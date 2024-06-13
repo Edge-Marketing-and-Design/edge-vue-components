@@ -25,7 +25,7 @@ const state = reactive({
   passwordVisible: false,
   passwordShow: false,
   panel: '',
-  phoneConfirmDialog: true,
+  phoneConfirmDialog: false,
   phoneNumber: null,
   phoneCode: '',
   forgotPasswordDialog: false,
