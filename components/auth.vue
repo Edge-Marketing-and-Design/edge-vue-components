@@ -35,7 +35,15 @@ const props = defineProps({
   },
   requestedOrgIdLabel: {
     type: String,
-    default: '',
+    default: 'Organization ID',
+  },
+  primaryButtonClasses: {
+    type: String,
+    default: 'text-white w-full bg-slate-800 hover:bg-slate-400',
+  },
+  secondaryButtonClasses: {
+    type: String,
+    default: 'bg-slate-400 w-full text-black hover:bg-slate-100',
   },
 })
 
@@ -70,22 +78,29 @@ watch(edgeFirebase.user, async () => {
 </script>
 
 <template>
-  <Card class="mx-auto max-w-lg w-full">
-    <edge-auth-login
-      v-if="props.type === 'login'"
-    />
-    <edge-auth-register
-      v-else-if="props.type === 'register'"
-      :single-organization="props.singleOrganization"
-      :registration-code="props.registrationCode"
-      :title="props.title"
-      :join-message="props.joinMessage"
-      :providers="props.providers"
-      :terms-links="props.termsLinks"
-      :show-requested-org-id="props.showRequestedOrgId"
-      :requested-org-id-label="props.requestedOrgIdLabel"
-    />
-  </Card>
+  <edge-auth-login
+    v-if="props.type === 'login'"
+    :providers="props.providers"
+    :primary-button-classes="props.primaryButtonClasses"
+    :secondary-button-classes="props.secondaryButtonClasses"
+  >
+    <slot />
+  </edge-auth-login>
+  <edge-auth-register
+    v-else-if="props.type === 'register'"
+    :single-organization="props.singleOrganization"
+    :registration-code="props.registrationCode"
+    :title="props.title"
+    :join-message="props.joinMessage"
+    :providers="props.providers"
+    :terms-links="props.termsLinks"
+    :show-requested-org-id="props.showRequestedOrgId"
+    :requested-org-id-label="props.requestedOrgIdLabel"
+    :primary-button-classes="props.primaryButtonClasses"
+    :secondary-button-classes="props.secondaryButtonClasses"
+  >
+    <slot />
+  </edge-auth-register>
 </template>
 
 <style lang="scss" scoped>

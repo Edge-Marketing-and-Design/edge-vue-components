@@ -1,9 +1,7 @@
 <script setup>
-// TODO: PHONE LOGIN NEXT
-// TODO:  Cannot click "Add Organization" or "Join Organization" because of generateShortId error
-import { computed, defineProps, inject, onMounted, reactive } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-
+import { toTypedSchema } from '@vee-validate/zod'
+import * as z from 'zod'
+import { Check, Loader2 } from 'lucide-vue-next'
 const props = defineProps({
   registrationCode: {
     type: String,
@@ -37,6 +35,14 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  primaryButtonClasses: {
+    type: String,
+    required: false,
+  },
+  secondaryButtonClasses: {
+    type: String,
+    reactive: false,
+  },
 })
 
 const multipleProviders = computed(() => props.providers.length > 1)
@@ -52,9 +58,9 @@ const state = reactive({
   passwordVisible: false,
   passwordShow: false,
   terms: false,
-  form: false,
+  form: true,
   form2: false,
-  provider: 0,
+  provider: '',
   error: { error: false, message: '' },
   registrationCode: '',
   showRegistrationCode: false,
@@ -73,51 +79,50 @@ const register = reactive({
   requestedOrgId: '',
 })
 
-const onSubmit = async (event) => {
+const onSubmit = async () => {
   state.registering = true
-  const results = await event
-  if (results.valid) {
-    if (props.singleOrganization) {
-      register.dynamicDocumentFieldValue = register.meta.name
-    }
-    if (state.provider === 'phone') {
-      register.phoneNumber = await edgeFirebase.sendPhoneCode(`${state.phone}`)
-      if (register.phoneNumber !== false) {
-        state.phoneConfirmDialog = true
-      }
-    }
-    else if (state.provider === 'emailLink') {
-      const flattenRegister = {
-        ...state,
-        ...register,
-        ...register.meta,
-      }
-      delete flattenRegister.meta
-      delete flattenRegister.error
 
-      const queryString = Object.keys(flattenRegister).map(key => `${key}=${encodeURIComponent(flattenRegister[key])}`).join('&')
-      const url = `/app/signup?${queryString}`
-      router.push(url)
-
-    // state.phoneConfirmDialog = true
-    }
-    else {
-      if (state.showRegistrationCode || !props.registrationCode) {
-        register.registrationCode = state.registrationCode
-      }
-      console.log('registering')
-      const result = await edgeFirebase.registerUser(register, state.provider)
-      state.error.error = !result.success
-      if (result.message === 'Organization ID already exists.') {
-        let orgLabel = props.requestedOrgIdLabel
-        if (!orgLabel) {
-          orgLabel = props.title
-        }
-        result.message = `${orgLabel} already exists. Please choose another.`
-      }
-      state.error.message = result.message.code ? result.message.code : result.message
+  if (props.singleOrganization) {
+    register.dynamicDocumentFieldValue = register.meta.name
+  }
+  if (state.provider === 'phone') {
+    register.phoneNumber = await edgeFirebase.sendPhoneCode(`${state.phone}`)
+    if (register.phoneNumber !== false) {
+      state.phoneConfirmDialog = true
     }
   }
+  else if (state.provider === 'emailLink') {
+    const flattenRegister = {
+      ...state,
+      ...register,
+      ...register.meta,
+    }
+    delete flattenRegister.meta
+    delete flattenRegister.error
+
+    const queryString = Object.keys(flattenRegister).map(key => `${key}=${encodeURIComponent(flattenRegister[key])}`).join('&')
+    const url = `/app/signup?${queryString}`
+    router.push(url)
+
+    // state.phoneConfirmDialog = true
+  }
+  else {
+    if (state.showRegistrationCode || !props.registrationCode) {
+      register.registrationCode = state.registrationCode
+    }
+    console.log('registering')
+    const result = await edgeFirebase.registerUser(register, state.provider)
+    state.error.error = !result.success
+    if (result.message === `${props.requestedOrgIdLabel} already exists.`) {
+      let orgLabel = props.requestedOrgIdLabel
+      if (!orgLabel) {
+        orgLabel = props.title
+      }
+      result.message = `${orgLabel} already exists. Please choose another.`
+    }
+    state.error.message = result.message.code ? result.message.code : result.message
+  }
+
   state.registering = false
 }
 onMounted(() => {
@@ -138,248 +143,267 @@ const phoneRegister = async (event) => {
   state.phoneConfirmDialog = false
 }
 function validateInput(event) {
+  console.log(event)
   const pattern = /^(?!.*__)[a-zA-Z0-9_]*$/
   const testString = event.target.value + event.key
   if (!pattern.test(testString)) {
     event.preventDefault()
   }
 }
+const providerNames = {
+  email: 'With email and password',
+  phone: 'With phone number',
+  emailLink: 'With email link',
+  microsoft: 'With Microsoft',
+}
+
+const schema = computed(() => {
+  const baseSchema = {
+    name: z.string({
+      required_error: 'Name is required',
+    }),
+    terms: z.boolean({
+      required_error: 'You must agree to the terms and conditions',
+    }).refine(value => value, {
+      message: 'You must agree to the terms and conditions',
+    }),
+  }
+
+  if (state.provider === 'email') {
+    const passwordPattern = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/
+    baseSchema.email = z.string({
+      required_error: 'Email is required',
+    }).email({ message: 'Invalid email address' }).min(6, { message: 'Email must be at least 6 characters long' }).max(50, { message: 'Email must be less than 50 characters long' })
+    baseSchema.password = z.string({
+      required_error: 'Password is required',
+    }).superRefine((value, ctx) => {
+      if (value.length < 8 || value.length > 50 || !passwordPattern.test(value)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Password must have at least 8 characters, including uppercase and lowercase letters, numbers, and a special character',
+        })
+      }
+    })
+  }
+
+  if (props.showRequestedOrgId) {
+    baseSchema.requestedOrgId = z.string({
+      required_error: `${props.requestedOrgIdLabel} is required`,
+    }).min(1, { message: `${props.requestedOrgIdLabel} is required` })
+  }
+
+  if (state.provider === 'phone') {
+    baseSchema.phone = z.string({
+      required_error: 'Phone number is required',
+    }).min(14, { message: 'Not a valid phone number' }).max(14, { message: 'Not a valid phone number' })
+  }
+
+  if (state.showRegistrationCode || !props.registrationCode) {
+    baseSchema.registrationCode = z.string({
+      required_error: 'Registration code is required',
+    }).min(1, { message: 'Registration code is required' })
+  }
+
+  if (!state.showRegistrationCode) {
+    baseSchema.dynamicDocumentFieldValue = z.string({
+      required_error: `${props.title} is required`,
+    }).min(1, { message: `${props.title} is required` })
+  }
+
+  return toTypedSchema(z.object(baseSchema))
+})
+
+watch(schema, async () => {
+  state.terms = false
+  state.form = false
+  await nextTick()
+  state.form = true
+})
+
+const customMaskOptions = {
+  mask(value) {
+    const pattern = /^[a-zA-Z0-9_]*$/
+    return value.split('').filter(char => pattern.test(char)).join('')
+  },
+}
 </script>
 
 <template>
   <edge-logging-in v-if="edgeFirebase.user.loggingIn || edgeFirebase.user.loggedIn" />
-  <v-card
-    v-else
-    class="mx-auto px-6 py-8"
-    max-width="444"
-    title="User Registration"
-  >
-    <v-form
-      v-model="state.form"
-      validate-on="submit"
-      @submit.prevent="onSubmit"
-    >
-      <v-container>
-        <span v-if="multipleProviders">Choose a login method:</span>
-        <v-item-group v-if="multipleProviders" v-model="state.provider" mandatory>
-          <Separator
-            v-if="props.providers.includes('email')"
-            class="my-2"
-          />
-          <v-item v-if="props.providers.includes('email')" v-slot="{ selectedClass, toggle }" value="email">
-            <v-btn
-              :prepend-icon="selectedClass ? 'mdi-check' : ''"
-              :class="[selectedClass ? 'bg-primary' : 'bg-grey']"
-              block
-              @click="toggle"
-            >
-              Username and Password
-            </v-btn>
-          </v-item>
-          <Separator
-            v-if="props.providers.includes('emailLink')"
-            class="my-2"
-          />
-          <v-item v-if="props.providers.includes('emailLink')" v-slot="{ selectedClass, toggle }" value="emailLink">
-            <v-btn
-              :prepend-icon="selectedClass ? 'mdi-check' : ''"
-              :class="[selectedClass ? 'bg-primary' : 'bg-grey']"
-              block
-              @click="toggle"
-            >
-              Email Link
-            </v-btn>
-          </v-item>
-          <Separator
-            v-if="props.providers.includes('microsoft')"
-            class="my-2"
-          />
-          <v-item v-if="props.providers.includes('microsoft')" v-slot="{ selectedClass, toggle }" value="microsoft">
-            <v-btn
-              :prepend-icon="selectedClass ? 'mdi-check' : ''"
-              :class="[selectedClass ? 'bg-primary' : 'bg-grey']"
-              block
-              @click="toggle"
-            >
-              Microsoft
-            </v-btn>
-          </v-item>
+  <Card v-else>
+    <slot />
+    <CardContent>
+      <span v-if="multipleProviders">Choose a login method:</span>
+      <div v-if="multipleProviders">
+        <template v-for="provider in props.providers" :key="provider">
+          <edge-shad-button :class="props.secondaryButtonClasses" @click="state.provider = provider">
+            <Check v-if="state.provider === provider" class="w-4 h-4 mr-2" />
+            {{ providerNames[provider] }}
+          </edge-shad-button>
           <Separator
             class="my-2"
-          />
-          <v-item v-if="props.providers.includes('phone')" v-slot="{ selectedClass, toggle }" value="phone">
-            <v-btn
-              :prepend-icon="selectedClass ? 'mdi-check' : ''"
-              :class="[selectedClass ? 'bg-primary' : 'bg-grey']"
-              block
-              @click="toggle"
-            >
-              Phone
-            </v-btn>
-          </v-item>
-          <Separator
-            v-if="props.providers.includes('phone')"
-            class="my-2"
-          />
-        </v-item-group>
-        <v-text-field
-          v-if="state.provider === 'email' || state.provider === 'emailLink'"
-          v-model="register.email"
-          :rules="[edgeGlobal.edgeRules.email]"
-          class="mb-2"
-          label="Email"
-          variant="underlined"
-        />
-
-        <v-text-field
-          v-if="state.provider === 'email'"
-          v-model="register.password"
-          :rules="[edgeGlobal.edgeRules.password]"
-          :append-inner-icon="state.passwordShow ? 'mdi-eye' : 'mdi-eye-off'"
-          :type="state.passwordShow ? 'text' : 'password'"
-          label="Password"
-          placeholder="Enter your password"
-          variant="underlined"
-          @click:append-inner="state.passwordShow = !state.passwordShow"
-        />
-
-        <edge-g-input
-          v-if="state.provider === 'phone'"
-          v-model="state.phone"
-          :disable-tracking="true"
-          field-type="text"
-          :rules="[edgeGlobal.edgeRules.required]"
-          label="Phone Number"
-          :mask-options="{ mask: '(###) ###-####' }"
-        />
-
-        <v-text-field
-          v-model="register.meta.name"
-          :rules="[edgeGlobal.edgeRules.required]"
-          label="Name"
-          variant="underlined"
-        />
-        <v-text-field
-          v-if="props.showRequestedOrgId"
-          v-model="register.requestedOrgId"
-          :rules="[edgeGlobal.edgeRules.required]"
-
-          :label="props.requestedOrgIdLabel"
-          variant="underlined"
-          hint="Once submitted, this cannot be changed. Only use letters, numbers, and underscores."
-          @keypress="validateInput"
-        />
-
-        <v-checkbox
-          v-if="!props.singleOrganization && props.registrationCode"
-          v-model="state.showRegistrationCode"
-          class="my-0"
-          hide-details
-        >
-          <template #label>
-            <span class="ml-2">{{ props.joinMessage }}</span>
-          </template>
-        </v-checkbox>
-        <template v-if="!props.singleOrganization">
-          <v-text-field
-            v-if="state.showRegistrationCode || !props.registrationCode"
-            v-model="state.registrationCode"
-            :rules="[edgeGlobal.edgeRules.required]"
-            label="Registration Code"
-            variant="underlined"
-          />
-          <v-text-field
-            v-else
-            v-model="register.dynamicDocumentFieldValue"
-            :rules="[edgeGlobal.edgeRules.required]"
-            :label="props.title"
-            variant="underlined"
           />
         </template>
+      </div>
+      <edge-shad-form
+        v-if="state.form"
+        :schema="schema"
+        @submit="onSubmit"
+      >
+        <div class="grid gap-4">
+          <div class="grid gap-2">
+            <edge-shad-input
+              v-if="state.provider === 'email'"
+              v-model="register.email"
+              name="email"
+              type="email"
+              label="Email"
+              placeholder="m@example.com"
+            />
+          </div>
+          <div class="grid gap-2">
+            <edge-shad-input
+              v-if="state.provider === 'email'"
+              v-model="register.password"
+              name="password"
+              type="password"
+              label="Password"
+            />
+          </div>
+          <div class="grid gap-2">
+            <edge-shad-input
+              v-if="state.provider === 'phone'"
+              v-model="state.phone"
+              name="phone"
+              type="tel"
+              label="Phone Number"
+              placeholder="(555) 555-5555"
+              :mask-options="{ mask: '(###) ###-####' }"
+            />
+          </div>
+          <div class="grid gap-2">
+            <edge-shad-input
+              v-model="register.meta.name"
+              name="name"
+              type="text"
+              label="Name"
+            />
+          </div>
+          <edge-shad-input
+            v-if="props.showRequestedOrgId"
+            v-model="register.requestedOrgId"
+            :label="props.requestedOrgIdLabel"
+            name="requestedOrgId"
+            type="text"
+            description="Once submitted, this cannot be changed. Only use letters, numbers, and underscores."
+            :mask-options="customMaskOptions"
+          />
+          <edge-shad-checkbox
+            v-model="state.showRegistrationCode"
+            name="showRegistrationCode"
+          >
+            {{ props.joinMessage }}
+          </edge-shad-checkbox>
 
-        <v-checkbox
-          v-model="state.terms"
-          :rules="[edgeGlobal.edgeRules.required]"
-          label="I agree to site terms and conditions"
-        />
-        <v-btn v-if="props.termsLinks" class="mt-0" variant="text" block text small :href="props.termsLinks" target="_blank">
-          Terms and Conditions
-        </v-btn>
-      </v-container>
+          <template v-if="!props.singleOrganization">
+            <edge-shad-input
+              v-if="state.showRegistrationCode || !props.registrationCode"
+              v-model="state.registrationCode"
+              label="Registration Code"
+              name="registrationCode"
+            />
+            <edge-shad-input
+              v-else
+              v-model="register.dynamicDocumentFieldValue"
+              :label="props.title"
+              name="dynamicDocumentFieldValue"
+            />
+          </template>
 
-      <Separator />
+          <edge-shad-checkbox
+            v-model="state.terms"
+            name="terms"
+          >
+            I agree to site <a v-if="props.termsLinks" :href="props.termsLinks" class="mt-0 mx-auto underline hover:no-underline" target="_blank">
+              terms and conditions
+            </a>
+            <span v-else>terms and conditions</span>
+          </edge-shad-checkbox>
 
-      <v-card-actions>
-        <v-spacer />
-
-        <v-btn color="success" :loading="state.registering" type="submit">
-          Submit
-        </v-btn>
-      </v-card-actions>
+          <edge-shad-button type="submit" :disabled="state.registering" :class="props.primaryButtonClasses">
+            <Loader2 v-if="state.registering" class="w-4 h-4 mr-2 animate-spin" />
+            <span v-if="state.registering">Registering...</span>
+            <span v-else>Submit</span>
+          </edge-shad-button>
+        </div>
+      </edge-shad-form>
       <edge-g-error v-if="edgeFirebase.user.logInError" :error="edgeFirebase.user.logInErrorMessage" />
       <edge-g-error v-if="state.error.error" :error="state.error.message" />
-      <Separator class="py-4" />
+
+      <Separator
+        class="my-4"
+      />
       Already have an account?
-      <v-btn color="success" small block to="/app/login">
+      <edge-shad-button :class="props.secondaryButtonClasses" to="/app/login">
         Sign in here.
-      </v-btn>
-    </v-form>
-    <v-dialog
-      v-model="state.phoneConfirmDialog"
-      persistent
-      max-width="600"
-      transition="fade-transition"
-    >
-      <v-card>
-        <v-form
+      </edge-shad-button>
+      <v-dialog
+        v-model="state.phoneConfirmDialog"
+        persistent
+        max-width="600"
+        transition="fade-transition"
+      >
+        <v-card>
+          <v-form
 
-          v-model="state.form2"
-          validate-on="submit"
-          @submit.prevent="phoneRegister"
-        >
-          <v-toolbar flat>
-            <v-icon class="mx-4">
-              mdi-list-box
-            </v-icon>
-            Enter Confirmation Code
-            <v-spacer />
+            v-model="state.form2"
+            validate-on="submit"
+            @submit.prevent="phoneRegister"
+          >
+            <v-toolbar flat>
+              <v-icon class="mx-4">
+                mdi-list-box
+              </v-icon>
+              Enter Confirmation Code
+              <v-spacer />
 
-            <v-btn
-              type="submit"
-              icon
-              @click="state.phoneConfirmDialog = false"
-            >
-              <v-icon> mdi-close</v-icon>
-            </v-btn>
-          </v-toolbar>
-          <v-card-title>Enter Confirmation Code</v-card-title>
-          <v-card-text>
-            Please enter the confirmation code that you received via text message. This code is used to verify your phone number. If you did not receive a text message, please confirm that your phone number is correct and request a new code.
-            <v-text-field
-              v-model="register.phoneCode"
-              :rules="[edgeGlobal.edgeRules.required]"
-              label="Confirmation Code"
-              variant="underlined"
-            />
-          </v-card-text>
-          <v-card-actions>
-            <v-spacer />
-            <v-btn
-              variant="text"
-              @click="state.phoneConfirmDialog = false"
-            >
-              Cancel
-            </v-btn>
-            <v-btn
-              type="submit"
-              color="error"
-              variant="text"
-            >
-              Submit
-            </v-btn>
-          </v-card-actions>
-        </v-form>
-      </v-card>
-    </v-dialog>
-  </v-card>
+              <v-btn
+                type="submit"
+                icon
+                @click="state.phoneConfirmDialog = false"
+              >
+                <v-icon> mdi-close</v-icon>
+              </v-btn>
+            </v-toolbar>
+            <v-card-title>Enter Confirmation Code</v-card-title>
+            <v-card-text>
+              Please enter the confirmation code that you received via text message. This code is used to verify your phone number. If you did not receive a text message, please confirm that your phone number is correct and request a new code.
+              <v-text-field
+                v-model="register.phoneCode"
+                :rules="[edgeGlobal.edgeRules.required]"
+                label="Confirmation Code"
+                variant="underlined"
+              />
+            </v-card-text>
+            <v-card-actions>
+              <v-spacer />
+              <v-btn
+                variant="text"
+                @click="state.phoneConfirmDialog = false"
+              >
+                Cancel
+              </v-btn>
+              <v-btn
+                type="submit"
+                color="error"
+                variant="text"
+              >
+                Submit
+              </v-btn>
+            </v-card-actions>
+          </v-form>
+        </v-card>
+      </v-dialog>
+    </CardContent>
+  </Card>
 </template>

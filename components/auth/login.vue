@@ -6,9 +6,13 @@ const props = defineProps({
     type: Array,
     default: () => ['email'],
   },
-  title: {
+  primaryButtonClasses: {
     type: String,
-    default: 'Login',
+    required: false,
+  },
+  secondaryButtonClasses: {
+    type: String,
+    reactive: false,
   },
 })
 
@@ -127,259 +131,249 @@ onMounted(async () => {
 
 <template>
   <edge-logging-in v-if="edgeFirebase.user.loggingIn !== false || edgeFirebase.user.loggedIn" />
-
-  <Card v-else flat class="pa-8" title="Login" max-width="344">
-    <div class="grid gap-2 text-center">
-      <h1 class="text-2xl font-bold">
-        {{ props.title }}
-      </h1>
-    </div>
-
-    <Accordion v-if="state.panel" v-model="state.panel" expand-icon="mdi-square-outline" :default-value="state.panel" collapse-icon="mdi-check">
-      <AccordionItem v-for="provider in props.providers" :key="provider" elevation="0" :value="provider">
-        <AccordionTrigger class="font-medium text-lg">
-          <template v-if="provider === 'email'">
-            Sign in with Email
-          </template>
-          <template v-if="provider === 'microsoft'">
-            Sign in with Microsoft
-          </template>
-          <template v-if="provider === 'phone'">
-            Sign in with Phone
-          </template>
-        </AccordionTrigger>
-        <AccordionContent>
-          <template v-if="provider === 'email'">
-            <edge-shad-form :schema="loginSchema" @submit="onSubmit">
-              <div class="grid gap-2 text-center">
-                <p class="text-balance text-muted-foreground">
-                  Enter your email below to login to your account
-                </p>
-              </div>
-              <div class="grid gap-4">
-                <div class="grid gap-2">
-                  <edge-shad-input
-                    v-model="login.email"
-                    name="email"
-                    type="email"
-                    label="Email"
-                    placeholder="m@example.com"
-                  />
-                </div>
-                <div class="grid gap-2">
-                  <edge-shad-input
-                    v-model="login.password"
-                    name="password"
-                    type="password"
-                    label="Password"
-                  >
-                    <a
-                      class="text-sm underline cursor-pointer"
-                      @click="state.forgotPasswordDialog = true"
-                    >
-                      Forgot your password?
-                    </a>
-                  </edge-shad-input>
-                </div>
-                <edge-shad-button type="submit" class="w-full bg-slate-800 text-white p-0">
-                  <div class="flex items-center justify-center w-full h-full hover:text-black">
-                    Login
-                  </div>
-                </edge-shad-button>
-              </div>
-            </edge-shad-form>
-          </template>
-          <template v-if="provider === 'phone'">
-            <edge-shad-form :schema="phoneSchema" @submit="onPhoneSubmit">
-              <edge-shad-input
-                v-model="state.phone"
-                name="phone"
-                type="tel"
-                label="Phone Number"
-                placeholder="(555) 555-5555"
-                :mask-options="{ mask: '(###) ###-####' }"
-                class="mb-4"
-              />
-              <edge-shad-button type="submit" class="w-full bg-slate-800 text-white p-0">
-                <div class="flex items-center justify-center w-full h-full hover:text-black">
-                  Login
-                </div>
-              </edge-shad-button>
-            </edge-shad-form>
-          </template>
-          <template v-if="provider === 'microsoft'">
-            <edge-shad-button class="w-full bg-slate-800 text-white p-0" @click="edgeFirebase.logInWithMicrosoft()">
-              <div class="flex items-center justify-center w-full h-full hover:text-black">
-                Sign in with Microsoft
-              </div>
-            </edge-shad-button>
-          </template>
-        </AccordionContent>
-      </AccordionItem>
-    </Accordion>
-    <edge-g-error v-if="edgeFirebase.user.logInError" :error="edgeFirebase.user.logInErrorMessage" />
-    <Separator
-      class="my-4"
-    />
-    Don't have an account?
-    <edge-shad-button class="w-full bg-slate-500" small block to="/app/signup">
-      Sign up here.
-    </edge-shad-button>
-    <edge-shad-dialog
-      v-model="state.passwordResetDialog"
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>
-            <span v-if="route.query.mode === 'resetPassword'">
-              Reset Password
-
-            </span>
-            <span v-else>
-              Update Email Address
-            </span>
-          </DialogTitle>
-          <DialogDescription class="text-left mb-2">
-            <span v-if="route.query.mode === 'resetPassword'" class="mb-2">
-              Enter your new password below and click "Reset Password".
-            </span>
-            <template v-else>
-              <p class="mb-2">
-                To update your email address, click "Update Email Address".
-              </p>
-              <p class="mb-2">
-                This will change your email address to the address that received the email with the link you clicked on to get here.
-              </p>
+  <Card v-else>
+    <slot />
+    <CardContent>
+      <Accordion v-if="state.panel" v-model="state.panel" expand-icon="mdi-square-outline" :default-value="state.panel" collapse-icon="mdi-check">
+        <AccordionItem v-for="provider in props.providers" :key="provider" elevation="0" :value="provider">
+          <AccordionTrigger class="font-medium text-lg">
+            <template v-if="provider === 'email'">
+              Sign in with Email
             </template>
-          </DialogDescription>
-        </DialogHeader>
-        <edge-shad-form
-          :schema="passwordSchema"
-          @submit="resetPassword"
-        >
-          <edge-shad-input
-            v-if="route.query.mode === 'resetPassword'"
-            v-model="login.password"
-            name="password"
-            type="password"
-            label="Password"
-          />
-          <edge-g-error v-if="state.passwordResetResult.success === false" :error="state.passwordResetResult.message" />
-          <Alert v-if="state.passwordResetResult.success === true" class="mt-2 bg-green-800">
-            <AlertDescription>
+            <template v-if="provider === 'microsoft'">
+              Sign in with Microsoft
+            </template>
+            <template v-if="provider === 'phone'">
+              Sign in with Phone
+            </template>
+          </AccordionTrigger>
+          <AccordionContent>
+            <template v-if="provider === 'email'">
+              <edge-shad-form :schema="loginSchema" @submit="onSubmit">
+                <div class="grid gap-2 text-center">
+                  <p class="text-balance text-muted-foreground">
+                    Enter your email below to login to your account
+                  </p>
+                </div>
+                <div class="grid gap-4">
+                  <div class="grid gap-2">
+                    <edge-shad-input
+                      v-model="login.email"
+                      name="email"
+                      type="email"
+                      label="Email"
+                      placeholder="m@example.com"
+                    />
+                  </div>
+                  <div class="grid gap-2">
+                    <edge-shad-input
+                      v-model="login.password"
+                      name="password"
+                      type="password"
+                      label="Password"
+                    >
+                      <a
+                        class="text-sm underline cursor-pointer"
+                        @click="state.forgotPasswordDialog = true"
+                      >
+                        Forgot your password?
+                      </a>
+                    </edge-shad-input>
+                  </div>
+                  <edge-shad-button type="submit" :class="props.primaryButtonClasses">
+                    Login
+                  </edge-shad-button>
+                </div>
+              </edge-shad-form>
+            </template>
+            <template v-if="provider === 'phone'">
+              <edge-shad-form :schema="phoneSchema" @submit="onPhoneSubmit">
+                <edge-shad-input
+                  v-model="state.phone"
+                  name="phone"
+                  type="tel"
+                  label="Phone Number"
+                  placeholder="(555) 555-5555"
+                  :mask-options="{ mask: '(###) ###-####' }"
+                  class="mb-4"
+                />
+                <edge-shad-button type="submit" :class="props.primaryButtonClasses">
+                  Login
+                </edge-shad-button>
+              </edge-shad-form>
+            </template>
+            <template v-if="provider === 'microsoft'">
+              <edge-shad-button :class="props.primaryButtonClasses" @click="edgeFirebase.logInWithMicrosoft()">
+                Sign in with Microsoft
+              </edge-shad-button>
+            </template>
+          </AccordionContent>
+        </AccordionItem>
+      </Accordion>
+      <edge-g-error v-if="edgeFirebase.user.logInError" :error="edgeFirebase.user.logInErrorMessage" />
+      <Separator
+        class="my-4"
+      />
+      Don't have an account?
+      <edge-shad-button :class="props.secondaryButtonClasses" to="/app/signup">
+        Sign up here.
+      </edge-shad-button>
+      <edge-shad-dialog
+        v-model="state.passwordResetDialog"
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
               <span v-if="route.query.mode === 'resetPassword'">
-                Your password has been reset. Close this dialog and log in with your new password.
+                Reset Password
+
               </span>
               <span v-else>
-                Your email address has been updated. Close this dialog and log in with your updated address.
+                Update Email Address
               </span>
-            </AlertDescription>
-          </Alert>
-          <DialogFooter v-if="route.query.mode === 'resetPassword'" class="pt-6">
-            <edge-shad-button v-if="state.passwordResetResult.success === true" variant="destructive" @click="state.passwordResetDialog = false">
-              Close
-            </edge-shad-button>
-            <edge-shad-button v-else variant="destructive" @click="state.passwordResetDialog = false">
-              Cancel
-            </edge-shad-button>
-            <edge-shad-button v-if="state.passwordResetResult.success !== true" class="bg-slate-500" type="submit">
-              Reset Password
-            </edge-shad-button>
-          </DialogFooter>
-        </edge-shad-form>
-        <edge-shad-form
-          v-if="route.query.mode !== 'resetPassword'"
-          @submit="resetPassword"
-        >
-          <DialogFooter class="pt-6">
-            <edge-shad-button v-if="state.passwordResetResult.success === true" variant="destructive" @click="state.passwordResetDialog = false">
-              Close
-            </edge-shad-button>
-            <edge-shad-button v-else variant="destructive" @click="state.passwordResetDialog = false">
-              Cancel
-            </edge-shad-button>
-            <edge-shad-button v-if="state.passwordResetResult.success !== true" class="bg-slate-500" type="submit">
-              Update Email Address
-            </edge-shad-button>
-          </DialogFooter>
-        </edge-shad-form>
-      </DialogContent>
-    </edge-shad-dialog>
-
-    <edge-shad-dialog
-      v-model="state.forgotPasswordDialog"
-    >
-      <DialogContent>
-        <edge-shad-form
-          :schema="emailSchema"
-          @submit="submitForgotPassword"
-        >
-          <DialogHeader>
-            <DialogTitle>Password Reset</DialogTitle>
+            </DialogTitle>
             <DialogDescription class="text-left mb-2">
-              If you forgot your password, please enter your email address below and click "Send Password Reset".
+              <span v-if="route.query.mode === 'resetPassword'" class="mb-2">
+                Enter your new password below and click "Reset Password".
+              </span>
+              <template v-else>
+                <p class="mb-2">
+                  To update your email address, click "Update Email Address".
+                </p>
+                <p class="mb-2">
+                  This will change your email address to the address that received the email with the link you clicked on to get here.
+                </p>
+              </template>
             </DialogDescription>
           </DialogHeader>
-          <edge-shad-input
-            v-model="login.email"
-            init-valu
-            name="email"
-            type="email"
-            label="Email"
-            placeholder="m@example.com"
-            class="mb-4"
-          />
-          <Alert v-if="state.passwordResetSent" class="my-2 bg-green-800">
-            <AlertDescription>
-              If you entered the correct email address, a password reset email has been sent to your email address. Please check your email and click the link to reset your password.
-            </AlertDescription>
-          </Alert>
-          <DialogFooter class="pt-0">
-            <edge-shad-button v-if="state.passwordResetSent === true" variant="destructive" @click="state.forgotPasswordDialog = false; state.passwordResetSent = false;">
-              Close
-            </edge-shad-button>
-            <edge-shad-button v-else variant="destructive" @click="state.forgotPasswordDialog = false; state.passwordResetSent = false;">
-              Cancel
-            </edge-shad-button>
-            <edge-shad-button v-if="state.passwordResetSent === false" class="bg-slate-500" type="submit">
-              Send Password Reset
-            </edge-shad-button>
-          </DialogFooter>
-        </edge-shad-form>
-      </DialogContent>
-    </edge-shad-dialog>
-    <edge-shad-dialog
-      v-model="state.phoneConfirmDialog"
-    >
-      <DialogContent>
-        <edge-shad-form
-          :schema="codeSchema"
-          @submit="phoneLogin"
-        >
-          <DialogHeader>
-            <DialogTitle>Enter Confirmation Code</DialogTitle>
-            <DialogDescription class="text-left mb-2">
-              Please enter the confirmation code that you received via text message. This code is used to verify your phone number. If you did not receive a text message, please confirm that your phone number is correct and request a new code.
-            </DialogDescription>
-          </DialogHeader>
-          <edge-shad-input
-            v-model="state.phoneCode"
-            name="phoneCode"
-            type="text"
-            label="Confirmation Code"
-          />
+          <edge-shad-form
+            :schema="passwordSchema"
+            @submit="resetPassword"
+          >
+            <edge-shad-input
+              v-if="route.query.mode === 'resetPassword'"
+              v-model="login.password"
+              name="password"
+              type="password"
+              label="Password"
+            />
+            <edge-g-error v-if="state.passwordResetResult.success === false" :error="state.passwordResetResult.message" />
+            <Alert v-if="state.passwordResetResult.success === true" class="mt-2 bg-green-800">
+              <AlertDescription>
+                <span v-if="route.query.mode === 'resetPassword'">
+                  Your password has been reset. Close this dialog and log in with your new password.
+                </span>
+                <span v-else>
+                  Your email address has been updated. Close this dialog and log in with your updated address.
+                </span>
+              </AlertDescription>
+            </Alert>
+            <DialogFooter v-if="route.query.mode === 'resetPassword'" class="flex justify-between pt-6">
+              <edge-shad-button v-if="state.passwordResetResult.success === true" variant="destructive" @click="state.passwordResetDialog = false">
+                Close
+              </edge-shad-button>
+              <edge-shad-button v-else variant="destructive" @click="state.passwordResetDialog = false">
+                Cancel
+              </edge-shad-button>
+              <edge-shad-button v-if="state.passwordResetResult.success !== true" :class="props.primaryButtonClasses" type="submit">
+                Reset Password
+              </edge-shad-button>
+            </DialogFooter>
+          </edge-shad-form>
+          <edge-shad-form
+            v-if="route.query.mode !== 'resetPassword'"
+            @submit="resetPassword"
+          >
+            <DialogFooter class="pt-6 flex justify-between">
+              <edge-shad-button v-if="state.passwordResetResult.success === true" variant="destructive" @click="state.passwordResetDialog = false">
+                Close
+              </edge-shad-button>
+              <edge-shad-button v-else variant="destructive" @click="state.passwordResetDialog = false">
+                Cancel
+              </edge-shad-button>
+              <edge-shad-button v-if="state.passwordResetResult.success !== true" :class="props.primaryButtonClasses" type="submit">
+                Update Email Address
+              </edge-shad-button>
+            </DialogFooter>
+          </edge-shad-form>
+        </DialogContent>
+      </edge-shad-dialog>
 
-          <DialogFooter class="pt-6">
-            <edge-shad-button variant="destructive" @click="state.phoneConfirmDialog = false">
-              Cancel
-            </edge-shad-button>
-            <edge-shad-button class="bg-slate-500" type="submit">
-              Submit
-            </edge-shad-button>
-          </DialogFooter>
-        </edge-shad-form>
-      </DialogContent>
-    </edge-shad-dialog>
+      <edge-shad-dialog
+        v-model="state.forgotPasswordDialog"
+      >
+        <DialogContent>
+          <edge-shad-form
+            :schema="emailSchema"
+            @submit="submitForgotPassword"
+          >
+            <DialogHeader>
+              <DialogTitle>Password Reset</DialogTitle>
+              <DialogDescription class="text-left mb-2">
+                If you forgot your password, please enter your email address below and click "Send Password Reset".
+              </DialogDescription>
+            </DialogHeader>
+            <edge-shad-input
+              v-model="login.email"
+              init-valu
+              name="email"
+              type="email"
+              label="Email"
+              placeholder="m@example.com"
+              class="mb-4"
+            />
+            <Alert v-if="state.passwordResetSent" class="my-2 bg-green-800">
+              <AlertDescription>
+                If you entered the correct email address, a password reset email has been sent to your email address. Please check your email and click the link to reset your password.
+              </AlertDescription>
+            </Alert>
+            <DialogFooter class="pt-0 flex justify-between">
+              <edge-shad-button v-if="state.passwordResetSent === true" variant="destructive" @click="state.forgotPasswordDialog = false; state.passwordResetSent = false;">
+                Close
+              </edge-shad-button>
+              <edge-shad-button v-else variant="destructive" @click="state.forgotPasswordDialog = false; state.passwordResetSent = false;">
+                Cancel
+              </edge-shad-button>
+              <edge-shad-button v-if="state.passwordResetSent === false" :class="props.primaryButtonClasses" type="submit">
+                Send Password Reset
+              </edge-shad-button>
+            </DialogFooter>
+          </edge-shad-form>
+        </DialogContent>
+      </edge-shad-dialog>
+      <edge-shad-dialog
+        v-model="state.phoneConfirmDialog"
+      >
+        <DialogContent>
+          <edge-shad-form
+            :schema="codeSchema"
+            @submit="phoneLogin"
+          >
+            <DialogHeader>
+              <DialogTitle>Enter Confirmation Code</DialogTitle>
+              <DialogDescription class="text-left mb-2">
+                Please enter the confirmation code that you received via text message. This code is used to verify your phone number. If you did not receive a text message, please confirm that your phone number is correct and request a new code.
+              </DialogDescription>
+            </DialogHeader>
+            <edge-shad-input
+              v-model="state.phoneCode"
+              name="phoneCode"
+              type="text"
+              label="Confirmation Code"
+            />
+
+            <DialogFooter class="pt-6 flex justify-between">
+              <edge-shad-button variant="destructive" @click="state.phoneConfirmDialog = false">
+                Cancel
+              </edge-shad-button>
+              <edge-shad-button :class="props.primaryButtonClasses" type="submit">
+                Submit
+              </edge-shad-button>
+            </DialogFooter>
+          </edge-shad-form>
+        </DialogContent>
+      </edge-shad-dialog>
+    </CardContent>
   </Card>
 </template>
 

@@ -31,6 +31,10 @@ const props = defineProps({
     type: String,
     required: false,
   },
+  description: {
+    type: String,
+    required: false,
+  },
   maskOptions: {
     type: [Object],
     required: false,
@@ -89,6 +93,9 @@ const classComputed = computed(() => {
           </span>
         </div>
       </FormControl>
+      <FormDescription>
+        {{ props.description }}
+      </FormDescription>
       <FormMessage />
     </FormItem>
   </FormField>
