@@ -59,7 +59,6 @@ const state = reactive({
   passwordShow: false,
   terms: false,
   form: true,
-  form2: false,
   provider: '',
   error: { error: false, message: '' },
   registrationCode: '',
@@ -133,29 +132,25 @@ onMounted(() => {
     state.showRegistrationCode = true
   }
 })
-const phoneRegister = async (event) => {
-  const results = await event
-  if (results.valid) {
-    const result = await edgeFirebase.registerUser(register, state.provider)
-    state.error.error = !result.success
-    state.error.message = result.message.code
-  }
+const phoneRegister = async () => {
+  const result = await edgeFirebase.registerUser(register, state.provider)
+  state.error.error = !result.success
+  state.error.message = result.message.code
   state.phoneConfirmDialog = false
 }
-function validateInput(event) {
-  console.log(event)
-  const pattern = /^(?!.*__)[a-zA-Z0-9_]*$/
-  const testString = event.target.value + event.key
-  if (!pattern.test(testString)) {
-    event.preventDefault()
-  }
-}
+
 const providerNames = {
   email: 'With email and password',
   phone: 'With phone number',
   emailLink: 'With email link',
   microsoft: 'With Microsoft',
 }
+
+const phoneCodeSchema = toTypedSchema(z.object({
+  phoneCode: z.string({
+    required_error: 'Confirmation code is required',
+  }).min(1, { message: 'Confirmation code is required' }),
+}))
 
 const schema = computed(() => {
   const baseSchema = {
@@ -347,63 +342,39 @@ const customMaskOptions = {
       <edge-shad-button :class="props.secondaryButtonClasses" to="/app/login">
         Sign in here.
       </edge-shad-button>
-      <v-dialog
+      <edge-shad-dialog
         v-model="state.phoneConfirmDialog"
-        persistent
-        max-width="600"
-        transition="fade-transition"
       >
-        <v-card>
-          <v-form
-
-            v-model="state.form2"
-            validate-on="submit"
-            @submit.prevent="phoneRegister"
-          >
-            <v-toolbar flat>
-              <v-icon class="mx-4">
-                mdi-list-box
-              </v-icon>
-              Enter Confirmation Code
-              <v-spacer />
-
-              <v-btn
-                type="submit"
-                icon
-                @click="state.phoneConfirmDialog = false"
-              >
-                <v-icon> mdi-close</v-icon>
-              </v-btn>
-            </v-toolbar>
-            <v-card-title>Enter Confirmation Code</v-card-title>
-            <v-card-text>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Enter Confirmation Code</DialogTitle>
+            <DialogDescription class="text-left mb-2">
               Please enter the confirmation code that you received via text message. This code is used to verify your phone number. If you did not receive a text message, please confirm that your phone number is correct and request a new code.
-              <v-text-field
-                v-model="register.phoneCode"
-                :rules="[edgeGlobal.edgeRules.required]"
-                label="Confirmation Code"
-                variant="underlined"
-              />
-            </v-card-text>
-            <v-card-actions>
-              <v-spacer />
-              <v-btn
-                variant="text"
-                @click="state.phoneConfirmDialog = false"
-              >
+            </DialogDescription>
+          </DialogHeader>
+          <edge-shad-form
+            :schema="phoneCodeSchema"
+            @submit="phoneRegister"
+          >
+            <edge-shad-input
+              v-model="register.phoneCode"
+              label="Confirmation Code"
+              name="phoneCode"
+            />
+            <DialogFooter>
+              <edge-shad-button variant="destructive" @click="state.phoneConfirmDialog = false">
                 Cancel
-              </v-btn>
-              <v-btn
+              </edge-shad-button>
+              <edge-shad-button
                 type="submit"
-                color="error"
-                variant="text"
+                :class="props.primaryButtonClasses"
               >
                 Submit
-              </v-btn>
-            </v-card-actions>
-          </v-form>
-        </v-card>
-      </v-dialog>
+              </edge-shad-button>
+            </DialogFooter>
+          </edge-shad-form>
+        </DialogContent>
+      </edge-shad-dialog>
     </CardContent>
   </Card>
 </template>
