@@ -40,24 +40,30 @@ const handleChange = (value) => {
 </script>
 
 <template>
-  <FormField v-slot="{ handleChange: formHandleChange }" type="checkbox" :name="props.name">
-    <FormItem class="flex flex-row items-start gap-x-3 space-y-0 rounded-md border p-4" @click.capture.once="formHandleChange(modelValue)">
-      <FormControl>
-        <Checkbox
-          :id="props.name"
-          :class="props.class"
-          class="bg-slate-200"
-          :checked="modelValue"
-          @update:checked="(value) => { handleChange(value); formHandleChange(value); }"
-        />
-      </FormControl>
-      <div class="space-y-1 leading-none">
-        <FormLabel><slot /></FormLabel>
-        <FormDescription />
-        <FormMessage />
-      </div>
-    </FormItem>
-  </FormField>
+  <div>
+    <FormField v-slot="{ handleChange: formHandleChange }" type="checkbox" :name="props.name">
+      <FormItem class="flex flex-row items-start gap-x-3 space-y-0 rounded-md border p-3" @click.capture.once="formHandleChange(modelValue)">
+        <FormControl>
+          <Checkbox
+            :id="props.name"
+            :class="props.class"
+            class="bg-slate-200"
+            :checked="modelValue"
+            @update:checked="(value) => { handleChange(value); formHandleChange(value); }"
+          />
+        </FormControl>
+        <div class="space-y-1 leading-none w-full">
+          <div class="relative w-full items-center">
+            <FormLabel><slot /></FormLabel>
+            <span class="absolute end-0 inset-y-0 flex items-center justify-center pl-2 pr-0">
+              <slot name="icon" /></span>
+          </div>
+          <FormDescription />
+          <FormMessage />
+        </div>
+      </FormItem>
+    </FormField>
+  </div>
 </template>
 
 <style lang="scss" scoped>

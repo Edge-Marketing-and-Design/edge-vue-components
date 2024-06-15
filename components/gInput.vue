@@ -1,6 +1,6 @@
 <script setup>
 // TODO:  ADD HELPERS TO THE SCHEMA PARAMS
-
+// TODO: START SHAD CONVERSION AT text
 import { computed, defineProps, inject, nextTick, onBeforeMount, onMounted, reactive, ref, watch } from 'vue'
 import functionChips from './gSubInput/gptFunctionChips.vue'
 
@@ -85,11 +85,15 @@ const props = defineProps({
   bindings: {
     type: [Object],
     required: false,
-    default: () => ({ variant: 'underlined' }),
+    default: () => ({}),
   },
   forFunctions: {
     type: Boolean,
     default: false,
+  },
+  name: {
+    type: String,
+    required: true,
   },
 })
 const emit = defineEmits(['update:modelValue'])
@@ -992,28 +996,31 @@ watch(modelValue, () => {
         <edge-g-helper :helper="props.helper" />
       </template>
     </v-text-field>
-    <v-text-field
+    <edge-shad-input
       v-if="props.fieldType === 'text'"
       v-model="modelValue"
       v-maska:[props.maskOptions]
+      type="text"
+      :name="props.name"
       v-bind="props.bindings"
-      :rules="props.rules"
       :label="props.label"
-      :hint="props.hint"
-      :persistent-hint="props.persistentHint"
       :disabled="props.disabled"
     >
-      <template v-if="props.helper" #append-inner>
-        <edge-g-helper :helper="props.helper" />
+      <template #icon>
+        <edge-g-helper v-if="props.helper" :helper="props.helper" />
       </template>
-    </v-text-field>
-    <v-checkbox
+    </edge-shad-input>
+    <edge-shad-checkbox
       v-if="props.fieldType === 'boolean'"
       v-model="modelValue"
-      :rules="props.rules"
-      :label="props.label"
+      :name="props.name"
       v-bind="props.bindings"
-    />
+    >
+      {{ props.label }}
+      <template #icon>
+        <edge-g-helper v-if="props.helper" :helper="props.helper" />
+      </template>
+    </edge-shad-checkbox>
     <v-select
       v-if="props.fieldType === 'select'"
       v-model="modelValue"
@@ -1202,16 +1209,9 @@ watch(modelValue, () => {
                   </v-row>
                   <v-row v-if="typeof modelValue[element.key].value === 'object'" class="mt-0 px-1 pb-1">
                     <v-col cols="12">
-                      <edge-g-input v-model="modelValue[element.key].value" :for-functions="props.forFunctions" :bindings="props.bindings" :label="getArrayObjectLabel(element.key)" :disable-tracking="true" :field-type="Array.isArray(modelValue[element.key].value) ? 'array' : 'object'" />
+                      <edge-g-input v-model="modelValue[element.key].value" :name="element.key" :for-functions="props.forFunctions" :bindings="props.bindings" :label="getArrayObjectLabel(element.key)" :disable-tracking="true" :field-type="Array.isArray(modelValue[element.key].value) ? 'array' : 'object'" />
                     </v-col>
                   </v-row>
-                  <!-- <template v-if="props.forFunctions && props.fieldType === 'array'">
-                    <v-row v-if="element.value.type === 'array' || element.value.type === 'object'" class="mt-0 px-1 pb-1">
-                      <v-col cols="12">
-                        <edge-g-input v-model="modelValue[0].value" :for-functions="props.forFunctions" :bindings="props.bindings" :label="element.value.type" :disable-tracking="true" field-type="object" />
-                      </v-col>
-                    </v-row>
-                  </template> -->
                 </v-card>
               </v-container>
             </template>
@@ -1430,7 +1430,7 @@ watch(modelValue, () => {
           </v-list>
         </v-menu>
         <template v-for="(value, key) in state.fieldInsert" :key="key">
-          <edge-g-input v-if="!['type', 'key', 'description', 'required', 'gptGenerated', 'value', 'fieldId'].includes(key)" v-model="state.fieldInsert[key]" :disable-tracking="true" v-bind="extraTypeFields[state.fieldInsert.type][key].bindings" />
+          <edge-g-input v-if="!['type', 'key', 'description', 'required', 'gptGenerated', 'value', 'fieldId'].includes(key)" v-model="state.fieldInsert[key]" :name="key" :disable-tracking="true" v-bind="extraTypeFields[state.fieldInsert.type][key].bindings" />
         </template>
       </v-card-text>
       <v-card-actions>

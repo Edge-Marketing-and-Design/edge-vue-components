@@ -219,6 +219,7 @@ const onSubmit = async (event) => {
               field-type="text"
               :rules="[edgeGlobal.edgeRules.required]"
               label="Name"
+              name="name"
               :parent-tracker-id="`myOrgs-${state.workingItem.id}`"
             />
           </template>
@@ -226,6 +227,7 @@ const onSubmit = async (event) => {
             To join an existing organization, please enter the registration code provided by the organization.
             <edge-g-input
               v-model="state.workingItem.name"
+              name="name"
               :disable-tracking="true"
               field-type="text"
               :rules="[edgeGlobal.edgeRules.required]"
