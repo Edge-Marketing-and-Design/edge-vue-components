@@ -114,7 +114,7 @@ watch(currentOrgName, async () => {
           Logged in as:
           <v-alert-title>{{ state.username }}</v-alert-title>
           <strong>Custom Provider</strong>
-          <Separator class="my-4" />
+          <Separator class="my-4 dark:bg-slate-600" />
           Notice: You're signed in with a custom provider. Nothing to update here.
         </v-alert>
       </template>
@@ -127,6 +127,7 @@ watch(currentOrgName, async () => {
         >
           <edge-g-input
             v-model="state.username"
+            name="username"
             field-type="text"
             :rules="[edgeGlobal.edgeRules.required, edgeGlobal.edgeRules.email]"
             label="Username"
@@ -151,7 +152,7 @@ watch(currentOrgName, async () => {
             Update Email
           </v-btn>
         </v-form>
-        <Separator class="my-4" />
+        <Separator class="my-4 dark:bg-slate-600" />
         <v-form
           v-model="state.passwordForm"
           validate-on="submit"
@@ -202,7 +203,7 @@ watch(currentOrgName, async () => {
           Logged in as:
           <v-alert-title>{{ edgeFirebase.user.firebaseUser.providerData[0].email }}</v-alert-title>
           <strong>Provider: {{ edgeFirebase.user.firebaseUser.providerData[0].providerId }}</strong>
-          <Separator class="my-4" />
+          <Separator class="my-4 dark:bg-slate-600" />
           Notice: You're signed in with a third-party provider. To update your login information, please visit your provider's account settings. Changes cannot be made directly within this app.
         </v-alert>
       </template>
@@ -211,7 +212,7 @@ watch(currentOrgName, async () => {
           Delete Account
         </h4>
       </van-divider>
-      <Separator class="my-4" />
+      <Separator class="my-4 dark:bg-slate-600" />
       <v-form
         v-model="state.deleteForm"
         validate-on="submit"
@@ -232,6 +233,7 @@ watch(currentOrgName, async () => {
               <strong>Warning:</strong> Deleting your account will permanently remove all of your data from this app. This action cannot be undone.
             </h3>
             <edge-g-input
+              name="delete_account"
               field-type="boolean"
               label="I understand the consequences of deleting my account."
               :disable-tracking="true"

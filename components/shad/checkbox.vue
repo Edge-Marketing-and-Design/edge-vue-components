@@ -42,7 +42,7 @@ const handleChange = (value) => {
 <template>
   <div>
     <FormField v-slot="{ handleChange: formHandleChange }" type="checkbox" :name="props.name">
-      <FormItem class="flex flex-row items-start gap-x-3 space-y-0 rounded-md border p-3" @click.capture.once="formHandleChange(modelValue)">
+      <FormItem class="flex flex-row items-start gap-x-3 space-y-0 rounded-md border p-3 pr-2" @click.capture.once="formHandleChange(modelValue)">
         <FormControl>
           <Checkbox
             :id="props.name"
@@ -53,7 +53,7 @@ const handleChange = (value) => {
           />
         </FormControl>
         <div class="space-y-1 leading-none w-full">
-          <div class="relative w-full items-center">
+          <div class="relative w-full items-center text-left">
             <FormLabel><slot /></FormLabel>
             <span class="absolute end-0 inset-y-0 flex items-center justify-center pl-2 pr-0">
               <slot name="icon" /></span>

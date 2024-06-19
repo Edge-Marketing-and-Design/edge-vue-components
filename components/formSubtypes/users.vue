@@ -1,5 +1,6 @@
 <script setup>
 import { computed, defineProps, inject, reactive } from 'vue'
+import { User } from 'lucide-vue-next'
 // TODO: If a removed user no longer has roles to any organiztions, need to a create new organization for them with
 // default name of "Personal". This will allow them to continue to use the app.
 
@@ -133,47 +134,45 @@ const onSubmit = async (event) => {
 </script>
 
 <template>
-  <v-btn v-if="props.item === null" size="x-small" variant="tonal" @click="addItem()">
+  <edge-shad-button v-if="props.item === null" class="bg-slate-500 mx-2 h-6 text-xs" @click="addItem()">
     Invite Member
-  </v-btn>
-  <v-list-item v-else @click="editItem(props.item)">
-    <template #prepend>
-      <v-avatar class="handle pointer" color="grey-darken-1">
-        <v-icon>mdi-account</v-icon>
-      </v-avatar>
-    </template>
-    <v-list-item-title>
-      {{ props.item.meta.name }}
-      <v-chip v-if="props.item.userId === edgeFirebase.user.uid" size="small" color="success">
+  </edge-shad-button>
+  <div v-else class="flex w-full py-1 justify-between items-center cursor-pointer" @click="editItem(props.item)">
+    <Avatar class="handle pointer p-0 h-6 w-6 mr-2">
+      <User width="18" height="18" />
+    </Avatar>
+    <div class="flex gap-2 mr-2">
+      <edge-chip class="bg-secondary">
+        {{ props.item.meta.name }}
+      </edge-chip>
+      <edge-chip v-if="props.item.userId === edgeFirebase.user.uid" class="bg-success">
         You
-      </v-chip>
-      <v-chip v-if="!props.item.userId" size="small" color="warning">
+      </edge-chip>
+      <edge-chip v-if="!props.item.userId" class="bg-warning">
         Invited, Not Registered
-      </v-chip>
-    </v-list-item-title>
-    <v-list-item-subtitle>
-      <v-chip size="small" color="primary">
+      </edge-chip>
+    </div>
+    <div class="grow flex gap-2 justify-end">
+      <edge-chip variant="outlined">
         {{ edgeGlobal.getRoleName(props.item.roles, edgeGlobal.edgeState.currentOrganization) }}
-      </v-chip>
+      </edge-chip>
       <template v-if="!props.item.userId">
-        <v-chip size="small" color="primary">
+        <edge-chip>
           Registration Code: {{ props.item.docId }}
-        </v-chip>
+        </edge-chip>
         <edge-clipboard-button :text="props.item.docId" />
       </template>
-    </v-list-item-subtitle>
-    <template #append>
-      <v-btn
-        color="secondary"
-        variant="text"
-        :disabled="items.length === 1"
-        @click.stop="deleteConfirm(props.item)"
-      >
-        <span v-if="props.item.userId === edgeFirebase.user.uid">Leave</span>
-        <span v-else>Remove</span>
-      </v-btn>
-    </template>
-  </v-list-item>
+    </div>
+    <v-btn
+      color="secondary"
+      variant="text"
+      :disabled="items.length === 1"
+      @click.stop="deleteConfirm(props.item)"
+    >
+      <span v-if="props.item.userId === edgeFirebase.user.uid">Leave</span>
+      <span v-else>Remove</span>
+    </v-btn>
+  </div>
   <v-dialog
     v-model="state.deleteDialog"
     persistent
@@ -269,6 +268,7 @@ const onSubmit = async (event) => {
         <v-card-text>
           <edge-g-input
             v-model="state.workingItem.name"
+            name="name"
             :disable-tracking="true"
             field-type="text"
             :rules="[edgeGlobal.edgeRules.required]"
@@ -279,22 +279,20 @@ const onSubmit = async (event) => {
           <edge-g-input
             v-if="state.saveButton === 'Invite User'"
             v-model="state.workingItem.email"
+            name="email"
             :disable-tracking="true"
             field-type="text"
-            :rules="[edgeGlobal.edgeRules.required, edgeGlobal.edgeRules.email]"
             label="Email"
             :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
           />
           <edge-g-input
             v-model="state.workingItem.role"
+            name="role"
             :disable-tracking="disableTracking"
             :items="roleNamesOnly"
             field-type="select"
-            :rules="[edgeGlobal.edgeRules.required]"
             label="Role"
             :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
-            :disabled="state.workingItem.userId === edgeFirebase.user.uid"
-            helper="<p>When granting a role, carefully consider the responsibilities and access each role entails:</p><ul><li>Admin: Empowers users to manage the organization, including adding/removing members and overseeing billing. Choose wisely, as admins have extensive control over the organization's structure and financials.</li><li>User: Grants users access to create and edit sites, as well as configure form endpoints under those sites. Users can also create/modify Global Variables. Ideal for team members who focus on site creation and form endpoint configuration without needing high-level administrative privileges.</li></ul><p>Pick the right role for each team member to ensure a balanced and efficient organization!</p>"
           />
         </v-card-text>
         <v-card-actions>

@@ -119,9 +119,9 @@ const onSubmit = async (event) => {
       {{ props.item.name }}
     </v-list-item-title>
     <v-list-item-subtitle>
-      <v-chip size="small" color="primary">
+      <edge-chip size="small" color="primary">
         {{ edgeGlobal.getRoleName(edgeFirebase.user.roles, props.item.docId) }}
-      </v-chip>
+      </edge-chip>
     </v-list-item-subtitle>
     <template #append>
       <v-btn

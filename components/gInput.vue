@@ -2,7 +2,7 @@
 // TODO:  ADD HELPERS TO THE SCHEMA PARAMS
 // TODO: START SHAD CONVERSION AT text
 import { computed, defineProps, inject, nextTick, onBeforeMount, onMounted, reactive, ref, watch } from 'vue'
-import functionChips from './gSubInput/gptFunctionChips.vue'
+import { Braces, Brackets, Pencil, Trash } from 'lucide-vue-next'
 
 const props = defineProps({
   disableTracking: {
@@ -27,7 +27,7 @@ const props = defineProps({
   },
   fieldTypes: {
     type: Array,
-    default: () => [],
+    default: () => ['string', 'boolean', 'array', 'object', 'number', 'integer'],
   },
   subFieldType: {
     type: String,
@@ -139,6 +139,7 @@ const state = reactive({
   objectListOriginalOrder: {},
   arrayAdd: null,
   isEditing: false,
+  removeFieldDialogShow: false,
 })
 
 const returnObject = computed(() => {
@@ -573,12 +574,15 @@ const collectionItems = computed(() => {
   }))
 })
 
-const removeFieldDialogShow = computed(() => {
+watch (() => state.removeField, () => {
   if (state.removeField !== null) {
-    return true
+    state.removeFieldDialogShow = true
   }
-  return false
+  else {
+    state.removeFieldDialogShow = false
+  }
 })
+
 const originalCompare = computed(() => {
   if (props.fieldType === 'objectList' || props.fieldType === 'object' || props.fieldType === 'array' || returnObject) {
     return JSON.stringify(edgeGlobal.edgeState.changeTracker[state.trackerKey])
@@ -773,7 +777,7 @@ watch(() => state.fieldInsertDialog, () => {
   if (state.fieldInsertDialog) {
     if (props.fieldType === 'array') {
       if (!props.forFunctions) {
-        addField()
+        // addField()
       }
     }
   }
@@ -903,7 +907,7 @@ watch(modelValue, () => {
             </v-list-item-title>
             <template #append>
               <v-btn flat size="x-small" icon @click="modelValue.splice(i, 1)">
-                <v-icon>mdi-delete</v-icon>
+                <Trash class="text-sm" />
               </v-btn>
             </template>
           </v-list-item>
@@ -1021,257 +1025,221 @@ watch(modelValue, () => {
         <edge-g-helper v-if="props.helper" :helper="props.helper" />
       </template>
     </edge-shad-checkbox>
-    <v-select
+    <edge-shad-select
       v-if="props.fieldType === 'select'"
       v-model="modelValue"
-      :rules="props.rules"
-      :clearable="true"
       :label="props.label"
       :items="props.items"
       v-bind="props.bindings"
-      :return-object="returnObject"
       :disabled="props.disabled"
+      :name="props.name"
+      class="pr-8"
     >
-      <template v-if="props.helper" #append>
+      <template v-if="props.helper" #icon>
         <edge-g-helper :helper="props.helper" />
       </template>
-    </v-select>
-    <v-textarea
+    </edge-shad-select>
+    <edge-shad-textarea
       v-if="props.fieldType === 'textarea'"
       v-model="modelValue"
-      :rules="props.rules"
-      :label="props.label"
-      auto-grow
-      :rows="props.rows"
+      v-maska:[props.maskOptions]
+      type="text"
+      :name="props.name"
       v-bind="props.bindings"
+      :label="props.label"
+      :disabled="props.disabled"
     >
-      <template v-if="props.helper" #append-inner>
+      <template v-if="props.helper" #icon>
         <edge-g-helper :helper="props.helper" />
       </template>
-    </v-textarea>
+    </edge-shad-textarea>
     <template v-if="props.fieldType === 'object' || props.fieldType === 'array'">
-      <v-dialog v-model="state.keyMenu" :max-width="300">
-        <v-card>
-          <v-toolbar density="compact">
-            <v-toolbar-title v-if="props.fieldType === 'object'">
-              Update Key
-            </v-toolbar-title>
-            <v-toolbar-title v-else>
-              Add Item
-            </v-toolbar-title>
-            <v-spacer />
-            <v-btn icon @click="state.fieldInsertDialog = false">
-              <v-icon>mdi-close</v-icon>
-            </v-btn>
-          </v-toolbar>
-          <v-card-text>
-            <v-text-field
-              v-model="state.newKey"
-              class="mb-1"
-              label="Key"
-              v-bind="props.bindings"
-              hide-details
-            />
-          </v-card-text>
-          <v-card-actions>
-            <v-spacer />
-            <v-btn @click="state.keyMenu = false">
-              Cancel
-            </v-btn>
-            <v-btn color="primary" @click="updateKey">
-              Update
-            </v-btn>
-          </v-card-actions>
-        </v-card>
-      </v-dialog>
-      <v-card :color="state.forFunctions ? '' : 'transparent'" :rounded="0" elevation="0" flat class="fill-height">
-        <v-toolbar v-if="!(props.forFunctions && modelValue.length >= 1)" :color="state.forFunctions ? '' : 'transparent'" class="mb-0" density="compact" flat>
-          <template v-if="!props.forFunctions">
-            <v-icon v-if="props.fieldType === 'object'" class="mx-4">
-              mdi-set-merge
-            </v-icon>
-            <v-icon v-else class="mx-4">
-              mdi-code-array
-            </v-icon>
-            {{ props.label }}
-          </template>
-          <v-spacer />
-
-          <v-btn size="x-small" variant="tonal" @click="state.fieldInsertDialog = true">
-            <template v-if="props.fieldType === 'object'">
-              Add Field
-            </template>
-            <template v-else>
-              <template v-if="props.forFunctions">
-                Array Item Params
-              </template>
-              <template v-else>
+      <edge-shad-dialog v-model="state.keyMenu">
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              <span v-if="props.fieldType === 'object'">
+                Update Key
+              </span>
+              <span v-else>
                 Add Item
-              </template>
-            </template>
-          </v-btn>
-          <edge-g-helper v-if="props.helper" :helper="props.helper" />
-        </v-toolbar>
-        <v-card-text class="py-0 px-0">
+              </span>
+            </DialogTitle>
+          </DialogHeader>
+          <DialogDescription />
+          <edge-shad-input
+            v-model="state.newKey"
+            name="key"
+            class="mb-1"
+            label="Key"
+            v-bind="props.bindings"
+          />
+          <DialogFooter class="pt-6 flex justify-between">
+            <edge-shad-button variant="destructive" @click="state.keyMenu = false">
+              Cancel
+            </edge-shad-button>
+            <edge-shad-button class="text-white w-full bg-slate-800 hover:bg-slate-400" @click="updateKey">
+              Submit
+            </edge-shad-button>
+          </DialogFooter>
+        </DialogContent>
+      </edge-shad-dialog>
+      <Card v-if="!(props.forFunctions && modelValue.length >= 1)" class="p-0" :class="state.forFunctions ? '' : 'bg-transparent mb-1'">
+        <CardHeader class="p-2" :class="state.forFunctions ? '' : 'bg-transparent'">
+          <div class="w-full flex justify-between">
+            <div v-if="!props.forFunctions" class="flex items-center">
+              <Braces v-if="props.fieldType === 'object'" class="mx-2" />
+
+              <Brackets v-else class="mx-2" />
+
+              <div>
+                {{ props.label }}
+              </div>
+            </div>
+            <div class="flex items-center">
+              <edge-shad-button class="bg-slate-500 mx-2 h-6 text-xs" @click.stop.prevent="state.fieldInsertDialog = true">
+                <template v-if="props.fieldType === 'object'">
+                  Add Field
+                </template>
+                <template v-else>
+                  <template v-if="props.forFunctions">
+                    Array Item Params
+                  </template>
+                  <template v-else>
+                    Add Item
+                  </template>
+                </template>
+              </edge-shad-button>
+              <edge-g-helper v-if="props.helper" :helper="props.helper" />
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent class="py-0 px-2">
           <draggable
             v-model="state.order"
             handle=".handle"
             item-key="key"
           >
             <template #item="{ element }">
-              <v-container :key="element.key" class="py-1">
-                <v-card :style="`background-color:${typeColor(modelValue[element.key].type)}`">
-                  <v-row dense>
-                    <v-col class="text-right pt-5" cols="1">
-                      <v-icon class="handle pointer">
-                        mdi-format-align-justify
-                      </v-icon>
-                    </v-col>
-                    <v-col
-                      v-show="props.fieldType !== 'array'"
-                      class="pt-3"
-                      cols="3"
-                    >
-                      <template v-if="modelValue[element.key].gptGenerated">
-                        <v-btn prepend-icon="mdi-pencil" class="text-none" variant="tonal" @click="editField(element)">
-                          {{ element.key }}
-                        </v-btn>
-                      </template>
-                      <v-btn v-else size="small" variant="outlined" class="py-0 mt-2 text-none" block @click="openKeyMenu(element.key)">
+              <div :key="element.key" class="w-full">
+                <div class="flex w-full py-1 justify-between items-center">
+                  <div class="text-left px-2">
+                    <v-icon class="handle pointer">
+                      mdi-format-align-justify
+                    </v-icon>
+                  </div>
+                  <div
+                    v-show="props.fieldType !== 'array'"
+                    class="w-1/6 text-left mr-2"
+                  >
+                    <template v-if="modelValue[element.key].gptGenerated">
+                      <edge-shad-button class="bg-slate-500 mx-2 h-6 text-xs" @click.prevent.stop="editField(element)">
                         {{ element.key }}
-                      </v-btn>
-                    </v-col>
-                    <v-col
-                      v-if="props.fieldType === 'array'"
-                      class="pt-3"
-                      cols="3"
-                    >
-                      <v-btn prepend-icon="mdi-pencil" class="text-none" variant="tonal" @click="editField(element)">
-                        {{ element.value.type }}
-                      </v-btn>
-                    </v-col>
-                    <v-col class="py-0 text-right">
-                      <template v-if="modelValue[element.key].gptGenerated || props.forFunctions">
-                        <function-chips class="mt-5" :field="modelValue[element.key]" />
-                      </template>
-                      <template v-else-if="typeof modelValue[element.key].value !== 'object'">
-                        <v-text-field
-                          v-if="typeof modelValue[element.key].value === 'string'"
-                          v-model="modelValue[element.key].value"
-                          v-bind="props.bindings"
-                          placeholder="Enter value here"
-                          hide-details
-                        />
-                        <v-checkbox
-                          v-else-if="typeof modelValue[element.key].value === 'boolean'"
-                          :key="`select-${element.key}`"
-                          v-model="modelValue[element.key].value"
-                          class="mb-1"
-                          hide-details
-                          :label="getArrayObjectLabel(element.key)"
-                          v-bind="props.bindings"
-                        />
-                        <vue-number-input
-                          v-else-if="modelValue[element.key].type === 'number'"
-                          :key="`number-${element.key}`"
-                          v-model="modelValue[element.key].value"
-                          :step=".1"
-                          class="mt-3"
-                          density="compact"
-                          controls
-                          size="medium"
-                          v-bind="props.bindings"
-                        />
-                        <vue-number-input
-                          v-else-if="modelValue[element.key].type === 'integer'"
-                          :key="`integer-${element.key}`"
-                          v-model="modelValue[element.key].value"
-                          :step="1"
-                          class="mt-3"
-                          density="compact"
-                          controls
-                          size="medium"
-                          v-bind="props.bindings"
-                          @keydown="event => (event.key === '.' || event.keyCode === 190) && event.preventDefault()"
-                        />
-                      </template>
-                      <template v-else>
-                        <div class="mt-9" style="with:100%;border-bottom: solid thin;" />
-                      </template>
-                    </v-col>
-                    <v-col class="pt-4" cols="1">
-                      <v-btn variant="text" size="small" icon @click="state.removeField = element.key">
-                        <v-icon size="x-large">
-                          mdi-delete
-                        </v-icon>
-                      </v-btn>
-                    </v-col>
-                  </v-row>
-                  <v-row v-if="typeof modelValue[element.key].value === 'object'" class="mt-0 px-1 pb-1">
-                    <v-col cols="12">
-                      <edge-g-input v-model="modelValue[element.key].value" :name="element.key" :for-functions="props.forFunctions" :bindings="props.bindings" :label="getArrayObjectLabel(element.key)" :disable-tracking="true" :field-type="Array.isArray(modelValue[element.key].value) ? 'array' : 'object'" />
-                    </v-col>
-                  </v-row>
-                </v-card>
-              </v-container>
+                      </edge-shad-button>
+                    </template>
+                    <edge-shad-button v-else class="bg-slate-500 mx-2 h-6 text-xs" @click.prevent.stop="openKeyMenu(element.key)">
+                      {{ element.key }}
+                    </edge-shad-button>
+                  </div>
+                  <div
+                    v-if="props.fieldType === 'array'"
+                  >
+                    <edge-shad-button v-if="props.forFunctions" class="bg-slate-500 mx-2 h-6 text-xs" @click.prevent.stop="editField(element)">
+                      <Pencil width="16" height="16" />
+                      {{ element.value.type }}
+                    </edge-shad-button>
+                  </div>
+                  <div class="py-0 text-right grow">
+                    <template v-if="modelValue[element.key].gptGenerated || props.forFunctions">
+                      <edge-function-chips class="mt-5" :field="modelValue[element.key]" />
+                    </template>
+                    <template v-else-if="typeof modelValue[element.key].value !== 'object'">
+                      <edge-shad-input
+                        v-if="typeof modelValue[element.key].value === 'string'"
+                        v-model="modelValue[element.key].value"
+                        v-bind="props.bindings"
+                        placeholder="Enter value here"
+                        :name="typeof modelValue[element.key].value"
+                      />
+                      <edge-shad-checkbox
+                        v-else-if="typeof modelValue[element.key].value === 'boolean'"
+                        v-model="modelValue[element.key].value"
+                        class="mb-1"
+                        v-bind="props.bindings"
+                        :name="typeof modelValue[element.key].value"
+                      >
+                        {{ getArrayObjectLabel(element.key) }}
+                      </edge-shad-checkbox>
+                      <edge-shad-number
+                        v-else-if="modelValue[element.key].type === 'number'"
+                        v-model="modelValue[element.key].value"
+                        :step=".1"
+                        :name="typeof modelValue[element.key].value"
+                        v-bind="props.bindings"
+                      />
+                      <edge-shad-number
+                        v-else-if="modelValue[element.key].type === 'integer'"
+                        v-model="modelValue[element.key].value"
+                        :step="1"
+                        :name="typeof modelValue[element.key].value"
+                        :format-options="{ maximumFractionDigits: 0 }"
+                        v-bind="props.bindings"
+                      />
+                    </template>
+                    <template v-else>
+                      <Separator class="dark:bg-slate-600" />
+                    </template>
+                  </div>
+                  <edge-shad-button variant="text" size="icon" @click.prevent.stop="state.removeField = element.key">
+                    <Trash width="18" height="18" />
+                  </edge-shad-button>
+                </div>
+                <div v-if="typeof modelValue[element.key].value === 'object'" class="w-full py-1">
+                  <edge-g-input v-model="modelValue[element.key].value" :name="element.key" :for-functions="props.forFunctions" :bindings="props.bindings" :label="getArrayObjectLabel(element.key)" :disable-tracking="true" :field-type="Array.isArray(modelValue[element.key].value) ? 'array' : 'object'" />
+                </div>
+              </div>
             </template>
           </draggable>
-          <v-dialog
-            v-model="removeFieldDialogShow"
-            persistent
-            max-width="600"
-            transition="fade-transition"
+          <edge-shad-dialog
+            v-model="state.removeFieldDialogShow"
           >
-            <v-card>
-              <v-toolbar density="compact" flat>
-                <v-icon class="mx-4">
-                  mdi-delete
-                </v-icon>
-                Delete "{{ getArrayObjectLabel (state.removeField) }}"
-                <v-spacer />
-
-                <v-btn
-                  type="submit"
-                  color="primary"
-                  icon
-                  @click="state.removeField = null"
-                >
-                  <v-icon> mdi-close</v-icon>
-                </v-btn>
-              </v-toolbar>
-              <v-card-title>Are you sure you want to delete "{{ getArrayObjectLabel(state.removeField) }}"?</v-card-title>
-              <v-card-actions>
-                <v-spacer />
-                <v-btn
-                  color="blue-darken-1"
-                  variant="text"
-                  @click="state.removeField = null"
-                >
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>
+                  Delete "{{ getArrayObjectLabel (state.removeField) }}"
+                </DialogTitle>
+                <DialogDescription class="mt-3">
+                  Are you sure you want to delete "{{ getArrayObjectLabel(state.removeField) }}"?
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter class="pt-6 flex justify-between">
+                <edge-shad-button class="text-white bg-slate-800 hover:bg-slate-400" @click="state.removeField = null">
                   Cancel
-                </v-btn>
-                <v-btn
-                  type="submit"
-                  color="error"
-                  variant="text"
-                  @click="removeField(state.removeField)"
-                >
+                </edge-shad-button>
+                <edge-shad-button variant="destructive" class="w-full" @click="removeField(state.removeField)">
                   Delete
-                </v-btn>
-              </v-card-actions>
-            </v-card>
-          </v-dialog>
-        </v-card-text>
-      </v-card>
+                </edge-shad-button>
+              </DialogFooter>
+            </DialogContent>
+          </edge-shad-dialog>
+        </CardContent>
+      </Card>
     </template>
     <template v-if="props.fieldType === 'objectList'">
-      <v-card :rounded="0" flat class="fill-height">
-        <v-card-text class="pa-0">
-          <v-toolbar density="compact" color="transparent" flat>
-            <v-toolbar-title>{{ props.label }}</v-toolbar-title>
-            <v-spacer />
-            <component :is="`form-subtypes-${props.subFieldType}`" v-model:items="modelValue" :pass-through-props="passThroughProps" />
+      <Card class="h-100">
+        <CardHeader class="pt-3 pb-2">
+          <CardTitle class="text-lg flex items-center">
+            <div>{{ props.label }}</div>
+            <div class="grow text-right">
+              <component :is="`edge-form-subtypes-${props.subFieldType}`" v-model:items="modelValue" :pass-through-props="passThroughProps" />
+            </div>
             <edge-g-helper v-if="props.helper" :helper="props.helper" />
-          </v-toolbar>
+          </CardTitle>
+          <CardDescription>
+            <Separator />
+          </CardDescription>
+        </CardHeader>
+        <CardContent class="mt-0">
           <v-list class="mt-0 pt-0" bg-color="transparent">
             <draggable
               v-model="modelValue"
@@ -1280,7 +1248,7 @@ watch(modelValue, () => {
             >
               <template #item="{ element, index }">
                 <div>
-                  <component :is="`form-subtypes-${props.subFieldType}`" v-model:items="modelValue" :item="element" :pass-through-props="passThroughProps" />
+                  <component :is="`edge-form-subtypes-${props.subFieldType}`" v-model:items="modelValue" :item="element" :pass-through-props="passThroughProps" />
                   <v-fade-transition>
                     <v-alert v-if="isTracked && state.afterMount && (JSON.stringify(modelValue[index]) !== JSON.stringify(edgeGlobal.edgeState.changeTracker[state.trackerKey][state.objectListOriginalOrder[element.id]]))" class="mt-0 mb-3 text-caption" density="compact" variant="tonal" type="warning">
                       <v-row dense class="pa-0 ma-0">
@@ -1302,14 +1270,14 @@ watch(modelValue, () => {
                     </v-alert>
                   </v-fade-transition>
                   <Separator
-                    inset
+                    class="dark:bg-slate-600"
                   />
                 </div>
               </template>
             </draggable>
           </v-list>
-        </v-card-text>
-      </v-card>
+        </CardContent>
+      </Card>
       <v-input
         v-model="modelValue"
         density="compact"
@@ -1382,7 +1350,7 @@ watch(modelValue, () => {
           :error-messages="state.fieldErrorMessage"
         />
         <v-select
-          v-if="(fieldTypes.length > 1 && props.fieldType === 'object') || props.forFunctions"
+          v-if="(fieldTypes.length > 1) || props.forFunctions"
           v-model="state.fieldInsert.type"
           :disabled="state.isEditing"
           v-bind="props.bindings"

@@ -24,11 +24,13 @@ watch(users, async () => {
     <edge-g-input
       v-if="state.loaded"
       v-model="users"
+      name="users"
       :disable-tracking="true"
       field-type="objectList"
       sub-field-type="users"
       label="Users"
       parent-tracker-id="users"
+      helper="Users"
     />
   </div>
 </template>

@@ -87,12 +87,14 @@ watch(currentOrgData, async () => {
           <edge-g-input
             v-if="edgeGlobal.objHas(field, 'bindings')"
             v-model="state.data[field.field]"
+            :name="field.field"
             v-bind="field.bindings"
             :parent-tracker-id="`org-settings-${field.field}`"
           />
           <edge-g-input
             v-else
             v-model="state.data[field.field]"
+            :name="field.field"
             :field-type="field.type"
             :rules="field.rules"
             :label="field.label"

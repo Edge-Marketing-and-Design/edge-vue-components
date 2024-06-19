@@ -36,6 +36,7 @@ watch(roles, async () => {
     <edge-g-input
       v-if="state.loaded"
       v-model="edgeGlobal.edgeState.organizations"
+      name="organizations"
       :disable-tracking="true"
       field-type="objectList"
       sub-field-type="myOrgs"

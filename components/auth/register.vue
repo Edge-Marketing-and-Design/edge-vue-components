@@ -236,7 +236,7 @@ const customMaskOptions = {
             {{ providerNames[provider] }}
           </edge-shad-button>
           <Separator
-            class="my-2"
+            class="my-2 dark:bg-slate-600"
           />
         </template>
       </div>
@@ -336,7 +336,7 @@ const customMaskOptions = {
       <edge-g-error v-if="state.error.error" :error="state.error.message" />
 
       <Separator
-        class="my-4"
+        class="my-4 dark:bg-slate-600"
       />
       Already have an account?
       <edge-shad-button :class="props.secondaryButtonClasses" to="/app/login">

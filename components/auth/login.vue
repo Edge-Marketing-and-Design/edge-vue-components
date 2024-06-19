@@ -212,7 +212,7 @@ onMounted(async () => {
       </Accordion>
       <edge-g-error v-if="edgeFirebase.user.logInError" :error="edgeFirebase.user.logInErrorMessage" />
       <Separator
-        class="my-4"
+        class="my-4 dark:bg-slate-600"
       />
       Don't have an account?
       <edge-shad-button :class="props.secondaryButtonClasses" to="/app/signup">

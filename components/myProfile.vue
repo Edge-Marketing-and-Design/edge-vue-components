@@ -59,6 +59,7 @@ watch(currentMeta, async () => {
           v-for="field in props.metaFields"
           :key="field.field"
           v-model="state.meta[field.field]"
+          :name="field.field"
           :field-type="field.type"
           :rules="field.rules"
           :label="field.label"
