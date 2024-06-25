@@ -20,6 +20,7 @@ const setOpen = (value) => {
 
 <template>
   <Dialog
+    v-if="modelValue"
     :open="modelValue"
     @update:open="setOpen"
   >

@@ -52,6 +52,7 @@ const emits = defineEmits(['update:modelValue'])
 const state = reactive({
   showPassword: false,
   type: '',
+  modelValue: props.modelValue,
 })
 
 onBeforeMount(() => {
@@ -59,8 +60,8 @@ onBeforeMount(() => {
 })
 
 const modelValue = useVModel(props, 'modelValue', emits, {
-  passive: true,
-  defaultValue: props.defaultValue,
+  passive: false,
+  prop: 'modelValue',
 })
 
 const classComputed = computed(() => {
@@ -87,7 +88,7 @@ const classComputed = computed(() => {
               :id="props.name"
               v-model="modelValue"
               v-maska:[props.maskOptions]
-              :default-value="modelValue"
+              :default-value="props.modelValue"
               :class="classComputed"
               :type="state.type"
               v-bind="componentField"

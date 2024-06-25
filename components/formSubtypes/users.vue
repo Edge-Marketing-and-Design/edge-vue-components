@@ -1,6 +1,7 @@
 <script setup>
-import { computed, defineProps, inject, reactive } from 'vue'
-import { User } from 'lucide-vue-next'
+import { Loader2, User } from 'lucide-vue-next'
+import { toTypedSchema } from '@vee-validate/zod'
+import * as z from 'zod'
 // TODO: If a removed user no longer has roles to any organiztions, need to a create new organization for them with
 // default name of "Personal". This will allow them to continue to use the app.
 
@@ -39,6 +40,7 @@ const state = reactive({
     submits: true,
   },
   deleteDialog: false,
+  loading: false,
 })
 
 const roleNamesOnly = computed(() => {
@@ -50,7 +52,7 @@ const roleNamesOnly = computed(() => {
 const newItem = {
   name: '',
   email: '',
-  role: 'User',
+  role: '',
 }
 
 // computed property gets count of admin users in organization
@@ -106,31 +108,59 @@ const disableTracking = computed(() => {
   return state.saveButton === 'Invite User'
 })
 
-const onSubmit = async (event) => {
-  const results = await event
-  if (results.valid) {
-    const userRoles = edgeGlobal.orgUserRoles(edgeGlobal.edgeState.currentOrganization)
-    const roles = userRoles.find(role => role.name === state.workingItem.role).roles
-    if (state.saveButton === 'Invite User') {
-      edgeFirebase.addUser({ roles, meta: { name: state.workingItem.name, email: state.workingItem.email } })
-    }
-    else {
-      const oldRoles = state.workingItem.roles.filter((role) => {
-        return role.collectionPath.startsWith(edgeGlobal.edgeState.organizationDocPath.replaceAll('/', '-'))
-      })
-
-      for (const role of oldRoles) {
-        await edgeFirebase.removeUserRoles(state.workingItem.docId, role.collectionPath)
-      }
-
-      for (const role of roles) {
-        await edgeFirebase.storeUserRoles(state.workingItem.docId, role.collectionPath, role.role)
-      }
-    }
-    edgeGlobal.edgeState.changeTracker = {}
-    state.dialog = false
+const onSubmit = async () => {
+  state.loading = true
+  const userRoles = edgeGlobal.orgUserRoles(edgeGlobal.edgeState.currentOrganization)
+  const roles = userRoles.find(role => role.name === state.workingItem.role).roles
+  if (state.saveButton === 'Invite User') {
+    await edgeFirebase.addUser({ roles, meta: { name: state.workingItem.name, email: state.workingItem.email } })
   }
+  else {
+    const oldRoles = state.workingItem.roles.filter((role) => {
+      return role.collectionPath.startsWith(edgeGlobal.edgeState.organizationDocPath.replaceAll('/', '-'))
+        && !roles.find(r => r.collectionPath === role.collectionPath)
+    })
+
+    for (const role of oldRoles) {
+      await edgeFirebase.removeUserRoles(state.workingItem.docId, role.collectionPath)
+    }
+
+    for (const role of roles) {
+      await edgeFirebase.storeUserRoles(state.workingItem.docId, role.collectionPath, role.role)
+    }
+  }
+  edgeGlobal.edgeState.changeTracker = {}
+  state.loading = false
+  state.dialog = false
 }
+
+const newUserSchema = toTypedSchema(z.object({
+  name: z.string({
+    required_error: 'Name is required',
+  }),
+  email: z.string({
+    required_error: 'Email is required',
+  }).email({ message: 'Invalid email address' }).min(6, { message: 'Email must be at least 6 characters long' }).max(50, { message: 'Email must be less than 50 characters long' }),
+  role: z.string({
+    required_error: 'Role is required',
+  }),
+}))
+
+const updateUserSchema = toTypedSchema(z.object({
+  name: z.string({
+    required_error: 'Name is required',
+  }),
+  role: z.string({
+    required_error: 'Role is required',
+  }),
+}))
+
+const computedUserSchema = computed(() => {
+  if (state.saveButton === 'Invite User') {
+    return newUserSchema
+  }
+  return updateUserSchema
+})
 </script>
 
 <template>
@@ -141,10 +171,10 @@ const onSubmit = async (event) => {
     <Avatar class="handle pointer p-0 h-6 w-6 mr-2">
       <User width="18" height="18" />
     </Avatar>
-    <div class="flex gap-2 mr-2">
-      <edge-chip class="bg-secondary">
+    <div class="flex gap-2 mr-2 items-center">
+      <div class="text-md text-bold mr-2">
         {{ props.item.meta.name }}
-      </edge-chip>
+      </div>
       <edge-chip v-if="props.item.userId === edgeFirebase.user.uid" class="bg-success">
         You
       </edge-chip>
@@ -159,73 +189,53 @@ const onSubmit = async (event) => {
       <template v-if="!props.item.userId">
         <edge-chip>
           Registration Code: {{ props.item.docId }}
+          <edge-clipboard-button :text="props.item.docId" />
         </edge-chip>
-        <edge-clipboard-button :text="props.item.docId" />
       </template>
     </div>
-    <v-btn
-      color="secondary"
-      variant="text"
+    <edge-shad-button
       :disabled="items.length === 1"
+      class="bg-red-400 mx-2 h-6 text-xs"
+      variant="outline"
       @click.stop="deleteConfirm(props.item)"
     >
       <span v-if="props.item.userId === edgeFirebase.user.uid">Leave</span>
       <span v-else>Remove</span>
-    </v-btn>
+    </edge-shad-button>
   </div>
-  <v-dialog
+  <edge-shad-dialog
     v-model="state.deleteDialog"
-    persistent
-    max-width="600"
-    transition="fade-transition"
   >
-    <v-card>
-      <v-toolbar flat>
-        <v-icon class="mx-4">
-          mdi-list-box
-        </v-icon>
-        <span v-if="state.workingItem.userId === edgeFirebase.user.uid">
-          Remove Yourself?
-        </span>
-        <span v-else>
-          Remove "{{ state.workingItem.meta.name }}"
-        </span>
-        <v-spacer />
+    <DialogContent>
+      <DialogHeader>
+        <DialogTitle>
+          <span v-if="state.workingItem.userId === edgeFirebase.user.uid">
+            Remove Yourself?
+          </span>
+          <span v-else>
+            Remove "{{ state.workingItem.meta.name }}"
+          </span>
+        </DialogTitle>
+      </DialogHeader>
+      <DialogDescription />
 
-        <v-btn
-          type="submit"
-          color="primary"
-          icon
-          @click="state.deleteDialog = false"
-        >
-          <v-icon> mdi-close</v-icon>
-        </v-btn>
-      </v-toolbar>
-      <v-card-text>
-        <h3 v-if="state.workingItem.userId === edgeFirebase.user.uid && adminCount > 1">
-          Are you sure you want to remove yourself from the organization "{{ edgeGlobal.currentOrganizationObject.name }}"? You will no longer have access to any of the organization's data.
-        </h3>
-        <h3 v-else-if="state.workingItem.userId === edgeFirebase.user.uid && adminCount === 1">
-          You cannot remove yourself from this organization because you are the only admin. You can delete the organization or add another admin.
-        </h3>
-        <h3 v-else>
-          Are you sure you want to remove "{{ state.workingItem.meta.name }}" from the organization "{{ edgeGlobal.currentOrganizationObject.name }}"?
-        </h3>
-      </v-card-text>
-      <v-card-actions>
-        <v-spacer />
-        <v-btn
-          color="blue-darken-1"
-          variant="text"
-          @click="state.deleteDialog = false"
-        >
+      <h3 v-if="state.workingItem.userId === edgeFirebase.user.uid && adminCount > 1">
+        Are you sure you want to remove yourself from the organization "{{ edgeGlobal.currentOrganizationObject.name }}"? You will no longer have access to any of the organization's data.
+      </h3>
+      <h3 v-else-if="state.workingItem.userId === edgeFirebase.user.uid && adminCount === 1">
+        You cannot remove yourself from this organization because you are the only admin. You can delete the organization or add another admin.
+      </h3>
+      <h3 v-else>
+        Are you sure you want to remove "{{ state.workingItem.meta.name }}" from the organization "{{ edgeGlobal.currentOrganizationObject.name }}"?
+      </h3>
+      <DialogFooter class="pt-6 flex justify-between">
+        <edge-shad-button class="text-white  bg-slate-800 hover:bg-slate-400" @click="state.deleteDialog = false">
           Cancel
-        </v-btn>
-        <v-btn
+        </edge-shad-button>
+        <edge-shad-button
           :disabled="adminCount === 1 && state.workingItem.userId === edgeFirebase.user.uid"
-          type="submit"
-          color="error"
-          variant="text"
+          class="w-full"
+          variant="destructive"
           @click="deleteAction()"
         >
           <span v-if="state.workingItem.userId === edgeFirebase.user.uid">
@@ -234,87 +244,66 @@ const onSubmit = async (event) => {
           <span v-else>
             Remove
           </span>
-        </v-btn>
-      </v-card-actions>
-    </v-card>
-  </v-dialog>
-  <v-dialog
+        </edge-shad-button>
+      </DialogFooter>
+    </DialogContent>
+  </edge-shad-dialog>
+  <edge-shad-dialog
     v-model="state.dialog"
-    persistent
-    max-width="800"
-    transition="fade-transition"
   >
-    <v-card>
-      <v-form
-        v-model="state.form"
-        validate-on="submit"
-        @submit.prevent="onSubmit"
-      >
-        <v-toolbar flat>
-          <v-icon class="mx-4">
-            mdi-list-box
-          </v-icon>
-          {{ state.currentTitle }}
-          <v-spacer />
+    <DialogContent>
+      <edge-shad-form :schema="computedUserSchema" @submit="onSubmit">
+        <DialogHeader>
+          <DialogTitle>
+            {{ state.currentTitle }}
+          </DialogTitle>
+        </DialogHeader>
+        <DialogDescription />
 
-          <v-btn
+        <edge-g-input
+          v-model="state.workingItem.name"
+          name="name"
+          :disable-tracking="true"
+          field-type="text"
+          label="Name"
+          :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
+          :disabled="state.saveButton !== 'Invite User'"
+        />
+        <edge-g-input
+          v-if="state.saveButton === 'Invite User'"
+          v-model="state.workingItem.email"
+          name="email"
+          :disable-tracking="true"
+          field-type="text"
+          label="Email"
+          :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
+        />
+        <edge-g-input
+          v-model="state.workingItem.role"
+          name="role"
+          :disable-tracking="true"
+          :items="roleNamesOnly"
+          field-type="select"
+          label="Role"
+          :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
+          :disabled="state.workingItem.userId === edgeFirebase.user.uid"
+        />
+        <DialogFooter class="pt-6 flex justify-between">
+          <edge-shad-button variant="destructive" @click="closeDialog">
+            Cancel
+          </edge-shad-button>
+          <edge-shad-button
+            :disabled="state.loading"
+            class="text-white  w-100 bg-slate-800 hover:bg-slate-400"
             type="submit"
-            color="primary"
-            variant="text"
           >
+            <Loader2 v-if="state.loading" class="w-4 h-4 mr-2 animate-spin" />
             {{ state.saveButton }}
-          </v-btn>
-        </v-toolbar>
-        <v-card-text>
-          <edge-g-input
-            v-model="state.workingItem.name"
-            name="name"
-            :disable-tracking="true"
-            field-type="text"
-            :rules="[edgeGlobal.edgeRules.required]"
-            label="Name"
-            :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
-            :disabled="state.saveButton !== 'Invite User'"
-          />
-          <edge-g-input
-            v-if="state.saveButton === 'Invite User'"
-            v-model="state.workingItem.email"
-            name="email"
-            :disable-tracking="true"
-            field-type="text"
-            label="Email"
-            :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
-          />
-          <edge-g-input
-            v-model="state.workingItem.role"
-            name="role"
-            :disable-tracking="disableTracking"
-            :items="roleNamesOnly"
-            field-type="select"
-            label="Role"
-            :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
-          />
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer />
-          <v-btn
-            color="blue-darken-1"
-            variant="text"
-            @click="closeDialog"
-          >
-            Close
-          </v-btn>
-          <v-btn
-            type="submit"
-            color="primary"
-            variant="text"
-          >
-            {{ state.saveButton }}
-          </v-btn>
-        </v-card-actions>
-      </v-form>
-    </v-card>
-  </v-dialog>
+          </edge-shad-button>
+        </DialogFooter>
+      </edge-shad-form>
+    </DialogContent>
+  </edge-shad-dialog>
 </template>
 
 <style lang="scss" scoped>

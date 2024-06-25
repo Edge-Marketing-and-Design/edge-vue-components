@@ -1,17 +1,27 @@
 <script setup>
-import { defineProps, reactive } from 'vue'
+import { useToast } from '@/components/ui/toast/use-toast'
 const props = defineProps({
   text: {
     type: String,
     required: true,
   },
 })
+const { toast } = useToast()
 const state = reactive({
   snackbar: false,
   buttonIcon: 'mdi-content-copy',
 })
+
+const showToast = () => {
+  toast({
+    title: '',
+    description: 'Copied to clipboard',
+    duration: 3000,
+  })
+}
+
 const copyToClipboard = async (text) => {
-  state.snackbar = true
+  showToast()
   await navigator.clipboard.writeText(text)
   state.buttonIcon = 'mdi-check'
   setTimeout(() => {
@@ -30,7 +40,7 @@ const copyToClipboard = async (text) => {
   <v-icon
     size="small"
     class="mx-1"
-    @click.stop="copyToClipboard(props.text)"
+    @click.stop.prevent="copyToClipboard(props.text)"
   >
     {{ state.buttonIcon }}
   </v-icon>
@@ -50,7 +60,6 @@ const copyToClipboard = async (text) => {
       </v-btn>
     </template>
   </v-snackbar>
-  <!-- </v-btn> -->
 </template>
 
 <style lang="scss" scoped>

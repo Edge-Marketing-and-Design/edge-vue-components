@@ -1,5 +1,7 @@
 <script setup>
-import { defineProps, inject, reactive } from 'vue'
+import { Loader2, User } from 'lucide-vue-next'
+import { toTypedSchema } from '@vee-validate/zod'
+import * as z from 'zod'
 
 const props = defineProps({
   item: {
@@ -17,7 +19,7 @@ const props = defineProps({
 })
 
 const edgeFirebase = inject('edgeFirebase')
-// const edgeGlobal = inject('edgeGlobal')
+
 const state = reactive({
   workingItem: {},
   dialog: false,
@@ -28,6 +30,7 @@ const state = reactive({
     submits: true,
   },
   deleteDialog: false,
+  loading: false,
 })
 
 const newItem = {
@@ -68,194 +71,141 @@ const closeDialog = () => {
   edgeGlobal.edgeState.changeTracker = {}
 }
 
-const getRole = (org) => {
-  const orgPath = `organizations/${org}`
-  const role = edgeFirebase.user.roles.find((role) => {
-    return role.collectionPath === orgPath.replaceAll('/', '-')
-  })
-  return role.role.charAt(0).toUpperCase() + role.role.slice(1)
-}
-
 const register = reactive({
   registrationCode: props.passThroughProps,
   dynamicDocumentFieldValue: '',
 })
 
-const onSubmit = async (event) => {
-  const results = await event
+const onSubmit = async () => {
   const registerSend = edgeGlobal.dupObject(register)
-  if (results.valid) {
-    if (state.saveButton === 'Add Organization') {
-      registerSend.dynamicDocumentFieldValue = state.workingItem.name
-    }
-    else {
-      registerSend.dynamicDocumentFieldValue = ''
-      registerSend.registrationCode = state.workingItem.name
-    }
-    const results = await edgeFirebase.currentUserRegister(registerSend)
-    edgeGlobal.getOrganizations(edgeFirebase)
-    console.log(results)
-    edgeGlobal.edgeState.changeTracker = {}
-    state.dialog = false
+  state.loading = true
+  if (state.saveButton === 'Add Organization') {
+    registerSend.dynamicDocumentFieldValue = state.workingItem.name
   }
+  else {
+    registerSend.dynamicDocumentFieldValue = ''
+    registerSend.registrationCode = state.workingItem.name
+  }
+  const results = await edgeFirebase.currentUserRegister(registerSend)
+  edgeGlobal.getOrganizations(edgeFirebase)
+  console.log(results)
+  edgeGlobal.edgeState.changeTracker = {}
+  state.dialog = false
+  state.loading = false
 }
+const schema = toTypedSchema(z.object({
+  name: z.string({
+    required_error: 'Required',
+  }),
+}))
 </script>
 
 <template>
-  <v-btn v-if="props.item === null && props.passThroughProps" size="x-small" class="mr-2" variant="tonal" @click="addItem()">
+  <edge-shad-button v-if="props.item === null && props.passThroughProps" class="bg-slate-500 mx-2 h-6 text-xs" @click="addItem()">
     Add Organization
-  </v-btn>
-  <v-btn v-if="props.item === null" size="x-small" variant="tonal" @click="joinOrg()">
+  </edge-shad-button>
+  <edge-shad-button v-if="props.item === null" class="bg-slate-500 mx-2 h-6 text-xs" @click="joinOrg()">
     Join Organization
-  </v-btn>
-  <v-list-item v-else @click="editItem(props.item)">
-    <template #prepend>
-      <v-avatar class="handle pointer" color="grey-darken-1">
-        <v-icon>mdi-account</v-icon>
-      </v-avatar>
-    </template>
-
-    <v-list-item-title>
-      {{ props.item.name }}
-    </v-list-item-title>
-    <v-list-item-subtitle>
-      <edge-chip size="small" color="primary">
+  </edge-shad-button>
+  <div v-else class="flex w-full py-1 justify-between items-center">
+    <Avatar class="handle pointer p-0 h-6 w-6 mr-2">
+      <User width="18" height="18" />
+    </Avatar>
+    <div class="flex gap-2 mr-2 items-center">
+      <div class="text-md text-bold mr-2">
+        {{ props.item.name }}
+      </div>
+      <edge-chip v-if="edgeGlobal.edgeState.currentOrganization === props.item.docId" size="small" color="primary">
+        Current
+      </edge-chip>
+      <edge-shad-button v-else class="bg-slate-500 h-6 text-xs" @click="edgeGlobal.setOrganization(props.item.docId, edgeFirebase)">
+        Switch
+      </edge-shad-button>
+    </div>
+    <div class="grow flex gap-2 justify-end">
+      <edge-chip variant="outlined">
         {{ edgeGlobal.getRoleName(edgeFirebase.user.roles, props.item.docId) }}
       </edge-chip>
-    </v-list-item-subtitle>
-    <template #append>
-      <v-btn
-        color="secondary"
-        variant="text"
-        @click.stop="deleteConfirm(props.item)"
-      >
-        Leave
-      </v-btn>
-    </template>
-  </v-list-item>
-  <v-dialog
-    v-model="state.deleteDialog"
-    persistent
-    max-width="600"
-    transition="fade-transition"
-  >
-    <v-card>
-      <v-toolbar flat>
-        <v-icon class="mx-4">
-          mdi-list-box
-        </v-icon>
-        Leave Organization
-        <v-spacer />
+    </div>
+    <edge-shad-button
+      class="bg-red-400 mx-2 h-6 text-xs"
+      variant="outline"
+      @click.stop="deleteConfirm(props.item)"
+    >
+      Leave
+    </edge-shad-button>
+  </div>
 
-        <v-btn
-          type="submit"
-          color="primary"
-          icon
-          @click="state.deleteDialog = false"
-        >
-          <v-icon> mdi-close</v-icon>
-        </v-btn>
-      </v-toolbar>
-      <v-card-text v-if="getRole(state.workingItem.docId) === 'User'">
+  <edge-shad-dialog v-model="state.deleteDialog">
+    <DialogContent>
+      <DialogHeader>
+        <DialogTitle>
+          Leave Organization
+        </DialogTitle>
+      </DialogHeader>
+      <DialogDescription />
+      <h3 v-if="edgeGlobal.getRoleName(edgeFirebase.user.roles, state.workingItem.docId) === 'User'">
         Are you sure you want to leave the organization "{{ state.currentTitle }}"? You will no longer have access to any of the organization's data.
-      </v-card-text>
-      <v-card-text v-else>
+      </h3>
+      <h3 v-else>
         As an admin, you cannot leave the organization "{{ state.currentTitle }}" from this screen. Please go to the organization's members page to remove yourself.
-      </v-card-text>
-      <v-card-actions>
-        <v-spacer />
-        <v-btn
-          color="blue-darken-1"
-          variant="text"
-          @click="state.deleteDialog = false"
-        >
+      </h3>
+      <DialogFooter class="pt-6 flex justify-between">
+        <edge-shad-button class="text-white bg-slate-800 hover:bg-slate-400" @click="state.deleteDialog = false">
           Cancel
-        </v-btn>
-        <v-btn
-          v-if="getRole(state.workingItem.docId) === 'User'"
-          type="submit"
-          color="error"
-          variant="text"
+        </edge-shad-button>
+        <edge-shad-button
+          v-if="edgeGlobal.getRoleName(edgeFirebase.user.roles, state.workingItem.docId) === 'User'"
+          class="w-full"
+          variant="destructive"
           @click="deleteAction()"
         >
           Leave
-        </v-btn>
-      </v-card-actions>
-    </v-card>
-  </v-dialog>
-  <v-dialog
-    v-model="state.dialog"
-    persistent
-    max-width="600"
-    transition="fade-transition"
-  >
-    <v-card>
-      <v-form
-        v-model="state.form"
-        validate-on="submit"
-        @submit.prevent="onSubmit"
-      >
-        <v-toolbar flat>
-          <v-icon class="mx-4">
-            mdi-list-box
-          </v-icon>
-          {{ state.currentTitle }}
-          <v-spacer />
+        </edge-shad-button>
+      </DialogFooter>
+    </DialogContent>
+  </edge-shad-dialog>
 
-          <v-btn
-            type="submit"
-            color="primary"
-            variant="text"
-          >
-            {{ state.saveButton }}
-          </v-btn>
-        </v-toolbar>
-        <v-card-text>
-          <template v-if="state.saveButton === 'Add Organization'">
-            Please enter the name of the organization you would like to create.
-            <edge-g-input
-              v-model="state.workingItem.name"
-              :disable-tracking="true"
-              field-type="text"
-              :rules="[edgeGlobal.edgeRules.required]"
-              label="Name"
-              name="name"
-              :parent-tracker-id="`myOrgs-${state.workingItem.id}`"
-            />
-          </template>
-          <template v-else>
-            To join an existing organization, please enter the registration code provided by the organization.
-            <edge-g-input
-              v-model="state.workingItem.name"
-              name="name"
-              :disable-tracking="true"
-              field-type="text"
-              :rules="[edgeGlobal.edgeRules.required]"
-              label="Registration Code"
-              :parent-tracker-id="`myOrgs-${state.workingItem.id}`"
-            />
-          </template>
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer />
-          <v-btn
-            color="blue-darken-1"
-            variant="text"
-            @click="closeDialog"
-          >
+  <edge-shad-dialog v-model="state.dialog">
+    <DialogContent>
+      <edge-shad-form :schema="schema" @submit="onSubmit">
+        <DialogHeader>
+          <DialogTitle>
+            {{ state.currentTitle }}
+          </DialogTitle>
+        </DialogHeader>
+        <DialogDescription />
+        <edge-g-input
+          v-model="state.workingItem.name"
+          name="name"
+          :disable-tracking="true"
+          field-type="text"
+          :label="state.saveButton === 'Add Organization' ? 'Name' : 'Registration Code'"
+          :parent-tracker-id="`myOrgs-${state.workingItem.id}`"
+        />
+
+        <template v-if="state.saveButton === 'Add Organization'">
+          Please enter the name of the organization you would like to create.
+        </template>
+        <template v-else>
+          To join an existing organization, please enter the registration code provided by the organization.
+        </template>
+        <DialogFooter class="pt-6 flex justify-between">
+          <edge-shad-button variant="destructive" @click="closeDialog">
             Close
-          </v-btn>
-          <v-btn
+          </edge-shad-button>
+          <edge-shad-button
+            :disabled="state.loading"
+            class="text-white w-100 bg-slate-800 hover:bg-slate-400"
             type="submit"
-            color="primary"
-            variant="text"
           >
+            <Loader2 v-if="state.loading" class="w-4 h-4 mr-2 animate-spin" />
             {{ state.saveButton }}
-          </v-btn>
-        </v-card-actions>
-      </v-form>
-    </v-card>
-  </v-dialog>
+          </edge-shad-button>
+        </DialogFooter>
+      </edge-shad-form>
+    </DialogContent>
+  </edge-shad-dialog>
 </template>
 
 <style lang="scss" scoped>
