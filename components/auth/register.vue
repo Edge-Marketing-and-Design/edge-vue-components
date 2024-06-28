@@ -1,7 +1,6 @@
 <script setup>
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { Check, Loader2 } from 'lucide-vue-next'
 const props = defineProps({
   registrationCode: {
     type: String,
@@ -156,7 +155,7 @@ const schema = computed(() => {
   const baseSchema = {
     name: z.string({
       required_error: 'Name is required',
-    }),
+    }).min(1, { message: 'Registration code is required' }),
     terms: z.boolean({
       required_error: 'You must agree to the terms and conditions',
     }).refine(value => value, {

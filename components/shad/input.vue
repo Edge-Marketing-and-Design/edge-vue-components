@@ -1,6 +1,5 @@
 <script setup>
 import { useVModel } from '@vueuse/core'
-import { Eye, EyeOff } from 'lucide-vue-next'
 const props = defineProps({
   name: {
     type: String,

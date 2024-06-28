@@ -10,42 +10,46 @@ const props = defineProps({
 
 <template>
   <div>
-    <edge-chip size="small" label color="primary" variant="flat">
+    <edge-chip>
       Type: {{ field.type }}
     </edge-chip>
-    <edge-chip v-if="field.required" size="small" class="ml-1" label color="error" variant="flat">
+    <edge-chip>
       Required
     </edge-chip>
-    <v-menu
+    <DropdownMenu
       v-if="field?.enum?.length"
     >
-      <template #activator="{ props }">
-        <edge-chip size="small" class="ml-1" v-bind="props" label variant="flat" append-icon="mdi-information">
+      <DropdownMenuTrigger as-child>
+        <edge-chip class="ml-1 cursor-pointer">
           Enum
         </edge-chip>
-      </template>
-      <v-alert min-width="300" max-width="300" border="start" density="compact">
-        <template #title>
-          Enum
-        </template>
-        {{ field.enum.join(', ') }}
-      </v-alert>
-    </v-menu>
-    <v-menu
+      </DropdownMenuTrigger>
+      <DropdownMenuContent>
+        <edge-v-alert class="w-[300px]">
+          <div class="text-lg">
+            Enum
+          </div>
+          {{ field.enum.join(', ') }}
+        </edge-v-alert>
+      </DropdownMenuContent>
+    </DropdownMenu>
+    <DropdownMenu
       v-if="field.description"
     >
-      <template #activator="{ props }">
-        <edge-chip size="small" class="ml-1" v-bind="props" label variant="flat" append-icon="mdi-information">
+      <DropdownMenuTrigger as-child>
+        <edge-chip class="ml-1 cursor-pointer">
           Description
         </edge-chip>
-      </template>
-      <v-alert min-width="300" max-width="300" border="start" density="compact">
-        <template #title>
-          Description
-        </template>
-        {{ field.description }}
-      </v-alert>
-    </v-menu>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent>
+        <edge-v-alert class="w-[300px]">
+          <div class="text-lg">
+            Description
+          </div>
+          {{ field.description }}
+        </edge-v-alert>
+      </DropdownMenuContent>
+    </DropdownMenu>
   </div>
 </template>
 

@@ -1,5 +1,4 @@
 <script setup>
-import { Loader2, User } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 // TODO: If a removed user no longer has roles to any organiztions, need to a create new organization for them with
@@ -137,22 +136,22 @@ const onSubmit = async () => {
 const newUserSchema = toTypedSchema(z.object({
   name: z.string({
     required_error: 'Name is required',
-  }),
+  }).min(1, { message: 'Name is required' }),
   email: z.string({
     required_error: 'Email is required',
   }).email({ message: 'Invalid email address' }).min(6, { message: 'Email must be at least 6 characters long' }).max(50, { message: 'Email must be less than 50 characters long' }),
   role: z.string({
     required_error: 'Role is required',
-  }),
+  }).min(1, { message: 'Role is required' }),
 }))
 
 const updateUserSchema = toTypedSchema(z.object({
   name: z.string({
     required_error: 'Name is required',
-  }),
+  }).min(1, { message: 'Name is required' }),
   role: z.string({
     required_error: 'Role is required',
-  }),
+  }).min(1, { message: 'Role is required' }),
 }))
 
 const computedUserSchema = computed(() => {
@@ -167,7 +166,7 @@ const computedUserSchema = computed(() => {
   <edge-shad-button v-if="props.item === null" class="bg-slate-500 mx-2 h-6 text-xs" @click="addItem()">
     Invite Member
   </edge-shad-button>
-  <div v-else class="flex w-full py-1 justify-between items-center cursor-pointer" @click="editItem(props.item)">
+  <div v-else class="flex w-full py-2 justify-between items-center cursor-pointer" @click="editItem(props.item)">
     <Avatar class="handle pointer p-0 h-6 w-6 mr-2">
       <User width="18" height="18" />
     </Avatar>

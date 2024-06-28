@@ -1,6 +1,5 @@
 <script setup>
 import { useVModel } from '@vueuse/core'
-import { Check, ChevronsUpDown } from 'lucide-vue-next'
 import { cn } from '@/lib/utils'
 const props = defineProps({
   name: {

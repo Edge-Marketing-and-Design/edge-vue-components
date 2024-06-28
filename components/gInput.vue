@@ -2,7 +2,6 @@
 // TODO:  ADD HELPERS TO THE SCHEMA PARAMS
 // TODO: START SHAD CONVERSION AT
 import { computed, defineProps, inject, nextTick, onBeforeMount, onMounted, reactive, ref, watch } from 'vue'
-import { Braces, Brackets, Grip, ListPlus, Pencil, Trash } from 'lucide-vue-next'
 
 const props = defineProps({
   disableTracking: {
@@ -830,7 +829,7 @@ watch(modelValue, () => {
       :placeholder="`${props.label}...`"
     >
       <template v-if="props.helper" #append>
-        <edge-g-helper :helper="props.helper" />
+        <edge-g-helper :title="props.label" :helper="props.helper" />
       </template>
     </edge-shad-combobox>
     <Card v-if="props.fieldType === 'stringArray' || props.fieldType === 'numberArray' || props.fieldType === 'intArray'" class="p-1">
@@ -901,7 +900,7 @@ watch(modelValue, () => {
       :description="props.hint"
     >
       <template v-if="props.helper" #icon>
-        <edge-g-helper :helper="props.helper" />
+        <edge-g-helper :title="props.label" :helper="props.helper" />
       </template>
     </edge-shad-select>
     <edge-shad-number
@@ -915,7 +914,7 @@ watch(modelValue, () => {
       :description="props.hint"
     >
       <template v-if="props.helper">
-        <edge-g-helper :helper="props.helper" />
+        <edge-g-helper :title="props.label" :helper="props.helper" />
       </template>
     </edge-shad-number>
     <edge-shad-number
@@ -930,7 +929,7 @@ watch(modelValue, () => {
       :format-options="{ maximumFractionDigits: 0 }"
     >
       <template v-if="props.helper">
-        <edge-g-helper :helper="props.helper" />
+        <edge-g-helper :title="props.label" :helper="props.helper" />
       </template>
     </edge-shad-number>
     <edge-shad-number
@@ -950,7 +949,7 @@ watch(modelValue, () => {
       }"
     >
       <template v-if="props.helper">
-        <edge-g-helper :helper="props.helper" />
+        <edge-g-helper :title="props.label" :helper="props.helper" />
       </template>
     </edge-shad-number>
     <edge-shad-input
@@ -965,7 +964,7 @@ watch(modelValue, () => {
       :description="props.hint"
     >
       <template #icon>
-        <edge-g-helper v-if="props.helper" :helper="props.helper" />
+        <edge-g-helper v-if="props.helper" :title="props.label" :helper="props.helper" />
       </template>
     </edge-shad-input>
     <edge-shad-checkbox
@@ -976,7 +975,7 @@ watch(modelValue, () => {
     >
       {{ props.label }}
       <template #icon>
-        <edge-g-helper v-if="props.helper" :helper="props.helper" />
+        <edge-g-helper v-if="props.helper" :title="props.label" :helper="props.helper" />
       </template>
     </edge-shad-checkbox>
     <edge-shad-combobox
@@ -992,7 +991,7 @@ watch(modelValue, () => {
       :placeholder="`${props.label}...`"
     >
       <template v-if="props.helper" #append>
-        <edge-g-helper :helper="props.helper" />
+        <edge-g-helper :title="props.label" :helper="props.helper" />
       </template>
     </edge-shad-combobox>
     <edge-shad-select
@@ -1005,7 +1004,7 @@ watch(modelValue, () => {
       :name="props.name"
     >
       <template v-if="props.helper" #icon>
-        <edge-g-helper :helper="props.helper" />
+        <edge-g-helper :title="props.label" :helper="props.helper" />
       </template>
     </edge-shad-select>
     <edge-shad-textarea
@@ -1019,7 +1018,7 @@ watch(modelValue, () => {
       :disabled="props.disabled"
     >
       <template v-if="props.helper" #icon>
-        <edge-g-helper :helper="props.helper" />
+        <edge-g-helper :title="props.label" :helper="props.helper" />
       </template>
     </edge-shad-textarea>
     <template v-if="props.fieldType === 'object' || props.fieldType === 'array'">
@@ -1079,7 +1078,7 @@ watch(modelValue, () => {
                   </template>
                 </template>
               </edge-shad-button>
-              <edge-g-helper v-if="props.helper" :helper="props.helper" />
+              <edge-g-helper v-if="props.helper" :title="props.label" :helper="props.helper" />
             </div>
           </div>
         </CardHeader>
@@ -1200,7 +1199,7 @@ watch(modelValue, () => {
             <div class="grow text-right">
               <component :is="`${props.subFieldType}`" v-model:items="modelValue" :pass-through-props="passThroughProps" />
             </div>
-            <edge-g-helper v-if="props.helper" :helper="props.helper" />
+            <edge-g-helper v-if="props.helper" :title="props.label" :helper="props.helper" />
           </CardTitle>
           <CardDescription>
             <Separator />
@@ -1242,7 +1241,7 @@ watch(modelValue, () => {
     <Alert v-if="isTracked && state.afterMount && (modelCompare !== originalCompare)" class="mt-0 mb-3 bg-warning py-2 px-1">
       <div class="flex flex-wrap justify-center py-0 items-center">
         <template v-if="props.fieldType === 'objectList' || props.fieldType === 'object' || props.fieldType === 'array' || returnObject">
-          <div class="justify-center grow">
+          <div class="justify-center text-center grow">
             {{ props.label }} has been modified
           </div>
           <div class="text-right">

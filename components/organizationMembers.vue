@@ -29,7 +29,6 @@ watch(users, async () => {
     sub-field-type="edge-form-subtypes-users"
     label="Users"
     parent-tracker-id="users"
-    helper="Users"
   />
 </template>
 

@@ -12,7 +12,7 @@ const props = defineProps({
   class: {
     type: null,
     required: false,
-    default: 'w-100',
+    default: 'w-full',
   },
   placeholder: {
     type: String,
@@ -101,7 +101,6 @@ const modelValue = useVModel(props, 'modelValue', emits, {
           </SelectContent>
         </Select>
         <span class="absolute end-0 inset-y-0 flex items-center justify-center pl-2 pr-2">
-
           <slot name="icon" />
         </span>
       </div>

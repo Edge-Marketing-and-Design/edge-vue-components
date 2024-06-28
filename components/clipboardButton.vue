@@ -1,5 +1,6 @@
 <script setup>
 import { useToast } from '@/components/ui/toast/use-toast'
+
 const props = defineProps({
   text: {
     type: String,
@@ -8,58 +9,32 @@ const props = defineProps({
 })
 const { toast } = useToast()
 const state = reactive({
-  snackbar: false,
-  buttonIcon: 'mdi-content-copy',
+  buttonIcon: 'Copy',
 })
 
-const showToast = () => {
-  toast({
-    title: '',
-    description: 'Copied to clipboard',
-    duration: 3000,
-  })
-}
-
 const copyToClipboard = async (text) => {
-  showToast()
   await navigator.clipboard.writeText(text)
-  state.buttonIcon = 'mdi-check'
+  state.buttonIcon = 'Check'
+  // toast({
+  //   title: '',
+  //   description: 'Copied to clipboard',
+  //   duration: 1000,
+  // })
   setTimeout(() => {
-    state.buttonIcon = 'mdi-content-copy'
+    state.buttonIcon = 'Copy'
   }, 3000)
 }
 </script>
 
 <template>
-  <!-- <v-btn
+  <edge-shad-button
+    class="w-4 h-4"
+    size="icon"
     variant="text"
-    icon
-    size="small"
-    @click.stop="copyToClipboard(props.text)"
-  > -->
-  <v-icon
-    size="small"
-    class="mx-1"
     @click.stop.prevent="copyToClipboard(props.text)"
   >
-    {{ state.buttonIcon }}
-  </v-icon>
-  <v-snackbar
-    v-model="state.snackbar"
-    :timeout="3000"
-    location="center"
-  >
-    Copied to clipboard
-    <template #actions>
-      <v-btn
-        color="grey-darken-5"
-        variant="text"
-        @click="state.snackbar = false"
-      >
-        Close
-      </v-btn>
-    </template>
-  </v-snackbar>
+    <component :is="state.buttonIcon" class="w-4 h-4" />
+  </edge-shad-button>
 </template>
 
 <style lang="scss" scoped>

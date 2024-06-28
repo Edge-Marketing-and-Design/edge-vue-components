@@ -1,5 +1,4 @@
 <script setup>
-import { Loader2, User } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 
@@ -96,7 +95,7 @@ const onSubmit = async () => {
 const schema = toTypedSchema(z.object({
   name: z.string({
     required_error: 'Required',
-  }),
+  }).min(1, { message: 'Required' }),
 }))
 </script>
 
@@ -107,8 +106,8 @@ const schema = toTypedSchema(z.object({
   <edge-shad-button v-if="props.item === null" class="bg-slate-500 mx-2 h-6 text-xs" @click="joinOrg()">
     Join Organization
   </edge-shad-button>
-  <div v-else class="flex w-full py-1 justify-between items-center">
-    <Avatar class="handle pointer p-0 h-6 w-6 mr-2">
+  <div v-else class="flex w-full py-2 justify-between items-center">
+    <Avatar class="p-0 h-6 w-6 mr-2">
       <User width="18" height="18" />
     </Avatar>
     <div class="flex gap-2 mr-2 items-center">
@@ -118,7 +117,7 @@ const schema = toTypedSchema(z.object({
       <edge-chip v-if="edgeGlobal.edgeState.currentOrganization === props.item.docId" size="small" color="primary">
         Current
       </edge-chip>
-      <edge-shad-button v-else class="bg-slate-500 h-6 text-xs" @click="edgeGlobal.setOrganization(props.item.docId, edgeFirebase)">
+      <edge-shad-button v-else class="bg-slate-500 h-6 text-xs" @click.stop.prevent="edgeGlobal.setOrganization(props.item.docId, edgeFirebase)">
         Switch
       </edge-shad-button>
     </div>

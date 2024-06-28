@@ -6,70 +6,62 @@ const props = defineProps({
     type: String,
     default: null,
   },
+  title: {
+    type: String,
+    default: null,
+  },
 })
 
 const state = reactive({
   titles: [
-    'Help, Help, and Help',
-    'Help Is on the Way',
-    'Help Me, Rhonda',
-    'Help Is Here',
-    'Help! I Need Somebody',
+    'Field Assistance',
+    'Form Help',
+    'Input Guide',
+    'Need Assistance?',
+    'Help Center',
+    'Field Support',
+    'Quick Help',
+    'Form Assistance',
+    'Guidance Available',
+    'Information Station',
     'Here to Help',
-    'You Got This',
-    'Just Ask',
-    'Gotcha Covered',
-    'Helping Hand',
-    'Assistance Available',
-    'Lend a Hand',
-    'In Need of Assistance',
-    'I\'m Here to Help',
-    'Never Alone',
-    'Together We Can',
-    'We\'ve Got Your Back',
-    'Ask and You Shall Receive',
-    'Let Me Know How I Can Help',
-    'Help Me Help You',
+    'Form Guidance',
+    'Input Support',
+    'Solutions Available',
+    'Your Guide',
+    'Support Hub',
+    'Input Assistance',
+    'Help Desk',
+    'Support Center',
   ],
 })
-const title = computed(() => {
-  return state.titles[Math.floor(Math.random() * state.titles.length)]
+const newTitle = computed(() => {
+  if (!props.title) {
+    return state.titles[Math.floor(Math.random() * state.titles.length)]
+  }
+  return `${props.title} Help`
 })
 </script>
 
 <template>
-  <v-menu v-if="props.helper" class="ml-3">
-    <template #activator="{ props }">
-      <!-- <v-btn size="small" icon>
-        <v-icon v-bind="props">
-          mdi-help-circle
-        </v-icon>
-      </v-btn> -->
-      <v-icon size="small" class="mx-1" v-bind="props">
-        mdi-help-circle
-      </v-icon>
-    </template>
-    <v-card class="helper" density="compact" max-width="600">
-      <v-toolbar class="pl-2" density="compact">
-        {{ title }}
-        <v-spacer />
-        <v-icon class="mr-2">
-          mdi-help-rhombus
-        </v-icon>
-      </v-toolbar>
-      <v-card-text class="px-8">
-        <div v-html="props.helper" />
-      </v-card-text>
-    </v-card>
-  </v-menu>
+  <DropdownMenu>
+    <DropdownMenuTrigger as-child>
+      <Button variant="text" size="icon" class="p-0 w-5 h-5">
+        <Info class="w-5 h-5" />
+      </Button>
+    </DropdownMenuTrigger>
+    <DropdownMenuContent class="absolute right-0 w-screen max-w-[600px]">
+      <Card class="border-0">
+        <CardHeader class="py-2">
+          <CardTitle class="text-xl">
+            {{ newTitle }}
+          </CardTitle>
+        </CardHeader>
+        <CardContent v-html="props.helper" />
+      </Card>
+    </DropdownMenuContent>
+  </DropdownMenu>
 </template>
 
 <style lang="scss">
-.helper ul {
-    margin-bottom: 20px !important;
-    margin-left: 20px !important;
-}
-.helper p{
-  margin-bottom: 20px !important;
-}
 </style>
