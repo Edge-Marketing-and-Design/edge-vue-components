@@ -21,8 +21,8 @@ incrementCount()
 </script>
 
 <template>
-  <div class="flex h-full align-center">
-    <Card class="w-100 pt-10 pb-6">
+  <div class="flex h-full w-full align-bottom items-center">
+    <Card class="w-full pt-10 pb-6">
       <CardContent class="text-center">
         Loading...
         <Progress v-model="state.count" class="bg-slate-800 w-100" />

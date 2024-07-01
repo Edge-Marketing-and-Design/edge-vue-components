@@ -1,8 +1,17 @@
 <script setup>
+import { cn } from '@/lib/utils'
 const props = defineProps({
   title: {
     type: String,
     default: 'Organization(s)',
+  },
+  buttonClass: {
+    type: String,
+    default: '',
+  },
+  iconClass: {
+    type: String,
+    default: '',
   },
 })
 const edgeFirebase = inject('edgeFirebase')
@@ -28,8 +37,8 @@ const currentRoutePath = computed(() => {
 <template>
   <DropdownMenu>
     <DropdownMenuTrigger as-child>
-      <Button size="icon" class="text-white bg-slate-600 rounded-full">
-        <Settings2 class="h-5 w-5" />
+      <Button size="icon" :class="cn('text-white bg-slate-600 rounded-full', props.buttonClass)">
+        <Settings2 :class="cn('h-5 w-5', props.iconClass)" />
       </Button>
     </DropdownMenuTrigger>
     <DropdownMenuContent align="end">

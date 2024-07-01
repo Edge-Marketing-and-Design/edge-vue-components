@@ -8,7 +8,7 @@ const props = defineProps({
 </script>
 
 <template>
-  <CardFooter class="flex justify-between">
+  <CardFooter class="flex justify-end gap-1">
     <slot />
   </CardFooter>
 </template>

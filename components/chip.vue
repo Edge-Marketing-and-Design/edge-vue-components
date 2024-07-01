@@ -26,9 +26,9 @@ const classes = computed(() => {
 </script>
 
 <template>
-  <div :class="cn(classes, props.class)">
+  <Badge :class="cn(classes, props.class)">
     <span>
       <slot />
     </span>
-  </div>
+  </Badge>
 </template>
