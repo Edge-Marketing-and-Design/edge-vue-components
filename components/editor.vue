@@ -99,16 +99,20 @@ const capitalizeFirstLetter = (str) => {
 }
 
 const singularize = (word) => {
-  if (word.endsWith('ies')) {
+  if (word.endsWith('ies') && word.length > 4) {
+    // Handle words like "stories" -> "story"
     return `${word.slice(0, -3)}y`
   }
-  else if (word.endsWith('es')) {
+  else if (word.endsWith('es') && word.length > 5) {
+    // Handle words like "boxes" -> "box", "classes" -> "class", "wishes" -> "wish"
     return word.slice(0, -2)
   }
-  else if (word.endsWith('s')) {
+  else if (word.endsWith('s') && word.length > 2) {
+    // Handle words like "cats" -> "cat", "sites" -> "site"
     return word.slice(0, -1)
   }
   else {
+    // Return the word as is if none of the above conditions match
     return word
   }
 }
