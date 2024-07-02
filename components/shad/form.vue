@@ -8,14 +8,19 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['submit'])
+const emit = defineEmits(['submit', 'error'])
 
 const form = useForm({
   validationSchema: props.schema,
 })
-const onSubmit = form.handleSubmit(async (values) => {
-  emit('submit', values)
-})
+const onSubmit = form.handleSubmit(
+  async (values) => {
+    emit('submit', values)
+  },
+  (errors) => {
+    emit('error', errors)
+  },
+)
 </script>
 
 <template>
