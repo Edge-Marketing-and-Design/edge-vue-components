@@ -114,7 +114,7 @@ const deleteAction = () => {
     <edge-menu class="py-9">
       <template #start>
         <slot name="header-start">
-          <Box class="mr-2" />
+          <LayoutDashboard class="mr-2" />
           {{ capitalizeFirstLetter(props.collection) }}
         </slot>
       </template>

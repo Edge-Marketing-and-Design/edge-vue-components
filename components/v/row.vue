@@ -32,7 +32,7 @@ const justifyClasses = computed(() => {
 </script>
 
 <template>
-  <div class="flex flex-wrap py-2 items-center" :class="cn(justifyClasses, props.class)">
+  <div :class="cn('flex flex-wrap py-2 items-center', justifyClasses, props.class)">
     <slot />
   </div>
 </template>
