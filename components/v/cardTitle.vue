@@ -12,7 +12,6 @@ const props = defineProps({
     <CardTitle :class="props.class">
       <slot />
     </CardTitle>
-    <slot />
   </CardHeader>
 </template>
 
