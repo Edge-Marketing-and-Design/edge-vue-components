@@ -122,7 +122,7 @@ const schema = toTypedSchema(z.object({
       </edge-shad-button>
     </div>
     <div class="grow flex gap-2 justify-end">
-      <edge-chip variant="outlined">
+      <edge-chip>
         {{ edgeGlobal.getRoleName(edgeFirebase.user.roles, props.item.docId) }}
       </edge-chip>
     </div>
