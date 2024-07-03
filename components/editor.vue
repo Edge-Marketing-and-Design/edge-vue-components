@@ -171,6 +171,7 @@ watch(() => edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${pro
     <edge-shad-form
       v-model="state.form"
       :schema="props.schema"
+      :initial-values="state.workingDoc"
       @submit="onSubmit"
     >
       <edge-menu v-if="props.showHeader">

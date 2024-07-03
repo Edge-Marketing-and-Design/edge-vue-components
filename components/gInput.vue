@@ -845,7 +845,7 @@ watch(modelValue, () => {
               v-if="props.fieldType === 'numberArray'"
               v-model="state.arrayAdd"
               :step=".1"
-              :name="props.name"
+              :name="`${props.name}Input`"
               v-bind="props.bindings"
               class="w-full"
             />
@@ -853,14 +853,14 @@ watch(modelValue, () => {
               v-else-if="props.fieldType === 'intArray'"
               v-model="state.arrayAdd"
               :step="1"
-              :name="props.name"
+              :name="`${props.name}Input`"
               :format-options="{ maximumFractionDigits: 0 }"
               v-bind="props.bindings"
             />
             <edge-shad-input
               v-else
               v-model="state.arrayAdd"
-              :name="props.name"
+              :name="`${props.name}Input`"
             />
           </div>
           <edge-shad-button size="icon" class="text-white bg-slate-800 hover:bg-slate-400" @click.stop.prevent="addArray">

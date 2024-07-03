@@ -6,19 +6,28 @@ const props = defineProps({
     required: false,
     default: () => ({}),
   },
+  initialValues: {
+    type: Object,
+    default: () => ({}),
+  },
 })
 
 const emit = defineEmits(['submit', 'error'])
 
+const { schema, initialValues } = toRefs(props)
+
 const form = useForm({
-  validationSchema: props.schema,
+  validationSchema: schema,
+  initialValues: initialValues.value,
 })
 const onSubmit = form.handleSubmit(
   async (values) => {
     emit('submit', values)
   },
   (errors) => {
-    emit('error', errors)
+    if (errors.errors.length !== 0) {
+      emit('error', errors)
+    }
   },
 )
 </script>
