@@ -16,10 +16,10 @@ const props = defineProps({
 const classes = computed(() => {
   let combinedClasses = 'relative grid select-none items-center whitespace-nowrap rounded-lg'
   if (props.variant === 'filled') {
-    combinedClasses += ' bg-slate-700 py-1.5 px-3 font-sans text-xs   text-white dark:text-gray-100'
+    combinedClasses += ' bg-slate-700  font-sans text-xs   text-white dark:text-gray-100'
   }
   else if (props.variant === 'outlined') {
-    combinedClasses += ' border-slate-700 border py-1.5 px-3 font-sans text-xs  text-gray-900 dark:text-gray-100'
+    combinedClasses += ' border-slate-700 border  font-sans text-xs  text-gray-900 dark:text-gray-100'
   }
   return combinedClasses
 })

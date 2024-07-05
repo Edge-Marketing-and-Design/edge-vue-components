@@ -182,7 +182,7 @@ const computedUserSchema = computed(() => {
       </edge-chip>
     </div>
     <div class="grow flex gap-2 justify-end">
-      <edge-chip variant="outlined">
+      <edge-chip>
         {{ edgeGlobal.getRoleName(props.item.roles, edgeGlobal.edgeState.currentOrganization) }}
       </edge-chip>
       <template v-if="!props.item.userId">
@@ -215,8 +215,8 @@ const computedUserSchema = computed(() => {
             Remove "{{ state.workingItem.meta.name }}"
           </span>
         </DialogTitle>
+        <DialogDescription />
       </DialogHeader>
-      <DialogDescription />
 
       <h3 v-if="state.workingItem.userId === edgeFirebase.user.uid && adminCount > 1">
         Are you sure you want to remove yourself from the organization "{{ edgeGlobal.currentOrganizationObject.name }}"? You will no longer have access to any of the organization's data.
@@ -251,13 +251,13 @@ const computedUserSchema = computed(() => {
     v-model="state.dialog"
   >
     <DialogContent>
-      <edge-shad-form :schema="computedUserSchema" @submit="onSubmit">
+      <edge-shad-form :initial-values="state.workingItem" :schema="computedUserSchema" @submit="onSubmit">
         <DialogHeader>
           <DialogTitle>
             {{ state.currentTitle }}
           </DialogTitle>
+          <DialogDescription />
         </DialogHeader>
-        <DialogDescription />
 
         <edge-g-input
           v-model="state.workingItem.name"
