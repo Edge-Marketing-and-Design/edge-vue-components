@@ -80,7 +80,9 @@ const modelValue = useVModel(props, 'modelValue', emits, {
 <template>
   <FormField v-slot="{ componentField }" :name="props.name">
     <FormItem>
-      <FormLabel>{{ props.label }}</FormLabel>
+      <FormLabel class="flex">
+        {{ props.label }}
+      </FormLabel>
       <div class="relative w-full items-center">
         <Select v-model="modelValue" :disabled="props.disabled" :default-value="modelValue" v-bind="componentField">
           <FormControl>
