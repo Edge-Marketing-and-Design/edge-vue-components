@@ -53,8 +53,11 @@ const modelValue = useVModel(props, 'modelValue', emits, {
       </CardContent>
     </file-upload>
     <div v-if="modelValue.length > 0" class="mt-0">
-      <div class="mb-2">
+      <div v-if="props.multiple" class="mb-2">
         {{ modelValue.length }} file(s) selected for upload.
+      </div>
+      <div v-else class="mt-0">
+        {{ modelValue[0].name }} selected for upload.
       </div>
     </div>
   </Card>

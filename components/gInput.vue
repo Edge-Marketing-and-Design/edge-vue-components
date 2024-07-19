@@ -873,7 +873,7 @@ watch(modelValue, () => {
             v-for="(item, i) in modelValue"
             :key="i"
             :value="item"
-            class="flex odd:bg-slate-700 even:bg-transparent py-1 items-center"
+            class="flex odd:bg-slate-700 even:bg-slate-500 rounded-sm py-1 items-center"
           >
             <div class="grow  text-white px-2">
               {{ item }}
