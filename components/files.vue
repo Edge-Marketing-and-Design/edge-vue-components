@@ -1,5 +1,6 @@
 <script setup>
 import { useVModel } from '@vueuse/core'
+
 const props = defineProps({
   title: {
     type: String,
@@ -10,7 +11,7 @@ const props = defineProps({
     default: 'Drag and drop files here or click to upload.',
   },
   modelValue: {
-    type: Array,
+    type: [Array, Object],
     default: () => [],
   },
   accept: {
@@ -32,6 +33,13 @@ const emits = defineEmits(['update:modelValue'])
 const modelValue = useVModel(props, 'modelValue', emits, {
   passive: false,
   prop: 'modelValue',
+})
+
+// Ensure modelValue is always an array
+watch(modelValue, (newValue) => {
+  if (!Array.isArray(newValue)) {
+    modelValue.value = [newValue]
+  }
 })
 </script>
 
