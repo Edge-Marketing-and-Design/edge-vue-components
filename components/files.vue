@@ -30,13 +30,30 @@ const props = defineProps({
 
 const emits = defineEmits(['update:modelValue'])
 
+const state = reactive({
+  files: [],
+})
+
 const modelValue = useVModel(props, 'modelValue', emits, {
   passive: false,
   prop: 'modelValue',
 })
 
+const dropFiles = computed(() => {
+  return state.files
+})
+
+watch (dropFiles, (newValue) => {
+  const files = []
+  newValue.forEach((file) => {
+    files.push(file.file)
+  })
+  modelValue.value = files
+})
+
 // Ensure modelValue is always an array
 watch(modelValue, (newValue) => {
+  console.log(newValue)
   if (!Array.isArray(newValue)) {
     modelValue.value = [newValue]
   }
@@ -46,7 +63,7 @@ watch(modelValue, (newValue) => {
 <template>
   <Card color="secondary" class="px-0 py-2 my-2 drop-active text-center sticky z-10 top-0 cursor-pointer">
     <file-upload
-      v-model="modelValue"
+      v-model="state.files"
       :accept="props.accept"
       :name="props.name"
       :multiple="props.multiple"
