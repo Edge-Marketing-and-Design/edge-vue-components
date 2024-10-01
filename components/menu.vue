@@ -74,7 +74,7 @@ const typeClasses = computed(() => {
 <template>
   <component
     :is="props.type"
-    :class="cn(typeClasses[props.type], 'z-10 flex h-[57px] items-center gap-1 border-b px-4 flex-shrink-0', props.class)"
+    :class="cn(typeClasses[props.type], 'z-10 flex items-center gap-1 border-b px-4 flex-shrink-0', props.class)"
   >
     <div class="flex items-center gap-1">
       <slot name="start">
@@ -89,7 +89,7 @@ const typeClasses = computed(() => {
       <div class="grow">
         <nav
           v-if="props.menuItems.length > 0"
-          :class="cn('justify-center ml-4 hidden flex-col gap-6 text-lg font-medium md:flex md:flex-row md:items-center md:gap-5 md:text-sm lg:gap-6', props.navClass)"
+          :class="cn('justify-center ml-4 hidden flex-col gap-3 text-lg font-medium md:flex md:flex-row md:items-center md:gap-2 md:text-sm lg:gap-3', props.navClass)"
         >
           <edge-shad-button
             v-for="(item, key) in props.menuItems"
