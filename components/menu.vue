@@ -118,7 +118,7 @@ const typeClasses = computed(() => {
     <div class="flex items-center gap-1">
       <slot name="end">
         <div class="grow text-right">
-          <edge-user-menu />
+          <edge-user-menu button-class="bg-primary" />
         </div>
       </slot>
     </div>
