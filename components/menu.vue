@@ -97,6 +97,7 @@ const typeClasses = computed(() => {
             :to="item.to"
             :class="cn(
               'transition-colors px-0',
+              props.hoverClass,
               props.buttonClass, // Default (unselected) styles
               {
                 [props.selectedBgColor]: startsWithCurrentRoute(item.to),

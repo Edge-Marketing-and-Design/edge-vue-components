@@ -1,6 +1,23 @@
 <script setup>
 import { cn } from '@/lib/utils'
+
 const props = defineProps({
+  paginated: {
+    type: Boolean,
+    default: false,
+  },
+  paginatedQuery: {
+    type: Array,
+    default: () => [],
+  },
+  pagintedSort: {
+    type: Array,
+    default: () => [{ field: 'name', direction: 'asc' }],
+  },
+  paginatedLimit: {
+    type: Number,
+    default: 100,
+  },
   collection: {
     type: String,
     required: true,
@@ -13,10 +30,33 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  sortField: {
+    type: String,
+    default: 'name',
+  },
+  sortDirection: {
+    type: String,
+    default: 'asc',
+  },
+  deleteTitle: {
+    type: String,
+    default: '',
+  },
+  deleteDescription: {
+    type: String,
+    default: '',
+  },
+  headerClass: {
+    type: String,
+    default: 'bg-primary py-2',
+  },
+  footerClass: {
+    type: String,
+    default: 'justify-end py-2 bg-secondary',
+  },
 })
 
 const edgeFirebase = inject('edgeFirebase')
-// const edgeGlobal = inject('edgeGlobal')
 const router = useRouter()
 
 const state = reactive({
@@ -30,6 +70,9 @@ const state = reactive({
   deleteDialog: false,
   deleteItemName: '',
   deleteItemDocId: '',
+  staticSearch: {},
+  paginatedResults: [],
+  loadingMore: false,
 })
 
 const gotoSite = (docId) => {
@@ -42,19 +85,15 @@ const capitalizeFirstLetter = (str) => {
 
 const singularize = (word) => {
   if (word.endsWith('ies') && word.length > 4) {
-    // Handle words like "stories" -> "story"
     return `${word.slice(0, -3)}y`
   }
   else if (word.endsWith('es') && word.length > 5) {
-    // Handle words like "boxes" -> "box", "classes" -> "class", "wishes" -> "wish"
     return word.slice(0, -2)
   }
   else if (word.endsWith('s') && word.length > 2) {
-    // Handle words like "cats" -> "cat", "sites" -> "site"
     return word.slice(0, -1)
   }
   else {
-    // Return the word as is if none of the above conditions match
     return word
   }
 }
@@ -67,35 +106,85 @@ const filterText = computed(() => {
 })
 
 const filtered = computed(() => {
-  if (edgeGlobal.objHas(edgeFirebase.data, `${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`) === false) {
-    return []
+  let allData = []
+  if (!props.paginated) {
+    if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`]) {
+      return []
+    }
+    allData = Object.values(edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`])
   }
-
-  const allData = Object.values(edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`])
+  else {
+    allData = state.paginatedResults
+  }
 
   const filtered = allData.filter((entry) => {
     if (filterText.value.trim() === '') {
       return true
     }
-
-    // Modify the condition as needed, e.g., using "startsWith" or "includes"
     return entry.name.toLowerCase().includes(filterText.value.toLowerCase())
   })
+
   return filtered.sort((a, b) => {
-    if (a.name < b.name) {
-      return -1
+    const field = props.sortField
+    const direction = props.sortDirection === 'asc' ? 1 : -1
+
+    if (a[field] < b[field]) {
+      return -1 * direction
     }
-    if (a.name > b.name) {
-      return 1
+    if (a[field] > b[field]) {
+      return 1 * direction
     }
     return 0
   })
 })
 
-onBeforeMount (async () => {
-  await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
+const loadInitialData = async () => {
+  await state.staticSearch.getData(
+    `${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`,
+    props.paginatedQuery,
+    props.pagintedSort,
+    props.paginatedLimit,
+  )
+  const initialResults = state.staticSearch.results.data || {}
+  state.paginatedResults = Object.values(initialResults)
+}
+
+onBeforeMount(async () => {
+  if (!props.paginated) {
+    await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
+  }
+  else {
+    state.staticSearch = new edgeFirebase.SearchStaticData()
+    await loadInitialData()
+  }
   state.afterMount = true
 })
+
+const loadMoreData = async () => {
+  if (state.staticSearch && !state.staticSearch.results.staticIsLastPage && !state.loadingMore) {
+    state.loadingMore = true
+    await state.staticSearch.next()
+    const newResults = state.staticSearch.results.data || {}
+
+    // Append new results to paginatedResults
+    state.paginatedResults = [
+      ...state.paginatedResults,
+      ...Object.values(newResults),
+    ]
+    state.loadingMore = false
+  }
+}
+
+const handleScroll = async (event) => {
+  const scrollContainer = event.target
+  if (
+    scrollContainer.scrollTop + scrollContainer.clientHeight
+    >= scrollContainer.scrollHeight - 150
+  ) {
+    // Load more data when near the bottom of the scroll container
+    await loadMoreData()
+  }
+}
 
 const deleteItem = (docId) => {
   state.deleteDialog = true
@@ -111,7 +200,7 @@ const deleteAction = () => {
 
 <template>
   <Card v-if="state.afterMount" :class="cn('mx-auto bg-muted/50 w-full max-w-7xl', props.class)" max-width="1200">
-    <edge-menu class="py-9">
+    <edge-menu :class="props.headerClass">
       <template #start>
         <slot name="header-start">
           <LayoutDashboard class="mr-2" />
@@ -138,7 +227,10 @@ const deleteAction = () => {
         </slot>
       </template>
     </edge-menu>
-    <CardContent>
+    <CardContent
+      class="p-3 w-full h-[calc(100vh-190px)] overflow-y-auto"
+      @scroll="handleScroll"
+    >
       <div class="flex flex-wrap items-center py-0">
         <template v-for="item in filtered" :key="item.docId">
           <slot name="list-item" :item="item" :delete-item="deleteItem">
@@ -173,11 +265,17 @@ const deleteAction = () => {
     >
       <DialogContent class="pt-10">
         <DialogHeader>
-          <DialogTitle class="text-left">
+          <DialogTitle v-if="!props.deleteTitle" class="text-left">
             Are you sure you want to delete "{{ state.deleteItemName }}"?
           </DialogTitle>
-          <DialogDescription>
+          <DialogTitle v-else class="text-left">
+            {{ props.deleteTitle }}
+          </DialogTitle>
+          <DialogDescription v-if="!props.deleteDescription">
             This action cannot be undone. {{ state.deleteItemName }} will be permanently deleted.
+          </DialogDescription>
+          <DialogDescription v-else>
+            {{ props.deleteDescription }}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter class="pt-2 flex justify-between">
