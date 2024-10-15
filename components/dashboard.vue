@@ -73,6 +73,8 @@ const state = reactive({
   staticSearch: {},
   paginatedResults: [],
   loadingMore: false,
+  queryField: '',
+  queryValue: '',
 })
 
 const gotoSite = (docId) => {
@@ -97,6 +99,13 @@ const singularize = (word) => {
     return word
   }
 }
+
+const searchQuery = computed(() => {
+  if (state.queryField && state.queryValue) {
+    return [{ field: state.queryField, operator: '==', value: state.queryValue }]
+  }
+  return []
+})
 
 const filterText = computed(() => {
   if (props.filter) {
@@ -141,24 +150,13 @@ const filtered = computed(() => {
 const loadInitialData = async () => {
   await state.staticSearch.getData(
     `${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`,
-    props.paginatedQuery,
+    searchQuery.value,
     props.pagintedSort,
     props.paginatedLimit,
   )
   const initialResults = state.staticSearch.results.data || {}
   state.paginatedResults = Object.values(initialResults)
 }
-
-onBeforeMount(async () => {
-  if (!props.paginated) {
-    await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
-  }
-  else {
-    state.staticSearch = new edgeFirebase.SearchStaticData()
-    await loadInitialData()
-  }
-  state.afterMount = true
-})
 
 const loadMoreData = async () => {
   if (state.staticSearch && !state.staticSearch.results.staticIsLastPage && !state.loadingMore) {
@@ -175,11 +173,23 @@ const loadMoreData = async () => {
   }
 }
 
+onBeforeMount(async () => {
+  if (!props.paginated) {
+    await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
+  }
+  else {
+    state.staticSearch = new edgeFirebase.SearchStaticData()
+    await loadInitialData()
+    // await loadMoreData()
+  }
+  state.afterMount = true
+})
+
 const handleScroll = async (event) => {
   const scrollContainer = event.target
   if (
     scrollContainer.scrollTop + scrollContainer.clientHeight
-    >= scrollContainer.scrollHeight - 150
+    >= scrollContainer.scrollHeight - 550
   ) {
     // Load more data when near the bottom of the scroll container
     await loadMoreData()
@@ -196,6 +206,13 @@ const deleteAction = () => {
   edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, state.deleteItemDocId)
   state.deleteDialog = false
 }
+
+watch(searchQuery, async () => {
+  if (props.paginated) {
+    state.staticSearch = new edgeFirebase.SearchStaticData()
+    await loadInitialData()
+  }
+})
 </script>
 
 <template>
@@ -211,24 +228,46 @@ const deleteAction = () => {
         <slot name="header-center" :filter="state.filter">
           <div class="w-full px-6">
             <edge-shad-input
+              v-if="!props.paginated"
               v-model="state.filter"
               label=""
               name="filter"
               placeholder="Search..."
             />
+            <div v-else class="py-2 flex gap-2 w-full">
+              <div class="w-48">
+                <edge-shad-select
+                  v-model="state.queryField"
+                  :items="['LastName', 'name']"
+                  name="test"
+                  placeholder="test"
+                  class="uppercase"
+                />
+              </div>
+              <div class="flex-grow">
+                <edge-shad-input
+                  v-model="state.queryValue"
+                  name="filter"
+                  placeholder="Search For..."
+                />
+              </div>
+            </div>
           </div>
         </slot>
       </template>
       <template #end>
         <slot name="header-end" :title="singularize(props.collection)">
-          <edge-shad-button class="uppercase bg-slate-600" :to="`/app/dashboard/${props.collection}/new`">
+          <edge-shad-button v-if="!props.paginated" class="uppercase bg-slate-600" :to="`/app/dashboard/${props.collection}/new`">
             Add {{ singularize(props.collection) }}
           </edge-shad-button>
+          <span v-else>
+            {{ state.staticSearch.results.total }} records
+          </span>
         </slot>
       </template>
     </edge-menu>
     <CardContent
-      class="p-3 w-full h-[calc(100vh-190px)] overflow-y-auto"
+      class="p-3 w-full h-[calc(100vh-208px)] overflow-y-auto"
       @scroll="handleScroll"
     >
       <div class="flex flex-wrap items-center py-0">
