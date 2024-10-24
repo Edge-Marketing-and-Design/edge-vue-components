@@ -54,6 +54,18 @@ const props = defineProps({
     type: String,
     default: 'justify-end py-2 bg-secondary',
   },
+  searchFields: {
+    type: Array,
+    default: () => [],
+  },
+  queryField: {
+    type: String,
+    default: '',
+  },
+  queryValue: {
+    type: String,
+    default: '',
+  },
 })
 
 const edgeFirebase = inject('edgeFirebase')
@@ -75,6 +87,8 @@ const state = reactive({
   loadingMore: false,
   queryField: '',
   queryValue: '',
+  scrollPosition: 0,
+  staticCurrentPage: '',
 })
 
 const gotoSite = (docId) => {
@@ -102,7 +116,18 @@ const singularize = (word) => {
 
 const searchQuery = computed(() => {
   if (state.queryField && state.queryValue) {
-    return [{ field: state.queryField, operator: '==', value: state.queryValue }]
+    const upperCaseValue = state.queryValue.toUpperCase()
+
+    const searchField = props.searchFields.find(field => field.name === state.queryField)
+    if (searchField?.choices) {
+      return [
+        { field: state.queryField, operator: '==', value: state.queryValue },
+      ]
+    }
+    return [
+      { field: state.queryField, operator: '>=', value: upperCaseValue },
+      { field: state.queryField, operator: '<=', value: `${upperCaseValue}\uF8FF` },
+    ]
   }
   return []
 })
@@ -148,12 +173,18 @@ const filtered = computed(() => {
 })
 
 const loadInitialData = async () => {
+  const sortFields = [{ field: state.queryField, direction: 'asc' }]
+  if (!props.pagintedSort.some(sort => sort.field === state.queryField)) {
+    sortFields.push(...props.pagintedSort)
+  }
+
   await state.staticSearch.getData(
     `${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`,
     searchQuery.value,
-    props.pagintedSort,
+    sortFields,
     props.paginatedLimit,
   )
+  state.staticCurrentPage = state.staticSearch.results.staticCurrentPage
   const initialResults = state.staticSearch.results.data || {}
   state.paginatedResults = Object.values(initialResults)
 }
@@ -163,33 +194,41 @@ const loadMoreData = async () => {
     state.loadingMore = true
     await state.staticSearch.next()
     const newResults = state.staticSearch.results.data || {}
-
+    console.log(newResults)
     // Append new results to paginatedResults
-    state.paginatedResults = [
-      ...state.paginatedResults,
-      ...Object.values(newResults),
-    ]
+    if (state.staticCurrentPage !== state.staticSearch.results.staticCurrentPage) {
+      state.paginatedResults = [
+        ...state.paginatedResults,
+        ...Object.values(newResults),
+      ]
+    }
+
+    state.staticCurrentPage = state.staticSearch.results.staticCurrentPage
     state.loadingMore = false
   }
 }
 
 onBeforeMount(async () => {
+  console.log('before mount')
   if (!props.paginated) {
     await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
   }
   else {
     state.staticSearch = new edgeFirebase.SearchStaticData()
+    state.queryField = props.searchFields[0].name
     await loadInitialData()
+
     // await loadMoreData()
   }
   state.afterMount = true
 })
 
 const handleScroll = async (event) => {
+  state.scrollPosition = event.target.scrollTop
   const scrollContainer = event.target
   if (
     scrollContainer.scrollTop + scrollContainer.clientHeight
-    >= scrollContainer.scrollHeight - 550
+    >= scrollContainer.scrollHeight - 10
   ) {
     // Load more data when near the bottom of the scroll container
     await loadMoreData()
@@ -212,6 +251,46 @@ watch(searchQuery, async () => {
     state.staticSearch = new edgeFirebase.SearchStaticData()
     await loadInitialData()
   }
+})
+const scrollContainerRef = ref(null)
+
+// Restore the scroll position in the div
+const restoreScrollPosition = async () => {
+  const cardText = document.querySelector('.scroll-area')
+  // console.log(cardText)
+  nextTick(() => {
+    if (cardText) {
+      cardText.scrollTop = state.scrollPosition
+    }
+  })
+}
+
+// When the component is activated (coming back to this route)
+onActivated(() => {
+  console.log('activated')
+  restoreScrollPosition() // Restore the scroll position when the component is activated
+})
+
+const runSearch = (field, value) => {
+  state.afterMount = false
+  state.queryField = field
+  state.queryValue = value
+  nextTick(() => {
+    state.afterMount = true
+  })
+}
+
+const searchDropDown = computed(() => {
+  const searchField = props.searchFields.find(field => field.name === state.queryField)
+  if (searchField?.choices) {
+    const title = searchField.choices.title
+    const name = searchField.name
+    return searchField.choices.data.map(choice => ({
+      name: String(choice[name]),
+      title: String(choice[title]),
+    }))
+  }
+  return null
 })
 </script>
 
@@ -238,14 +317,21 @@ watch(searchQuery, async () => {
               <div class="w-48">
                 <edge-shad-select
                   v-model="state.queryField"
-                  :items="['LastName', 'name']"
-                  name="test"
-                  placeholder="test"
+                  :items="props.searchFields"
+                  name="search"
                   class="uppercase"
                 />
               </div>
               <div class="flex-grow">
+                <edge-shad-combobox
+                  v-if="searchDropDown"
+                  v-model="state.queryValue"
+                  :items="searchDropDown"
+                  name="filter"
+                  placeholder="Search For..."
+                />
                 <edge-shad-input
+                  v-else
                   v-model="state.queryValue"
                   name="filter"
                   placeholder="Search For..."
@@ -261,18 +347,19 @@ watch(searchQuery, async () => {
             Add {{ singularize(props.collection) }}
           </edge-shad-button>
           <span v-else>
-            {{ state.staticSearch.results.total }} records
+            {{ state.staticSearch.results.total.toLocaleString() }} records
           </span>
         </slot>
       </template>
     </edge-menu>
     <CardContent
-      class="p-3 w-full h-[calc(100vh-208px)] overflow-y-auto"
+      ref="scrollContainerRef"
+      class="p-3 w-full h-[calc(100vh-208px)] overflow-y-auto scroll-area"
       @scroll="handleScroll"
     >
       <div class="flex flex-wrap items-center py-0">
         <template v-for="item in filtered" :key="item.docId">
-          <slot name="list-item" :item="item" :delete-item="deleteItem">
+          <slot name="list-item" :item="item" :delete-item="deleteItem" :run-search="runSearch">
             <div class="cursor-pointer w-full flex justify-between items-center py-1 gap-3" @click="gotoSite(item.docId)">
               <div>
                 <Avatar class="cursor-pointer p-0 h-8 w-8 mr-2">
