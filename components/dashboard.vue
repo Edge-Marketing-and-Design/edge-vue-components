@@ -313,7 +313,7 @@ const searchDropDown = computed(() => {
               name="filter"
               placeholder="Search..."
             />
-            <div v-else class="py-2 flex gap-2 w-full">
+            <div v-else class="py-0 flex gap-2 w-full">
               <div class="w-48">
                 <edge-shad-select
                   v-model="state.queryField"
