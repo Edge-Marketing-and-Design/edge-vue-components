@@ -30,6 +30,14 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  stringsToUpperCase: {
+    type: Boolean,
+    default: false,
+  },
+  saveRedirectOverride: {
+    type: String,
+    default: '',
+  },
 })
 
 const newDoc = computed(() => {
@@ -122,6 +130,9 @@ const title = computed(() => {
     if (!edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`]) {
       return ''
     }
+    if (!edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`][props.docId]) {
+      return ''
+    }
     return capitalizeFirstLetter(`${edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`][props.docId].name}`)
   }
   else {
@@ -131,9 +142,19 @@ const title = computed(() => {
 
 const onSubmit = async () => {
   state.bypassUnsavedChanges = true
+  Object.keys(state.workingDoc).forEach((key) => {
+    if (typeof state.workingDoc[key] === 'string' && props.stringsToUpperCase) {
+      state.workingDoc[key] = state.workingDoc[key].toUpperCase()
+    }
+  })
   edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, state.workingDoc)
   edgeGlobal.edgeState.changeTracker = {}
-  router.push(`/app/dashboard/${props.collection}`)
+  if (props.saveRedirectOverride) {
+    router.push(props.saveRedirectOverride)
+  }
+  else {
+    router.push(`/app/dashboard/${props.collection}`)
+  }
 }
 
 onBeforeMount(async () => {

@@ -116,7 +116,7 @@ const triggerTitle = computed(() => {
 
 <template>
   <FormField v-if="updateCheck" v-slot="{ componentField }" :name="props.name">
-    <FormItem class="flex flex-col">
+    <FormItem class="flex flex-col space-y-1">
       <Input
         :id="props.name"
         v-model="modelValue"

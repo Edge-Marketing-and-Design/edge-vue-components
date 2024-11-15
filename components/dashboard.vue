@@ -1,6 +1,23 @@
 <script setup>
 import { cn } from '@/lib/utils'
+
 const props = defineProps({
+  paginated: {
+    type: Boolean,
+    default: false,
+  },
+  paginatedQuery: {
+    type: Array,
+    default: () => [],
+  },
+  pagintedSort: {
+    type: Array,
+    default: () => [{ field: 'name', direction: 'asc' }],
+  },
+  paginatedLimit: {
+    type: Number,
+    default: 100,
+  },
   collection: {
     type: String,
     required: true,
@@ -13,10 +30,45 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  sortField: {
+    type: String,
+    default: 'name',
+  },
+  sortDirection: {
+    type: String,
+    default: 'asc',
+  },
+  deleteTitle: {
+    type: String,
+    default: '',
+  },
+  deleteDescription: {
+    type: String,
+    default: '',
+  },
+  headerClass: {
+    type: String,
+    default: 'bg-primary py-2',
+  },
+  footerClass: {
+    type: String,
+    default: 'justify-end py-2 bg-secondary',
+  },
+  searchFields: {
+    type: Array,
+    default: () => [],
+  },
+  queryField: {
+    type: String,
+    default: '',
+  },
+  queryValue: {
+    type: String,
+    default: '',
+  },
 })
 
 const edgeFirebase = inject('edgeFirebase')
-// const edgeGlobal = inject('edgeGlobal')
 const router = useRouter()
 
 const state = reactive({
@@ -30,6 +82,13 @@ const state = reactive({
   deleteDialog: false,
   deleteItemName: '',
   deleteItemDocId: '',
+  staticSearch: {},
+  paginatedResults: [],
+  loadingMore: false,
+  queryField: '',
+  queryValue: '',
+  scrollPosition: 0,
+  staticCurrentPage: '',
 })
 
 const gotoSite = (docId) => {
@@ -42,22 +101,36 @@ const capitalizeFirstLetter = (str) => {
 
 const singularize = (word) => {
   if (word.endsWith('ies') && word.length > 4) {
-    // Handle words like "stories" -> "story"
     return `${word.slice(0, -3)}y`
   }
   else if (word.endsWith('es') && word.length > 5) {
-    // Handle words like "boxes" -> "box", "classes" -> "class", "wishes" -> "wish"
     return word.slice(0, -2)
   }
   else if (word.endsWith('s') && word.length > 2) {
-    // Handle words like "cats" -> "cat", "sites" -> "site"
     return word.slice(0, -1)
   }
   else {
-    // Return the word as is if none of the above conditions match
     return word
   }
 }
+
+const searchQuery = computed(() => {
+  if (state.queryField && state.queryValue) {
+    const upperCaseValue = state.queryValue.toUpperCase()
+
+    const searchField = props.searchFields.find(field => field.name === state.queryField)
+    if (searchField?.choices) {
+      return [
+        { field: state.queryField, operator: '==', value: state.queryValue },
+      ]
+    }
+    return [
+      { field: state.queryField, operator: '>=', value: upperCaseValue },
+      { field: state.queryField, operator: '<=', value: `${upperCaseValue}\uF8FF` },
+    ]
+  }
+  return []
+})
 
 const filterText = computed(() => {
   if (props.filter) {
@@ -67,35 +140,100 @@ const filterText = computed(() => {
 })
 
 const filtered = computed(() => {
-  if (edgeGlobal.objHas(edgeFirebase.data, `${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`) === false) {
-    return []
+  let allData = []
+  if (!props.paginated) {
+    if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`]) {
+      return []
+    }
+    allData = Object.values(edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`])
   }
-
-  const allData = Object.values(edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`])
+  else {
+    allData = state.paginatedResults
+  }
 
   const filtered = allData.filter((entry) => {
     if (filterText.value.trim() === '') {
       return true
     }
-
-    // Modify the condition as needed, e.g., using "startsWith" or "includes"
     return entry.name.toLowerCase().includes(filterText.value.toLowerCase())
   })
+
   return filtered.sort((a, b) => {
-    if (a.name < b.name) {
-      return -1
+    const field = props.sortField
+    const direction = props.sortDirection === 'asc' ? 1 : -1
+
+    if (a[field] < b[field]) {
+      return -1 * direction
     }
-    if (a.name > b.name) {
-      return 1
+    if (a[field] > b[field]) {
+      return 1 * direction
     }
     return 0
   })
 })
 
-onBeforeMount (async () => {
-  await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
+const loadInitialData = async () => {
+  const sortFields = [{ field: state.queryField, direction: 'asc' }]
+  if (!props.pagintedSort.some(sort => sort.field === state.queryField)) {
+    sortFields.push(...props.pagintedSort)
+  }
+
+  await state.staticSearch.getData(
+    `${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`,
+    searchQuery.value,
+    sortFields,
+    props.paginatedLimit,
+  )
+  state.staticCurrentPage = state.staticSearch.results.staticCurrentPage
+  const initialResults = state.staticSearch.results.data || {}
+  state.paginatedResults = Object.values(initialResults)
+}
+
+const loadMoreData = async () => {
+  if (state.staticSearch && !state.staticSearch.results.staticIsLastPage && !state.loadingMore) {
+    state.loadingMore = true
+    await state.staticSearch.next()
+    const newResults = state.staticSearch.results.data || {}
+    console.log(newResults)
+    // Append new results to paginatedResults
+    if (state.staticCurrentPage !== state.staticSearch.results.staticCurrentPage) {
+      state.paginatedResults = [
+        ...state.paginatedResults,
+        ...Object.values(newResults),
+      ]
+    }
+
+    state.staticCurrentPage = state.staticSearch.results.staticCurrentPage
+    state.loadingMore = false
+  }
+}
+
+onBeforeMount(async () => {
+  console.log('before mount')
+  if (!props.paginated) {
+    await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
+  }
+  else {
+    state.staticSearch = new edgeFirebase.SearchStaticData()
+    state.queryField = props.searchFields[0].name
+    await loadInitialData()
+
+    // await loadMoreData()
+  }
   state.afterMount = true
 })
+
+const handleScroll = async (event) => {
+  state.scrollPosition = event.target.scrollTop
+  const scrollContainer = event.target
+  if (
+    scrollContainer.scrollTop + scrollContainer.clientHeight
+    >= scrollContainer.scrollHeight - 10
+  ) {
+    // Load more data when near the bottom of the scroll container
+    await loadMoreData()
+  }
+}
 
 const deleteItem = (docId) => {
   state.deleteDialog = true
@@ -107,11 +245,58 @@ const deleteAction = () => {
   edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, state.deleteItemDocId)
   state.deleteDialog = false
 }
+
+watch(searchQuery, async () => {
+  if (props.paginated) {
+    state.staticSearch = new edgeFirebase.SearchStaticData()
+    await loadInitialData()
+  }
+})
+const scrollContainerRef = ref(null)
+
+// Restore the scroll position in the div
+const restoreScrollPosition = async () => {
+  const cardText = document.querySelector('.scroll-area')
+  // console.log(cardText)
+  nextTick(() => {
+    if (cardText) {
+      cardText.scrollTop = state.scrollPosition
+    }
+  })
+}
+
+// When the component is activated (coming back to this route)
+onActivated(() => {
+  console.log('activated')
+  restoreScrollPosition() // Restore the scroll position when the component is activated
+})
+
+const runSearch = (field, value) => {
+  state.afterMount = false
+  state.queryField = field
+  state.queryValue = value
+  nextTick(() => {
+    state.afterMount = true
+  })
+}
+
+const searchDropDown = computed(() => {
+  const searchField = props.searchFields.find(field => field.name === state.queryField)
+  if (searchField?.choices) {
+    const title = searchField.choices.title
+    const name = searchField.name
+    return searchField.choices.data.map(choice => ({
+      name: String(choice[name]),
+      title: String(choice[title]),
+    }))
+  }
+  return null
+})
 </script>
 
 <template>
   <Card v-if="state.afterMount" :class="cn('mx-auto bg-muted/50 w-full max-w-7xl', props.class)" max-width="1200">
-    <edge-menu class="py-9">
+    <edge-menu :class="props.headerClass">
       <template #start>
         <slot name="header-start">
           <LayoutDashboard class="mr-2" />
@@ -122,26 +307,59 @@ const deleteAction = () => {
         <slot name="header-center" :filter="state.filter">
           <div class="w-full px-6">
             <edge-shad-input
+              v-if="!props.paginated"
               v-model="state.filter"
               label=""
               name="filter"
               placeholder="Search..."
             />
+            <div v-else class="py-0 flex gap-2 w-full">
+              <div class="w-48">
+                <edge-shad-select
+                  v-model="state.queryField"
+                  :items="props.searchFields"
+                  name="search"
+                  class="uppercase"
+                />
+              </div>
+              <div class="flex-grow">
+                <edge-shad-combobox
+                  v-if="searchDropDown"
+                  v-model="state.queryValue"
+                  :items="searchDropDown"
+                  name="filter"
+                  placeholder="Search For..."
+                />
+                <edge-shad-input
+                  v-else
+                  v-model="state.queryValue"
+                  name="filter"
+                  placeholder="Search For..."
+                />
+              </div>
+            </div>
           </div>
         </slot>
       </template>
       <template #end>
         <slot name="header-end" :title="singularize(props.collection)">
-          <edge-shad-button class="uppercase bg-slate-600" :to="`/app/dashboard/${props.collection}/new`">
+          <edge-shad-button v-if="!props.paginated" class="uppercase bg-slate-600" :to="`/app/dashboard/${props.collection}/new`">
             Add {{ singularize(props.collection) }}
           </edge-shad-button>
+          <span v-else>
+            {{ state.staticSearch.results.total.toLocaleString() }} records
+          </span>
         </slot>
       </template>
     </edge-menu>
-    <CardContent>
+    <CardContent
+      ref="scrollContainerRef"
+      class="p-3 w-full h-[calc(100vh-208px)] overflow-y-auto scroll-area"
+      @scroll="handleScroll"
+    >
       <div class="flex flex-wrap items-center py-0">
         <template v-for="item in filtered" :key="item.docId">
-          <slot name="list-item" :item="item" :delete-item="deleteItem">
+          <slot name="list-item" :item="item" :delete-item="deleteItem" :run-search="runSearch">
             <div class="cursor-pointer w-full flex justify-between items-center py-1 gap-3" @click="gotoSite(item.docId)">
               <div>
                 <Avatar class="cursor-pointer p-0 h-8 w-8 mr-2">
@@ -173,11 +391,17 @@ const deleteAction = () => {
     >
       <DialogContent class="pt-10">
         <DialogHeader>
-          <DialogTitle class="text-left">
+          <DialogTitle v-if="!props.deleteTitle" class="text-left">
             Are you sure you want to delete "{{ state.deleteItemName }}"?
           </DialogTitle>
-          <DialogDescription>
+          <DialogTitle v-else class="text-left">
+            {{ props.deleteTitle }}
+          </DialogTitle>
+          <DialogDescription v-if="!props.deleteDescription">
             This action cannot be undone. {{ state.deleteItemName }} will be permanently deleted.
+          </DialogDescription>
+          <DialogDescription v-else>
+            {{ props.deleteDescription }}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter class="pt-2 flex justify-between">
