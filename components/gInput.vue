@@ -869,21 +869,27 @@ watch(modelValue, () => {
         </div>
 
         <div>
-          <div
-            v-for="(item, i) in modelValue"
-            :key="i"
-            :value="item"
-            class="flex odd:bg-slate-700 even:bg-slate-500 rounded-sm py-1 items-center"
+          <draggable
+            v-model="modelValue"
+            handle=".handle"
+            item-key="key"
           >
-            <div class="grow  text-white px-2">
-              {{ item }}
-            </div>
-            <div class="pr-1">
-              <edge-shad-button class="text-white bg-slate-800 hover:bg-slate-400" size="icon" @click="modelValue.splice(i, 1)">
-                <Trash width="16" height="16" />
-              </edge-shad-button>
-            </div>
-          </div>
+            <template #item="{ element }">
+              <div :key="element" class="w-full flex odd:bg-slate-700 even:bg-slate-500 rounded-sm py-1 items-center">
+                <div class="text-left px-2">
+                  <Grip class="handle pointer" />
+                </div>
+                <div class="grow  text-white px-2">
+                  {{ element }}
+                </div>
+                <div class="pr-1">
+                  <edge-shad-button class="text-white bg-slate-800 hover:bg-slate-400" size="icon" @click="modelValue.splice(i, 1)">
+                    <Trash width="16" height="16" />
+                  </edge-shad-button>
+                </div>
+              </div>
+            </template>
+          </draggable>
         </div>
       </CardContent>
     </Card>
