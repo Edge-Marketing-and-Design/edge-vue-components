@@ -76,14 +76,14 @@ onBeforeMount(() => {
 })
 
 const modelValue = useVModel(props, 'modelValue', emits, {
-  passive: true,
+  passive: false,
   defaultValue: props.defaultValue,
 })
 </script>
 
 <template>
   <div>
-    <FormField :name="props.name">
+    <FormField v-slot="{ componentField }" :name="props.name">
       <FormItem>
         <FormLabel class="flex">
           {{ props.label }}
@@ -98,6 +98,7 @@ const modelValue = useVModel(props, 'modelValue', emits, {
           :min="props.min"
           :max="props.max"
           :format-options="props.formatOptions"
+          v-bind="componentField"
           :step="props.step"
         >
           <NumberFieldContent>

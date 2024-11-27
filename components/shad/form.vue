@@ -26,6 +26,7 @@ const onSubmit = form.handleSubmit(
   },
   (errors) => {
     if (errors.errors.length !== 0) {
+      console.log(errors)
       emit('error', errors)
     }
   },

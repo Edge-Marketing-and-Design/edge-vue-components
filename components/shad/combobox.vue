@@ -1,5 +1,6 @@
 <script setup>
 import { useVModel } from '@vueuse/core'
+import { useField } from 'vee-validate'
 import { cn } from '@/lib/utils'
 const props = defineProps({
   name: {
@@ -67,8 +68,8 @@ const computedItems = computed(() => {
 })
 
 const modelValue = useVModel(props, 'modelValue', emits, {
-  passive: true,
-  defaultValue: props.defaultValue,
+  passive: false,
+  prop: 'modelValue',
 })
 
 const triggerButton = ref(null)
@@ -89,17 +90,19 @@ watch(() => modelValue.value, () => {
   })
 })
 
+const { setValue } = useField(props.name)
+
 const handleItemSelect = (item) => {
-  if (item[props.itemValue]) {
-    modelValue.value = item[props.itemValue]
-  }
-  else {
-    modelValue.value = ''
-  }
-  open.value = false
-  console.log('modelValue', modelValue.value)
+  const selectedValue = item[props.itemValue] || '' // Fallback to an empty string
+  emits('update:modelValue', selectedValue) // Emit the update event
+  setValue(item.value) // Update the vee-validate field value
+  modelValue.value = selectedValue // Update the reactive modelValue
+  open.value = false // Close the dropdown
 }
 
+watch(() => modelValue.value, (newValue) => {
+  emits('update:modelValue', newValue)
+})
 const triggerTitle = computed(() => {
   let triggerTitle = 'Make a selection'
   if (modelValue.value) {
@@ -115,15 +118,15 @@ const triggerTitle = computed(() => {
 </script>
 
 <template>
-  <FormField v-if="updateCheck" v-slot="{ componentField }" :name="props.name">
+  <FormField :name="props.name">
     <FormItem class="flex flex-col space-y-1">
-      <Input
+      <!-- <Input
         :id="props.name"
-        v-model="modelValue"
-        :default-value="modelValue"
+        :value="modelValue"
+        :default-value="props.modelValue"
+        :type="state.type"
         v-bind="componentField"
-        type="hidden"
-      />
+      /> -->
       <FormLabel>{{ props.label }}</FormLabel>
       <Popover v-model:open="open">
         <PopoverTrigger as-child>

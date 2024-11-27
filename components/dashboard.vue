@@ -173,6 +173,8 @@ const filtered = computed(() => {
 })
 
 const loadInitialData = async () => {
+  state.staticSearch = new edgeFirebase.SearchStaticData()
+  state.queryField = props.searchFields[0].name
   const sortFields = [{ field: state.queryField, direction: 'asc' }]
   if (!props.pagintedSort.some(sort => sort.field === state.queryField)) {
     sortFields.push(...props.pagintedSort)
@@ -185,6 +187,7 @@ const loadInitialData = async () => {
     props.paginatedLimit,
   )
   state.staticCurrentPage = state.staticSearch.results.staticCurrentPage
+  console.log(state.staticSearch.results)
   const initialResults = state.staticSearch.results.data || {}
   state.paginatedResults = Object.values(initialResults)
 }
@@ -214,8 +217,6 @@ onBeforeMount(async () => {
     await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
   }
   else {
-    state.staticSearch = new edgeFirebase.SearchStaticData()
-    state.queryField = props.searchFields[0].name
     await loadInitialData()
 
     // await loadMoreData()
@@ -323,13 +324,14 @@ const searchDropDown = computed(() => {
                 />
               </div>
               <div class="flex-grow">
-                <edge-shad-combobox
-                  v-if="searchDropDown"
-                  v-model="state.queryValue"
-                  :items="searchDropDown"
-                  name="filter"
-                  placeholder="Search For..."
-                />
+                <div v-if="searchDropDown" class="py-1">
+                  <edge-shad-combobox
+                    v-model="state.queryValue"
+                    :items="searchDropDown"
+                    name="filter"
+                    placeholder="Search For..."
+                  />
+                </div>
                 <edge-shad-input
                   v-else
                   v-model="state.queryValue"
@@ -342,7 +344,7 @@ const searchDropDown = computed(() => {
         </slot>
       </template>
       <template #end>
-        <slot name="header-end" :title="singularize(props.collection)">
+        <slot name="header-end" :record-count="state.staticSearch?.results?.total" :title="singularize(props.collection)">
           <edge-shad-button v-if="!props.paginated" class="uppercase bg-slate-600" :to="`/app/dashboard/${props.collection}/new`">
             Add {{ singularize(props.collection) }}
           </edge-shad-button>
