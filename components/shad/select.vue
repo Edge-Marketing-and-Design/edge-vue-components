@@ -72,7 +72,7 @@ const computedItems = computed(() => {
 })
 
 const modelValue = useVModel(props, 'modelValue', emits, {
-  passive: true,
+  passive: false,
   prop: 'modelValue',
 })
 </script>

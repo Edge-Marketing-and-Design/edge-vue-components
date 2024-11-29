@@ -10,9 +10,9 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
-  pagintedSort: {
+  paginatedSort: {
     type: Array,
-    default: () => [{ field: 'name', direction: 'asc' }],
+    default: () => [],
   },
   paginatedLimit: {
     type: Number,
@@ -56,7 +56,7 @@ const props = defineProps({
   },
   searchFields: {
     type: Array,
-    default: () => [],
+    default: () => [{ title: 'Name', name: 'name' }],
   },
   queryField: {
     type: String,
@@ -158,6 +158,10 @@ const filtered = computed(() => {
     return entry.name.toLowerCase().includes(filterText.value.toLowerCase())
   })
 
+  if (props.paginated) {
+    return filtered
+  }
+
   return filtered.sort((a, b) => {
     const field = props.sortField
     const direction = props.sortDirection === 'asc' ? 1 : -1
@@ -174,16 +178,37 @@ const filtered = computed(() => {
 
 const loadInitialData = async () => {
   state.staticSearch = new edgeFirebase.SearchStaticData()
-  state.queryField = props.searchFields[0].name
-  const sortFields = [{ field: state.queryField, direction: 'asc' }]
-  if (!props.pagintedSort.some(sort => sort.field === state.queryField)) {
-    sortFields.push(...props.pagintedSort)
+  if (state.queryField === '') {
+    state.queryField = props.searchFields[0].name
   }
+
+  let sortFields = [{ field: state.queryField, direction: 'asc' }]
+  if (!props.paginatedSort.some(sort => sort.field === state.queryField)) {
+    sortFields.push(...props.paginatedSort)
+  }
+
+  sortFields = sortFields.filter(
+    (item, index, self) =>
+      index === self.findIndex(t => t.field === item.field),
+  )
+
+  const finalSortFields = []
+  sortFields.forEach((sortField) => {
+    console.log(sortField)
+    const findPaginatedSort = props.paginatedSort.find(sort => sort.field === sortField.field)
+    console.log(findPaginatedSort)
+    if (findPaginatedSort) {
+      finalSortFields.push(findPaginatedSort)
+    }
+    else {
+      finalSortFields.push(sortField)
+    }
+  })
 
   await state.staticSearch.getData(
     `${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`,
     searchQuery.value,
-    sortFields,
+    finalSortFields,
     props.paginatedLimit,
   )
   state.staticCurrentPage = state.staticSearch.results.staticCurrentPage
@@ -207,8 +232,8 @@ const loadMoreData = async () => {
     }
 
     state.staticCurrentPage = state.staticSearch.results.staticCurrentPage
-    state.loadingMore = false
   }
+  state.loadingMore = false
 }
 
 onBeforeMount(async () => {
@@ -243,7 +268,11 @@ const deleteItem = (docId) => {
 }
 
 const deleteAction = () => {
+  console.log('deleteAction', state.deleteItemDocId)
   edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, state.deleteItemDocId)
+  if (props.paginated) {
+    state.paginatedResults = state.paginatedResults.filter(item => item.docId !== state.deleteItemDocId)
+  }
   state.deleteDialog = false
 }
 
@@ -270,6 +299,17 @@ const restoreScrollPosition = async () => {
 onActivated(() => {
   console.log('activated')
   restoreScrollPosition() // Restore the scroll position when the component is activated
+  if (props.paginated) {
+    const workingDoc = edgeGlobal.edgeState.lastPaginatedDoc
+    if (workingDoc) {
+      state.paginatedResults = state.paginatedResults.map((item) => {
+        if (item.docId === workingDoc.docId) {
+          return workingDoc
+        }
+        return item
+      })
+    }
+  }
 })
 
 const runSearch = (field, value) => {

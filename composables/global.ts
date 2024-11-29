@@ -6,6 +6,7 @@ const edgeState = reactive({
   changeTracker: {},
   user: null,
   userRoles: [],
+  lastPaginatedDoc: null,
 })
 
 const setOrganization = async (organization: string, edgeFirebase: any) => {

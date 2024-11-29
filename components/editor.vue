@@ -147,6 +147,8 @@ const onSubmit = async () => {
       state.workingDoc[key] = state.workingDoc[key].toUpperCase()
     }
   })
+  console.log('state.workingDoc', state.workingDoc)
+  edgeGlobal.edgeState.lastPaginatedDoc = state.workingDoc
   edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, state.workingDoc)
   edgeGlobal.edgeState.changeTracker = {}
   if (props.saveRedirectOverride) {
@@ -234,18 +236,24 @@ watch(() => edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${pro
         <slot name="main" :title="title" :working-doc="state.workingDoc">
           <edge-v-row>
             <edge-v-col v-for="(field, name, index) in props.newDocSchema" :key="index" :cols="field.cols">
+              <edge-shad-datepicker
+                v-if="field.bindings['field-type'] === 'date'"
+                v-model="state.workingDoc[name]"
+                :label="field.bindings.label"
+                :name="name"
+              />
               <edge-g-input
-                v-if="field.bindings['field-type'] !== 'collection'"
+                v-else-if="field.bindings['field-type'] !== 'collection'"
                 v-model="state.workingDoc[name]"
                 :name="name"
-                :disable-tracking="props.docId === 'new'"
+                :disable-tracking="true"
                 :parent-tracker-id="`${props.collection}-${props.docId}`"
                 v-bind="field.bindings"
               />
               <edge-g-input
                 v-else
                 v-model="state.workingDoc[name]"
-                :disable-tracking="props.docId === 'new'"
+                :disable-tracking="true"
                 field-type="collection"
                 :collection-path="`${edgeGlobal.edgeState.organizationDocPath}/${field.bindings['collection-path']}`"
                 :label="field.bindings.label"
