@@ -263,7 +263,13 @@ const handleScroll = async (event) => {
 
 const deleteItem = (docId) => {
   state.deleteDialog = true
-  state.deleteItemName = edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`][docId].name
+  if (props.paginated) {
+    state.deleteItemName = state.paginatedResults.find(item => item.docId === docId).name
+  }
+  else {
+    state.deleteItemName = edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`][docId].name
+  }
+
   state.deleteItemDocId = docId
 }
 

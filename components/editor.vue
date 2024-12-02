@@ -55,6 +55,7 @@ const state = reactive({
   tab: 'forms',
   bypassUnsavedChanges: false,
   afterMount: false,
+  submitting: false,
 })
 const edgeFirebase = inject('edgeFirebase')
 // const edgeGlobal = inject('edgeGlobal')
@@ -141,15 +142,20 @@ const title = computed(() => {
 })
 
 const onSubmit = async () => {
+  state.submitting = true
   state.bypassUnsavedChanges = true
   Object.keys(state.workingDoc).forEach((key) => {
+    const schemaFieldType = props.newDocSchema[key]?.bindings['field-type']
+    if (schemaFieldType === 'money') {
+      state.workingDoc[key] = parseFloat(state.workingDoc[key]).toFixed(2)
+    }
     if (typeof state.workingDoc[key] === 'string' && props.stringsToUpperCase) {
       state.workingDoc[key] = state.workingDoc[key].toUpperCase()
     }
   })
-  console.log('state.workingDoc', state.workingDoc)
+  const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, state.workingDoc)
+  state.workingDoc.docId = result.meta.docId
   edgeGlobal.edgeState.lastPaginatedDoc = state.workingDoc
-  edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, state.workingDoc)
   edgeGlobal.edgeState.changeTracker = {}
   if (props.saveRedirectOverride) {
     router.push(props.saveRedirectOverride)
@@ -157,6 +163,7 @@ const onSubmit = async () => {
   else {
     router.push(`/app/dashboard/${props.collection}`)
   }
+  state.submitting = false
 }
 
 onBeforeMount(async () => {
@@ -208,7 +215,10 @@ watch(() => edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${pro
           <slot name="header-center" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc" />
         </template>
         <template #end>
-          <slot name="header-end" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc">
+          <div v-if="state.submitting">
+            <edge-chip>Saving...</edge-chip>
+          </div>
+          <slot v-else name="header-end" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc">
             <edge-shad-button
               v-if="!unsavedChanges"
               :to="`/app/dashboard/${props.collection}`"
@@ -219,7 +229,7 @@ watch(() => edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${pro
             <edge-shad-button
               v-else
               :to="`/app/dashboard/${props.collection}`"
-              class="bg-red-700 uppercase h-8 hover:bg-slate-400 w-20"
+              class="bg-red-700 uppercase h-8 hover:bg-slate-400 w-20 "
             >
               Cancel
             </edge-shad-button>
@@ -265,7 +275,10 @@ watch(() => edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${pro
         </slot>
       </edge-v-card-text>
       <CardFooter v-if="showFooter" class="flex gap-1">
-        <slot name="footer" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc">
+        <div v-if="state.submitting" class="ml-auto">
+          <edge-chip>Saving...</edge-chip>
+        </div>
+        <slot v-else name="footer" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc">
           <edge-shad-button
             v-if="!unsavedChanges"
             :to="`/app/dashboard/${props.collection}`"

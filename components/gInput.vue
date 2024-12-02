@@ -938,7 +938,7 @@ watch(modelValue, () => {
         <edge-g-helper :title="props.label" :helper="props.helper" />
       </template>
     </edge-shad-number>
-    <edge-shad-number
+    <edge-shad-type-money
       v-if="props.fieldType === 'money'"
       v-model="modelValue"
       :step=".1"
@@ -957,7 +957,7 @@ watch(modelValue, () => {
       <template v-if="props.helper">
         <edge-g-helper :title="props.label" :helper="props.helper" />
       </template>
-    </edge-shad-number>
+    </edge-shad-type-money>
     <edge-shad-input
       v-if="props.fieldType === 'text'"
       v-model="modelValue"
