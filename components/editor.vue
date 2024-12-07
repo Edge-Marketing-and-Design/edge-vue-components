@@ -215,10 +215,7 @@ watch(() => edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${pro
           <slot name="header-center" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc" />
         </template>
         <template #end>
-          <div v-if="state.submitting">
-            <edge-chip>Saving...</edge-chip>
-          </div>
-          <slot v-else name="header-end" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc">
+          <slot name="header-end" :unsaved-changes="unsavedChanges" :submitting="state.submitting" :title="title" :working-doc="state.workingDoc">
             <edge-shad-button
               v-if="!unsavedChanges"
               :to="`/app/dashboard/${props.collection}`"
@@ -235,9 +232,12 @@ watch(() => edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${pro
             </edge-shad-button>
             <edge-shad-button
               type="submit"
-              class="bg-slate-500 uppercase h-8 hover:bg-slate-400 w-20"
+              class="bg-slate-500 uppercase h-8 hover:bg-slate-400 w-[120px] mb-1"
+              :disabled="state.submitting"
             >
-              Save
+              <Loader2 v-if="state.submitting" class="w-4 h-4 mr-2 animate-spin" />
+              <span v-if="state.submitting">Saving...</span>
+              <span v-else>Save</span>
             </edge-shad-button>
           </slot>
         </template>
@@ -275,10 +275,7 @@ watch(() => edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${pro
         </slot>
       </edge-v-card-text>
       <CardFooter v-if="showFooter" class="flex gap-1">
-        <div v-if="state.submitting" class="ml-auto">
-          <edge-chip>Saving...</edge-chip>
-        </div>
-        <slot v-else name="footer" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc">
+        <slot name="footer" :unsaved-changes="unsavedChanges" :title="title" :submitting="state.submitting" :working-doc="state.workingDoc">
           <edge-shad-button
             v-if="!unsavedChanges"
             :to="`/app/dashboard/${props.collection}`"
@@ -296,9 +293,12 @@ watch(() => edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${pro
 
           <edge-shad-button
             type="submit"
-            class="bg-slate-500 uppercase h-8 hover:bg-slate-400 w-20"
+            class="bg-slate-500 uppercase h-8 hover:bg-slate-400 w-[120px] mb-1"
+            :disabled="state.submitting"
           >
-            Save
+            <Loader2 v-if="state.submitting" class="w-4 h-4 mr-2 animate-spin" />
+            <span v-if="state.submitting">Saving...</span>
+            <span v-else>Save</span>
           </edge-shad-button>
         </slot>
       </CardFooter>

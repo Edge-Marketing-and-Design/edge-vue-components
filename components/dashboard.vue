@@ -66,6 +66,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  queryOperator: {
+    type: String,
+    default: '==',
+  },
 })
 
 const edgeFirebase = inject('edgeFirebase')
@@ -87,8 +91,10 @@ const state = reactive({
   loadingMore: false,
   queryField: '',
   queryValue: '',
+  queryOperator: '',
   scrollPosition: 0,
   staticCurrentPage: '',
+  searching: false,
 })
 
 const gotoSite = (docId) => {
@@ -113,6 +119,20 @@ const singularize = (word) => {
     return word
   }
 }
+
+const snapShotQuery = computed(() => {
+  const queryInfo = props.searchFields.find(field => field.name === state.queryField)
+  let operator = '=='
+  if (queryInfo?.operators) {
+    operator = state.queryOperator
+  }
+  if (state.queryField && state.queryValue) {
+    return [
+      { field: state.queryField, operator, value: state.queryValue },
+    ]
+  }
+  return []
+})
 
 const searchQuery = computed(() => {
   if (state.queryField && state.queryValue) {
@@ -181,7 +201,6 @@ const loadInitialData = async () => {
   if (state.queryField === '') {
     state.queryField = props.searchFields[0].name
   }
-
   let sortFields = [{ field: state.queryField, direction: 'asc' }]
   if (!props.paginatedSort.some(sort => sort.field === state.queryField)) {
     sortFields.push(...props.paginatedSort)
@@ -239,7 +258,19 @@ const loadMoreData = async () => {
 onBeforeMount(async () => {
   console.log('before mount')
   if (!props.paginated) {
-    await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
+    if (!state.searchField) {
+      state.queryField = props.queryField
+    }
+    if (!state.queryValue) {
+      state.queryValue = props.queryValue
+    }
+    if (!state.queryOperator) {
+      state.queryOperator = props.queryOperator
+    }
+    console.log('start snapshot')
+    console.log(snapShotQuery.value)
+    await edgeFirebase.stopSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
+    await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, snapShotQuery.value)
   }
   else {
     await loadInitialData()
@@ -286,6 +317,15 @@ watch(searchQuery, async () => {
   if (props.paginated) {
     state.staticSearch = new edgeFirebase.SearchStaticData()
     await loadInitialData()
+  }
+})
+
+watch (snapShotQuery, async () => {
+  if (state.afterMount) {
+    if (!props.paginated) {
+      await edgeFirebase.stopSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
+      await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, snapShotQuery.value)
+    }
   }
 })
 const scrollContainerRef = ref(null)
@@ -354,7 +394,7 @@ const searchDropDown = computed(() => {
         <slot name="header-center" :filter="state.filter">
           <div class="w-full px-6">
             <edge-shad-input
-              v-if="!props.paginated"
+              v-if="props.searchFields.length === 0"
               v-model="state.filter"
               label=""
               name="filter"
@@ -369,11 +409,28 @@ const searchDropDown = computed(() => {
                   class="uppercase"
                 />
               </div>
+              <div v-if="props.searchFields.find(field => field.name === state.queryField)?.operators">
+                <edge-shad-select
+                  v-model="state.queryOperator"
+                  :items="props.searchFields.find(field => field.name === state.queryField)?.operators"
+                  item-title="title"
+                  item-value="operator"
+                  name="operator"
+                  class="uppercase"
+                />
+              </div>
               <div class="flex-grow">
                 <div v-if="searchDropDown" class="py-1">
                   <edge-shad-combobox
                     v-model="state.queryValue"
                     :items="searchDropDown"
+                    name="filter"
+                    placeholder="Search For..."
+                  />
+                </div>
+                <div v-else-if="props.searchFields.find(field => field.name === state.queryField)?.fieldType === 'date'" class="py-1">
+                  <edge-shad-datepicker
+                    v-model="state.queryValue"
                     name="filter"
                     placeholder="Search For..."
                   />
@@ -390,7 +447,15 @@ const searchDropDown = computed(() => {
         </slot>
       </template>
       <template #end>
-        <slot name="header-end" :record-count="state.staticSearch?.results?.total" :title="singularize(props.collection)">
+        <slot v-if="props.paginated" name="header-end" :record-count="state.staticSearch?.results?.total" :title="singularize(props.collection)">
+          <edge-shad-button v-if="!props.paginated" class="uppercase bg-slate-600" :to="`/app/dashboard/${props.collection}/new`">
+            Add {{ singularize(props.collection) }}
+          </edge-shad-button>
+          <span v-else>
+            {{ state.staticSearch.results.total.toLocaleString() }} records
+          </span>
+        </slot>
+        <slot v-else name="header-end" :record-count="filtered.length" :title="singularize(props.collection)">
           <edge-shad-button v-if="!props.paginated" class="uppercase bg-slate-600" :to="`/app/dashboard/${props.collection}/new`">
             Add {{ singularize(props.collection) }}
           </edge-shad-button>
