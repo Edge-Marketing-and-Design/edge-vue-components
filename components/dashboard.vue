@@ -281,14 +281,16 @@ onBeforeMount(async () => {
 })
 
 const handleScroll = async (event) => {
-  state.scrollPosition = event.target.scrollTop
-  const scrollContainer = event.target
-  if (
-    scrollContainer.scrollTop + scrollContainer.clientHeight
+  if (props.paginated) {
+    state.scrollPosition = event.target.scrollTop
+    const scrollContainer = event.target
+    if (
+      scrollContainer.scrollTop + scrollContainer.clientHeight
     >= scrollContainer.scrollHeight - 10
-  ) {
+    ) {
     // Load more data when near the bottom of the scroll container
-    await loadMoreData()
+      await loadMoreData()
+    }
   }
 }
 

@@ -146,11 +146,11 @@ const onSubmit = async () => {
   state.bypassUnsavedChanges = true
   Object.keys(state.workingDoc).forEach((key) => {
     const schemaFieldType = props.newDocSchema[key]?.bindings['field-type']
-    if (schemaFieldType === 'money') {
-      state.workingDoc[key] = parseFloat(state.workingDoc[key]).toFixed(2)
-    }
     if (typeof state.workingDoc[key] === 'string' && props.stringsToUpperCase) {
       state.workingDoc[key] = state.workingDoc[key].toUpperCase()
+    }
+    if (schemaFieldType === 'money') {
+      state.workingDoc[key] = Number(parseFloat(state.workingDoc[key]).toFixed(2))
     }
   })
   const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, state.workingDoc)
