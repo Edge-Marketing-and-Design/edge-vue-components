@@ -147,16 +147,20 @@ const onSubmit = async () => {
   Object.keys(state.workingDoc).forEach((key) => {
     const schemaFieldType = props.newDocSchema[key]?.bindings['field-type']
     if (typeof state.workingDoc[key] === 'string' && props.stringsToUpperCase) {
-      state.workingDoc[key] = state.workingDoc[key].toUpperCase()
+      if (key !== 'docId') {
+        state.workingDoc[key] = state.workingDoc[key].toUpperCase()
+      }
     }
     if (schemaFieldType === 'money') {
       state.workingDoc[key] = Number(parseFloat(state.workingDoc[key]).toFixed(2))
     }
   })
+  console.log('saving', state.workingDoc)
   const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, state.workingDoc)
   state.workingDoc.docId = result.meta.docId
   edgeGlobal.edgeState.lastPaginatedDoc = state.workingDoc
   edgeGlobal.edgeState.changeTracker = {}
+  state.workingDoc = {}
   if (props.saveRedirectOverride) {
     router.push(props.saveRedirectOverride)
   }
@@ -177,6 +181,7 @@ onBeforeMount(async () => {
 })
 
 watch(() => edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`], (newVal) => {
+  console.log('newVal', newVal)
   if (props.docId !== 'new') {
     if (edgeGlobal.objHas(newVal, props.docId) === false) {
       return
@@ -193,6 +198,31 @@ watch(() => edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${pro
     state.workingDoc = edgeGlobal.dupObject(newDoc.value)
     state.afterMount = true
   }
+})
+onActivated(() => {
+  state.afterMount = false
+  if (props.docId !== 'new') {
+    if (edgeGlobal.objHas(edgeFirebase.data, `${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`) === false) {
+      return
+    }
+    if (edgeGlobal.objHas(edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`], props.docId) === false) {
+      return
+    }
+    state.workingDoc = edgeGlobal.dupObject(edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`][props.docId])
+    Object.keys(newDoc.value).forEach((field) => {
+      if (!edgeGlobal.objHas(state.workingDoc, field)) {
+        state.workingDoc[field] = newDoc.value[field]
+      }
+    })
+    console.log('state.workingDoc', state.workingDoc)
+  }
+  else {
+    state.workingDoc = edgeGlobal.dupObject(newDoc.value)
+    console.log('state.workingDoc', state.workingDoc)
+  }
+  nextTick(() => {
+    state.afterMount = true
+  })
 })
 </script>
 
