@@ -70,6 +70,10 @@ const props = defineProps({
     type: String,
     default: '==',
   },
+  hideSearch: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const edgeFirebase = inject('edgeFirebase')
@@ -274,8 +278,6 @@ onBeforeMount(async () => {
   }
   else {
     await loadInitialData()
-
-    // await loadMoreData()
   }
   state.afterMount = true
 })
@@ -394,7 +396,7 @@ const searchDropDown = computed(() => {
       </template>
       <template #center>
         <slot name="header-center" :filter="state.filter">
-          <div class="w-full px-6">
+          <div v-if="!props.hideSearch" class="w-full px-6">
             <edge-shad-input
               v-if="props.searchFields.length === 0"
               v-model="state.filter"
