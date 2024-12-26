@@ -48,6 +48,7 @@ const newDoc = computed(() => {
 })
 
 const router = useRouter()
+const route = useRoute()
 
 const state = reactive({
   workingDoc: {},
@@ -165,9 +166,19 @@ const onSubmit = async () => {
     router.push(props.saveRedirectOverride)
   }
   else {
-    router.push(`/app/dashboard/${props.collection}`)
+    router.back()
+    // router.push(`/app/dashboard/${props.collection}`)
   }
   state.submitting = false
+}
+
+const onCancel = () => {
+  if (props.saveRedirectOverride) {
+    router.push(props.saveRedirectOverride)
+  }
+  else {
+    router.back()
+  }
 }
 
 onBeforeMount(async () => {
@@ -214,12 +225,20 @@ onActivated(() => {
         state.workingDoc[field] = newDoc.value[field]
       }
     })
+
     console.log('state.workingDoc', state.workingDoc)
   }
   else {
     state.workingDoc = edgeGlobal.dupObject(newDoc.value)
+    Object.entries(route.query).forEach(([key, value]) => {
+    // Check if the key exists in state.workingDoc, and if so, set the value
+      if (key in state.workingDoc) {
+        state.workingDoc[key] = value
+      }
+    })
     console.log('state.workingDoc', state.workingDoc)
   }
+  //
   nextTick(() => {
     state.afterMount = true
   })
@@ -248,15 +267,15 @@ onActivated(() => {
           <slot name="header-end" :unsaved-changes="unsavedChanges" :submitting="state.submitting" :title="title" :working-doc="state.workingDoc">
             <edge-shad-button
               v-if="!unsavedChanges"
-              :to="`/app/dashboard/${props.collection}`"
               class="bg-red-700 uppercase h-8 hover:bg-slate-400 w-20"
+              @click="onCancel"
             >
               Close
             </edge-shad-button>
             <edge-shad-button
               v-else
-              :to="`/app/dashboard/${props.collection}`"
               class="bg-red-700 uppercase h-8 hover:bg-slate-400 w-20 "
+              @click="onCancel"
             >
               Cancel
             </edge-shad-button>
@@ -308,15 +327,15 @@ onActivated(() => {
         <slot name="footer" :unsaved-changes="unsavedChanges" :title="title" :submitting="state.submitting" :working-doc="state.workingDoc">
           <edge-shad-button
             v-if="!unsavedChanges"
-            :to="`/app/dashboard/${props.collection}`"
             class="bg-red-700 uppercase h-8 hover:bg-slate-400 w-20"
+            @click="onCancel"
           >
             Close
           </edge-shad-button>
           <edge-shad-button
             v-else
-            :to="`/app/dashboard/${props.collection}`"
             class="bg-red-700 uppercase h-8 hover:bg-slate-400 w-20"
+            @click="onCancel"
           >
             Cancel
           </edge-shad-button>
