@@ -95,13 +95,23 @@ const discardChanges = async () => {
   if (props.docId === 'new') {
     state.bypassUnsavedChanges = true
     edgeGlobal.edgeState.changeTracker = {}
-    router.push(`/app/dashboard/${props.collection}`)
+    if (props.saveRedirectOverride) {
+      router.push(props.saveRedirectOverride)
+    }
+    else {
+      router.push(`/app/dashboard/${props.collection}`)
+    }
     return
   }
   state.workingDoc = await edgeGlobal.dupObject(edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`][props.docId])
   state.bypassUnsavedChanges = true
   edgeGlobal.edgeState.changeTracker = {}
-  router.push(`/app/dashboard/${props.collection}`)
+  if (props.saveRedirectOverride) {
+    router.push(props.saveRedirectOverride)
+  }
+  else {
+    router.push(`/app/dashboard/${props.collection}`)
+  }
 }
 
 const capitalizeFirstLetter = (str) => {
