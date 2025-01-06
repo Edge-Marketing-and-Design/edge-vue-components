@@ -38,6 +38,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  customDocId: {
+    type: String,
+    default: '',
+  },
 })
 
 const newDoc = computed(() => {
@@ -166,6 +170,9 @@ const onSubmit = async () => {
       state.workingDoc[key] = Number(parseFloat(state.workingDoc[key]).toFixed(2))
     }
   })
+  if (props.customDocId) {
+    state.workingDoc.docId = state.workingDoc[props.customDocId]
+  }
   console.log('saving', state.workingDoc)
   const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, state.workingDoc)
   state.workingDoc.docId = result.meta.docId
