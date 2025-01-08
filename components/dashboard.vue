@@ -469,6 +469,9 @@ const searchDropDown = computed(() => {
         </slot>
       </template>
     </edge-menu>
+    <div v-if="$slots['list-header']" class="flex flex-wrap items-center py-0 mx-8 text-sm">
+      <slot name="list-header" />
+    </div>
     <CardContent
       ref="scrollContainerRef"
       class="p-3 w-full h-[calc(100vh-208px)] overflow-y-auto scroll-area"
