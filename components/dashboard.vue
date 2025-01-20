@@ -48,7 +48,7 @@ const props = defineProps({
   },
   headerClass: {
     type: String,
-    default: 'bg-primary py-2',
+    default: 'bg-secondary py-2',
   },
   footerClass: {
     type: String,
