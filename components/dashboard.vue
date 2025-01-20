@@ -259,6 +259,33 @@ const loadMoreData = async () => {
   state.loadingMore = false
 }
 
+watch (
+  () => edgeGlobal.edgeState.organizationDocPath,
+  async () => {
+    state.afterMount = false
+    console.log('organizationDocPath changed')
+    if (!props.paginated) {
+      if (!state.searchField) {
+        state.queryField = props.queryField
+      }
+      if (!state.queryValue) {
+        state.queryValue = props.queryValue
+      }
+      if (!state.queryOperator) {
+        state.queryOperator = props.queryOperator
+      }
+      console.log('start snapshot')
+      console.log(snapShotQuery.value)
+      await edgeFirebase.stopSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
+      await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, snapShotQuery.value)
+    }
+    else {
+      await loadInitialData()
+    }
+    state.afterMount = true
+  },
+)
+
 onBeforeMount(async () => {
   console.log('before mount')
   if (!props.paginated) {
