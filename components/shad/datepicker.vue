@@ -136,19 +136,20 @@ onMounted(() => {
             <Button
               variant="outline"
               :class="cn(
-                'w-full ps-3 text-start font-normal',
+                'w-full ps-3 text-start font-normal items-start h-auto', // Added 'items-start'
                 (!value || (Array.isArray(value) && value.length === 0)) && 'text-muted-foreground',
               )"
             >
-              <template v-if="Array.isArray(value)">
-                <edge-chip v-for="date in value" :key="date" class="mr-1">
-                  {{ date }}
-                </edge-chip>
-              </template>
-              <span v-else-if="value">
-                {{ value }}
-              </span>
-
+              <div class="flex flex-wrap gap-1 overflow-hidden">
+                <template v-if="Array.isArray(value)">
+                  <edge-chip v-for="date in value" :key="date" class="mr-1">
+                    {{ date }}
+                  </edge-chip>
+                </template>
+                <span v-else-if="value">
+                  {{ value }}
+                </span>
+              </div>
               <CalendarIcon class="ms-auto h-4 w-4 opacity-50" />
             </Button>
             <input hidden>
