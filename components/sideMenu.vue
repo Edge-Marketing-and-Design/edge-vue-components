@@ -33,7 +33,7 @@ const currentRoutePath = computed(() => {
   <Command class="h-full  rounded-none">
     <CommandList class="h-full max-h-full">
       <CommandItem value="header" class="!bg-transparent">
-        <edge-user-menu button-class="w-6 h-6 bg-primary" icon-class="w-4 h-4" />
+        <edge-user-menu button-class="w-6 h-6 bg-secondary" icon-class="w-4 h-4" />
       </CommandItem>
       <CommandSeparator class="my-1" />
       <CommandItem
