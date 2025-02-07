@@ -15,7 +15,6 @@ const setOrganization = async (organization: string, edgeFirebase: any) => {
     localStorage.setItem('organizationID', organization)
     edgeState.currentOrganization = organization
     await edgeFirebase.startUsersSnapshot(`organizations/${organization}`)
-    edgeState.organizationDocPath = ''
     edgeState.organizationDocPath = `organizations/${organization}`
   }
 }
