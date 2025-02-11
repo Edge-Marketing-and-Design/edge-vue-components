@@ -7,6 +7,7 @@ const edgeState = reactive({
   user: null,
   userRoles: [],
   lastPaginatedDoc: null,
+  subscribedStatus: null,
 })
 
 const setOrganization = async (organization: string, edgeFirebase: any) => {
@@ -16,6 +17,93 @@ const setOrganization = async (organization: string, edgeFirebase: any) => {
     edgeState.currentOrganization = organization
     await edgeFirebase.startUsersSnapshot(`organizations/${organization}`)
     edgeState.organizationDocPath = `organizations/${organization}`
+  }
+}
+
+const getSubscribedStatus = (org: any) => {
+  let isSubscribed = true
+  let status = ''
+  let description = ''
+  let color = ''
+  let icon = ''
+
+  if (!org || !org.stripeSubscription) {
+    isSubscribed = false
+    status = 'Not Subscribed'
+    description = 'No subscription found.'
+    color = 'bg-red-900'
+    icon = 'AlertCircle'
+  }
+  else {
+    const subscription = org.stripeSubscription
+
+    if (!subscription || subscription === 'canceled') {
+      isSubscribed = false
+      status = 'Canceled'
+      description = 'The subscription has been canceled.'
+      color = 'bg-red-600'
+      icon = 'X'
+    }
+    else {
+      switch (subscription) {
+        case 'trialing':
+          status = 'Trial'
+          description = 'The subscription is currently in a trial period.'
+          color = 'bg-green-600'
+          icon = 'Check'
+          break
+        case 'active':
+          status = 'Active'
+          description = 'The subscription is in good standing.'
+          color = 'bg-green-600'
+          icon = 'Check'
+          break
+        case 'incomplete':
+          status = 'Incomplete'
+          description = 'A successful payment needs to be made within 23 hours to activate the subscription.'
+          color = 'bg-amber-500'
+          icon = 'Hourglass'
+          break
+        case 'incomplete_expired':
+          status = 'Incomplete Expired'
+          description = 'The initial payment on the subscription failed and no successful payment was made within 23 hours of creating the subscription.'
+          color = 'bg-red-600'
+          icon = 'AlertCircle'
+          break
+        case 'past_due':
+          status = 'Past Due'
+          description = 'Payment on the latest finalized invoice either failed or wasn’t attempted.'
+          color = 'bg-red-600'
+          icon = 'AlertCircle'
+          break
+        case 'unpaid':
+          status = 'Unpaid'
+          description = 'The latest invoice hasn’t been paid but the subscription remains in place.'
+          color = 'bg-red-600'
+          icon = 'AlertCircle'
+          break
+        case 'paused':
+          status = 'Paused'
+          description = 'The subscription has ended its trial period without a default payment method.'
+          color = 'bg-amber-500'
+          icon = 'PauseCircle'
+          break
+        default:
+          status = 'Unknown'
+          description = 'The subscription status is unknown.'
+          color = 'bg-red-600'
+          icon = 'AlertCircle'
+          break
+      }
+    }
+  }
+
+  return {
+    isSubscribed,
+    status,
+    description,
+    color,
+    icon,
   }
 }
 
@@ -212,6 +300,7 @@ const getRoleName = (roles: RoleType[], orgId: string) => {
 export const edgeGlobal = {
   edgeState,
   setOrganization,
+  getSubscribedStatus,
   isDarkMode,
   generateShortId,
   objHas,

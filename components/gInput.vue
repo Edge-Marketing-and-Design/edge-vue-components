@@ -102,6 +102,10 @@ const props = defineProps({
     type: String,
     required: true,
   },
+  staticObject: {
+    type: Boolean,
+    default: false,
+  },
 })
 const emit = defineEmits(['update:modelValue'])
 
@@ -1071,7 +1075,7 @@ watch(modelValue, () => {
               </div>
             </div>
             <div class="flex items-center">
-              <edge-shad-button class="bg-slate-500 mx-2 h-6 text-xs" @click.stop.prevent="state.fieldInsertDialog = true">
+              <edge-shad-button v-if="!props.staticObject" class="bg-slate-500 mx-2 h-6 text-xs" @click.stop.prevent="state.fieldInsertDialog = true">
                 <template v-if="props.fieldType === 'object'">
                   Add Field
                 </template>
@@ -1097,7 +1101,7 @@ watch(modelValue, () => {
             <template #item="{ element }">
               <div :key="element.key" class="w-full">
                 <div class="flex w-full py-1 justify-between items-center">
-                  <div class="text-left px-2">
+                  <div v-if="!staticObject" class="text-left px-2">
                     <Grip class="handle pointer" />
                   </div>
                   <div
@@ -1109,7 +1113,7 @@ watch(modelValue, () => {
                         {{ element.key }}
                       </edge-shad-button>
                     </template>
-                    <edge-shad-button v-else class="bg-slate-500 mx-2 h-6 text-xs" @click.prevent.stop="openKeyMenu(element.key)">
+                    <edge-shad-button v-else-if="!props.staticObject" class="bg-slate-500 mx-2 h-6 text-xs" @click.prevent.stop="openKeyMenu(element.key)">
                       {{ element.key }}
                     </edge-shad-button>
                   </div>
@@ -1131,14 +1135,15 @@ watch(modelValue, () => {
                         v-model="modelValue[element.key].value"
                         v-bind="props.bindings"
                         placeholder="Enter value here"
-                        :name="typeof modelValue[element.key].value"
+                        :label="!props.staticObject ? '' : element.key"
+                        :name="`${props.name}.${element.key}`"
                       />
                       <edge-shad-checkbox
                         v-else-if="typeof modelValue[element.key].value === 'boolean'"
                         v-model="modelValue[element.key].value"
                         class="mb-1"
                         v-bind="props.bindings"
-                        :name="typeof modelValue[element.key].value"
+                        :name="`${props.name}.${element.key}`"
                       >
                         {{ getArrayObjectLabel(element.key) }}
                       </edge-shad-checkbox>
@@ -1146,14 +1151,14 @@ watch(modelValue, () => {
                         v-else-if="modelValue[element.key].type === 'number'"
                         v-model="modelValue[element.key].value"
                         :step=".1"
-                        :name="typeof modelValue[element.key].value"
+                        :name="`${props.name}.${element.key}`"
                         v-bind="props.bindings"
                       />
                       <edge-shad-number
                         v-else-if="modelValue[element.key].type === 'integer'"
                         v-model="modelValue[element.key].value"
                         :step="1"
-                        :name="typeof modelValue[element.key].value"
+                        :name="`${props.name}.${element.key}`"
                         :format-options="{ maximumFractionDigits: 0 }"
                         v-bind="props.bindings"
                       />
@@ -1162,7 +1167,7 @@ watch(modelValue, () => {
                       <Separator class="dark:bg-slate-600" />
                     </template>
                   </div>
-                  <edge-shad-button variant="text" size="icon" @click.prevent.stop="state.removeField = element.key">
+                  <edge-shad-button v-if="!props.staticObject" variant="text" size="icon" @click.prevent.stop="state.removeField = element.key">
                     <Trash width="18" height="18" />
                   </edge-shad-button>
                 </div>

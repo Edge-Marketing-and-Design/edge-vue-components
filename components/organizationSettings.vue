@@ -4,6 +4,10 @@ import CardContent from '~/components/ui/card/CardContent.vue'
 
 import { useToast } from '@/components/ui/toast/use-toast'
 const props = defineProps({
+  subscribeOptions: {
+    type: Array,
+    default: () => [],
+  },
   orgFields: {
     type: Object,
     required: true,
@@ -65,24 +69,91 @@ const currentOrgData = computed(() => {
   }
   return edgeFirebase.data[edgeGlobal.edgeState.organizationDocPath]
 })
-onBeforeMount(() => {
+
+const loadStateData = () => {
   state.data = edgeGlobal.dupObject(currentOrgData.value)
   for (const field of props.orgFields) {
     if (edgeGlobal.objHas(state.data, field.field) === false) {
-      state.data[field.field] = field.value
+      if (field.type === 'section') {
+        state.data[field.field] = {}
+        for (const subField of field.fields) {
+          if (edgeGlobal.objHas(state.data[field.field], subField.field) === false) {
+            state.data[field.field][subField.field] = subField.value
+          }
+        }
+      }
+      else {
+        state.data[field.field] = field.value
+      }
     }
   }
+}
+
+onBeforeMount(() => {
+  loadStateData()
   state.loaded = true
 })
 watch(currentOrgData, async () => {
   edgeGlobal.edgeState.changeTracker = {}
+  loadStateData()
   state.loaded = false
   await nextTick()
   state.loaded = true
 })
+
+const navigateToBilling = async () => {
+  state.loading = true
+  const billingLink = await edgeFirebase.runFunction('stripe-redirectToBilling', {})
+  window.location.href = billingLink.data.url
+  state.loading = false
+}
+
+const gotoSubscription = async (url) => {
+  state.loading = true
+  window.location.href = url
+  state.loading = false
+}
 </script>
 
 <template>
+  <Alert v-if="edgeGlobal.edgeState.subscribedStatus && props.subscribeOptions.length > 0" class="mt-0" :class="edgeGlobal.edgeState.subscribedStatus.color">
+    <component :is="edgeGlobal.edgeState.subscribedStatus.icon" />
+    <AlertTitle>
+      {{ edgeGlobal.edgeState.subscribedStatus.status }}
+    </AlertTitle>
+    <AlertDescription>
+      {{ edgeGlobal.edgeState.subscribedStatus.description }}
+      <template v-if="!edgeGlobal.edgeState.subscribedStatus.isSubscribed">
+        <div class="text-center w-full mb-4">
+          <slot name="subscribeTitle">
+            <span class="text-2xl">Subscribe now with 7 day free trial!</span>
+          </slot>
+        </div>
+        <slot name="subscribeOptions">
+          <div class="flex justify-center space-x-4">
+            <edge-shad-button
+              v-for="option in props.subscribeOptions"
+              :key="option.buttonText"
+              class="text-white  w-100 bg-slate-800 hover:bg-slate-400"
+              @click="gotoSubscription(`${option.stripeSubscriptionLink}?client_reference_id=${edgeGlobal.edgeState.currentOrganization}`)"
+            >
+              {{ option.buttonText }}
+            </edge-shad-button>
+          </div>
+        </slot>
+      </template>
+      <div v-else class="flex flex-col sm:flex-row">
+        <div>
+          <edge-shad-button
+            class="text-white  w-100 bg-slate-800 hover:bg-slate-400"
+            @click="navigateToBilling"
+          >
+            Manage Subscription
+          </edge-shad-button>
+        </div>
+      </div>
+    </AlertDescription>
+  </Alert>
   <Card v-if="state.loaded" class="border-0 bg-transparent">
     <edge-shad-form
       :schema="props.formSchema"
@@ -95,6 +166,27 @@ watch(currentOrgData, async () => {
       </CardHeader>
       <CardContent>
         <template v-for="field in props.orgFields" :key="field.field">
+          <Card v-if="field.type === 'section'" class="mb-2">
+            <CardHeader>
+              <CardTitle>
+                {{ field.label }}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div class="grid gap-2">
+                <template v-for="subField in field.fields" :key="subField.field">
+                  <edge-g-input
+                    v-model="state.data[field.field][subField.field]"
+                    :name="`${field.field}.${subField.field}`"
+                    :label="subField.label"
+                    :field-type="subField.type"
+                    :hint="subField.hint"
+                    persistent-hint
+                  />
+                </template>
+              </div>
+            </CardContent>
+          </Card>
           <edge-g-input
             v-if="edgeGlobal.objHas(field, 'bindings')"
             v-model="state.data[field.field]"
