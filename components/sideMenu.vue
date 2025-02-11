@@ -8,6 +8,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from '@/components/ui/sidebar'
 
 const props = defineProps({
@@ -24,6 +25,8 @@ const props = defineProps({
     default: () => [],
   },
 })
+
+const { state: sidebarState } = useSidebar()
 
 const edgeFirebase = inject('edgeFirebase')
 const isAdmin = computed(() => {
@@ -42,7 +45,6 @@ const goTo = (path) => {
 const currentRoutePath = computed(() => {
   return route.fullPath.endsWith('/') ? route.fullPath.slice(0, -1) : route.fullPath
 })
-
 // Sidebar props:
 // variant: 'sidebar' | 'floating'
 // collapsible: 'offcanvas' | 'icon' | 'none'
@@ -54,7 +56,7 @@ const currentRoutePath = computed(() => {
 <template>
   <Sidebar side="left" variant="sidebar" collapsible="icon">
     <SidebarHeader>
-      <slot name="header" />
+      <slot name="header" :side-bar-state="sidebarState" />
     </SidebarHeader>
     <SidebarContent>
       <SidebarGroup>
@@ -79,32 +81,47 @@ const currentRoutePath = computed(() => {
           </SidebarMenu>
         </SidebarGroupContent>
       </SidebarGroup>
+      <SidebarGroup>
+        <SidebarGroupContent>
+          <CommandSeparator class="mb-3" />
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <edge-user-menu :title="props.organizationTitle" button-class="w-8 h-8 bg-primary" icon-class="w-6 h-6">
+                <template #trigger>
+                  <SidebarMenuButton>
+                    <Settings2 /> Settings
+                  </SidebarMenuButton>
+                </template>
+              </edge-user-menu>
+            </SidebarMenuItem>
+          </SidebarMenu>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton @click="edgeGlobal.edgeLogOut(edgeFirebase)">
+                <LogOut />
+                <span>Logout</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarGroupContent>
+      </SidebarGroup>
     </SidebarContent>
     <SidebarFooter>
-      <slot name="footer" />
-      <SidebarMenu>
-        <SidebarMenuItem>
-          <edge-user-menu :title="props.organizationTitle" button-class="w-8 h-8 bg-primary" icon-class="w-6 h-6">
-            <template #trigger>
-              <SidebarMenuButton>
-                <Settings2 /> Settings
-                <ChevronUp class-name="ml-auto" />
-              </SidebarMenuButton>
-            </template>
-          </edge-user-menu>
-        </SidebarMenuItem>
-      </SidebarMenu>
-      <SidebarMenu>
-        <SidebarMenuItem>
-          <SidebarMenuButton @click="edgeFirebase.signOut">
-            <LogOut />
-            <span>Logout</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      </SidebarMenu>
+      <slot name="footer" :side-bar-state="sidebarState" />
     </SidebarFooter>
+    <SidebarRail>
+      <Button
+        size="icon"
+        variant="secondary"
+        class="w-10 h-6"
+      >
+        <ChevronLeft v-if="sidebarState === 'expanded'" class="!w-6 !h-6" />
+        <ChevronRight v-else class="!w-6 !h-6" />
+      </Button>
+    </SidebarRail>
   </Sidebar>
 </template>
 
-<style scoped>
+<style>
+
 </style>
