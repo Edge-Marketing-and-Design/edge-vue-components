@@ -68,9 +68,7 @@ const currentRoutePath = computed(() => {
             <slot name="menu">
               <SidebarMenuItem v-for="item in props.menuItems" :key="item.title">
                 <SidebarMenuButton
-                  :is-active="currentRoutePath === item.to" class="hover:bg-accent hover:text-accent-foreground" :class="{
-                    'bg-primary text-primary-foreground': currentRoutePath === item.to,
-                  }"
+                  :is-active="currentRoutePath === item.to"
                   @click="goTo(item.to)"
                 >
                   <component :is="item.icon" />
