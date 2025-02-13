@@ -427,7 +427,7 @@ const searchDropDown = computed(() => {
 
 <template>
   <Card v-if="state.afterMount" :class="cn('mx-auto bg-muted/50 w-full max-w-7xl', props.class)" max-width="1200">
-    <edge-menu :class="props.headerClass">
+    <edge-menu class="bg-primary text-primary-foreground" :class="props.headerClass">
       <template #start>
         <slot name="header-start">
           <LayoutDashboard class="mr-2" />
@@ -449,8 +449,8 @@ const searchDropDown = computed(() => {
                 <edge-shad-select
                   v-model="state.queryField"
                   :items="props.searchFields"
-                  name="search"
                   class="uppercase"
+                  name="search"
                 />
               </div>
               <div v-if="props.searchFields.find(field => field.name === state.queryField)?.operators">

@@ -293,7 +293,7 @@ onActivated(() => {
           <slot name="header-end" :unsaved-changes="unsavedChanges" :submitting="state.submitting" :title="title" :working-doc="state.workingDoc">
             <edge-shad-button
               v-if="!unsavedChanges"
-              class="bg-red-700 uppercase h-8 hover:bg-slate-400 w-20"
+              type="destructive"
               @click="onCancel"
             >
               Close
