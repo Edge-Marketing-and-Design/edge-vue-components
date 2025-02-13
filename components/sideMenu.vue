@@ -111,7 +111,7 @@ const currentRoutePath = computed(() => {
       <Button
         size="icon"
         variant="secondary"
-        class="w-10 h-6 !z-100"
+        class="w-10 h-6"
       >
         <ChevronLeft v-if="sidebarState === 'expanded'" class="!w-6 !h-6" />
         <ChevronRight v-else class="!w-6 !h-6" />
