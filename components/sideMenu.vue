@@ -54,7 +54,7 @@ const currentRoutePath = computed(() => {
 </script>
 
 <template>
-  <Sidebar side="left" variant="sidebar" collapsible="icon">
+  <Sidebar side="left" variant="primary" collapsible="icon">
     <SidebarHeader>
       <slot name="header" :side-bar-state="sidebarState" />
     </SidebarHeader>
@@ -111,7 +111,7 @@ const currentRoutePath = computed(() => {
       <Button
         size="icon"
         variant="secondary"
-        class="w-10 h-6"
+        class="w-10 h-6 z-1000"
       >
         <ChevronLeft v-if="sidebarState === 'expanded'" class="!w-6 !h-6" />
         <ChevronRight v-else class="!w-6 !h-6" />
