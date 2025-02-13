@@ -86,7 +86,7 @@ const modelValue = useVModel(props, 'modelValue', emits, {
       <div class="relative w-full items-center">
         <Select v-model="modelValue" :disabled="props.disabled" :default-value="modelValue" v-bind="componentField">
           <FormControl>
-            <SelectTrigger :class="[$slots.icon ? 'pr-8' : '', props.class]">
+            <SelectTrigger class="text-foreground" :class="[$slots.icon ? 'pr-8' : '', props.class]">
               <SelectValue />
             </SelectTrigger>
           </FormControl>
