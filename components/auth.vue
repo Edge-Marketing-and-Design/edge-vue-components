@@ -39,11 +39,11 @@ const props = defineProps({
   },
   primaryButtonClasses: {
     type: String,
-    default: 'text-white w-full bg-slate-800 hover:bg-slate-400',
+    default: '',
   },
   secondaryButtonClasses: {
     type: String,
-    default: 'bg-slate-400 w-full text-black hover:bg-slate-100',
+    default: 'w-full',
   },
 })
 

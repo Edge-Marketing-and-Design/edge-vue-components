@@ -25,7 +25,7 @@ incrementCount()
     <Card class="w-full pt-10 pb-6">
       <CardContent class="text-center">
         Loading...
-        <Progress v-model="state.count" class="bg-slate-800 w-100" />
+        <Progress v-model="state.count" class="w-100" />
       </CardContent>
     </Card>
   </div>

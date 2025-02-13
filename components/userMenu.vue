@@ -44,18 +44,18 @@ const currentRoutePath = computed(() => {
       </slot>
     </DropdownMenuTrigger>
     <DropdownMenuContent align="end">
-      <DropdownMenuItem>
-        <Card class="border-0">
-          <CardHeader class="p-2">
-            <CardTitle>
-              {{ edgeFirebase.user.meta.name }}
-            </CardTitle>
-            <CardDescription>
-              {{ edgeFirebase.user.firebaseUser.providerData[0].email }}
-            </CardDescription>
-          </CardHeader>
-        </Card>
-      </DropdownMenuItem>
+      <!-- <DropdownMenuItem class="bg-accent"> -->
+      <Card class="border-0 p-2 bg-popover shadow-none">
+        <CardHeader class="p-0">
+          <CardTitle>
+            {{ edgeFirebase.user.meta.name }}
+          </CardTitle>
+          <CardDescription class="p-2">
+            {{ edgeFirebase.user.firebaseUser.providerData[0].email }}
+          </CardDescription>
+        </CardHeader>
+      </Card>
+      <!-- </DropdownMenuItem> -->
       <DropdownMenuSeparator />
       <DropdownMenuLabel class="text-xs text-muted-foreground">
         {{ props.title }}
