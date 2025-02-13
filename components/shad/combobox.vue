@@ -136,7 +136,7 @@ const triggerTitle = computed(() => {
               variant="outline"
               role="combobox"
               :aria-expanded="open"
-              class="w-[200px] justify-between"
+              class="w-[200px] justify-between text-foreground"
               :class="props.class"
             >
               {{ triggerTitle }}
