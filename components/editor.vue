@@ -286,7 +286,7 @@ const numColsToTailwind = (cols) => {
       :initial-values="state.workingDoc"
       @submit="onSubmit"
     >
-      <edge-menu v-if="props.showHeader">
+      <edge-menu v-if="props.showHeader" class="py-2 bg-primary text-primary-foreground">
         <template #start>
           <slot name="header-start" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc">
             <FilePenLine class="mr-2" />
