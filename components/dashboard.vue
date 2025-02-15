@@ -514,7 +514,7 @@ const searchDropDown = computed(() => {
     </div>
     <CardContent
       ref="scrollContainerRef"
-      class="p-3 w-full h-[calc(100vh-208px)] overflow-y-auto scroll-area"
+      class="p-3 w-full min-h-[200px] overflow-y-auto scroll-area"
       @scroll="handleScroll"
     >
       <div class="flex flex-wrap items-center py-0">

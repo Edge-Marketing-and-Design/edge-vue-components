@@ -56,7 +56,7 @@ const typeClasses = computed(() => {
 <template>
   <Card
     v-if="props.type === 'Card'"
-    :class="cn(typeClasses[props.type], 'z-10 flex items-center gap-1 border-b px-4 flex-shrink-0', props.class)"
+    :class="cn(typeClasses[props.type], 'z-10 flex items-center gap-1  px-4 flex-shrink-0', props.class)"
   >
     <edge-menu-content
       v-bind="props"
@@ -74,7 +74,7 @@ const typeClasses = computed(() => {
   </Card>
 
   <nav
-    v-else
+    v-else-if="props.type === 'nav'"
     :class="cn(typeClasses[props.type], 'z-10 flex items-center gap-1 border-b px-4 flex-shrink-0', props.class)"
   >
     <edge-menu-content
@@ -91,6 +91,24 @@ const typeClasses = computed(() => {
       </template>
     </edge-menu-content>
   </nav>
+  <footer
+    v-else-if="props.type === 'footer'"
+    :class="cn(typeClasses[props.type], 'z-10 flex items-center gap-1 border-t px-4 flex-shrink-0', props.class)"
+  >
+    <edge-menu-content
+      v-bind="props"
+    >
+      <template #start>
+        <slot name="start" />
+      </template>
+      <template #center>
+        <slot name="center" />
+      </template>
+      <template #end>
+        <slot name="end" />
+      </template>
+    </edge-menu-content>
+  </footer>
 </template>
 
 <style lang="scss" scoped>

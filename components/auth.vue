@@ -1,4 +1,5 @@
 <script setup>
+// TODO:  GO THROUGH EDGE COMPONENTS AND REMOVE COLOR CLASSES SO IT USES THE THEME CONFIG FILES
 import { defineProps, inject, onBeforeMount, watch } from 'vue'
 const props = defineProps({
   type: {
