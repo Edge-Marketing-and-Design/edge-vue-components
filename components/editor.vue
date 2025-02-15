@@ -269,6 +269,13 @@ onActivated(() => {
     state.afterMount = true
   })
 })
+
+const numColsToTailwind = (cols) => {
+  if (cols === '12') {
+    return 'w-full'
+  }
+  return `w-${cols}/12`
+}
 </script>
 
 <template>
@@ -317,10 +324,10 @@ onActivated(() => {
           </slot>
         </template>
       </edge-menu>
-      <edge-v-card-text>
+      <CardContent>
         <slot name="main" :title="title" :working-doc="state.workingDoc">
-          <edge-v-row>
-            <edge-v-col v-for="(field, name, index) in props.newDocSchema" :key="index" :cols="field.cols">
+          <div class="flex flex-wrap py-2 items-center">
+            <div v-for="(field, name, index) in props.newDocSchema" :key="index" :class="numColsToTailwind(field.cols)">
               <edge-shad-datepicker
                 v-if="field.bindings['field-type'] === 'date'"
                 v-model="state.workingDoc[name]"
@@ -345,10 +352,10 @@ onActivated(() => {
                 :name="name"
                 :parent-tracker-id="`${props.collection}-${props.docId}`"
               />
-            </edge-v-col>
-          </edge-v-row>
+            </div>
+          </div>
         </slot>
-      </edge-v-card-text>
+      </CardContent>
       <CardFooter v-if="showFooter" class="flex gap-1">
         <slot name="footer" :unsaved-changes="unsavedChanges" :title="title" :submitting="state.submitting" :working-doc="state.workingDoc">
           <edge-shad-button
@@ -378,28 +385,28 @@ onActivated(() => {
         </slot>
       </CardFooter>
     </edge-shad-form>
+    <edge-shad-dialog v-model="state.dialog" max-width="500px">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            Unsaved Changes!
+          </DialogTitle>
+          <DialogDescription>
+            <h4>"{{ title }}" has unsaved changes.</h4>
+            <p>Are you sure you want to discard them?</p>
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter class="pt-2 flex justify-between">
+          <edge-shad-button class="text-white bg-slate-800 hover:bg-slate-400" @click="state.dialog = false">
+            Cancel
+          </edge-shad-button>
+          <edge-shad-button variant="destructive" class="text-white w-full" @click="discardChanges()">
+            Discard
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
   </Card>
-  <edge-shad-dialog v-model="state.dialog" max-width="500px">
-    <DialogContent>
-      <DialogHeader>
-        <DialogTitle>
-          Unsaved Changes!
-        </DialogTitle>
-        <DialogDescription>
-          <h4>"{{ title }}" has unsaved changes.</h4>
-          <p>Are you sure you want to discard them?</p>
-        </DialogDescription>
-      </DialogHeader>
-      <DialogFooter class="pt-2 flex justify-between">
-        <edge-shad-button class="text-white bg-slate-800 hover:bg-slate-400" @click="state.dialog = false">
-          Cancel
-        </edge-shad-button>
-        <edge-shad-button variant="destructive" class="text-white w-full" @click="discardChanges()">
-          Discard
-        </edge-shad-button>
-      </DialogFooter>
-    </DialogContent>
-  </edge-shad-dialog>
 </template>
 
 <style lang="scss" scoped>
