@@ -426,7 +426,7 @@ const searchDropDown = computed(() => {
 </script>
 
 <template>
-  <Card v-if="state.afterMount" :class="cn('mx-auto bg-muted/50 w-full max-w-7xl', props.class)">
+  <Card v-if="state.afterMount" :class="cn('mx-auto bg-muted/50 w-full', props.class)">
     <edge-menu class="bg-primary text-primary-foreground" :class="props.headerClass">
       <template #start>
         <slot name="header-start">

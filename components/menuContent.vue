@@ -1,14 +1,47 @@
 <script setup>
 import { cn } from '@/lib/utils'
 
-defineProps({
-  menuItems: Array,
-  navClass: String,
-  buttonClass: String,
-  hoverClass: String,
-  selectedBgColor: String,
-  selectedTextColor: String,
-  showIcon: Boolean,
+const props = defineProps({
+  type: {
+    type: String,
+    required: false,
+    default: 'Card',
+  },
+  class: {
+    type: String,
+    required: false,
+    default: '',
+  },
+  menuItems: {
+    type: Array,
+    required: false,
+    default: () => [],
+  },
+  navClass: {
+    type: String,
+    required: false,
+    default: '',
+  },
+  buttonClass: {
+    type: String,
+    required: false,
+    default: '',
+  },
+  showIcon: {
+    type: Boolean,
+    required: false,
+    default: true,
+  },
+  selectedBgColor: {
+    type: String,
+    required: false,
+    default: '',
+  },
+  selectedTextColor: {
+    type: String,
+    required: false,
+    default: '',
+  },
 })
 
 const route = useRoute()
@@ -43,11 +76,11 @@ const startsWithCurrentRoute = (path) => {
     <slot name="center" />
     <div class="grow">
       <nav
-        v-if="menuItems.length > 0"
+        v-if="props.menuItems.length > 0"
         :class="cn('justify-center ml-4 hidden flex-col gap-3 text-lg font-medium md:flex md:flex-row md:items-center md:gap-2 md:text-sm lg:gap-3', navClass)"
       >
         <edge-shad-button
-          v-for="(item, key) in menuItems"
+          v-for="(item, key) in props.menuItems"
           :key="key"
           :to="item.to"
           :class="cn(
@@ -63,7 +96,7 @@ const startsWithCurrentRoute = (path) => {
         >
           <component
             :is="item.icon"
-            v-if="item.icon && showIcon"
+            v-if="item.icon && props.showIcon"
             class="h-4 w-4 mr-1"
           />
           {{ item.title }}

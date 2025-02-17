@@ -279,52 +279,55 @@ const numColsToTailwind = (cols) => {
 </script>
 
 <template>
-  <Card v-if="state.afterMount" :class="cn('m-auto bg-muted/50 w-full max-w-7xl', props.class)">
+  <Card v-if="state.afterMount" :class="cn('m-auto bg-muted/50 w-full flex flex-col', props.class)">
     <edge-shad-form
       v-model="state.form"
       :schema="props.schema"
       :initial-values="state.workingDoc"
+      class="flex flex-col flex-1"
       @submit="onSubmit"
     >
-      <edge-menu v-if="props.showHeader" class="py-2 bg-primary text-primary-foreground">
-        <template #start>
-          <slot name="header-start" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc">
-            <FilePenLine class="mr-2" />
-            {{ title }}
-          </slot>
-        </template>
-        <template #center>
-          <slot name="header-center" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc" />
-        </template>
-        <template #end>
-          <slot name="header-end" :unsaved-changes="unsavedChanges" :submitting="state.submitting" :title="title" :working-doc="state.workingDoc">
-            <edge-shad-button
-              v-if="!unsavedChanges"
-              type="destructive"
-              @click="onCancel"
-            >
-              Close
-            </edge-shad-button>
-            <edge-shad-button
-              v-else
-              class="bg-red-700 uppercase h-8 hover:bg-slate-400 w-20 "
-              @click="onCancel"
-            >
-              Cancel
-            </edge-shad-button>
-            <edge-shad-button
-              type="submit"
-              class="bg-slate-500 uppercase h-8 hover:bg-slate-400 w-[120px] mb-1"
-              :disabled="state.submitting"
-            >
-              <Loader2 v-if="state.submitting" class="w-4 h-4 mr-2 animate-spin" />
-              <span v-if="state.submitting">Saving...</span>
-              <span v-else>Save</span>
-            </edge-shad-button>
-          </slot>
-        </template>
-      </edge-menu>
-      <CardContent>
+      <slot name="header" :on-cancel="onCancel" :submitting="state.submitting" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc">
+        <edge-menu v-if="props.showHeader" class="py-2 bg-primary text-primary-foreground">
+          <template #start>
+            <slot name="header-start" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc">
+              <FilePenLine class="mr-2" />
+              {{ title }}
+            </slot>
+          </template>
+          <template #center>
+            <slot name="header-center" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc" />
+          </template>
+          <template #end>
+            <slot name="header-end" :unsaved-changes="unsavedChanges" :submitting="state.submitting" :title="title" :working-doc="state.workingDoc">
+              <edge-shad-button
+                v-if="!unsavedChanges"
+                type="destructive"
+                @click="onCancel"
+              >
+                Close
+              </edge-shad-button>
+              <edge-shad-button
+                v-else
+                class="bg-red-700 uppercase h-8 hover:bg-slate-400 w-20 "
+                @click="onCancel"
+              >
+                Cancel
+              </edge-shad-button>
+              <edge-shad-button
+                type="submit"
+                class="bg-slate-500 uppercase h-8 hover:bg-slate-400 w-[120px] mb-1"
+                :disabled="state.submitting"
+              >
+                <Loader2 v-if="state.submitting" class="w-4 h-4 mr-2 animate-spin" />
+                <span v-if="state.submitting">Saving...</span>
+                <span v-else>Save</span>
+              </edge-shad-button>
+            </slot>
+          </template>
+        </edge-menu>
+      </slot>
+      <CardContent class="flex-1 flex flex-col">
         <slot name="main" :title="title" :working-doc="state.workingDoc">
           <div class="flex flex-wrap py-2 items-center">
             <div v-for="(field, name, index) in props.newDocSchema" :key="index" :class="numColsToTailwind(field.cols)">
@@ -355,6 +358,27 @@ const numColsToTailwind = (cols) => {
             </div>
           </div>
         </slot>
+        <edge-shad-dialog v-model="state.dialog">
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>
+                Unsaved Changes!
+              </DialogTitle>
+              <DialogDescription>
+                <h4>"{{ title }}" has unsaved changes.</h4>
+                <p>Are you sure you want to discard them?</p>
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter class="pt-2 flex justify-between">
+              <edge-shad-button class="text-white bg-slate-800 hover:bg-slate-400" @click="state.dialog = false">
+                Cancel
+              </edge-shad-button>
+              <edge-shad-button variant="destructive" class="text-white w-full" @click="discardChanges()">
+                Discard
+              </edge-shad-button>
+            </DialogFooter>
+          </DialogContent>
+        </edge-shad-dialog>
       </CardContent>
       <CardFooter v-if="showFooter" class="flex gap-1">
         <slot name="footer" :unsaved-changes="unsavedChanges" :title="title" :submitting="state.submitting" :working-doc="state.workingDoc">
@@ -385,27 +409,6 @@ const numColsToTailwind = (cols) => {
         </slot>
       </CardFooter>
     </edge-shad-form>
-    <edge-shad-dialog v-model="state.dialog" max-width="500px">
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>
-            Unsaved Changes!
-          </DialogTitle>
-          <DialogDescription>
-            <h4>"{{ title }}" has unsaved changes.</h4>
-            <p>Are you sure you want to discard them?</p>
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter class="pt-2 flex justify-between">
-          <edge-shad-button class="text-white bg-slate-800 hover:bg-slate-400" @click="state.dialog = false">
-            Cancel
-          </edge-shad-button>
-          <edge-shad-button variant="destructive" class="text-white w-full" @click="discardChanges()">
-            Discard
-          </edge-shad-button>
-        </DialogFooter>
-      </DialogContent>
-    </edge-shad-dialog>
   </Card>
 </template>
 
