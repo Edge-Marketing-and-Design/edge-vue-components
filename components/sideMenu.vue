@@ -69,6 +69,7 @@ const currentRoutePath = computed(() => {
               <SidebarMenuItem v-for="item in props.menuItems" :key="item.title">
                 <SidebarMenuButton
                   :is-active="currentRoutePath === item.to"
+                  :tooltip="item.title"
                   @click="goTo(item.to)"
                 >
                   <component :is="item.icon" />
@@ -86,7 +87,7 @@ const currentRoutePath = computed(() => {
             <SidebarMenuItem>
               <edge-user-menu :title="props.organizationTitle" button-class="w-8 h-8 bg-primary" icon-class="w-6 h-6">
                 <template #trigger>
-                  <SidebarMenuButton>
+                  <SidebarMenuButton tooltip="Settings">
                     <Settings2 /> Settings
                   </SidebarMenuButton>
                 </template>
@@ -95,7 +96,7 @@ const currentRoutePath = computed(() => {
           </SidebarMenu>
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton @click="edgeGlobal.edgeLogOut(edgeFirebase)">
+              <SidebarMenuButton tooltip="Logout" @click="edgeGlobal.edgeLogOut(edgeFirebase)">
                 <LogOut />
                 <span>Logout</span>
               </SidebarMenuButton>
