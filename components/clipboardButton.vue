@@ -28,7 +28,7 @@ const copyToClipboard = async (text) => {
 
 <template>
   <edge-shad-button
-    class="w-4 h-4"
+    class="w-4 h-4 mt-1"
     size="icon"
     variant="text"
     @click.stop.prevent="copyToClipboard(props.text)"

@@ -36,7 +36,7 @@ const currentRoutePath = computed(() => {
 
 <template>
   <DropdownMenu>
-    <DropdownMenuTrigger as-child>
+    <DropdownMenuTrigger class="flex flex-col items-center" as-child>
       <slot name="trigger">
         <Button size="icon" :class="cn('rounded-full', props.buttonClass)">
           <Settings2 :class="cn('h-5 w-5', props.iconClass)" />

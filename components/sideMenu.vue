@@ -24,6 +24,22 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  headerClasses: {
+    type: String,
+    default: '',
+  },
+  contentClasses: {
+    type: String,
+    default: '',
+  },
+  footerClasses: {
+    type: String,
+    default: '',
+  },
+  collapsible: {
+    type: String,
+    default: 'icon',
+  },
 })
 
 const { state: sidebarState } = useSidebar()
@@ -47,18 +63,57 @@ const currentRoutePath = computed(() => {
 })
 // Sidebar props:
 // variant: 'sidebar' | 'floating'
-// collapsible: 'offcanvas' | 'icon' | 'none'
+// collapsible: 'offcanvas' | 'icon' | 'none' | 'slack'
 // side: 'left' | 'right'
 
 // https://ui.shadcn.com/docs/components/sidebar
+
+const collapsible = computed(() => {
+  if (props.collapsible === 'slack') {
+    return 'none'
+  }
+  return props.collapsible
+})
+
+const sidebarClasses = computed(() => {
+  if (props.collapsible === 'slack') {
+    return 'w-[80px]'
+  }
+  return ''
+})
+
+const sidebarMenuItemClasses = computed(() => {
+  if (props.collapsible === 'slack') {
+    return 'justify-center flex'
+  }
+  return ''
+})
+
+const sideBarMenuButtonClasses = computed(() => {
+  if (props.collapsible === 'slack') {
+    return 'w-7 h-7 p-1 rounded-[6px]'
+  }
+  return ''
+})
+
+const sideBarIconClasses = computed(() => {
+  if (props.collapsible === 'slack') {
+    return '!w-5 !h-5'
+  }
+  return ''
+})
+
+const isSlack = computed(() => {
+  return props.collapsible === 'slack'
+})
 </script>
 
 <template>
-  <Sidebar side="left" variant="primary" collapsible="icon">
-    <SidebarHeader>
+  <Sidebar side="left" variant="primary" :class="sidebarClasses" :collapsible="collapsible">
+    <SidebarHeader :class="props.headerClasses">
       <slot name="header" :side-bar-state="sidebarState" />
     </SidebarHeader>
-    <SidebarContent>
+    <SidebarContent :class="props.contentClasses">
       <SidebarGroup>
         <SidebarGroupLabel v-if="props.title">
           {{ props.title }}
@@ -66,15 +121,19 @@ const currentRoutePath = computed(() => {
         <SidebarGroupContent>
           <SidebarMenu>
             <slot name="menu">
-              <SidebarMenuItem v-for="item in props.menuItems" :key="item.title">
-                <SidebarMenuButton
-                  :is-active="currentRoutePath === item.to"
-                  :tooltip="item.title"
-                  @click="goTo(item.to)"
-                >
-                  <component :is="item.icon" />
-                  <span>{{ item.title }}</span>
-                </SidebarMenuButton>
+              <SidebarMenuItem v-for="item in props.menuItems" :key="item.title" :class="sidebarMenuItemClasses">
+                <div class="flex flex-col items-center">
+                  <SidebarMenuButton
+                    :is-active="currentRoutePath.startsWith(item.to)"
+                    :tooltip="item.title"
+                    :class="sideBarMenuButtonClasses"
+                    @click="goTo(item.to)"
+                  >
+                    <component :is="item.icon" :class="sideBarIconClasses" />
+                    <span v-if="!isSlack">{{ item.title }}</span>
+                  </SidebarMenuButton>
+                  <span v-if="isSlack" class="text-xs mb-3">{{ item.title }}</span>
+                </div>
               </SidebarMenuItem>
             </slot>
           </SidebarMenu>
@@ -84,28 +143,35 @@ const currentRoutePath = computed(() => {
         <SidebarGroupContent>
           <CommandSeparator class="mb-3" />
           <SidebarMenu>
-            <SidebarMenuItem>
-              <edge-user-menu :title="props.organizationTitle" button-class="w-8 h-8 bg-primary" icon-class="w-6 h-6">
+            <SidebarMenuItem :class="sidebarMenuItemClasses">
+              <edge-user-menu :title="props.organizationTitle">
                 <template #trigger>
-                  <SidebarMenuButton tooltip="Settings">
-                    <Settings2 /> Settings
-                  </SidebarMenuButton>
+                  <div class="flex flex-col items-center">
+                    <SidebarMenuButton :class="sideBarMenuButtonClasses" tooltip="Settings">
+                      <Settings2 />
+                      <span v-if="!isSlack">Settings</span>
+                    </SidebarMenuButton>
+                    <span v-if="isSlack" class="text-xs mb-3"> Settings</span>
+                  </div>
                 </template>
               </edge-user-menu>
             </SidebarMenuItem>
           </SidebarMenu>
           <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton tooltip="Logout" @click="edgeGlobal.edgeLogOut(edgeFirebase)">
-                <LogOut />
-                <span>Logout</span>
-              </SidebarMenuButton>
+            <SidebarMenuItem :class="sidebarMenuItemClasses">
+              <div class="flex flex-col items-center">
+                <SidebarMenuButton :class="sideBarMenuButtonClasses" tooltip="Logout" @click="edgeGlobal.edgeLogOut(edgeFirebase)">
+                  <LogOut />
+                  <span v-if="!isSlack">Logout</span>
+                </SidebarMenuButton>
+                <span v-if="isSlack" class="text-xs mb-3">Logout</span>
+              </div>
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarGroupContent>
       </SidebarGroup>
     </SidebarContent>
-    <SidebarFooter>
+    <SidebarFooter :class="props.footerClasses">
       <slot name="footer" :side-bar-state="sidebarState" />
     </SidebarFooter>
     <SidebarRail>
@@ -114,6 +180,5 @@ const currentRoutePath = computed(() => {
   </Sidebar>
 </template>
 
-<style>
-
+<style scoped>
 </style>

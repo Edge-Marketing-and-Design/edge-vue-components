@@ -46,7 +46,7 @@ const props = defineProps({
   },
 })
 
-const emits = defineEmits(['update:modelValue'])
+const emits = defineEmits(['update:modelValue', 'blur'])
 
 const state = reactive({
   showPassword: false,
@@ -93,6 +93,7 @@ const classComputed = computed(() => {
               v-bind="componentField"
               :placeholder="props.placeholder"
               :disabled="props.disabled"
+              @blur="$emit('blur', $event)"
             />
             <span class="absolute end-0 inset-y-0 flex items-center justify-center px-2">
               <slot name="icon" />

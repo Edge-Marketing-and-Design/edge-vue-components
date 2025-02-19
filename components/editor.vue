@@ -59,6 +59,7 @@ const state = reactive({
   form: false,
   tab: 'forms',
   bypassUnsavedChanges: false,
+  bypassRoute: '',
   afterMount: false,
   submitting: false,
 })
@@ -85,7 +86,9 @@ const subCollection = (collection) => {
   })
 }
 
-onBeforeRouteUpdate((to, from, next) => {
+onBeforeRouteLeave((to, from, next) => {
+  console.log('testing!!!!')
+  state.bypassRoute = to.path
   if (unsavedChanges.value && !state.bypassUnsavedChanges) {
     state.dialog = true
     next(false)
@@ -109,12 +112,18 @@ const discardChanges = async () => {
   }
   state.workingDoc = await edgeGlobal.dupObject(edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`][props.docId])
   state.bypassUnsavedChanges = true
+  state.dialog = false
   edgeGlobal.edgeState.changeTracker = {}
-  if (props.saveRedirectOverride) {
-    router.push(props.saveRedirectOverride)
+  if (state.bypassRoute) {
+    router.push(state.bypassRoute)
   }
   else {
-    router.push(`/app/dashboard/${props.collection}`)
+    if (props.saveRedirectOverride) {
+      router.push(props.saveRedirectOverride)
+    }
+    else {
+      router.push(`/app/dashboard/${props.collection}`)
+    }
   }
 }
 
@@ -208,6 +217,8 @@ const onCancel = () => {
 }
 
 onBeforeMount(async () => {
+  console.log('test')
+  state.bypassUnsavedChanges = false
   edgeGlobal.edgeState.changeTracker = {}
   for (const field of Object.keys(props.newDocSchema)) {
     if (props.newDocSchema[field].type === 'collection') {
@@ -237,6 +248,10 @@ watch(() => edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${pro
   }
 })
 onActivated(() => {
+  console.log('activated')
+  state.bypassUnsavedChanges = false
+  state.bypassRoute = ''
+  console.log('bypass', state.bypassUnsavedChanges)
   state.afterMount = false
   if (props.docId !== 'new') {
     if (edgeGlobal.objHas(edgeFirebase.data, `${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`) === false) {
@@ -327,7 +342,7 @@ const numColsToTailwind = (cols) => {
           </template>
         </edge-menu>
       </slot>
-      <CardContent class="flex-1 flex flex-col">
+      <CardContent class="flex-1 flex flex-col p-0">
         <slot name="main" :title="title" :working-doc="state.workingDoc">
           <div class="flex flex-wrap py-2 items-center">
             <div v-for="(field, name, index) in props.newDocSchema" :key="index" :class="numColsToTailwind(field.cols)">
