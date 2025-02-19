@@ -16,11 +16,19 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  settingsTitle: {
+    type: String,
+    default: '',
+  },
   organizationTitle: {
     type: String,
     default: 'Organization(s)',
   },
   menuItems: {
+    type: Array,
+    default: () => [],
+  },
+  settingsMenuItems: {
     type: Array,
     default: () => [],
   },
@@ -43,6 +51,14 @@ const props = defineProps({
   showRail: {
     type: Boolean,
     default: true,
+  },
+  showSettingsSection: {
+    type: Boolean,
+    default: true,
+  },
+  groupLabelClasses: {
+    type: String,
+    default: '',
   },
 })
 
@@ -148,7 +164,7 @@ const isSlack = computed(() => {
     <SidebarContent :class="props.contentClasses">
       <slot name="content" :side-bar-state="sidebarState">
         <SidebarGroup>
-          <SidebarGroupLabel v-if="props.title">
+          <SidebarGroupLabel v-if="props.title" :class="props.groupLabelClasses">
             {{ props.title }}
           </SidebarGroupLabel>
           <SidebarGroupContent>
@@ -173,33 +189,50 @@ const isSlack = computed(() => {
           </SidebarGroupContent>
         </SidebarGroup>
         <SidebarGroup>
+          <CommandSeparator class="mb-3" />
+          <SidebarGroupLabel v-if="props.settingsTitle" :class="props.groupLabelClasses">
+            {{ props.settingsTitle }}
+          </SidebarGroupLabel>
           <SidebarGroupContent>
-            <CommandSeparator class="mb-3" />
             <SidebarMenu>
-              <SidebarMenuItem :class="sidebarMenuItemClasses">
-                <edge-user-menu :title="props.organizationTitle">
-                  <template #trigger>
-                    <div class="flex flex-col items-center">
-                      <SidebarMenuButton :class="sideBarMenuButtonClasses" tooltip="Settings">
-                        <Settings2 />
-                        <span v-if="!isSlack">Settings</span>
-                      </SidebarMenuButton>
-                      <span v-if="isSlack" class="text-xs mb-3"> Settings</span>
-                    </div>
-                  </template>
-                </edge-user-menu>
-              </SidebarMenuItem>
-            </SidebarMenu>
-            <SidebarMenu>
-              <SidebarMenuItem :class="sidebarMenuItemClasses">
+              <SidebarMenuItem v-for="item in props.settingsMenuItems" :key="item.title" :class="sidebarMenuItemClasses">
                 <div class="flex flex-col items-center">
-                  <SidebarMenuButton :class="sideBarMenuButtonClasses" tooltip="Logout" @click="edgeGlobal.edgeLogOut(edgeFirebase)">
-                    <LogOut />
-                    <span v-if="!isSlack">Logout</span>
+                  <SidebarMenuButton
+                    :is-active="currentRoutePath.startsWith(item.to)"
+                    :tooltip="item.title"
+                    :class="sideBarMenuButtonClasses"
+                    @click="goTo(item.to)"
+                  >
+                    <component :is="item.icon" :class="sideBarIconClasses" />
+                    <span v-if="!isSlack">{{ item.title }}</span>
                   </SidebarMenuButton>
-                  <span v-if="isSlack" class="text-xs mb-3">Logout</span>
+                  <span v-if="isSlack" class="text-xs mb-3">{{ item.title }}</span>
                 </div>
               </SidebarMenuItem>
+              <template v-if="props.showSettingsSection">
+                <SidebarMenuItem :class="sidebarMenuItemClasses">
+                  <edge-user-menu :title="props.organizationTitle">
+                    <template #trigger>
+                      <div class="flex flex-col items-center">
+                        <SidebarMenuButton :class="sideBarMenuButtonClasses" tooltip="Settings">
+                          <Settings2 />
+                          <span v-if="!isSlack">Settings</span>
+                        </SidebarMenuButton>
+                        <span v-if="isSlack" class="text-xs mb-3"> Settings</span>
+                      </div>
+                    </template>
+                  </edge-user-menu>
+                </SidebarMenuItem>
+                <SidebarMenuItem :class="sidebarMenuItemClasses">
+                  <div class="flex flex-col items-center">
+                    <SidebarMenuButton :class="sideBarMenuButtonClasses" tooltip="Logout" @click="edgeGlobal.edgeLogOut(edgeFirebase)">
+                      <LogOut />
+                      <span v-if="!isSlack">Logout</span>
+                    </SidebarMenuButton>
+                    <span v-if="isSlack" class="text-xs mb-3">Logout</span>
+                  </div>
+                </SidebarMenuItem>
+              </template>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

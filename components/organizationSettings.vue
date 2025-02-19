@@ -154,7 +154,7 @@ const gotoSubscription = async (url) => {
       </div>
     </AlertDescription>
   </Alert>
-  <Card v-if="state.loaded" class="border-0 bg-transparent">
+  <Card v-if="state.loaded" class="border-none shadow-none bg-transparent">
     <edge-shad-form
       :schema="props.formSchema"
       @submit="onSubmit"
