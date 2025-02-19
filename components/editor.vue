@@ -343,7 +343,7 @@ const numColsToTailwind = (cols) => {
         </edge-menu>
       </slot>
       <CardContent class="flex-1 flex flex-col p-0">
-        <slot name="main" :title="title" :working-doc="state.workingDoc">
+        <slot name="main" :title="title" :on-cancel="onCancel" :submitting="state.submitting" :unsaved-changes="unsavedChanges" :working-doc="state.workingDoc">
           <div class="flex flex-wrap py-2 items-center">
             <div v-for="(field, name, index) in props.newDocSchema" :key="index" :class="numColsToTailwind(field.cols)">
               <edge-shad-datepicker
