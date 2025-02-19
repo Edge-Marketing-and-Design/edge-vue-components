@@ -14,7 +14,7 @@ const props = defineProps({
 })
 
 const classes = computed(() => {
-  let combinedClasses = 'relative flex select-none items-center whitespace-nowrap rounded-lg'
+  let combinedClasses = 'relative flex select-none items-center justify-center whitespace-nowrap rounded-lg'
   if (props.variant === 'filled') {
     combinedClasses += ' font-sans text-xs '
   }
