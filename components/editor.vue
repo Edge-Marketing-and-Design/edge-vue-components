@@ -302,7 +302,7 @@ const numColsToTailwind = (cols) => {
       class="flex flex-col flex-1"
       @submit="onSubmit"
     >
-      <slot name="header" :on-cancel="onCancel" :submitting="state.submitting" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc">
+      <slot name="header" :on-submit="onSubmit" :on-cancel="onCancel" :submitting="state.submitting" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc">
         <edge-menu v-if="props.showHeader" class="py-2 bg-primary text-primary-foreground">
           <template #start>
             <slot name="header-start" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc">
@@ -343,7 +343,7 @@ const numColsToTailwind = (cols) => {
         </edge-menu>
       </slot>
       <CardContent class="flex-1 flex flex-col p-0">
-        <slot name="main" :title="title" :on-cancel="onCancel" :submitting="state.submitting" :unsaved-changes="unsavedChanges" :working-doc="state.workingDoc">
+        <slot name="main" :title="title" :on-cancel="onCancel" :submitting="state.submitting" :unsaved-changes="unsavedChanges" :on-submit="onSubmit" :working-doc="state.workingDoc">
           <div class="flex flex-wrap py-2 items-center">
             <div v-for="(field, name, index) in props.newDocSchema" :key="index" :class="numColsToTailwind(field.cols)">
               <edge-shad-datepicker
@@ -396,7 +396,7 @@ const numColsToTailwind = (cols) => {
         </edge-shad-dialog>
       </CardContent>
       <CardFooter v-if="showFooter" class="flex gap-1">
-        <slot name="footer" :unsaved-changes="unsavedChanges" :title="title" :submitting="state.submitting" :working-doc="state.workingDoc">
+        <slot name="footer" :on-submit="onSubmit" :unsaved-changes="unsavedChanges" :title="title" :submitting="state.submitting" :working-doc="state.workingDoc">
           <edge-shad-button
             v-if="!unsavedChanges"
             class="bg-red-700 uppercase h-8 hover:bg-slate-400 w-20"
