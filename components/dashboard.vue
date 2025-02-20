@@ -483,6 +483,7 @@ const searchDropDown = computed(() => {
                   v-else
                   v-model="state.queryValue"
                   name="filter"
+                  class="text-foreground"
                   placeholder="Search For..."
                 />
               </div>
