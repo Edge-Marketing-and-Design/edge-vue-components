@@ -1,5 +1,6 @@
 <script setup>
 import { useForm } from 'vee-validate'
+
 const props = defineProps({
   schema: {
     type: Object,
@@ -20,6 +21,7 @@ const form = useForm({
   validationSchema: schema,
   initialValues: initialValues.value,
 })
+
 const onSubmit = form.handleSubmit(
   async (values) => {
     emit('submit', values)
@@ -31,6 +33,11 @@ const onSubmit = form.handleSubmit(
     }
   },
 )
+
+// Expose form methods for parent components
+defineExpose({
+  handleSubmit: form.handleSubmit,
+})
 </script>
 
 <template>
@@ -38,6 +45,3 @@ const onSubmit = form.handleSubmit(
     <slot />
   </form>
 </template>
-
-<style lang="scss" scoped>
-</style>

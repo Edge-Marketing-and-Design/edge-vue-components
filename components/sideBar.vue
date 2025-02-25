@@ -70,15 +70,20 @@ const {
   isMobile: sidebarIsMobile,
 } = useSidebar()
 
+edgeGlobal.edgeState.sidebar = useSidebar()
+
 // Sidebar props:
 // variant: 'sidebar' | 'floating'
-// collapsible: 'offcanvas' | 'icon' | 'none' | 'slack'
+// collapsible: 'offcanvas' | 'icon' | 'none' | 'slack' | 'submenu'
 // side: 'left' | 'right'
 
 // https://ui.shadcn.com/docs/components/sidebar
 
 const collapsible = computed(() => {
   if (props.collapsible === 'slack') {
+    if (sidebarIsMobile.value) {
+      return 'offcanvas'
+    }
     return 'none'
   }
   if (props.collapsible === 'submenu') {
@@ -99,6 +104,9 @@ const collapsible = computed(() => {
 
 const slots = useSlots()
 const isNested = computed(() => {
+  if (sidebarIsMobile.value) {
+    return false
+  }
   const nestedMenuSlot = slots['nested-menu']
   if (!nestedMenuSlot) {
     return false
@@ -110,7 +118,7 @@ const isNested = computed(() => {
 const styleOverrides = computed(() => {
   const styles = {}
 
-  if (props.collapsible === 'slack') {
+  if (props.collapsible === 'slack' && !sidebarIsMobile.value) {
     styles['--sidebar-width'] = '80px'
     styles['--sidebar-width-icon'] = '80px'
   }
@@ -120,7 +128,7 @@ const styleOverrides = computed(() => {
 </script>
 
 <template>
-  <Sidebar v-if="isNested" collapsible="icon" class="g-transparent shadow-none overflow-hidden [&>[data-sidebar=sidebar]]:flex-row">
+  <Sidebar v-if="isNested" collapsible="icon" class="bg-transparent shadow-none overflow-hidden [&>[data-sidebar=sidebar]]:flex-row">
     <Sidebar side="left" v-bind="attrs" :style="styleOverrides" :collapsible="collapsible">
       <SidebarHeader :class="props.headerClasses">
         <slot name="header" :side-bar-state="sidebarState" />

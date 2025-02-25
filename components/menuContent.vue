@@ -42,6 +42,21 @@ const props = defineProps({
     required: false,
     default: '',
   },
+  showStart: {
+    type: Boolean,
+    required: false,
+    default: true,
+  },
+  showEnd: {
+    type: Boolean,
+    required: false,
+    default: true,
+  },
+  showCenter: {
+    type: Boolean,
+    required: false,
+    default: true,
+  },
 })
 
 const route = useRoute()
@@ -64,7 +79,7 @@ const startsWithCurrentRoute = (path) => {
 </script>
 
 <template>
-  <div class="flex items-center gap-1">
+  <div v-if="props.showStart" class="flex items-center gap-1">
     <slot name="start">
       <Package class="h-6 w-6 mr-2" />
       <h1 class="text-xl font-bold">
@@ -72,11 +87,10 @@ const startsWithCurrentRoute = (path) => {
       </h1>
     </slot>
   </div>
-  <div class="grow flex items-center gap-1">
+  <div v-if="props.showCenter" class="grow flex items-center gap-1">
     <slot name="center" />
-    <div class="grow">
+    <div v-if="props.menuItems.length > 0" class="grow">
       <nav
-        v-if="props.menuItems.length > 0"
         :class="cn('justify-center ml-4 hidden flex-col gap-3 text-lg font-medium md:flex md:flex-row md:items-center md:gap-2 md:text-sm lg:gap-3', navClass)"
       >
         <edge-shad-button
@@ -104,7 +118,7 @@ const startsWithCurrentRoute = (path) => {
       </nav>
     </div>
   </div>
-  <div class="flex items-center gap-1">
+  <div v-if="props.showEnd" class="flex items-center gap-1">
     <slot name="end">
       <div class="grow text-right">
         <edge-user-menu button-class="bg-primary" />

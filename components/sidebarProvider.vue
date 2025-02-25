@@ -9,7 +9,6 @@ const props = defineProps({
     default: false,
   },
 })
-
 const styleOverrides = computed(() => {
   if (props.collapsible === 'slack' && props.enableNestedMenu) {
     return {
@@ -23,7 +22,9 @@ const styleOverrides = computed(() => {
 
 <template>
   <SidebarProvider :style="styleOverrides">
-    <slot :collapsible="props.collapsible" />
+    <slot
+      :collapsible="props.collapsible"
+    />
   </SidebarProvider>
 </template>
 

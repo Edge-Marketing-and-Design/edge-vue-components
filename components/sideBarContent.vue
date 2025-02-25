@@ -53,22 +53,27 @@ const props = defineProps({
   },
 })
 
+const {
+  state: sidebarState,
+  isMobile: sidebarIsMobile,
+} = useSidebar()
+
 const sidebarMenuItemClasses = computed(() => {
-  if (props.collapsible === 'slack') {
+  if (props.collapsible === 'slack' && !sidebarIsMobile.value) {
     return 'justify-center flex'
   }
   return ''
 })
 
 const sideBarMenuButtonClasses = computed(() => {
-  if (props.collapsible === 'slack') {
+  if (props.collapsible === 'slack' && !sidebarIsMobile.value) {
     return 'w-8 h-8 rounded-[6px] flex items-center justify-center'
   }
   return ''
 })
 
 const sideBarButtonStyles = computed(() => {
-  if (props.collapsible === 'slack') {
+  if (props.collapsible === 'slack' && !sidebarIsMobile.value) {
     return {
       padding: '0 !important',
       width: 'auto !important',
@@ -79,13 +84,16 @@ const sideBarButtonStyles = computed(() => {
 })
 
 const sideBarIconClasses = computed(() => {
-  if (props.collapsible === 'slack') {
+  if (props.collapsible === 'slack' && !sidebarIsMobile.value) {
     return '!w-5 !h-5'
   }
   return ''
 })
 
 const isSlack = computed(() => {
+  if (sidebarIsMobile.value) {
+    return false
+  }
   return props.collapsible === 'slack'
 })
 
@@ -96,10 +104,6 @@ const router = useRouter()
 const goTo = (path) => {
   router.push(path)
 }
-
-const {
-  state: sidebarState,
-} = useSidebar()
 
 const currentRoutePath = computed(() => {
   return route.fullPath.endsWith('/') ? route.fullPath.slice(0, -1) : route.fullPath

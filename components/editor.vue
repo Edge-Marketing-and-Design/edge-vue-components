@@ -1,5 +1,6 @@
 <script setup>
 import { cn } from '@/lib/utils'
+
 const props = defineProps({
   docId: {
     type: String,
@@ -175,6 +176,7 @@ const title = computed(() => {
 })
 
 const onSubmit = async () => {
+  console.log(state.workingDoc)
   state.submitting = true
   state.bypassUnsavedChanges = true
   Object.keys(state.workingDoc).forEach((key) => {
@@ -291,18 +293,27 @@ const numColsToTailwind = (cols) => {
   }
   return `w-${cols}/12`
 }
+
+const formRef = ref(null)
+
+const triggerSubmit = () => {
+  if (formRef.value) {
+    formRef.value.handleSubmit(onSubmit)()
+  }
+}
 </script>
 
 <template>
   <Card v-if="state.afterMount" :class="cn('m-auto bg-muted/50 w-full flex flex-col', props.class)">
     <edge-shad-form
+      ref="formRef"
       v-model="state.form"
       :schema="props.schema"
       :initial-values="state.workingDoc"
       class="flex flex-col flex-1"
       @submit="onSubmit"
     >
-      <slot name="header" :on-submit="onSubmit" :on-cancel="onCancel" :submitting="state.submitting" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc">
+      <slot name="header" :on-submit="triggerSubmit" :on-cancel="onCancel" :submitting="state.submitting" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc">
         <edge-menu v-if="props.showHeader" class="py-2 bg-primary text-primary-foreground">
           <template #start>
             <slot name="header-start" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc">
@@ -343,7 +354,7 @@ const numColsToTailwind = (cols) => {
         </edge-menu>
       </slot>
       <CardContent class="flex-1 flex flex-col p-0">
-        <slot name="main" :title="title" :on-cancel="onCancel" :submitting="state.submitting" :unsaved-changes="unsavedChanges" :on-submit="onSubmit" :working-doc="state.workingDoc">
+        <slot name="main" :title="title" :on-cancel="onCancel" :submitting="state.submitting" :unsaved-changes="unsavedChanges" :on-submit="triggerSubmit" :working-doc="state.workingDoc">
           <div class="flex flex-wrap py-2 items-center">
             <div v-for="(field, name, index) in props.newDocSchema" :key="index" :class="numColsToTailwind(field.cols)">
               <edge-shad-datepicker
@@ -396,7 +407,7 @@ const numColsToTailwind = (cols) => {
         </edge-shad-dialog>
       </CardContent>
       <CardFooter v-if="showFooter" class="flex gap-1">
-        <slot name="footer" :on-submit="onSubmit" :unsaved-changes="unsavedChanges" :title="title" :submitting="state.submitting" :working-doc="state.workingDoc">
+        <slot name="footer" :on-submit="triggerSubmit" :unsaved-changes="unsavedChanges" :title="title" :submitting="state.submitting" :working-doc="state.workingDoc">
           <edge-shad-button
             v-if="!unsavedChanges"
             class="bg-red-700 uppercase h-8 hover:bg-slate-400 w-20"

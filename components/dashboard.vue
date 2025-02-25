@@ -427,89 +427,91 @@ const searchDropDown = computed(() => {
 
 <template>
   <Card v-if="state.afterMount" :class="cn('mx-auto bg-muted/50 w-full', props.class)">
-    <edge-menu class="bg-primary text-primary-foreground" :class="props.headerClass">
-      <template #start>
-        <slot name="header-start">
-          <LayoutDashboard class="mr-2" />
-          {{ capitalizeFirstLetter(props.collection) }}
-        </slot>
-      </template>
-      <template #center>
-        <slot name="header-center" :filter="state.filter">
-          <div v-if="!props.hideSearch" class="w-full px-6">
-            <edge-shad-input
-              v-if="props.searchFields.length === 0"
-              v-model="state.filter"
-              label=""
-              name="filter"
-              placeholder="Search..."
-            />
-            <div v-else class="py-0 flex gap-2 w-full">
-              <div class="w-48">
-                <edge-shad-select
-                  v-model="state.queryField"
-                  :items="props.searchFields"
-                  class="uppercase"
-                  name="search"
-                />
-              </div>
-              <div v-if="props.searchFields.find(field => field.name === state.queryField)?.operators">
-                <edge-shad-select
-                  v-model="state.queryOperator"
-                  :items="props.searchFields.find(field => field.name === state.queryField)?.operators"
-                  item-title="title"
-                  item-value="operator"
-                  name="operator"
-                  class="uppercase"
-                />
-              </div>
-              <div class="flex-grow">
-                <div v-if="searchDropDown" class="py-1">
-                  <edge-shad-combobox
+    <slot name="header">
+      <edge-menu class="bg-primary text-primary-foreground" :class="props.headerClass">
+        <template #start>
+          <slot name="header-start">
+            <LayoutDashboard class="mr-2" />
+            {{ capitalizeFirstLetter(props.collection) }}
+          </slot>
+        </template>
+        <template #center>
+          <slot name="header-center" :filter="state.filter">
+            <div v-if="!props.hideSearch" class="w-full px-6">
+              <edge-shad-input
+                v-if="props.searchFields.length === 0"
+                v-model="state.filter"
+                label=""
+                name="filter"
+                placeholder="Search..."
+              />
+              <div v-else class="py-0 flex gap-2 w-full">
+                <div class="w-48">
+                  <edge-shad-select
+                    v-model="state.queryField"
+                    :items="props.searchFields"
+                    class="uppercase"
+                    name="search"
+                  />
+                </div>
+                <div v-if="props.searchFields.find(field => field.name === state.queryField)?.operators">
+                  <edge-shad-select
+                    v-model="state.queryOperator"
+                    :items="props.searchFields.find(field => field.name === state.queryField)?.operators"
+                    item-title="title"
+                    item-value="operator"
+                    name="operator"
+                    class="uppercase"
+                  />
+                </div>
+                <div class="flex-grow">
+                  <div v-if="searchDropDown" class="py-1">
+                    <edge-shad-combobox
+                      v-model="state.queryValue"
+                      :items="searchDropDown"
+                      name="filter"
+                      placeholder="Search For..."
+                    />
+                  </div>
+                  <div v-else-if="props.searchFields.find(field => field.name === state.queryField)?.fieldType === 'date'" class="py-1">
+                    <edge-shad-datepicker
+                      v-model="state.queryValue"
+                      name="filter"
+                      placeholder="Search For..."
+                    />
+                  </div>
+                  <edge-shad-input
+                    v-else
                     v-model="state.queryValue"
-                    :items="searchDropDown"
                     name="filter"
+                    class="text-foreground"
                     placeholder="Search For..."
                   />
                 </div>
-                <div v-else-if="props.searchFields.find(field => field.name === state.queryField)?.fieldType === 'date'" class="py-1">
-                  <edge-shad-datepicker
-                    v-model="state.queryValue"
-                    name="filter"
-                    placeholder="Search For..."
-                  />
-                </div>
-                <edge-shad-input
-                  v-else
-                  v-model="state.queryValue"
-                  name="filter"
-                  class="text-foreground"
-                  placeholder="Search For..."
-                />
               </div>
             </div>
-          </div>
-        </slot>
-      </template>
-      <template #end>
-        <slot v-if="props.paginated" name="header-end" :record-count="state.staticSearch?.results?.total" :title="singularize(props.collection)">
-          <edge-shad-button v-if="!props.paginated" class="uppercase bg-slate-600" :to="`/app/dashboard/${props.collection}/new`">
-            Add {{ singularize(props.collection) }}
-          </edge-shad-button>
-          <span v-else>
-            {{ state.staticSearch.results.total.toLocaleString() }} records
-          </span>
-        </slot>
-        <slot v-else name="header-end" :record-count="filtered.length" :title="singularize(props.collection)">
-          <edge-shad-button v-if="!props.paginated" class="uppercase bg-slate-600" :to="`/app/dashboard/${props.collection}/new`">
-            Add {{ singularize(props.collection) }}
-          </edge-shad-button>
-          <span v-else>
-            {{ state.staticSearch.results.total.toLocaleString() }} records
-          </span>
-        </slot>
-      </template>
-    </edge-menu>
+          </slot>
+        </template>
+        <template #end>
+          <slot v-if="props.paginated" name="header-end" :record-count="state.staticSearch?.results?.total" :title="singularize(props.collection)">
+            <edge-shad-button v-if="!props.paginated" class="uppercase bg-slate-600" :to="`/app/dashboard/${props.collection}/new`">
+              Add {{ singularize(props.collection) }}
+            </edge-shad-button>
+            <span v-else>
+              {{ state.staticSearch.results.total.toLocaleString() }} records
+            </span>
+          </slot>
+          <slot v-else name="header-end" :record-count="filtered.length" :title="singularize(props.collection)">
+            <edge-shad-button v-if="!props.paginated" class="uppercase bg-slate-600" :to="`/app/dashboard/${props.collection}/new`">
+              Add {{ singularize(props.collection) }}
+            </edge-shad-button>
+            <span v-else>
+              {{ state.staticSearch.results.total.toLocaleString() }} records
+            </span>
+          </slot>
+        </template>
+      </edge-menu>
+    </slot>
     <div v-if="$slots['list-header']" class="flex flex-wrap items-center py-0 mx-8 text-sm">
       <slot name="list-header" />
     </div>

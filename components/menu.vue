@@ -42,6 +42,21 @@ const props = defineProps({
     required: false,
     default: '',
   },
+  showStart: {
+    type: Boolean,
+    required: false,
+    default: true,
+  },
+  showEnd: {
+    type: Boolean,
+    required: false,
+    default: true,
+  },
+  showCenter: {
+    type: Boolean,
+    required: false,
+    default: true,
+  },
 })
 
 const typeClasses = computed(() => {
@@ -56,18 +71,18 @@ const typeClasses = computed(() => {
 <template>
   <Card
     v-if="props.type === 'Card'"
-    :class="cn(typeClasses[props.type], 'z-10 flex items-center gap-1  px-4 flex-shrink-0', props.class)"
+    :class="cn(typeClasses[props.type], 'z-10 flex items-center gap-1 px-4 flex-shrink-0', props.class)"
   >
     <edge-menu-content
       v-bind="props"
     >
-      <template #start>
+      <template v-if="props.showStart" #start>
         <slot name="start" />
       </template>
-      <template #center>
+      <template v-if="props.showCenter" #center>
         <slot name="center" />
       </template>
-      <template #end>
+      <template v-if="props.showEnd" #end>
         <slot name="end" />
       </template>
     </edge-menu-content>
@@ -80,13 +95,13 @@ const typeClasses = computed(() => {
     <edge-menu-content
       v-bind="props"
     >
-      <template #start>
+      <template v-if="props.showStart" #start>
         <slot name="start" />
       </template>
-      <template #center>
+      <template v-if="props.showCenter" #center>
         <slot name="center" />
       </template>
-      <template #end>
+      <template v-if="props.showEnd" #end>
         <slot name="end" />
       </template>
     </edge-menu-content>
@@ -98,13 +113,13 @@ const typeClasses = computed(() => {
     <edge-menu-content
       v-bind="props"
     >
-      <template #start>
+      <template v-if="props.showStart" #start>
         <slot name="start" />
       </template>
-      <template #center>
+      <template v-if="props.showCenter" #center>
         <slot name="center" />
       </template>
-      <template #end>
+      <template v-if="props.showEnd" #end>
         <slot name="end" />
       </template>
     </edge-menu-content>

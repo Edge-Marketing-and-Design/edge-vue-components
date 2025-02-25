@@ -43,21 +43,23 @@ const handleChange = (value) => {
 <template>
   <div>
     <FormField v-slot="{ handleChange: formHandleChange }" :name="props.name">
-      <FormItem :class="cn('flex flex-row items-center justify-between rounded-lg border p-4', props.class)">
-        <div class="mr-3">
-          <FormLabel class="text-base">
-            {{ props.label }}
-          </FormLabel>
-          <FormDescription>
-            <slot />
-          </FormDescription>
+      <FormItem :class="cn('flex flex-row items-center justify-between', props.class)">
+        <div class="flex flex-row items-center w-full">
+          <div class="grow">
+            <FormLabel class="text-base">
+              {{ props.label }}
+            </FormLabel>
+            <FormDescription>
+              <slot />
+            </FormDescription>
+          </div>
+          <FormControl>
+            <Switch
+              :checked="modelValue"
+              @update:checked="(value) => { handleChange(value); formHandleChange(value); }"
+            />
+          </FormControl>
         </div>
-        <FormControl id="test">
-          <Switch
-            :checked="modelValue"
-            @update:checked="(value) => { handleChange(value); formHandleChange(value); }"
-          />
-        </FormControl>
       </FormItem>
     </FormField>
   </div>
