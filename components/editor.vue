@@ -43,6 +43,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  noCloseAfterSave: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const newDoc = computed(() => {
@@ -197,6 +201,10 @@ const onSubmit = async () => {
   const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, state.workingDoc)
   state.workingDoc.docId = result.meta.docId
   edgeGlobal.edgeState.lastPaginatedDoc = state.workingDoc
+  if (props.noCloseAfterSave) {
+    state.submitting = false
+    return
+  }
   edgeGlobal.edgeState.changeTracker = {}
   state.workingDoc = {}
   if (props.saveRedirectOverride) {
