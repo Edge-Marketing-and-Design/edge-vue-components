@@ -69,6 +69,23 @@ const classComputed = computed(() => {
   }
   return props.class
 })
+
+const inputRef = ref(null) // Reference to the input field
+
+const onInputChange = (e) => {
+  if (e.target.value !== modelValue.value) {
+    modelValue.value = e.target.value // Sync value only if changed
+  }
+}
+
+// Check for pre-filled (autofilled) value on mount
+onMounted(() => {
+  nextTick(() => {
+    if (inputRef.value?.value && inputRef.value.value !== modelValue.value) {
+      modelValue.value = inputRef.value.value
+    }
+  })
+})
 </script>
 
 <template>
@@ -85,14 +102,17 @@ const classComputed = computed(() => {
           <div class="relative w-full  items-center">
             <Input
               :id="props.name"
+              ref="inputRef"
               v-model="modelValue"
               v-maska:[props.maskOptions]
+              :name="props.name"
               :default-value="props.modelValue"
               :class="classComputed"
               :type="state.type"
               v-bind="componentField"
               :placeholder="props.placeholder"
               :disabled="props.disabled"
+              @change="onInputChange"
               @blur="$emit('blur', $event)"
             />
             <span class="absolute end-0 inset-y-0 flex items-center justify-center px-2">
