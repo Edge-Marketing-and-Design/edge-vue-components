@@ -92,7 +92,6 @@ const subCollection = (collection) => {
 }
 
 onBeforeRouteLeave((to, from, next) => {
-  console.log('testing!!!!')
   state.bypassRoute = to.path
   if (unsavedChanges.value && !state.bypassUnsavedChanges) {
     state.dialog = true
