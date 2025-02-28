@@ -1,6 +1,4 @@
 <script setup>
-import Flipbook from 'flipbook-vue'
-import { ChevronRightCircle } from 'lucide-vue-next'
 const props = defineProps({
   magazine: {
     type: Object,
@@ -38,14 +36,29 @@ const pagesHighRes = computed(() => {
 </script>
 
 <template>
-  <Flipbook v-if="props.effect === 'flip'" v-slot="flipbookSlot" class="h-full w-full" :gloss="1" :pages-hi-res="pagesHighRes" :flip-duration="500" :pages="pages">
-    <edge-shad-button variant="icon" @click.prevent.stop="flipbookSlot.flipLeft">
-      <ChevronLeftCircle />
-    </edge-shad-button>
-    <edge-shad-button variant="icon" @click.prevent.stop="flipbookSlot.flipRight">
-      <ChevronRightCircle />
-    </edge-shad-button>
-  </Flipbook>
+  <EdgeFlip
+    v-if="props.effect === 'flip'"
+    ref="flipbookRef" v-slot="flipbook" class="w-full bg-[#F7F9F8] h-full px-4 pt-8 pb-14"
+    :magazine="props.magazine"
+    :flip-duration="1000" :centering="false" :n-polygons="2"
+  >
+    <div class="flex items-center justify-center w-full gap-1 my-2 mb-4">
+      <Button variant="outline" :disabled="!flipbook.canFlipLeft" size="sm" @click="flipbook.flipLeft">
+        <ChevronLeftCircle class="m-1" :size="24" />
+      </Button>
+
+      <div class="mx-2 font-medium">
+        Page {{ flipbook.page }} of {{ flipbook.numPages }}
+      </div>
+
+      <Button variant="outline" :disabled="!flipbook.canFlipRight" size="sm" @click="flipbook.flipRight">
+        <ChevronRightCircle class="m-1" :size="24" />
+      </Button>
+      <Button @click="flipbook.openFullscreen(flipbook.viewport)">
+        <Fullscreen class="m-1" :size="24" />
+      </Button>
+    </div>
+  </EdgeFlip>
 
   <Carousel
     v-else-if="props.effect === 'slide'"
@@ -74,8 +87,4 @@ const pagesHighRes = computed(() => {
 </template>
 
 <style>
-.flipbook {
-  width: 90vw;
-  height: 90vh;
-}
 </style>
