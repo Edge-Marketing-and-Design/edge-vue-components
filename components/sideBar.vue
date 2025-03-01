@@ -61,6 +61,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  iconClasses: {
+    type: String,
+    default: '',
+  },
 })
 
 const attrs = useAttrs()

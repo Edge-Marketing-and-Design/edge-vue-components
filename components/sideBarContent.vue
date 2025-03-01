@@ -59,6 +59,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  iconClasses: {
+    type: String,
+    default: '',
+  },
 })
 
 const {
@@ -93,9 +97,9 @@ const sideBarButtonStyles = computed(() => {
 
 const sideBarIconClasses = computed(() => {
   if (props.collapsible === 'slack' && !sidebarIsMobile.value) {
-    return '!w-5 !h-5'
+    return `!w-5 !h-5${props.iconClasses ? ` ${props.iconClasses}` : ''}`
   }
-  return ''
+  return `${props.iconClasses ? ` ${props.iconClasses}` : ''}`
 })
 
 const sidebarGroupClasses = computed(() => {
@@ -187,7 +191,7 @@ const currentRoutePath = computed(() => {
                   <template #trigger>
                     <div class="flex flex-col items-center w-full">
                       <SidebarMenuButton :class="sideBarMenuButtonClasses" tooltip="Settings">
-                        <Settings2 class="[stroke-width:1]" />
+                        <Settings2 :class="sideBarIconClasses" class="[stroke-width:1]" />
                         <span v-if="!isSlack">Settings</span>
                         <span v-else class="text-xs">Settings</span>
                       </SidebarMenuButton>
@@ -198,7 +202,7 @@ const currentRoutePath = computed(() => {
               <SidebarMenuItem v-if="!props.hideLogout" :class="sidebarMenuItemClasses">
                 <div class="flex flex-col items-center w-full">
                   <SidebarMenuButton :class="sideBarMenuButtonClasses" tooltip="Logout" @click="edgeGlobal.edgeLogOut(edgeFirebase)">
-                    <LogOut class="[stroke-width:1]" />
+                    <LogOut :class="sideBarIconClasses" class="[stroke-width:1]" />
                     <span v-if="!isSlack">Logout</span>
                     <span v-else class="text-xs">Logout</span>
                   </SidebarMenuButton>
