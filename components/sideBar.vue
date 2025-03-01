@@ -53,6 +53,14 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  buttonClasses: {
+    type: String,
+    default: '',
+  },
+  hideLogout: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const attrs = useAttrs()
@@ -119,8 +127,8 @@ const styleOverrides = computed(() => {
   const styles = {}
 
   if (props.collapsible === 'slack' && !sidebarIsMobile.value) {
-    styles['--sidebar-width'] = '80px'
-    styles['--sidebar-width-icon'] = '80px'
+    styles['--sidebar-width'] = '97px'
+    styles['--sidebar-width-icon'] = '97px'
   }
 
   return styles
@@ -141,7 +149,7 @@ const styleOverrides = computed(() => {
       <SidebarFooter :class="props.footerClasses">
         <slot name="footer" :side-bar-state="sidebarState" />
       </SidebarFooter>
-      <SidebarRail v-if="props.showRail">
+      <SidebarRail v-if="props.showRail && props.collapsible !== 'slack'">
         <slot name="rail" :side-bar-state="sidebarState" />
       </SidebarRail>
     </Sidebar>
@@ -159,7 +167,7 @@ const styleOverrides = computed(() => {
     <SidebarFooter :class="props.footerClasses">
       <slot name="footer" :side-bar-state="sidebarState" />
     </SidebarFooter>
-    <SidebarRail v-if="props.showRail">
+    <SidebarRail v-if="props.showRail && props.collapsible !== 'slack'">
       <slot name="rail" :side-bar-state="sidebarState" />
     </SidebarRail>
   </Sidebar>

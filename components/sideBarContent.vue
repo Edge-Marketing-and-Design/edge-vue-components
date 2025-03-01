@@ -51,6 +51,14 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  buttonClasses: {
+    type: String,
+    default: '',
+  },
+  hideLogout: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const {
@@ -60,14 +68,14 @@ const {
 
 const sidebarMenuItemClasses = computed(() => {
   if (props.collapsible === 'slack' && !sidebarIsMobile.value) {
-    return 'justify-center flex'
+    return 'justify-center flex w-full'
   }
   return ''
 })
 
 const sideBarMenuButtonClasses = computed(() => {
   if (props.collapsible === 'slack' && !sidebarIsMobile.value) {
-    return 'w-8 h-8 rounded-[6px] flex items-center justify-center'
+    return `w-full h-[78px] rounded-[0px] flex flex-col items-center justify-center ${props.buttonClasses}`
   }
   return ''
 })
@@ -86,6 +94,20 @@ const sideBarButtonStyles = computed(() => {
 const sideBarIconClasses = computed(() => {
   if (props.collapsible === 'slack' && !sidebarIsMobile.value) {
     return '!w-5 !h-5'
+  }
+  return ''
+})
+
+const sidebarGroupClasses = computed(() => {
+  if (props.collapsible === 'slack' && !sidebarIsMobile.value) {
+    return 'px-0 pt-0'
+  }
+  return ''
+})
+
+const sidebarMenuClasses = computed(() => {
+  if (props.collapsible === 'slack' && !sidebarIsMobile.value) {
+    return 'gap-0'
   }
   return ''
 })
@@ -111,45 +133,41 @@ const currentRoutePath = computed(() => {
 </script>
 
 <template>
-  <SidebarHeader :class="props.headerClasses">
-    <slot name="header" :side-bar-state="sidebarState" />
-  </SidebarHeader>
-  <SidebarContent :class="props.contentClasses">
+  <SidebarContent class="gap-0" :class="props.contentClasses">
     <slot name="content" :side-bar-state="sidebarState">
-      <SidebarGroup>
+      <SidebarGroup class="pb-0" :class="sidebarGroupClasses">
         <SidebarGroupLabel v-if="props.title" :class="props.groupLabelClasses">
           {{ props.title }}
         </SidebarGroupLabel>
         <SidebarGroupContent>
-          <SidebarMenu>
+          <SidebarMenu :class="sidebarMenuClasses">
             <slot name="menu">
               <SidebarMenuItem v-for="item in props.menuItems" :key="item.title" :class="sidebarMenuItemClasses">
-                <div class="flex flex-col items-center">
+                <div class="flex flex-col items-center w-full">
                   <SidebarMenuButton
                     :is-active="currentRoutePath.startsWith(item.to)"
                     :tooltip="item.title"
                     :class="sideBarMenuButtonClasses"
                     @click="goTo(item.to)"
                   >
-                    <component :is="item.icon" :class="sideBarIconClasses" />
+                    <component :is="item.icon" class="[stroke-width:1]" :class="sideBarIconClasses" />
                     <span v-if="!isSlack">{{ item.title }}</span>
+                    <span v-else class="text-xs">{{ item.title }}</span>
                   </SidebarMenuButton>
-                  <span v-if="isSlack" class="text-xs mb-3">{{ item.title }}</span>
                 </div>
               </SidebarMenuItem>
             </slot>
           </SidebarMenu>
         </SidebarGroupContent>
       </SidebarGroup>
-      <SidebarGroup>
-        <CommandSeparator class="mb-3" />
+      <SidebarGroup class="pt-0" :class="sidebarGroupClasses">
         <SidebarGroupLabel v-if="props.settingsTitle" :class="props.groupLabelClasses">
           {{ props.settingsTitle }}
         </SidebarGroupLabel>
         <SidebarGroupContent>
-          <SidebarMenu>
+          <SidebarMenu :class="sidebarMenuClasses">
             <SidebarMenuItem v-for="item in props.settingsMenuItems" :key="item.title" :class="sidebarMenuItemClasses">
-              <div class="flex flex-col items-center">
+              <div class="flex flex-col items-center w-full">
                 <SidebarMenuButton
                   :is-active="currentRoutePath.startsWith(item.to)"
                   :tooltip="item.title"
@@ -157,33 +175,33 @@ const currentRoutePath = computed(() => {
                   :style="sideBarButtonStyles"
                   @click="goTo(item.to)"
                 >
-                  <component :is="item.icon" :class="sideBarIconClasses" />
+                  <component :is="item.icon" class="[stroke-width:1]" :class="sideBarIconClasses" />
                   <span v-if="!isSlack">{{ item.title }}</span>
+                  <span v-else class="text-xs">{{ item.title }}</span>
                 </SidebarMenuButton>
-                <span v-if="isSlack" class="text-xs mb-3">{{ item.title }}</span>
               </div>
             </SidebarMenuItem>
             <template v-if="props.showSettingsSection">
               <SidebarMenuItem :class="sidebarMenuItemClasses">
-                <edge-user-menu :title="props.organizationTitle">
+                <edge-user-menu class="w-full" :title="props.organizationTitle">
                   <template #trigger>
-                    <div class="flex flex-col items-center">
+                    <div class="flex flex-col items-center w-full">
                       <SidebarMenuButton :class="sideBarMenuButtonClasses" tooltip="Settings">
-                        <Settings2 />
+                        <Settings2 class="[stroke-width:1]" />
                         <span v-if="!isSlack">Settings</span>
+                        <span v-else class="text-xs">Settings</span>
                       </SidebarMenuButton>
-                      <span v-if="isSlack" class="text-xs mb-3"> Settings</span>
                     </div>
                   </template>
                 </edge-user-menu>
               </SidebarMenuItem>
-              <SidebarMenuItem :class="sidebarMenuItemClasses">
-                <div class="flex flex-col items-center">
+              <SidebarMenuItem v-if="!props.hideLogout" :class="sidebarMenuItemClasses">
+                <div class="flex flex-col items-center w-full">
                   <SidebarMenuButton :class="sideBarMenuButtonClasses" tooltip="Logout" @click="edgeGlobal.edgeLogOut(edgeFirebase)">
-                    <LogOut />
+                    <LogOut class="[stroke-width:1]" />
                     <span v-if="!isSlack">Logout</span>
+                    <span v-else class="text-xs">Logout</span>
                   </SidebarMenuButton>
-                  <span v-if="isSlack" class="text-xs mb-3">Logout</span>
                 </div>
               </SidebarMenuItem>
             </template>
