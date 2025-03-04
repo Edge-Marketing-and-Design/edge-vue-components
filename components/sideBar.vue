@@ -1,5 +1,5 @@
 <script setup>
-import { useAttrs, useSlots } from 'vue'
+import { useAttrs } from 'vue'
 import {
   Sidebar,
   useSidebar,
@@ -107,26 +107,6 @@ const collapsible = computed(() => {
   return props.collapsible
 })
 
-// const sidebarClasses = computed(() => {
-//   if (props.collapsible === 'slack') {
-//     return 'w-[80px] !min-w-[80px]'
-//   }
-//   return ''
-// })
-
-const slots = useSlots()
-const isNested = computed(() => {
-  if (sidebarIsMobile.value) {
-    return false
-  }
-  const nestedMenuSlot = slots['nested-menu']
-  if (!nestedMenuSlot) {
-    return false
-  }
-  const slotContent = nestedMenuSlot()
-  return slotContent.length > 0 && slotContent.some(node => node.children && node.children.length > 0)
-})
-
 const styleOverrides = computed(() => {
   const styles = {}
 
@@ -140,26 +120,7 @@ const styleOverrides = computed(() => {
 </script>
 
 <template>
-  <Sidebar v-if="isNested" collapsible="icon" class="bg-transparent shadow-none overflow-hidden [&>[data-sidebar=sidebar]]:flex-row">
-    <Sidebar side="left" v-bind="attrs" :style="styleOverrides" :collapsible="collapsible">
-      <SidebarHeader :class="props.headerClasses">
-        <slot name="header" :side-bar-state="sidebarState" />
-      </SidebarHeader>
-      <slot name="content">
-        <edge-side-bar-content
-          v-bind="props"
-        />
-      </slot>
-      <SidebarFooter :class="props.footerClasses">
-        <slot name="footer" :side-bar-state="sidebarState" />
-      </SidebarFooter>
-      <SidebarRail v-if="props.showRail && props.collapsible !== 'slack'">
-        <slot name="rail" :side-bar-state="sidebarState" />
-      </SidebarRail>
-    </Sidebar>
-    <slot name="nested-menu" />
-  </Sidebar>
-  <Sidebar v-else :style="styleOverrides" side="left" v-bind="attrs" :collapsible="collapsible">
+  <Sidebar :style="styleOverrides" side="left" v-bind="attrs" :collapsible="collapsible">
     <SidebarHeader :class="props.headerClasses">
       <slot name="header" :side-bar-state="sidebarState" />
     </SidebarHeader>

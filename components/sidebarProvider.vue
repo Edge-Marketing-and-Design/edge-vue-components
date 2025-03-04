@@ -16,7 +16,7 @@ const styleOverrides = computed(() => {
       '--sidebar-width-icon': '80px',
     }
   }
-  return {}
+  return null
 })
 </script>
 

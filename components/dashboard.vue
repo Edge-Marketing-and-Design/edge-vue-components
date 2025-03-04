@@ -478,6 +478,7 @@ const searchDropDown = computed(() => {
                       v-model="state.queryValue"
                       name="filter"
                       placeholder="Search For..."
+                      label=""
                     />
                   </div>
                   <edge-shad-input

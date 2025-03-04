@@ -71,7 +71,7 @@ const typeClasses = computed(() => {
 <template>
   <Card
     v-if="props.type === 'Card'"
-    :class="cn(typeClasses[props.type], 'z-10 flex items-center gap-1 px-4 flex-shrink-0', props.class)"
+    :class="cn(typeClasses[props.type], 'z-10 flex items-center gap-1 px-4 flex-shrink-0 overflow-hidden', props.class)"
   >
     <edge-menu-content
       v-bind="props"

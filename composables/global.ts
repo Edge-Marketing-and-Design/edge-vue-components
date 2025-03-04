@@ -1,4 +1,7 @@
 // DO NOT EDIT
+
+const route = useRoute()
+
 const edgeState = reactive({
   currentOrganization: '',
   organizationDocPath: '',
@@ -8,6 +11,7 @@ const edgeState = reactive({
   userRoles: [],
   lastPaginatedDoc: null,
   subscribedStatus: null,
+  showLeftPanel: {} as Record<string, boolean>,
 })
 
 const setOrganization = async (organization: string, edgeFirebase: any) => {
@@ -18,6 +22,10 @@ const setOrganization = async (organization: string, edgeFirebase: any) => {
     await edgeFirebase.startUsersSnapshot(`organizations/${organization}`)
     edgeState.organizationDocPath = `organizations/${organization}`
   }
+}
+
+const showLeftPanel = (show: boolean) => {
+  edgeState.showLeftPanel[route.path] = show
 }
 
 const getSubscribedStatus = (org: any) => {
@@ -311,4 +319,5 @@ export const edgeGlobal = {
   edgeLogOut,
   orgUserRoles,
   getRoleName,
+  showLeftPanel,
 }
