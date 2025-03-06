@@ -190,7 +190,7 @@ const currentRoutePath = computed(() => {
                 <edge-user-menu class="w-full" :title="props.organizationTitle">
                   <template #trigger>
                     <div class="flex flex-col items-center w-full">
-                      <SidebarMenuButton :class="sideBarMenuButtonClasses" tooltip="Settings">
+                      <SidebarMenuButton :is-active="currentRoutePath.startsWith('/app/account')" :class="sideBarMenuButtonClasses" tooltip="Settings">
                         <Settings2 :class="sideBarIconClasses" class="[stroke-width:1]" />
                         <span v-if="!isSlack">Settings</span>
                         <span v-else class="text-xs">Settings</span>
