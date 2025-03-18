@@ -450,7 +450,7 @@ const searchDropDown = computed(() => {
                   <edge-shad-select
                     v-model="state.queryField"
                     :items="props.searchFields"
-                    class="uppercase"
+                    class="uppercase bg-background text-foreground"
                     name="search"
                   />
                 </div>
@@ -461,7 +461,7 @@ const searchDropDown = computed(() => {
                     item-title="title"
                     item-value="operator"
                     name="operator"
-                    class="uppercase"
+                    class="uppercase bg-background text-foreground"
                   />
                 </div>
                 <div class="flex-grow">
@@ -471,6 +471,7 @@ const searchDropDown = computed(() => {
                       :items="searchDropDown"
                       name="filter"
                       placeholder="Search For..."
+                      class="bg-background text-foreground"
                     />
                   </div>
                   <div v-else-if="props.searchFields.find(field => field.name === state.queryField)?.fieldType === 'date'" class="py-1">
@@ -485,7 +486,7 @@ const searchDropDown = computed(() => {
                     v-else
                     v-model="state.queryValue"
                     name="filter"
-                    class="text-foreground"
+                    class="bg-background text-foreground"
                     placeholder="Search For..."
                   />
                 </div>
