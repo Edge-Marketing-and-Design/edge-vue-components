@@ -140,10 +140,15 @@ const getOrganizations = async (edgeFirebase: any) => {
   if (edgeFirebase.user.loggedIn) {
     for (const role of edgeFirebase.user.roles) {
       const segments = role.collectionPath.split('-')
-      if (segments[0] === 'organizations' && segments.length === 2) {
+      if (segments[0] === 'organizations') {
         await edgeFirebase.startDocumentSnapshot('organizations', segments[1])
-        const org = await edgeFirebase.getDocData('organizations', segments[1])
-        orgs.push(org)
+        let org = await edgeFirebase.getDocData('organizations', segments[1])
+        if (!org.success) {
+          org = { name: 'Organization', docId: segments[1] }
+        }
+        if (!orgs.some((o: { docId: string }) => o.docId === org.docId)) {
+          orgs.push(org)
+        }
       }
     }
   }

@@ -13,6 +13,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  singleOrg: {
+    type: Boolean,
+    default: false,
+  },
 })
 const edgeFirebase = inject('edgeFirebase')
 const isAdmin = computed(() => {
@@ -31,6 +35,11 @@ const goTo = (path) => {
 const currentRoutePath = computed(() => {
   const currentRoutePath = route.fullPath.endsWith('/') ? route.fullPath.substring(0, route.fullPath.length - 1) : route.fullPath
   return currentRoutePath
+})
+
+const firstPart = computed(() => {
+  const firstPart = route.path.split('/')[1]
+  return `/${firstPart}`
 })
 </script>
 
@@ -56,21 +65,23 @@ const currentRoutePath = computed(() => {
         </CardHeader>
       </Card>
       <!-- </DropdownMenuItem> -->
-      <DropdownMenuSeparator />
-      <DropdownMenuLabel class="text-xs text-muted-foreground">
+      <DropdownMenuSeparator v-if="!props.singleOrg" />
+      <DropdownMenuLabel v-if="!props.singleOrg" class="text-xs text-muted-foreground">
         {{ props.title }}
       </DropdownMenuLabel>
-      <DropdownMenuItem
-        v-for="org in edgeGlobal.edgeState.organizations"
-        :key="org.docId"
-        class="cursor-pointer"
-        :class="{ 'bg-accent': org.docId === edgeGlobal.edgeState.currentOrganization }"
-        @click="edgeGlobal.setOrganization(org.docId, edgeFirebase)"
-      >
-        {{ org.name }}
-        <Check v-if="org.docId === edgeGlobal.edgeState.currentOrganization" class="h-3 w-3 mr-2 ml-auto" />
-        <div v-else class="h-3 w-3 mr-2" />
-      </DropdownMenuItem>
+      <template v-for="org in edgeGlobal.edgeState.organizations">
+        <DropdownMenuItem
+          v-if="!props.singleOrg"
+          :key="org.docId"
+          class="cursor-pointer"
+          :class="{ 'bg-accent': org.docId === edgeGlobal.edgeState.currentOrganization }"
+          @click="edgeGlobal.setOrganization(org.docId, edgeFirebase)"
+        >
+          {{ org.name }}
+          <Check v-if="org.docId === edgeGlobal.edgeState.currentOrganization" class="h-3 w-3 mr-2 ml-auto" />
+          <div v-else class="h-3 w-3 mr-2" />
+        </DropdownMenuItem>
+      </template>
       <template v-if="isAdmin">
         <DropdownMenuSeparator />
         <DropdownMenuLabel class="text-xs text-muted-foreground">
@@ -78,21 +89,21 @@ const currentRoutePath = computed(() => {
         </DropdownMenuLabel>
         <DropdownMenuItem
           class="cursor-pointer"
-          :class="{ 'bg-accent': currentRoutePath === '/app/account/organization-settings' }"
-          @click="goTo('/app/account/organization-settings')"
+          :class="{ 'bg-accent': currentRoutePath === `${firstPart}/account/organization-settings` }"
+          @click="goTo(`${firstPart}/account/organization-settings`)"
         >
           <Settings class="h-4 w-4 mr-2" />
           Settings
-          <Check v-if="currentRoutePath === '/app/account/organization-settings'" class="h-3 w-3 mr-2 ml-auto" />
+          <Check v-if="currentRoutePath === `${firstPart}/account/organization-settings`" class="h-3 w-3 mr-2 ml-auto" />
         </DropdownMenuItem>
         <DropdownMenuItem
           class="cursor-pointer"
-          :class="{ 'bg-accent': currentRoutePath === '/app/account/organization-members' }"
-          @click="goTo('/app/account/organization-members')"
+          :class="{ 'bg-accent': currentRoutePath === `${firstPart}/account/organization-members` }"
+          @click="goTo(`${firstPart}/account/organization-members`)"
         >
           <Users class="h-4 w-4 mr-2" />
           Members
-          <Check v-if="currentRoutePath === '/app/account/organization-members'" class="h-3 w-3 mr-2 ml-auto" />
+          <Check v-if="currentRoutePath === `${firstPart}/account/organization-members`" class="h-3 w-3 mr-2 ml-auto" />
         </DropdownMenuItem>
       </template>
       <DropdownMenuSeparator />
@@ -101,30 +112,31 @@ const currentRoutePath = computed(() => {
       </DropdownMenuLabel>
       <DropdownMenuItem
         class="cursor-pointer"
-        :class="{ 'bg-accent': currentRoutePath === '/app/account/my-profile' }"
-        @click="goTo('/app/account/my-profile')"
+        :class="{ 'bg-accent': currentRoutePath === `${firstPart}/account/my-profile` }"
+        @click="goTo(`${firstPart}/account/my-profile`)"
       >
         <User class="h-4 w-4 mr-2" />
         Profile
-        <Check v-if="currentRoutePath === '/app/account/my-profile'" class="h-3 w-3 mr-2 ml-auto" />
+        <Check v-if="currentRoutePath === `${firstPart}/account/my-profile`" class="h-3 w-3 mr-2 ml-auto" />
       </DropdownMenuItem>
       <DropdownMenuItem
         class="cursor-pointer"
-        :class="{ 'bg-accent': currentRoutePath === '/app/account/my-account' }"
-        @click="goTo('/app/account/my-account')"
+        :class="{ 'bg-accent': currentRoutePath === `${firstPart}/account/my-account` }"
+        @click="goTo(`${firstPart}/account/my-account`)"
       >
         <CircleUser class="h-4 w-4 mr-2" />
         Account
-        <Check v-if="currentRoutePath === '/app/account/my-account'" class="h-3 w-3 mr-2 ml-auto" />
+        <Check v-if="currentRoutePath === `${firstPart}/account/my-account`" class="h-3 w-3 mr-2 ml-auto" />
       </DropdownMenuItem>
       <DropdownMenuItem
+        v-if="!props.singleOrg"
         class="cursor-pointer"
-        :class="{ 'bg-accent': currentRoutePath === '/app/account/my-organizations' }"
-        @click="goTo('/app/account/my-organizations')"
+        :class="{ 'bg-accent': currentRoutePath === `${firstPart}/account/my-organizations` }"
+        @click="goTo(`${firstPart}/account/my-organizations`)"
       >
         <Group class="h-4 w-4 mr-2" />
         Organizations
-        <Check v-if="currentRoutePath === '/app/account/my-organizations'" class="h-3 w-3 mr-2 ml-auto" />
+        <Check v-if="currentRoutePath === `${firstPart}/account/my-organizations`" class="h-3 w-3 mr-2 ml-auto" />
       </DropdownMenuItem>
       <DropdownMenuSeparator />
       <DropdownMenuItem class="cursor-pointer" @click="logOut(edgeFirebase, edgeGlobal)">

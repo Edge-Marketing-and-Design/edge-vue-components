@@ -25,6 +25,10 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  singleOrg: {
+    type: Boolean,
+    default: false,
+  },
   headerClasses: {
     type: String,
     default: '',

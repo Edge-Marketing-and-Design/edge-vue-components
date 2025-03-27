@@ -15,6 +15,10 @@ const props = defineProps({
     type: String,
     default: 'Organization(s)',
   },
+  singleOrg: {
+    type: Boolean,
+    default: false,
+  },
   menuItems: {
     type: Array,
     default: () => [],
@@ -165,7 +169,7 @@ const currentRoutePath = computed(() => {
         </SidebarGroupContent>
       </SidebarGroup>
       <SidebarGroup class="pt-0" :class="sidebarGroupClasses">
-        <SidebarGroupLabel v-if="props.settingsTitle" :class="props.groupLabelClasses">
+        <SidebarGroupLabel v-if="props.settingsTitle && props.settingsMenuItems.length > 0" :class="props.groupLabelClasses">
           {{ props.settingsTitle }}
         </SidebarGroupLabel>
         <SidebarGroupContent>
@@ -187,7 +191,7 @@ const currentRoutePath = computed(() => {
             </SidebarMenuItem>
             <template v-if="props.showSettingsSection">
               <SidebarMenuItem :class="sidebarMenuItemClasses">
-                <edge-user-menu class="w-full" :title="props.organizationTitle">
+                <edge-user-menu class="w-full" :single-org="props.singleOrg" :title="props.organizationTitle">
                   <template #trigger>
                     <div class="flex flex-col items-center w-full">
                       <SidebarMenuButton :is-active="currentRoutePath.startsWith('/app/account')" :class="sideBarMenuButtonClasses" tooltip="Settings">

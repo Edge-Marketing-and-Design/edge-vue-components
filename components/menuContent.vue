@@ -7,6 +7,10 @@ const props = defineProps({
     required: false,
     default: 'Card',
   },
+  singleOrg: {
+    type: Boolean,
+    default: false,
+  },
   class: {
     type: String,
     required: false,
@@ -121,7 +125,7 @@ const startsWithCurrentRoute = (path) => {
   <div v-if="props.showEnd" class="flex items-center gap-1">
     <slot name="end">
       <div class="grow text-right">
-        <edge-user-menu button-class="bg-primary" />
+        <edge-user-menu :single-org="props.singleOrg" button-class="bg-primary" />
       </div>
     </slot>
   </div>

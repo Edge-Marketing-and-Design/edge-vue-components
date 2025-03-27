@@ -108,7 +108,6 @@ const onSubmit = async () => {
     if (state.showRegistrationCode || !props.registrationCode) {
       register.registrationCode = state.registrationCode
     }
-    console.log('registering')
     const result = await edgeFirebase.registerUser(register, state.provider)
     state.error.error = !result.success
     if (result.message === `${props.requestedOrgIdLabel} already exists.`) {
@@ -293,6 +292,7 @@ const customMaskOptions = {
             :mask-options="customMaskOptions"
           />
           <edge-shad-checkbox
+            v-if="!props.singleOrganization"
             v-model="state.showRegistrationCode"
             name="showRegistrationCode"
           >
@@ -313,6 +313,12 @@ const customMaskOptions = {
               name="dynamicDocumentFieldValue"
             />
           </template>
+          <edge-shad-input
+            v-if="!props.registrationCode"
+            v-model="state.registrationCode"
+            label="Registration Code"
+            name="registrationCode"
+          />
 
           <edge-shad-checkbox
             v-model="state.terms"

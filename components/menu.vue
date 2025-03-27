@@ -27,6 +27,10 @@ const props = defineProps({
     required: false,
     default: '',
   },
+  singleOrg: {
+    type: Boolean,
+    default: false,
+  },
   showIcon: {
     type: Boolean,
     required: false,
