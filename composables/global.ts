@@ -259,7 +259,10 @@ const edgeLogOut = async (edgeFirebase: any) => {
   edgeState.organizations = []
   edgeState.changeTracker = {}
   edgeState.user = null
-  await edgeFirebase.logOut()
+  nextTick(async () => {
+    await edgeFirebase.logOut()
+    window.location.reload()
+  })
 }
 
 const orgUserRoles = (orgId: string) => {

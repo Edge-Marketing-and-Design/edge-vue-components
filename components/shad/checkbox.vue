@@ -34,22 +34,24 @@ const modelValue = useVModel(props, 'modelValue', emits, {
   defaultValue: props.modelValue,
 })
 
-const handleChange = (value) => {
-  modelValue.value = value
-}
+const formHandleChange = ref(() => {})
+
+watch(modelValue, (val) => {
+  formHandleChange.value(val)
+})
 </script>
 
 <template>
   <div>
-    <FormField v-slot="{ handleChange: formHandleChange }" type="checkbox" :name="props.name">
+    <FormField v-slot="{ handleChange }" type="checkbox" :name="props.name">
       <FormItem class="flex flex-row items-start gap-x-3 space-y-0 rounded-md border p-3 h-[40px] mt-3" @click.capture.once="formHandleChange(modelValue)">
         <FormControl>
           <Checkbox
             :id="props.name"
+            :ref="() => { formHandleChange = handleChange }"
+            v-model="modelValue"
             :class="props.class"
             class="bg-slate-200"
-            :checked="modelValue"
-            @update:checked="(value) => { handleChange(value); formHandleChange(value); }"
           />
         </FormControl>
         <div class="space-y-1 leading-none w-full">

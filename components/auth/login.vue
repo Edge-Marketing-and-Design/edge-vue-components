@@ -127,6 +127,11 @@ onMounted(async () => {
     state.passwordResetDialog = true
   }
 })
+
+const registerPath = computed(() => {
+  const firstPart = route.path.split('/')[1]
+  return `/${firstPart}/signup`
+})
 </script>
 
 <template>
@@ -215,7 +220,7 @@ onMounted(async () => {
         class="my-4 dark:bg-slate-600"
       />
       Don't have an account?
-      <edge-shad-button class="bg-secondary text-secondary-foreground" :class="props.secondaryButtonClasses" to="/app/signup">
+      <edge-shad-button class="bg-secondary text-secondary-foreground" :class="props.secondaryButtonClasses" :to="registerPath">
         Sign up here.
       </edge-shad-button>
       <edge-shad-dialog
