@@ -130,6 +130,7 @@ onMounted(() => {
     state.showRegistrationCode = true
   }
 })
+
 const phoneRegister = async () => {
   const result = await edgeFirebase.registerUser(register, state.provider)
   state.error.error = !result.success
@@ -198,9 +199,11 @@ const schema = computed(() => {
   }
 
   if (!state.showRegistrationCode) {
-    baseSchema.dynamicDocumentFieldValue = z.string({
-      required_error: `${props.title} is required`,
-    }).min(1, { message: `${props.title} is required` })
+    if (!props.singleOrganization) {
+      baseSchema.dynamicDocumentFieldValue = z.string({
+        required_error: `${props.title} is required`,
+      }).min(1, { message: `${props.title} is required` })
+    }
   }
 
   return toTypedSchema(z.object(baseSchema))
