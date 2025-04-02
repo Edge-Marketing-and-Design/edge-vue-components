@@ -523,32 +523,34 @@ const searchDropDown = computed(() => {
       @scroll="handleScroll"
     >
       <div class="flex flex-wrap items-center py-0">
-        <template v-for="item in filtered" :key="item.docId">
-          <slot name="list-item" :item="item" :delete-item="deleteItem" :run-search="runSearch">
-            <div class="cursor-pointer w-full flex justify-between items-center py-1 gap-3" @click="gotoSite(item.docId)">
-              <div>
-                <Avatar class="cursor-pointer p-0 h-8 w-8 mr-2">
-                  <FilePenLine class="h-5 w-5" />
-                </Avatar>
-              </div>
-              <div class="grow">
-                <div class="text-lg">
-                  {{ item.name }}
+        <slot name="list" :filtered="filtered" :delete-item="deleteItem" :run-search="runSearch" :loading-more="state.loadingMore">
+          <template v-for="item in filtered" :key="item.docId">
+            <slot name="list-item" :item="item" :delete-item="deleteItem" :run-search="runSearch">
+              <div class="cursor-pointer w-full flex justify-between items-center py-1 gap-3" @click="gotoSite(item.docId)">
+                <div>
+                  <Avatar class="cursor-pointer p-0 h-8 w-8 mr-2">
+                    <FilePenLine class="h-5 w-5" />
+                  </Avatar>
+                </div>
+                <div class="grow">
+                  <div class="text-lg">
+                    {{ item.name }}
+                  </div>
+                </div>
+                <div>
+                  <edge-shad-button
+                    size="icon"
+                    class="bg-slate-600 h-7 w-7"
+                    @click.stop="deleteItem(item.docId)"
+                  >
+                    <Trash class="h-5 w-5" />
+                  </edge-shad-button>
                 </div>
               </div>
-              <div>
-                <edge-shad-button
-                  size="icon"
-                  class="bg-slate-600 h-7 w-7"
-                  @click.stop="deleteItem(item.docId)"
-                >
-                  <Trash class="h-5 w-5" />
-                </edge-shad-button>
-              </div>
-            </div>
-            <Separator class="dark:bg-slate-600" />
-          </slot>
-        </template>
+              <Separator class="dark:bg-slate-600" />
+            </slot>
+          </template>
+        </slot>
       </div>
     </CardContent>
     <edge-shad-dialog

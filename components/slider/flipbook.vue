@@ -1,5 +1,5 @@
 <script setup lang="js">
-import spinner from '@/assets/spinner.svg'
+// import spinner from '@/assets/spinner.svg'
 const props = defineProps({
   magazine: {
     type: Object,
@@ -56,7 +56,7 @@ const props = defineProps({
   },
   loadingImage: {
     type: String,
-    default: spinner,
+    default: 'spinner',
   },
   clickToZoom: {
     type: Boolean,
