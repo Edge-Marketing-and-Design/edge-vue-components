@@ -134,9 +134,8 @@ onMounted(() => {
         <PopoverTrigger as-child>
           <FormControl>
             <Button
-              variant="outline"
               :class="cn(
-                'w-full ps-3 text-start font-normal items-start h-auto', // Added 'items-start'
+                'w-full border border-solid ps-3 text-start font-normal items-start h-auto', // Added 'items-start'
                 (!value || (Array.isArray(value) && value.length === 0)) && 'text-muted-foreground',
               )"
             >

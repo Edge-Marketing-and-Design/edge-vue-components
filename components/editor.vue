@@ -321,7 +321,7 @@ const triggerSubmit = () => {
       @submit="onSubmit"
     >
       <slot name="header" :on-submit="triggerSubmit" :on-cancel="onCancel" :submitting="state.submitting" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc">
-        <edge-menu v-if="props.showHeader" class="py-2 bg-primary text-primary-foreground">
+        <edge-menu v-if="props.showHeader" class="py-2 bg-primary text-primary-foreground rounded-none sticky top-0">
           <template #start>
             <slot name="header-start" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc">
               <FilePenLine class="mr-2" />
@@ -360,7 +360,7 @@ const triggerSubmit = () => {
           </template>
         </edge-menu>
       </slot>
-      <CardContent class="flex-1 flex flex-col p-0">
+      <CardContent class="flex-1 flex flex-col px-4">
         <slot name="main" :title="title" :on-cancel="onCancel" :submitting="state.submitting" :unsaved-changes="unsavedChanges" :on-submit="triggerSubmit" :working-doc="state.workingDoc">
           <div class="flex flex-wrap py-2 items-center">
             <div v-for="(field, name, index) in props.newDocSchema" :key="index" :class="numColsToTailwind(field.cols)">

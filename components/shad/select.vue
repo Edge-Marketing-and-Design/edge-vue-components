@@ -3,7 +3,7 @@ import { useVModel } from '@vueuse/core'
 const props = defineProps({
   name: {
     type: String,
-    required: true,
+    required: false,
   },
   modelValue: {
     type: String,
@@ -78,18 +78,53 @@ const modelValue = useVModel(props, 'modelValue', emits, {
 </script>
 
 <template>
-  <FormField v-slot="{ componentField }" :name="props.name">
-    <FormItem>
-      <FormLabel class="flex">
+  <template v-if="props.name">
+    <FormField v-slot="{ componentField }" :name="props.name">
+      <FormItem>
+        <FormLabel class="flex">
+          {{ props.label }}
+        </FormLabel>
+        <div class="relative w-full items-center">
+          <Select v-model="modelValue" :disabled="props.disabled" :default-value="modelValue" v-bind="componentField">
+            <FormControl>
+              <SelectTrigger class="text-foreground" :class="[$slots.icon ? 'pr-8' : '', props.class]">
+                <SelectValue />
+              </SelectTrigger>
+            </FormControl>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem
+                  v-for="item in computedItems"
+                  :key="item[props.itemTitle]"
+                  :value="item[props.itemValue]"
+                >
+                  {{ item[props.itemTitle] }}
+                </SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          <span class="absolute end-0 inset-y-0 flex items-center justify-center pl-2 pr-2">
+            <slot name="icon" />
+          </span>
+        </div>
+        <FormDescription>
+          {{ props.description }}
+        </FormDescription>
+        <FormMessage />
+      </FormItem>
+    </FormField>
+  </template>
+
+  <template v-else>
+    <div class="w-full">
+      <label class="flex mb-1">
         {{ props.label }}
-      </FormLabel>
+      </label>
       <div class="relative w-full items-center">
-        <Select v-model="modelValue" :disabled="props.disabled" :default-value="modelValue" v-bind="componentField">
-          <FormControl>
-            <SelectTrigger class="text-foreground" :class="[$slots.icon ? 'pr-8' : '', props.class]">
-              <SelectValue />
-            </SelectTrigger>
-          </FormControl>
+        <Select v-model="modelValue" :disabled="props.disabled" :default-value="modelValue">
+          <SelectTrigger class="text-foreground" :class="[$slots.icon ? 'pr-8' : '', props.class]">
+            <SelectValue />
+          </SelectTrigger>
           <SelectContent>
             <SelectGroup>
               <SelectItem
@@ -106,12 +141,11 @@ const modelValue = useVModel(props, 'modelValue', emits, {
           <slot name="icon" />
         </span>
       </div>
-      <FormDescription>
+      <p class="text-sm text-muted-foreground mt-1">
         {{ props.description }}
-      </FormDescription>
-      <FormMessage />
-    </FormItem>
-  </FormField>
+      </p>
+    </div>
+  </template>
 </template>
 
 <style lang="scss" scoped>

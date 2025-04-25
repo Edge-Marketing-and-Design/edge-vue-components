@@ -40,6 +40,11 @@ const props = defineProps({
     required: false,
     default: false,
   },
+  modelValue: {
+    type: [String, Number],
+    required: false,
+    default: '',
+  },
 })
 
 const emits = defineEmits(['update:modelValue'])
@@ -47,6 +52,7 @@ const emits = defineEmits(['update:modelValue'])
 const state = reactive({
   showPassword: false,
   type: '',
+  editMode: false,
 })
 
 onBeforeMount(() => {
@@ -55,8 +61,17 @@ onBeforeMount(() => {
 
 // Initialize useVModel
 const modelValue = useVModel(props, 'modelValue', emits, {
-  passive: false,
   prop: 'modelValue',
+})
+
+watch(modelValue, (val) => {
+  const stringValue = String(val || '')
+  const newVal = parseFloat(stringValue.replace(/[$,]/g, ''))
+  if (isNaN(newVal)) {
+    modelValue.value = 0
+    return
+  }
+  emits('update:modelValue', newVal)
 })
 
 const classComputed = computed(() => {
@@ -102,6 +117,35 @@ const handleKeydown = (event) => {
   // Prevent any other key
   event.preventDefault()
 }
+
+const moneyMask = {
+  preProcess: val => val.replace(/[$,]/g, ''),
+  postProcess: (val) => {
+    if (!val)
+      return ''
+    const sub = 3 - (val.includes('.') ? val.length - val.indexOf('.') : 0)
+    return Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+    })
+      .format(val)
+      .slice(0, sub ? -sub : undefined)
+  },
+}
+const formatDecimal = (event) => {
+  const el = event.target
+  const cleaned = el.value.replace(/[$,]/g, '')
+  const num = parseFloat(cleaned)
+
+  if (!isNaN(num)) {
+    const fixed = num.toFixed(2)
+    modelValue.value = parseFloat(fixed)
+
+    // Force input's displayed value to update
+    el.value = fixed
+    el.dispatchEvent(new Event('input')) // triggers v-model update
+  }
+}
 </script>
 
 <template>
@@ -115,25 +159,19 @@ const handleKeydown = (event) => {
           </div>
         </FormLabel>
         <FormControl>
-          <div class="relative w-full items-center">
-            <Input
-              :id="props.name"
-              v-model="modelValue"
-              v-maska:[props.maskOptions]
-              :default-value="props.modelValue"
-              :class="classComputed"
-              :type="state.type"
-              v-bind="componentField"
-              :placeholder="props.placeholder"
-              :disabled="props.disabled"
-              @keydown="handleKeydown"
-            />
-            <span class="absolute end-0 inset-y-0 flex items-center justify-center px-2">
-              <slot name="icon">
-                <DollarSign class="size-6 text-muted-foreground cursor-pointer" />
-              </slot>
-            </span>
-          </div>
+          <Input
+            :id="props.name"
+            v-model="modelValue"
+            v-maska:[moneyMask]
+            :default-value="props.modelValue"
+            :class="classComputed"
+            :type="state.type"
+            v-bind="componentField"
+            :placeholder="props.placeholder"
+            :disabled="props.disabled"
+            @keydown="handleKeydown"
+            @blur="formatDecimal"
+          />
         </FormControl>
         <FormDescription>
           {{ props.description }}

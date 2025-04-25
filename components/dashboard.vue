@@ -1,4 +1,5 @@
 <script setup>
+import { useElementVisibility } from '@vueuse/core'
 import { cn } from '@/lib/utils'
 
 const props = defineProps({
@@ -75,6 +76,8 @@ const props = defineProps({
     default: false,
   },
 })
+const target = ref(null)
+const isVisible = useElementVisibility(target)
 
 const edgeFirebase = inject('edgeFirebase')
 const router = useRouter()
@@ -254,23 +257,31 @@ const loadInitialData = async () => {
 }
 
 const loadMoreData = async () => {
-  if (state.staticSearch && !state.staticSearch.results.staticIsLastPage && !state.loadingMore) {
-    state.loadingMore = true
-    await state.staticSearch.next()
-    const newResults = state.staticSearch.results.data || {}
-    console.log(newResults)
-    // Append new results to paginatedResults
-    if (state.staticCurrentPage !== state.staticSearch.results.staticCurrentPage) {
-      state.paginatedResults = [
-        ...state.paginatedResults,
-        ...Object.values(newResults),
-      ]
-    }
+  if (state.staticSearch?.results) {
+    if (state.staticSearch && !state.staticSearch.results.staticIsLastPage && !state.loadingMore) {
+      state.loadingMore = true
+      await state.staticSearch.next()
+      const newResults = state.staticSearch.results.data || {}
+      console.log(newResults)
+      // Append new results to paginatedResults
+      if (state.staticCurrentPage !== state.staticSearch.results.staticCurrentPage) {
+        state.paginatedResults = [
+          ...state.paginatedResults,
+          ...Object.values(newResults),
+        ]
+      }
 
-    state.staticCurrentPage = state.staticSearch.results.staticCurrentPage
+      state.staticCurrentPage = state.staticSearch.results.staticCurrentPage
+    }
   }
   state.loadingMore = false
 }
+
+watch(isVisible, async (visible) => {
+  if (visible) {
+    await loadMoreData()
+  }
+})
 
 watch (
   () => edgeGlobal.edgeState.organizationDocPath,
@@ -428,7 +439,7 @@ const searchDropDown = computed(() => {
 <template>
   <Card v-if="state.afterMount" :class="cn('mx-auto bg-muted/50 w-full', props.class)">
     <slot name="header">
-      <edge-menu class="bg-primary text-primary-foreground" :class="props.headerClass">
+      <edge-menu class="bg-primary text-primary-foreground rounded-none sticky top-0" :class="props.headerClass">
         <template #start>
           <slot name="header-start">
             <LayoutDashboard class="mr-2" />
@@ -438,59 +449,61 @@ const searchDropDown = computed(() => {
         <template #center>
           <slot name="header-center" :filter="state.filter">
             <div v-if="!props.hideSearch" class="w-full px-6">
-              <edge-shad-input
-                v-if="props.searchFields.length === 0"
-                v-model="state.filter"
-                label=""
-                name="filter"
-                placeholder="Search..."
-              />
-              <div v-else class="py-0 flex gap-2 w-full">
-                <div class="w-48">
-                  <edge-shad-select
-                    v-model="state.queryField"
-                    :items="props.searchFields"
-                    class="uppercase bg-background text-foreground"
-                    name="search"
-                  />
-                </div>
-                <div v-if="props.searchFields.find(field => field.name === state.queryField)?.operators">
-                  <edge-shad-select
-                    v-model="state.queryOperator"
-                    :items="props.searchFields.find(field => field.name === state.queryField)?.operators"
-                    item-title="title"
-                    item-value="operator"
-                    name="operator"
-                    class="uppercase bg-background text-foreground"
-                  />
-                </div>
-                <div class="flex-grow">
-                  <div v-if="searchDropDown" class="py-1">
-                    <edge-shad-combobox
+              <edge-shad-form>
+                <edge-shad-input
+                  v-if="props.searchFields.length === 0"
+                  v-model="state.filter"
+                  label=""
+                  name="filter"
+                  placeholder="Search..."
+                />
+                <div v-else class="py-0 flex gap-2 w-full">
+                  <div class="w-48">
+                    <edge-shad-select
+                      v-model="state.queryField"
+                      :items="props.searchFields"
+                      class="uppercase bg-background text-foreground"
+                      name="search"
+                    />
+                  </div>
+                  <div v-if="props.searchFields.find(field => field.name === state.queryField)?.operators">
+                    <edge-shad-select
+                      v-model="state.queryOperator"
+                      :items="props.searchFields.find(field => field.name === state.queryField)?.operators"
+                      item-title="title"
+                      item-value="operator"
+                      name="operator"
+                      class="uppercase bg-background text-foreground"
+                    />
+                  </div>
+                  <div class="flex-grow">
+                    <div v-if="searchDropDown" class="py-1">
+                      <edge-shad-combobox
+                        v-model="state.queryValue"
+                        :items="searchDropDown"
+                        name="filter"
+                        placeholder="Search For..."
+                        class="uppercase bg-background text-foreground w-full"
+                      />
+                    </div>
+                    <div v-else-if="props.searchFields.find(field => field.name === state.queryField)?.fieldType === 'date'" class="py-1">
+                      <edge-shad-datepicker
+                        v-model="state.queryValue"
+                        name="filter"
+                        placeholder="Search For..."
+                        class="!bg-yellow-900 !text-foreground"
+                      />
+                    </div>
+                    <edge-shad-input
+                      v-else
                       v-model="state.queryValue"
-                      :items="searchDropDown"
                       name="filter"
-                      placeholder="Search For..."
                       class="bg-background text-foreground"
-                    />
-                  </div>
-                  <div v-else-if="props.searchFields.find(field => field.name === state.queryField)?.fieldType === 'date'" class="py-1">
-                    <edge-shad-datepicker
-                      v-model="state.queryValue"
-                      name="filter"
                       placeholder="Search For..."
-                      label=""
                     />
                   </div>
-                  <edge-shad-input
-                    v-else
-                    v-model="state.queryValue"
-                    name="filter"
-                    class="bg-background text-foreground"
-                    placeholder="Search For..."
-                  />
                 </div>
-              </div>
+              </edge-shad-form>
             </div>
           </slot>
         </template>
@@ -551,6 +564,7 @@ const searchDropDown = computed(() => {
             </slot>
           </template>
         </slot>
+        <div ref="target" />
       </div>
     </CardContent>
     <edge-shad-dialog
