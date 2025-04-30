@@ -174,7 +174,7 @@ const computedUserSchema = computed(() => {
       <div class="text-md text-bold mr-2">
         {{ props.item.meta.name }}
       </div>
-      <edge-chip v-if="props.item.userId === edgeFirebase.user.uid" class="bg-success">
+      <edge-chip v-if="props.item.userId === edgeFirebase.user.uid">
         You
       </edge-chip>
       <edge-chip v-if="!props.item.userId" class="bg-warning">
