@@ -110,8 +110,6 @@ const codeSchema = toTypedSchema(z.object({
 }))
 
 const onSubmit = async (values) => {
-  console.log(state.panel)
-  console.log(values)
   await edgeFirebase.logIn(login)
 }
 

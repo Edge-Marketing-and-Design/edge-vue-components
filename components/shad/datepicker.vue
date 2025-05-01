@@ -20,7 +20,8 @@ import { Calendar } from '@/components/ui/calendar'
 const props = defineProps({
   label: {
     type: String,
-    required: true,
+    required: false,
+    default: '',
   },
   description: {
     type: String,
