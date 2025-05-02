@@ -57,7 +57,7 @@ const props = defineProps({
   },
   searchFields: {
     type: Array,
-    default: () => [{ title: 'Name', name: 'name' }],
+    default: () => [],
   },
   queryField: {
     type: String,
