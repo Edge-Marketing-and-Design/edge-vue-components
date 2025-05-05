@@ -138,6 +138,20 @@ const goTo = (path) => {
 const currentRoutePath = computed(() => {
   return route.fullPath.endsWith('/') ? route.fullPath.slice(0, -1) : route.fullPath
 })
+const isAdmin = computed(() => {
+  const orgRole = edgeFirebase?.user?.roles.find(role =>
+    role.collectionPath === edgeGlobal.edgeState.organizationDocPath.replaceAll('/', '-'),
+  )
+  return orgRole && orgRole.role === 'admin'
+})
+const menuItems = computed(() => {
+  return props.menuItems.filter((item) => {
+    if (item.adminOnly && !isAdmin.value) {
+      return false
+    }
+    return true
+  })
+})
 </script>
 
 <template>
@@ -150,7 +164,7 @@ const currentRoutePath = computed(() => {
         <SidebarGroupContent>
           <SidebarMenu :class="sidebarMenuClasses">
             <slot name="menu">
-              <SidebarMenuItem v-for="item in props.menuItems" :key="item.title" :class="sidebarMenuItemClasses">
+              <SidebarMenuItem v-for="item in menuItems" :key="item.title" :class="sidebarMenuItemClasses">
                 <div class="flex flex-col items-center w-full">
                   <SidebarMenuButton
                     :is-active="currentRoutePath.startsWith(item.to)"
