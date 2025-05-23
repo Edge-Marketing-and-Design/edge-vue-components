@@ -141,31 +141,35 @@ const state = reactive({
 const pages = computed(() => {
   const images = props.magazine?.ccState?.cfImages || {}
 
-  return Object.keys(images)
+  const pageList = Object.keys(images)
     .sort() // Ensures order by "page-001", "page-002", etc.
     .map((key) => {
       const image = images[key]
       return image.variants.find(url => url.includes('/thumbnail'))
     })
     .filter(Boolean) // Removes undefined values in case no thumbnail is found
+
+  // Add a blank array item at the start
+  return [null, ...pageList]
 })
 
 const pagesHighRes = computed(() => {
   const images = props.magazine?.ccState?.cfImages || {}
 
-  return Object.keys(images)
+  const pageList = Object.keys(images)
     .sort() // Ensures order by "page-001", "page-002", etc.
     .map((key) => {
       const image = images[key]
       return image.variants.find(url => url.includes('/public'))
     })
     .filter(Boolean) // Removes undefined values in case no thumbnail is found
+  return [null, ...pageList]
 })
 
 const zooms_ = computed(() => props.zoomLevels || [1])
 
 const canGoForward = computed(() => {
-  return !state.flip.direction && state.currentPage < pages.value.length - state.displayedPages
+  return !state.flip.direction && state.currentPage + state.displayedPages < pages.value.length
 })
 
 const pageUrl = (page, hiRes = false) => {
@@ -1246,12 +1250,16 @@ const openFullscreen = (elem) => {
 
           <!-- Right Page -->
           <img
-            v-if="showRightPage" class="fixed page" :style="{
+            v-if="showRightPage && pageUrl(rightPage)"
+            class="fixed page"
+            :style="{
               width: `${pageWidth}px`,
               height: `${pageHeight}px`,
               left: `${state.viewWidth / 2}px`,
               top: `${yMargin}px`,
-            }" :src="pageUrlLoading(rightPage, true)" @load="didLoadImage($event)"
+            }"
+            :src="pageUrlLoading(rightPage, true)"
+            @load="didLoadImage($event)"
           >
 
           <!-- Flipbook Polygon Animation -->

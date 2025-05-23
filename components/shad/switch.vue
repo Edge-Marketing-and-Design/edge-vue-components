@@ -14,6 +14,10 @@ const props = defineProps({
     type: null,
     required: false,
   },
+  switchClass: {
+    type: null,
+    required: false,
+  },
   placeholder: {
     type: String,
     required: false,
@@ -30,19 +34,12 @@ const props = defineProps({
 
 const emits = defineEmits(['update:modelValue'])
 
-const modelValue = useVModel(props, 'modelValue', emits, {
-  passive: true,
-  defaultValue: props.modelValue,
-})
-
-const handleChange = (value) => {
-  modelValue.value = value
-}
+const modelValue = useVModel(props, 'modelValue', emits)
 </script>
 
 <template>
   <div>
-    <FormField v-slot="{ handleChange: formHandleChange }" :name="props.name">
+    <FormField :name="props.name">
       <FormItem :class="cn('flex flex-row items-center justify-between', props.class)">
         <div class="flex flex-row items-center w-full">
           <div class="grow">
@@ -55,8 +52,8 @@ const handleChange = (value) => {
           </div>
           <FormControl>
             <Switch
-              :checked="modelValue"
-              @update:checked="(value) => { handleChange(value); formHandleChange(value); }"
+              v-model="modelValue"
+              :class="cn('', props.switchClass)"
             />
           </FormControl>
         </div>
