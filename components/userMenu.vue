@@ -54,7 +54,7 @@ const firstPart = computed(() => {
     </DropdownMenuTrigger>
     <DropdownMenuContent align="end">
       <!-- <DropdownMenuItem class="bg-accent"> -->
-      <Card class="border-0 p-2 bg-popover shadow-none">
+      <Card class="border-0 p-4 bg-popover shadow-none">
         <CardHeader class="p-0">
           <CardTitle>
             {{ edgeFirebase.user.meta.name }}

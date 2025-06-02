@@ -162,3 +162,9 @@ watch(dropFiles, (newValue) => {
     </template>
   </Card>
 </template>
+
+<style>
+label[for="file"] {
+  cursor: pointer;
+}
+</style>
