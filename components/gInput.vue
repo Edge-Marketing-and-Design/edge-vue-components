@@ -1203,7 +1203,7 @@ watch(modelValue, () => {
       </Card>
     </template>
     <template v-if="props.fieldType === 'objectList'">
-      <Card class="bg-transparent border-0">
+      <Card class="bg-transparent border-0 shadow-none">
         <CardHeader class="pt-3 pb-2">
           <CardTitle class="text-lg flex items-center">
             <div>{{ props.label }}</div>

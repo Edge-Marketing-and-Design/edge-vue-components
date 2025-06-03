@@ -116,44 +116,53 @@ const gotoSubscription = async (url) => {
 </script>
 
 <template>
-  <Alert v-if="edgeGlobal.edgeState.subscribedStatus && props.subscribeOptions.length > 0" class="mt-0" :class="edgeGlobal.edgeState.subscribedStatus.color">
-    <component :is="edgeGlobal.edgeState.subscribedStatus.icon" />
-    <AlertTitle>
-      {{ edgeGlobal.edgeState.subscribedStatus.status }}
-    </AlertTitle>
-    <AlertDescription>
-      {{ edgeGlobal.edgeState.subscribedStatus.description }}
-      <template v-if="!edgeGlobal.edgeState.subscribedStatus.isSubscribed">
-        <div class="text-center w-full mb-4">
-          <slot name="subscribeTitle">
-            <span class="text-2xl">Subscribe now with 7 day free trial!</span>
+  <slot
+    name="subscription"
+    :subscribed-status="edgeGlobal.edgeState.subscribedStatus"
+    :subscribe-options="props.subscribeOptions"
+    :goto-subscription="gotoSubscription"
+    :navigate-to-billing="navigateToBilling"
+    :current-organization="edgeGlobal.edgeState.currentOrganization"
+  >
+    <Alert v-if="edgeGlobal.edgeState.subscribedStatus && props.subscribeOptions.length > 0" class="mt-0" :class="edgeGlobal.edgeState.subscribedStatus.color">
+      <component :is="edgeGlobal.edgeState.subscribedStatus.icon" />
+      <AlertTitle>
+        {{ edgeGlobal.edgeState.subscribedStatus.status }}
+      </AlertTitle>
+      <AlertDescription>
+        {{ edgeGlobal.edgeState.subscribedStatus.description }}
+        <template v-if="!edgeGlobal.edgeState.subscribedStatus.isSubscribed">
+          <div class="text-center w-full mb-4">
+            <slot name="subscribeTitle">
+              <span class="text-2xl">Subscribe now with 7 day free trial!</span>
+            </slot>
+          </div>
+          <slot name="subscribeOptions">
+            <div class="flex justify-center space-x-4">
+              <edge-shad-button
+                v-for="option in props.subscribeOptions"
+                :key="option.buttonText"
+                class="text-white  w-100 bg-slate-800 hover:bg-slate-400"
+                @click="gotoSubscription(`${option.stripeSubscriptionLink}?client_reference_id=${edgeGlobal.edgeState.currentOrganization}`)"
+              >
+                {{ option.buttonText }}
+              </edge-shad-button>
+            </div>
           </slot>
-        </div>
-        <slot name="subscribeOptions">
-          <div class="flex justify-center space-x-4">
+        </template>
+        <div v-else class="flex flex-col sm:flex-row">
+          <div>
             <edge-shad-button
-              v-for="option in props.subscribeOptions"
-              :key="option.buttonText"
               class="text-white  w-100 bg-slate-800 hover:bg-slate-400"
-              @click="gotoSubscription(`${option.stripeSubscriptionLink}?client_reference_id=${edgeGlobal.edgeState.currentOrganization}`)"
+              @click="navigateToBilling"
             >
-              {{ option.buttonText }}
+              Manage Subscription
             </edge-shad-button>
           </div>
-        </slot>
-      </template>
-      <div v-else class="flex flex-col sm:flex-row">
-        <div>
-          <edge-shad-button
-            class="text-white  w-100 bg-slate-800 hover:bg-slate-400"
-            @click="navigateToBilling"
-          >
-            Manage Subscription
-          </edge-shad-button>
         </div>
-      </div>
-    </AlertDescription>
-  </Alert>
+      </AlertDescription>
+    </Alert>
+  </slot>
   <Card v-if="state.loaded" class="border-none shadow-none bg-transparent">
     <edge-shad-form
       :schema="props.formSchema"
