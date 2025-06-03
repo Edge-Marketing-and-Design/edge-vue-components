@@ -362,32 +362,35 @@ const triggerSubmit = () => {
       </slot>
       <CardContent class="flex-1 flex flex-col px-4">
         <slot name="main" :title="title" :on-cancel="onCancel" :submitting="state.submitting" :unsaved-changes="unsavedChanges" :on-submit="triggerSubmit" :working-doc="state.workingDoc">
-          <div class="flex flex-wrap py-2 items-center">
+          <div class="flex flex-wrap items-center justify-between">
             <div v-for="(field, name, index) in props.newDocSchema" :key="index" :class="numColsToTailwind(field.cols)">
-              <edge-shad-datepicker
-                v-if="field.bindings['field-type'] === 'date'"
-                v-model="state.workingDoc[name]"
-                :label="field.bindings.label"
-                :name="name"
-              />
-              <edge-g-input
-                v-else-if="field.bindings['field-type'] !== 'collection'"
-                v-model="state.workingDoc[name]"
-                :name="name"
-                :disable-tracking="true"
-                :parent-tracker-id="`${props.collection}-${props.docId}`"
-                v-bind="field.bindings"
-              />
-              <edge-g-input
-                v-else
-                v-model="state.workingDoc[name]"
-                :disable-tracking="true"
-                field-type="collection"
-                :collection-path="`${edgeGlobal.edgeState.organizationDocPath}/${field.bindings['collection-path']}`"
-                :label="field.bindings.label"
-                :name="name"
-                :parent-tracker-id="`${props.collection}-${props.docId}`"
-              />
+              <div v-if="field.bindings['field-type'] === 'date'" class="h-[100px] p-3 items-center">
+                <edge-shad-datepicker
+                  v-model="state.workingDoc[name]"
+                  :label="field.bindings.label"
+                  :name="name"
+                />
+              </div>
+              <div v-else-if="field.bindings['field-type'] !== 'collection'" class="h-[100px] p-3 items-center">
+                <edge-g-input
+                  v-model="state.workingDoc[name]"
+                  :name="name"
+                  :disable-tracking="true"
+                  :parent-tracker-id="`${props.collection}-${props.docId}`"
+                  v-bind="field.bindings"
+                />
+              </div>
+              <div v-else class="h-[100px] p-3 items-center">
+                <edge-g-input
+                  v-model="state.workingDoc[name]"
+                  :disable-tracking="true"
+                  field-type="collection"
+                  :collection-path="`${edgeGlobal.edgeState.organizationDocPath}/${field.bindings['collection-path']}`"
+                  :label="field.bindings.label"
+                  :name="name"
+                  :parent-tracker-id="`${props.collection}-${props.docId}`"
+                />
+              </div>
             </div>
           </div>
         </slot>
