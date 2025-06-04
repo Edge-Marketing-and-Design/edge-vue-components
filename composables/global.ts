@@ -143,7 +143,7 @@ const getOrganizations = async (edgeFirebase: any) => {
       if (segments[0] === 'organizations') {
         await edgeFirebase.startDocumentSnapshot('organizations', segments[1])
         let org = await edgeFirebase.getDocData('organizations', segments[1])
-        if (!org) {
+        if (!org.success) {
           org = { name: 'Organization', docId: segments[1] }
         }
         if (!orgs.some((o: { docId: string }) => o.docId === org.docId)) {
@@ -153,6 +153,7 @@ const getOrganizations = async (edgeFirebase: any) => {
     }
   }
   edgeState.organizations = orgs
+  console.log('Organizations:', edgeState.organizations)
 }
 
 const dupObject = (obj: any): any => {
