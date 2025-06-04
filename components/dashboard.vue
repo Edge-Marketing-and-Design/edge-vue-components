@@ -75,6 +75,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  defaultFilterFields: {
+    type: Array,
+    default: () => [],
+  },
 })
 const target = ref(null)
 const isVisible = useElementVisibility(target)
@@ -102,6 +106,7 @@ const state = reactive({
   scrollPosition: 0,
   staticCurrentPage: '',
   searching: false,
+  filterFields: [],
 })
 
 const gotoSite = (docId) => {
@@ -191,7 +196,7 @@ const filtered = computed(() => {
     allData = state.paginatedResults
   }
 
-  const filtered = allData.filter((entry) => {
+  let filtered = allData.filter((entry) => {
     if (filterText.value.trim() === '') {
       return true
     }
@@ -200,6 +205,20 @@ const filtered = computed(() => {
 
   if (props.paginated) {
     return filtered
+  }
+
+  if (state.filterFields.length > 0) {
+    state.filterFields.forEach((filter) => {
+      filtered = filtered.filter((item) => {
+        if (item[filter.field] === undefined) {
+          return false
+        }
+        if (typeof item[filter.field] === 'string') {
+          return item[filter.field].toLowerCase().includes(filter.value.toLowerCase())
+        }
+        return item[filter.field] === filter.value
+      })
+    })
   }
 
   return filtered.sort((a, b) => {
@@ -330,6 +349,10 @@ onBeforeMount(async () => {
   else {
     await loadInitialData()
   }
+  state.filterFields = props.defaultFilterFields.map(field => ({
+    field: field.field,
+    value: field.value,
+  }))
   state.afterMount = true
 })
 
@@ -434,6 +457,20 @@ const searchDropDown = computed(() => {
   }
   return null
 })
+
+const addFilter = (field, value) => {
+  if (state.filterFields.some(f => f.field === field)) {
+    const existingFilter = state.filterFields.find(f => f.field === field)
+    existingFilter.value = value
+  }
+  else {
+    state.filterFields.push({ field, value })
+  }
+}
+
+const removeFilter = (field) => {
+  state.filterFields = state.filterFields.filter(f => f.field !== field)
+}
 </script>
 
 <template>
@@ -441,7 +478,7 @@ const searchDropDown = computed(() => {
     <slot name="header">
       <edge-menu class="bg-primary text-primary-foreground rounded-none sticky top-0" :class="props.headerClass">
         <template #start>
-          <slot name="header-start">
+          <slot name="header-start" :add-filter="addFilter">
             <LayoutDashboard class="mr-2" />
             {{ capitalizeFirstLetter(props.collection) }}
           </slot>
@@ -508,7 +545,7 @@ const searchDropDown = computed(() => {
           </slot>
         </template>
         <template #end>
-          <slot v-if="props.paginated" name="header-end" :record-count="state.staticSearch?.results?.total" :title="singularize(props.collection)">
+          <slot v-if="props.paginated" name="header-end" :add-filter="addFilter" :record-count="state.staticSearch?.results?.total" :title="singularize(props.collection)">
             <edge-shad-button v-if="!props.paginated" class="uppercase bg-slate-600" :to="`/app/dashboard/${props.collection}/new`">
               Add {{ singularize(props.collection) }}
             </edge-shad-button>
@@ -516,7 +553,7 @@ const searchDropDown = computed(() => {
               {{ state.staticSearch.results.total.toLocaleString() }} records
             </span>
           </slot>
-          <slot v-else name="header-end" :record-count="filtered.length" :title="singularize(props.collection)">
+          <slot v-else name="header-end" :add-filter="addFilter" :record-count="filtered.length" :title="singularize(props.collection)">
             <edge-shad-button v-if="!props.paginated" class="uppercase bg-slate-600" :to="`/app/dashboard/${props.collection}/new`">
               Add {{ singularize(props.collection) }}
             </edge-shad-button>
