@@ -1,50 +1,17 @@
 <script setup>
 import { useVModel } from '@vueuse/core'
+
 const props = defineProps({
-  name: {
-    type: String,
-    required: true,
-  },
-  type: {
-    type: String,
-    required: false,
-    default: 'text',
-  },
-  defaultValue: {
-    type: [String, Number],
-    required: false,
-  },
-  class: {
-    type: null,
-    required: false,
-  },
-  placeholder: {
-    type: String,
-    required: false,
-  },
-  label: {
-    type: String,
-    required: false,
-  },
-  description: {
-    type: String,
-    required: false,
-  },
-  maskOptions: {
-    type: [Object],
-    required: false,
-    default: null,
-  },
-  disabled: {
-    type: Boolean,
-    required: false,
-    default: false,
-  },
-  modelValue: {
-    type: [String, Number],
-    required: false,
-    default: '',
-  },
+  name: { type: String, required: true },
+  type: { type: String, default: 'text' },
+  defaultValue: { type: [String, Number], required: false },
+  class: { type: null, required: false },
+  placeholder: { type: String, required: false },
+  label: { type: String, required: false },
+  description: { type: String, required: false },
+  maskOptions: { type: [Object], default: null },
+  disabled: { type: Boolean, default: false },
+  modelValue: { type: [String, Number], default: '' },
 })
 
 const emits = defineEmits(['update:modelValue'])
@@ -53,6 +20,7 @@ const state = reactive({
   showPassword: false,
   type: '',
   editMode: false,
+  isDebit: false, // false = credit, true = debit
 })
 
 onBeforeMount(() => {
@@ -71,14 +39,20 @@ watch(modelValue, (val) => {
     modelValue.value = 0
     return
   }
-  emits('update:modelValue', newVal)
+  emits('update:modelValue', state.isDebit ? -Math.abs(newVal) : Math.abs(newVal))
 })
 
-const classComputed = computed(() => {
-  if (props.type === 'password') {
-    return `${props.class} pr-10`
+const toggleDebit = () => {
+  state.isDebit = !state.isDebit
+  if (modelValue.value !== '') {
+    modelValue.value = state.isDebit
+      ? -Math.abs(modelValue.value)
+      : Math.abs(modelValue.value)
   }
-  return props.class
+}
+
+const classComputed = computed(() => {
+  return props.type === 'password' ? `${props.class} pr-10` : props.class
 })
 
 const handleKeydown = (event) => {
@@ -93,14 +67,11 @@ const handleKeydown = (event) => {
   const value = event.target.value
   const selectionStart = event.target.selectionStart
 
-  // Allow valid keys
   if (
-    allowedKeys.includes(key) // Allow navigation/control keys
-    || (key >= '0' && key <= '9') // Allow numbers
-    || (key === '.' && !value.includes('.')) // Allow one decimal point
-    || (key === '-' && selectionStart === 0) // Allow minus sign only at the start
+    allowedKeys.includes(key)
+    || (key >= '0' && key <= '9')
+    || (key === '.' && !value.includes('.'))
   ) {
-    // Check for two decimal places
     if (value.includes('.') && key >= '0' && key <= '9') {
       const decimalPart = value.split('.')[1]
       if (
@@ -111,10 +82,10 @@ const handleKeydown = (event) => {
         return
       }
     }
-    return // Valid key, do nothing
+    return
   }
 
-  // Prevent any other key
+  // Disallow minus and any other invalid input
   event.preventDefault()
 }
 
@@ -127,11 +98,10 @@ const moneyMask = {
     return Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
-    })
-      .format(val)
-      .slice(0, sub ? -sub : undefined)
+    }).format(val).slice(0, sub ? -sub : undefined)
   },
 }
+
 const formatDecimal = (event) => {
   const el = event.target
   const cleaned = el.value.replace(/[$,]/g, '')
@@ -139,11 +109,13 @@ const formatDecimal = (event) => {
 
   if (!isNaN(num)) {
     const fixed = num.toFixed(2)
-    modelValue.value = parseFloat(fixed)
+    modelValue.value = state.isDebit
+      ? -Math.abs(parseFloat(fixed))
+      : Math.abs(parseFloat(fixed))
 
     // Force input's displayed value to update
     el.value = fixed
-    el.dispatchEvent(new Event('input')) // triggers v-model update
+    el.dispatchEvent(new Event('input'))
   }
 }
 </script>
@@ -158,21 +130,32 @@ const formatDecimal = (event) => {
             <slot />
           </div>
         </FormLabel>
-        <FormControl>
-          <Input
-            :id="props.name"
-            v-model="modelValue"
-            v-maska:[moneyMask]
-            :default-value="props.modelValue"
-            :class="classComputed"
-            :type="state.type"
-            v-bind="componentField"
-            :placeholder="props.placeholder"
-            :disabled="props.disabled"
-            @keydown="handleKeydown"
-            @blur="formatDecimal"
-          />
-        </FormControl>
+
+        <div class="flex items-center mb-2">
+          <button
+            type="button"
+            class="border px-2 py-2 rounded text-sm w-[100px] bg-primary text-primary-foreground"
+            @click="toggleDebit"
+          >
+            {{ state.isDebit ? 'Debit (−)' : 'Credit (+)' }}
+          </button>
+          <FormControl>
+            <Input
+              :id="props.name"
+              v-model="modelValue"
+              v-maska:[moneyMask]
+              :default-value="props.modelValue"
+              :class="classComputed"
+              :type="state.type"
+              v-bind="componentField"
+              :placeholder="props.placeholder"
+              :disabled="props.disabled"
+              @keydown="handleKeydown"
+              @blur="formatDecimal"
+            />
+          </FormControl>
+        </div>
+
         <FormDescription>
           {{ props.description }}
           <slot name="description" />
