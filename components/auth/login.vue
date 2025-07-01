@@ -72,7 +72,7 @@ const resetPassword = async () => {
   state.passwordResetResult = result
 }
 
-const passwordPattern = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/
+const passwordPattern = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^\w\s]).{8,50}$/
 
 const loginSchema = toTypedSchema(z.object({
   email: z.string().email().min(6).max(50),
@@ -80,7 +80,7 @@ const loginSchema = toTypedSchema(z.object({
     if (value.length < 8 || value.length > 50 || !passwordPattern.test(value)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'Password must have at least 8 characters, including uppercase and lowercase letters, numbers, and a special character',
+        message: 'Password must be 8–50 characters and include at least one uppercase letter, one lowercase letter, one number, and one special character (e.g., !@#$%^&*).',
       })
     }
   }),
@@ -92,10 +92,10 @@ const emailSchema = toTypedSchema(z.object({
 
 const passwordSchema = toTypedSchema(z.object({
   password: z.string().superRefine((value, ctx) => {
-    if (value.length < 8 || value.length > 50 || !passwordPattern.test(value)) {
+    if (!passwordPattern.test(value)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'Password must have at least 8 characters, including uppercase and lowercase letters, numbers, and a special character',
+        message: 'Password must be 8–50 characters and include at least one uppercase letter, one lowercase letter, one number, and one special character (e.g., !@#$%^&*).',
       })
     }
   }),

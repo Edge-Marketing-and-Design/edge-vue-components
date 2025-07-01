@@ -164,17 +164,23 @@ const schema = computed(() => {
   }
 
   if (state.provider === 'email') {
-    const passwordPattern = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/
+    const passwordPattern = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^\w\s]).{8,50}$/
+
     baseSchema.email = z.string({
       required_error: 'Email is required',
-    }).email({ message: 'Invalid email address' }).min(6, { message: 'Email must be at least 6 characters long' }).max(50, { message: 'Email must be less than 50 characters long' })
+    })
+      .email({ message: 'Invalid email address' })
+      .min(6, { message: 'Email must be at least 6 characters long' })
+      .max(50, { message: 'Email must be less than 50 characters long' })
+
     baseSchema.password = z.string({
       required_error: 'Password is required',
     }).superRefine((value, ctx) => {
-      if (value.length < 8 || value.length > 50 || !passwordPattern.test(value)) {
+      if (!passwordPattern.test(value)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'Password must have at least 8 characters, including uppercase and lowercase letters, numbers, and a special character',
+          message:
+          'Password must be 8–50 characters and include at least one uppercase letter, one lowercase letter, one number, and one special character (e.g., !@#$%^&*).',
         })
       }
     })
