@@ -1,5 +1,6 @@
 <script setup>
 import { useVModel } from '@vueuse/core'
+
 const props = defineProps({
   title: {
     type: String,
@@ -14,7 +15,7 @@ const props = defineProps({
     default: () => [],
   },
   accept: {
-    type: String,
+    type: [String, Array],
     default: '',
   },
   name: {
@@ -64,6 +65,19 @@ const modelValue = useVModel(props, 'modelValue', emits, {
   prop: 'modelValue',
 })
 
+const normalizedAccept = computed(() => {
+  if (Array.isArray(props.accept)) {
+    return props.accept.join(',')
+  }
+  return props.accept
+})
+
+const acceptRegex = computed(() => {
+  return normalizedAccept.value
+    ? new RegExp(normalizedAccept.value.replace(/,/g, '|').replace(/\./g, '\\.'), 'i')
+    : null
+})
+
 const uploadFiles = async () => {
   const results = []
   if (state.files && state.files.length > 0) {
@@ -73,13 +87,19 @@ const uploadFiles = async () => {
     try {
       let index = 0
       for (const file of state.files) {
-        if (props.accept && !file.name.match(props.accept)) {
+        if (acceptRegex.value && !file.type.match(acceptRegex.value)) {
           state.currentUploadFile = `Skipped: ${file.name} (unsupported file type)`
-          state.uploadErrors.push(`"${file.name}" is an unsupported file type. Please upload "${props.accept}" files only.`)
+          state.uploadErrors.push(`"${file.name}" is an unsupported file type. Please upload "${normalizedAccept.value}" files only.`)
         }
         else {
           state.currentUploadFile = `Uploading: ${file.name}`
-          const result = await edgeFirebase.uploadFile(edgeGlobal.edgeState.currentOrganization, file.file, props.filePath, props.public, props.r2)
+          const result = await edgeFirebase.uploadFile(
+            edgeGlobal.edgeState.currentOrganization,
+            file.file,
+            props.filePath,
+            props.public,
+            props.r2,
+          )
           results.push(result)
           state.uploadProgress = ((index + 1) / state.files.length) * 100
           index++
@@ -97,22 +117,16 @@ const uploadFiles = async () => {
 }
 
 const uploadProgress = computed(() => {
-  if (!state.uploading) {
+  if (!state.uploading)
     return 100
-  }
-  if (state.files.length === 1) {
-    return edgeFirebase.state.currentUploadProgress
-  }
-  return state.uploadProgress
+  return state.files.length === 1
+    ? edgeFirebase.state.currentUploadProgress
+    : state.uploadProgress
 })
 
-const dropFiles = computed(() => {
-  return state.files
-})
+const dropFiles = computed(() => state.files)
 
-// Ensure modelValue is always an array
-watch(dropFiles, (newValue) => {
-  console.log(newValue)
+watch(dropFiles, () => {
   uploadFiles()
 })
 </script>
@@ -121,7 +135,7 @@ watch(dropFiles, (newValue) => {
   <Card color="secondary" class="px-0 py-2 my-2 drop-active text-center z-10 top-0 cursor-pointer">
     <file-upload
       v-model="state.files"
-      :accept="props.accept"
+      :accept="normalizedAccept"
       :name="props.name"
       :multiple="props.multiple"
       :drop-directory="props.dropDirectory"
@@ -140,12 +154,16 @@ watch(dropFiles, (newValue) => {
         </slot>
       </CardContent>
     </file-upload>
+
     <Progress
       v-if="state.uploading && uploadProgress > 0"
       v-model="uploadProgress"
       class="mx-auto w-1/2 mb-2"
     />
-    <span v-if="state.uploading || state.uploadProgress > 0">{{ state.currentUploadFile }} </span>
+    <span v-if="state.uploading || state.uploadProgress > 0">
+      {{ state.currentUploadFile }}
+    </span>
+
     <template v-if="state.uploadErrors.length > 0">
       <Alert
         v-for="(error, index) in state.uploadErrors"

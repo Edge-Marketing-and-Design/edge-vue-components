@@ -52,6 +52,7 @@ const newItem = {
   name: '',
   email: '',
   role: '',
+  isTemplate: false,
 }
 
 // computed property gets count of admin users in organization
@@ -112,7 +113,12 @@ const onSubmit = async () => {
   const userRoles = edgeGlobal.orgUserRoles(edgeGlobal.edgeState.currentOrganization)
   const roles = userRoles.find(role => role.name === state.workingItem.role).roles
   if (state.saveButton === 'Invite User') {
-    await edgeFirebase.addUser({ roles, meta: { name: state.workingItem.name, email: state.workingItem.email } })
+    if (!state.workingItem.isTemplate) {
+      await edgeFirebase.addUser({ roles, meta: { name: state.workingItem.name, email: state.workingItem.email } })
+    }
+    else {
+      await edgeFirebase.addUser({ roles, meta: { name: state.workingItem.name, email: state.workingItem.email }, isTemplate: true })
+    }
   }
   else {
     const oldRoles = state.workingItem.roles.filter((role) => {
@@ -277,6 +283,16 @@ const computedUserSchema = computed(() => {
           label="Email"
           :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
         />
+        <edge-g-input
+          v-if="state.saveButton === 'Invite User'"
+          v-model="state.workingItem.isTemplate"
+          name="isTemplate"
+          :disable-tracking="true"
+          field-type="boolean"
+          label="Template User"
+          :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
+        />
+        <div class="mb-4" />
         <edge-g-input
           v-model="state.workingItem.role"
           name="role"
