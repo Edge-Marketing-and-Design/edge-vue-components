@@ -107,7 +107,6 @@ onMounted(() => {
               v-maska:[props.maskOptions]
               :name="props.name"
               :default-value="props.modelValue"
-              :value="modelValue"
               :class="classComputed"
               :type="state.type"
               v-bind="componentField"
