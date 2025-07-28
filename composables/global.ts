@@ -143,7 +143,7 @@ const getOrganizations = async (edgeFirebase: any) => {
       if (segments[0] === 'organizations') {
         await edgeFirebase.startDocumentSnapshot('organizations', segments[1])
         let org = await edgeFirebase.getDocData('organizations', segments[1])
-        if (!org.success) {
+        if (!org?.name) {
           org = { name: 'Organization', docId: segments[1] }
         }
         if (!orgs.some((o: { docId: string }) => o.docId === org.docId)) {
