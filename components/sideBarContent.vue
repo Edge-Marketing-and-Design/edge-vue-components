@@ -152,6 +152,24 @@ const menuItems = computed(() => {
     return true
   })
 })
+
+const processedMenuItems = computed(() => {
+  if (!sidebarIsMobile.value)
+    return menuItems.value
+
+  return menuItems.value.flatMap((item) => {
+    const base = [{ ...item, isSub: false }]
+    if (item.submenu?.length) {
+      const subItems = item.submenu.map(sub => ({
+        ...sub,
+        isSub: true,
+        parentTo: item.to,
+      }))
+      return [...base, ...subItems]
+    }
+    return base
+  })
+})
 </script>
 
 <template>
@@ -164,10 +182,13 @@ const menuItems = computed(() => {
         <SidebarGroupContent>
           <SidebarMenu :class="sidebarMenuClasses">
             <slot name="menu">
-              <SidebarMenuItem v-for="item in menuItems" :key="item.title" :class="sidebarMenuItemClasses">
-                <div class="flex flex-col items-center w-full">
+              <SidebarMenuItem v-for="item in processedMenuItems" :key="item.title" :class="sidebarMenuItemClasses">
+                <div
+                  class="flex flex-col items-center w-full"
+                  :class="item.isSub && sidebarIsMobile ? 'pl-6' : ''"
+                >
                   <SidebarMenuButton
-                    :is-active="currentRoutePath.startsWith(item.to)"
+                    :is-active="currentRoutePath.startsWith(item.to) || (item.submenu && item.submenu.some(sub => currentRoutePath.startsWith(sub.to)))"
                     :tooltip="item.title"
                     :class="sideBarMenuButtonClasses"
                     @click="goTo(item.to)"

@@ -1,9 +1,11 @@
 <script setup>
 import { useAttrs } from 'vue'
+import { useRoute } from 'vue-router'
 import {
   Sidebar,
   useSidebar,
 } from '@/components/ui/sidebar'
+
 const props = defineProps({
   title: {
     type: String,
@@ -121,25 +123,64 @@ const styleOverrides = computed(() => {
 
   return styles
 })
+
+const route = useRoute()
+
+const submenu = computed(() => {
+  let match = props.menuItems.find(item => item.to === route.path)
+
+  if (!match) {
+    match = props.menuItems.find(item =>
+      item.submenu?.some(sub => sub.to === route.path),
+    )
+  }
+
+  return match?.submenu || []
+})
 </script>
 
 <template>
-  <Sidebar :style="styleOverrides" side="left" v-bind="attrs" :collapsible="collapsible">
-    <SidebarHeader :class="props.headerClasses">
-      <slot name="header" :side-bar-state="sidebarState" />
-    </SidebarHeader>
-    <slot name="content">
+  <div class="flex h-full">
+    <!-- Primary Sidebar -->
+    <Sidebar :style="styleOverrides" side="left" v-bind="attrs" :collapsible="collapsible">
+      <SidebarHeader :class="props.headerClasses">
+        <slot name="header" :side-bar-state="sidebarState" />
+      </SidebarHeader>
+      <slot name="content">
+        <edge-side-bar-content
+          v-bind="props"
+        />
+      </slot>
+      <SidebarFooter :class="props.footerClasses">
+        <slot name="footer" :side-bar-state="sidebarState" />
+      </SidebarFooter>
+      <SidebarRail v-if="props.showRail && props.collapsible !== 'slack'">
+        <slot name="rail" :side-bar-state="sidebarState" />
+      </SidebarRail>
+    </Sidebar>
+
+    <!-- Submenu Sidebar -->
+    <Sidebar
+      v-if="submenu.length > 0 && !sidebarIsMobile"
+      side="left"
+      :collapsible="collapsible"
+      class="border-solid border-r w-[60px]"
+    >
       <edge-side-bar-content
-        v-bind="props"
+        :menu-items="submenu"
+        :collapsible="props.collapsible"
+        :show-settings-section="false"
+        :header-classes="props.headerClasses"
+        :content-classes="props.contentClasses"
+        :footer-classes="props.footerClasses"
+        :group-label-classes="props.groupLabelClasses"
+        :button-classes="`gap-0 h-[50px] ${props.buttonClasses}`"
+        :icon-classes="props.iconClasses"
+        :hide-logout="props.hideLogout"
+        class="mt-4"
       />
-    </slot>
-    <SidebarFooter :class="props.footerClasses">
-      <slot name="footer" :side-bar-state="sidebarState" />
-    </SidebarFooter>
-    <SidebarRail v-if="props.showRail && props.collapsible !== 'slack'">
-      <slot name="rail" :side-bar-state="sidebarState" />
-    </SidebarRail>
-  </Sidebar>
+    </Sidebar>
+  </div>
 </template>
 
 <style scoped>

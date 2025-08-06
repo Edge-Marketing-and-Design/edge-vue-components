@@ -206,7 +206,7 @@ const registerPath = computed(() => {
               </edge-shad-form>
             </template>
             <template v-if="provider === 'microsoft'">
-              <edge-shad-button :class="props.primaryButtonClasses" @click="edgeFirebase.logInWithMicrosoft()">
+              <edge-shad-button :class="props.primaryButtonClasses" class="w-full" @click="edgeFirebase.logInWithMicrosoft()">
                 Sign in with Microsoft
               </edge-shad-button>
             </template>
