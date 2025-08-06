@@ -2,6 +2,7 @@
 import { computed, inject, nextTick, onBeforeMount, reactive, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
+import { UserCircle } from 'lucide-vue-next'
 const edgeFirebase = inject('edgeFirebase')
 // const edgeGlobal = inject('edgeGlobal')
 
@@ -130,12 +131,18 @@ const deleteSchema = toTypedSchema(z.object({
 </script>
 
 <template>
+  <edge-menu class="bg-secondary text-foreground rounded-none sticky top-0 py-6">
+    <template #start>
+      <slot name="header-start">
+        <UserCircle class="mr-2" />
+        <span class="capitalize">My Account</span>
+      </slot>
+    </template>
+    <template #end>
+      <div class="hidden" />
+    </template>
+  </edge-menu>
   <Card v-if="state.loaded" class="bg-transparent border-0">
-    <CardHeader class="pt-3">
-      <CardTitle class="text-lg">
-        My Account
-      </CardTitle>
-    </CardHeader>
     <CardContent>
       <template v-if="edgeFirebase.user.firebaseUser.providerData.length === 0">
         <edge-v-alert>

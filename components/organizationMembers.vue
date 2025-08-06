@@ -20,6 +20,17 @@ watch(users, async () => {
 </script>
 
 <template>
+  <edge-menu class="bg-secondary text-foreground rounded-none sticky top-0 py-6">
+    <template #start>
+      <slot name="header-start">
+        <Users class="mr-2" />
+        <span class="capitalize">Users</span>
+      </slot>
+    </template>
+    <template #end>
+      <div class="hidden" />
+    </template>
+  </edge-menu>
   <edge-g-input
     v-if="state.loaded"
     v-model="users"
@@ -27,7 +38,6 @@ watch(users, async () => {
     :disable-tracking="true"
     field-type="objectList"
     sub-field-type="edge-form-subtypes-users"
-    label="Users"
     parent-tracker-id="users"
   />
 </template>

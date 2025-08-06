@@ -85,6 +85,7 @@ const isVisible = useElementVisibility(target)
 
 const edgeFirebase = inject('edgeFirebase')
 const router = useRouter()
+const route = useRoute()
 
 const state = reactive({
   form: false,
@@ -471,16 +472,39 @@ const addFilter = (field, value) => {
 const removeFilter = (field) => {
   state.filterFields = state.filterFields.filter(f => f.field !== field)
 }
+const iconFromMenu = computed(() => {
+  const routePath = route.path
+  console.log('routePath', routePath)
+  console.log(edgeGlobal.edgeState.menuItems)
+
+  // Check top-level menu first
+  const menu = edgeGlobal.edgeState.menuItems.find(item => item.to.startsWith(routePath))
+  if (menu) {
+    return menu.icon
+  }
+
+  // Check submenus
+  for (const item of edgeGlobal.edgeState.menuItems) {
+    if (item.submenu && Array.isArray(item.submenu)) {
+      const foundSub = item.submenu.find(sub => sub.to.startsWith(routePath))
+      if (foundSub) {
+        return foundSub.icon || item.icon
+      }
+    }
+  }
+
+  return 'LayoutDashboard'
+})
 </script>
 
 <template>
   <Card v-if="state.afterMount" :class="cn('mx-auto bg-muted/50 w-full', props.class)">
     <slot name="header">
-      <edge-menu class="bg-primary text-primary-foreground rounded-none sticky top-0" :class="props.headerClass">
+      <edge-menu class="bg-primary text-foreground rounded-none sticky top-0" :class="props.headerClass">
         <template #start>
           <slot name="header-start" :add-filter="addFilter">
-            <LayoutDashboard class="mr-2" />
-            {{ capitalizeFirstLetter(props.collection) }}
+            <component :is="iconFromMenu" class="mr-2" />
+            <span class="capitalize">{{ capitalizeFirstLetter(props.collection).replaceAll('-', ' ') }}</span>
           </slot>
         </template>
         <template #center>
@@ -546,16 +570,16 @@ const removeFilter = (field) => {
         </template>
         <template #end>
           <slot v-if="props.paginated" name="header-end" :add-filter="addFilter" :record-count="state.staticSearch?.results?.total" :title="singularize(props.collection)">
-            <edge-shad-button v-if="!props.paginated" class="uppercase bg-slate-600" :to="`/app/dashboard/${props.collection}/new`">
-              Add {{ singularize(props.collection) }}
+            <edge-shad-button v-if="!props.paginated" class="uppercase bg-primary" :to="`/app/dashboard/${props.collection}/new`">
+              Add {{ singularize(props.collection).replaceAll('-', ' ') }}
             </edge-shad-button>
             <span v-else>
               {{ state.staticSearch.results.total.toLocaleString() }} records
             </span>
           </slot>
           <slot v-else name="header-end" :add-filter="addFilter" :record-count="filtered.length" :title="singularize(props.collection)">
-            <edge-shad-button v-if="!props.paginated" class="uppercase bg-slate-600" :to="`/app/dashboard/${props.collection}/new`">
-              Add {{ singularize(props.collection) }}
+            <edge-shad-button v-if="!props.paginated" class="uppercase bg-primary" :to="`/app/dashboard/${props.collection}/new`">
+              Add {{ singularize(props.collection).replaceAll('-', ' ') }}
             </edge-shad-button>
             <span v-else>
               {{ state.staticSearch.results.total.toLocaleString() }} records

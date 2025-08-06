@@ -127,11 +127,27 @@ const styleOverrides = computed(() => {
 const route = useRoute()
 
 const submenu = computed(() => {
+  // Direct match on top-level item
   let match = props.menuItems.find(item => item.to === route.path)
 
+  // Exact match on a submenu item
   if (!match) {
     match = props.menuItems.find(item =>
       item.submenu?.some(sub => sub.to === route.path),
+    )
+  }
+
+  // Match route starting with submenu.to (e.g., dynamic routes like /blocks/abc)
+  if (!match) {
+    match = props.menuItems.find(item =>
+      item.submenu?.some(sub => route.path.startsWith(`${sub.to}/`)),
+    )
+  }
+
+  // Fallback: match route starting with top-level item.to
+  if (!match) {
+    match = props.menuItems.find(item =>
+      route.path.startsWith(`${item.to}/`),
     )
   }
 
@@ -160,28 +176,50 @@ const submenu = computed(() => {
     </Sidebar>
 
     <!-- Submenu Sidebar -->
-    <Sidebar
-      v-if="submenu.length > 0 && !sidebarIsMobile"
-      side="left"
-      :collapsible="collapsible"
-      class="border-solid border-r w-[60px]"
-    >
-      <edge-side-bar-content
-        :menu-items="submenu"
-        :collapsible="props.collapsible"
-        :show-settings-section="false"
-        :header-classes="props.headerClasses"
-        :content-classes="props.contentClasses"
-        :footer-classes="props.footerClasses"
-        :group-label-classes="props.groupLabelClasses"
-        :button-classes="`gap-0 h-[50px] ${props.buttonClasses}`"
-        :icon-classes="props.iconClasses"
-        :hide-logout="props.hideLogout"
-        class="mt-4"
-      />
-    </Sidebar>
+    <Transition name="slide-submenu">
+      <Sidebar
+        v-if="submenu.length > 0 && !sidebarIsMobile"
+        side="left"
+        :collapsible="collapsible"
+        class="border-solid border-r w-[60px]"
+      >
+        <edge-side-bar-content
+          :menu-items="submenu"
+          :submenu="true"
+          :collapsible="props.collapsible"
+          :show-settings-section="false"
+          :header-classes="props.headerClasses"
+          :content-classes="props.contentClasses"
+          :footer-classes="props.footerClasses"
+          :group-label-classes="props.groupLabelClasses"
+          :button-classes="`gap-0 h-[52px] ${props.buttonClasses}`"
+          :icon-classes="props.iconClasses"
+          :hide-logout="props.hideLogout"
+          class="mt-4"
+        />
+      </Sidebar>
+    </Transition>
   </div>
 </template>
 
 <style scoped>
+.slide-submenu-enter-active, .slide-submenu-leave-active {
+  transition: transform 0.3s ease, opacity 0.3s ease;
+}
+.slide-submenu-enter-from {
+  transform: translateX(-100%);
+  opacity: 0;
+}
+.slide-submenu-enter-to {
+  transform: translateX(0);
+  opacity: 1;
+}
+.slide-submenu-leave-from {
+  transform: translateX(0);
+  opacity: 1;
+}
+.slide-submenu-leave-to {
+  transform: translateX(-100%);
+  opacity: 0;
+}
 </style>

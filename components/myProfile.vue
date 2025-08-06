@@ -1,5 +1,6 @@
 <script setup>
 import { computed, defineProps, inject, nextTick, onBeforeMount, reactive, watch } from 'vue'
+import { User } from 'lucide-vue-next'
 import { useToast } from '@/components/ui/toast/use-toast'
 const props = defineProps({
   metaFields: {
@@ -57,17 +58,23 @@ watch(currentMeta, async () => {
 </script>
 
 <template>
-  <Card v-if="state.loaded" class="bg-transparent border-0">
+  <edge-menu class="bg-secondary text-foreground rounded-none sticky top-0 py-6">
+    <template #start>
+      <slot name="header-start">
+        <User class="mr-2" />
+        <span class="capitalize">My Profile</span>
+      </slot>
+    </template>
+    <template #end>
+      <div class="hidden" />
+    </template>
+  </edge-menu>
+  <Card v-if="state.loaded" class="bg-transparent border-0 shadow-none py-4">
     <edge-shad-form
       v-model="state.form"
       :schema="props.formSchema"
       @submit="onSubmit"
     >
-      <CardHeader class="pt-3">
-        <CardTitle class="text-lg">
-          My Profile
-        </CardTitle>
-      </CardHeader>
       <CardContent>
         <edge-g-input
           v-for="field in props.metaFields"

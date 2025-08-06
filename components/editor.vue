@@ -93,6 +93,20 @@ const subCollection = (collection) => {
 
 onBeforeRouteLeave((to, from, next) => {
   state.bypassRoute = to.path
+  console.log('bypassRoute', state.bypassRoute)
+  console.log('unsavedChanges', unsavedChanges.value)
+  console.log('bypassUnsavedChanges', state.bypassUnsavedChanges)
+  if (unsavedChanges.value && !state.bypassUnsavedChanges) {
+    state.dialog = true
+    next(false)
+    return
+  }
+  edgeGlobal.edgeState.changeTracker = {}
+  next()
+})
+
+onBeforeRouteUpdate((to, from, next) => {
+  state.bypassRoute = to.path
   if (unsavedChanges.value && !state.bypassUnsavedChanges) {
     state.dialog = true
     next(false)
@@ -321,7 +335,7 @@ const triggerSubmit = () => {
       @submit="onSubmit"
     >
       <slot name="header" :on-submit="triggerSubmit" :on-cancel="onCancel" :submitting="state.submitting" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc">
-        <edge-menu v-if="props.showHeader" class="py-2 bg-primary text-primary-foreground rounded-none sticky top-0">
+        <edge-menu v-if="props.showHeader" class="py-4 bg-secondary text-foreground rounded-none sticky top-0">
           <template #start>
             <slot name="header-start" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc">
               <FilePenLine class="mr-2" />
@@ -335,21 +349,21 @@ const triggerSubmit = () => {
             <slot name="header-end" :unsaved-changes="unsavedChanges" :submitting="state.submitting" :title="title" :working-doc="state.workingDoc">
               <edge-shad-button
                 v-if="!unsavedChanges"
-                type="destructive"
+                class="bg-red-700 uppercase h-8 hover:bg-red-200 w-20"
                 @click="onCancel"
               >
                 Close
               </edge-shad-button>
               <edge-shad-button
                 v-else
-                class="bg-red-700 uppercase h-8 hover:bg-slate-400 w-20 "
+                class="bg-red-700 uppercase h-8 hover:bg-red-200 w-20"
                 @click="onCancel"
               >
                 Cancel
               </edge-shad-button>
               <edge-shad-button
                 type="submit"
-                class="bg-slate-500 uppercase h-8 hover:bg-slate-400 w-[120px] mb-1"
+                class="bg-primary uppercase h-8 hover:bg-slate-400 px-8"
                 :disabled="state.submitting"
               >
                 <Loader2 v-if="state.submitting" class="w-4 h-4 mr-2 animate-spin" />
@@ -420,14 +434,14 @@ const triggerSubmit = () => {
         <slot name="footer" :on-submit="triggerSubmit" :unsaved-changes="unsavedChanges" :title="title" :submitting="state.submitting" :working-doc="state.workingDoc">
           <edge-shad-button
             v-if="!unsavedChanges"
-            class="bg-red-700 uppercase h-8 hover:bg-slate-400 w-20"
+            class="bg-red-700 uppercase h-8 hover:bg-red-200 w-20"
             @click="onCancel"
           >
             Close
           </edge-shad-button>
           <edge-shad-button
             v-else
-            class="bg-red-700 uppercase h-8 hover:bg-slate-400 w-20"
+            class="bg-red-700 uppercase h-8 hover:bg-red-200 w-20"
             @click="onCancel"
           >
             Cancel
@@ -435,7 +449,7 @@ const triggerSubmit = () => {
 
           <edge-shad-button
             type="submit"
-            class="bg-slate-500 uppercase h-8 hover:bg-slate-400 w-[120px] mb-1"
+            class="bg-primary uppercase h-8 hover:bg-slate-400 px-8"
             :disabled="state.submitting"
           >
             <Loader2 v-if="state.submitting" class="w-4 h-4 mr-2 animate-spin" />

@@ -7,6 +7,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  submenu: {
+    type: Boolean,
+    default: false,
+  },
   settingsTitle: {
     type: String,
     default: '',
@@ -195,7 +199,7 @@ const processedMenuItems = computed(() => {
                   >
                     <component :is="item.icon" class="[stroke-width:1]" :class="sideBarIconClasses" />
                     <span v-if="!isSlack">{{ item.title }}</span>
-                    <span v-else class="text-xs">{{ item.title }}</span>
+                    <span v-else :class="submenu ? 'text-[10px]' : 'text-xs'">{{ item.title }}</span>
                   </SidebarMenuButton>
                 </div>
               </SidebarMenuItem>
