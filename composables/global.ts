@@ -12,6 +12,7 @@ const edgeState = reactive({
   lastPaginatedDoc: null,
   subscribedStatus: null,
   showLeftPanel: {} as Record<string, boolean>,
+  menuItems: [],
 })
 
 const setOrganization = async (organization: string, edgeFirebase: any) => {

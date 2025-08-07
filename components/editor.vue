@@ -385,7 +385,7 @@ const triggerSubmit = () => {
                   :name="name"
                 />
               </div>
-              <div v-else-if="field.bindings['field-type'] !== 'collection'" class="h-[100px] p-3 items-center">
+              <div v-else-if="field.bindings['field-type'] !== 'collection'" :class="field.bindings['field-type'] === 'textarea' ? 'mb-10' : ''" class="h-[100px] p-3 items-center">
                 <edge-g-input
                   v-model="state.workingDoc[name]"
                   :name="name"

@@ -599,7 +599,7 @@ const iconFromMenu = computed(() => {
       <div class="flex flex-wrap items-center py-0">
         <slot name="list" :filtered="filtered" :delete-item="deleteItem" :run-search="runSearch" :loading-more="state.loadingMore">
           <template v-for="item in filtered" :key="item.docId">
-            <slot name="list-item" :item="item" :delete-item="deleteItem" :run-search="runSearch">
+            <slot name="list-item" :item="item" :delete-item="deleteItem" :run-search="runSearch" :goto-site="gotoSite">
               <div class="cursor-pointer w-full flex justify-between items-center py-1 gap-3" @click="gotoSite(item.docId)">
                 <div>
                   <Avatar class="cursor-pointer p-0 h-8 w-8 mr-2">

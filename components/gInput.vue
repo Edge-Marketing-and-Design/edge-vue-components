@@ -839,7 +839,14 @@ watch(modelValue, () => {
     <Card v-if="props.fieldType === 'stringArray' || props.fieldType === 'numberArray' || props.fieldType === 'intArray'" class="p-1">
       <CardHeader class="py-2 px-3">
         <CardTitle class="text-md">
-          {{ props.label }}
+          <div class="flex items-center">
+            <div class="grow">
+              {{ props.label }}
+            </div>
+            <div>
+              <edge-g-helper :title="props.label" :helper="props.helper" />
+            </div>
+          </div>
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -1208,7 +1215,7 @@ watch(modelValue, () => {
           <CardTitle class="text-lg flex items-center">
             <div>{{ props.label }}</div>
             <div class="grow text-right">
-              <component :is="`${props.subFieldType}`" v-model:items="modelValue" :pass-through-props="passThroughProps" />
+              <component :is="resolveComponent(`edge-form-subtypes-${props.subFieldType}`)" v-model:items="modelValue" :pass-through-props="passThroughProps" />
             </div>
             <edge-g-helper v-if="props.helper" :title="props.label" :helper="props.helper" />
           </CardTitle>
@@ -1224,7 +1231,7 @@ watch(modelValue, () => {
           >
             <template #item="{ element, index }">
               <div>
-                <component :is="`${props.subFieldType}`" v-model:items="modelValue" :item="element" :pass-through-props="passThroughProps" />
+                <component :is="resolveComponent(`edge-form-subtypes-${props.subFieldType}`)" v-model:items="modelValue" :item="element" :pass-through-props="passThroughProps" />
                 <Alert v-if="isTracked && state.afterMount && (JSON.stringify(modelValue[index]) !== JSON.stringify(edgeGlobal.edgeState.changeTracker[state.trackerKey][state.objectListOriginalOrder[element.id]]))" class="mt-0 mb-3 bg-warning py-2 px-1">
                   <div class="flex flex-wrap justify-center py-0 items-center">
                     <div v-if="props.fieldType === 'objectList'" class="flex flex-wrap justify-center grow">
