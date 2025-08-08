@@ -37,7 +37,7 @@ watch(users, async () => {
     name="users"
     :disable-tracking="true"
     field-type="objectList"
-    sub-field-type="edge-form-subtypes-users"
+    sub-field-type="users"
     parent-tracker-id="users"
   />
 </template>

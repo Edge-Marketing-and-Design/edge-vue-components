@@ -499,10 +499,10 @@ const iconFromMenu = computed(() => {
 
 <template>
   <Card v-if="state.afterMount" :class="cn('mx-auto bg-muted/50 w-full', props.class)">
-    <slot name="header">
+    <slot name="header" :add-filter="addFilter" :icon="iconFromMenu" :add-title="capitalizeFirstLetter(singularize(props.collection))" :title="capitalizeFirstLetter(props.collection).replaceAll('-', ' ')">
       <edge-menu class="bg-primary text-foreground rounded-none sticky top-0" :class="props.headerClass">
         <template #start>
-          <slot name="header-start" :add-filter="addFilter">
+          <slot name="header-start" :add-filter="addFilter" :icon="iconFromMenu">
             <component :is="iconFromMenu" class="mr-2" />
             <span class="capitalize">{{ capitalizeFirstLetter(props.collection).replaceAll('-', ' ') }}</span>
           </slot>
