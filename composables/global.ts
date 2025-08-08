@@ -158,6 +158,7 @@ const getOrganizations = async (edgeFirebase: any) => {
 }
 
 const dupObject = (obj: any): any => {
+  console.log('Duplicating object:', obj)
   return JSON.parse(JSON.stringify(obj))
 }
 

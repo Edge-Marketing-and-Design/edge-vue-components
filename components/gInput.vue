@@ -325,10 +325,7 @@ const addField = async () => {
       }
     }
     else {
-      finalValue = {
-        value,
-        type: state.fieldInsert.type,
-      }
+      finalValue = value
     }
     console.log(state.isEditing)
     if (state.isEditing) {
@@ -401,10 +398,7 @@ const addField = async () => {
     }
   }
   else {
-    finalValue = {
-      value,
-      type: state.fieldInsert.type,
-    }
+    finalValue = value
   }
   const existingFieldIndex = Object.values(modelValue.value).findIndex(item => item.fieldId === fieldId)
 
@@ -728,8 +722,8 @@ const validateInput = (event) => {
 watch(() => props.modelValue, (newValue) => {
   if (state.afterMount) {
     if (props.fieldType === 'objectList') {
-    // Only update if the objects are different
-      if (JSON.stringify(modelValue.value) !== JSON.stringify(newValue)) {
+      // Only update if the objects are different and newValue is not undefined
+      if (newValue !== undefined && JSON.stringify(modelValue.value) !== JSON.stringify(newValue)) {
         modelValue.value = edgeGlobal.dupObject(newValue)
       }
     }
@@ -1136,18 +1130,18 @@ watch(modelValue, () => {
                     <template v-if="modelValue[element.key].gptGenerated || props.forFunctions">
                       <edge-function-chips class="mt-5" :field="modelValue[element.key]" />
                     </template>
-                    <template v-else-if="typeof modelValue[element.key].value !== 'object'">
+                    <template v-else-if="typeof modelValue[element.key] !== 'object'">
                       <edge-shad-input
-                        v-if="typeof modelValue[element.key].value === 'string'"
-                        v-model="modelValue[element.key].value"
+                        v-if="typeof modelValue[element.key] === 'string'"
+                        v-model="modelValue[element.key]"
                         v-bind="props.bindings"
                         placeholder="Enter value here"
                         :label="!props.staticObject ? '' : element.key"
                         :name="`${props.name}.${element.key}`"
                       />
                       <edge-shad-checkbox
-                        v-else-if="typeof modelValue[element.key].value === 'boolean'"
-                        v-model="modelValue[element.key].value"
+                        v-else-if="typeof modelValue[element.key] === 'boolean'"
+                        v-model="modelValue[element.key]"
                         class="mb-1"
                         v-bind="props.bindings"
                         :name="`${props.name}.${element.key}`"
@@ -1155,18 +1149,10 @@ watch(modelValue, () => {
                         {{ getArrayObjectLabel(element.key) }}
                       </edge-shad-checkbox>
                       <edge-shad-number
-                        v-else-if="modelValue[element.key].type === 'number'"
-                        v-model="modelValue[element.key].value"
+                        v-else-if="typeof modelValue[element.key] === 'number'"
+                        v-model="modelValue[element.key]"
                         :step=".1"
                         :name="`${props.name}.${element.key}`"
-                        v-bind="props.bindings"
-                      />
-                      <edge-shad-number
-                        v-else-if="modelValue[element.key].type === 'integer'"
-                        v-model="modelValue[element.key].value"
-                        :step="1"
-                        :name="`${props.name}.${element.key}`"
-                        :format-options="{ maximumFractionDigits: 0 }"
                         v-bind="props.bindings"
                       />
                     </template>
@@ -1178,8 +1164,8 @@ watch(modelValue, () => {
                     <Trash width="18" height="18" />
                   </edge-shad-button>
                 </div>
-                <div v-if="typeof modelValue[element.key].value === 'object'" class="w-full py-1">
-                  <edge-g-input v-model="modelValue[element.key].value" :name="element.key" :for-functions="props.forFunctions" :bindings="props.bindings" :label="getArrayObjectLabel(element.key)" :disable-tracking="true" :field-type="Array.isArray(modelValue[element.key].value) ? 'array' : 'object'" />
+                <div v-if="typeof modelValue[element.key] === 'object'" class="w-full py-1">
+                  <edge-g-input v-model="modelValue[element.key]" :name="element.key" :for-functions="props.forFunctions" :bindings="props.bindings" :label="getArrayObjectLabel(element.key)" :disable-tracking="true" :field-type="Array.isArray(modelValue[element.key]) ? 'array' : 'object'" />
                 </div>
               </div>
             </template>

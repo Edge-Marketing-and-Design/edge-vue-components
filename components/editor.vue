@@ -224,8 +224,8 @@ const onSubmit = async () => {
     router.push(props.saveRedirectOverride)
   }
   else {
-    router.back()
-    // router.push(`/app/dashboard/${props.collection}`)
+    // router.back()
+    router.push(`/app/dashboard/${props.collection}`)
   }
   state.submitting = false
 }
@@ -235,12 +235,12 @@ const onCancel = () => {
     router.push(props.saveRedirectOverride)
   }
   else {
-    router.back()
+    // router.back()
+    router.push(`/app/dashboard/${props.collection}`)
   }
 }
 
 onBeforeMount(async () => {
-  console.log('test')
   state.bypassUnsavedChanges = false
   edgeGlobal.edgeState.changeTracker = {}
   for (const field of Object.keys(props.newDocSchema)) {
@@ -252,7 +252,6 @@ onBeforeMount(async () => {
 })
 
 watch(() => edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`], (newVal) => {
-  console.log('newVal', newVal)
   if (props.docId !== 'new') {
     if (edgeGlobal.objHas(newVal, props.docId) === false) {
       return
@@ -349,14 +348,14 @@ const triggerSubmit = () => {
             <slot name="header-end" :unsaved-changes="unsavedChanges" :submitting="state.submitting" :title="title" :working-doc="state.workingDoc">
               <edge-shad-button
                 v-if="!unsavedChanges"
-                class="bg-red-700 uppercase h-8 hover:bg-red-200 w-20"
+                class="bg-secondary uppercase h-8 hover:bg-red-400 w-20"
                 @click="onCancel"
               >
                 Close
               </edge-shad-button>
               <edge-shad-button
                 v-else
-                class="bg-red-700 uppercase h-8 hover:bg-red-200 w-20"
+                class="bg-red-700 uppercase h-8 hover:bg-red-400 w-20"
                 @click="onCancel"
               >
                 Cancel
