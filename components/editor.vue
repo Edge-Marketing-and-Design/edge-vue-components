@@ -377,23 +377,25 @@ const triggerSubmit = () => {
         <slot name="main" :title="title" :on-cancel="onCancel" :submitting="state.submitting" :unsaved-changes="unsavedChanges" :on-submit="triggerSubmit" :working-doc="state.workingDoc">
           <div class="flex flex-wrap items-center justify-between">
             <div v-for="(field, name, index) in props.newDocSchema" :key="index" :class="numColsToTailwind(field.cols)">
-              <div v-if="field.bindings['field-type'] === 'date'" class="h-[100px] p-3 items-center">
+              <div v-if="field.bindings['field-type'] === 'date'" class="p-3 items-center">
                 <edge-shad-datepicker
                   v-model="state.workingDoc[name]"
                   :label="field.bindings.label"
                   :name="name"
+                  :bindings="field.bindings"
                 />
               </div>
-              <div v-else-if="field.bindings['field-type'] !== 'collection'" :class="field.bindings['field-type'] === 'textarea' ? 'mb-10' : ''" class="h-[100px] p-3 items-center">
+              <div v-else-if="field.bindings['field-type'] !== 'collection'" :class="field.bindings['field-type'] === 'textarea' ? 'mb-10' : ''" class="p-3 items-center">
                 <edge-g-input
                   v-model="state.workingDoc[name]"
                   :name="name"
                   :disable-tracking="true"
                   :parent-tracker-id="`${props.collection}-${props.docId}`"
                   v-bind="field.bindings"
+                  :bindings="field.bindings"
                 />
               </div>
-              <div v-else class="h-[100px] p-3 items-center">
+              <div v-else class="p-3 items-center">
                 <edge-g-input
                   v-model="state.workingDoc[name]"
                   :disable-tracking="true"
@@ -401,6 +403,7 @@ const triggerSubmit = () => {
                   :collection-path="`${edgeGlobal.edgeState.organizationDocPath}/${field.bindings['collection-path']}`"
                   :label="field.bindings.label"
                   :name="name"
+                  :bindings="field.bindings"
                   :parent-tracker-id="`${props.collection}-${props.docId}`"
                 />
               </div>
