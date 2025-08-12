@@ -83,12 +83,15 @@ const modelValue = useVModel(props, 'modelValue', emits, {
       <FormItem>
         <FormLabel class="flex">
           {{ props.label }}
+          <div class="ml-auto inline-block">
+            <slot />
+          </div>
         </FormLabel>
         <div class="relative w-full items-center">
           <Select v-model="modelValue" :disabled="props.disabled" :default-value="modelValue" v-bind="componentField">
             <FormControl>
               <SelectTrigger class="text-foreground" :class="[$slots.icon ? 'pr-8' : '', props.class]">
-                <SelectValue />
+                <SelectValue :placeholder="props.placeholder" />
               </SelectTrigger>
             </FormControl>
             <SelectContent>

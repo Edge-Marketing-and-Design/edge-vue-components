@@ -18,6 +18,7 @@ const props = defineProps({
   },
   placeholder: {
     type: String,
+    default: 'Make a selection',
     required: false,
   },
   label: {
@@ -104,7 +105,7 @@ watch(() => modelValue.value, (newValue) => {
   emits('update:modelValue', newValue)
 })
 const triggerTitle = computed(() => {
-  let triggerTitle = 'Make a selection'
+  let triggerTitle = props.placeholder
   if (modelValue.value) {
     const item = computedItems.value.find(item => item[props.itemValue] === modelValue.value)
     if (item) {
