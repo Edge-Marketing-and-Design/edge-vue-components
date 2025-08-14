@@ -145,10 +145,7 @@ const currentRoutePath = computed(() => {
   return route.fullPath.endsWith('/') ? route.fullPath.slice(0, -1) : route.fullPath
 })
 const isAdmin = computed(() => {
-  const orgRole = edgeFirebase?.user?.roles.find(role =>
-    role.collectionPath === edgeGlobal.edgeState.organizationDocPath.replaceAll('/', '-'),
-  )
-  return orgRole && orgRole.role === 'admin'
+  return edgeGlobal.isAdminGlobal(edgeFirebase).value
 })
 
 const toBool = v => v === true || v === 'true' || v === 1 || v === '1'
@@ -157,11 +154,15 @@ const allowMenuItem = (item) => {
   const isDev = config.public.developmentMode
   const adminOnly = toBool(item.adminOnly)
   const devOnly = toBool(item.devOnly)
+  const override = toBool(item.override)
   console.log(item)
   console.log('adminOnly:', adminOnly)
   console.log('isAdmin:', isAdmin.value)
   console.log('devOnly:', devOnly)
   console.log('isDev:', isDev)
+  console.log('override:', override)
+  if (item.override !== undefined)
+    return override
   if (adminOnly && !isAdmin.value)
     return false
   if (devOnly && !isDev)

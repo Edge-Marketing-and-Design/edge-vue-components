@@ -104,15 +104,20 @@ const valueToTitle = computed(() => {
               <ComboboxAnchor as-child>
                 <TagsInput v-model="modelValue" :class="cn('px-2 gap-2 w-80', props.class)" :disabled="props.disabled">
                   <div class="flex gap-2 flex-wrap items-center">
-                    <TagsInputItem v-for="val in modelValue" :key="val" :value="val">
+                    <TagsInputItem v-for="val in modelValue" :key="val" class="h-8" :value="val">
                       <span class="px-1">{{ valueToTitle[val] ?? val }}</span>
                       <TagsInputItemDelete v-if="!props.disabled" />
                     </TagsInputItem>
                   </div>
 
                   <ComboboxInput v-model="searchTerm" as-child>
-                    <TagsInputInput :disabled="props.disabled" :placeholder="props.placeholder" class="min-w-[200px] w-full p-0 border-none focus-visible:ring-0 h-auto" @keydown.enter.prevent />
+                    <TagsInputInput :disabled="props.disabled" :placeholder="props.placeholder" class="min-w-[200px] w-full p-0 border-none shadow-none focus-visible:ring-0 h-auto" @keydown.enter.prevent />
                   </ComboboxInput>
+                  <ComboboxTrigger as-child>
+                    <Button variant="icon" class="!py-0 h-6">
+                      <ChevronsUpDown class="h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </ComboboxTrigger>
                 </TagsInput>
 
                 <ComboboxList class="w-[--reka-popper-anchor-width]">

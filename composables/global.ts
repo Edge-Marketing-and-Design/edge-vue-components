@@ -13,6 +13,7 @@ const edgeState = reactive({
   subscribedStatus: null,
   showLeftPanel: {} as Record<string, boolean>,
   menuItems: [],
+  isAdminCollections: [] as string[],
 })
 
 const setOrganization = async (organization: string, edgeFirebase: any) => {
@@ -316,6 +317,22 @@ const getRoleName = (roles: RoleType[], orgId: string) => {
   return 'Unknown'
 }
 
+const isAdminGlobal = (edgeFirebase: any) => computed(() => {
+  const roleCompares = dupObject(edgeState.isAdminCollections)
+  roleCompares.push(edgeState.organizationDocPath)
+  console.log('roles compare')
+  console.log(roleCompares)
+  for (const compare of roleCompares) {
+    const orgRole = edgeFirebase?.user?.roles.find((role: any) =>
+      role.collectionPath === compare.replaceAll('/', '-'),
+    )
+    if (orgRole && orgRole.role === 'admin') {
+      return true
+    }
+  }
+  return false
+})
+
 export const edgeGlobal = {
   edgeState,
   setOrganization,
@@ -330,5 +347,5 @@ export const edgeGlobal = {
   edgeLogOut,
   orgUserRoles,
   getRoleName,
-  showLeftPanel,
+  isAdminGlobal,
 }
