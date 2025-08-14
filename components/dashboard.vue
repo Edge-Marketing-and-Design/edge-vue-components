@@ -147,14 +147,10 @@ const singularize = (word) => {
 }
 
 const snapShotQuery = computed(() => {
-  const queryInfo = props.searchFields.find(field => field.name === state.queryField)
-  let operator = '=='
-  if (queryInfo?.operators) {
-    operator = state.queryOperator
-  }
   if (state.queryField && state.queryValue) {
+    console.log('snapShotQuery', state.queryField, state.queryOperator, state.queryValue)
     return [
-      { field: state.queryField, operator, value: state.queryValue },
+      { field: state.queryField, operator: state.queryOperator, value: state.queryValue },
     ]
   }
   return []
@@ -344,6 +340,7 @@ onBeforeMount(async () => {
     }
     console.log('start snapshot')
     console.log(snapShotQuery.value)
+    console.log(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
     await edgeFirebase.stopSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
     await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, snapShotQuery.value)
   }
@@ -407,6 +404,7 @@ watch (snapShotQuery, async () => {
     }
   }
 })
+
 const scrollContainerRef = ref(null)
 
 // Restore the scroll position in the div
@@ -502,7 +500,7 @@ const iconFromMenu = computed(() => {
     <slot name="header" :add-filter="addFilter" :icon="iconFromMenu" :add-title="capitalizeFirstLetter(singularize(props.collection))" :title="capitalizeFirstLetter(props.collection).replaceAll('-', ' ')">
       <edge-menu class="bg-primary text-foreground rounded-none sticky top-0" :class="props.headerClass">
         <template #start>
-          <slot name="header-start" :add-filter="addFilter" :icon="iconFromMenu">
+          <slot name="header-start" :add-filter="addFilter" :icon="iconFromMenu" :title="capitalizeFirstLetter(props.collection).replaceAll('-', ' ')">
             <component :is="iconFromMenu" class="mr-2" />
             <span class="capitalize">{{ capitalizeFirstLetter(props.collection).replaceAll('-', ' ') }}</span>
           </slot>

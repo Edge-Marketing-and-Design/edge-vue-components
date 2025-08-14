@@ -149,6 +149,12 @@ const capitalizeFirstLetter = (str) => {
   return str.charAt(0).toUpperCase() + str.slice(1)
 }
 
+function toTitleCase(str) {
+  return str.replace(/\b\w/g, char => char.toUpperCase())
+}
+
+// Output: "Hello World From Javascript"
+
 const singularize = (word) => {
   if (word.endsWith('ies') && word.length > 4) {
     return `${word.slice(0, -3)}y`
@@ -188,7 +194,7 @@ const title = computed(() => {
     return capitalizeFirstLetter(`${edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`][props.docId].name}`)
   }
   else {
-    return `New ${capitalizeFirstLetter(singularize(props.collection))}`
+    return `New ${toTitleCase(singularize(props.collection)).replace('-', ' ')}`
   }
 })
 

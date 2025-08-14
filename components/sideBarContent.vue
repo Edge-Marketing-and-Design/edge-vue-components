@@ -73,6 +73,8 @@ const props = defineProps({
   },
 })
 
+const config = useRuntimeConfig()
+
 const {
   state: sidebarState,
   isMobile: sidebarIsMobile,
@@ -148,13 +150,34 @@ const isAdmin = computed(() => {
   )
   return orgRole && orgRole.role === 'admin'
 })
+
+const toBool = v => v === true || v === 'true' || v === 1 || v === '1'
+
+const allowMenuItem = (item) => {
+  const isDev = config.public.developmentMode
+  const adminOnly = toBool(item.adminOnly)
+  const devOnly = toBool(item.devOnly)
+  console.log(item)
+  console.log('adminOnly:', adminOnly)
+  console.log('isAdmin:', isAdmin.value)
+  console.log('devOnly:', devOnly)
+  console.log('isDev:', isDev)
+  if (adminOnly && !isAdmin.value)
+    return false
+  if (devOnly && !isDev)
+    return false
+  return true
+}
+
 const menuItems = computed(() => {
-  return props.menuItems.filter((item) => {
-    if (item.adminOnly && !isAdmin.value) {
-      return false
-    }
-    return true
-  })
+  return props.menuItems
+    .filter(allowMenuItem)
+    .map(item => ({
+      ...item,
+      submenu: Array.isArray(item.submenu)
+        ? item.submenu.filter(allowMenuItem)
+        : item.submenu,
+    }))
 })
 
 const processedMenuItems = computed(() => {
@@ -163,7 +186,7 @@ const processedMenuItems = computed(() => {
 
   return menuItems.value.flatMap((item) => {
     const base = [{ ...item, isSub: false }]
-    if (item.submenu?.length) {
+    if (Array.isArray(item.submenu) && item.submenu.length) {
       const subItems = item.submenu.map(sub => ({
         ...sub,
         isSub: true,

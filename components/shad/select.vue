@@ -55,18 +55,10 @@ const computedItems = computed(() => {
     if (typeof item === 'string') {
       return { [props.itemTitle]: item, [props.itemValue]: item }
     }
-    else {
-      const titleParts = props.itemTitle.split('.')
-      let value = { ...item }
-      titleParts.forEach((part) => {
-        if (value && typeof value === 'object' && part in value) {
-          value = value[part]
-        }
-        else {
-          value = null
-        }
-      })
-      return { [props.itemTitle]: value, [props.itemValue]: item[props.itemValue] }
+    const getNestedValue = (obj, path) => path.split('.').reduce((acc, key) => acc && acc[key], obj)
+    return {
+      [props.itemTitle]: getNestedValue(item, props.itemTitle),
+      [props.itemValue]: getNestedValue(item, props.itemValue),
     }
   })
 })

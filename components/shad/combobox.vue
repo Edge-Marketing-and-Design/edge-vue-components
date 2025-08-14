@@ -8,7 +8,7 @@ const props = defineProps({
     required: true,
   },
   modelValue: {
-    type: String,
+    type: [String, Array],
     required: false,
   },
   class: {
@@ -49,6 +49,11 @@ const props = defineProps({
     required: false,
     default: 'name',
   },
+  multiple: {
+    type: Boolean,
+    required: false,
+    default: false,
+  },
 })
 
 const emits = defineEmits(['update:modelValue'])
@@ -64,7 +69,11 @@ const computedItems = computed(() => {
     if (typeof item === 'string') {
       return { [props.itemTitle]: item, [props.itemValue]: item }
     }
-    return item
+    const getNestedValue = (obj, path) => path.split('.').reduce((acc, key) => acc && acc[key], obj)
+    return {
+      [props.itemTitle]: getNestedValue(item, props.itemTitle),
+      [props.itemValue]: getNestedValue(item, props.itemValue),
+    }
   })
 })
 
@@ -72,6 +81,11 @@ const modelValue = useVModel(props, 'modelValue', emits, {
   passive: false,
   prop: 'modelValue',
 })
+
+// Ensure model is an array when multiple
+if (props.multiple && !Array.isArray(modelValue.value)) {
+  modelValue.value = modelValue.value ? [modelValue.value] : []
+}
 
 const triggerButton = ref(null)
 
@@ -94,40 +108,76 @@ watch(() => modelValue.value, () => {
 const { setValue } = useField(props.name)
 
 const handleItemSelect = (item) => {
-  const selectedValue = item[props.itemValue] || '' // Fallback to an empty string
-  emits('update:modelValue', selectedValue) // Emit the update event
-  setValue(item.value) // Update the vee-validate field value
-  modelValue.value = selectedValue // Update the reactive modelValue
-  open.value = false // Close the dropdown
+  const selectedValue = item[props.itemValue] ?? ''
+
+  if (props.multiple) {
+    // Start from an array
+    const current = Array.isArray(modelValue.value) ? [...modelValue.value] : []
+    const idx = current.indexOf(selectedValue)
+    if (idx === -1) {
+      current.push(selectedValue)
+    }
+    else {
+      current.splice(idx, 1)
+    }
+    modelValue.value = current
+    emits('update:modelValue', current)
+    setValue(current)
+    // keep popover open for multi-select
+  }
+  else {
+    modelValue.value = selectedValue
+    emits('update:modelValue', selectedValue)
+    setValue(selectedValue)
+    open.value = false
+  }
 }
 
 watch(() => modelValue.value, (newValue) => {
   emits('update:modelValue', newValue)
 })
-const triggerTitle = computed(() => {
-  let triggerTitle = props.placeholder
-  if (modelValue.value) {
-    const item = computedItems.value.find(item => item[props.itemValue] === modelValue.value)
-    if (item) {
-      if (edgeGlobal.objHas(item, props.itemTitle)) {
-        triggerTitle = item[props.itemTitle]
-      }
-    }
+
+const isSelected = (item) => {
+  const val = item[props.itemValue] ?? ''
+  if (props.multiple) {
+    return Array.isArray(modelValue.value) && modelValue.value.includes(val)
   }
-  return triggerTitle
+  return modelValue.value === val
+}
+
+const triggerTitle = computed(() => {
+  const placeholder = props.placeholder
+  const items = computedItems.value
+
+  if (props.multiple) {
+    const values = Array.isArray(modelValue.value) ? modelValue.value : []
+    if (values.length === 0)
+      return placeholder
+    const titles = values
+      .map(v => items.find(i => (i[props.itemValue] ?? '') === v))
+      .filter(Boolean)
+      .map(i => i[props.itemTitle])
+    if (titles.length === 0)
+      return placeholder
+    if (titles.length <= 3)
+      return titles.join(', ')
+    return `${titles.length} selected`
+  }
+  else {
+    if (modelValue.value) {
+      const item = items.find(i => (i[props.itemValue] ?? '') === modelValue.value)
+      if (item && edgeGlobal.objHas(item, props.itemTitle))
+        return item[props.itemTitle]
+    }
+    return placeholder
+  }
 })
 </script>
 
 <template>
   <FormField :name="props.name">
     <FormItem class="flex flex-col space-y-1">
-      <!-- <Input
-        :id="props.name"
-        :value="modelValue"
-        :default-value="props.modelValue"
-        :type="state.type"
-        v-bind="componentField"
-      /> -->
+      {{ computedItems }}
       <FormLabel>{{ props.label }}</FormLabel>
       <Popover v-model:open="open">
         <PopoverTrigger as-child>
@@ -139,6 +189,7 @@ const triggerTitle = computed(() => {
               :aria-expanded="open"
               class="w-[200px] justify-between text-foreground"
               :class="props.class"
+              :disabled="props.disabled"
             >
               {{ triggerTitle }}
               <ChevronsUpDown class="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -161,7 +212,7 @@ const triggerTitle = computed(() => {
                   <Check
                     :class="cn(
                       'ml-auto h-4 w-4',
-                      modelValue === item[props.itemValue] ? 'opacity-100' : 'opacity-0',
+                      isSelected(item) ? 'opacity-100' : 'opacity-0',
                     )"
                   />
                 </CommandItem>
