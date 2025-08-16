@@ -113,67 +113,85 @@ const gotoSubscription = async (url) => {
   window.location.href = url
   state.loading = false
 }
+
+const route = useRoute()
 </script>
 
 <template>
-  <slot
-    name="subscription"
-    :subscribed-status="edgeGlobal.edgeState.subscribedStatus"
-    :subscribe-options="props.subscribeOptions"
-    :goto-subscription="gotoSubscription"
-    :navigate-to-billing="navigateToBilling"
-    :current-organization="edgeGlobal.edgeState.currentOrganization"
-  >
-    <Alert v-if="edgeGlobal.edgeState.subscribedStatus && props.subscribeOptions.length > 0" class="mt-0" :class="edgeGlobal.edgeState.subscribedStatus.color">
-      <component :is="edgeGlobal.edgeState.subscribedStatus.icon" />
-      <AlertTitle>
-        {{ edgeGlobal.edgeState.subscribedStatus.status }}
-      </AlertTitle>
-      <AlertDescription>
-        {{ edgeGlobal.edgeState.subscribedStatus.description }}
-        <template v-if="!edgeGlobal.edgeState.subscribedStatus.isSubscribed">
-          <div class="text-center w-full mb-4">
-            <slot name="subscribeTitle">
-              <span class="text-2xl">Subscribe now with 7 day free trial!</span>
+  <Card class="w-full flex-1 bg-muted/50 mx-auto w-full border-none shadow-none pt-2">
+    <slot
+      name="subscription"
+      :subscribed-status="edgeGlobal.edgeState.subscribedStatus"
+      :subscribe-options="props.subscribeOptions"
+      :goto-subscription="gotoSubscription"
+      :navigate-to-billing="navigateToBilling"
+      :current-organization="edgeGlobal.edgeState.currentOrganization"
+    >
+      <Alert v-if="edgeGlobal.edgeState.subscribedStatus && props.subscribeOptions.length > 0" class="mt-0" :class="edgeGlobal.edgeState.subscribedStatus.color">
+        <component :is="edgeGlobal.edgeState.subscribedStatus.icon" />
+        <AlertTitle>
+          {{ edgeGlobal.edgeState.subscribedStatus.status }}
+        </AlertTitle>
+        <AlertDescription>
+          {{ edgeGlobal.edgeState.subscribedStatus.description }}
+          <template v-if="!edgeGlobal.edgeState.subscribedStatus.isSubscribed">
+            <div class="text-center w-full mb-4">
+              <slot name="subscribeTitle">
+                <span class="text-2xl">Subscribe now with 7 day free trial!</span>
+              </slot>
+            </div>
+            <slot name="subscribeOptions">
+              <div class="flex justify-center space-x-4">
+                <edge-shad-button
+                  v-for="option in props.subscribeOptions"
+                  :key="option.buttonText"
+                  class="text-white  w-100 bg-slate-800 hover:bg-slate-400"
+                  @click="gotoSubscription(`${option.stripeSubscriptionLink}?client_reference_id=${edgeGlobal.edgeState.currentOrganization}`)"
+                >
+                  {{ option.buttonText }}
+                </edge-shad-button>
+              </div>
             </slot>
-          </div>
-          <slot name="subscribeOptions">
-            <div class="flex justify-center space-x-4">
+          </template>
+          <div v-else class="flex flex-col sm:flex-row">
+            <div>
               <edge-shad-button
-                v-for="option in props.subscribeOptions"
-                :key="option.buttonText"
                 class="text-white  w-100 bg-slate-800 hover:bg-slate-400"
-                @click="gotoSubscription(`${option.stripeSubscriptionLink}?client_reference_id=${edgeGlobal.edgeState.currentOrganization}`)"
+                @click="navigateToBilling"
               >
-                {{ option.buttonText }}
+                Manage Subscription
               </edge-shad-button>
             </div>
-          </slot>
-        </template>
-        <div v-else class="flex flex-col sm:flex-row">
-          <div>
-            <edge-shad-button
-              class="text-white  w-100 bg-slate-800 hover:bg-slate-400"
-              @click="navigateToBilling"
-            >
-              Manage Subscription
-            </edge-shad-button>
           </div>
-        </div>
-      </AlertDescription>
-    </Alert>
-  </slot>
-  <Card v-if="state.loaded" class="border-none shadow-none bg-transparent">
+        </AlertDescription>
+      </Alert>
+    </slot>
+
     <edge-shad-form
       :schema="props.formSchema"
       @submit="onSubmit"
     >
-      <CardHeader class="pt-3">
-        <CardTitle class="text-lg">
-          {{ props.title }}
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
+      <slot name="header">
+        <edge-menu class="bg-secondary text-foreground rounded-none sticky top-0 py-6">
+          <template #start>
+            <slot name="header-start">
+              <component :is="edgeGlobal.iconFromMenu(route)" class="mr-2" />
+              <span class="capitalize">Organization Settings</span>
+            </slot>
+          </template>
+          <template #center>
+            <slot name="header-center">
+              <div v-if="!props.hideSearch" class="w-full px-6" />
+            </slot>
+          </template>
+          <template #end>
+            <slot name="header-end">
+              <div />
+            </slot>
+          </template>
+        </edge-menu>
+      </slot>
+      <CardContent v-if="state.loaded" class="p-3 w-full  overflow-y-auto scroll-area">
         <template v-for="field in props.orgFields" :key="field.field">
           <Card v-if="field.type === 'section'" class="mb-2">
             <CardHeader>

@@ -470,38 +470,15 @@ const addFilter = (field, value) => {
 const removeFilter = (field) => {
   state.filterFields = state.filterFields.filter(f => f.field !== field)
 }
-const iconFromMenu = computed(() => {
-  const routePath = route.path
-  console.log('routePath', routePath)
-  console.log(edgeGlobal.edgeState.menuItems)
-
-  // Check top-level menu first
-  const menu = edgeGlobal.edgeState.menuItems.find(item => item.to.startsWith(routePath))
-  if (menu) {
-    return menu.icon
-  }
-
-  // Check submenus
-  for (const item of edgeGlobal.edgeState.menuItems) {
-    if (item.submenu && Array.isArray(item.submenu)) {
-      const foundSub = item.submenu.find(sub => sub.to.startsWith(routePath))
-      if (foundSub) {
-        return foundSub.icon || item.icon
-      }
-    }
-  }
-
-  return 'LayoutDashboard'
-})
 </script>
 
 <template>
-  <Card v-if="state.afterMount" :class="cn('mx-auto bg-muted/50 w-full', props.class)">
-    <slot name="header" :add-filter="addFilter" :icon="iconFromMenu" :add-title="capitalizeFirstLetter(singularize(props.collection))" :title="capitalizeFirstLetter(props.collection).replaceAll('-', ' ')">
+  <Card v-if="state.afterMount" :class="cn('mx-auto bg-muted/50 w-full flex-1 border-none shadow-none pt-2', props.class)">
+    <slot name="header" :add-filter="addFilter" :icon="edgeGlobal.iconFromMenu(route)" :add-title="capitalizeFirstLetter(singularize(props.collection))" :title="capitalizeFirstLetter(props.collection).replaceAll('-', ' ')">
       <edge-menu class="bg-primary text-foreground rounded-none sticky top-0" :class="props.headerClass">
         <template #start>
-          <slot name="header-start" :add-filter="addFilter" :icon="iconFromMenu" :title="capitalizeFirstLetter(props.collection).replaceAll('-', ' ')">
-            <component :is="iconFromMenu" class="mr-2" />
+          <slot name="header-start" :add-filter="addFilter" :icon="edgeGlobal.iconFromMenu(route)" :title="capitalizeFirstLetter(props.collection).replaceAll('-', ' ')">
+            <component :is="edgeGlobal.iconFromMenu(route)" class="mr-2" />
             <span class="capitalize">{{ capitalizeFirstLetter(props.collection).replaceAll('-', ' ') }}</span>
           </slot>
         </template>

@@ -2,7 +2,6 @@
 import { computed, inject, nextTick, onBeforeMount, reactive, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { UserCircle } from 'lucide-vue-next'
 const edgeFirebase = inject('edgeFirebase')
 // const edgeGlobal = inject('edgeGlobal')
 
@@ -128,172 +127,187 @@ const deleteSchema = toTypedSchema(z.object({
     required_error: 'You must confirm that you understand the consequences of deleting your account',
   }),
 }))
+
+const route = useRoute()
 </script>
 
 <template>
-  <edge-menu class="bg-secondary text-foreground rounded-none sticky top-0 py-6">
-    <template #start>
-      <slot name="header-start">
-        <UserCircle class="mr-2" />
-        <span class="capitalize">My Account</span>
-      </slot>
-    </template>
-    <template #end>
-      <div class="hidden" />
-    </template>
-  </edge-menu>
-  <Card v-if="state.loaded" class="bg-transparent border-0">
-    <CardContent>
-      <template v-if="edgeFirebase.user.firebaseUser.providerData.length === 0">
-        <edge-v-alert>
-          Logged in as:
-          <edge-v-alert-title>{{ state.username }}</edge-v-alert-title>
-          <strong>Custom Provider</strong>
-          <Separator class="my-4 dark:bg-slate-600" />
-          Notice: You're signed in with a custom provider. Nothing to update here.
-        </edge-v-alert>
-      </template>
-      <template v-else-if="edgeFirebase.user.firebaseUser.providerData[0].providerId === 'password'">
-        <div class="mb-2 font-bold">
-          Update Email
-        </div>
-        <edge-shad-form
-          v-model="state.userForm"
-          :schema="usernameSchema"
-          @submit="updateUser"
-        >
-          <edge-g-input
-            v-model="state.username"
-            name="username"
-            field-type="text"
-            label="Username"
-            parent-tracker-id="my-account"
-            hint="Update your email address, which also serves as your username."
-            persistent-hint
-          />
-          <edge-v-alert
-            v-if="state.userError.message !== ''"
-            :type="state.userError.success ? 'success' : 'error'"
-            dismissible
-            class="mt-0 mb-3 text-caption" density="compact" variant="tonal"
-          >
-            {{ state.userError.message }}
-          </edge-v-alert>
-
-          <edge-shad-button
-            type="submit"
-            :disabled="state.loading"
-            class="text-white bg-slate-800 hover:bg-slate-400"
-          >
-            <Loader2 v-if="state.loading" class="w-4 h-4 mr-2 animate-spin" />
-            Update Email
-          </edge-shad-button>
-        </edge-shad-form>
-        <Separator class="my-4 dark:bg-slate-600" />
-        <edge-shad-form
-          v-model="state.passwordForm"
-          :schema="passwordSchema"
-          @submit="updatePassword"
-        >
-          <div class="mb-2 font-bold">
-            Change Password
-          </div>
-          <edge-shad-input
-            v-model="state.oldPassword"
-            type="password"
-            label="Old Password"
-            placeholder="Enter your old password"
-            name="oldPassword"
-          />
-          <edge-shad-input
-            v-model="state.newPassword"
-            type="password"
-            label="New Password"
-            placeholder="Enter your new password"
-            name="newPassword"
-          />
-          <edge-v-alert
-            v-if="state.passwordError.message !== ''"
-            :type="state.passwordError.success ? 'success' : 'error'"
-            dismissible
-            class="mt-0 mb-3 text-caption" density="compact" variant="tonal"
-          >
-            {{ state.passwordError.message }}
-          </edge-v-alert>
-          <edge-shad-button
-            type="submit"
-            :disabled="state.loading"
-            class="text-white bg-slate-800 hover:bg-slate-400"
-          >
-            <Loader2 v-if="state.loading" class="w-4 h-4 mr-2 animate-spin" />
-            Update Password
-          </edge-shad-button>
-        </edge-shad-form>
-      </template>
-      <template v-else>
-        <edge-v-alert>
-          Logged in as:
-          <edge-v-alert-title>{{ edgeFirebase.user.firebaseUser.providerData[0].email }}</edge-v-alert-title>
-          <strong>Provider: {{ edgeFirebase.user.firebaseUser.providerData[0].providerId }}</strong>
-          <Separator class="my-4 dark:bg-slate-600" />
-          Notice: You're signed in with a third-party provider. To update your login information, please visit your provider's account settings. Changes cannot be made directly within this app.
-        </edge-v-alert>
-      </template>
-      <van-divider class="my-2">
-        <h4 class="font-bold">
-          Delete Account
-        </h4>
-      </van-divider>
-      <Separator class="my-4 dark:bg-slate-600" />
-      <edge-shad-form
-        v-model="state.deleteForm"
-        :schema="deleteSchema"
-        @submit="deleteAccount"
-      >
-        <edge-shad-button
-          v-if="!state.showDeleteAccount"
-          :disabled="state.loading"
-          variant="destructive"
-          class="w-full"
-          @click.stop.prevent="state.showDeleteAccount = true"
-        >
-          <Loader2 v-if="state.loading" class="w-4 h-4 mr-2 animate-spin" />
-          Delete Account
-        </edge-shad-button>
-        <edge-v-alert v-else closable variant="tonal" border="start" type="error" prominent @click:close="state.showDeleteAccount = false">
-          <div class="text-xl font-bold">
-            Are you sure?
-          </div>
-          <h3 class="my-2">
-            <strong>Warning:</strong> Deleting your account will permanently remove all of your data from this app. This action cannot be undone.
-          </h3>
-          <edge-g-input
-            name="delete_account"
-            field-type="boolean"
-            label="I understand the consequences of deleting my account."
-            :disable-tracking="true"
-          />
-          <div class="flex gap-2 items-center">
-            <edge-shad-button
-              :disabled="state.loading"
-              variant="destructive"
-              class="text-white bg-slate-800 hover:bg-slate-400 mt-3"
-              @click.stop.prevent="state.showDeleteAccount = false"
+  <Card class="w-full flex-1 bg-muted/50 mx-auto w-full border-none shadow-none pt-2">
+    <slot name="header">
+      <edge-menu class="bg-secondary text-foreground rounded-none sticky top-0 py-6">
+        <template #start>
+          <slot name="header-start">
+            <component :is="edgeGlobal.iconFromMenu(route)" class="mr-2" />
+            <span class="capitalize">My Account</span>
+          </slot>
+        </template>
+        <template #center>
+          <slot name="header-center">
+            <div class="w-full px-6" />
+          </slot>
+        </template>
+        <template #end>
+          <slot name="header-end">
+            <div />
+          </slot>
+        </template>
+      </edge-menu>
+    </slot>
+    <CardContent v-if="state.loaded" class="p-3 w-full overflow-y-auto scroll-area">
+      <Card v-if="state.loaded" class="bg-transparent border-0">
+        <CardContent>
+          <template v-if="edgeFirebase.user.firebaseUser.providerData.length === 0">
+            <edge-v-alert>
+              Logged in as:
+              <edge-v-alert-title>{{ state.username }}</edge-v-alert-title>
+              <strong>Custom Provider</strong>
+              <Separator class="my-4 dark:bg-slate-600" />
+              Notice: You're signed in with a custom provider. Nothing to update here.
+            </edge-v-alert>
+          </template>
+          <template v-else-if="edgeFirebase.user.firebaseUser.providerData[0].providerId === 'password'">
+            <div class="mb-2 font-bold">
+              Update Email
+            </div>
+            <edge-shad-form
+              v-model="state.userForm"
+              :schema="usernameSchema"
+              @submit="updateUser"
             >
-              Cancel
-            </edge-shad-button>
+              <edge-g-input
+                v-model="state.username"
+                name="username"
+                field-type="text"
+                label="Username"
+                parent-tracker-id="my-account"
+                hint="Update your email address, which also serves as your username."
+                persistent-hint
+              />
+              <edge-v-alert
+                v-if="state.userError.message !== ''"
+                :type="state.userError.success ? 'success' : 'error'"
+                dismissible
+                class="mt-0 mb-3 text-caption" density="compact" variant="tonal"
+              >
+                {{ state.userError.message }}
+              </edge-v-alert>
+
+              <edge-shad-button
+                type="submit"
+                :disabled="state.loading"
+                class="text-white bg-slate-800 hover:bg-slate-400"
+              >
+                <Loader2 v-if="state.loading" class="w-4 h-4 mr-2 animate-spin" />
+                Update Email
+              </edge-shad-button>
+            </edge-shad-form>
+            <Separator class="my-4 dark:bg-slate-600" />
+            <edge-shad-form
+              v-model="state.passwordForm"
+              :schema="passwordSchema"
+              @submit="updatePassword"
+            >
+              <div class="mb-2 font-bold">
+                Change Password
+              </div>
+              <edge-shad-input
+                v-model="state.oldPassword"
+                type="password"
+                label="Old Password"
+                placeholder="Enter your old password"
+                name="oldPassword"
+              />
+              <edge-shad-input
+                v-model="state.newPassword"
+                type="password"
+                label="New Password"
+                placeholder="Enter your new password"
+                name="newPassword"
+              />
+              <edge-v-alert
+                v-if="state.passwordError.message !== ''"
+                :type="state.passwordError.success ? 'success' : 'error'"
+                dismissible
+                class="mt-0 mb-3 text-caption" density="compact" variant="tonal"
+              >
+                {{ state.passwordError.message }}
+              </edge-v-alert>
+              <edge-shad-button
+                type="submit"
+                :disabled="state.loading"
+                class="text-white bg-slate-800 hover:bg-slate-400"
+              >
+                <Loader2 v-if="state.loading" class="w-4 h-4 mr-2 animate-spin" />
+                Update Password
+              </edge-shad-button>
+            </edge-shad-form>
+          </template>
+          <template v-else>
+            <edge-v-alert>
+              Logged in as:
+              <edge-v-alert-title>{{ edgeFirebase.user.firebaseUser.providerData[0].email }}</edge-v-alert-title>
+              <strong>Provider: {{ edgeFirebase.user.firebaseUser.providerData[0].providerId }}</strong>
+              <Separator class="my-4 dark:bg-slate-600" />
+              Notice: You're signed in with a third-party provider. To update your login information, please visit your provider's account settings. Changes cannot be made directly within this app.
+            </edge-v-alert>
+          </template>
+          <van-divider class="my-2">
+            <h4 class="font-bold">
+              Delete Account
+            </h4>
+          </van-divider>
+          <Separator class="my-4 dark:bg-slate-600" />
+          <edge-shad-form
+            v-model="state.deleteForm"
+            :schema="deleteSchema"
+            @submit="deleteAccount"
+          >
             <edge-shad-button
-              type="submit"
+              v-if="!state.showDeleteAccount"
               :disabled="state.loading"
               variant="destructive"
-              class="text-white  mt-3 uppercase text-lg"
+              class="w-full"
+              @click.stop.prevent="state.showDeleteAccount = true"
             >
               <Loader2 v-if="state.loading" class="w-4 h-4 mr-2 animate-spin" />
               Delete Account
             </edge-shad-button>
-          </div>
-        </edge-v-alert>
-      </edge-shad-form>
+            <edge-v-alert v-else closable variant="tonal" border="start" type="error" prominent @click:close="state.showDeleteAccount = false">
+              <div class="text-xl font-bold">
+                Are you sure?
+              </div>
+              <h3 class="my-2">
+                <strong>Warning:</strong> Deleting your account will permanently remove all of your data from this app. This action cannot be undone.
+              </h3>
+              <edge-g-input
+                name="delete_account"
+                field-type="boolean"
+                label="I understand the consequences of deleting my account."
+                :disable-tracking="true"
+              />
+              <div class="flex gap-2 items-center">
+                <edge-shad-button
+                  :disabled="state.loading"
+                  variant="destructive"
+                  class="text-white bg-slate-800 hover:bg-slate-400 mt-3"
+                  @click.stop.prevent="state.showDeleteAccount = false"
+                >
+                  Cancel
+                </edge-shad-button>
+                <edge-shad-button
+                  type="submit"
+                  :disabled="state.loading"
+                  variant="destructive"
+                  class="text-white  mt-3 uppercase text-lg"
+                >
+                  <Loader2 v-if="state.loading" class="w-4 h-4 mr-2 animate-spin" />
+                  Delete Account
+                </edge-shad-button>
+              </div>
+            </edge-v-alert>
+          </edge-shad-form>
+        </CardContent>
+      </Card>
     </CardContent>
   </Card>
 </template>

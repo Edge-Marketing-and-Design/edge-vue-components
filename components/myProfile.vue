@@ -1,6 +1,5 @@
 <script setup>
 import { computed, defineProps, inject, nextTick, onBeforeMount, reactive, watch } from 'vue'
-import { User } from 'lucide-vue-next'
 import { useToast } from '@/components/ui/toast/use-toast'
 const props = defineProps({
   metaFields: {
@@ -55,49 +54,61 @@ watch(currentMeta, async () => {
   await nextTick()
   state.loaded = true
 })
+const route = useRoute()
 </script>
 
 <template>
-  <edge-menu class="bg-secondary text-foreground rounded-none sticky top-0 py-6">
-    <template #start>
-      <slot name="header-start">
-        <User class="mr-2" />
-        <span class="capitalize">My Profile</span>
-      </slot>
-    </template>
-    <template #end>
-      <div class="hidden" />
-    </template>
-  </edge-menu>
-  <Card v-if="state.loaded" class="bg-transparent border-0 shadow-none py-4">
-    <edge-shad-form
-      v-model="state.form"
-      :schema="props.formSchema"
-      @submit="onSubmit"
-    >
-      <CardContent>
-        <edge-g-input
-          v-for="field in props.metaFields"
-          :key="field.field"
-          v-model="state.meta[field.field]"
-          :name="field.field"
-          :field-type="field.type"
-          :label="field.label"
-          parent-tracker-id="profile-settings"
-          :hint="field.hint"
-        />
-      </CardContent>
-      <CardFooter>
-        <edge-shad-button
-          type="submit"
-          :disabled="state.loading"
-          class="text-white bg-slate-800 hover:bg-slate-400"
-        >
-          <Loader2 v-if="state.loading" class="w-4 h-4 mr-2 animate-spin" />
-          Save
-        </edge-shad-button>
-      </CardFooter>
-    </edge-shad-form>
+  <Card class="w-full flex-1 bg-muted/50 mx-auto w-full border-none shadow-none pt-2">
+    <slot name="header">
+      <edge-menu class="bg-secondary text-foreground rounded-none sticky top-0 py-6">
+        <template #start>
+          <slot name="header-start">
+            <component :is="edgeGlobal.iconFromMenu(route)" class="mr-2" />
+            <span class="capitalize">My Profile</span>
+          </slot>
+        </template>
+        <template #center>
+          <slot name="header-center">
+            <div class="w-full px-6" />
+          </slot>
+        </template>
+        <template #end>
+          <slot name="header-end">
+            <div />
+          </slot>
+        </template>
+      </edge-menu>
+    </slot>
+    <CardContent v-if="state.loaded" class="p-3 w-full overflow-y-auto scroll-area">
+      <edge-shad-form
+        v-model="state.form"
+        :schema="props.formSchema"
+        @submit="onSubmit"
+      >
+        <CardContent>
+          <edge-g-input
+            v-for="field in props.metaFields"
+            :key="field.field"
+            v-model="state.meta[field.field]"
+            :name="field.field"
+            :field-type="field.type"
+            :label="field.label"
+            parent-tracker-id="profile-settings"
+            :hint="field.hint"
+          />
+        </CardContent>
+        <CardFooter>
+          <edge-shad-button
+            type="submit"
+            :disabled="state.loading"
+            class="text-white bg-slate-800 hover:bg-slate-400"
+          >
+            <Loader2 v-if="state.loading" class="w-4 h-4 mr-2 animate-spin" />
+            Save
+          </edge-shad-button>
+        </CardFooter>
+      </edge-shad-form>
+    </CardContent>
   </Card>
 </template>
 

@@ -14,6 +14,7 @@ const edgeState = reactive({
   showLeftPanel: {} as Record<string, boolean>,
   menuItems: [],
   isAdminCollections: [] as string[],
+  redirectRoute: '',
 })
 
 const setOrganization = async (organization: string, edgeFirebase: any) => {
@@ -319,7 +320,7 @@ const getRoleName = (roles: RoleType[], orgId: string) => {
 
 const isAdminGlobal = (edgeFirebase: any) => computed(() => {
   const roleCompares = dupObject(edgeState.isAdminCollections)
-  roleCompares.push(edgeState.organizationDocPath)
+  roleCompares.push(`organizations-${edgeState.currentOrganization}`)
   console.log('roles compare')
   console.log(roleCompares)
   for (const compare of roleCompares) {
@@ -332,6 +333,65 @@ const isAdminGlobal = (edgeFirebase: any) => computed(() => {
   }
   return false
 })
+
+interface MenuItem {
+  to: string
+  icon?: string
+  submenu?: SubMenuItem[]
+}
+
+interface SubMenuItem {
+  to: string
+  icon?: string
+}
+
+interface BestMatch {
+  icon: string
+  len: number
+}
+
+const iconFromMenu = (route: { path: string }): string => {
+  const normalize = (p: string): string => {
+    if (!p)
+      return '/'
+    const cleaned = p.replace(/\/+$/, '')
+    return cleaned.length ? cleaned : '/'
+  }
+
+  const current = normalize(route.path)
+  let best: BestMatch = { icon: 'LayoutDashboard', len: -1 }
+
+  for (const item of (edgeState.menuItems || []) as MenuItem[]) {
+    const parentTo = normalize(item.to)
+
+    // 1) Exact submenu match first (wins even if sub.to === item.to)
+    if (Array.isArray(item.submenu)) {
+      for (const sub of item.submenu) {
+        const subTo = normalize(sub.to)
+        if (subTo === current) {
+          return sub.icon || item.icon || 'LayoutDashboard'
+        }
+        // Track most specific submenu prefix match
+        if (current.startsWith(subTo) && subTo.length > best.len) {
+          best = { icon: sub.icon || item.icon || 'LayoutDashboard', len: subTo.length }
+        }
+      }
+    }
+
+    // 2) Exact parent match (only if no exact submenu already returned)
+    if (parentTo === current) {
+      return item.icon || 'LayoutDashboard'
+    }
+
+    // 3) Track most specific parent prefix match
+    if (current.startsWith(parentTo) && parentTo.length > best.len) {
+      best = { icon: item.icon || 'LayoutDashboard', len: parentTo.length }
+    }
+  }
+
+  // 4) Fallback
+  return best.icon
+}
 
 export const edgeGlobal = {
   edgeState,
@@ -348,4 +408,5 @@ export const edgeGlobal = {
   orgUserRoles,
   getRoleName,
   isAdminGlobal,
+  iconFromMenu,
 }

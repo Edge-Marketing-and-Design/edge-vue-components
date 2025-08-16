@@ -330,7 +330,7 @@ const triggerSubmit = () => {
 </script>
 
 <template>
-  <Card v-if="state.afterMount" :class="cn('m-auto bg-muted/50 w-full flex flex-col', props.class)">
+  <Card v-if="state.afterMount" :class="cn('bg-muted/50 w-full flex-1 border-none shadow-none pt-2 px-2 m-auto flex-col', props.class)">
     <edge-shad-form
       ref="formRef"
       v-model="state.form"

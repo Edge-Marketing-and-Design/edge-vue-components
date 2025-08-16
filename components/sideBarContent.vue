@@ -155,12 +155,6 @@ const allowMenuItem = (item) => {
   const adminOnly = toBool(item.adminOnly)
   const devOnly = toBool(item.devOnly)
   const override = toBool(item.override)
-  console.log(item)
-  console.log('adminOnly:', adminOnly)
-  console.log('isAdmin:', isAdmin.value)
-  console.log('devOnly:', devOnly)
-  console.log('isDev:', isDev)
-  console.log('override:', override)
   if (item.override !== undefined)
     return override
   if (adminOnly && !isAdmin.value)
@@ -179,6 +173,9 @@ const menuItems = computed(() => {
         ? item.submenu.filter(allowMenuItem)
         : item.submenu,
     }))
+})
+
+onMounted(() => {
 })
 
 const processedMenuItems = computed(() => {
