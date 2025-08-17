@@ -424,6 +424,7 @@ const onError = async () => {
                   :name="name"
                   :bindings="field.bindings"
                   :errors="state.errors?.[name]"
+                  :pass-through-props="state.workingDoc"
                 />
               </div>
               <div v-else-if="field.bindings['field-type'] !== 'collection'" :class="field.bindings['field-type'] === 'textarea' ? 'mb-10' : ''" class="p-3 items-center">
@@ -435,6 +436,7 @@ const onError = async () => {
                   v-bind="field.bindings"
                   :bindings="field.bindings"
                   :errors="state.errors?.[name]"
+                  :pass-through-props="state.workingDoc"
                 />
               </div>
               <div v-else class="p-3 items-center">
@@ -448,6 +450,7 @@ const onError = async () => {
                   :bindings="field.bindings"
                   :parent-tracker-id="`${props.collection}-${props.docId}`"
                   :errors="state.errors?.[name]"
+                  :pass-through-props="state.workingDoc"
                 />
               </div>
             </div>
