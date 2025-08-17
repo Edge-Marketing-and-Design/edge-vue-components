@@ -67,6 +67,9 @@ const state = reactive({
   bypassRoute: '',
   afterMount: false,
   submitting: false,
+  errors: {},
+  // When creating a new doc, suppress the very first validation pass that happens right after initial values load
+  skipNextValidation: props.docId === 'new',
 })
 const edgeFirebase = inject('edgeFirebase')
 // const edgeGlobal = inject('edgeGlobal')
@@ -327,6 +330,36 @@ const triggerSubmit = () => {
     formRef.value.handleSubmit(onSubmit)()
   }
 }
+
+watch(() => state.workingDoc, async () => {
+  // Do nothing until the component signals it's ready
+  if (state.afterMount === false)
+    return
+
+  if (!formRef.value)
+    return
+
+  // If this is the first change on a brand-new doc, set values WITHOUT validation and exit.
+  if (state.skipNextValidation && props.docId === 'new') {
+    await formRef.value.setValues(state.workingDoc, false) // no validate on initial fill
+    state.skipNextValidation = false
+    return
+  }
+
+  // Normal behavior thereafter: update values and validate
+  await formRef.value.setValues(state.workingDoc, true)
+  await formRef.value.validate()
+  state.errors = formRef.value.errors
+  console.log('formRef.value.errors', state.errors)
+}, { deep: true, immediate: false })
+
+const onError = async () => {
+  if (!formRef.value)
+    return
+  await formRef.value.setValues(state.workingDoc, false) // sync without triggering per-field validate
+  await formRef.value.validate() // run full form validation once
+  state.errors = formRef.value.errors // reflect in UI
+}
 </script>
 
 <template>
@@ -338,6 +371,7 @@ const triggerSubmit = () => {
       :initial-values="state.workingDoc"
       class="flex flex-col flex-1"
       @submit="onSubmit"
+      @error="onError"
     >
       <slot name="header" :on-submit="triggerSubmit" :on-cancel="onCancel" :submitting="state.submitting" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc">
         <edge-menu v-if="props.showHeader" class="py-4 bg-secondary text-foreground rounded-none sticky top-0">
@@ -389,6 +423,7 @@ const triggerSubmit = () => {
                   :label="field.bindings.label"
                   :name="name"
                   :bindings="field.bindings"
+                  :errors="state.errors?.[name]"
                 />
               </div>
               <div v-else-if="field.bindings['field-type'] !== 'collection'" :class="field.bindings['field-type'] === 'textarea' ? 'mb-10' : ''" class="p-3 items-center">
@@ -399,6 +434,7 @@ const triggerSubmit = () => {
                   :parent-tracker-id="`${props.collection}-${props.docId}`"
                   v-bind="field.bindings"
                   :bindings="field.bindings"
+                  :errors="state.errors?.[name]"
                 />
               </div>
               <div v-else class="p-3 items-center">
@@ -411,6 +447,7 @@ const triggerSubmit = () => {
                   :name="name"
                   :bindings="field.bindings"
                   :parent-tracker-id="`${props.collection}-${props.docId}`"
+                  :errors="state.errors?.[name]"
                 />
               </div>
             </div>

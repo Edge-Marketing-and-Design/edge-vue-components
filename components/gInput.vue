@@ -106,6 +106,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  errors: {
+    type: String,
+    default: '',
+  },
 })
 const emit = defineEmits(['update:modelValue'])
 
@@ -1213,13 +1217,18 @@ watch(modelValue, () => {
       <Card class="bg-transparent border-0 shadow-none">
         <CardHeader class="pt-3 pb-2">
           <CardTitle class="text-lg flex items-center">
-            <div>{{ props.label }}</div>
+            <div :class="{ 'text-red-500': props.errors.length > 0 }">
+              {{ props.label }}
+            </div>
             <div class="grow text-right">
               <component :is="resolveComponent(`edge-form-subtypes-${props.subFieldType}`)" v-model:items="modelValue" :pass-through-props="passThroughProps" />
             </div>
             <edge-g-helper v-if="props.helper" :title="props.label" :helper="props.helper" />
           </CardTitle>
           <CardDescription>
+            <span v-if="props.errors" class="text-red-500">
+              {{ props.errors }}
+            </span>
             <Separator />
           </CardDescription>
         </CardHeader>

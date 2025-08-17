@@ -43,13 +43,13 @@ const arrayModel = computed({
     const cleaned = normalize(arr)
     if (props.valueAs === 'array') {
       rawModel.value = cleaned
-      setValue(cleaned)
+      setValue(cleaned, false)
       emit('update:modelValue', cleaned)
     }
     else {
       const csv = cleaned.join(',')
       rawModel.value = csv
-      setValue(csv)
+      setValue(csv, false)
       emit('update:modelValue', csv)
     }
     setTouched(true)
@@ -61,10 +61,10 @@ watch(
   () => rawModel.value,
   (v) => {
     if (props.valueAs === 'array') {
-      setValue(Array.isArray(v) ? v : [])
+      setValue(Array.isArray(v) ? v : [], false)
     }
     else {
-      setValue(String(v ?? ''))
+      setValue(String(v ?? ''), false)
     }
   },
   { immediate: true },

@@ -36,12 +36,24 @@ const onSubmit = form.handleSubmit(
 
 // Expose form methods for parent components
 defineExpose({
+  // submission
   handleSubmit: form.handleSubmit,
+  // value setters
+  setValues: form.setValues,
+  setFieldValue: form.setFieldValue,
+  // validation helpers
+  validate: form.validate,
+  validateField: form.validateField,
+  // state accessors
+  values: form.values,
+  errors: form.errors,
+  // utils
+  resetForm: form.resetForm,
 })
 </script>
 
 <template>
-  <form @submit="onSubmit">
+  <form @submit.prevent="onSubmit">
     <slot />
   </form>
 </template>
