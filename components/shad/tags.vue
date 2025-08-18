@@ -94,7 +94,6 @@ function onInputBlur(e) {
       <div class="flex items-center justify-between">
         <FormLabel v-if="props.label">
           {{ props.label }}
-          {{ props.valueAs }}
         </FormLabel>
         <slot name="icon" />
       </div>

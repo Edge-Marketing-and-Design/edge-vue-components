@@ -349,7 +349,7 @@ watch(() => state.workingDoc, async () => {
   // Normal behavior thereafter: update values and validate
   await formRef.value.setValues(state.workingDoc, true)
   await formRef.value.validate()
-  state.errors = formRef.value.errors
+  state.errors = formRef.value?.errors
   console.log('formRef.value.errors', state.errors)
 }, { deep: true, immediate: false })
 
@@ -358,7 +358,7 @@ const onError = async () => {
     return
   await formRef.value.setValues(state.workingDoc, false) // sync without triggering per-field validate
   await formRef.value.validate() // run full form validation once
-  state.errors = formRef.value.errors // reflect in UI
+  state.errors = formRef.value?.errors // reflect in UI
 }
 </script>
 
