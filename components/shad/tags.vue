@@ -90,7 +90,7 @@ function onInputBlur(e) {
 
 <template>
   <FormField :name="props.name">
-    <FormItem class="flex flex-col gap-2 p-3 mt-3">
+    <FormItem class="flex flex-col gap-2 p-0 mt-0">
       <div class="flex items-center justify-between">
         <FormLabel v-if="props.label">
           {{ props.label }}

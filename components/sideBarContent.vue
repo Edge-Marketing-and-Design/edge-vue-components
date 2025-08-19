@@ -138,6 +138,7 @@ const edgeFirebase = inject('edgeFirebase')
 const route = useRoute()
 const router = useRouter()
 const goTo = (path) => {
+  edgeGlobal.edgeState.sidebar.toggleSidebar()
   router.push(path)
 }
 

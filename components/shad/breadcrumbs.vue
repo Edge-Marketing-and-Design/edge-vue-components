@@ -6,7 +6,7 @@ const props = defineProps({
   },
   itemClass: {
     type: String,
-    default: 'text-secondary text-4xl font-[700]',
+    default: 'text-secondary text-2xl sm:text-4xl font-[700]',
   },
 })
 </script>
