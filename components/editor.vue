@@ -70,6 +70,7 @@ const state = reactive({
   errors: {},
   // When creating a new doc, suppress the very first validation pass that happens right after initial values load
   skipNextValidation: props.docId === 'new',
+  overrideClose: false,
 })
 const edgeFirebase = inject('edgeFirebase')
 // const edgeGlobal = inject('edgeGlobal')
@@ -206,7 +207,7 @@ const onSubmit = async () => {
   state.submitting = true
   state.bypassUnsavedChanges = true
   Object.keys(state.workingDoc).forEach((key) => {
-    const schemaFieldType = props.newDocSchema[key]?.bindings['field-type']
+    const schemaFieldType = props.newDocSchema[key]?.bindings?.['field-type']
     if (typeof state.workingDoc[key] === 'string' && props.stringsToUpperCase) {
       if (key !== 'docId') {
         state.workingDoc[key] = state.workingDoc[key].toUpperCase()
@@ -223,8 +224,9 @@ const onSubmit = async () => {
   const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, state.workingDoc)
   state.workingDoc.docId = result.meta.docId
   edgeGlobal.edgeState.lastPaginatedDoc = state.workingDoc
-  if (props.noCloseAfterSave) {
+  if (state.overrideClose) {
     state.submitting = false
+    state.overrideClose = false
     return
   }
   edgeGlobal.edgeState.changeTracker = {}
@@ -274,7 +276,9 @@ watch(() => edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${pro
     state.afterMount = true
   }
   else {
-    state.workingDoc = edgeGlobal.dupObject(newDoc.value)
+    if (!state.afterMount) {
+      state.workingDoc = edgeGlobal.dupObject(newDoc.value)
+    }
     state.afterMount = true
   }
 })
@@ -326,6 +330,29 @@ const numColsToTailwind = (cols) => {
 
 const formRef = ref(null)
 
+const onKeydown = (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+    event.preventDefault()
+    if (formRef.value) {
+      if (props.noCloseAfterSave) {
+        state.overrideClose = true
+      }
+      formRef.value.handleSubmit(onSubmit)()
+    }
+  }
+}
+
+onMounted(() => {
+  if (props.noCloseAfterSave) {
+    window.addEventListener('keydown', onKeydown)
+  }
+})
+onUnmounted(() => {
+  if (props.noCloseAfterSave) {
+    window.removeEventListener('keydown', onKeydown)
+  }
+})
+
 const triggerSubmit = () => {
   if (formRef.value) {
     formRef.value.handleSubmit(onSubmit)()
@@ -351,7 +378,7 @@ watch(() => state.workingDoc, async () => {
   await formRef.value.setValues(state.workingDoc, true)
   await formRef.value.validate()
   state.errors = formRef.value?.errors
-  console.log('formRef.value.errors', state.errors)
+  // console.log('formRef.value.errors', state.errors)
 }, { deep: true, immediate: false })
 
 const onError = async () => {
@@ -374,7 +401,7 @@ const onError = async () => {
       @submit="onSubmit"
       @error="onError"
     >
-      <slot name="header" :on-submit="triggerSubmit" :on-cancel="onCancel" :submitting="state.submitting" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc">
+      <slot name="header" :on-submit="triggerSubmit" :on-cancel="onCancel" :submitting="state.submitting" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc" :errors="state.errors">
         <edge-menu v-if="props.showHeader" class="py-4 bg-secondary text-foreground rounded-none sticky top-0">
           <template #start>
             <slot name="header-start" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc">
