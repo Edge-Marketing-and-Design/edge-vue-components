@@ -94,7 +94,13 @@ const deleteConfirm = (item) => {
 }
 
 const deleteAction = async () => {
-  await edgeFirebase.removeUser(state.workingItem.docId)
+  const userRoles = state.workingItem.roles.filter((role) => {
+    return role.collectionPath.startsWith(edgeGlobal.edgeState.organizationDocPath.replaceAll('/', '-'))
+  })
+  for (const role of userRoles) {
+    await edgeFirebase.removeUserRoles(state.workingItem.docId, role.collectionPath)
+    // console.log(role.collectionPath)
+  }
   state.deleteDialog = false
   edgeGlobal.edgeState.changeTracker = {}
 }
@@ -166,6 +172,15 @@ const computedUserSchema = computed(() => {
   }
   return updateUserSchema
 })
+
+const currentOrganization = computed(() => {
+  if (edgeGlobal.edgeState.organizations.length > 0) {
+    if (edgeGlobal.edgeState.currentOrganization && edgeFirebase?.data[`organizations/${edgeGlobal.edgeState.currentOrganization}`]) {
+      return edgeFirebase?.data[`organizations/${edgeGlobal.edgeState.currentOrganization}`]
+    }
+  }
+  return ''
+})
 </script>
 
 <template>
@@ -225,13 +240,13 @@ const computedUserSchema = computed(() => {
       </DialogHeader>
 
       <h3 v-if="state.workingItem.userId === edgeFirebase.user.uid && adminCount > 1">
-        Are you sure you want to remove yourself from the organization "{{ edgeGlobal.currentOrganizationObject.name }}"? You will no longer have access to any of the organization's data.
+        Are you sure you want to remove yourself from the organization "{{ currentOrganization.name }}"? You will no longer have access to any of the organization's data.
       </h3>
       <h3 v-else-if="state.workingItem.userId === edgeFirebase.user.uid && adminCount === 1">
         You cannot remove yourself from this organization because you are the only admin. You can delete the organization or add another admin.
       </h3>
       <h3 v-else>
-        Are you sure you want to remove "{{ state.workingItem.meta.name }}" from the organization "{{ edgeGlobal.currentOrganizationObject.name }}"?
+        Are you sure you want to remove "{{ state.workingItem.meta.name }}" from the organization "{{ currentOrganization.name }}"?
       </h3>
       <DialogFooter class="pt-6 flex justify-between">
         <edge-shad-button class="text-white  bg-slate-800 hover:bg-slate-400" @click="state.deleteDialog = false">
