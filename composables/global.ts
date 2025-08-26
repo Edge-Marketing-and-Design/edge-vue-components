@@ -396,6 +396,7 @@ const iconFromMenu = (route: { path: string }): string => {
 export const edgeGlobal = {
   edgeState,
   setOrganization,
+  showLeftPanel,
   getSubscribedStatus,
   isDarkMode,
   generateShortId,
