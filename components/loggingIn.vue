@@ -1,4 +1,7 @@
 <script setup>
+const props = defineProps({
+  class: String,
+})
 const state = reactive({
   count: 20,
 })
@@ -22,7 +25,7 @@ incrementCount()
 
 <template>
   <div class="flex h-full w-full align-bottom items-center">
-    <Card class="w-full pt-10 pb-6">
+    <Card :class="props.class" class="w-full pt-10 pb-6">
       <CardContent class="text-center">
         Loading...
         <Progress v-model="state.count" class="w-100" />
