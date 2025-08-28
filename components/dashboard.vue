@@ -1,7 +1,6 @@
 <script setup>
 import { useElementVisibility } from '@vueuse/core'
 import { cn } from '@/lib/utils'
-
 const props = defineProps({
   paginated: {
     type: Boolean,
@@ -64,7 +63,7 @@ const props = defineProps({
     default: '',
   },
   queryValue: {
-    type: String,
+    type: [String, Array],
     default: '',
   },
   queryOperator: {
@@ -80,6 +79,9 @@ const props = defineProps({
     default: () => [],
   },
 })
+
+defineOptions({ name: 'EdgeDashboard' })
+
 const target = ref(null)
 const isVisible = useElementVisibility(target)
 
@@ -157,23 +159,40 @@ const snapShotQuery = computed(() => {
 })
 
 const searchQuery = computed(() => {
-  if (state.queryField && state.queryValue) {
-    const upperCaseValue = state.queryValue.toUpperCase()
+  const field = state.queryField
+  const rawVal = state.queryValue
 
-    const searchField = props.searchFields.find(field => field.name === state.queryField)
-    if (searchField?.choices) {
-      return [
-        { field: state.queryField, operator: '==', value: state.queryValue },
-      ]
-    }
-    return [
-      { field: state.queryField, operator: '>=', value: upperCaseValue },
-      { field: state.queryField, operator: '<=', value: `${upperCaseValue}\uF8FF` },
-    ]
+  // Bail early if field or value is missing/empty
+  if (!field || rawVal == null || (Array.isArray(rawVal) && rawVal.length === 0)) {
+    return []
   }
-  return []
-})
 
+  // Normalize to an array of trimmed, non-empty strings
+  const values = (Array.isArray(rawVal) ? rawVal : [rawVal])
+    .map(v => (v == null ? '' : String(v).trim()))
+    .filter(Boolean)
+
+  if (values.length === 0)
+    return []
+
+  const searchField = props.searchFields.find(f => f.name === field)
+
+  // If this field has discrete choices, support multi-select with 'in'
+  if (searchField?.choices) {
+    if (values.length === 1) {
+      return [{ field, operator: '==', value: values[0] }]
+    }
+    // Firestore 'in' supports up to 10 values
+    return [{ field, operator: 'in', value: values.slice(0, 10) }]
+  }
+
+  // Prefix search: use the FIRST value (Firestore can't OR multiple prefix ranges)
+  const upper = values[0].toUpperCase()
+  return [
+    { field, operator: '>=', value: upper },
+    { field, operator: '<=', value: `${upper}\uF8FF` },
+  ]
+})
 const filterText = computed(() => {
   if (props.filter) {
     return props.filter
@@ -182,6 +201,7 @@ const filterText = computed(() => {
 })
 
 const filtered = computed(() => {
+  console.log('filter changed')
   let allData = []
   if (!props.paginated) {
     if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`]) {
@@ -338,11 +358,14 @@ onBeforeMount(async () => {
     if (!state.queryOperator) {
       state.queryOperator = props.queryOperator
     }
-    console.log('start snapshot')
-    console.log(snapShotQuery.value)
-    console.log(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
-    await edgeFirebase.stopSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
-    await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, snapShotQuery.value)
+
+    if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`]) {
+      console.log('start snapshot')
+      console.log(snapShotQuery.value)
+      console.log(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
+      await edgeFirebase.stopSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
+      await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, snapShotQuery.value)
+    }
   }
   else {
     await loadInitialData()
@@ -399,6 +422,7 @@ watch(searchQuery, async () => {
 watch (snapShotQuery, async () => {
   if (state.afterMount) {
     if (!props.paginated) {
+      console.log('snapShotQuery changed')
       await edgeFirebase.stopSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
       await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, snapShotQuery.value)
     }
@@ -420,7 +444,7 @@ const restoreScrollPosition = async () => {
 
 // When the component is activated (coming back to this route)
 onActivated(() => {
-  console.log('activated')
+  console.log('activated dashboard')
   restoreScrollPosition() // Restore the scroll position when the component is activated
   if (props.paginated) {
     const workingDoc = edgeGlobal.edgeState.lastPaginatedDoc

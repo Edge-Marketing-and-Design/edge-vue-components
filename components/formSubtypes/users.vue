@@ -6,12 +6,6 @@ import * as z from 'zod'
 
 // TODO:  Finish user setup.
 // TODO:  Add error/success to join/add organization.
-
-// TODO: Put git in this folder in FormFling... merge ionic package with this one...
-// perhaps components keep name but are in seperate folders that a var uses to point to the correct folder.
-
-// TODO MAKE app.vue component differnt for ionic and vuetify
-// todo same with pages that get coppied into the project.
 const props = defineProps({
   item: {
     type: Object,
@@ -27,7 +21,6 @@ const props = defineProps({
   },
 })
 
-// const edgeGlobal = inject('edgeGlobal')
 const edgeFirebase = inject('edgeFirebase')
 const state = reactive({
   workingItem: {},

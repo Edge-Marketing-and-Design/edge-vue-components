@@ -47,7 +47,13 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  saveFunctionOverride: {
+    type: Function,
+    default: null,
+  },
 })
+
+const emit = defineEmits(['unsavedChanges'])
 
 const newDoc = computed(() => {
   return Object.entries(props.newDocSchema).reduce((newObj, [key, val]) => {
@@ -71,6 +77,7 @@ const state = reactive({
   // When creating a new doc, suppress the very first validation pass that happens right after initial values load
   skipNextValidation: props.docId === 'new',
   overrideClose: false,
+  collectionData: {},
 })
 const edgeFirebase = inject('edgeFirebase')
 // const edgeGlobal = inject('edgeGlobal')
@@ -79,27 +86,14 @@ const unsavedChanges = computed(() => {
   if (props.docId === 'new') {
     return false
   }
-  return JSON.stringify(state.workingDoc) !== JSON.stringify(edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`][props.docId])
+  return JSON.stringify(state.workingDoc) !== JSON.stringify(state.collectionData[props.docId])
 })
-
-const subCollection = (collection) => {
-  if (edgeGlobal.objHas(edgeFirebase.data, `${edgeGlobal.edgeState.organizationDocPath}/${collection}`) === false) {
-    return []
-  }
-  // need to return an array of objects title is name and value is docId
-  return Object.entries(edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${collection}`]).map(([key, val]) => {
-    return {
-      title: val.name,
-      value: key,
-    }
-  })
-}
 
 onBeforeRouteLeave((to, from, next) => {
   state.bypassRoute = to.path
-  console.log('bypassRoute', state.bypassRoute)
-  console.log('unsavedChanges', unsavedChanges.value)
-  console.log('bypassUnsavedChanges', state.bypassUnsavedChanges)
+  // console.log('bypassRoute', state.bypassRoute)
+  // console.log('unsavedChanges', unsavedChanges.value)
+  // console.log('bypassUnsavedChanges', state.bypassUnsavedChanges)
   if (unsavedChanges.value && !state.bypassUnsavedChanges) {
     state.dialog = true
     next(false)
@@ -119,6 +113,10 @@ onBeforeRouteUpdate((to, from, next) => {
   edgeGlobal.edgeState.changeTracker = {}
   next()
 })
+watch(() => unsavedChanges.value, (newVal) => {
+  console.log('test', newVal)
+  emit('unsavedChanges', newVal)
+})
 
 const discardChanges = async () => {
   if (props.docId === 'new') {
@@ -128,11 +126,17 @@ const discardChanges = async () => {
       router.push(props.saveRedirectOverride)
     }
     else {
-      router.push(`/app/dashboard/${props.collection}`)
+      if (props.saveFunctionOverride) {
+        emit('unsavedChanges', false)
+        props.saveFunctionOverride()
+      }
+      else {
+        router.push(`/app/dashboard/${props.collection}`)
+      }
     }
     return
   }
-  state.workingDoc = await edgeGlobal.dupObject(edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`][props.docId])
+  state.workingDoc = await edgeGlobal.dupObject(state.collectionData[props.docId])
   state.bypassUnsavedChanges = true
   state.dialog = false
   edgeGlobal.edgeState.changeTracker = {}
@@ -144,7 +148,13 @@ const discardChanges = async () => {
       router.push(props.saveRedirectOverride)
     }
     else {
-      router.push(`/app/dashboard/${props.collection}`)
+      if (props.saveFunctionOverride) {
+        emit('unsavedChanges', false)
+        props.saveFunctionOverride()
+      }
+      else {
+        router.push(`/app/dashboard/${props.collection}`)
+      }
     }
   }
 }
@@ -189,13 +199,16 @@ const singularize = (word) => {
 
 const title = computed(() => {
   if (props.docId !== 'new') {
-    if (!edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`]) {
+    if (!state.collectionData) {
       return ''
     }
-    if (!edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`][props.docId]) {
+    if (!state.collectionData[props.docId]) {
       return ''
     }
-    return capitalizeFirstLetter(`${edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`][props.docId].name}`)
+    // if (!state.collectionData?.[props.docId]?.name) {
+    //   return capitalizeFirstLetter(`${state.collectionData[props.docId]}`)
+    // }
+    return capitalizeFirstLetter(`${state.collectionData[props.docId].name}`)
   }
   else {
     return `New ${toTitleCase(singularize(props.collection)).replace('-', ' ')}`
@@ -203,7 +216,7 @@ const title = computed(() => {
 })
 
 const onSubmit = async () => {
-  console.log(state.workingDoc)
+  // console.log(state.workingDoc)
   state.submitting = true
   state.bypassUnsavedChanges = true
   Object.keys(state.workingDoc).forEach((key) => {
@@ -220,7 +233,7 @@ const onSubmit = async () => {
   if (props.customDocId) {
     state.workingDoc.docId = state.workingDoc[props.customDocId]
   }
-  console.log('saving', state.workingDoc)
+  // console.log('saving', state.workingDoc)
   const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, state.workingDoc)
   state.workingDoc.docId = result.meta.docId
   edgeGlobal.edgeState.lastPaginatedDoc = state.workingDoc
@@ -235,8 +248,13 @@ const onSubmit = async () => {
     router.push(props.saveRedirectOverride)
   }
   else {
-    // router.back()
-    router.push(`/app/dashboard/${props.collection}`)
+    if (props.saveFunctionOverride) {
+      emit('unsavedChanges', false)
+      props.saveFunctionOverride()
+    }
+    else {
+      router.push(`/app/dashboard/${props.collection}`)
+    }
   }
   state.submitting = false
 }
@@ -246,23 +264,17 @@ const onCancel = () => {
     router.push(props.saveRedirectOverride)
   }
   else {
-    // router.back()
-    router.push(`/app/dashboard/${props.collection}`)
+    if (props.saveFunctionOverride) {
+      emit('unsavedChanges', false)
+      props.saveFunctionOverride()
+    }
+    else {
+      router.push(`/app/dashboard/${props.collection}`)
+    }
   }
 }
 
-onBeforeMount(async () => {
-  state.bypassUnsavedChanges = false
-  edgeGlobal.edgeState.changeTracker = {}
-  for (const field of Object.keys(props.newDocSchema)) {
-    if (props.newDocSchema[field].type === 'collection') {
-      await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${field}`)
-    }
-  }
-  await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
-})
-
-watch(() => edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`], (newVal) => {
+const initData = (newVal) => {
   if (props.docId !== 'new') {
     if (edgeGlobal.objHas(newVal, props.docId) === false) {
       return
@@ -281,28 +293,50 @@ watch(() => edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${pro
     }
     state.afterMount = true
   }
+}
+
+onBeforeMount(async () => {
+  state.bypassUnsavedChanges = false
+  edgeGlobal.edgeState.changeTracker = {}
+  for (const field of Object.keys(props.newDocSchema)) {
+    if (props.newDocSchema[field].type === 'collection') {
+      await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${field}`)
+    }
+  }
+  // console.log('mounting editor for', props.collection, props.docId)
+  // console.log('starting snapshot for collection:', props.collection)
+  // await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
+  if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`]) {
+    const docData = await edgeFirebase.getDocData(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, props.docId)
+    state.collectionData[props.docId] = docData
+    initData(state.collectionData)
+  }
+  else {
+    state.collectionData = edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`]
+  }
+})
+
+watch(() => state.collectionData, (newVal) => {
+  initData(newVal)
 })
 onActivated(() => {
-  console.log('activated')
+  // console.log('activated')
   state.bypassUnsavedChanges = false
   state.bypassRoute = ''
-  console.log('bypass', state.bypassUnsavedChanges)
+  // console.log('bypass', state.bypassUnsavedChanges)
   state.afterMount = false
   if (props.docId !== 'new') {
-    if (edgeGlobal.objHas(edgeFirebase.data, `${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`) === false) {
+    if (edgeGlobal.objHas(state.collectionData, props.docId) === false) {
       return
     }
-    if (edgeGlobal.objHas(edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`], props.docId) === false) {
-      return
-    }
-    state.workingDoc = edgeGlobal.dupObject(edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`][props.docId])
+    state.workingDoc = edgeGlobal.dupObject(state.collectionData[props.docId])
     Object.keys(newDoc.value).forEach((field) => {
       if (!edgeGlobal.objHas(state.workingDoc, field)) {
         state.workingDoc[field] = newDoc.value[field]
       }
     })
 
-    console.log('state.workingDoc', state.workingDoc)
+    // console.log('state.workingDoc', state.workingDoc)
   }
   else {
     state.workingDoc = edgeGlobal.dupObject(newDoc.value)
@@ -312,7 +346,7 @@ onActivated(() => {
         state.workingDoc[key] = value
       }
     })
-    console.log('state.workingDoc', state.workingDoc)
+    // console.log('state.workingDoc', state.workingDoc)
   }
   //
   nextTick(() => {
@@ -353,9 +387,20 @@ onUnmounted(() => {
   }
 })
 
-const triggerSubmit = () => {
+const triggerSubmit = async (insertedValues = {}) => {
   if (formRef.value) {
-    formRef.value.handleSubmit(onSubmit)()
+    Object.keys(insertedValues).forEach((key) => {
+      state.workingDoc[key] = insertedValues[key]
+    })
+    await nextTick()
+    await formRef.value.setValues(state.workingDoc, true)
+    await formRef.value.validate()
+    console.log(formRef.value?.errors)
+    await nextTick()
+    await formRef.value.handleSubmit(onSubmit)()
+    await nextTick()
+    console.log(formRef.value?.errors)
+    state.errors = formRef.value?.errors
   }
 }
 
@@ -377,11 +422,13 @@ watch(() => state.workingDoc, async () => {
   // Normal behavior thereafter: update values and validate
   await formRef.value.setValues(state.workingDoc, true)
   await formRef.value.validate()
+  await nextTick()
   state.errors = formRef.value?.errors
-  // console.log('formRef.value.errors', state.errors)
+  console.log('formRef.value.errors', state.errors)
 }, { deep: true, immediate: false })
 
 const onError = async () => {
+  // console.log('form error', formRef.value?.errors)
   if (!formRef.value)
     return
   await formRef.value.setValues(state.workingDoc, false) // sync without triggering per-field validate
@@ -404,7 +451,7 @@ const onError = async () => {
       <slot name="header" :on-submit="triggerSubmit" :on-cancel="onCancel" :submitting="state.submitting" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc" :errors="state.errors">
         <edge-menu v-if="props.showHeader" class="py-4 bg-secondary text-foreground rounded-none sticky top-0">
           <template #start>
-            <slot name="header-start" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc">
+            <slot name="header-start" :unsaved-changes="unsavedChanges" :title="title" :errors="state.errors" :working-doc="state.workingDoc">
               <FilePenLine class="mr-2" />
               {{ title }}
             </slot>
@@ -413,7 +460,7 @@ const onError = async () => {
             <slot name="header-center" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc" />
           </template>
           <template #end>
-            <slot name="header-end" :unsaved-changes="unsavedChanges" :submitting="state.submitting" :title="title" :working-doc="state.workingDoc">
+            <slot name="header-end" :on-submit="triggerSubmit" :unsaved-changes="unsavedChanges" :errors="state.errors" :submitting="state.submitting" :title="title" :working-doc="state.workingDoc">
               <edge-shad-button
                 v-if="!unsavedChanges"
                 class="bg-secondary uppercase h-8 hover:bg-red-400 w-20"

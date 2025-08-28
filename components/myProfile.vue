@@ -3,7 +3,7 @@ import { computed, defineProps, inject, nextTick, onBeforeMount, reactive, watch
 import { useToast } from '@/components/ui/toast/use-toast'
 const props = defineProps({
   metaFields: {
-    type: Object,
+    type: Array,
     required: true,
   },
   formSchema: {
@@ -45,6 +45,11 @@ const currentMeta = computed(() => {
 
 onBeforeMount(() => {
   state.meta = currentMeta.value
+  props.metaFields.forEach((field) => {
+    if (!(field.field in state.meta)) {
+      state.meta[field.field] = field.value
+    }
+  })
 })
 
 watch(currentMeta, async () => {
@@ -86,16 +91,16 @@ const route = useRoute()
         @submit="onSubmit"
       >
         <CardContent>
-          <edge-g-input
-            v-for="field in props.metaFields"
-            :key="field.field"
-            v-model="state.meta[field.field]"
-            :name="field.field"
-            :field-type="field.type"
-            :label="field.label"
-            parent-tracker-id="profile-settings"
-            :hint="field.hint"
-          />
+          <div v-for="field in props.metaFields" :key="field.field" class="mb-3">
+            <edge-g-input
+              v-model="state.meta[field.field]"
+              :name="field.field"
+              :field-type="field.type"
+              :label="field.label"
+              parent-tracker-id="profile-settings"
+              :hint="field.hint"
+            />
+          </div>
         </CardContent>
         <CardFooter>
           <edge-shad-button

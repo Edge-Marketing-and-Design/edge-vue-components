@@ -6,7 +6,7 @@ const props = defineProps({
     required: false,
   },
   modelValue: {
-    type: String,
+    type: [String, Boolean, Number],
     required: false,
   },
   class: {
