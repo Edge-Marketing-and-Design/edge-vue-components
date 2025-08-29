@@ -86,6 +86,8 @@ const unsavedChanges = computed(() => {
   if (props.docId === 'new') {
     return false
   }
+  // console.log('comparing', state.workingDoc, state.collectionData[props.docId])
+  // console.log('unsavedChanges', JSON.stringify(state.workingDoc) !== JSON.stringify(state.collectionData[props.docId]))
   return JSON.stringify(state.workingDoc) !== JSON.stringify(state.collectionData[props.docId])
 })
 
@@ -113,6 +115,7 @@ onBeforeRouteUpdate((to, from, next) => {
   edgeGlobal.edgeState.changeTracker = {}
   next()
 })
+
 watch(() => unsavedChanges.value, (newVal) => {
   console.log('test', newVal)
   emit('unsavedChanges', newVal)
@@ -303,6 +306,7 @@ onBeforeMount(async () => {
       await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${field}`)
     }
   }
+  emit('unsavedChanges', unsavedChanges.value)
   // console.log('mounting editor for', props.collection, props.docId)
   // console.log('starting snapshot for collection:', props.collection)
   // await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
