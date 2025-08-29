@@ -399,7 +399,9 @@ onUnmounted(() => {
 const triggerSubmit = async (insertedValues = {}) => {
   if (formRef.value) {
     Object.keys(insertedValues).forEach((key) => {
-      state.workingDoc[key] = insertedValues[key]
+      if (insertedValues[key]) {
+        state.workingDoc[key] = insertedValues[key]
+      }
     })
     await nextTick()
     await formRef.value.setValues(state.workingDoc, true)

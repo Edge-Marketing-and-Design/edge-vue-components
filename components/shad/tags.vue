@@ -12,10 +12,15 @@ const props = defineProps({
   description: { type: String, default: '' },
   disabled: { type: Boolean, default: false },
   // NEW: controls how the component reads/emits the value
-  valueAs: { type: String, default: 'string', validator: v => ['string', 'array'].includes(v) },
+  valueAs: { type: String, required: false, validator: v => ['string', 'array'].includes(v) },
 })
 
 const emit = defineEmits(['update:modelValue', 'blur'])
+
+// Determine operational mode: explicit prop wins only when set; otherwise infer from initial modelValue
+const mode = computed(() =>
+  (props.valueAs ?? (Array.isArray(props.modelValue) ? 'array' : 'string')),
+)
 
 // raw v-model that mirrors props.modelValue directly
 const rawModel = useVModel(props, 'modelValue', emit, {
@@ -33,7 +38,7 @@ const { setValue, setTouched } = useField(props.name)
 // Public array model used by the Tags UI regardless of underlying type
 const arrayModel = computed({
   get: () => {
-    if (props.valueAs === 'array') {
+    if (mode.value === 'array') {
       return normalize(Array.isArray(rawModel.value) ? rawModel.value : [])
     }
     // 'string' mode -> parse CSV
@@ -41,7 +46,7 @@ const arrayModel = computed({
   },
   set: (arr) => {
     const cleaned = normalize(arr)
-    if (props.valueAs === 'array') {
+    if (mode.value === 'array') {
       rawModel.value = cleaned
       setValue(cleaned, false)
       emit('update:modelValue', cleaned)
@@ -60,7 +65,7 @@ const arrayModel = computed({
 watch(
   () => rawModel.value,
   (v) => {
-    if (props.valueAs === 'array') {
+    if (mode.value === 'array') {
       setValue(Array.isArray(v) ? v : [], false)
     }
     else {
@@ -109,7 +114,7 @@ function onInputBlur(e) {
             v-for="item in arrayModel"
             :key="item"
             :value="item"
-            class="bg-primary"
+            class="bg-secondary"
           >
             <TagsInputItemText />
             <TagsInputItemDelete />

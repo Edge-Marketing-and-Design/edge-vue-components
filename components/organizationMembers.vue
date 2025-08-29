@@ -1,7 +1,12 @@
 <script setup>
+// TODO: pass possible roles in prop
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 const props = defineProps({
+  usersCollectionPath: {
+    type: String,
+    default: () => `organizations/${edgeGlobal.edgeState.currentOrganization}`,
+  },
   metaFields: {
     type: Array,
     default: () => [
@@ -59,6 +64,7 @@ const props = defineProps({
 const route = useRoute()
 const edgeFirebase = inject('edgeFirebase')
 const state = reactive({
+  filter: '',
   workingItem: {},
   dialog: false,
   form: false,
@@ -83,11 +89,77 @@ const roleNamesOnly = computed(() => {
   })
 })
 
-const users = computed(() => {
-  const otherUsers = Object.values(edgeFirebase.state.users)
+const edgeUsers = toRef(edgeFirebase.state, 'users')
+const users = computed(() => Object.values(edgeUsers.value ?? {}))
 
-  return otherUsers
+const WIDTHS = {
+  1: 'md:col-span-1',
+  2: 'md:col-span-2',
+  3: 'md:col-span-3',
+  4: 'md:col-span-4',
+  5: 'md:col-span-5',
+  6: 'md:col-span-6',
+  7: 'md:col-span-7',
+  8: 'md:col-span-8',
+  9: 'md:col-span-9',
+  10: 'md:col-span-10',
+  11: 'md:col-span-11',
+  12: 'md:col-span-12',
+}
+
+const numColsToTailwind = cols => WIDTHS[cols] || 'md:col-span-12'
+
+// Helpers to read/write nested keys like "profile.firstName" on plain objects
+function getByPath(obj, path, fallback = undefined) {
+  if (!obj || !path)
+    return fallback
+  const parts = String(path).split('.')
+  let cur = obj
+  for (const p of parts) {
+    if (cur == null || typeof cur !== 'object' || !(p in cur))
+      return fallback
+    cur = cur[p]
+  }
+  return cur
+}
+
+function setByPath(obj, path, value) {
+  if (!obj || !path)
+    return
+  const parts = String(path).split('.')
+  let cur = obj
+  for (let i = 0; i < parts.length; i++) {
+    const key = parts[i]
+    if (i === parts.length - 1) {
+      cur[key] = value
+    }
+    else {
+      if (cur[key] == null || typeof cur[key] !== 'object')
+        cur[key] = {}
+      cur = cur[key]
+    }
+  }
+}
+
+const sortedFilteredUsers = computed(() => {
+  const filter = state.filter.toLowerCase()
+
+  const getLastName = (fullName) => {
+    if (!fullName)
+      return ''
+    const parts = fullName.trim().split(/\s+/)
+    return parts[parts.length - 1] || ''
+  }
+
+  return users.value
+    .filter(user => user.meta.name.toLowerCase().includes(filter))
+    .sort((a, b) => {
+      const lastA = getLastName(a.meta.name).toLowerCase()
+      const lastB = getLastName(b.meta.name).toLowerCase()
+      return lastA.localeCompare(lastB)
+    })
 })
+
 const adminCount = computed(() => {
   return users.value.filter((item) => {
     return item.roles.find((role) => {
@@ -114,10 +186,19 @@ const editItem = (item) => {
   state.workingItem.role = edgeGlobal.getRoleName(item.roles, edgeGlobal.edgeState.currentOrganization)
   const newItemKeys = Object.keys(state.newItem)
   newItemKeys.forEach((key) => {
-    if (state.workingItem[key] === undefined) {
+    if (!state.workingItem?.[key]) {
       state.workingItem[key] = state.newItem[key]
     }
+    if (key === 'meta') {
+      const metaKeys = Object.keys(state.newItem.meta)
+      metaKeys.forEach((metaKey) => {
+        if (!state.workingItem?.meta?.[metaKey]) {
+          state.workingItem.meta[metaKey] = state.newItem.meta[metaKey]
+        }
+      })
+    }
   })
+  console.log('Working Item:', state.workingItem)
   state.dialog = true
 }
 
@@ -196,10 +277,25 @@ const currentOrganization = computed(() => {
   return ''
 })
 
-onBeforeMount(() => {
+onBeforeMount(async () => {
   props.metaFields.forEach((field) => {
-    state.newItem.meta[field.field] = field.value
+    const keys = field.field.split('.')
+    let current = state.newItem.meta
+
+    keys.forEach((key, index) => {
+      if (index === keys.length - 1) {
+        console.log(`Setting ${key} to ${field.value}`)
+        current[key] = field.value
+      }
+      else {
+        if (!current[key]) {
+          current[key] = {}
+        }
+        current = current[key]
+      }
+    })
   })
+  await edgeFirebase.startUsersSnapshot(props.usersCollectionPath)
   state.loaded = true
 })
 </script>
@@ -229,8 +325,13 @@ onBeforeMount(() => {
       </edge-menu>
     </slot>
     <CardContent class="p-3 w-full overflow-y-auto scroll-area">
-      <div v-if="users.length > 0">
-        <div v-for="user in users" :key="user.id" class="flex w-full py-2 justify-between items-center cursor-pointer" @click="editItem(user)">
+      <Input
+        v-model="state.filter"
+        class="mb-2"
+        placeholder="Filter members..."
+      />
+      <div v-if="sortedFilteredUsers.length > 0">
+        <div v-for="user in sortedFilteredUsers" :key="user.id" class="flex w-full py-2 justify-between items-center cursor-pointer" @click="editItem(user)">
           <slot name="user" :user="user">
             <Avatar class="handle pointer p-0 h-6 w-6 mr-2">
               <User width="18" height="18" />
@@ -317,7 +418,7 @@ onBeforeMount(() => {
       <edge-shad-dialog
         v-model="state.dialog"
       >
-        <DialogContent class="w-full max-w-[800px]">
+        <DialogContent class="w-full max-w-[1200px]">
           <edge-shad-form :initial-values="state.workingItem" :schema="computedUserSchema" @submit="onSubmit">
             <DialogHeader class="mb-4">
               <DialogTitle>
@@ -326,36 +427,6 @@ onBeforeMount(() => {
               <DialogDescription />
             </DialogHeader>
             <slot name="edit-fields" :working-item="state.workingItem">
-              <div v-for="field in props.metaFields" :key="field.field" class="mb-3">
-                <edge-g-input
-                  v-model="state.workingItem.meta[field.field]"
-                  :name="`meta.${field.field}`"
-                  :field-type="field?.type"
-                  :label="field?.label"
-                  parent-tracker-id="user-settings"
-                  :hint="field?.hint"
-                  :disable-tracking="true"
-                />
-              </div>
-              <edge-g-input
-                v-if="state.saveButton === 'Invite User'"
-                v-model="state.workingItem.meta.email"
-                name="meta.email"
-                :disable-tracking="true"
-                field-type="text"
-                label="Email"
-                :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
-              />
-              <edge-g-input
-                v-if="state.saveButton === 'Invite User'"
-                v-model="state.workingItem.isTemplate"
-                name="isTemplate"
-                :disable-tracking="true"
-                field-type="boolean"
-                label="Template User"
-                :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
-              />
-              <div class="mb-4" />
               <edge-g-input
                 v-model="state.workingItem.role"
                 name="role"
@@ -365,6 +436,65 @@ onBeforeMount(() => {
                 label="Role"
                 :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
                 :disabled="state.workingItem.userId === edgeFirebase.user.uid"
+              />
+              <edge-g-input
+                v-if="state.saveButton === 'Invite User'"
+                v-model="state.workingItem.meta.email"
+                name="meta.email"
+                :disable-tracking="true"
+                field-type="text"
+                label="Email"
+                :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
+              />
+              <Separator class="my-6" />
+              <div class="grid grid-cols-12 gap-2">
+                <div v-for="field in props.metaFields" :key="field.field" class="mb-3 col-span-12" :class="numColsToTailwind(field.cols)">
+                  <!-- Use explicit model binding so dotted paths (e.g., "address.street") work -->
+                  <edge-g-input
+                    v-if="field?.type === 'textarea'"
+                    :model-value="getByPath(state.workingItem.meta, field.field, '')"
+                    :name="`meta.${field.field}`"
+                    :field-type="field?.type"
+                    :label="field?.label"
+                    parent-tracker-id="user-settings"
+                    :hint="field?.hint"
+                    :disable-tracking="true"
+                    :bindings="{ class: 'h-60' }"
+                    @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
+                  />
+                  <edge-shad-tags
+                    v-else-if="field?.type === 'tags' || field?.type === 'commaTags'"
+                    :model-value="getByPath(state.workingItem.meta, field.field, '')"
+                    :name="`meta.${field.field}`"
+                    :field-type="field?.type"
+                    :label="field?.label"
+                    parent-tracker-id="user-settings"
+                    :hint="field?.hint"
+                    :disable-tracking="true"
+                    @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
+                  />
+                  <edge-g-input
+                    v-else
+                    :model-value="getByPath(state.workingItem.meta, field.field, '')"
+                    :name="`meta.${field.field}`"
+                    :field-type="field?.type"
+                    :label="field?.label"
+                    parent-tracker-id="user-settings"
+                    :hint="field?.hint"
+                    :disable-tracking="true"
+                    @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
+                  />
+                </div>
+              </div>
+
+              <edge-g-input
+                v-if="state.saveButton === 'Invite User'"
+                v-model="state.workingItem.isTemplate"
+                name="isTemplate"
+                :disable-tracking="true"
+                field-type="boolean"
+                label="Template User"
+                :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
               />
             </slot>
             <DialogFooter class="pt-6 flex justify-between">
