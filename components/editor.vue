@@ -475,7 +475,7 @@ const onError = async () => {
             <slot name="header-center" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc" />
           </template>
           <template #end>
-            <slot name="header-end" :on-submit="triggerSubmit" :unsaved-changes="unsavedChanges" :errors="state.errors" :submitting="state.submitting" :title="title" :working-doc="state.workingDoc">
+            <slot name="header-end" :on-submit="triggerSubmit" :unsaved-changes="unsavedChanges" :on-cancel="onCancel" :errors="state.errors" :submitting="state.submitting" :title="title" :working-doc="state.workingDoc">
               <edge-shad-button
                 v-if="!unsavedChanges"
                 class="bg-secondary uppercase h-8 hover:bg-red-400 w-20"
