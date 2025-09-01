@@ -26,9 +26,17 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  filters: {
+    type: Array,
+    default: () => [],
+  },
   filter: {
-    type: String,
+    type: [String, Array],
     default: '',
+  },
+  filterFields: {
+    type: Array,
+    default: () => ['name'],
   },
   sortField: {
     type: String,
@@ -148,9 +156,19 @@ const singularize = (word) => {
   }
 }
 
+const getByPath = (obj, path) => {
+  if (!obj || !path)
+    return undefined
+  return path.split('.').reduce((acc, key) => {
+    if (acc == null)
+      return undefined
+    return acc[key]
+  }, obj)
+}
+
 const snapShotQuery = computed(() => {
   if (state.queryField && state.queryValue) {
-    console.log('snapShotQuery', state.queryField, state.queryOperator, state.queryValue)
+    // console.log('snapShotQuery', state.queryField, state.queryOperator, state.queryValue)
     return [
       { field: state.queryField, operator: state.queryOperator, value: state.queryValue },
     ]
@@ -201,7 +219,6 @@ const filterText = computed(() => {
 })
 
 const filtered = computed(() => {
-  console.log('filter changed')
   let allData = []
   if (!props.paginated) {
     if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`]) {
@@ -213,12 +230,83 @@ const filtered = computed(() => {
     allData = state.paginatedResults
   }
 
-  let filtered = allData.filter((entry) => {
-    if (filterText.value.trim() === '') {
-      return true
+  const qRaw = filterText.value
+  const fieldsToSearch = (Array.isArray(props.filterFields) && props.filterFields.length > 0) ? props.filterFields : ['name']
+
+  // Helper: does a "has value" check for strings/arrays
+  const hasValue = val => !(val == null || (typeof val === 'string' && val.trim() === '') || (Array.isArray(val) && val.length === 0))
+
+  // Helper: apply one filter group to a dataset
+  const applyFilterToData = (data, qRawLocal, fieldsLocal) => {
+    return data.filter((entry) => {
+    // If no query value, keep everything
+      if (!hasValue(qRawLocal))
+        return true
+
+      // If the filter text is an array, treat it as an "allowlist":
+      // include the entry if the field's value is IN that array (case-insensitive).
+      if (Array.isArray(qRawLocal)) {
+        const qSet = new Set(
+          qRawLocal.map(v => String(v).toLowerCase().trim()).filter(Boolean),
+        )
+        if (qSet.size === 0)
+          return true
+
+        return fieldsLocal.some((fieldPath) => {
+          const raw = getByPath(entry, fieldPath)
+          if (raw === undefined || raw === null)
+            return false
+
+          // If the field itself is an array, match on any overlap
+          if (Array.isArray(raw)) {
+            return raw.some(val => qSet.has(String(val).toLowerCase()))
+          }
+
+          const str = typeof raw === 'string' ? raw : JSON.stringify(raw)
+          return qSet.has(String(str).toLowerCase())
+        })
+      }
+
+      // Otherwise, treat it as a substring match on any of the fields
+      const q = String(qRawLocal).trim().toLowerCase()
+      return fieldsLocal.some((fieldPath) => {
+        const raw = getByPath(entry, fieldPath)
+        if (raw === undefined || raw === null)
+          return false
+
+        // If the field is an array, check if any element includes the substring
+        if (Array.isArray(raw)) {
+          return raw.some(val => String(val).toLowerCase().includes(q))
+        }
+
+        const str = typeof raw === 'string' ? raw : JSON.stringify(raw)
+        return String(str).toLowerCase().includes(q)
+      })
+    })
+  }
+
+  // Build the list of filter groups to apply in order.
+  // Group 1 (optional): props.filter + props.filterFields (if it "has value")
+  const filterGroups = []
+  if (hasValue(qRaw)) {
+    filterGroups.push({ filterFields: fieldsToSearch, value: qRaw })
+  }
+
+  // Additional groups: props.filters (array of { filterFields: string[], value: string | string[] })
+  if (Array.isArray(props.filters) && props.filters.length > 0) {
+    props.filters.forEach((g) => {
+      const gFields = (Array.isArray(g?.filterFields) && g.filterFields.length > 0) ? g.filterFields : ['name']
+      filterGroups.push({ filterFields: gFields, value: g?.value })
+    })
+  }
+
+  // Apply all groups sequentially; if none exist, keep all data
+  let filtered = allData
+  if (filterGroups.length > 0) {
+    for (const g of filterGroups) {
+      filtered = applyFilterToData(filtered, g.value, g.filterFields)
     }
-    return entry.name.toLowerCase().includes(filterText.value.toLowerCase())
-  })
+  }
 
   if (props.paginated) {
     return filtered
@@ -481,18 +569,21 @@ const searchDropDown = computed(() => {
   return null
 })
 
+const removeFilter = (field) => {
+  state.filterFields = state.filterFields.filter(f => f.field !== field)
+}
+
 const addFilter = (field, value) => {
   if (state.filterFields.some(f => f.field === field)) {
-    const existingFilter = state.filterFields.find(f => f.field === field)
-    existingFilter.value = value
+    const existingFilterKey = state.filterFields.findIndex(f => f.field === field)
+    state.filterFields[existingFilterKey] = { field, value }
   }
   else {
     state.filterFields.push({ field, value })
   }
-}
-
-const removeFilter = (field) => {
-  state.filterFields = state.filterFields.filter(f => f.field !== field)
+  if (!value) {
+    removeFilter(field)
+  }
 }
 </script>
 
@@ -507,7 +598,7 @@ const removeFilter = (field) => {
           </slot>
         </template>
         <template #center>
-          <slot name="header-center" :filter="state.filter">
+          <slot name="header-center" :add-filter="addFilter" :filter="state.filter">
             <div v-if="!props.hideSearch" class="w-full px-6">
               <edge-shad-form>
                 <edge-shad-input
