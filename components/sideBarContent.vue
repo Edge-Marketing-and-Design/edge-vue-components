@@ -138,6 +138,7 @@ const edgeFirebase = inject('edgeFirebase')
 const route = useRoute()
 const router = useRouter()
 const goTo = (path) => {
+  console.log(path)
   edgeGlobal.edgeState.sidebar.toggleSidebar()
   router.push(path)
 }
@@ -214,10 +215,11 @@ const processedMenuItems = computed(() => {
                   :class="item.isSub && sidebarIsMobile ? 'pl-6' : ''"
                 >
                   <SidebarMenuButton
+                    type="button"
                     :is-active="currentRoutePath.startsWith(item.to) || (item.submenu && item.submenu.some(sub => currentRoutePath.startsWith(sub.to)))"
                     :tooltip="item.title"
                     :class="sideBarMenuButtonClasses"
-                    @click="goTo(item.to)"
+                    @click.prevent="goTo(item.to)"
                   >
                     <component :is="item.icon" class="[stroke-width:1]" :class="sideBarIconClasses" />
                     <span v-if="!isSlack">{{ item.title }}</span>
@@ -238,11 +240,12 @@ const processedMenuItems = computed(() => {
             <SidebarMenuItem v-for="item in props.settingsMenuItems" :key="item.title" :class="sidebarMenuItemClasses">
               <div class="flex flex-col items-center w-full">
                 <SidebarMenuButton
+                  type="button"
                   :is-active="currentRoutePath.startsWith(item.to)"
                   :tooltip="item.title"
                   :class="sideBarMenuButtonClasses"
                   :style="sideBarButtonStyles"
-                  @click="goTo(item.to)"
+                  @click.prevent="goTo(item.to)"
                 >
                   <component :is="item.icon" class="[stroke-width:1]" :class="sideBarIconClasses" />
                   <span v-if="!isSlack">{{ item.title }}</span>
@@ -255,7 +258,7 @@ const processedMenuItems = computed(() => {
                 <edge-user-menu class="w-full" :single-org="props.singleOrg" :title="props.organizationTitle">
                   <template #trigger>
                     <div class="flex flex-col items-center w-full">
-                      <SidebarMenuButton :is-active="currentRoutePath.startsWith('/app/account')" :class="sideBarMenuButtonClasses" tooltip="Settings">
+                      <SidebarMenuButton type="button" :is-active="currentRoutePath.startsWith('/app/account')" :class="sideBarMenuButtonClasses" tooltip="Settings">
                         <Settings2 :class="sideBarIconClasses" class="[stroke-width:1]" />
                         <span v-if="!isSlack">Settings</span>
                         <span v-else class="text-xs">Settings</span>
@@ -266,7 +269,7 @@ const processedMenuItems = computed(() => {
               </SidebarMenuItem>
               <SidebarMenuItem v-if="!props.hideLogout" :class="sidebarMenuItemClasses">
                 <div class="flex flex-col items-center w-full">
-                  <SidebarMenuButton :class="sideBarMenuButtonClasses" tooltip="Logout" @click="edgeGlobal.edgeLogOut(edgeFirebase)">
+                  <SidebarMenuButton type="button" :class="sideBarMenuButtonClasses" tooltip="Logout" @click.prevent="edgeGlobal.edgeLogOut(edgeFirebase)">
                     <LogOut :class="sideBarIconClasses" class="[stroke-width:1]" />
                     <span v-if="!isSlack">Logout</span>
                     <span v-else class="text-xs">Logout</span>
