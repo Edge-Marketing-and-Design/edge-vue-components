@@ -1,36 +1,13 @@
 <script setup>
-import { useVModel } from '@vueuse/core'
-// Renders a single block payload with provided values.
-// Clicking the rendered block (or optional button) opens a dialog to edit values.
-// Emits: 'update:block' with the updated block payload.
-
 const props = defineProps({
-  modelValue: {
+  content: {
+    type: String,
+    required: true,
+  },
+  values: {
     type: Object,
     required: true,
-    // {
-    //   blockId: string,
-    //   values: Record<string, any>,
-    //   blockTemplate: string
-    // }
   },
-  title: {
-    type: String,
-    default: 'Edit Block',
-  },
-  // If set, shows a button instead of making the rendered block clickable.
-  buttonText: {
-    type: String,
-    default: null,
-  },
-})
-
-const emit = defineEmits(['update:modelValue'])
-const model = useVModel(props, 'modelValue', emit)
-
-const state = reactive({
-  open: false,
-  draft: {},
 })
 
 /* ---------------- Parsing & rendering helpers (aligned with your picker) ---------------- */
@@ -59,25 +36,6 @@ const parseConfig = (raw) => {
       return null
     }
   }
-}
-
-const analyzeFields = (content) => {
-  const fieldKind = new Map()
-  content.replace(SIMPLE_BLOCK_RE, (_m, kind, json) => {
-    const cfg = parseConfig(json)
-    const f = cfg?.field && String(cfg.field).trim()
-    if (f)
-      fieldKind.set(f, kind) // text | image
-    return ''
-  })
-  content.replace(ARRAY_BLOCK_RE, (_m, json) => {
-    const cfg = parseConfig(json)
-    const f = cfg?.field && String(cfg.field).trim()
-    if (f)
-      fieldKind.set(f, 'array')
-    return ''
-  })
-  return { fieldKind }
 }
 
 const escapeHtml = s =>
@@ -150,78 +108,10 @@ const renderWithValues = (content, values) => {
 /* ---------------- state & events ---------------- */
 
 const rendered = computed(() =>
-  renderWithValues(model.value?.blockTemplate || '', model.value?.values || {}),
+  renderWithValues(props.content || '', props.values || {}),
 )
-
-const openEditor = () => {
-  state.draft = JSON.parse(JSON.stringify(model.value?.values || {}))
-  state.open = true
-}
-
-const { fieldKind } = computed(() => analyzeFields(model.value?.blockTemplate || '')).value
-const fields = computed(() => Array.from(fieldKind.keys()))
-
-const save = () => {
-  const updated = {
-    ...model.value,
-    values: JSON.parse(JSON.stringify(state.draft)),
-  }
-  model.value = updated
-  state.open = false
-}
 </script>
 
 <template>
-  <div>
-    <!-- If buttonText is provided, show a button. Otherwise the rendered block is clickable -->
-    <button
-      v-if="buttonText"
-      type="button"
-      class="px-3 py-2 border rounded hover:bg-gray-100"
-      @click="openEditor"
-    >
-      {{ buttonText }}
-    </button>
-
-    <div
-      v-else
-      class="cursor-pointer"
-      @click="openEditor"
-    >
-      <edge-cms-html-content :html="rendered" />
-    </div>
-
-    <edge-shad-dialog v-model="state.open">
-      <DialogContent class="max-w-xl">
-        <DialogHeader>
-          <DialogTitle>{{ title }}</DialogTitle>
-        </DialogHeader>
-        <DialogDescription />
-
-        <div class="mt-4 space-y-4">
-          <edge-shad-form>
-            <template v-for="f in fields" :key="f">
-              <div v-if="fieldKind.get(f) === 'array'">
-                <label class="block text-sm font-medium mb-1">{{ f }}</label>
-                <edge-shad-tags v-model="state.draft[f]" :name="f" />
-              </div>
-              <div v-else>
-                <!-- Treat text and image as plain strings; image expected to be URL -->
-                <edge-shad-input v-model="state.draft[f]" :name="f" :label="f" />
-              </div>
-            </template>
-          </edge-shad-form>
-        </div>
-
-        <div class="mt-6 flex justify-end gap-2">
-          <button type="button" class="px-3 py-2 border rounded" @click="state.open = false">
-            Cancel
-          </button>
-          <button type="button" class="px-3 py-2 border rounded" @click="save">
-            Save
-          </button>
-        </div>
-      </DialogContent>
-    </edge-shad-dialog>
-  </div>
+  <edge-cms-html-content :html="rendered" />
 </template>
