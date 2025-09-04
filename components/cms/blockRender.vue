@@ -107,9 +107,9 @@ const renderWithValues = (content, values) => {
 
 /* ---------------- state & events ---------------- */
 
-const rendered = computed(() =>
-  renderWithValues(props.content || '', props.values || {}),
-)
+const rendered = computed(() => {
+  return renderWithValues(props.content || '', props.values || {})
+})
 </script>
 
 <template>

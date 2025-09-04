@@ -240,9 +240,11 @@ const onSubmit = async () => {
   const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, state.workingDoc)
   state.workingDoc.docId = result.meta.docId
   edgeGlobal.edgeState.lastPaginatedDoc = state.workingDoc
+
   if (state.overrideClose) {
     state.submitting = false
-    state.overrideClose = false
+    // state.overrideClose = false
+    edgeGlobal.edgeState.changeTracker = {}
     return
   }
   edgeGlobal.edgeState.changeTracker = {}
@@ -317,6 +319,9 @@ onBeforeMount(async () => {
   }
   else {
     state.collectionData = edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`]
+  }
+  if (props.noCloseAfterSave) {
+    state.overrideClose = true
   }
 })
 
@@ -478,7 +483,7 @@ const onError = async () => {
             <slot name="header-end" :on-submit="triggerSubmit" :unsaved-changes="unsavedChanges" :on-cancel="onCancel" :errors="state.errors" :submitting="state.submitting" :title="title" :working-doc="state.workingDoc">
               <edge-shad-button
                 v-if="!unsavedChanges"
-                class="bg-secondary uppercase h-8 hover:bg-red-400 w-20"
+                class="bg-red-700 uppercase h-8 hover:bg-red-400 w-20"
                 @click="onCancel"
               >
                 Close
