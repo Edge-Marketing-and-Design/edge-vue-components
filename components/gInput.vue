@@ -63,6 +63,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  description: {
+    type: String,
+    default: '',
+  },
   rows: {
     type: String,
     default: '1',
@@ -819,80 +823,69 @@ watch(modelValue, () => {
 <template>
   <div v-if="state.loaded">
     <edge-shad-combobox
-      v-if="props.fieldType === 'collection'"
-      v-model="modelValue"
-      :label="props.label"
-      :items="collectionItems"
-      v-bind="props.bindings"
-      :disabled="props.disabled"
-      :name="props.name"
-      item-value="value"
-      item-title="title"
-      :placeholder="`${props.label}...`"
+      v-if="props.fieldType === 'collection'" v-model="modelValue" :label="props.label"
+      :items="collectionItems" v-bind="props.bindings" :disabled="props.disabled" :name="props.name" item-value="value"
+      item-title="title" :placeholder="`${props.label}...`"
     >
       <template v-if="props.helper" #append>
         <edge-g-helper :title="props.label" :helper="props.helper" />
       </template>
     </edge-shad-combobox>
-    <Card v-if="props.fieldType === 'stringArray' || props.fieldType === 'numberArray' || props.fieldType === 'intArray'" class="p-1">
-      <CardHeader class="py-2 px-3">
+    <Card
+      v-if="props.fieldType === 'stringArray' || props.fieldType === 'numberArray' || props.fieldType === 'intArray'"
+      class="p-1"
+    >
+      <CardHeader class="px-3 py-2">
         <CardTitle class="text-md">
           <div class="flex items-center">
             <div class="grow">
               {{ props.label }}
             </div>
             <div>
-              <edge-g-helper :title="props.label" :helper="props.helper" />
+              <edge-g-helper v-if="props.helper" :title="props.label" :helper="props.helper" />
             </div>
           </div>
         </CardTitle>
+        <CardDescription v-if="props?.description">
+          {{ props.description }}
+        </CardDescription>
       </CardHeader>
       <CardContent>
-        <div v-if="refreshArray" class="w-full flex items-center">
+        <div v-if="refreshArray" class="flex items-center w-full">
           <div class="grow">
             <edge-shad-number
-              v-if="props.fieldType === 'numberArray'"
-              v-model="state.arrayAdd"
-              :step=".1"
-              :name="`${props.name}Input`"
-              v-bind="props.bindings"
-              class="w-full"
+              v-if="props.fieldType === 'numberArray'" v-model="state.arrayAdd" :step=".1"
+              :name="`${props.name}Input`" v-bind="props.bindings" class="w-full"
             />
             <edge-shad-number
-              v-else-if="props.fieldType === 'intArray'"
-              v-model="state.arrayAdd"
-              :step="1"
-              :name="`${props.name}Input`"
-              :format-options="{ maximumFractionDigits: 0 }"
-              v-bind="props.bindings"
+              v-else-if="props.fieldType === 'intArray'" v-model="state.arrayAdd" :step="1"
+              :name="`${props.name}Input`" :format-options="{ maximumFractionDigits: 0 }" v-bind="props.bindings"
             />
-            <edge-shad-input
-              v-else
-              v-model="state.arrayAdd"
-              :name="`${props.name}Input`"
-            />
+            <edge-shad-input v-else v-model="state.arrayAdd" :name="`${props.name}Input`" />
           </div>
-          <edge-shad-button size="icon" class="text-white bg-slate-800 hover:bg-slate-400" @click.stop.prevent="addArray">
+          <edge-shad-button
+            variant="ghost" size="icon" class="text-slate-800 hover:bg-slate-400"
+            @click.stop.prevent="addArray"
+          >
             <ListPlus width="16" height="16" />
           </edge-shad-button>
         </div>
 
         <div>
-          <draggable
-            v-model="modelValue"
-            handle=".handle"
-            item-key="key"
-          >
+          <draggable v-model="modelValue" handle=".handle" item-key="key">
             <template #item="{ element }">
-              <div :key="element" class="w-full flex odd:bg-slate-700 even:bg-slate-500 rounded-sm py-1 items-center">
-                <div class="text-left px-2">
+              <div :key="element" class="flex items-center w-full py-1 odd:bg-slate-100 even:bg-slate-200">
+                <div class="px-2 text-left">
                   <Grip class="handle pointer" />
                 </div>
-                <div class="grow  text-white px-2">
+                <div class="px-2 grow">
                   {{ element }}
                 </div>
                 <div class="pr-1">
-                  <edge-shad-button class="text-white bg-slate-800 hover:bg-slate-400" size="icon" @click="modelValue.splice(i, 1)">
+                  <edge-shad-button
+                    variant="ghost" class="hover:bg-slate-400" size="icon"
+                    @click="modelValue.splice(i, 1)"
+                  >
                     <Trash width="16" height="16" />
                   </edge-shad-button>
                 </div>
@@ -903,44 +896,25 @@ watch(modelValue, () => {
       </CardContent>
     </Card>
     <edge-shad-select
-      v-if="props.fieldType === 'users'"
-      v-model="modelValue"
-      :label="props.label"
-      v-bind="props.bindings"
-      :items="Object.values(edgeFirebase.state.users).filter(user => user.uid !== '')"
-      item-title="meta.name"
-      item-value="uid"
-      :disabled="props.disabled"
-      :name="props.name"
-      :description="props.hint"
+      v-if="props.fieldType === 'users'" v-model="modelValue" :label="props.label"
+      v-bind="props.bindings" :items="Object.values(edgeFirebase.state.users).filter(user => user.uid !== '')"
+      item-title="meta.name" item-value="uid" :disabled="props.disabled" :name="props.name" :description="props.hint"
     >
       <template v-if="props.helper" #icon>
         <edge-g-helper :title="props.label" :helper="props.helper" />
       </template>
     </edge-shad-select>
     <edge-shad-number
-      v-if="props.fieldType === 'number'"
-      v-model="modelValue"
-      :step=".1"
-      :name="props.name"
-      :disabled="props.disabled"
-      v-bind="props.bindings"
-      :label="props.label"
-      :description="props.hint"
+      v-if="props.fieldType === 'number'" v-model="modelValue" :step=".1" :name="props.name"
+      :disabled="props.disabled" v-bind="props.bindings" :label="props.label" :description="props.hint"
     >
       <template v-if="props.helper">
         <edge-g-helper :title="props.label" :helper="props.helper" />
       </template>
     </edge-shad-number>
     <edge-shad-number
-      v-if="props.fieldType === 'integer'"
-      v-model="modelValue"
-      :step="1"
-      :name="props.name"
-      :disabled="props.disabled"
-      v-bind="props.bindings"
-      :label="props.label"
-      :description="props.hint"
+      v-if="props.fieldType === 'integer'" v-model="modelValue" :step="1" :name="props.name"
+      :disabled="props.disabled" v-bind="props.bindings" :label="props.label" :description="props.hint"
       :format-options="{ maximumFractionDigits: 0 }"
     >
       <template v-if="props.helper">
@@ -948,15 +922,8 @@ watch(modelValue, () => {
       </template>
     </edge-shad-number>
     <edge-shad-type-money
-      v-if="props.fieldType === 'money'"
-      v-model="modelValue"
-      :step=".1"
-      :name="props.name"
-      :disabled="props.disabled"
-      v-bind="props.bindings"
-      :label="props.label"
-      :description="props.hint"
-      :format-options="{
+      v-if="props.fieldType === 'money'" v-model="modelValue" :step=".1" :name="props.name"
+      :disabled="props.disabled" v-bind="props.bindings" :label="props.label" :description="props.hint" :format-options="{
         style: 'currency',
         currency: 'USD',
         currencyDisplay: 'symbol',
@@ -968,14 +935,8 @@ watch(modelValue, () => {
       </template>
     </edge-shad-type-money>
     <edge-shad-input
-      v-if="props.fieldType === 'text'"
-      v-model="modelValue"
-      v-maska:[props.maskOptions]
-      type="text"
-      :name="props.name"
-      v-bind="props.bindings"
-      :label="props.label"
-      :disabled="props.disabled"
+      v-if="props.fieldType === 'text'" v-model="modelValue" v-maska:[props.maskOptions] type="text"
+      :name="props.name" v-bind="props.bindings" :label="props.label" :disabled="props.disabled"
       :description="props.hint"
     >
       <template #icon>
@@ -983,9 +944,7 @@ watch(modelValue, () => {
       </template>
     </edge-shad-input>
     <edge-shad-checkbox
-      v-if="props.fieldType === 'boolean'"
-      v-model="modelValue"
-      :name="props.name"
+      v-if="props.fieldType === 'boolean'" v-model="modelValue" :name="props.name"
       v-bind="props.bindings"
     >
       {{ props.label }}
@@ -994,57 +953,33 @@ watch(modelValue, () => {
       </template>
     </edge-shad-checkbox>
     <edge-shad-combobox
-      v-if="props.fieldType === 'combobox'"
-      v-model="modelValue"
-      :label="props.label"
-      :items="props.items"
-      v-bind="props.bindings"
-      :disabled="props.disabled"
-      :name="props.name"
-      :item-value="props.valueField"
-      :item-title="props.titleField"
-      :placeholder="`${props.label}...`"
+      v-if="props.fieldType === 'combobox'" v-model="modelValue" :label="props.label"
+      :items="props.items" v-bind="props.bindings" :disabled="props.disabled" :name="props.name"
+      :item-value="props.valueField" :item-title="props.titleField" :placeholder="`${props.label}...`"
     >
       <template v-if="props.helper" #append>
         <edge-g-helper :title="props.label" :helper="props.helper" />
       </template>
     </edge-shad-combobox>
     <edge-shad-select
-      v-if="props.fieldType === 'select'"
-      v-model="modelValue"
-      :label="props.label"
-      :items="props.items"
-      v-bind="props.bindings"
-      :disabled="props.disabled"
-      :name="props.name"
+      v-if="props.fieldType === 'select'" v-model="modelValue" :label="props.label" :items="props.items"
+      v-bind="props.bindings" :disabled="props.disabled" :name="props.name"
     >
       <template v-if="props.helper" #icon>
         <edge-g-helper :title="props.label" :helper="props.helper" />
       </template>
     </edge-shad-select>
     <edge-shad-textarea
-      v-if="props.fieldType === 'textarea'"
-      v-model="modelValue"
-      v-maska:[props.maskOptions]
-      type="text"
-      :name="props.name"
-      v-bind="props.bindings"
-      :label="props.label"
-      :disabled="props.disabled"
+      v-if="props.fieldType === 'textarea'" v-model="modelValue" v-maska:[props.maskOptions]
+      type="text" :name="props.name" v-bind="props.bindings" :label="props.label" :disabled="props.disabled"
     >
       <template v-if="props.helper" #icon>
         <edge-g-helper :title="props.label" :helper="props.helper" />
       </template>
     </edge-shad-textarea>
     <edge-shad-tags
-      v-if="props.fieldType === 'tags'"
-      v-model="modelValue"
-      type="text"
-      :name="props.name"
-      v-bind="props.bindings"
-      :label="props.label"
-      :disabled="props.disabled"
-      :value-as="props.bindings['value-as']"
+      v-if="props.fieldType === 'tags'" v-model="modelValue" type="text" :name="props.name"
+      v-bind="props.bindings" :label="props.label" :disabled="props.disabled" :value-as="props.bindings['value-as']"
     >
       <template v-if="props.helper" #icon>
         <edge-g-helper :title="props.label" :helper="props.helper" />
@@ -1064,26 +999,23 @@ watch(modelValue, () => {
             </DialogTitle>
           </DialogHeader>
           <DialogDescription />
-          <edge-shad-input
-            v-model="state.newKey"
-            name="key"
-            class="mb-1"
-            label="Key"
-            v-bind="props.bindings"
-          />
-          <DialogFooter class="pt-6 flex justify-between">
+          <edge-shad-input v-model="state.newKey" name="key" class="mb-1" label="Key" v-bind="props.bindings" />
+          <DialogFooter class="flex justify-between pt-6">
             <edge-shad-button variant="destructive" @click="state.keyMenu = false">
               Cancel
             </edge-shad-button>
-            <edge-shad-button class="text-white w-full bg-slate-800 hover:bg-slate-400" @click="updateKey">
+            <edge-shad-button class="w-full text-white bg-slate-800 hover:bg-slate-400" @click="updateKey">
               Submit
             </edge-shad-button>
           </DialogFooter>
         </DialogContent>
       </edge-shad-dialog>
-      <Card v-if="!(props.forFunctions && modelValue.length >= 1)" class="p-0" :class="state.forFunctions ? '' : 'bg-transparent mb-1'">
+      <Card
+        v-if="!(props.forFunctions && modelValue.length >= 1)" class="p-0"
+        :class="state.forFunctions ? '' : 'bg-transparent mb-1'"
+      >
         <CardHeader class="p-2" :class="state.forFunctions ? '' : 'bg-transparent'">
-          <div class="w-full flex justify-between">
+          <div class="flex justify-between w-full">
             <div v-if="!props.forFunctions" class="flex items-center">
               <Braces v-if="props.fieldType === 'object'" class="mx-2" />
 
@@ -1094,7 +1026,10 @@ watch(modelValue, () => {
               </div>
             </div>
             <div class="flex items-center">
-              <edge-shad-button v-if="!props.staticObject" class="bg-slate-500 mx-2 h-6 text-xs" @click.stop.prevent="state.fieldInsertDialog = true">
+              <edge-shad-button
+                v-if="!props.staticObject" class="h-6 mx-2 text-xs bg-slate-500"
+                @click.stop.prevent="state.fieldInsertDialog = true"
+              >
                 <template v-if="props.fieldType === 'object'">
                   Add Field
                 </template>
@@ -1111,35 +1046,32 @@ watch(modelValue, () => {
             </div>
           </div>
         </CardHeader>
-        <CardContent class="py-0 px-2">
-          <draggable
-            v-model="state.order"
-            handle=".handle"
-            item-key="key"
-          >
+        <CardContent class="px-2 py-0">
+          <draggable v-model="state.order" handle=".handle" item-key="key">
             <template #item="{ element }">
               <div :key="element.key" class="w-full">
-                <div class="flex w-full py-1 justify-between items-center">
-                  <div v-if="!staticObject" class="text-left px-2">
+                <div class="flex items-center justify-between w-full py-1">
+                  <div v-if="!staticObject" class="px-2 text-left">
                     <Grip class="handle pointer" />
                   </div>
-                  <div
-                    v-show="props.fieldType !== 'array'"
-                    class="w-1/6 text-left mr-2"
-                  >
+                  <div v-show="props.fieldType !== 'array'" class="w-1/6 mr-2 text-left">
                     <template v-if="modelValue[element.key].gptGenerated">
-                      <edge-shad-button class="bg-slate-500 mx-2 h-6 text-xs" @click.prevent.stop="editField(element)">
+                      <edge-shad-button class="h-6 mx-2 text-xs bg-slate-500" @click.prevent.stop="editField(element)">
                         {{ element.key }}
                       </edge-shad-button>
                     </template>
-                    <edge-shad-button v-else-if="!props.staticObject" class="bg-slate-500 mx-2 h-6 text-xs" @click.prevent.stop="openKeyMenu(element.key)">
+                    <edge-shad-button
+                      v-else-if="!props.staticObject" class="h-6 mx-2 text-xs bg-slate-500"
+                      @click.prevent.stop="openKeyMenu(element.key)"
+                    >
                       {{ element.key }}
                     </edge-shad-button>
                   </div>
-                  <div
-                    v-if="props.fieldType === 'array'"
-                  >
-                    <edge-shad-button v-if="props.forFunctions" class="bg-slate-500 mx-2 h-6 text-xs" @click.prevent.stop="editField(element)">
+                  <div v-if="props.fieldType === 'array'">
+                    <edge-shad-button
+                      v-if="props.forFunctions" class="h-6 mx-2 text-xs bg-slate-500"
+                      @click.prevent.stop="editField(element)"
+                    >
                       <Pencil width="16" height="16" />
                       {{ element.value.type }}
                     </edge-shad-button>
@@ -1151,26 +1083,19 @@ watch(modelValue, () => {
                     <template v-else-if="typeof modelValue[element.key] !== 'object'">
                       <edge-shad-input
                         v-if="typeof modelValue[element.key] === 'string'"
-                        v-model="modelValue[element.key]"
-                        v-bind="props.bindings"
-                        placeholder="Enter value here"
-                        :label="!props.staticObject ? '' : element.key"
-                        :name="`${props.name}.${element.key}`"
+                        v-model="modelValue[element.key]" v-bind="props.bindings" placeholder="Enter value here"
+                        :label="!props.staticObject ? '' : element.key" :name="`${props.name}.${element.key}`"
                       />
                       <edge-shad-checkbox
                         v-else-if="typeof modelValue[element.key] === 'boolean'"
-                        v-model="modelValue[element.key]"
-                        class="mb-1"
-                        v-bind="props.bindings"
+                        v-model="modelValue[element.key]" class="mb-1" v-bind="props.bindings"
                         :name="`${props.name}.${element.key}`"
                       >
                         {{ getArrayObjectLabel(element.key) }}
                       </edge-shad-checkbox>
                       <edge-shad-number
                         v-else-if="typeof modelValue[element.key] === 'number'"
-                        v-model="modelValue[element.key]"
-                        :step=".1"
-                        :name="`${props.name}.${element.key}`"
+                        v-model="modelValue[element.key]" :step=".1" :name="`${props.name}.${element.key}`"
                         v-bind="props.bindings"
                       />
                     </template>
@@ -1178,19 +1103,25 @@ watch(modelValue, () => {
                       <Separator class="dark:bg-slate-600" />
                     </template>
                   </div>
-                  <edge-shad-button v-if="!props.staticObject" variant="text" size="icon" @click.prevent.stop="state.removeField = element.key">
+                  <edge-shad-button
+                    v-if="!props.staticObject" variant="text" size="icon"
+                    @click.prevent.stop="state.removeField = element.key"
+                  >
                     <Trash width="18" height="18" />
                   </edge-shad-button>
                 </div>
                 <div v-if="typeof modelValue[element.key] === 'object'" class="w-full py-1">
-                  <edge-g-input v-model="modelValue[element.key]" :name="element.key" :for-functions="props.forFunctions" :bindings="props.bindings" :label="getArrayObjectLabel(element.key)" :disable-tracking="true" :field-type="Array.isArray(modelValue[element.key]) ? 'array' : 'object'" />
+                  <edge-g-input
+                    v-model="modelValue[element.key]" :name="element.key"
+                    :for-functions="props.forFunctions" :bindings="props.bindings"
+                    :label="getArrayObjectLabel(element.key)" :disable-tracking="true"
+                    :field-type="Array.isArray(modelValue[element.key]) ? 'array' : 'object'"
+                  />
                 </div>
               </div>
             </template>
           </draggable>
-          <edge-shad-dialog
-            v-model="state.removeFieldDialogShow"
-          >
+          <edge-shad-dialog v-model="state.removeFieldDialogShow">
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>
@@ -1200,7 +1131,7 @@ watch(modelValue, () => {
                   Are you sure you want to delete "{{ getArrayObjectLabel(state.removeField) }}"?
                 </DialogDescription>
               </DialogHeader>
-              <DialogFooter class="pt-6 flex justify-between">
+              <DialogFooter class="flex justify-between pt-6">
                 <edge-shad-button class="text-white bg-slate-800 hover:bg-slate-400" @click="state.removeField = null">
                   Cancel
                 </edge-shad-button>
@@ -1214,14 +1145,17 @@ watch(modelValue, () => {
       </Card>
     </template>
     <template v-if="props.fieldType === 'objectList'">
-      <Card class="bg-transparent border-0 shadow-none px-0">
-        <CardHeader class="pt-3 px-0 pb-2">
-          <CardTitle class="text-lg flex items-center">
+      <Card class="px-0 bg-transparent border-0 shadow-none">
+        <CardHeader class="px-0 pt-3 pb-2">
+          <CardTitle class="flex items-center text-lg">
             <div :class="{ 'text-red-500': props.errors.length > 0 }">
               {{ props.label }}
             </div>
-            <div class="grow text-right">
-              <component :is="resolveComponent(`edge-form-subtypes-${props.subFieldType}`)" v-model:items="modelValue" :pass-through-props="passThroughProps" />
+            <div class="text-right grow">
+              <component
+                :is="resolveComponent(`edge-form-subtypes-${props.subFieldType}`)" v-model:items="modelValue"
+                :pass-through-props="passThroughProps"
+              />
             </div>
             <edge-g-helper v-if="props.helper" :title="props.label" :helper="props.helper" />
           </CardTitle>
@@ -1232,17 +1166,19 @@ watch(modelValue, () => {
             <Separator />
           </CardDescription>
         </CardHeader>
-        <CardContent class="mt-0 px-0">
-          <draggable
-            v-model="modelValue"
-            handle=".handle"
-            item-key="id"
-          >
+        <CardContent class="px-0 mt-0">
+          <draggable v-model="modelValue" handle=".handle" item-key="id">
             <template #item="{ element, index }">
               <div>
-                <component :is="resolveComponent(`edge-form-subtypes-${props.subFieldType}`)" v-model:items="modelValue" :item="element" :pass-through-props="passThroughProps" />
-                <Alert v-if="isTracked && state.afterMount && (JSON.stringify(modelValue[index]) !== JSON.stringify(edgeGlobal.edgeState.changeTracker[state.trackerKey][state.objectListOriginalOrder[element.id]]))" class="mt-0 mb-3 bg-warning py-2 px-1">
-                  <div class="flex flex-wrap justify-center py-0 items-center">
+                <component
+                  :is="resolveComponent(`edge-form-subtypes-${props.subFieldType}`)" v-model:items="modelValue"
+                  :item="element" :pass-through-props="passThroughProps"
+                />
+                <Alert
+                  v-if="isTracked && state.afterMount && (JSON.stringify(modelValue[index]) !== JSON.stringify(edgeGlobal.edgeState.changeTracker[state.trackerKey][state.objectListOriginalOrder[element.id]]))"
+                  class="px-1 py-2 mt-0 mb-3 bg-warning"
+                >
+                  <div class="flex flex-wrap items-center justify-center py-0">
                     <div v-if="props.fieldType === 'objectList'" class="flex flex-wrap justify-center grow">
                       This item has been modified
                     </div>
@@ -1250,29 +1186,35 @@ watch(modelValue, () => {
                       Modified from "{{ originalCompare }}"
                     </div>
                     <div class="text-right">
-                      <edge-shad-button class="text-white  bg-slate-700 mx-2 h-6 text-xs" @click="modelValue[index] = edgeGlobal.edgeState.changeTracker[state.trackerKey][state.objectListOriginalOrder[element.id]]">
+                      <edge-shad-button
+                        class="h-6 mx-2 text-xs text-white bg-slate-700"
+                        @click="modelValue[index] = edgeGlobal.edgeState.changeTracker[state.trackerKey][state.objectListOriginalOrder[element.id]]"
+                      >
                         Undo
                       </edge-shad-button>
                     </div>
                   </div>
                 </Alert>
-                <Separator
-                  class="dark:bg-slate-600"
-                />
+                <Separator class="dark:bg-slate-600" />
               </div>
             </template>
           </draggable>
         </CardContent>
       </Card>
     </template>
-    <Alert v-if="isTracked && state.afterMount && (modelCompare !== originalCompare)" class="mt-0 mb-3 bg-warning py-2 px-1">
-      <div class="flex flex-wrap justify-center py-0 items-center">
-        <template v-if="props.fieldType === 'objectList' || props.fieldType === 'object' || props.fieldType === 'array' || returnObject">
+    <Alert
+      v-if="isTracked && state.afterMount && (modelCompare !== originalCompare)"
+      class="px-1 py-2 mt-0 mb-3 bg-warning"
+    >
+      <div class="flex flex-wrap items-center justify-center py-0">
+        <template
+          v-if="props.fieldType === 'objectList' || props.fieldType === 'object' || props.fieldType === 'array' || returnObject"
+        >
           <div class="justify-center text-center grow">
             {{ props.label }} has been modified
           </div>
           <div class="text-right">
-            <edge-shad-button class="text-white bg-slate-700 mx-2 h-6 text-xs" @click="undo()">
+            <edge-shad-button class="h-6 mx-2 text-xs text-white bg-slate-700" @click="undo()">
               Undo All
             </edge-shad-button>
           </div>
@@ -1294,7 +1236,7 @@ watch(modelValue, () => {
             Modified from "{{ originalCompare }}" to "{{ modelValue }}"
           </div>
           <div class="text-right">
-            <edge-shad-button class="text-white  bg-slate-700 mx-2 h-6 text-xs" @click="undo()">
+            <edge-shad-button class="h-6 mx-2 text-xs text-white bg-slate-700" @click="undo()">
               Undo
             </edge-shad-button>
           </div>
@@ -1316,40 +1258,27 @@ watch(modelValue, () => {
       </DialogHeader>
       <DialogDescription />
       <edge-shad-input
-        v-if="props.fieldType === 'object'"
-        v-model="state.fieldInsert.key"
-        v-bind="props.bindings"
-        label="Field Key"
-        name="key"
-        class="mb-0"
+        v-if="props.fieldType === 'object'" v-model="state.fieldInsert.key" v-bind="props.bindings"
+        label="Field Key" name="key" class="mb-0"
       />
-      <Alert v-if="state.fieldInsertKeyRequired" class="mt-0 mb-3 bg-error py-2 px-1">
-        <div class="flex flex-wrap justify-center py-0 items-center">
-          <div class="justify-center grow pl-2 text-bold">
+      <Alert v-if="state.fieldInsertKeyRequired" class="px-1 py-2 mt-0 mb-3 bg-error">
+        <div class="flex flex-wrap items-center justify-center py-0">
+          <div class="justify-center pl-2 grow text-bold">
             {{ state.fieldErrorMessage }}
           </div>
         </div>
       </Alert>
       <edge-shad-select
-        v-if="(fieldTypes.length > 1) || props.forFunctions"
-        v-model="state.fieldInsert.type"
-        :disabled="state.isEditing"
-        v-bind="props.bindings"
-        :items="fieldTypes"
-        label="Type"
-        name="type"
+        v-if="(fieldTypes.length > 1) || props.forFunctions" v-model="state.fieldInsert.type"
+        :disabled="state.isEditing" v-bind="props.bindings" :items="fieldTypes" label="Type" name="type"
       />
       <edge-shad-textarea
-        v-if="props.forFunctions"
-        v-model="state.fieldInsert.description"
-        label="Description"
+        v-if="props.forFunctions" v-model="state.fieldInsert.description" label="Description"
         name="description"
       />
       <edge-shad-checkbox
-        v-if="props.forFunctions && props.fieldType !== 'array'"
-        v-model="state.fieldInsert.required"
-        label="Field Required"
-        name="required"
+        v-if="props.forFunctions && props.fieldType !== 'array'" v-model="state.fieldInsert.required"
+        label="Field Required" name="required"
       />
       <DropdownMenu v-if="props.forFunctions">
         <DropdownMenuTrigger as-child>
@@ -1361,12 +1290,8 @@ watch(modelValue, () => {
           <DropdownMenuGroup>
             <template v-for="(item, i) in extraTypeFields[state.fieldInsert.type]" :key="i">
               <DropdownMenuItem
-                v-if="!state.fieldInsert.hasOwnProperty(i)"
-                :key="i"
-                :value="item"
-                color="primary"
-                class="cursor-pointer"
-                @click="state.fieldInsert[i] = item.default"
+                v-if="!state.fieldInsert.hasOwnProperty(i)" :key="i" :value="item" color="primary"
+                class="cursor-pointer" @click="state.fieldInsert[i] = item.default"
               >
                 <span>{{ item.bindings.label }}</span>
               </DropdownMenuItem>
@@ -1375,9 +1300,13 @@ watch(modelValue, () => {
         </DropdownMenuContent>
       </DropdownMenu>
       <template v-for="(value, key) in state.fieldInsert" :key="key">
-        <edge-g-input v-if="!['type', 'key', 'description', 'required', 'gptGenerated', 'value', 'fieldId'].includes(key)" v-model="state.fieldInsert[key]" :name="key" :disable-tracking="true" v-bind="extraTypeFields[state.fieldInsert.type][key].bindings" />
+        <edge-g-input
+          v-if="!['type', 'key', 'description', 'required', 'gptGenerated', 'value', 'fieldId'].includes(key)"
+          v-model="state.fieldInsert[key]" :name="key" :disable-tracking="true"
+          v-bind="extraTypeFields[state.fieldInsert.type][key].bindings"
+        />
       </template>
-      <DialogFooter class="pt-6 flex justify-between">
+      <DialogFooter class="flex justify-between pt-6">
         <edge-shad-button variant="destructive" @click="state.fieldInsertDialog = false">
           Cancel
         </edge-shad-button>
