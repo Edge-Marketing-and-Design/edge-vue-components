@@ -86,6 +86,8 @@ const unsavedChanges = computed(() => {
   if (props.docId === 'new') {
     return false
   }
+  // console.log('comparing', state.workingDoc, state.collectionData[props.docId])
+  // console.log('unsavedChanges', JSON.stringify(state.workingDoc) !== JSON.stringify(state.collectionData[props.docId]))
   return JSON.stringify(state.workingDoc) !== JSON.stringify(state.collectionData[props.docId])
 })
 
@@ -113,6 +115,7 @@ onBeforeRouteUpdate((to, from, next) => {
   edgeGlobal.edgeState.changeTracker = {}
   next()
 })
+
 watch(() => unsavedChanges.value, (newVal) => {
   console.log('test', newVal)
   emit('unsavedChanges', newVal)
@@ -237,9 +240,11 @@ const onSubmit = async () => {
   const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, state.workingDoc)
   state.workingDoc.docId = result.meta.docId
   edgeGlobal.edgeState.lastPaginatedDoc = state.workingDoc
+
   if (state.overrideClose) {
     state.submitting = false
-    state.overrideClose = false
+    // state.overrideClose = false
+    edgeGlobal.edgeState.changeTracker = {}
     return
   }
   edgeGlobal.edgeState.changeTracker = {}
@@ -303,6 +308,7 @@ onBeforeMount(async () => {
       await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${field}`)
     }
   }
+  emit('unsavedChanges', unsavedChanges.value)
   // console.log('mounting editor for', props.collection, props.docId)
   // console.log('starting snapshot for collection:', props.collection)
   // await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
@@ -313,6 +319,9 @@ onBeforeMount(async () => {
   }
   else {
     state.collectionData = edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`]
+  }
+  if (props.noCloseAfterSave) {
+    state.overrideClose = true
   }
 })
 
@@ -471,10 +480,10 @@ const onError = async () => {
             <slot name="header-center" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc" />
           </template>
           <template #end>
-            <slot name="header-end" :on-submit="triggerSubmit" :unsaved-changes="unsavedChanges" :errors="state.errors" :submitting="state.submitting" :title="title" :working-doc="state.workingDoc">
+            <slot name="header-end" :on-submit="triggerSubmit" :unsaved-changes="unsavedChanges" :on-cancel="onCancel" :errors="state.errors" :submitting="state.submitting" :title="title" :working-doc="state.workingDoc">
               <edge-shad-button
                 v-if="!unsavedChanges"
-                class="bg-secondary uppercase h-8 hover:bg-red-400 w-20"
+                class="bg-red-700 uppercase h-8 hover:bg-red-400 w-20"
                 @click="onCancel"
               >
                 Close

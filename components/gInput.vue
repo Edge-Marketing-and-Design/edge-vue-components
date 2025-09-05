@@ -841,8 +841,8 @@ watch(modelValue, () => {
             <div class="grow">
               {{ props.label }}
             </div>
-            <div>
-              <edge-g-helper v-if="props.helper" :title="props.label" :helper="props.helper" />
+            <div v-if="props.helper">
+              <edge-g-helper :title="props.label" :helper="props.helper" />
             </div>
           </div>
         </CardTitle>
@@ -882,10 +882,7 @@ watch(modelValue, () => {
                   {{ element }}
                 </div>
                 <div class="pr-1">
-                  <edge-shad-button
-                    variant="ghost" class="hover:bg-slate-400" size="icon"
-                    @click="modelValue.splice(i, 1)"
-                  >
+                  <edge-shad-button class="text-white bg-slate-800 hover:bg-slate-400" size="icon" @click="modelValue.splice(modelValue.indexOf(element), 1)">
                     <Trash width="16" height="16" />
                   </edge-shad-button>
                 </div>
