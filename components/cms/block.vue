@@ -10,6 +10,10 @@ const props = defineProps({
     type: String,
     required: true,
   },
+  editMode: {
+    type: Boolean,
+    default: true,
+  },
 })
 
 const emit = defineEmits(['update:modelValue', 'delete'])
@@ -39,10 +43,14 @@ const state = reactive({
   open: false,
   draft: {},
   delete: false,
+  meta: {},
 })
 
 const openEditor = () => {
+  if (!props.editMode)
+    return
   state.draft = JSON.parse(JSON.stringify(modelValue.value?.values || {}))
+  state.meta = JSON.parse(JSON.stringify(modelValue.value?.meta || {}))
   state.open = true
 }
 
@@ -50,14 +58,11 @@ const save = () => {
   const updated = {
     ...modelValue.value,
     values: JSON.parse(JSON.stringify(state.draft)),
+    meta: JSON.parse(JSON.stringify(state.meta)),
   }
   modelValue.value = updated
   state.open = false
 }
-
-const meta = computed(() => {
-  return modelValue.value?.meta || {}
-})
 
 const orderedMeta = computed(() => {
   const metaObj = modelValue.value?.meta || {}
@@ -87,17 +92,18 @@ const orderedMeta = computed(() => {
 <template>
   <div>
     <div
-      class="relative group cursor-pointer"
+      :class="{ 'cursor-pointer': props.editMode }"
+      class="relative group "
       @click="openEditor"
     >
       <!-- Content -->
       <edge-cms-block-render :content="modelValue?.blockTemplate" :values="modelValue?.values" />
 
       <!-- Darken overlay on hover -->
-      <div class="pointer-events-none absolute inset-0 bg-black/50 opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-10" />
+      <div v-if="props.editMode" class="pointer-events-none absolute inset-0 bg-black/50 opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-10" />
 
       <!-- Hover controls -->
-      <div class="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-20">
+      <div v-if="props.editMode" class="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-20">
         <!-- Delete button top right -->
         <div class="absolute top-2 right-2">
           <edge-shad-button
@@ -148,7 +154,14 @@ const orderedMeta = computed(() => {
           <edge-shad-form>
             <template v-for="entry in orderedMeta" :key="entry.field">
               <div v-if="entry.meta.type === 'array'">
-                <edge-shad-tags v-model="state.draft[entry.field]" :label="entry.meta.title" :name="entry.field" />
+                <div v-if="!entry.meta?.api">
+                  <edge-shad-tags v-model="state.draft[entry.field]" :label="entry.meta.title" :name="entry.field" />
+                </div>
+                <div v-else>
+                  <edge-shad-input v-model="state.meta[entry.field].api" name="api" label="API URL" />
+                  <edge-shad-input v-model="state.meta[entry.field].apiField" name="apiField" label="API Field" />
+                  <edge-shad-input v-model="state.meta[entry.field].apiQuery" name="apiQuery" label="API Query String" />
+                </div>
               </div>
               <div v-else-if="entry.meta?.options">
                 <!-- Treat text and image as plain strings; image expected to be URL -->

@@ -158,9 +158,9 @@ const chooseBlock = (block) => {
 
 <template>
   <div>
-    <div class="w-full flex justify-center items-center">
+    <div class="flex justify-center items-center">
       <edge-shad-button
-        class="!my-1  px-12 h-[24px] bg-secondary w-full text-secondary-foreground hover:text-white"
+        class="!my-1  px-2 h-[24px] bg-secondary text-secondary-foreground hover:text-white"
         @click="state.keyMenu = true"
       >
         <Plus class="w-4 h-4" />
