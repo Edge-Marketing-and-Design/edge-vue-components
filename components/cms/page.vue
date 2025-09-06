@@ -31,20 +31,20 @@ const schemas = {
   })),
 }
 
-const deleteBlock = (blockId) => {
+const deleteBlock = (blockId, slotProps) => {
   console.log('Deleting block with ID:', blockId)
-  const index = modelValue.value.findIndex(block => block.id === blockId)
+  const index = slotProps.workingDoc.content.findIndex(block => block.id === blockId)
   if (index !== -1) {
-    modelValue.value.splice(index, 1)
+    slotProps.workingDoc.content.splice(index, 1)
   }
 }
 
-const blockPick = (block, index) => {
+const blockPick = (block, index, slotProps) => {
+  console.log(slotProps)
   const generatedId = edgeGlobal.generateShortId()
   block.id = generatedId
-  modelValue.value ??= []
   if (index === 0 || index) {
-    modelValue.value.splice(index, 0, block)
+    slotProps.workingDoc.content.splice(index, 0, block)
   }
 }
 
@@ -123,7 +123,7 @@ onMounted(() => {
     <template #main="slotProps">
       <Separator class="my-4" />
       <edge-button-divider v-if="state.editMode" class="my-2">
-        <edge-cms-block-picker @pick="(block) => blockPick(block, 0)" />
+        <edge-cms-block-picker @pick="(block) => blockPick(block, 0, slotProps)" />
       </edge-button-divider>
       <div class="w-full mx-auto  bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30">
         <draggable
@@ -143,13 +143,13 @@ onMounted(() => {
                     v-model="slotProps.workingDoc.content[index]"
                     :edit-mode="state.editMode"
                     :block-id="element.id" class=""
-                    @delete="deleteBlock"
+                    @delete="(block) => deleteBlock(block, slotProps)"
                   />
                 </div>
               </div>
               <div v-if="state.editMode" class="w-full">
                 <edge-button-divider class="my-2">
-                  <edge-cms-block-picker @pick="(block) => blockPick(block, index + 1)" />
+                  <edge-cms-block-picker @pick="(block) => blockPick(block, index + 1, slotProps)" />
                 </edge-button-divider>
               </div>
             </div>
