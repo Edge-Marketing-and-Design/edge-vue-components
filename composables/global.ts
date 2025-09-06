@@ -15,6 +15,7 @@ const edgeState = reactive({
   menuItems: [],
   isAdminCollections: [] as string[],
   redirectRoute: '',
+  isEmulator: false,
 })
 
 const setOrganization = async (organization: string, edgeFirebase: any) => {
@@ -24,6 +25,9 @@ const setOrganization = async (organization: string, edgeFirebase: any) => {
     edgeState.currentOrganization = organization
     await edgeFirebase.startUsersSnapshot(`organizations/${organization}`)
     edgeState.organizationDocPath = `organizations/${organization}`
+    if (import.meta.env.VITE_FIREBASE_EMULATOR_FIRESTORE) {
+      edgeState.isEmulator = true
+    }
   }
 }
 

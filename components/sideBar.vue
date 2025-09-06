@@ -153,6 +153,10 @@ const submenu = computed(() => {
 
   return match?.submenu || []
 })
+
+const isDev = computed(() => {
+  return process.dev
+})
 </script>
 
 <template>
@@ -160,6 +164,9 @@ const submenu = computed(() => {
     <!-- Primary Sidebar -->
     <Sidebar :style="styleOverrides" side="left" v-bind="attrs" :collapsible="collapsible">
       <SidebarHeader :class="props.headerClasses">
+        <div v-if="isDev" :class="edgeGlobal.edgeState.isEmulator ? 'bg-yellow-500' : 'bg-red-500'" class="text-xs text-white px-0 text-center ">
+          {{ edgeGlobal.edgeState.isEmulator ? 'Emulator' : '! Production !' }}
+        </div>
         <slot name="header" :side-bar-state="sidebarState" />
       </SidebarHeader>
       <slot name="content">
