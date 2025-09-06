@@ -50,34 +50,36 @@ const blockPick = (block, index) => {
     <edge-button-divider v-if="state.editMode" class="my-2">
       <edge-cms-block-picker @pick="(block) => blockPick(block, 0)" />
     </edge-button-divider>
-    <draggable
-      v-if="modelValue && modelValue.length > 0"
-      v-model="modelValue"
-      handle=".handle"
-      item-key="id"
-    >
-      <template #item="{ element, index }">
-        <div :key="element.id" class="">
-          <div :class="{ 'border-1 border-dotted py-1 mb-1': state.editMode }" class="flex w-full items-center w-full rounded-sm ">
-            <div v-if="state.editMode" class="text-left px-2">
-              <Grip class="handle pointer" />
+    <div class="w-full mx-auto  bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30">
+      <draggable
+        v-if="modelValue && modelValue.length > 0"
+        v-model="modelValue"
+        handle=".handle"
+        item-key="id"
+      >
+        <template #item="{ element, index }">
+          <div :key="element.id" class="">
+            <div :class="{ 'border-1 border-dotted py-1 mb-1': state.editMode }" class="flex w-full items-center w-full rounded-sm ">
+              <div v-if="state.editMode" class="text-left px-2">
+                <Grip class="handle pointer" />
+              </div>
+              <div :class="{ 'px-2 py-2': state.editMode }" class="grow">
+                <edge-cms-block
+                  v-model="modelValue[index]"
+                  :edit-mode="state.editMode"
+                  :block-id="element.id" class=""
+                  @delete="deleteBlock"
+                />
+              </div>
             </div>
-            <div :class="{ 'px-2 py-2': state.editMode }" class="grow">
-              <edge-cms-block
-                v-model="modelValue[index]"
-                :edit-mode="state.editMode"
-                :block-id="element.id" class=""
-                @delete="deleteBlock"
-              />
+            <div v-if="state.editMode" class="w-full">
+              <edge-button-divider class="my-2">
+                <edge-cms-block-picker @pick="(block) => blockPick(block, index + 1)" />
+              </edge-button-divider>
             </div>
           </div>
-          <div v-if="state.editMode" class="w-full">
-            <edge-button-divider class="my-2">
-              <edge-cms-block-picker @pick="(block) => blockPick(block, index + 1)" />
-            </edge-button-divider>
-          </div>
-        </div>
-      </template>
-    </draggable>
+        </template>
+      </draggable>
+    </div>
   </div>
 </template>
