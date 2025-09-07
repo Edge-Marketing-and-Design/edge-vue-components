@@ -166,7 +166,41 @@ const chooseBlock = (block) => {
         <Plus class="w-4 h-4" />
       </edge-shad-button>
     </div>
-    <edge-shad-dialog v-model="state.keyMenu">
+    <Sheet v-model:open="state.keyMenu">
+      <SheetContent side="left" class="w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl">
+        <SheetHeader>
+          <SheetTitle>Pick a Block</SheetTitle>
+          <SheetDescription />
+        </SheetHeader>
+
+        <edge-shad-form>
+          <div class="p-6 space-y-4  h-[calc(100vh-50px)] overflow-y-auto">
+            <template v-for="block in blocks" :key="block.docId">
+              <button
+                :ref="el => setBtnRef(block.docId, el)"
+                type="button"
+                class="p-0 text-left hover:bg-primary text-slate-500  border !hover:text-white   border-dashed cursor-pointer w-full overflow-hidden relative"
+                @click="chooseBlock(block)"
+              >
+                <div class="scale-wrapper">
+                  <div
+                    :ref="el => setInnerRef(block.docId, el)"
+                    class="scale-inner scale p-4"
+                    :data-block-id="block.docId"
+                  >
+                    <div class="text-4xl relative text-inherit text-center">
+                      {{ block.name }}
+                    </div>
+                    <edge-cms-block-render :content="block.content" :values="blockModel(block.content).values" />
+                  </div>
+                </div>
+              </button>
+            </template>
+          </div>
+        </edge-shad-form>
+      </SheetContent>
+    </Sheet>
+    <!-- <edge-shad-dialog v-model="state.keyMenu">
       <DialogScrollContent class="max-w-3xl w-full">
         <DialogHeader>
           <DialogTitle>
@@ -196,7 +230,7 @@ const chooseBlock = (block) => {
           </button>
         </template>
       </DialogScrollContent>
-    </edge-shad-dialog>
+    </edge-shad-dialog> -->
   </div>
 </template>
 

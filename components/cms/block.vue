@@ -143,15 +143,15 @@ const orderedMeta = computed(() => {
       </DialogContent>
     </edge-shad-dialog>
 
-    <edge-shad-dialog v-model="state.open">
-      <DialogContent class="max-w-xl">
-        <DialogHeader>
-          <DialogTitle>Edit Block</DialogTitle>
-        </DialogHeader>
-        <DialogDescription />
+    <Sheet v-model:open="state.open">
+      <SheetContent class="w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl">
+        <SheetHeader>
+          <SheetTitle>Edit Block</SheetTitle>
+          <SheetDescription />
+        </SheetHeader>
 
-        <div class="mt-4 space-y-4">
-          <edge-shad-form>
+        <edge-shad-form>
+          <div class="p-6 space-y-4  h-[calc(100vh-120px)] overflow-y-auto">
             <template v-for="entry in orderedMeta" :key="entry.field">
               <div v-if="entry.meta.type === 'array'">
                 <div v-if="!entry.meta?.api">
@@ -164,7 +164,6 @@ const orderedMeta = computed(() => {
                 </div>
               </div>
               <div v-else-if="entry.meta?.options">
-                <!-- Treat text and image as plain strings; image expected to be URL -->
                 <edge-shad-select
                   v-model="state.draft[entry.field]"
                   :label="entry.meta.title"
@@ -178,17 +177,17 @@ const orderedMeta = computed(() => {
                 <edge-shad-input v-model="state.draft[entry.field]" :name="entry.field" :label="entry.meta.title" />
               </div>
             </template>
-          </edge-shad-form>
-        </div>
-        <DialogFooter class="pt-2 flex justify-between">
-          <edge-shad-button variant="destructive" class="text-white" @click="state.open = false">
-            Cancel
-          </edge-shad-button>
-          <edge-shad-button class=" bg-slate-800 hover:bg-slate-400 w-full" @click="save">
-            Save
-          </edge-shad-button>
-        </DialogFooter>
-      </DialogContent>
-    </edge-shad-dialog>
+          </div>
+          <SheetFooter class="pt-2 flex justify-between">
+            <edge-shad-button variant="destructive" class="text-white" @click="state.open = false">
+              Cancel
+            </edge-shad-button>
+            <edge-shad-button class=" bg-slate-800 hover:bg-slate-400 w-full" @click="save">
+              Save changes
+            </edge-shad-button>
+          </SheetFooter>
+        </edge-shad-form>
+      </SheetContent>
+    </Sheet>
   </div>
 </template>
