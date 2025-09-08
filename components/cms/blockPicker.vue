@@ -129,6 +129,10 @@ const blockModel = (html) => {
 
     const field = String(cfg.field)
     const title = cfg.title != null ? String(cfg.title) : ''
+
+    const { value: _omitValue, field: _omitField, ...rest } = cfg
+    meta[field] = { type, ...rest, title }
+
     let val = cfg.value
 
     if (type === 'image') {
@@ -138,7 +142,19 @@ const blockModel = (html) => {
       val = !val ? PLACEHOLDERS.text : String(val)
     }
     else if (type === 'array') {
-      val = PLACEHOLDERS.arrayItem
+      if (meta[field]?.apiLimit > 0) {
+        val = Array(meta[field].apiLimit).fill('placeholder')
+      }
+      else {
+        if (Array.isArray(val)) {
+          if (val.length === 0) {
+            val = PLACEHOLDERS.arrayItem
+          }
+        }
+        else {
+          val = PLACEHOLDERS.arrayItem
+        }
+      }
     }
     else if (type === 'textarea') {
       val = !val ? PLACEHOLDERS.textarea : String(val)
@@ -149,8 +165,6 @@ const blockModel = (html) => {
 
     values[field] = val
     // Place type, ...rest, then title (preserve computed title/type, add all other config keys except field/value)
-    const { value: _omitValue, field: _omitField, ...rest } = cfg
-    meta[field] = { type, ...rest, title }
   }
 
   return { values, meta, blockTemplate: html }
