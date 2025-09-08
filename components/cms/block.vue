@@ -97,7 +97,7 @@ const orderedMeta = computed(() => {
       @click="openEditor"
     >
       <!-- Content -->
-      <edge-cms-block-render :content="modelValue?.blockTemplate" :values="modelValue?.values" />
+      <edge-cms-block-render :content="modelValue?.blockTemplate" :values="modelValue?.values" :meta="modelValue?.meta" />
 
       <!-- Darken overlay on hover -->
       <div v-if="props.editMode" class="pointer-events-none absolute inset-0 bg-black/50 opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-10" />
@@ -153,7 +153,13 @@ const orderedMeta = computed(() => {
         <edge-shad-form>
           <div class="p-6 space-y-4  h-[calc(100vh-120px)] overflow-y-auto">
             <template v-for="entry in orderedMeta" :key="entry.field">
-              <div v-if="entry.meta.type === 'array'">
+              <div v-if="entry.meta?.type === 'richtext'">
+                <edge-shad-html v-model="state.draft[entry.field]" :enabled-toggles="['bold', 'italic', 'strike', 'bulletlist', 'orderedlist', 'underline']" :name="entry.field" :label="entry.meta.title" />
+              </div>
+              <div v-else-if="entry.meta?.type === 'textarea'">
+                <edge-shad-textarea v-model="state.draft[entry.field]" :name="entry.field" :label="entry.meta.title" />
+              </div>
+              <div v-else-if="entry.meta.type === 'array'">
                 <div v-if="!entry.meta?.api">
                   <edge-shad-tags v-model="state.draft[entry.field]" :label="entry.meta.title" :name="entry.field" />
                 </div>
@@ -161,6 +167,7 @@ const orderedMeta = computed(() => {
                   <edge-shad-input v-model="state.meta[entry.field].api" name="api" label="API URL" />
                   <edge-shad-input v-model="state.meta[entry.field].apiField" name="apiField" label="API Field" />
                   <edge-shad-input v-model="state.meta[entry.field].apiQuery" name="apiQuery" label="API Query String" />
+                  <edge-shad-number v-model="state.meta[entry.field].apiLimit" name="apiLimit" label="API Limit" />
                 </div>
               </div>
               <div v-else-if="entry.meta?.options">

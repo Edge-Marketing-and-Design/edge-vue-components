@@ -20,6 +20,8 @@ onBeforeMount(async () => {
 
 const PLACEHOLDERS = {
   text: 'Lorem ipsum dolor sit amet.',
+  textarea: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.',
+  richtext: '<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>',
   arrayItem: [
     'Lorem ipsum dolor sit amet.',
     'Consectetur adipiscing elit.',
@@ -138,6 +140,12 @@ const blockModel = (html) => {
     else if (type === 'array') {
       val = PLACEHOLDERS.arrayItem
     }
+    else if (type === 'textarea') {
+      val = !val ? PLACEHOLDERS.textarea : String(val)
+    }
+    else if (type === 'richtext') {
+      val = !val ? PLACEHOLDERS.richtext : String(val)
+    }
 
     values[field] = val
     // Place type, ...rest, then title (preserve computed title/type, add all other config keys except field/value)
@@ -191,7 +199,7 @@ const chooseBlock = (block) => {
                     <div class="text-4xl relative text-inherit text-center">
                       {{ block.name }}
                     </div>
-                    <edge-cms-block-render :content="block.content" :values="blockModel(block.content).values" />
+                    <edge-cms-block-render :content="block.content" :values="blockModel(block.content).values" :meta="blockModel(block.content).meta" />
                   </div>
                 </div>
               </button>

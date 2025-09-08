@@ -2,6 +2,7 @@
 // import { Extension } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import TextStyle from '@tiptap/extension-text-style'
+import Underline from '@tiptap/extension-underline'
 import ImageExt from '@tiptap/extension-image'
 import { Editor, EditorContent } from '@tiptap/vue-3'
 import { useVModel } from '@vueuse/core'
@@ -25,6 +26,7 @@ import {
   SquareCode,
   Strikethrough,
   TextQuote,
+  Underline as UnderlineIcon,
   Undo,
   WrapText,
 } from 'lucide-vue-next'
@@ -68,6 +70,11 @@ const props = defineProps({
     type: Boolean,
     required: false,
     default: false,
+  },
+  enabledToggles: {
+    type: Array,
+    required: false,
+    default: () => ['bold', 'italic', 'strike', 'underline', 'code', 'codeBlock', 'heading1', 'heading2', 'heading3', 'heading4', 'heading5', 'heading6', 'bulletlist', 'orderedlist', 'blockquote', 'horizontalrule', 'hardbreak'],
   },
 })
 
@@ -113,6 +120,7 @@ onMounted(() => {
       StarterKit,
       TextStyle,
       ImageExt,
+      Underline,
       // PreventEnterSubmit,
     ],
     /*     onCreate({ editor }) {
@@ -166,7 +174,8 @@ const addImage = () => {
               <div class="button-group w-full flex flex-wrap gap-2">
                 <ToggleGroup type="multiple">
                   <ToggleGroupItem
-
+                    v-if="enabledToggles.includes('bold')"
+                    value="bold"
                     :disabled="!editor.can().chain().focus().toggleBold().run()"
                     :data-state="editor.isActive('bold') ? 'on' : 'off'"
                     @click.prevent="editor.chain().focus().toggleBold().run()"
@@ -174,7 +183,8 @@ const addImage = () => {
                     <Bold :size="16" />
                   </ToggleGroupItem>
                   <ToggleGroupItem
-
+                    v-if="enabledToggles.includes('italic')"
+                    value="italic"
                     :disabled="!editor.can().chain().focus().toggleItalic().run()"
                     :data-state="editor.isActive('italic') ? 'on' : 'off'"
                     @click.prevent="editor.chain().focus().toggleItalic().run()"
@@ -182,6 +192,17 @@ const addImage = () => {
                     <Italic :size="16" />
                   </ToggleGroupItem>
                   <ToggleGroupItem
+                    v-if="enabledToggles.includes('underline')"
+                    value="underline"
+                    :disabled="!editor.can().chain().focus().toggleUnderline().run()"
+                    :data-state="editor.isActive('underline') ? 'on' : 'off'"
+                    @click.prevent="editor.chain().focus().toggleUnderline().run()"
+                  >
+                    <UnderlineIcon :size="16" />
+                  </ToggleGroupItem>
+                  <ToggleGroupItem
+                    v-if="enabledToggles.includes('strike')"
+                    value="strike"
                     :disabled="!editor.can().chain().focus().toggleStrike().run()"
                     :data-state="editor.isActive('strike') ? 'on' : 'off'"
                     @click.prevent="editor.chain().focus().toggleStrike().run()"
@@ -189,9 +210,10 @@ const addImage = () => {
                     <Strikethrough :size="16" />
                   </ToggleGroupItem>
                 </ToggleGroup>
-                <ToggleGroup type="single">
+                <ToggleGroup v-if="enabledToggles.includes('code') || enabledToggles.includes('codeBlock')" type="single">
                   <ToggleGroupItem
-
+                    v-if="enabledToggles.includes('code')"
+                    value="code"
                     :disabled="!editor.can().chain().focus().toggleCode().run()"
                     :data-state="editor.isActive('code') ? 'on' : 'off'"
                     @click.prevent="editor.chain().focus().toggleCode().run()"
@@ -199,7 +221,8 @@ const addImage = () => {
                     <Code :size="16" />
                   </ToggleGroupItem>
                   <ToggleGroupItem
-
+                    v-if="enabledToggles.includes('codeBlock')"
+                    value="codeBlock"
                     :disabled="!editor.can().chain().focus().toggleCodeBlock().run()"
                     :data-state="editor.isActive('codeBlock') ? 'on' : 'off'"
                     @click.prevent="editor.chain().focus().toggleCodeBlock().run()"
@@ -208,9 +231,13 @@ const addImage = () => {
                   </ToggleGroupItem>
                 </ToggleGroup>
 
-                <ToggleGroup type="single">
+                <ToggleGroup
+                  v-if="enabledToggles.includes('heading1') || enabledToggles.includes('heading2') || enabledToggles.includes('heading3') || enabledToggles.includes('heading4') || enabledToggles.includes('heading5') || enabledToggles.includes('heading6')"
+                  type="single"
+                >
                   <ToggleGroupItem
-
+                    v-if="enabledToggles.includes('heading1')"
+                    value="heading1"
                     :disabled="!editor.can().chain().focus().toggleHeading({ level: 1 }).run()"
                     :data-state="editor.isActive('heading', { level: 1 }) ? 'on' : 'off'"
                     @click.prevent="editor.chain().focus().toggleHeading({ level: 1 }).run()"
@@ -218,7 +245,8 @@ const addImage = () => {
                     <Heading1 :size="16" />
                   </ToggleGroupItem>
                   <ToggleGroupItem
-
+                    v-if="enabledToggles.includes('heading2')"
+                    value="heading2"
                     :disabled="!editor.can().chain().focus().toggleHeading({ level: 2 }).run()"
                     :data-state="editor.isActive('heading', { level: 2 }) ? 'on' : 'off'"
                     @click.prevent="editor.chain().focus().toggleHeading({ level: 2 }).run()"
@@ -226,7 +254,8 @@ const addImage = () => {
                     <Heading2 :size="16" />
                   </ToggleGroupItem>
                   <ToggleGroupItem
-
+                    v-if="enabledToggles.includes('heading3')"
+                    value="heading3"
                     :disabled="!editor.can().chain().focus().toggleHeading({ level: 3 }).run()"
                     :data-state="editor.isActive('heading', { level: 3 }) ? 'on' : 'off'"
                     @click.prevent="editor.chain().focus().toggleHeading({ level: 3 }).run()"
@@ -234,7 +263,8 @@ const addImage = () => {
                     <Heading3 :size="16" />
                   </ToggleGroupItem>
                   <ToggleGroupItem
-
+                    v-if="enabledToggles.includes('heading4')"
+                    value="heading4"
                     :disabled="!editor.can().chain().focus().toggleHeading({ level: 4 }).run()"
                     :data-state="editor.isActive('heading', { level: 4 }) ? 'on' : 'off'"
                     @click.prevent="editor.chain().focus().toggleHeading({ level: 4 }).run()"
@@ -242,7 +272,8 @@ const addImage = () => {
                     <Heading4 :size="16" />
                   </ToggleGroupItem>
                   <ToggleGroupItem
-
+                    v-if="enabledToggles.includes('heading5')"
+                    value="heading5"
                     :disabled="!editor.can().chain().focus().toggleHeading({ level: 5 }).run()"
                     :data-state="editor.isActive('heading', { level: 5 }) ? 'on' : 'off'"
                     @click.prevent="editor.chain().focus().toggleHeading({ level: 5 }).run()"
@@ -250,7 +281,8 @@ const addImage = () => {
                     <Heading5 :size="16" />
                   </ToggleGroupItem>
                   <ToggleGroupItem
-
+                    v-if="enabledToggles.includes('heading6')"
+                    value="heading6"
                     :disabled="!editor.can().chain().focus().toggleHeading({ level: 6 }).run()"
                     :data-state="editor.isActive('heading', { level: 6 }) ? 'on' : 'off'"
                     @click.prevent="editor.chain().focus().toggleHeading({ level: 6 }).run()"
@@ -260,6 +292,7 @@ const addImage = () => {
                 </ToggleGroup>
 
                 <Button
+                  v-if="enabledToggles.includes('paragraph')"
                   variant="outline"
                   :data-state="editor.isActive('paragraph') ? 'on' : 'off'"
                   @click.prevent="editor.chain().focus().setParagraph().run()"
@@ -268,6 +301,7 @@ const addImage = () => {
                 </Button>
 
                 <Button
+                  v-if="enabledToggles.includes('image')"
                   variant="outline"
                   @click.prevent="addImage"
                 >
@@ -276,6 +310,8 @@ const addImage = () => {
 
                 <ToggleGroup type="single">
                   <ToggleGroupItem
+                    v-if="enabledToggles.includes('bulletlist')"
+                    value="bulletList"
                     :disabled="!editor.can().chain().focus().toggleBulletList().run()"
                     :data-state="editor.isActive('bulletList') ? 'on' : 'off'"
                     @click.prevent="editor.chain().focus().toggleBulletList().run()"
@@ -283,6 +319,8 @@ const addImage = () => {
                     <List :size="16" />
                   </ToggleGroupItem>
                   <ToggleGroupItem
+                    v-if="enabledToggles.includes('orderedlist')"
+                    value="orderedList"
                     :disabled="!editor.can().chain().focus().toggleOrderedList().run()"
                     :data-state="editor.isActive('orderedList') ? 'on' : 'off'"
                     @click.prevent="editor.chain().focus().toggleOrderedList().run()"
@@ -300,6 +338,7 @@ const addImage = () => {
                 </Button>
 
                 <Toggle
+                  v-if="enabledToggles.includes('blockquote')"
                   :disabled="!editor.can().chain().focus().toggleBlockquote().run()"
                   :data-state="editor.isActive('blockQuote') ? 'on' : 'off'"
                   @click.prevent="editor.chain().focus().toggleBlockquote().run()"
@@ -307,11 +346,21 @@ const addImage = () => {
                   <TextQuote :size="16" />
                 </Toggle>
 
-                <Button variant="outline" title="Horizontal Rule" @click.prevent="editor.chain().focus().setHorizontalRule().run()">
+                <Button
+                  v-if="enabledToggles.includes('horizontalrule')"
+                  variant="outline"
+                  title="Horizontal Rule"
+                  @click.prevent="editor.chain().focus().setHorizontalRule().run()"
+                >
                   <Minus :size="16" />
                 </Button>
 
-                <Button variant="outline" title="Hard Break" @click.prevent="editor.chain().focus().setHardBreak().run()">
+                <Button
+                  v-if="enabledToggles.includes('hardbreak')"
+                  variant="outline"
+                  title="Hard Break"
+                  @click.prevent="editor.chain().focus().setHardBreak().run()"
+                >
                   <WrapText :size="16" />
                 </Button>
 
@@ -356,6 +405,10 @@ const addImage = () => {
 <style lang="scss">
 /* Basic editor styles */
 .tiptap {
+  min-height: 300px;
+  max-height: 300px;
+  overflow-y: auto;
+
   :first-child {
     margin-top: 0;
   }
@@ -369,6 +422,16 @@ const addImage = () => {
     li p {
       margin-top: 0.25em;
       margin-bottom: 0.25em;
+    }
+  }
+  ol {
+    list-style-type: decimal;
+    list-style-position: outside;
+  }
+  ul {
+    li {
+      list-style-type: disc;
+      list-style-position: outside;
     }
   }
 
