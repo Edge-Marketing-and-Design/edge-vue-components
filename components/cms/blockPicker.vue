@@ -1,5 +1,12 @@
 <script setup>
 import { Plus } from 'lucide-vue-next'
+const props = defineProps({
+  blockContentOverride: {
+    type: String,
+    default: null,
+  },
+})
+
 const emit = defineEmits(['pick'])
 
 const state = reactive({
@@ -108,8 +115,74 @@ function safeParseConfig(raw) {
   }
 }
 
-// Finds {{{#type { ... }}}} for any tag type (future-proof)
-const TAG_RE = /\{\{\{\#([A-Za-z0-9_-]+)\s+(\{[\s\S]*?\})\s*\}\}\}/g
+// --- Robust tag parsing: supports nested objects/arrays in the config ---
+// Matches `{{{#<type> { ... }}}}` and extracts a *balanced* `{ ... }` blob.
+const TAG_START_RE = /\{\{\{\#([A-Za-z0-9_-]+)\s*\{/g
+
+function findMatchingBrace(str, startIdx) {
+  // startIdx points at the opening '{' of the config
+  let depth = 0
+  let inString = false
+  let quote = null
+  let escape = false
+  for (let i = startIdx; i < str.length; i++) {
+    const ch = str[i]
+    if (inString) {
+      if (escape) {
+        escape = false
+        continue
+      }
+      if (ch === '\\') {
+        escape = true
+        continue
+      }
+      if (ch === quote) {
+        inString = false
+        quote = null
+      }
+      continue
+    }
+    if (ch === '"' || ch === '\'') {
+      inString = true
+      quote = ch
+      continue
+    }
+    if (ch === '{')
+      depth++
+    else if (ch === '}') {
+      depth--
+      if (depth === 0)
+        return i
+    }
+  }
+  return -1
+}
+
+function* iterateTags(html) {
+  TAG_START_RE.lastIndex = 0
+  for (;;) {
+    const m = TAG_START_RE.exec(html)
+    if (!m)
+      break
+
+    const type = m[1]
+    // The regex cursor ends *right after* the config's opening '{'
+    const openIdx = TAG_START_RE.lastIndex - 1
+    if (openIdx < 0 || html[openIdx] !== '{')
+      continue
+
+    const closeIdx = findMatchingBrace(html, openIdx)
+    if (closeIdx === -1)
+      continue
+
+    const rawCfg = html.slice(openIdx, closeIdx + 1)
+    yield { type, rawCfg }
+
+    // Jump past the closing braces and any trailing '}}}'
+    const afterCfg = html.indexOf('}}}', closeIdx)
+    TAG_START_RE.lastIndex = afterCfg !== -1 ? afterCfg + 3 : closeIdx + 1
+  }
+}
 
 const blockModel = (html) => {
   const values = {}
@@ -118,11 +191,7 @@ const blockModel = (html) => {
   if (!html)
     return { values, meta }
 
-  TAG_RE.lastIndex = 0
-  let m
-  for (const m of html.matchAll(TAG_RE)) {
-    const type = m[1]
-    const rawCfg = m[2]
+  for (const { type, rawCfg } of iterateTags(html)) {
     const cfg = safeParseConfig(rawCfg)
     if (!cfg || !cfg.field)
       continue
@@ -147,6 +216,7 @@ const blockModel = (html) => {
       }
       else {
         if (Array.isArray(val)) {
+          console.log('Array value detected for field:', field, 'with value:', val)
           if (val.length === 0) {
             val = PLACEHOLDERS.arrayItem
           }
@@ -164,11 +234,11 @@ const blockModel = (html) => {
     }
 
     values[field] = val
-    // Place type, ...rest, then title (preserve computed title/type, add all other config keys except field/value)
   }
 
   return { values, meta, blockTemplate: html }
 }
+// --- End robust tag parsing ---
 
 const chooseBlock = (block) => {
   const blockModelData = blockModel(block.content)
@@ -179,7 +249,14 @@ const chooseBlock = (block) => {
 </script>
 
 <template>
-  <div>
+  <div v-if="props.blockContentOverride">
+    <edge-cms-block-render
+      :content="props.blockContentOverride"
+      :values="blockModel(props.blockContentOverride).values"
+      :meta="blockModel(props.blockContentOverride).meta"
+    />
+  </div>
+  <div v-else>
     <div class="flex justify-center items-center">
       <edge-shad-button
         class="!my-1  px-2 h-[24px] bg-secondary text-secondary-foreground hover:text-white"
@@ -222,37 +299,6 @@ const chooseBlock = (block) => {
         </edge-shad-form>
       </SheetContent>
     </Sheet>
-    <!-- <edge-shad-dialog v-model="state.keyMenu">
-      <DialogScrollContent class="max-w-3xl w-full">
-        <DialogHeader>
-          <DialogTitle>
-            Pick a Block
-          </DialogTitle>
-        </DialogHeader>
-        <DialogDescription />
-        <template v-for="block in blocks" :key="block.docId">
-          <button
-            :ref="el => setBtnRef(block.docId, el)"
-            type="button"
-            class="p-0 text-left hover:bg-primary text-slate-500  border !hover:text-white   border-dashed cursor-pointer w-full overflow-hidden relative"
-            @click="chooseBlock(block)"
-          >
-            <div class="scale-wrapper">
-              <div
-                :ref="el => setInnerRef(block.docId, el)"
-                class="scale-inner scale p-4"
-                :data-block-id="block.docId"
-              >
-                <div class="text-4xl relative text-inherit text-center">
-                  {{ block.name }}
-                </div>
-                <edge-cms-block-render :content="block.content" :values="blockModel(block.content).values" />
-              </div>
-            </div>
-          </button>
-        </template>
-      </DialogScrollContent>
-    </edge-shad-dialog> -->
   </div>
 </template>
 

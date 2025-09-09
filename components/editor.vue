@@ -117,7 +117,7 @@ onBeforeRouteUpdate((to, from, next) => {
 })
 
 watch(() => unsavedChanges.value, (newVal) => {
-  console.log('test', newVal)
+  // console.log('test', newVal)
   emit('unsavedChanges', newVal)
 })
 
@@ -444,7 +444,7 @@ watch(() => state.workingDoc, async () => {
   await formRef.value.validate()
   await nextTick()
   state.errors = formRef.value?.errors
-  console.log('formRef.value.errors', state.errors)
+  // console.log('formRef.value.errors', state.errors)
 }, { deep: true, immediate: false })
 
 const onError = async () => {

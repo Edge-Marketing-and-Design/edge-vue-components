@@ -1,0 +1,27 @@
+<section class="bg-gray-100 text-gray-900 py-16">
+  <div class="max-w-7xl mx-auto px-4">
+    <div class="flex flex-col md:flex-row items-center gap-12">
+      
+      <!-- Image -->
+      <div class="w-full md:w-1/2">
+        <img
+          src="{{{#image {"field": "backgroundImage", "value": "https://www.clearwaterproperties.com/image/static/hp-recreational.jpg" }}}}"
+          alt="David Hatef"
+          loading="lazy"
+          class="w-full h-auto rounded shadow-lg"
+        />
+      </div>
+
+      <!-- Text -->
+      <div class="w-full md:w-1/2 space-y-6">
+        <h2 class="text-3xl md:text-4xl font-bold">
+          {{{#text {"field": "header", "value": "" }}}}
+        </h2>
+        <div class="text-lg text-gray-700 leading-relaxed space-y-4">
+          {{{#richtext {"field": "content", "value": "" }}}}
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>

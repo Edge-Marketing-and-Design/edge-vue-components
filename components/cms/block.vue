@@ -44,11 +44,41 @@ const state = reactive({
   draft: {},
   delete: false,
   meta: {},
+  arrayItems: {},
+  reload: false,
 })
+
+const resetArrayItems = (field) => {
+  if (!state.arrayItems?.[field]) {
+    state.arrayItems[field] = {}
+  }
+  for (const schemaItem of Object.keys(modelValue.value.meta[field].schema)) {
+    if (modelValue.value.meta[field].schema[schemaItem] === 'text') {
+      state.arrayItems[field][schemaItem] = ''
+    }
+    else if (modelValue.value.meta[field].schema[schemaItem] === 'number') {
+      state.arrayItems[field][schemaItem] = 0
+    }
+    else if (modelValue.value.meta[field].schema[schemaItem] === 'richtext') {
+      state.arrayItems[field][schemaItem] = ''
+    }
+    else if (modelValue.value.meta[field].schema[schemaItem] === 'textarea') {
+      state.arrayItems[field][schemaItem] = ''
+    }
+    else if (modelValue.value.meta[field].schema[schemaItem] === 'image') {
+      state.arrayItems[field][schemaItem] = ''
+    }
+  }
+}
 
 const openEditor = () => {
   if (!props.editMode)
     return
+  for (const key of Object.keys(modelValue.value?.meta || {})) {
+    if (modelValue.value.meta[key]?.type === 'array' && modelValue.value.meta[key]?.schema) {
+      resetArrayItems(key)
+    }
+  }
   state.draft = JSON.parse(JSON.stringify(modelValue.value?.values || {}))
   state.meta = JSON.parse(JSON.stringify(modelValue.value?.meta || {}))
   state.open = true
@@ -63,7 +93,6 @@ const save = () => {
   modelValue.value = updated
   state.open = false
 }
-
 const orderedMeta = computed(() => {
   const metaObj = modelValue.value?.meta || {}
   const tpl = modelValue.value?.blockTemplate || ''
@@ -87,6 +116,21 @@ const orderedMeta = computed(() => {
 
   return out
 })
+
+const genTitleFromField = (field) => {
+  return field
+    // Insert space before a capital only if it's followed by a lowercase
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/^./, str => str.toUpperCase())
+}
+const addToArray = async (field) => {
+  state.reload = true
+  state.draft[field].push(JSON.parse(JSON.stringify(state.arrayItems[field])))
+  resetArrayItems(field)
+  await nextTick()
+  state.reload = false
+}
 </script>
 
 <template>
@@ -153,15 +197,39 @@ const orderedMeta = computed(() => {
         <edge-shad-form>
           <div class="p-6 space-y-4  h-[calc(100vh-120px)] overflow-y-auto">
             <template v-for="entry in orderedMeta" :key="entry.field">
-              <div v-if="entry.meta?.type === 'richtext'">
-                <edge-shad-html v-model="state.draft[entry.field]" :enabled-toggles="['bold', 'italic', 'strike', 'bulletlist', 'orderedlist', 'underline']" :name="entry.field" :label="entry.meta.title" />
-              </div>
-              <div v-else-if="entry.meta?.type === 'textarea'">
-                <edge-shad-textarea v-model="state.draft[entry.field]" :name="entry.field" :label="entry.meta.title" />
-              </div>
-              <div v-else-if="entry.meta.type === 'array'">
+              <div v-if="entry.meta.type === 'array'">
                 <div v-if="!entry.meta?.api">
-                  <edge-shad-tags v-model="state.draft[entry.field]" :label="entry.meta.title" :name="entry.field" />
+                  <div v-if="entry.meta?.schema">
+                    <Card v-if="!state.reload" class="mb-4 bg-white shadow-sm border border-gray-200 p-4">
+                      <CardTitle class="mb-2">
+                        {{ genTitleFromField(entry.field) }}
+                      </CardTitle>
+                      <template v-for="schemaItem in Object.keys(entry.meta.schema)" :key="schemaItem">
+                        <edge-cms-block-input
+                          v-model="state.arrayItems[entry.field][schemaItem]"
+                          :type="entry.meta.schema[schemaItem]"
+                          :field="schemaItem"
+                          :label="genTitleFromField(schemaItem)"
+                        />
+                      </template>
+                      <CardFooter>
+                        <edge-shad-button
+                          class="bg-secondary hover:text-primary/50 text-xs h-[26px] text-primary"
+                          @click="addToArray(entry.field)"
+                        >
+                          Add Entry
+                        </edge-shad-button>
+                      </CardFooter>
+                    </Card>
+                    {{ state.draft[entry.field] }}
+                  </div>
+                  <edge-cms-block-input
+                    v-else
+                    v-model="state.draft[entry.field]"
+                    :type="entry.meta.type"
+                    :field="entry.field"
+                    :label="genTitleFromField(entry.field)"
+                  />
                 </div>
                 <div v-else>
                   <edge-shad-input v-model="state.meta[entry.field].api" name="api" label="API URL" />
@@ -173,7 +241,7 @@ const orderedMeta = computed(() => {
               <div v-else-if="entry.meta?.options">
                 <edge-shad-select
                   v-model="state.draft[entry.field]"
-                  :label="entry.meta.title"
+                  :label="genTitleFromField(entry.field)"
                   :name="entry.field"
                   :items="entry.meta.options || []"
                   item-title="title"
@@ -181,7 +249,12 @@ const orderedMeta = computed(() => {
                 />
               </div>
               <div v-else>
-                <edge-shad-input v-model="state.draft[entry.field]" :name="entry.field" :label="entry.meta.title" />
+                <edge-cms-block-input
+                  v-model="state.draft[entry.field]"
+                  :type="entry.meta.type"
+                  :field="entry.field"
+                  :label="genTitleFromField(entry.field)"
+                />
               </div>
             </template>
           </div>

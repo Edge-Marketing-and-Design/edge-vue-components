@@ -108,8 +108,8 @@ const applySchemaFormat = (fieldKey, value, schemaMap) => {
   const f = t && formatters[t]
   return f ? f(value) : (value == null ? '' : String(value))
 }
-
 const renderWithValues = (content, values) => {
+  // console.log('Rendering content with values:', content, values)
   if (!content || typeof content !== 'string')
     return ''
 

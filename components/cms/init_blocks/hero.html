@@ -1,0 +1,35 @@
+  <section
+    class="relative h-[50dvh] min-h-[260px] w-full bg-cover bg-center"
+    style="background-image: url('{{{#image {"field": "backgroundImage", "value": "https://www.clearwaterproperties.com/image/static/hp-recreational.jpg" }}}}')"
+  >
+    <!-- Dark overlay -->
+    <div class="absolute inset-0 bg-black/40"></div>
+
+    <!-- Centered content -->
+    <div class="relative z-10 flex h-full items-center justify-center">
+      <div class="px-6 text-center text-white">
+        <p class="text-[0.65rem] md:text-sm tracking-[0.25em] uppercase opacity-80">
+        {{{#text {"field": "topHeader", "value": "" }}}}
+        </p>
+
+        <h1 class="mt-4 text-4xl md:text-6xl font-semibold tracking-[0.35em]">
+          {{{#text {"field": "middleHeader", "value": "" }}}}
+        </h1>
+
+        <p class="mt-4 text-sm md:text-base italic opacity-90">
+        {{{#text {"field": "bottomHeader", "value": "" }}}}
+        </p>
+
+        <a
+          href="{{{#text {"field": "buttonURL", title: "Button URL", "value": "" }}}}"
+          class="mt-8 inline-block border border-white/80 px-6 py-3 text-[0.7rem] md:text-xs uppercase tracking-[0.2em]
+                 transition hover:bg-white hover:text-neutral-900 focus:outline-none focus:ring-2 focus:ring-white/80"
+        >
+        {{{#text {"field": "buttonText", "value": "Search All Homes" }}}}
+        </a>
+      </div>
+    </div>
+
+    <!-- Optional vignette -->
+    <div class="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/30"></div>
+  </section>
