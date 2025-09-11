@@ -21,6 +21,7 @@ const state = reactive({
     },
   },
   editMode: false,
+  workingDoc: {},
 })
 
 const schemas = {
@@ -40,12 +41,14 @@ const deleteBlock = (blockId, slotProps) => {
 }
 
 const blockPick = (block, index, slotProps) => {
+  console.log('Block picked:', block, 'at index:', index)
   console.log(slotProps)
   const generatedId = edgeGlobal.generateShortId()
   block.id = generatedId
   if (index === 0 || index) {
     slotProps.workingDoc.content.splice(index, 0, block)
   }
+  console.log('Updated content:', slotProps.workingDoc.content)
 }
 
 onMounted(() => {
@@ -53,6 +56,12 @@ onMounted(() => {
     state.editMode = true
   }
 })
+
+const editorDocUpdates = (workingDoc) => {
+  const blockIds = workingDoc.content.map(block => block.blockId).filter(id => id)
+  const uniqueBlockIds = [...new Set(blockIds)]
+  state.workingDoc.blockIds = uniqueBlockIds
+}
 </script>
 
 <template>
@@ -65,6 +74,8 @@ onMounted(() => {
     :show-footer="false"
     :save-redirect-override="`/app/dashboard/sites/${site}`"
     :no-close-after-save="true"
+    :working-doc-overrides="state.workingDoc"
+    @working-doc="editorDocUpdates"
   >
     <template #header="slotProps">
       <div class="relative flex items-center bg-secondary p-2 justify-between sticky top-0 z-10 bg-primary rounded">
@@ -134,11 +145,11 @@ onMounted(() => {
         >
           <template #item="{ element, index }">
             <div :key="element.id" class="">
-              <div :class="{ 'border-1 border-dotted py-1 mb-1': state.editMode }" class="flex w-full items-center w-full rounded-sm ">
+              <div :class="{ 'border-1 border-dotted py-1 mb-1': state.editMode }" class="flex w-full items-center w-full">
                 <div v-if="state.editMode" class="text-left px-2">
                   <Grip class="handle pointer" />
                 </div>
-                <div :class="{ 'px-2 py-2': state.editMode }" class="grow">
+                <div :class="state.editMode ? 'px-2 py-2 w-[98%]' : 'w-[100%]'">
                   <edge-cms-block
                     v-model="slotProps.workingDoc.content[index]"
                     :edit-mode="state.editMode"

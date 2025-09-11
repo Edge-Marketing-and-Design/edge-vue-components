@@ -1,6 +1,6 @@
 <script setup>
 import { useVModel } from '@vueuse/core'
-
+import { Plus } from 'lucide-vue-next'
 const props = defineProps({
   modelValue: {
     type: Object,
@@ -15,9 +15,8 @@ const props = defineProps({
     default: true,
   },
 })
-
 const emit = defineEmits(['update:modelValue', 'delete'])
-
+const edgeFirebase = inject('edgeFirebase')
 function extractFieldsInOrder(template) {
   if (!template || typeof template !== 'string')
     return []
@@ -46,6 +45,7 @@ const state = reactive({
   meta: {},
   arrayItems: {},
   reload: false,
+  metaUpdate: {},
 })
 
 const resetArrayItems = (field) => {
@@ -81,6 +81,22 @@ const openEditor = () => {
   }
   state.draft = JSON.parse(JSON.stringify(modelValue.value?.values || {}))
   state.meta = JSON.parse(JSON.stringify(modelValue.value?.meta || {}))
+  const blockData = edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[modelValue.value.blockId]
+  state.metaUpdate = edgeGlobal.dupObject(modelValue.value?.meta) || {}
+  if (blockData?.meta) {
+    for (const key of Object.keys(blockData.meta)) {
+      if (!(key in state.metaUpdate)) {
+        state.metaUpdate[key] = blockData.meta[key]
+      }
+    }
+  }
+  if (blockData?.values) {
+    for (const key of Object.keys(blockData.values)) {
+      if (!(key in state.draft)) {
+        state.draft[key] = blockData.values[key]
+      }
+    }
+  }
   state.open = true
 }
 
@@ -94,8 +110,8 @@ const save = () => {
   state.open = false
 }
 const orderedMeta = computed(() => {
-  const metaObj = modelValue.value?.meta || {}
-  const tpl = modelValue.value?.blockTemplate || ''
+  const metaObj = state.metaUpdate || {}
+  const tpl = modelValue.value?.content || ''
   const orderedFields = extractFieldsInOrder(tpl)
 
   const out = []
@@ -141,7 +157,7 @@ const addToArray = async (field) => {
       @click="openEditor"
     >
       <!-- Content -->
-      <edge-cms-block-render :content="modelValue?.blockTemplate" :values="modelValue?.values" :meta="modelValue?.meta" />
+      <edge-cms-block-api :content="modelValue?.content" :values="modelValue?.values" :meta="modelValue?.meta" />
 
       <!-- Darken overlay on hover -->
       <div v-if="props.editMode" class="pointer-events-none absolute inset-0 bg-black/50 opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-10" />
@@ -201,27 +217,97 @@ const addToArray = async (field) => {
                 <div v-if="!entry.meta?.api">
                   <div v-if="entry.meta?.schema">
                     <Card v-if="!state.reload" class="mb-4 bg-white shadow-sm border border-gray-200 p-4">
-                      <CardTitle class="mb-2">
-                        {{ genTitleFromField(entry.field) }}
-                      </CardTitle>
-                      <template v-for="schemaItem in Object.keys(entry.meta.schema)" :key="schemaItem">
-                        <edge-cms-block-input
-                          v-model="state.arrayItems[entry.field][schemaItem]"
-                          :type="entry.meta.schema[schemaItem]"
-                          :field="schemaItem"
-                          :label="genTitleFromField(schemaItem)"
-                        />
-                      </template>
-                      <CardFooter>
-                        <edge-shad-button
-                          class="bg-secondary hover:text-primary/50 text-xs h-[26px] text-primary"
-                          @click="addToArray(entry.field)"
-                        >
-                          Add Entry
-                        </edge-shad-button>
-                      </CardFooter>
+                      <CardHeader class="p-0 mb-2">
+                        <div class="relative flex items-center bg-secondary p-2 justify-between sticky top-0 z-10 bg-primary rounded">
+                          <span class="text-lg font-semibold whitespace-nowrap pr-1"> {{ genTitleFromField(entry.field) }}</span>
+                          <div class="flex w-full items-center">
+                            <div class="w-full border-t border-gray-300 dark:border-white/15" aria-hidden="true" />
+                            <edge-shad-button variant="text" class="hover:text-primary/50 text-xs h-[26px] text-primary" @click="state.editMode = !state.editMode">
+                              <Popover>
+                                <PopoverTrigger as-child>
+                                  <edge-shad-button
+                                    variant="text"
+                                    type="submit"
+                                    class="bg-secondary hover:text-primary/50 text-xs h-[26px] text-primary"
+                                  >
+                                    <Plus class="w-4 h-4" />
+                                  </edge-shad-button>
+                                </PopoverTrigger>
+                                <PopoverContent class="!w-80 mr-20">
+                                  <Card class="border-none shadow-none p-4">
+                                    <template v-for="schemaItem in Object.keys(entry.meta.schema)" :key="schemaItem">
+                                      <edge-cms-block-input
+                                        v-model="state.arrayItems[entry.field][schemaItem]"
+                                        :type="entry.meta.schema[schemaItem]"
+                                        :field="schemaItem"
+                                        :label="genTitleFromField(schemaItem)"
+                                      />
+                                    </template>
+                                    <CardFooter class="mt-2 flex justify-end">
+                                      <edge-shad-button
+                                        class="bg-secondary hover:text-white text-xs h-[26px] text-primary"
+                                        @click="addToArray(entry.field)"
+                                      >
+                                        Add Entry
+                                      </edge-shad-button>
+                                    </CardFooter>
+                                  </Card>
+                                </PopoverContent>
+                              </Popover>
+                            </edge-shad-button>
+                          </div>
+                        </div>
+                      </CardHeader>
+                      <draggable
+                        v-if="state.draft?.[entry.field] && state.draft[entry.field].length > 0"
+                        v-model="state.draft[entry.field]"
+                        handle=".handle"
+                        item-key="index"
+                      >
+                        <template #item="{ element, index }">
+                          <div :key="index" class="">
+                            <div class="flex gap-2 w-full items-center w-full border-1 border-dotted py-1 mb-1">
+                              <div class="text-left px-2">
+                                <Grip class="handle pointer" />
+                              </div>
+                              <div class="px-2 py-2 w-[98%] flex gap-1">
+                                <template v-for="schemaItem in Object.keys(entry.meta.schema)" :key="schemaItem">
+                                  <Popover>
+                                    <PopoverTrigger as-child>
+                                      <Alert class="w-[200px] text-xs py-1 px-2 cursor-pointer hover:bg-primary hover:text-white">
+                                        <AlertTitle> {{ genTitleFromField(schemaItem) }}</AlertTitle>
+                                        <AlertDescription class="text-sm truncate max-w-[200px]">
+                                          {{ element[schemaItem] }}
+                                        </AlertDescription>
+                                      </Alert>
+                                    </PopoverTrigger>
+                                    <PopoverContent class="!w-80 mr-20">
+                                      <Card class="border-none shadow-none p-4">
+                                        <edge-cms-block-input
+                                          v-model="element[schemaItem]"
+                                          :type="entry.meta.schema[schemaItem]"
+                                          :field="`${schemaItem}-${index}-entry`"
+                                          :label="genTitleFromField(schemaItem)"
+                                        />
+                                      </Card>
+                                    </PopoverContent>
+                                  </Popover>
+                                </template>
+                              </div>
+                              <div class="pr-2">
+                                <edge-shad-button
+                                  variant="destructive"
+                                  size="icon"
+                                  @click="state.draft[entry.field].splice(index, 1)"
+                                >
+                                  <Trash class="h-4 w-4" />
+                                </edge-shad-button>
+                              </div>
+                            </div>
+                          </div>
+                        </template>
+                      </draggable>
                     </Card>
-                    {{ state.draft[entry.field] }}
                   </div>
                   <edge-cms-block-input
                     v-else

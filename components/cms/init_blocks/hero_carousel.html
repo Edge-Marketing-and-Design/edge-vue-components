@@ -1,0 +1,52 @@
+<section
+    class="relative h-[50dvh] min-h-[260px] w-full bg-cover bg-center"
+    style="background-image: url('{{{#image {"field": "backgroundImage", "value": "https://www.clearwaterproperties.com/image/static/hp-recreational.jpg" }}}}')"
+  >
+    <!-- Dark overlay -->
+    <div class="absolute inset-0 bg-black/40"></div>
+
+    <!-- Centered content -->
+    <div class="relative z-10 flex h-full items-center justify-center">
+      <div class="px-6 text-center text-white">
+          <div
+            data-carousel
+            class="relative overflow-hidden"
+            data-carousel-autoplay
+            data-carousel-interval="6000"
+            data-carousel-loop
+            data-carousel-slides-to-scroll="1"
+            data-carousel-no-pause
+            data-carousel-transition="fade"
+          >
+            <div data-carousel-track class="flex">
+              {{{#array {"field":"Slides","schema":{"topHeader":"text", "middleHeader":"text"},"value":[{"topHeader":"Lorem ipsum dolor sit amet.", "middleHeader": "Lorem ipsum dolor sit amet."},{"topHeader":"Sit amet lorem.", "middleHeader": "Sit amet lorem."}]}}}}
+                <div class="shrink-0 min-w-0 flex-[0_0_100%]">
+                  <div class="text-center text-white">
+                      <p class="text-[0.65rem] md:text-sm tracking-[0.35em] uppercase opacity-80 -ml-3">
+                        {{item.topHeader}}
+                      </p>
+                      <h1 class="mt-4 text-4xl md:text-6xl font-semibold tracking-[0.35em]">
+                        {{item.middleHeader}}
+                      </h1>
+                    </div>
+                </div>
+              {{{/array}}}
+            </div>
+          </div>
+        <p class="mt-4 text-sm md:text-base italic opacity-90">
+        {{{#text {"field": "bottomHeader", "value": "" }}}}
+        </p>
+
+        <a
+          href="{{{#text {"field": "buttonURL", title: "Button URL", "value": "" }}}}"
+          class="mt-8 inline-block border border-white/80 px-6 py-3 text-[0.7rem] md:text-xs uppercase tracking-[0.2em]
+                 transition hover:bg-white hover:text-neutral-900 focus:outline-none focus:ring-2 focus:ring-white/80"
+        >
+        {{{#text {"field": "buttonText", "value": "Search All Homes" }}}}
+        </a>
+      </div>
+    </div>
+
+    <!-- Optional vignette -->
+    <div class="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/30"></div>
+  </section>

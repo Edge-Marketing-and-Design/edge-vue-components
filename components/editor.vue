@@ -51,9 +51,13 @@ const props = defineProps({
     type: Function,
     default: null,
   },
+  workingDocOverrides: {
+    type: Object,
+    default: null,
+  },
 })
 
-const emit = defineEmits(['unsavedChanges'])
+const emit = defineEmits(['unsavedChanges', 'workingDoc'])
 
 const newDoc = computed(() => {
   return Object.entries(props.newDocSchema).reduce((newObj, [key, val]) => {
@@ -219,6 +223,12 @@ const title = computed(() => {
 })
 
 const onSubmit = async () => {
+  const workingDocOverrides = props.workingDocOverrides
+  if (workingDocOverrides) {
+    Object.keys(workingDocOverrides).forEach((key) => {
+      state.workingDoc[key] = workingDocOverrides[key]
+    })
+  }
   // console.log(state.workingDoc)
   state.submitting = true
   state.bypassUnsavedChanges = true
@@ -425,6 +435,7 @@ const triggerSubmit = async (insertedValues = {}) => {
 }
 
 watch(() => state.workingDoc, async () => {
+  emit('workingDoc', state.workingDoc)
   // Do nothing until the component signals it's ready
   if (state.afterMount === false)
     return
@@ -444,6 +455,7 @@ watch(() => state.workingDoc, async () => {
   await formRef.value.validate()
   await nextTick()
   state.errors = formRef.value?.errors
+
   // console.log('formRef.value.errors', state.errors)
 }, { deep: true, immediate: false })
 
