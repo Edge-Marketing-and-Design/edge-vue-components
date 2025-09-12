@@ -11,6 +11,7 @@ const emit = defineEmits(['pick'])
 
 const state = reactive({
   keyMenu: false,
+  blocksLoaded: [],
 })
 
 const edgeFirebase = inject('edgeFirebase')
@@ -97,12 +98,30 @@ const chooseBlock = (block) => {
   emit('pick', blockModelData)
   state.keyMenu = false
 }
+const loadingRender = (content) => {
+  content = content.replaceAll('{{loading}}', '')
+  content = content.replaceAll('{{loaded}}', 'hidden')
+  return content
+}
+
+const blockLoaded = (isLoading, index) => {
+  if (!isLoading && !state.blocksLoaded.includes(index)) {
+    state.blocksLoaded.push(index)
+  }
+}
 </script>
 
 <template>
   <div v-if="props.blockOverride">
     <edge-cms-block-api
       :content="blockOverride.content"
+      :values="blockOverride.values"
+      :meta="blockOverride.meta"
+      @pending="blockLoaded($event, 'block')"
+    />
+    <edge-cms-block-render
+      v-if="!state.blocksLoaded.includes('block')"
+      :content="loadingRender(blockOverride.content)"
       :values="blockOverride.values"
       :meta="blockOverride.meta"
     />
@@ -141,7 +160,13 @@ const chooseBlock = (block) => {
                     <div class="text-4xl relative text-inherit text-center">
                       {{ block.name }}
                     </div>
-                    <edge-cms-block-api :content="block.content" :values="block.values" :meta="block.meta" />
+                    <edge-cms-block-api :content="block.content" :values="block.values" :meta="block.meta" @pending="blockLoaded($event, block.docId)" />
+                    <edge-cms-block-render
+                      v-if="!state.blocksLoaded.includes(block.docId)"
+                      :content="loadingRender(block.content)"
+                      :values="block.values"
+                      :meta="block.meta"
+                    />
                   </div>
                 </div>
               </button>

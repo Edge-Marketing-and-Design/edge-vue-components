@@ -12,6 +12,40 @@ const props = defineProps({
     type: Object,
     required: true,
   },
+  theme: {
+    type: Object,
+    default: () => ({
+      extend: {
+        colors: {
+          brand: '#3B82F6',
+          accent: '#F59E0B',
+          surface: '#FAFAFA',
+          subtle: '#F3F4F6',
+          text: '#1F2937',
+          muted: '#9CA3AF',
+          success: '#22C55E',
+          danger: '#EF4444',
+        },
+        fontFamily: {
+          sans: ['Overpass', 'sans-serif'],
+          serif: ['Kode Mono', 'monospace'],
+          mono: ['Overpass', 'sans-serif'],
+          brand: ['Kode Mono', 'monospace'],
+        },
+      },
+      apply: {},
+      slots: {},
+      variants: {
+        light: {
+          apply: {},
+        },
+        dark: {
+          apply: {},
+          slots: {},
+        },
+      },
+    }),
+  },
 })
 
 /* ---------------- Parsing & rendering helpers (aligned with your picker) ---------------- */
@@ -299,7 +333,7 @@ const rendered = computed(() => {
 </script>
 
 <template>
-  <edge-cms-html-content :html="rendered" />
+  <edge-cms-html-content :html="rendered" :theme="props.theme" />
 </template>
 
 <style scoped>

@@ -46,6 +46,7 @@ const state = reactive({
   arrayItems: {},
   reload: false,
   metaUpdate: {},
+  loading: true,
 })
 
 const resetArrayItems = (field) => {
@@ -147,6 +148,18 @@ const addToArray = async (field) => {
   await nextTick()
   state.reload = false
 }
+
+const loadingRender = (content) => {
+  if (state.loading) {
+    content = content.replaceAll('{{loading}}', '')
+    content = content.replaceAll('{{loaded}}', 'hidden')
+  }
+  else {
+    content = content.replaceAll('{{loading}}', 'hidden')
+    content = content.replaceAll('{{loaded}}', '')
+  }
+  return content
+}
 </script>
 
 <template>
@@ -157,7 +170,13 @@ const addToArray = async (field) => {
       @click="openEditor"
     >
       <!-- Content -->
-      <edge-cms-block-api :content="modelValue?.content" :values="modelValue?.values" :meta="modelValue?.meta" />
+      <edge-cms-block-api :content="modelValue?.content" :values="modelValue?.values" :meta="modelValue?.meta" @pending="state.loading = $event" />
+      <edge-cms-block-render
+        v-if="state.loading"
+        :content="loadingRender(modelValue?.content)"
+        :values="modelValue?.values"
+        :meta="modelValue?.meta"
+      />
 
       <!-- Darken overlay on hover -->
       <div v-if="props.editMode" class="pointer-events-none absolute inset-0 bg-black/50 opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-10" />

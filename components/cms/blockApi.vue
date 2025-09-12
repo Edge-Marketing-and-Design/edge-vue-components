@@ -1,4 +1,11 @@
 <script setup>
+/**
+ * SSR-friendly array loading for block APIs using useAsyncData
+ * - Fetches all configured API arrays on the server when possible
+ * - Refetches when meta/values change on the client
+ * - Preserves original behavior: API fields override same-named props.values fields
+ */
+
 const props = defineProps({
   content: {
     type: String,
@@ -14,18 +21,18 @@ const props = defineProps({
   },
 })
 
-// Local resolved values (do not mutate props)
-const resolvedValues = reactive({ ...(props.values || {}) })
-const isLoading = ref(true)
+const emit = defineEmits(['pending'])
 
-// Helper: safe dot-path getter
+/* ---------------- helpers ---------------- */
+
+// Safe dot-path getter
 const getByPath = (obj, path) => {
   if (!path || typeof path !== 'string')
     return obj
   return path.split('.').reduce((acc, key) => ((acc && acc[key] !== undefined) ? acc[key] : undefined), obj)
 }
 
-// Helper: build URL with optional query string without altering server-side limits
+// Build URL with optional query string without altering server-side limits
 const buildUrlWithQuery = (base, query) => {
   if (!query)
     return base
@@ -34,58 +41,75 @@ const buildUrlWithQuery = (base, query) => {
   return `${base}${base.includes('?') ? '&' : '?'}${query}`
 }
 
-const loadApiArrays = async () => {
-  isLoading.value = true
-  // Start from current prop values to avoid stale merges
-  Object.keys(resolvedValues).forEach((k) => {
-    delete resolvedValues[k]
-  })
-  Object.assign(resolvedValues, props.values || {})
-
-  const meta = props.meta || {}
-  const entries = Object.entries(meta)
-  const fetches = entries.map(async ([field, cfg]) => {
+// Core fetcher that resolves all API-backed arrays from meta
+const fetchAllArrays = async (meta, baseValues) => {
+  const out = {}
+  const entries = Object.entries(meta || {})
+  await Promise.all(entries.map(async ([field, cfg]) => {
     try {
       if (!cfg || cfg.type !== 'array' || !cfg.api)
         return
 
       const url = buildUrlWithQuery(String(cfg.api), String(cfg.apiQuery || ''))
-      const res = await fetch(url, { method: 'GET' })
-      if (!res.ok)
-        throw new Error(`HTTP ${res.status}`)
-      const json = await res.json()
+      // use $fetch for SSR-friendly HTTP
+      const json = await $fetch(url, { method: 'GET' })
 
       let data = getByPath(json, cfg.apiField || '')
       if (!Array.isArray(data)) {
-        // If it's an object, try to coerce to array of values; otherwise fallback to empty array
         data = (data && typeof data === 'object') ? Object.values(data) : []
       }
 
-      // Apply client-side limit only (do not pass to API)
       const limit = Number(cfg.apiLimit)
-      if (Number.isFinite(limit) && limit > 0)
+      if (Number.isFinite(limit) && limit > 0) {
         data = data.slice(0, limit)
+      }
 
-      // Write into resolvedValues
-      resolvedValues[field] = data
+      out[field] = data
     }
     catch (e) {
-      // On error, preserve any existing prop value or fallback to []
-      if (!(field in resolvedValues))
-        resolvedValues[field] = Array.isArray((props.values || {})[field]) ? (props.values || {})[field] : []
-      // Optionally, you can console.warn here for visibility
-      // console.warn('loadApiArrays error for', field, e)
+      // On error, preserve any existing prop value for that field or fallback to []
+      const existing = (baseValues || {})[field]
+      out[field] = Array.isArray(existing) ? existing : []
+      // Optional: console.warn('blockApi useAsyncData error for', field, e)
     }
-  })
-
-  await Promise.all(fetches)
-  isLoading.value = false
+  }))
+  return out
 }
 
-/* ---------------- state & events ---------------- */
+/* ---------------- async data (SSR + client) ---------------- */
 
+// Stable, SSR-safe cache key so multiple block instances don't collide
+const route = useRoute()
+const asyncKey = computed(() => `blockApi:${route.fullPath}:${JSON.stringify(props.meta ?? {})}`)
+
+const { data: apiResolved, pending } = await useAsyncData(
+  asyncKey.value,
+  () => {
+    // Always compute from latest props
+    return fetchAllArrays(props.meta, props.values)
+  },
+  {
+    server: true,
+    default: () => ({}),
+    // Re-run when inputs change on client side
+    watch: [() => props.meta, () => props.values],
+  },
+)
+
+/* ---------------- state & derived values ---------------- */
+
+// Merge props.values (base) + apiResolved (overrides for API-backed fields)
+const mergedValues = computed(() => {
+  return {
+    ...(props.values || {}),
+    ...(apiResolved.value || {}),
+  }
+})
+
+// Map original loading flags into class toggles
 const loadingRender = (content) => {
-  if (isLoading.value) {
+  const isLoading = pending.value
+  if (isLoading) {
     content = content.replaceAll('{{loading}}', '')
     content = content.replaceAll('{{loaded}}', 'hidden')
   }
@@ -96,19 +120,18 @@ const loadingRender = (content) => {
   return content
 }
 
-onMounted(async () => {
-  await loadApiArrays()
-})
-
-watch(
-  () => [props.meta, props.values],
-  () => { loadApiArrays() },
-  { deep: true },
-)
+// Emit pending state to parent (client-side)
+if (import.meta.client) {
+  watch(pending, val => emit('pending', val), { immediate: true })
+}
 </script>
 
 <template>
-  <edge-cms-block-render :content="loadingRender(props.content)" :values="resolvedValues" :meta="props.meta" />
+  <edge-cms-block-render
+    :content="loadingRender(props.content)"
+    :values="mergedValues"
+    :meta="props.meta"
+  />
 </template>
 
 <style scoped>
