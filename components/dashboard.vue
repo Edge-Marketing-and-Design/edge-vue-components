@@ -448,9 +448,6 @@ onBeforeMount(async () => {
     }
 
     if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`]) {
-      console.log('start snapshot')
-      console.log(snapShotQuery.value)
-      console.log(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
       await edgeFirebase.stopSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
       await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, snapShotQuery.value)
     }
