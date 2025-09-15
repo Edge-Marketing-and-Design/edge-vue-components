@@ -19,6 +19,10 @@ const props = defineProps({
     type: Object,
     required: true,
   },
+  theme: {
+    type: Object,
+    default: null,
+  },
 })
 
 const emit = defineEmits(['pending'])
@@ -128,6 +132,7 @@ if (import.meta.client) {
 
 <template>
   <edge-cms-block-render
+    :theme="props.theme"
     :content="loadingRender(props.content)"
     :values="mergedValues"
     :meta="props.meta"

@@ -5,6 +5,10 @@ const props = defineProps({
     type: Object,
     default: null,
   },
+  theme: {
+    type: Object,
+    default: null,
+  },
 })
 
 const emit = defineEmits(['pick'])
@@ -117,6 +121,7 @@ const blockLoaded = (isLoading, index) => {
       :content="blockOverride.content"
       :values="blockOverride.values"
       :meta="blockOverride.meta"
+      :theme="props.theme"
       @pending="blockLoaded($event, 'block')"
     />
     <edge-cms-block-render
@@ -124,6 +129,7 @@ const blockLoaded = (isLoading, index) => {
       :content="loadingRender(blockOverride.content)"
       :values="blockOverride.values"
       :meta="blockOverride.meta"
+      :theme="props.theme"
     />
   </div>
   <div v-else>

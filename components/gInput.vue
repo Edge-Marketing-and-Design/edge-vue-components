@@ -826,6 +826,7 @@ watch(modelValue, () => {
       v-if="props.fieldType === 'collection'" v-model="modelValue" :label="props.label"
       :items="collectionItems" v-bind="props.bindings" :disabled="props.disabled" :name="props.name" item-value="value"
       item-title="title" :placeholder="`${props.label}...`"
+      class="w-full"
     >
       <template v-if="props.helper" #append>
         <edge-g-helper :title="props.label" :helper="props.helper" />

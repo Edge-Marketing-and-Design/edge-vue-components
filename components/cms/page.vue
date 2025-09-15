@@ -1,7 +1,6 @@
 <script setup>
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-
 const props = defineProps({
   site: {
     type: String,
@@ -12,6 +11,8 @@ const props = defineProps({
     required: true,
   },
 })
+
+const edgeFirebase = inject('edgeFirebase')
 
 const state = reactive({
   newDocs: {
@@ -62,6 +63,25 @@ const editorDocUpdates = (workingDoc) => {
   const uniqueBlockIds = [...new Set(blockIds)]
   state.workingDoc.blockIds = uniqueBlockIds
 }
+
+const pageName = computed(() => {
+  return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`]?.[props.page]?.name || ''
+})
+
+const theme = computed(() => {
+  const theme = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site]?.theme || ''
+  console.log(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}`)
+  console.log('Theme:', theme)
+  let themeContents = null
+  if (theme) {
+    themeContents = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`]?.[theme]?.theme || null
+  }
+  if (themeContents) {
+    console.log(themeContents)
+    return JSON.parse(themeContents)
+  }
+  return null
+})
 </script>
 
 <template>
@@ -79,14 +99,8 @@ const editorDocUpdates = (workingDoc) => {
   >
     <template #header="slotProps">
       <div class="relative flex items-center bg-secondary p-2 justify-between sticky top-0 z-10 bg-primary rounded">
-        <span v-if="!state.editMode" class="text-lg font-semibold whitespace-nowrap pr-1">{{ slotProps.workingDoc?.name }}</span>
-        <edge-shad-input
-          v-else
-          v-model="slotProps.workingDoc.name"
-          name="name"
-          placeholder="Enter page name"
-          class="w-full my-0"
-        />
+        <span class="text-lg font-semibold whitespace-nowrap pr-1">{{ pageName }}</span>
+
         <div class="flex w-full items-center">
           <div class="w-full border-t border-gray-300 dark:border-white/15" aria-hidden="true" />
           <edge-shad-button variant="text" class="hover:text-primary/50 text-xs h-[26px] text-primary" @click="state.editMode = !state.editMode">
@@ -154,13 +168,14 @@ const editorDocUpdates = (workingDoc) => {
                     v-model="slotProps.workingDoc.content[index]"
                     :edit-mode="state.editMode"
                     :block-id="element.id" class=""
+                    :theme="theme"
                     @delete="(block) => deleteBlock(block, slotProps)"
                   />
                 </div>
               </div>
               <div v-if="state.editMode" class="w-full">
                 <edge-button-divider class="my-2">
-                  <edge-cms-block-picker @pick="(block) => blockPick(block, index + 1, slotProps)" />
+                  <edge-cms-block-picker :theme="theme" @pick="(block) => blockPick(block, index + 1, slotProps)" />
                 </edge-button-divider>
               </div>
             </div>
