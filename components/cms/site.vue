@@ -2,7 +2,7 @@
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 
-import { FileStack, FolderCog, FolderUp } from 'lucide-vue-next'
+import { FileStack, FolderCog, FolderUp, Loader2 } from 'lucide-vue-next'
 const props = defineProps({
   site: {
     type: String,
@@ -23,6 +23,7 @@ const state = reactive({
     sites: {
       name: { bindings: { 'field-type': 'text', 'label': 'Name' }, cols: '12', value: '' },
       theme: { bindings: { 'field-type': 'collection', 'label': 'Themes', 'collection-path': 'themes' }, cols: '12', value: '' },
+      domains: { bindings: { 'field-type': 'tags', 'label': 'Domains', 'helper': 'Add or remove domains' }, cols: '12', value: [] },
       users: { bindings: { 'field-type': 'users', 'label': 'Users', 'hint': 'Choose users' }, cols: '12', value: [] },
     },
   },
@@ -31,6 +32,7 @@ const state = reactive({
   menus: { 'Main Menu': [] },
   saving: false,
   siteSettings: false,
+  hasError: false,
 })
 
 const pageInit = {
@@ -44,6 +46,15 @@ const schemas = {
     name: z.string({
       required_error: 'Name is required',
     }).min(1, { message: 'Name is required' }),
+    domains: z
+      .array(z.string().max(45, 'Each domain must be 45 characters or fewer'))
+      .refine(arr => !!(arr && arr[0] && String(arr[0]).trim().length), {
+        message: 'At least one domain is required',
+        path: ['domains', 0],
+      }),
+    theme: z.string({
+      required_error: 'Theme is required',
+    }).min(1, { message: 'Theme is required' }),
   })),
   pages: toTypedSchema(z.object({
     name: z.string({
@@ -143,6 +154,23 @@ watch(() => state.menus, async (newVal) => {
   await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, { menus: state.menus })
   state.saving = false
 }, { deep: true })
+
+const formErrors = (error) => {
+  console.log('Form errors:', error)
+  console.log(Object.values(error))
+  if (Object.values(error).length > 0) {
+    console.log('Form errors found')
+    state.hasError = true
+    console.log(state.hasError)
+  }
+  state.hasError = false
+}
+
+const onSubmit = () => {
+  if (!state.hasError) {
+    state.siteSettings = false
+  }
+}
 </script>
 
 <template>
@@ -185,21 +213,37 @@ watch(() => state.menus, async (newVal) => {
         </edge-shad-button>
       </template>
       <template #main="slotProps">
-        <Separator class="my-4" />
-        <edge-shad-input
-          v-model="slotProps.workingDoc.name"
-          name="name"
-          label="Name"
-          placeholder="Enter name"
-          class="w-full"
-        />
-        <Separator class="my-4" />
-        <edge-shad-select-tags
-          v-if="Object.values(edgeFirebase.state.users).length > 0"
-          v-model="slotProps.workingDoc.users" :disabled="!edgeGlobal.isAdminGlobal(edgeFirebase).value"
-          :items="Object.values(edgeFirebase.state.users).filter(user => user.userId !== '')" name="users" label="Users"
-          item-title="meta.name" item-value="userId" placeholder="Select users" class="w-full" :multiple="true"
-        />
+        <div class="flex-col flex gap-4 mt-4">
+          <edge-shad-input
+            v-model="slotProps.workingDoc.name"
+            name="name"
+            label="Name"
+            placeholder="Enter name"
+            class="w-full"
+          />
+          <edge-shad-tags
+            v-model="slotProps.workingDoc.domains"
+            name="domains"
+            label="Domains"
+            placeholder="Add or remove domains"
+            class="w-full"
+          />
+          <edge-g-input
+            v-model="slotProps.workingDoc.theme"
+            :disable-tracking="true"
+            field-type="collection"
+            :collection-path="`${edgeGlobal.edgeState.organizationDocPath}/themes`"
+            label="Themes"
+            name="theme"
+            :pass-through-props="state.workingDoc"
+          />
+          <edge-shad-select-tags
+            v-if="Object.values(edgeFirebase.state.users).length > 0"
+            v-model="slotProps.workingDoc.users" :disabled="!edgeGlobal.isAdminGlobal(edgeFirebase).value"
+            :items="Object.values(edgeFirebase.state.users).filter(user => user.userId !== '')" name="users" label="Users"
+            item-title="meta.name" item-value="userId" placeholder="Select users" class="w-full" :multiple="true"
+          />
+        </div>
       </template>
     </edge-editor>
     <ResizablePanelGroup v-else direction="horizontal" class="w-full h-full">
@@ -262,7 +306,6 @@ watch(() => state.menus, async (newVal) => {
           <SheetTitle>{{ siteData.name || 'Site' }}</SheetTitle>
           <SheetDescription />
         </SheetHeader>
-
         <edge-editor
           collection="sites"
           :doc-id="props.site"
@@ -271,39 +314,47 @@ watch(() => state.menus, async (newVal) => {
           class="w-full mx-auto flex-1 bg-transparent flex flex-col border-none shadow-none"
           :show-footer="false"
           :show-header="false"
-
-          :save-function-override="() => { state.siteSettings = false }"
+          :save-function-override="onSubmit"
+          @error="formErrors"
         >
           <template #main="slotProps">
-            <edge-shad-input
-              v-model="slotProps.workingDoc.name"
-              name="name"
-              label="Name"
-              placeholder="Enter name"
-              class="w-full"
-            />
-            <Separator class="my-4" />
-            <edge-g-input
-              v-model="slotProps.workingDoc.theme"
-              :disable-tracking="true"
-              field-type="collection"
-              :collection-path="`${edgeGlobal.edgeState.organizationDocPath}/themes`"
-              label="Themes"
-              name="theme"
-              :pass-through-props="state.workingDoc"
-              class="w-full"
-            />
-            <edge-shad-select-tags
-              v-if="Object.values(edgeFirebase.state.users).length > 0"
-              v-model="slotProps.workingDoc.users" :disabled="!edgeGlobal.isAdminGlobal(edgeFirebase).value"
-              :items="Object.values(edgeFirebase.state.users).filter(user => user.userId !== '')" name="users" label="Users"
-              item-title="meta.name" item-value="userId" placeholder="Select users" class="w-full" :multiple="true"
-            />
+            <div class="flex-col flex gap-4">
+              <edge-shad-input
+                v-model="slotProps.workingDoc.name"
+                name="name"
+                label="Name"
+                placeholder="Enter name"
+                class="w-full"
+              />
+              <edge-shad-tags
+                v-model="slotProps.workingDoc.domains"
+                name="domains"
+                label="Domains"
+                placeholder="Add or remove domains"
+                class="w-full"
+              />
+              <edge-g-input
+                v-model="slotProps.workingDoc.theme"
+                :disable-tracking="true"
+                field-type="collection"
+                :collection-path="`${edgeGlobal.edgeState.organizationDocPath}/themes`"
+                label="Themes"
+                name="theme"
+                :pass-through-props="state.workingDoc"
+              />
+              <edge-shad-select-tags
+                v-if="Object.values(edgeFirebase.state.users).length > 0"
+                v-model="slotProps.workingDoc.users" :disabled="!edgeGlobal.isAdminGlobal(edgeFirebase).value"
+                :items="Object.values(edgeFirebase.state.users).filter(user => user.userId !== '')" name="users" label="Users"
+                item-title="meta.name" item-value="userId" placeholder="Select users" class="w-full" :multiple="true"
+              />
+            </div>
             <SheetFooter class="pt-2 flex justify-between">
               <edge-shad-button variant="destructive" class="text-white" @click="state.siteSettings = false">
                 Cancel
               </edge-shad-button>
-              <edge-shad-button type="submit" class=" bg-slate-800 hover:bg-slate-400 w-full">
+              <edge-shad-button :disabled="slotProps.submitting" type="submit" class=" bg-slate-800 hover:bg-slate-400 w-full">
+                <Loader2 v-if="slotProps.submitting" class=" h-4 w-4 animate-spin" />
                 Update
               </edge-shad-button>
             </SheetFooter>

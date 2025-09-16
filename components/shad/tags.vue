@@ -95,18 +95,18 @@ function onInputBlur(e) {
 
 <template>
   <FormField :name="props.name">
-    <FormItem class="flex flex-col gap-2 p-0 mt-0">
+    <FormItem class="flex flex-col gap-2 p-0 mt-0 space-y-0 [&>*]:!mt-0">
       <div class="flex items-center justify-between">
         <FormLabel v-if="props.label">
           {{ props.label }}
         </FormLabel>
         <slot name="icon" />
       </div>
-
       <FormControl>
         <TagsInput
           :id="props.name"
           v-model="arrayModel"
+          class="mt-0"
           :class="props.class"
           :disabled="props.disabled"
         >

@@ -1,6 +1,6 @@
 <script setup lang="js">
 import { useVModel } from '@vueuse/core'
-import { CircleCheck, File, FileCog, FileMinus2, FilePen, FilePlus2, FileUp, Folder, FolderMinus, FolderOpen, FolderPen, FolderPlus } from 'lucide-vue-next'
+import { File, FileCheck, FileCog, FileMinus2, FilePen, FilePlus2, FileUp, FileWarning, Folder, FolderMinus, FolderOpen, FolderPen, FolderPlus } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 const props = defineProps({
@@ -196,6 +196,13 @@ const canRename = (menuName) => {
   }
   return true
 }
+
+const publishPage = async (pageId) => {
+  const pageData = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`] || {}
+  if (pageData[pageId]) {
+    await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`, pageData[pageId])
+  }
+}
 </script>
 
 <template>
@@ -266,8 +273,8 @@ const canRename = (menuName) => {
               <SidebarMenuSubButton :class="{ 'text-gray-400': element.item === '' }" as-child :is-active="element.item === props.page">
                 <NuxtLink :disabled="element.item === ''" :class="{ '!text-red-500': element.name === 'Deleting...' }" class="text-xs" :to="`/app/dashboard/sites/${props.site}/${element.item}`">
                   <Loader2 v-if="element.item === '' || element.name === 'Deleting...'" :class="{ '!text-red-500': element.name === 'Deleting...' }" class="w-4 h-4 animate-spin" />
-                  <FileMinus2 v-else-if="isPublishedPageDiff(element.item)" class="!text-yellow-600" />
-                  <CircleCheck v-else class="text-xs !text-green-700 font-normal" />
+                  <FileWarning v-else-if="isPublishedPageDiff(element.item)" class="!text-yellow-600" />
+                  <FileCheck v-else class="text-xs !text-green-700 font-normal" />
                   <span>{{ element.name }}</span>
                 </NuxtLink>
               </SidebarMenuSubButton>
@@ -290,9 +297,9 @@ const canRename = (menuName) => {
                       <FileCog />
                       <span>Settings</span>
                     </DropdownMenuItem>
-                    <DropdownMenuItem>
+                    <DropdownMenuItem @click="publishPage(element.item)">
                       <FileUp />
-                      <span>Publish</span>
+                      Publish
                     </DropdownMenuItem>
                     <DropdownMenuItem @click="renameFolderOrPageShow(element)">
                       <FilePen />

@@ -9,6 +9,10 @@ const props = defineProps({
     type: Object,
     default: null,
   },
+  listOnly: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const emit = defineEmits(['pick'])
@@ -132,6 +136,35 @@ const blockLoaded = (isLoading, index) => {
       :theme="props.theme"
     />
   </div>
+  <div v-else-if="props.listOnly" class="p-6 space-y-4  h-[calc(100vh-50px)] overflow-y-auto">
+    <template v-for="block in blocks" :key="block.docId">
+      <button
+        :ref="el => setBtnRef(block.docId, el)"
+        type="button"
+        class="p-0 text-left hover:bg-primary text-slate-500  border !hover:text-white   border-dashed cursor-pointer w-full overflow-hidden relative"
+      >
+        <div class="scale-wrapper">
+          <div
+            :ref="el => setInnerRef(block.docId, el)"
+            class="scale-inner scale p-4"
+            :data-block-id="block.docId"
+          >
+            <div class="text-4xl relative text-inherit text-center">
+              {{ block.name }}
+            </div>
+            <edge-cms-block-api :content="block.content" :theme="props.theme" :values="block.values" :meta="block.meta" @pending="blockLoaded($event, block.docId)" />
+            <edge-cms-block-render
+              v-if="!state.blocksLoaded.includes(block.docId)"
+              :content="loadingRender(block.content)"
+              :values="block.values"
+              :meta="block.meta"
+              :theme="props.theme"
+            />
+          </div>
+        </div>
+      </button>
+    </template>
+  </div>
   <div v-else>
     <div class="flex justify-center items-center">
       <edge-shad-button
@@ -166,12 +199,13 @@ const blockLoaded = (isLoading, index) => {
                     <div class="text-4xl relative text-inherit text-center">
                       {{ block.name }}
                     </div>
-                    <edge-cms-block-api :content="block.content" :values="block.values" :meta="block.meta" @pending="blockLoaded($event, block.docId)" />
+                    <edge-cms-block-api :content="block.content" :theme="props.theme" :values="block.values" :meta="block.meta" @pending="blockLoaded($event, block.docId)" />
                     <edge-cms-block-render
                       v-if="!state.blocksLoaded.includes(block.docId)"
                       :content="loadingRender(block.content)"
                       :values="block.values"
                       :meta="block.meta"
+                      :theme="props.theme"
                     />
                   </div>
                 </div>

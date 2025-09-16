@@ -82,6 +82,29 @@ const theme = computed(() => {
   }
   return null
 })
+
+const isPublishedPageDiff = (pageId) => {
+  const publishedPage = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`]?.[pageId]
+  const draftPage = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`]?.[pageId]
+  if (!publishedPage && draftPage) {
+    return true
+  }
+  if (publishedPage && !draftPage) {
+    return true
+  }
+  if (publishedPage && draftPage) {
+    return JSON.stringify(publishedPage.content) !== JSON.stringify(draftPage.content)
+  }
+  return false
+}
+
+const lastPublishedTime = (pageId) => {
+  const timestamp = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`]?.[pageId]?.last_updated
+  if (!timestamp)
+    return 'Never'
+  const date = new Date(timestamp)
+  return date.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })
+}
 </script>
 
 <template>
@@ -98,11 +121,27 @@ const theme = computed(() => {
     @working-doc="editorDocUpdates"
   >
     <template #header="slotProps">
-      <div class="relative flex items-center bg-secondary p-2 justify-between sticky top-0 z-10 bg-primary rounded">
+      <div class="relative flex items-center bg-secondary p-2 justify-between sticky top-0 z-10 bg-primary rounded h-[50px]">
         <span class="text-lg font-semibold whitespace-nowrap pr-1">{{ pageName }}</span>
 
         <div class="flex w-full items-center">
           <div class="w-full border-t border-gray-300 dark:border-white/15" aria-hidden="true" />
+          <div class="px-4 text-gray-600 dark:text-gray-300 whitespace-nowrap text-center">
+            <edge-chip v-if="isPublishedPageDiff(page)" class="bg-yellow-100 text-yellow-800">
+              <div class="w-full">
+                Unpublished Changes
+              </div>
+              <span class="text-[10px]">Last Published: {{ lastPublishedTime(page) }}</span>
+            </edge-chip>
+            <edge-chip v-else class="bg-green-100 text-green-800">
+              <div class="w-full">
+                Published
+              </div>
+              <span class="text-[10px]">Last Published: {{ lastPublishedTime(page) }}</span>
+            </edge-chip>
+          </div>
+          <div class="w-full border-t border-gray-300 dark:border-white/15" aria-hidden="true" />
+
           <edge-shad-button variant="text" class="hover:text-primary/50 text-xs h-[26px] text-primary" @click="state.editMode = !state.editMode">
             <template v-if="state.editMode">
               <Eye class="w-4 h-4" />

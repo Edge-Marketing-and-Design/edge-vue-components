@@ -57,7 +57,7 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['unsavedChanges', 'workingDoc'])
+const emit = defineEmits(['unsavedChanges', 'workingDoc', 'error'])
 
 const newDoc = computed(() => {
   return Object.entries(props.newDocSchema).reduce((newObj, [key, val]) => {
@@ -466,6 +466,7 @@ const onError = async () => {
   await formRef.value.setValues(state.workingDoc, false) // sync without triggering per-field validate
   await formRef.value.validate() // run full form validation once
   state.errors = formRef.value?.errors // reflect in UI
+  emit('error', state.errors)
 }
 </script>
 
