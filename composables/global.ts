@@ -16,6 +16,7 @@ const edgeState = reactive({
   isAdminCollections: [] as string[],
   redirectRoute: '',
   isEmulator: false,
+  blockEditorTheme: '',
 })
 
 const setOrganization = async (organization: string, edgeFirebase: any) => {

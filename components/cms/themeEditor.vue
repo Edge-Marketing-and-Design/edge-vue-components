@@ -7,7 +7,7 @@ const props = defineProps({
     required: true,
   },
 })
-
+const emit = defineEmits(['link'])
 const state = reactive({
   filter: '',
   workingDoc: {},
@@ -68,8 +68,33 @@ onMounted(() => {
 })
 
 const editorDocUpdates = (workingDoc) => {
-  console.log('Editor working doc updated:', workingDoc)
+  state.workingDoc = workingDoc
 }
+
+const theme = computed(() => {
+  const themeContents = state.workingDoc.theme || null
+  if (themeContents) {
+    return JSON.parse(themeContents)
+  }
+  return null
+})
+
+const linkElements = computed(() => {
+  // return theme.value
+  const fontLinks = Object.entries(theme.value?.extend.fontFamily || {}).flatMap(([key, fonts]) => {
+    console.log('Fonts for', key, fonts)
+    const googleFonts = fonts.filter(font => font !== 'sans-serif' && font !== 'monospace')
+    return googleFonts.map(font => ({
+      rel: 'stylesheet',
+      href: `https://fonts.googleapis.com/css2?family=${font.replace(/ /g, '+')}:wght@400;700&display=swap`,
+    }))
+  })
+  return fontLinks
+})
+
+watch(linkElements, (newLinkElements) => {
+  emit('link', newLinkElements)
+}, { immediate: true, deep: true })
 </script>
 
 <template>

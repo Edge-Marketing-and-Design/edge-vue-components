@@ -57,21 +57,21 @@ const resetArrayItems = (field) => {
   if (!state.arrayItems?.[field]) {
     state.arrayItems[field] = {}
   }
-  for (const schemaItem of Object.keys(modelValue.value.meta[field].schema)) {
-    if (modelValue.value.meta[field].schema[schemaItem] === 'text') {
-      state.arrayItems[field][schemaItem] = ''
+  for (const schemaItem of modelValue.value.meta[field].schema) {
+    if (schemaItem.type === 'text') {
+      state.arrayItems[field][schemaItem.field] = ''
     }
-    else if (modelValue.value.meta[field].schema[schemaItem] === 'number') {
-      state.arrayItems[field][schemaItem] = 0
+    else if (schemaItem.type === 'number') {
+      state.arrayItems[field][schemaItem.field] = 0
     }
-    else if (modelValue.value.meta[field].schema[schemaItem] === 'richtext') {
-      state.arrayItems[field][schemaItem] = ''
+    else if (schemaItem.type === 'richtext') {
+      state.arrayItems[field][schemaItem.field] = ''
     }
-    else if (modelValue.value.meta[field].schema[schemaItem] === 'textarea') {
-      state.arrayItems[field][schemaItem] = ''
+    else if (schemaItem.type === 'textarea') {
+      state.arrayItems[field][schemaItem.field] = ''
     }
-    else if (modelValue.value.meta[field].schema[schemaItem] === 'image') {
-      state.arrayItems[field][schemaItem] = ''
+    else if (schemaItem.type === 'image') {
+      state.arrayItems[field][schemaItem.field] = ''
     }
   }
 }
@@ -260,12 +260,12 @@ const loadingRender = (content) => {
                                 </PopoverTrigger>
                                 <PopoverContent class="!w-80 mr-20">
                                   <Card class="border-none shadow-none p-4">
-                                    <template v-for="schemaItem in Object.keys(entry.meta.schema)" :key="schemaItem">
+                                    <template v-for="schemaItem in entry.meta.schema" :key="schemaItem.field">
                                       <edge-cms-block-input
-                                        v-model="state.arrayItems[entry.field][schemaItem]"
-                                        :type="entry.meta.schema[schemaItem]"
-                                        :field="schemaItem"
-                                        :label="genTitleFromField(schemaItem)"
+                                        v-model="state.arrayItems[entry.field][schemaItem.field]"
+                                        :type="schemaItem.type"
+                                        :field="schemaItem.field"
+                                        :label="genTitleFromField(schemaItem.field)"
                                       />
                                     </template>
                                     <CardFooter class="mt-2 flex justify-end">
@@ -296,23 +296,23 @@ const loadingRender = (content) => {
                                 <Grip class="handle pointer" />
                               </div>
                               <div class="px-2 py-2 w-[98%] flex gap-1">
-                                <template v-for="schemaItem in Object.keys(entry.meta.schema)" :key="schemaItem">
+                                <template v-for="schemaItem in entry.meta.schema" :key="schemaItem.field">
                                   <Popover>
                                     <PopoverTrigger as-child>
                                       <Alert class="w-[200px] text-xs py-1 px-2 cursor-pointer hover:bg-primary hover:text-white">
-                                        <AlertTitle> {{ genTitleFromField(schemaItem) }}</AlertTitle>
+                                        <AlertTitle> {{ genTitleFromField(schemaItem.field) }}</AlertTitle>
                                         <AlertDescription class="text-sm truncate max-w-[200px]">
-                                          {{ element[schemaItem] }}
+                                          {{ element[schemaItem.field] }}
                                         </AlertDescription>
                                       </Alert>
                                     </PopoverTrigger>
                                     <PopoverContent class="!w-80 mr-20">
                                       <Card class="border-none shadow-none p-4">
                                         <edge-cms-block-input
-                                          v-model="element[schemaItem]"
-                                          :type="entry.meta.schema[schemaItem]"
-                                          :field="`${schemaItem}-${index}-entry`"
-                                          :label="genTitleFromField(schemaItem)"
+                                          v-model="element[schemaItem.field]"
+                                          :type="schemaItem.type"
+                                          :field="`${schemaItem.field}-${index}-entry`"
+                                          :label="genTitleFromField(schemaItem.field)"
                                         />
                                       </Card>
                                     </PopoverContent>

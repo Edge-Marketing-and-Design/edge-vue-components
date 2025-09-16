@@ -12,6 +12,8 @@ const props = defineProps({
   },
 })
 
+const emit = defineEmits(['link'])
+
 const edgeFirebase = inject('edgeFirebase')
 
 const state = reactive({
@@ -71,17 +73,32 @@ const pageName = computed(() => {
 const theme = computed(() => {
   const theme = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site]?.theme || ''
   console.log(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}`)
-  console.log('Theme:', theme)
   let themeContents = null
   if (theme) {
     themeContents = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`]?.[theme]?.theme || null
   }
   if (themeContents) {
-    console.log(themeContents)
     return JSON.parse(themeContents)
   }
   return null
 })
+
+const linkElements = computed(() => {
+  // return theme.value
+  const fontLinks = Object.entries(theme.value?.extend.fontFamily || {}).flatMap(([key, fonts]) => {
+    console.log('Fonts for', key, fonts)
+    const googleFonts = fonts.filter(font => font !== 'sans-serif' && font !== 'monospace')
+    return googleFonts.map(font => ({
+      rel: 'stylesheet',
+      href: `https://fonts.googleapis.com/css2?family=${font.replace(/ /g, '+')}:wght@400;700&display=swap`,
+    }))
+  })
+  return fontLinks
+})
+
+watch(linkElements, (newLinkElements) => {
+  emit('link', newLinkElements)
+}, { immediate: true, deep: true })
 
 const isPublishedPageDiff = (pageId) => {
   const publishedPage = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`]?.[pageId]

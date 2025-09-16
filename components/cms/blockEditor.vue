@@ -8,6 +8,10 @@ const props = defineProps({
   },
 })
 
+const emit = defineEmits(['link'])
+
+const edgeFirebase = inject('edgeFirebase')
+
 const route = useRoute()
 
 const state = reactive({
@@ -189,10 +193,40 @@ const blockModel = (html) => {
   return { values, meta }
 }
 
+const theme = computed(() => {
+  const theme = edgeGlobal.edgeState.blockEditorTheme || ''
+  console.log(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}`)
+  let themeContents = null
+  if (theme) {
+    themeContents = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`]?.[theme]?.theme || null
+  }
+  if (themeContents) {
+    return JSON.parse(themeContents)
+  }
+  return null
+})
+
 const editorDocUpdates = (workingDoc) => {
   state.workingDoc = blockModel(workingDoc.content)
   console.log('Editor workingDoc update:', state.workingDoc)
 }
+
+const linkElements = computed(() => {
+  // return theme.value
+  const fontLinks = Object.entries(theme.value?.extend.fontFamily || {}).flatMap(([key, fonts]) => {
+    console.log('Fonts for', key, fonts)
+    const googleFonts = fonts.filter(font => font !== 'sans-serif' && font !== 'monospace')
+    return googleFonts.map(font => ({
+      rel: 'stylesheet',
+      href: `https://fonts.googleapis.com/css2?family=${font.replace(/ /g, '+')}:wght@400;700&display=swap`,
+    }))
+  })
+  return fontLinks
+})
+
+watch(linkElements, (newLinkElements) => {
+  emit('link', newLinkElements)
+}, { immediate: true, deep: true })
 </script>
 
 <template>
@@ -214,6 +248,18 @@ const editorDocUpdates = (workingDoc) => {
         <FilePenLine class="mr-2" />
         {{ slotProps.title }}
       </template>
+      <template #header-center>
+        <div class="w-full px-4">
+          <edge-g-input
+            v-model="edgeGlobal.edgeState.blockEditorTheme"
+            :disable-tracking="true"
+            field-type="collection"
+            :collection-path="`${edgeGlobal.edgeState.organizationDocPath}/themes`"
+            name="theme"
+          />
+        </div>
+      </template>
+
       <template #main="slotProps">
         <div class="pt-4">
           <edge-shad-input
@@ -233,6 +279,7 @@ const editorDocUpdates = (workingDoc) => {
             <div class="w-1/2">
               <div class="w-full mx-auto bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30">
                 <edge-cms-block-picker
+                  :theme="theme"
                   :block-override="{ content: slotProps.workingDoc.content, values: state.workingDoc.values, meta: state.workingDoc.meta }"
                 />
               </div>

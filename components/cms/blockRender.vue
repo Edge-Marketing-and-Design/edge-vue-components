@@ -124,9 +124,20 @@ const formatters = {
 const applySchemaFormat = (fieldKey, value, schemaMap) => {
   if (!schemaMap || !fieldKey)
     return value == null ? '' : String(value)
+
   const baseKey = String(fieldKey).split('.')[0]
-  const t = schemaMap[baseKey]
-  const f = t && formatters[t]
+
+  // Resolve type from either object schema or array schema
+  let type
+  if (Array.isArray(schemaMap)) {
+    const hit = schemaMap.find(e => e && e.field === baseKey)
+    type = hit && hit.type
+  }
+  else if (schemaMap && typeof schemaMap === 'object') {
+    type = schemaMap[baseKey]
+  }
+
+  const f = type && formatters[type]
   return f ? f(value) : (value == null ? '' : String(value))
 }
 const renderWithValues = (content, values) => {

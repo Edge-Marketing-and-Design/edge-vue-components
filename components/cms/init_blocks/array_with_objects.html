@@ -1,6 +1,6 @@
 <div class="p-1 w-full bg-red-200">
     <ul class="list-inside">
-    {{{#array {"field":"listthing2", "schema": {"header": "text"}, "value": [{"header": "testing"}]}}}}
+    {{{#array {"field":"listthing2", "schema": [{"field": "header", "type": "text"}], "value": [{"header": "testing"}]}}}}
       <li class="list-disc">{{item.header}}</li>
     {{{/array}}}
     </ul>
