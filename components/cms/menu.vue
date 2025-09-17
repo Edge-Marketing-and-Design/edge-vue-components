@@ -1,6 +1,6 @@
 <script setup lang="js">
 import { useVModel } from '@vueuse/core'
-import { File, FileCheck, FileCog, FileMinus2, FilePen, FilePlus2, FileUp, FileWarning, Folder, FolderMinus, FolderOpen, FolderPen, FolderPlus } from 'lucide-vue-next'
+import { File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePlus2, FileUp, FileWarning, FileX, Folder, FolderMinus, FolderOpen, FolderPen, FolderPlus } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 const props = defineProps({
@@ -51,6 +51,19 @@ const isPublishedPageDiff = (pageId) => {
   return false
 }
 
+const isPublished = (pageId) => {
+  const publishedPage = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`]?.[pageId]
+  return !!publishedPage
+}
+
+const schemas = {
+  pages: toTypedSchema(z.object({
+    name: z.string({
+      required_error: 'Name is required',
+    }).min(1, { message: 'Name is required' }),
+  })),
+}
+
 const state = reactive({
   addPageDialog: false,
   newPageName: '',
@@ -60,6 +73,17 @@ const state = reactive({
   renameItem: {},
   renameFolderOrPageDialog: false,
   deletePageDialog: false,
+  pageSettings: false,
+  pageData: {},
+  newDocs: {
+    pages: {
+      name: { value: '' },
+      slug: { value: '' },
+      content: { value: [] },
+      blockIds: { value: [] },
+    },
+  },
+  hasErrors: false,
 })
 
 const renameFolderOrPageShow = (item) => {
@@ -203,6 +227,39 @@ const publishPage = async (pageId) => {
     await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`, pageData[pageId])
   }
 }
+const unPublishPage = async (pageId) => {
+  await edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`, pageId)
+}
+
+const discardPageChanges = async (pageId) => {
+  const publishedPage = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`]?.[pageId]
+  if (publishedPage) {
+    await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`, publishedPage, pageId)
+  }
+}
+
+const showPageSettings = (page) => {
+  console.log('showPageSettings', page)
+  state.pageData = page
+  state.pageSettings = true
+}
+
+const formErrors = (error) => {
+  console.log('Form errors:', error)
+  console.log(Object.values(error))
+  if (Object.values(error).length > 0) {
+    console.log('Form errors found')
+    state.hasError = true
+    console.log(state.hasError)
+  }
+  state.hasError = false
+}
+
+const onSubmit = () => {
+  if (!state.hasError) {
+    state.pageSettings = false
+  }
+}
 </script>
 
 <template>
@@ -293,17 +350,26 @@ const publishPage = async (pageId) => {
                       <File class="w-5 h-5" />  {{ menuName }} / {{ element.name }}
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem>
+                    <DropdownMenuItem @click="showPageSettings(element)">
                       <FileCog />
                       <span>Settings</span>
                     </DropdownMenuItem>
-                    <DropdownMenuItem @click="publishPage(element.item)">
+                    <DropdownMenuItem v-if="isPublishedPageDiff(element.item)" @click="publishPage(element.item)">
                       <FileUp />
                       Publish
                     </DropdownMenuItem>
                     <DropdownMenuItem @click="renameFolderOrPageShow(element)">
                       <FilePen />
                       <span>Rename</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem v-if="isPublishedPageDiff(element.item) && isPublished(element.item)" @click="discardPageChanges(element.item)">
+                      <FileX />
+                      Discard Changes
+                    </DropdownMenuItem>
+                    <DropdownMenuItem v-if="isPublished(element.item)" @click="unPublishPage(element.item)">
+                      <FileDown />
+                      Unpublish
                     </DropdownMenuItem>
                     <DropdownMenuItem @click="deletePageShow(element)">
                       <FileMinus2 />
@@ -404,4 +470,43 @@ const publishPage = async (pageId) => {
       </edge-shad-form>
     </DialogContent>
   </edge-shad-dialog>
+  <Sheet v-model:open="state.pageSettings">
+    <SheetContent side="left" class="w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl">
+      <SheetHeader>
+        <SheetTitle>{{ state.pageData.name || 'Site' }}</SheetTitle>
+        <SheetDescription />
+      </SheetHeader>
+      <edge-editor
+        :collection="`sites/${props.site}/pages`"
+        :doc-id="state.pageData.item"
+        :schema="schemas.pages"
+        :new-doc-schema="state.newDocs.pages"
+        class="w-full mx-auto flex-1 bg-transparent flex flex-col border-none px-0shadow-none"
+        :show-footer="false"
+        :show-header="false"
+        :save-function-override="onSubmit"
+        card-content-class="px-0"
+        @error="formErrors"
+      >
+        <template #main="slotProps">
+          <div class="p-6 space-y-4  h-[calc(100vh-126px)] overflow-y-auto">
+            <edge-shad-input
+              v-model="slotProps.workingDoc.slug"
+              label="Page Slug"
+              name="slug"
+            />
+          </div>
+          <SheetFooter class="pt-2 flex justify-between">
+            <edge-shad-button variant="destructive" class="text-white" @click="state.pageSettings = false">
+              Cancel
+            </edge-shad-button>
+            <edge-shad-button :disabled="slotProps.submitting" type="submit" class=" bg-slate-800 hover:bg-slate-400 w-full">
+              <Loader2 v-if="slotProps.submitting" class=" h-4 w-4 animate-spin" />
+              Update
+            </edge-shad-button>
+          </SheetFooter>
+        </template>
+      </edge-editor>
+    </SheetContent>
+  </Sheet>
 </template>

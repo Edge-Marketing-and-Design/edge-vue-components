@@ -2,7 +2,7 @@
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 
-import { FileStack, FolderCog, FolderUp, Loader2 } from 'lucide-vue-next'
+import { CircleAlert, FileCheck, FileStack, FolderCog, FolderDown, FolderUp, FolderX, Loader2 } from 'lucide-vue-next'
 const props = defineProps({
   site: {
     type: String,
@@ -37,6 +37,7 @@ const state = reactive({
 
 const pageInit = {
   name: '',
+  slug: '',
   content: [],
   blockIds: [],
 }
@@ -72,6 +73,9 @@ const siteData = computed(() => {
 })
 
 onBeforeMount(async () => {
+  if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/published-site-settings`]) {
+    await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/published-site-settings`)
+  }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/pages`]) {
     await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/pages`)
   }
@@ -86,11 +90,46 @@ onBeforeMount(async () => {
   }
 })
 
+const isSiteDiff = computed(() => {
+  const publishedSite = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`]?.[props.site]
+  if (!publishedSite && siteData.value) {
+    return true
+  }
+  if (publishedSite && !siteData.value) {
+    return true
+  }
+  if (publishedSite && siteData.value) {
+    return JSON.stringify({ domains: publishedSite.domains, menus: publishedSite.menus }) !== JSON.stringify({ domains: siteData.value.domains, menus: siteData.value.menus })
+  }
+  return false
+})
+
+const publishSiteSettings = async () => {
+  console.log('Publishing site settings for site:', props.site)
+  await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`, siteData.value)
+}
+
+const discardSiteSettings = async () => {
+  console.log('Discarding site settings for site:', props.site)
+  const publishedSite = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`]?.[props.site]
+  if (publishedSite) {
+    await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, { domains: publishedSite.domains || [], menus: publishedSite.menus || {} })
+  }
+}
+
+const unPublishSite = async () => {
+  console.log('Unpublishing site:', props.site)
+  const pages = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`] || {}
+  for (const pageId of Object.keys(pages)) {
+    await edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`, pageId)
+  }
+  await edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`, props.site)
+}
+
 const publishSite = async () => {
   for (const [pageId, pageData] of Object.entries(edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`] || {})) {
     await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`, pageData)
   }
-  edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, { lastPublished: new Date().toISOString() })
 }
 
 const pages = computed(() => {
@@ -122,7 +161,6 @@ watch(() => state.menus, async (newVal) => {
         else {
           if (item.name === 'Deleting...') {
             await edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`, item.item)
-            await edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`, item.item)
             state.menus[menuName].splice(index, 1)
           }
         }
@@ -141,7 +179,6 @@ watch(() => state.menus, async (newVal) => {
               else {
                 if (subItem.name === 'Deleting...') {
                   await edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`, subItem.item)
-                  await edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`, subItem.item)
                   state.menus[menuName][index].item[subMenuName].splice(subIndex, 1)
                 }
               }
@@ -171,6 +208,22 @@ const onSubmit = () => {
     state.siteSettings = false
   }
 }
+
+const isAllPagesPublished = computed(() => {
+  const pagesData = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`] || {}
+  const publishedData = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`] || {}
+  return Object.keys(pagesData).length === Object.keys(publishedData).length
+})
+
+const isSiteSettingPublished = computed(() => {
+  const publishedSite = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`]?.[props.site]
+  return !!publishedSite
+})
+
+const isAnyPagesPublished = computed(() => {
+  const publishedData = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`] || {}
+  return Object.keys(publishedData).length > 0
+})
 </script>
 
 <template>
@@ -250,7 +303,9 @@ const onSubmit = () => {
       <ResizablePanel class="bg-sidebar text-sidebar-foreground" :default-size="16">
         <edge-menu class="bg-secondary text-foreground rounded-none sticky top-0 py-2">
           <template #start>
-            {{ siteData.name || 'Site' }}
+            <div class="flex flex-col gap-0">
+              <span>Site:   {{ siteData.name || 'Site' }}</span>
+            </div>
           </template>
           <template #center>
             <div />
@@ -266,10 +321,27 @@ const onSubmit = () => {
                 <DropdownMenuLabel class="flex items-center gap-2">
                   <FileStack class="w-5 h-5" />{{ siteData.name || 'Site' }}
                 </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem @click="publishSite">
+                <DropdownMenuSeparator v-if="isSiteDiff" />
+                <DropdownMenuLabel v-if="isSiteDiff" class="flex items-center gap-2">
+                  Site Settings / Menus
+                </DropdownMenuLabel>
+
+                <DropdownMenuItem v-if="isSiteDiff" class="pl-4 text-xs" @click="publishSiteSettings">
                   <FolderUp />
                   Publish
+                </DropdownMenuItem>
+                <DropdownMenuItem v-if="isSiteDiff && isSiteSettingPublished" class="pl-4 text-xs" @click="discardSiteSettings">
+                  <FolderX />
+                  Discard Changes
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem v-if="!isAllPagesPublished" @click="publishSite">
+                  <FolderUp />
+                  Publish All Pages
+                </DropdownMenuItem>
+                <DropdownMenuItem v-if="isSiteSettingPublished || isAnyPagesPublished" @click="unPublishSite">
+                  <FolderDown />
+                  Unpublish Site
                 </DropdownMenuItem>
                 <DropdownMenuItem @click="state.siteSettings = true">
                   <FolderCog />
@@ -282,6 +354,20 @@ const onSubmit = () => {
         <SidebarGroup class="mt-0 pt-0">
           <SidebarGroupContent>
             <SidebarMenu>
+              <Transition name="fade" mode="out-in">
+                <div v-if="isSiteDiff" key="unpublished" class="flex gap-1 items-center mt-2 bg-yellow-100 text-xs py-1 px-4 text-yellow-800">
+                  <CircleAlert class="!text-yellow-800 w-3 h-3" />
+                  <span class="font-medium text-[10px]">
+                    Unpublished Settings/Menus
+                  </span>
+                </div>
+                <div v-else key="published" class="flex gap-1 items-center mt-2 bg-green-100 text-xs py-1 px-4 text-green-800">
+                  <FileCheck class="!text-green-800 w-3 h-3" />
+                  <span class="font-medium text-[10px]">
+                    Settings/Menus Published
+                  </span>
+                </div>
+              </Transition>
               <edge-cms-menu v-if="state.menus" v-model="state.menus" :site="props.site" :page="props.page" />
             </SidebarMenu>
           </SidebarGroupContent>
@@ -311,14 +397,15 @@ const onSubmit = () => {
           :doc-id="props.site"
           :schema="schemas.sites"
           :new-doc-schema="state.newDocs.sites"
-          class="w-full mx-auto flex-1 bg-transparent flex flex-col border-none shadow-none"
+          class="w-full mx-auto flex-1 bg-transparent flex flex-col border-none px-0 mx-0 shadow-none"
           :show-footer="false"
           :show-header="false"
           :save-function-override="onSubmit"
+          card-content-class="px-0"
           @error="formErrors"
         >
           <template #main="slotProps">
-            <div class="flex-col flex gap-4">
+            <div class="p-6 space-y-4  h-[calc(100vh-120px)] overflow-y-auto">
               <edge-shad-input
                 v-model="slotProps.workingDoc.name"
                 name="name"

@@ -81,7 +81,9 @@ const openEditor = () => {
     return
   for (const key of Object.keys(modelValue.value?.meta || {})) {
     if (modelValue.value.meta[key]?.type === 'array' && modelValue.value.meta[key]?.schema) {
-      resetArrayItems(key)
+      if (!modelValue.value.meta[key]?.api) {
+        resetArrayItems(key)
+      }
     }
   }
   state.draft = JSON.parse(JSON.stringify(modelValue.value?.values || {}))

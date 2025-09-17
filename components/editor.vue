@@ -55,6 +55,10 @@ const props = defineProps({
     type: Object,
     default: null,
   },
+  cardContentClass: {
+    type: String,
+    default: '',
+  },
 })
 
 const emit = defineEmits(['unsavedChanges', 'workingDoc', 'error'])
@@ -521,7 +525,7 @@ const onError = async () => {
           </template>
         </edge-menu>
       </slot>
-      <CardContent class="flex-1 flex flex-col px-4">
+      <CardContent :class="cn('flex-1 flex flex-col px-4', props.cardContentClass)">
         <slot name="main" :title="title" :on-cancel="onCancel" :submitting="state.submitting" :unsaved-changes="unsavedChanges" :on-submit="triggerSubmit" :working-doc="state.workingDoc">
           <div class="flex flex-wrap justify-between">
             <div v-for="(field, name, index) in props.newDocSchema" :key="index" class="w-full" :class="numColsToTailwind(field.cols)">
