@@ -29,7 +29,7 @@ const state = reactive({
   },
   mounted: false,
   page: {},
-  menus: { 'Main Menu': [] },
+  menus: { 'Site Root': [], 'Not In Menu': [] },
   saving: false,
   siteSettings: false,
   hasError: false,
@@ -37,7 +37,6 @@ const state = reactive({
 
 const pageInit = {
   name: '',
-  slug: '',
   content: [],
   blockIds: [],
 }
@@ -165,7 +164,6 @@ watch(() => state.menus, async (newVal) => {
           }
         }
       }
-      console.log('item:', item)
       if (typeof item.item === 'object') {
         for (const [subMenuName, subItems] of Object.entries(item.item)) {
           for (const [subIndex, subItem] of subItems.entries()) {
@@ -184,6 +182,9 @@ watch(() => state.menus, async (newVal) => {
               }
             }
           }
+        }
+        if (Object.keys(item.item).length === 0) {
+          state.menus[menuName].splice(index, 1)
         }
       }
     }
@@ -304,7 +305,7 @@ const isAnyPagesPublished = computed(() => {
         <edge-menu class="bg-secondary text-foreground rounded-none sticky top-0 py-2">
           <template #start>
             <div class="flex flex-col gap-0">
-              <span>Site:   {{ siteData.name || 'Site' }}</span>
+              <span>{{ siteData.name || 'Site' }}</span>
             </div>
           </template>
           <template #center>
@@ -323,7 +324,7 @@ const isAnyPagesPublished = computed(() => {
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator v-if="isSiteDiff" />
                 <DropdownMenuLabel v-if="isSiteDiff" class="flex items-center gap-2">
-                  Site Settings / Menus
+                  Site Settings
                 </DropdownMenuLabel>
 
                 <DropdownMenuItem v-if="isSiteDiff" class="pl-4 text-xs" @click="publishSiteSettings">
@@ -358,13 +359,13 @@ const isAnyPagesPublished = computed(() => {
                 <div v-if="isSiteDiff" key="unpublished" class="flex gap-1 items-center mt-2 bg-yellow-100 text-xs py-1 px-4 text-yellow-800">
                   <CircleAlert class="!text-yellow-800 w-3 h-3" />
                   <span class="font-medium text-[10px]">
-                    Unpublished Settings/Menus
+                    Unpublished Settings
                   </span>
                 </div>
                 <div v-else key="published" class="flex gap-1 items-center mt-2 bg-green-100 text-xs py-1 px-4 text-green-800">
                   <FileCheck class="!text-green-800 w-3 h-3" />
                   <span class="font-medium text-[10px]">
-                    Settings/Menus Published
+                    Settings Published
                   </span>
                 </div>
               </Transition>

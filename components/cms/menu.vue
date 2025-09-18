@@ -3,7 +3,13 @@ import { useVModel } from '@vueuse/core'
 import { File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePlus2, FileUp, FileWarning, FileX, Folder, FolderMinus, FolderOpen, FolderPen, FolderPlus } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
+
 const props = defineProps({
+  prevModelValue: {
+    type: Object,
+    required: false,
+    default: () => ({}),
+  },
   modelValue: {
     type: Object,
     required: true,
@@ -31,6 +37,7 @@ const props = defineProps({
   },
 })
 const emit = defineEmits(['update:modelValue'])
+const ROOT_MENUS = ['Site Root', 'Not In Menu']
 const router = useRouter()
 const modelValue = useVModel(props, 'modelValue', emit)
 const route = useRoute()
@@ -78,7 +85,6 @@ const state = reactive({
   newDocs: {
     pages: {
       name: { value: '' },
-      slug: { value: '' },
       content: { value: [] },
       blockIds: { value: [] },
     },
@@ -88,7 +94,7 @@ const state = reactive({
 
 const renameFolderOrPageShow = (item) => {
   state.renameItem = item
-  state.renameItem.originalName = item.name
+  state.renameItem.previousName = item.name
   state.renameFolderOrPageDialog = true
 }
 
@@ -103,9 +109,54 @@ const deletePageShow = (page) => {
   state.deletePageDialog = true
 }
 
+const collectRootLevelSlugs = (excludeName = '') => {
+  const slugs = new Set()
+  for (const root of ROOT_MENUS) {
+    const arr = modelValue.value?.[root] || []
+    for (const entry of arr) {
+      // Top-level page at "/<slug>"
+      if (typeof entry.item === 'string') {
+        if (entry.name && entry.name !== excludeName)
+          slugs.add(entry.name)
+      }
+      // Top-level folder at "/<folder>/*"
+      else if (entry && typeof entry.item === 'object') {
+        const key = Object.keys(entry.item)[0]
+        if (key && key !== excludeName)
+          slugs.add(key)
+      }
+    }
+  }
+  return slugs
+}
+
+const slugGenerator = (name, excludeName = '') => {
+  // Build a set of existing slugs that map to URLs off of "/" from *both* root menus.
+  const existing = collectRootLevelSlugs(excludeName)
+
+  const base = name ? name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '') : ''
+  let unique = base
+  let suffix = 1
+  while (existing.has(unique)) {
+    unique = `${base}-${suffix}`
+    suffix += 1
+  }
+  return unique
+}
+
 const renameFolderOrPageAction = async () => {
+  const newSlug = slugGenerator(state.renameItem.name, state.renameItem.previousName || '')
+
+  if (state.renameItem.name === state.renameItem.previousName) {
+    state.renameFolderOrPageDialog = false
+    state.renameItem = {}
+    return
+  }
+
   // If the item is an empty string, we are renaming a top-level folder (handled here)
   if (state.renameItem.item === '') {
+    const original = edgeGlobal.dupObject(modelValue.value)
+    const originalItem = edgeGlobal.dupObject(modelValue.value[state.renameItem.previousName])
     // Renaming a folder: if the new name is empty, abort and reset dialog state
     if (!state.renameItem.name) {
       state.renameFolderOrPageDialog = false
@@ -113,8 +164,9 @@ const renameFolderOrPageAction = async () => {
       return
     }
     // Move the array from the old key to the new key, then delete the old key
-    modelValue.value[state.renameItem.name] = modelValue.value[state.renameItem.originalName]
-    delete modelValue.value[state.renameItem.originalName]
+    modelValue.value[newSlug] = originalItem
+    console.log('updated modelValue:', modelValue.value)
+    delete modelValue.value[state.renameItem.previousName]
     state.renameFolderOrPageDialog = false
     state.renameItem = {}
     return
@@ -123,15 +175,15 @@ const renameFolderOrPageAction = async () => {
   // Renaming a page: the page is uniquely identified by its docId in `state.renameItem.item`.
   // Traverse all menus and submenus; update the `name` where the `item` matches that docId (strings only).
   const targetDocId = state.renameItem.item
-  const newName = state.renameItem.name || ''
+  // const newName = state.renameItem.name || ''
 
   let renamed = false
   for (const [menuName, items] of Object.entries(modelValue.value)) {
     for (const item of items) {
       if (typeof item.item === 'string' && item.item === targetDocId) {
-        const results = await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`, targetDocId, { name: newName })
+        const results = await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`, targetDocId, { name: newSlug })
         if (results.success) {
-          item.name = newName
+          item.name = newSlug
           renamed = true
         }
         break
@@ -140,13 +192,14 @@ const renameFolderOrPageAction = async () => {
     if (renamed)
       break
   }
-
+  console.log(modelValue.value)
   // Close dialog and reset state regardless
   state.renameFolderOrPageDialog = false
   state.renameItem = {}
 }
 
 const addPageAction = async () => {
+  const slug = slugGenerator(state.newPageName)
   if (!state.menuName) {
     modelValue.value[state.newPageName] = []
     state.newPageName = ''
@@ -154,10 +207,10 @@ const addPageAction = async () => {
     return
   }
   if (state.addMenu) {
-    modelValue.value[state.menuName].push({ item: { [state.newPageName]: [] } })
+    modelValue.value[state.menuName].push({ item: { [slug]: [] } })
   }
   else {
-    modelValue.value[state.menuName].push({ name: state.newPageName, item: '' })
+    modelValue.value[state.menuName].push({ name: slug, item: '' })
   }
 
   state.newPageName = ''
@@ -201,10 +254,9 @@ const pages = toTypedSchema(z.object({
 }))
 
 const disabledFolderDelete = (menuName, menu) => {
-  if (menuName === 'Main Menu') {
+  if (menuName === 'Site Root') {
     return true
   }
-  console.log('menu:', menu)
   if (menu.length > 0) {
     return true
   }
@@ -215,7 +267,7 @@ const canRename = (menuName) => {
   if (props.prevMenu) {
     return true
   }
-  if (menuName === 'Main Menu') {
+  if (menuName === 'Site Root') {
     return false
   }
   return true
@@ -263,21 +315,21 @@ const onSubmit = () => {
 </script>
 
 <template>
-  <SidebarMenuItem v-if="!props.prevMenu" class="mt-2" @click="addPageShow('', true)">
+  <!-- <SidebarMenuItem v-if="!props.prevMenu" class="mt-2" @click="addPageShow('', true)">
     <SidebarMenuButton class="!text-center" @click="addPageShow('', true)">
       <div class="w-full text-center flex gap-1 justify-center items-center">
         <PlusIcon class="h-4 w-4" />
         Add Top Level Menu
       </div>
     </SidebarMenuButton>
-  </SidebarMenuItem>
+  </SidebarMenuItem> -->
   <SidebarMenuItem v-for="(menu, menuName) in modelValue" :key="menu.name">
     <SidebarMenuButton class="!px-0 hover:!bg-transparent">
       <!-- Open icon (visible when group IS open) -->
       <FolderOpen
         class="mr-2"
       />
-      <span>{{ menuName }}</span>
+      <span>{{ menuName === 'Site Root' ? 'Main Menu' : menuName }}</span>
       <SidebarGroupAction class="absolute right-2 top-0 hover:!bg-transparent">
         <DropdownMenu>
           <DropdownMenuTrigger as-child>
@@ -287,13 +339,13 @@ const onSubmit = () => {
           </DropdownMenuTrigger>
           <DropdownMenuContent side="right" align="start">
             <DropdownMenuLabel v-if="props.prevMenu" class="flex items-center gap-2">
-              <Folder class="w-5 h-5" /> {{ props.prevMenu }} / {{ menuName }}
+              <Folder class="w-5 h-5" /> {{ ROOT_MENUS.includes(props.prevMenu) ? '' : props.prevMenu }}/{{ menuName }}/
             </DropdownMenuLabel>
             <DropdownMenuLabel v-else class="flex items-center gap-2">
-              <Folder class="w-5 h-5" /> {{ menuName }}
+              <Folder class="w-5 h-5" /> {{ ROOT_MENUS.includes(menuName) ? '' : menuName }}/
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem @click="addPageShow(menuName)">
+            <DropdownMenuItem @click="addPageShow(menuName, false)">
               <FilePlus2 />
               <span>New Page</span>
             </DropdownMenuItem>
@@ -307,7 +359,7 @@ const onSubmit = () => {
             </DropdownMenuItem>
             <DropdownMenuItem class="flex-col gap-0 items-start" :disabled="disabledFolderDelete(menuName, menu)" @click="deletePageShow({ name: menuName, item: '' })">
               <span class="my-0 py-0 flex"> <FolderMinus class="mr-2 h-4 w-4" />Delete Folder</span>
-              <span v-if="disabledFolderDelete(menuName, menu) && menuName === 'Main Menu'" class="my-0 text-gray-400 py-0 text-xs">(Cannot delete Main Menu)</span>
+              <span v-if="disabledFolderDelete(menuName, menu) && ROOT_MENUS.includes(menuName)" class="my-0 text-gray-400 py-0 text-xs">(Cannot delete {{ menuName }})</span>
               <span v-else-if="disabledFolderDelete(menuName, menu)" class="my-0 text-gray-400 py-0 text-xs">(Folder must be empty to delete)</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -325,7 +377,7 @@ const onSubmit = () => {
       >
         <template #item="{ element, index }">
           <div class="handle list-group-item">
-            <edge-cms-menu v-if="typeof element.item === 'object'" v-model="modelValue[menuName][index].item" :prev-menu="menuName" :site="props.site" :page="props.page" :prev-index="index" />
+            <edge-cms-menu v-if="typeof element.item === 'object'" v-model="modelValue[menuName][index].item" :prev-menu="menuName" :prev-model-value="modelValue" :site="props.site" :page="props.page" :prev-index="index" />
             <SidebarMenuSubItem v-else class="relative">
               <SidebarMenuSubButton :class="{ 'text-gray-400': element.item === '' }" as-child :is-active="element.item === props.page">
                 <NuxtLink :disabled="element.item === ''" :class="{ '!text-red-500': element.name === 'Deleting...' }" class="text-xs" :to="`/app/dashboard/sites/${props.site}/${element.item}`">
@@ -344,10 +396,10 @@ const onSubmit = () => {
                   </DropdownMenuTrigger>
                   <DropdownMenuContent side="right" align="start">
                     <DropdownMenuLabel v-if="props.prevMenu" class="flex items-center gap-2">
-                      <File class="w-5 h-5" /> {{ props.prevMenu }} / {{ menuName }} / {{ element.name }}
+                      <File class="w-5 h-5" /> {{ ROOT_MENUS.includes(props.prevMenu) ? '' : props.prevMenu }}/{{ menuName }}/{{ element.name }}
                     </DropdownMenuLabel>
                     <DropdownMenuLabel v-else class="flex items-center gap-2">
-                      <File class="w-5 h-5" />  {{ menuName }} / {{ element.name }}
+                      <File class="w-5 h-5" />  {{ ROOT_MENUS.includes(menuName) ? '' : menuName }}/{{ element.name }}
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem @click="showPageSettings(element)">
@@ -429,7 +481,6 @@ const onSubmit = () => {
         </DialogHeader>
 
         <edge-shad-input v-model="state.newPageName" name="name" placeholder="Page Name" />
-
         <DialogFooter class="pt-2 flex justify-between">
           <edge-shad-button variant="destructive" @click="state.addPageDialog = false">
             Cancel
@@ -490,11 +541,32 @@ const onSubmit = () => {
       >
         <template #main="slotProps">
           <div class="p-6 space-y-4  h-[calc(100vh-126px)] overflow-y-auto">
-            <edge-shad-input
-              v-model="slotProps.workingDoc.slug"
-              label="Page Slug"
-              name="slug"
-            />
+            <Card>
+              <CardHeader>
+                <CardTitle>SEO</CardTitle>
+                <CardDescription>Meta tags for the page.</CardDescription>
+              </CardHeader>
+              <CardContent class="pt-0">
+                <edge-shad-input
+                  v-model="slotProps.workingDoc.metaTitle"
+                  label="Meta Title"
+                  name="metaTitle"
+                />
+                <edge-shad-textarea
+                  v-model="slotProps.workingDoc.metaDescription"
+                  label="Meta Description"
+                  name="metaDescription"
+                />
+                <edge-cms-code-editor
+                  v-model="slotProps.workingDoc.structuredData"
+                  title="Structured Data (JSON-LD)"
+                  language="json"
+                  name="structuredData"
+                  height="300px"
+                  class="mb-4 w-full"
+                />
+              </CardContent>
+            </Card>
           </div>
           <SheetFooter class="pt-2 flex justify-between">
             <edge-shad-button variant="destructive" class="text-white" @click="state.pageSettings = false">
