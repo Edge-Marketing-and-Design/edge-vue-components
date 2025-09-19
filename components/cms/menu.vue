@@ -111,19 +111,58 @@ const deletePageShow = (page) => {
 
 const collectRootLevelSlugs = (excludeName = '') => {
   const slugs = new Set()
-  for (const root of ROOT_MENUS) {
-    const arr = modelValue.value?.[root] || []
-    for (const entry of arr) {
+  if (!props.prevMenu) {
+    for (const root of ROOT_MENUS) {
+      const arr = modelValue.value?.[root] || []
+      for (const entry of arr) {
       // Top-level page at "/<slug>"
-      if (typeof entry.item === 'string') {
-        if (entry.name && entry.name !== excludeName)
-          slugs.add(entry.name)
+        if (typeof entry.item === 'string') {
+          if (entry.name && entry.name !== excludeName)
+            slugs.add(entry.name)
+        }
+        // Top-level folder at "/<folder>/*"
+        else if (entry && typeof entry.item === 'object') {
+          const key = Object.keys(entry.item)[0]
+          if (key && key !== excludeName)
+            slugs.add(key)
+        }
       }
-      // Top-level folder at "/<folder>/*"
-      else if (entry && typeof entry.item === 'object') {
-        const key = Object.keys(entry.item)[0]
-        if (key && key !== excludeName)
-          slugs.add(key)
+    }
+  }
+  else {
+    if (state.renameItem.item === '') {
+      for (const root of ROOT_MENUS) {
+        const arr = props.prevModelValue?.[root] || []
+        for (const entry of arr) {
+          // Top-level page at "/<slug>"
+          if (typeof entry.item === 'string') {
+            if (entry.name && entry.name !== excludeName)
+              slugs.add(entry.name)
+          }
+          // Top-level folder at "/<folder>/*"
+          else if (entry && typeof entry.item === 'object') {
+            const key = Object.keys(entry.item)[0]
+            if (key && key !== excludeName)
+              slugs.add(key)
+          }
+        }
+      }
+    }
+    else {
+      const key = Object.keys(modelValue.value)[0]
+      const arr = modelValue.value?.[key] || []
+      for (const entry of arr) {
+      // Top-level page at "/<slug>"
+        if (typeof entry.item === 'string') {
+          if (entry.name && entry.name !== excludeName)
+            slugs.add(entry.name)
+        }
+        // Top-level folder at "/<folder>/*"
+        else if (entry && typeof entry.item === 'object') {
+          const key = Object.keys(entry.item)[0]
+          if (key && key !== excludeName)
+            slugs.add(key)
+        }
       }
     }
   }
@@ -133,6 +172,7 @@ const collectRootLevelSlugs = (excludeName = '') => {
 const slugGenerator = (name, excludeName = '') => {
   // Build a set of existing slugs that map to URLs off of "/" from *both* root menus.
   const existing = collectRootLevelSlugs(excludeName)
+  console.log('Existing slugs:', existing)
 
   const base = name ? name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '') : ''
   let unique = base

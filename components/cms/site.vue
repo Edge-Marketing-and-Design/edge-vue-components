@@ -98,7 +98,7 @@ const isSiteDiff = computed(() => {
     return true
   }
   if (publishedSite && siteData.value) {
-    return JSON.stringify({ domains: publishedSite.domains, menus: publishedSite.menus }) !== JSON.stringify({ domains: siteData.value.domains, menus: siteData.value.menus })
+    return JSON.stringify({ domains: publishedSite.domains, menus: publishedSite.menus, theme: publishedSite.theme }) !== JSON.stringify({ domains: siteData.value.domains, menus: siteData.value.menus, theme: siteData.value.theme })
   }
   return false
 })
@@ -221,6 +221,21 @@ const isSiteSettingPublished = computed(() => {
   return !!publishedSite
 })
 
+const isAnyPagesDiff = computed(() => {
+  const pagesData = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`] || {}
+  const publishedData = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`] || {}
+  for (const [pageId, pageData] of Object.entries(pagesData)) {
+    const publishedPage = publishedData?.[pageId]
+    if (!publishedPage) {
+      return true
+    }
+    if (JSON.stringify({ content: pageData.content }) !== JSON.stringify({ content: publishedPage.content })) {
+      return true
+    }
+  }
+  return false
+})
+
 const isAnyPagesPublished = computed(() => {
   const publishedData = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`] || {}
   return Object.keys(publishedData).length > 0
@@ -336,7 +351,7 @@ const isAnyPagesPublished = computed(() => {
                   Discard Changes
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem v-if="!isAllPagesPublished" @click="publishSite">
+                <DropdownMenuItem v-if="isAnyPagesDiff" @click="publishSite">
                   <FolderUp />
                   Publish All Pages
                 </DropdownMenuItem>
