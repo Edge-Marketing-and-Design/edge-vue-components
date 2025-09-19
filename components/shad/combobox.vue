@@ -89,12 +89,14 @@ if (props.multiple && !Array.isArray(modelValue.value)) {
 
 const triggerButton = ref(null)
 
-onMounted(() => {
-  nextTick(() => {
-    if (triggerButton.value) {
-      state.width = triggerButton.value.$el.offsetWidth
-    }
-  })
+watch(open, (isOpen) => {
+  if (isOpen) {
+    nextTick(() => {
+      if (triggerButton.value) {
+        state.width = triggerButton.value.$el.offsetWidth
+      }
+    })
+  }
 })
 
 const updateCheck = ref(true)
@@ -207,13 +209,13 @@ const triggerTitle = computed(() => {
                   :value="item[props.itemTitle]"
                   @select="() => handleItemSelect(item)"
                 >
-                  {{ item[props.itemTitle] }}
                   <Check
                     :class="cn(
-                      'ml-auto h-4 w-4',
+                      'h-4 w-4',
                       isSelected(item) ? 'opacity-100' : 'opacity-0',
                     )"
                   />
+                  {{ item[props.itemTitle] }}
                 </CommandItem>
               </CommandGroup>
             </CommandList>

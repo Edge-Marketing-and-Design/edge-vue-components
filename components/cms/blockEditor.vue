@@ -25,6 +25,7 @@ const state = reactive({
   },
   mounted: false,
   workingDoc: {},
+  loading: false,
 })
 
 const blockSchema = toTypedSchema(z.object({
@@ -227,6 +228,25 @@ const linkElements = computed(() => {
 watch(linkElements, (newLinkElements) => {
   emit('link', newLinkElements)
 }, { immediate: true, deep: true })
+
+onBeforeMount(async () => {
+  if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`]) {
+    await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`)
+  }
+})
+
+const themes = computed(() => {
+  return Object.values(edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`] || {})
+})
+
+watch (themes, async (newThemes) => {
+  state.loading = true
+  if (!edgeGlobal.edgeState.blockEditorTheme && newThemes.length > 0) {
+    edgeGlobal.edgeState.blockEditorTheme = newThemes[0].docId
+  }
+  await nextTick()
+  state.loading = false
+}, { immediate: true, deep: true })
 </script>
 
 <template>
@@ -250,12 +270,13 @@ watch(linkElements, (newLinkElements) => {
       </template>
       <template #header-center>
         <div class="w-full px-4">
-          <edge-g-input
+          <edge-shad-select
+            v-if="!state.loading"
             v-model="edgeGlobal.edgeState.blockEditorTheme"
-            :disable-tracking="true"
-            field-type="collection"
-            :collection-path="`${edgeGlobal.edgeState.organizationDocPath}/themes`"
+            label="Theme"
             name="theme"
+            :items="themes.map(t => ({ title: t.name, name: t.docId }))"
+            placeholder="Select Theme"
           />
         </div>
       </template>

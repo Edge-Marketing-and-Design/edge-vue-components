@@ -312,6 +312,11 @@ const onSubmit = () => {
     state.pageSettings = false
   }
 }
+const titleFromSlug = (slug) => {
+  if (!slug)
+    return ''
+  return slug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+}
 </script>
 
 <template>
@@ -329,7 +334,7 @@ const onSubmit = () => {
       <FolderOpen
         class="mr-2"
       />
-      <span>{{ menuName === 'Site Root' ? 'Main Menu' : menuName }}</span>
+      <span>{{ menuName === 'Site Root' ? 'Site Menu' : menuName }}</span>
       <SidebarGroupAction class="absolute right-2 top-0 hover:!bg-transparent">
         <DropdownMenu>
           <DropdownMenuTrigger as-child>
