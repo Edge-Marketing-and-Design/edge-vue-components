@@ -229,7 +229,7 @@ const isAnyPagesDiff = computed(() => {
     if (!publishedPage) {
       return true
     }
-    if (JSON.stringify({ content: pageData.content }) !== JSON.stringify({ content: publishedPage.content })) {
+    if (JSON.stringify({ content: pageData.content, metaTitle: pageData.metaTitle, metaDescription: pageData.metaDescription, structuredData: pageData.structuredData }) !== JSON.stringify({ content: publishedPage.content, metaTitle: publishedPage.metaTitle, metaDescription: publishedPage.metaDescription, structuredData: publishedPage.structuredData })) {
       return true
     }
   }

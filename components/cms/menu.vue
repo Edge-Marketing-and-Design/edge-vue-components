@@ -53,7 +53,7 @@ const isPublishedPageDiff = (pageId) => {
     return true
   }
   if (publishedPage && draftPage) {
-    return JSON.stringify(publishedPage.content) !== JSON.stringify(draftPage.content)
+    return JSON.stringify({ content: publishedPage.content, metaTitle: publishedPage.metaTitle, metaDescription: publishedPage.metaDescription, structuredData: publishedPage.structuredData }) !== JSON.stringify({ content: draftPage.content, metaTitle: draftPage.metaTitle, metaDescription: draftPage.metaDescription, structuredData: draftPage.structuredData })
   }
   return false
 }

@@ -8,7 +8,7 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['link'])
+const emit = defineEmits(['head'])
 
 const edgeFirebase = inject('edgeFirebase')
 
@@ -196,7 +196,6 @@ const blockModel = (html) => {
 
 const theme = computed(() => {
   const theme = edgeGlobal.edgeState.blockEditorTheme || ''
-  console.log(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}`)
   let themeContents = null
   if (theme) {
     themeContents = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`]?.[theme]?.theme || null
@@ -207,27 +206,24 @@ const theme = computed(() => {
   return null
 })
 
+const headObject = computed(() => {
+  const theme = edgeGlobal.edgeState.blockEditorTheme || ''
+  try {
+    return JSON.parse(edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`]?.[theme]?.headJSON || '{}')
+  }
+  catch (e) {
+    return {}
+  }
+})
+
+watch(headObject, (newHeadElements) => {
+  emit('head', newHeadElements)
+}, { immediate: true, deep: true })
+
 const editorDocUpdates = (workingDoc) => {
   state.workingDoc = blockModel(workingDoc.content)
   console.log('Editor workingDoc update:', state.workingDoc)
 }
-
-const linkElements = computed(() => {
-  // return theme.value
-  const fontLinks = Object.entries(theme.value?.extend.fontFamily || {}).flatMap(([key, fonts]) => {
-    console.log('Fonts for', key, fonts)
-    const googleFonts = fonts.filter(font => font !== 'sans-serif' && font !== 'monospace')
-    return googleFonts.map(font => ({
-      rel: 'stylesheet',
-      href: `https://fonts.googleapis.com/css2?family=${font.replace(/ /g, '+')}:wght@400;700&display=swap`,
-    }))
-  })
-  return fontLinks
-})
-
-watch(linkElements, (newLinkElements) => {
-  emit('link', newLinkElements)
-}, { immediate: true, deep: true })
 
 onBeforeMount(async () => {
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`]) {

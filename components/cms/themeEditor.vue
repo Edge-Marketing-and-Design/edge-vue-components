@@ -7,13 +7,32 @@ const props = defineProps({
     required: true,
   },
 })
-const emit = defineEmits(['link'])
+const emit = defineEmits(['head'])
 const state = reactive({
   filter: '',
   workingDoc: {},
   newDocs: {
     themes: {
       name: { value: '' },
+      headJSON: {
+        value: `{
+  "link": [
+    {
+      "rel": "preconnect",
+      "href": "https://fonts.googleapis.com"
+    },
+    {
+      "rel": "preconnect",
+      "href": "https://fonts.gstatic.com",
+      "crossorigin": ""
+    },
+    {
+      "rel": "stylesheet",
+      "href": "https://fonts.googleapis.com/css2?family=Overpass:wght@400;700&family=Kode+Mono:wght@400;700&display=swap"
+    }
+  ]
+}`,
+      },
       theme: {
         value: `{
   "extend": {
@@ -71,29 +90,17 @@ const editorDocUpdates = (workingDoc) => {
   state.workingDoc = workingDoc
 }
 
-const theme = computed(() => {
-  const themeContents = state.workingDoc.theme || null
-  if (themeContents) {
-    return JSON.parse(themeContents)
+const headObject = computed(() => {
+  try {
+    return JSON.parse(state.workingDoc.headJSON || '{}')
   }
-  return null
+  catch (e) {
+    return {}
+  }
 })
 
-const linkElements = computed(() => {
-  // return theme.value
-  const fontLinks = Object.entries(theme.value?.extend.fontFamily || {}).flatMap(([key, fonts]) => {
-    console.log('Fonts for', key, fonts)
-    const googleFonts = fonts.filter(font => font !== 'sans-serif' && font !== 'monospace')
-    return googleFonts.map(font => ({
-      rel: 'stylesheet',
-      href: `https://fonts.googleapis.com/css2?family=${font.replace(/ /g, '+')}:wght@400;700&display=swap`,
-    }))
-  })
-  return fontLinks
-})
-
-watch(linkElements, (newLinkElements) => {
-  emit('link', newLinkElements)
+watch(headObject, (newHeadElements) => {
+  emit('head', newHeadElements)
 }, { immediate: true, deep: true })
 </script>
 
@@ -124,17 +131,28 @@ watch(linkElements, (newLinkElements) => {
             name="name"
           />
           <div class="flex gap-4">
-            <edge-cms-code-editor
-              v-model="slotProps.workingDoc.theme"
-              title="Theme JSON"
-              language="json"
-              name="content"
-              height="calc(100vh - 300px)"
-              class="mb-4 w-1/2"
-            />
+            <div class="w-1/2">
+              <edge-cms-code-editor
+                v-model="slotProps.workingDoc.theme"
+                title="Theme JSON"
+                language="json"
+                name="content"
+                height="400px"
+                class="mb-4 w-full"
+              />
+              <edge-cms-code-editor
+                v-model="slotProps.workingDoc.headJSON"
+                title="Head JSON"
+                language="json"
+                name="headJSON"
+                height="400px"
+                class="mb-4 w-full"
+              />
+            </div>
             <div class="w-1/2">
               <div class="w-full mx-auto bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30">
                 <edge-cms-block-picker
+                  class="!h-[calc(100vh-220px)] overflow-y-auto"
                   list-only
                   :theme="JSON.parse(slotProps.workingDoc.theme)"
                 />

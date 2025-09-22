@@ -12,7 +12,7 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['link'])
+const emit = defineEmits(['head'])
 
 const edgeFirebase = inject('edgeFirebase')
 
@@ -83,21 +83,18 @@ const theme = computed(() => {
   return null
 })
 
-const linkElements = computed(() => {
-  // return theme.value
-  const fontLinks = Object.entries(theme.value?.extend.fontFamily || {}).flatMap(([key, fonts]) => {
-    console.log('Fonts for', key, fonts)
-    const googleFonts = fonts.filter(font => font !== 'sans-serif' && font !== 'monospace')
-    return googleFonts.map(font => ({
-      rel: 'stylesheet',
-      href: `https://fonts.googleapis.com/css2?family=${font.replace(/ /g, '+')}:wght@400;700&display=swap`,
-    }))
-  })
-  return fontLinks
+const headObject = computed(() => {
+  const theme = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site]?.theme || ''
+  try {
+    return JSON.parse(edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`]?.[theme]?.headJSON || '{}')
+  }
+  catch (e) {
+    return {}
+  }
 })
 
-watch(linkElements, (newLinkElements) => {
-  emit('link', newLinkElements)
+watch(headObject, (newHeadElements) => {
+  emit('head', newHeadElements)
 }, { immediate: true, deep: true })
 
 const isPublishedPageDiff = (pageId) => {
@@ -110,7 +107,7 @@ const isPublishedPageDiff = (pageId) => {
     return true
   }
   if (publishedPage && draftPage) {
-    return JSON.stringify(publishedPage.content) !== JSON.stringify(draftPage.content)
+    return JSON.stringify({ content: publishedPage.content, metaTitle: publishedPage.metaTitle, metaDescription: publishedPage.metaDescription, structuredData: publishedPage.structuredData }) !== JSON.stringify({ content: draftPage.content, metaTitle: draftPage.metaTitle, metaDescription: draftPage.metaDescription, structuredData: draftPage.structuredData })
   }
   return false
 }
@@ -122,6 +119,17 @@ const lastPublishedTime = (pageId) => {
   const date = new Date(timestamp)
   return date.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })
 }
+
+const currentPage = computed(() => {
+  return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`]?.[props.page] || null
+})
+
+watch (currentPage, (newPage) => {
+  state.workingDoc.last_updated = newPage.last_updated
+  state.workingDoc.metaTitle = newPage.metaTitle
+  state.workingDoc.metaDescription = newPage.metaDescription
+  state.workingDoc.structuredData = newPage.structuredData
+}, { immediate: true, deep: true })
 </script>
 
 <template>
@@ -204,7 +212,7 @@ const lastPublishedTime = (pageId) => {
     <template #main="slotProps">
       <Separator class="my-4" />
       <edge-button-divider v-if="state.editMode" class="my-2">
-        <edge-cms-block-picker @pick="(block) => blockPick(block, 0, slotProps)" />
+        <edge-cms-block-picker :theme="theme" @pick="(block) => blockPick(block, 0, slotProps)" />
       </edge-button-divider>
       <div class="w-full mx-auto  bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30">
         <draggable
