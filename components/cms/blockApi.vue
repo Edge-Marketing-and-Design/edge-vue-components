@@ -36,13 +36,52 @@ const getByPath = (obj, path) => {
   return path.split('.').reduce((acc, key) => ((acc && acc[key] !== undefined) ? acc[key] : undefined), obj)
 }
 
-// Build URL with optional query string without altering server-side limits
-const buildUrlWithQuery = (base, query) => {
-  if (!query)
-    return base
-  if (query.startsWith('?'))
-    return `${base}${query}`
-  return `${base}${base.includes('?') ? '&' : '?'}${query}`
+// Build URL combining existing query string, template query, and runtime overrides
+const buildUrlWithQuery = (base, query, queryItems = {}) => {
+  const safeBase = String(base || '')
+  const queryOverrides = (queryItems && typeof queryItems === 'object') ? queryItems : {}
+
+  // Separate hash fragment to re-attach later
+  const hashIndex = safeBase.indexOf('#')
+  const hash = hashIndex !== -1 ? safeBase.slice(hashIndex) : ''
+  const baseWithoutHash = hashIndex !== -1 ? safeBase.slice(0, hashIndex) : safeBase
+
+  const questionIndex = baseWithoutHash.indexOf('?')
+  const basePath = questionIndex === -1 ? baseWithoutHash : baseWithoutHash.slice(0, questionIndex)
+  const baseQuery = questionIndex === -1 ? '' : baseWithoutHash.slice(questionIndex + 1)
+
+  const params = new URLSearchParams(baseQuery)
+
+  const templateQuery = typeof query === 'string' ? query.trim() : ''
+  if (templateQuery) {
+    const cleaned = templateQuery.startsWith('?') ? templateQuery.slice(1) : templateQuery
+    if (cleaned) {
+      const templateParams = new URLSearchParams(cleaned)
+      for (const [key, value] of templateParams.entries())
+        params.set(key, value)
+    }
+  }
+
+  for (const [key, value] of Object.entries(queryOverrides)) {
+    if (value == null) {
+      params.delete(key)
+      continue
+    }
+
+    if (Array.isArray(value)) {
+      params.delete(key)
+      value.forEach((val) => {
+        if (val != null)
+          params.append(key, String(val))
+      })
+    }
+    else {
+      params.set(key, String(value))
+    }
+  }
+
+  const paramString = params.toString()
+  return `${basePath}${paramString ? `?${paramString}` : ''}${hash}`
 }
 
 // Core fetcher that resolves all API-backed arrays from meta
@@ -54,7 +93,7 @@ const fetchAllArrays = async (meta, baseValues) => {
       if (!cfg || cfg.type !== 'array' || !cfg.api)
         return
 
-      const url = buildUrlWithQuery(String(cfg.api), String(cfg.apiQuery || ''))
+      const url = buildUrlWithQuery(String(cfg.api), String(cfg.apiQuery || ''), cfg.apiQueryItems || {})
       // use $fetch for SSR-friendly HTTP
       const json = await $fetch(url, { method: 'GET' })
 

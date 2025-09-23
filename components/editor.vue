@@ -94,7 +94,7 @@ const unsavedChanges = computed(() => {
   if (props.docId === 'new') {
     return false
   }
-  // console.log('comparing', state.workingDoc, state.collectionData[props.docId])
+  console.log('comparing', state.workingDoc, state.collectionData[props.docId])
   // console.log('unsavedChanges', JSON.stringify(state.workingDoc) !== JSON.stringify(state.collectionData[props.docId]))
   return JSON.stringify(state.workingDoc) !== JSON.stringify(state.collectionData[props.docId])
 })

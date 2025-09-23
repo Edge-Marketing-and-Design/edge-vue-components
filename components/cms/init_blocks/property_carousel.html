@@ -8,11 +8,11 @@
   data-carousel-slides-to-scroll-lg="4"
 >
   <div data-carousel-track class="flex">
-    {{{#array {"field":"List", "schema":[{"field":"listing_price", "type":"money"},{"field":"square_feet", "type":"number"},{"field":"acres", "type":"number"}], "api": "https://api.clearwaterproperties.com/api/front/properties", "apiField": "data", "apiQuery": "", "apiLimit": 20, "value": []}}}}
+    {{{#array {"field":"List","schema":{"listing_price":"money","square_feet":"number","acres":"number"},"api":"https://api.clearwaterproperties.com/api/front/properties","apiField":"data","apiQuery":"?limit=20&filter_scope[agent][]=mt_nmar-mt.545000478","apiQueryOptions":[{"field":"sort","optionsKey":"label","optionsValue":"value","options":[{"label":"Highest Price","value":"listing_price"},{"label":"Lowest Price","value":"-listing_price"},{"label":"Newest","value":"-list_date"}]}],"apiLimit":10,"value":[]}}}}
       <div class="shrink-0 min-w-0 flex-[0_0_100%] lg:flex-[0_0_25%] p-4">
           <div class="{{loading}}">
             <div class="block bg-white shadow-md rounded-lg overflow-hidden animate-pulse">
-              <div class="relative w-full h-64 bg-gray-200">
+              <div class="relative w-full h-64 bg-gray-300">
                 <div class="absolute top-2 left-2 w-16 h-5 bg-gray-300 rounded"></div>
                 <div class="absolute bottom-2 right-2 w-20 h-5 bg-gray-300 rounded"></div>
               </div>

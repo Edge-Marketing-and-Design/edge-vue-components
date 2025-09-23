@@ -58,7 +58,7 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['update:modelValue'])
+const emit = defineEmits(['update:modelValue', 'lineClick'])
 const localModelValue = ref(null)
 const edgeFirebase = inject('edgeFirebase')
 
@@ -196,6 +196,20 @@ const runChatGpt = async () => {
 const handleMount = (editor) => {
   editorInstanceRef.value = editor
   editorInstanceRef.value?.getAction('editor.action.formatDocument').run()
+  editor.onMouseDown((event) => {
+    const position = event?.target?.position
+    const model = editor.getModel?.()
+    if (!position || !model)
+      return
+    const lineContent = model.getLineContent(position.lineNumber)
+    const offset = model.getOffsetAt(position)
+    emit('lineClick', {
+      lineNumber: position.lineNumber,
+      column: position.column,
+      lineContent,
+      offset,
+    })
+  })
 }
 
 const formatCode = () => {

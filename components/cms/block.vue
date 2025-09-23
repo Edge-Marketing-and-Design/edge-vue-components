@@ -88,6 +88,11 @@ const openEditor = () => {
   }
   state.draft = JSON.parse(JSON.stringify(modelValue.value?.values || {}))
   state.meta = JSON.parse(JSON.stringify(modelValue.value?.meta || {}))
+  for (const key of Object.keys(state.meta || {})) {
+    if (state.meta[key]?.apiQueryOptions && state.meta[key]?.apiQueryOptions.length > 0 && !state.meta[key].apiQueryItems) {
+      state.meta[key].apiQueryItems = {}
+    }
+  }
   const blockData = edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[modelValue.value.blockId]
   state.metaUpdate = edgeGlobal.dupObject(modelValue.value?.meta) || {}
   if (blockData?.meta) {
@@ -104,6 +109,7 @@ const openEditor = () => {
       }
     }
   }
+
   state.open = true
 }
 
@@ -345,9 +351,18 @@ const loadingRender = (content) => {
                   />
                 </div>
                 <div v-else>
-                  <edge-shad-input v-model="state.meta[entry.field].api" name="api" label="API URL" />
-                  <edge-shad-input v-model="state.meta[entry.field].apiField" name="apiField" label="API Field" />
-                  <edge-shad-input v-model="state.meta[entry.field].apiQuery" name="apiQuery" label="API Query String" />
+                  <template v-if="entry.meta?.apiQueryOptions">
+                    <div v-for="option in entry.meta.apiQueryOptions" :key="option.field" class="mb-2">
+                      <edge-shad-select
+                        v-model="state.meta[entry.field].apiQueryItems[option.field]"
+                        :label="genTitleFromField(option.field)"
+                        :name="option.field"
+                        :items="option.options || []"
+                        :item-title="option.optionsKey"
+                        :item-value="option.optionsValue"
+                      />
+                    </div>
+                  </template>
                   <edge-shad-number v-model="state.meta[entry.field].apiLimit" name="apiLimit" label="API Limit" />
                 </div>
               </div>
@@ -371,6 +386,7 @@ const loadingRender = (content) => {
               </div>
             </template>
           </div>
+
           <SheetFooter class="pt-2 flex justify-between">
             <edge-shad-button variant="destructive" class="text-white" @click="state.open = false">
               Cancel

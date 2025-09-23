@@ -28,6 +28,8 @@ const state = reactive({
   loading: false,
   jsonEditorOpen: false,
   jsonEditorContent: '',
+  jsonEditorError: '',
+  editingContext: null,
 })
 
 const blockSchema = toTypedSchema(z.object({
@@ -124,22 +126,31 @@ function* iterateTags(html) {
       break
 
     const type = m[1]
-    // The regex cursor ends *right after* the config's opening '{'
-    const openIdx = TAG_START_RE.lastIndex - 1
-    if (openIdx < 0 || html[openIdx] !== '{')
+    const configStart = TAG_START_RE.lastIndex - 1
+    if (configStart < 0 || html[configStart] !== '{')
       continue
 
-    const closeIdx = findMatchingBrace(html, openIdx)
-    if (closeIdx === -1)
+    const configEnd = findMatchingBrace(html, configStart)
+    if (configEnd === -1)
       continue
 
-    const rawCfg = html.slice(openIdx, closeIdx + 1)
-    yield { type, rawCfg }
+    const rawCfg = html.slice(configStart, configEnd + 1)
+    const tagStart = m.index
+    const closeTriple = html.indexOf('}}}', configEnd)
+    const tagEnd = closeTriple !== -1 ? closeTriple + 3 : configEnd + 1
 
-    // Jump past the closing braces and any trailing '}}}'
-    const afterCfg = html.indexOf('}}}', closeIdx)
-    TAG_START_RE.lastIndex = afterCfg !== -1 ? afterCfg + 3 : closeIdx + 1
+    yield { type, rawCfg, tagStart, tagEnd, configStart, configEnd }
+
+    TAG_START_RE.lastIndex = tagEnd
   }
+}
+
+function findTagAtOffset(html, offset) {
+  for (const tag of iterateTags(html)) {
+    if (offset >= tag.tagStart && offset <= tag.tagEnd)
+      return tag
+  }
+  return null
 }
 
 const blockModel = (html) => {
@@ -196,6 +207,105 @@ const blockModel = (html) => {
   return { values, meta }
 }
 
+function resetJsonEditorState() {
+  state.jsonEditorContent = ''
+  state.jsonEditorError = ''
+  state.editingContext = null
+}
+
+function closeJsonEditor() {
+  state.jsonEditorOpen = false
+  resetJsonEditorState()
+}
+
+function handleEditorLineClick(payload, workingDoc) {
+  if (!workingDoc || !workingDoc.content)
+    return
+
+  const offset = typeof payload?.offset === 'number' ? payload.offset : null
+  if (offset == null)
+    return
+
+  const tag = findTagAtOffset(workingDoc.content, offset)
+  if (!tag)
+    return
+
+  const parsedCfg = safeParseConfig(tag.rawCfg)
+  state.jsonEditorError = ''
+  state.jsonEditorContent = parsedCfg ? JSON.stringify(parsedCfg, null, 2) : tag.rawCfg
+  state.jsonEditorOpen = true
+  state.editingContext = {
+    type: tag.type,
+    field: parsedCfg?.field != null ? String(parsedCfg.field) : null,
+    workingDoc,
+    originalTag: workingDoc.content.slice(tag.tagStart, tag.tagEnd),
+    configStartOffset: tag.configStart - tag.tagStart,
+    configEndOffset: tag.configEnd - tag.tagStart,
+  }
+}
+
+function handleJsonEditorSave() {
+  if (!state.editingContext)
+    return
+
+  let parsed
+  try {
+    parsed = JSON.parse(state.jsonEditorContent)
+  }
+  catch (error) {
+    state.jsonEditorError = `Unable to parse JSON: ${error.message}`
+    return
+  }
+
+  const serialized = JSON.stringify(parsed)
+  const { workingDoc, type, field, originalTag, configStartOffset, configEndOffset } = state.editingContext
+  const content = workingDoc?.content ?? ''
+  if (!content) {
+    state.jsonEditorError = 'Block content is empty.'
+    return
+  }
+
+  let target = null
+  for (const tag of iterateTags(content)) {
+    if (tag.type !== type)
+      continue
+    if (!field) {
+      target = tag
+      break
+    }
+    const cfg = safeParseConfig(tag.rawCfg)
+    if (cfg && String(cfg.field) === field) {
+      target = tag
+      break
+    }
+  }
+
+  if (!target && originalTag) {
+    const idx = content.indexOf(originalTag)
+    if (idx !== -1) {
+      const startOffset = typeof configStartOffset === 'number' ? configStartOffset : originalTag.indexOf('{')
+      const endOffset = typeof configEndOffset === 'number' ? configEndOffset : originalTag.lastIndexOf('}')
+      if (startOffset != null && endOffset != null && startOffset >= 0 && endOffset >= startOffset) {
+        target = {
+          configStart: idx + startOffset,
+          configEnd: idx + endOffset,
+        }
+      }
+    }
+  }
+
+  if (!target) {
+    state.jsonEditorError = 'Unable to locate the original block field in the current content.'
+    return
+  }
+
+  const prefix = content.slice(0, target.configStart)
+  const suffix = content.slice(target.configEnd + 1)
+  workingDoc.content = `${prefix}${serialized}${suffix}`
+
+  closeJsonEditor()
+}
+
 const theme = computed(() => {
   const theme = edgeGlobal.edgeState.blockEditorTheme || ''
   let themeContents = null
@@ -245,6 +355,11 @@ watch (themes, async (newThemes) => {
   await nextTick()
   state.loading = false
 }, { immediate: true, deep: true })
+
+watch(() => state.jsonEditorOpen, (open) => {
+  if (!open)
+    resetJsonEditorState()
+})
 </script>
 
 <template>
@@ -294,6 +409,7 @@ watch (themes, async (newThemes) => {
               name="content"
               height="calc(100vh - 300px)"
               class="mb-4 w-1/2"
+              @line-click="payload => handleEditorLineClick(payload, slotProps.workingDoc)"
             />
             <div class="w-1/2">
               <div class="w-full mx-auto bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30">
@@ -307,33 +423,39 @@ watch (themes, async (newThemes) => {
         </div>
       </template>
     </edge-editor>
-    <edge-shad-dialog
-      v-model="state.jsonEditorOpen"
+    <Sheet
+      v-model:open="state.jsonEditorOpen"
     >
-      <DialogContent class="pt-10">
-        <DialogHeader>
-          <DialogTitle class="text-left">
+      <SheetContent side="left" class="w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl">
+        <SheetHeader>
+          <SheetTitle class="text-left">
             Field Editor
-          </DialogTitle>
-          <DialogDescription />
-        </DialogHeader>
-        <edge-cms-code-editor
-          v-model="state.jsonEditorContent"
-          title="Block Content"
-          language="json"
-          name="content"
-          height="500px"
-          class="mb-4 w-1/2"
-        />
-        <DialogFooter class="pt-2 flex justify-between">
-          <edge-shad-button class="text-white bg-slate-800 hover:bg-slate-400" @click="state.jsonEditorOpen = false">
+          </SheetTitle>
+        </SheetHeader>
+        <div class="p-6 space-y-4  h-[calc(100vh-120px)] overflow-y-auto">
+          <edge-cms-code-editor
+            v-model="state.jsonEditorContent"
+            title="Fields Configuration (JSON)"
+            language="json"
+            name="content"
+            height="calc(100vh - 200px)"
+          />
+          <p
+            v-if="state.jsonEditorError"
+            class="text-sm text-red-600"
+          >
+            {{ state.jsonEditorError }}
+          </p>
+        </div>
+        <SheetFooter class="pt-2 flex justify-between">
+          <edge-shad-button variant="destructive" class="text-white " @click="closeJsonEditor">
             Cancel
           </edge-shad-button>
-          <edge-shad-button variant="destructive" class="text-white w-full">
+          <edge-shad-button class=" bg-slate-800 hover:bg-slate-400text-white w-full" @click="handleJsonEditorSave">
             Save
           </edge-shad-button>
-        </DialogFooter>
-      </DialogContent>
-    </edge-shad-dialog>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
   </div>
 </template>
