@@ -125,10 +125,10 @@ const currentPage = computed(() => {
 })
 
 watch (currentPage, (newPage) => {
-  state.workingDoc.last_updated = newPage.last_updated
-  state.workingDoc.metaTitle = newPage.metaTitle
-  state.workingDoc.metaDescription = newPage.metaDescription
-  state.workingDoc.structuredData = newPage.structuredData
+  state.workingDoc.last_updated = newPage?.last_updated
+  state.workingDoc.metaTitle = newPage?.metaTitle
+  state.workingDoc.metaDescription = newPage?.metaDescription
+  state.workingDoc.structuredData = newPage?.structuredData
 }, { immediate: true, deep: true })
 </script>
 

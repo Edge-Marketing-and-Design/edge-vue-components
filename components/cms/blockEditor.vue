@@ -26,6 +26,8 @@ const state = reactive({
   mounted: false,
   workingDoc: {},
   loading: false,
+  jsonEditorOpen: false,
+  jsonEditorContent: '',
 })
 
 const blockSchema = toTypedSchema(z.object({
@@ -305,5 +307,33 @@ watch (themes, async (newThemes) => {
         </div>
       </template>
     </edge-editor>
+    <edge-shad-dialog
+      v-model="state.jsonEditorOpen"
+    >
+      <DialogContent class="pt-10">
+        <DialogHeader>
+          <DialogTitle class="text-left">
+            Field Editor
+          </DialogTitle>
+          <DialogDescription />
+        </DialogHeader>
+        <edge-cms-code-editor
+          v-model="state.jsonEditorContent"
+          title="Block Content"
+          language="json"
+          name="content"
+          height="500px"
+          class="mb-4 w-1/2"
+        />
+        <DialogFooter class="pt-2 flex justify-between">
+          <edge-shad-button class="text-white bg-slate-800 hover:bg-slate-400" @click="state.jsonEditorOpen = false">
+            Cancel
+          </edge-shad-button>
+          <edge-shad-button variant="destructive" class="text-white w-full">
+            Save
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
   </div>
 </template>
