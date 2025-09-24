@@ -375,14 +375,11 @@ const loadingRender = (content) => {
                   <edge-shad-number v-model="state.meta[entry.field].apiLimit" name="apiLimit" label="API Limit" />
                 </div>
               </div>
-              <div v-else-if="entry.meta?.options">
-                <edge-shad-select
+              <div v-else-if="entry.meta?.option">
+                <edge-cms-options-select
                   v-model="state.draft[entry.field]"
+                  :option="entry.meta.option"
                   :label="genTitleFromField(entry)"
-                  :name="entry.field"
-                  :items="entry.meta.options || []"
-                  item-title="title"
-                  item-value="value"
                 />
               </div>
               <div v-else>

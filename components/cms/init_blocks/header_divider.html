@@ -1,6 +1,7 @@
-<div class="p-1 w-full bg-slate-500 text-center text-white">
+<div class="p-1 w-full bg-brand text-center text-black">
     <img class="mx-auto" src={{{#image {"field": "image", "title": "The Image", "value": "" }}}} />
-    <h1 class="text-xl">{{{#text {"field": "mainHeader", "value": "" }}}}</h1>
+    <h1 class="text-xl font-brand">{{{#text {"field": "mainHeader", "value": "" }}}}</h1>
     <h3 class="text-sm">{{{#text {"field": "subHeader", "value": "" }}}}</h3>
-    <h3 class="text-sm">{{{#text {"field": "lastHeader", "value": "test", "options": ["test", "test2", "test3"] }}}}</h3>
+    <h3 class="text-sm">{{{#text {"field":"lastHeader","option":{"optionsKey":"title","optionsValue":"value","options":[{"title":"Test","value":"test"},{"title":"Test 2","value":"test2"},{"title":"Test 3","value":"test3"}]},"value":"test"}}}}</h3>
+    <h3 class="text-8xl">{{{#text {"field":"lastHeader2","option":{"optionsKey":"name","optionsValue":"name","options":"users"},"value":"test"}}}}</h3>
 </div>
