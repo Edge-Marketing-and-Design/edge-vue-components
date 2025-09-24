@@ -431,8 +431,19 @@ watch(() => state.jsonEditorOpen, (open) => {
           <SheetTitle class="text-left">
             Field Editor
           </SheetTitle>
+          <SheetDescription v-if="state.jsonEditorError" class="text-left text-sm text-gray-500">
+            <Alert variant="destructive" class="mt-2">
+              <AlertCircle class="w-4 h-4" />
+              <AlertTitle>
+                JSON Error
+              </AlertTitle>
+              <AlertDescription>
+                {{ state.jsonEditorError }}
+              </AlertDescription>
+            </Alert>
+          </SheetDescription>
         </SheetHeader>
-        <div class="p-6 space-y-4  h-[calc(100vh-120px)] overflow-y-auto">
+        <div :class="state.jsonEditorError ? 'h-[calc(100vh-200px)]' : 'h-[calc(100vh-120px)]'" class="p-6 space-y-4   overflow-y-auto">
           <edge-cms-code-editor
             v-model="state.jsonEditorContent"
             title="Fields Configuration (JSON)"
@@ -440,12 +451,6 @@ watch(() => state.jsonEditorOpen, (open) => {
             name="content"
             height="calc(100vh - 200px)"
           />
-          <p
-            v-if="state.jsonEditorError"
-            class="text-sm text-red-600"
-          >
-            {{ state.jsonEditorError }}
-          </p>
         </div>
         <SheetFooter class="pt-2 flex justify-between">
           <edge-shad-button variant="destructive" class="text-white " @click="closeJsonEditor">

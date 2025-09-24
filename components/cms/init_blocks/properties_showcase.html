@@ -1,16 +1,19 @@
 <section class="bg-gray-100 text-gray-900 py-16">
   <div class="max-w-7xl mx-auto px-4 py-4">
     <div class="text-center space-y-2">
-      <h2 class="text-3xl md:text-4xl font-semibold tracking-wide">
+      <h2 class="text-3xl md:text-5xl font-semibold tracking-wide">
         {{{#text {"field": "mainHeader", "value": "" }}}}
       </h2>
       <p class="text-base text-gray-600">
         {{{#text {"field": "subHeader", "value": "" }}}}
       </p>
+      <p>
+         {{{#text {"field": "thirdHeader", "value": "Hello" }}}}
+      </p>
     </div>
   </div>
   <div class="max-w-7xl mx-auto px-4 grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-    {{{#array {"field":"showcaseproperties", "schema":{"listing_price": "money", "square_feet": "number", "acres": "number"}, "api": "https://api.clearwaterproperties.com/api/front/properties", "apiField": "data", "apiQuery": "", "apiLimit": 6, "value": []}}}}
+    {{{#array {"field":"showcaseproperties","schema":{"listing_price":"money","square_feet":"number","acres":"number"},"api":"https://api.clearwaterproperties.com/api/front/properties","apiField":"data","apiQuery":"","apiQueryOptions":[{"field":"sort","optionsKey":"label","optionsValue":"value","options":[{"label":"Highest Price","value":"listing_price"},{"label":"Lowest Price","value":"-listing_price"},{"label":"Newest","value":"-list_date"}]},{"field":"filter_scope[agent][]","title":"Agent","optionsKey":"name","optionsValue":"mls.primary","options":"users"}],"apiLimit":6,"value":[]}}}}
       <div class="{{loading}}">
         <div class="block bg-white shadow-md rounded-lg overflow-hidden animate-pulse">
           <!-- Image skeleton -->

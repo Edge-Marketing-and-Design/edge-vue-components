@@ -6,7 +6,6 @@ import initUnocssRuntime, { defineConfig } from '@unocss/runtime'
 import presetWind4 from '@unocss/preset-wind4'
 
 import { useHead } from '#imports'
-
 const props = defineProps({
   html: {
     type: String,
@@ -17,6 +16,9 @@ const props = defineProps({
     default: () => ({}),
   },
 })
+
+const scopeId = `hc-${Math.random().toString(36).slice(2)}`
+
 // --- UnoCSS Runtime singleton (global, one init for the whole app) ---
 async function ensureUnoRuntime() {
   if (typeof window === 'undefined')
@@ -92,6 +94,29 @@ function buildGlobalThemeCSS(theme) {
   return `:root{${decls.join('')}}`
 }
 
+function buildScopedThemeCSS(theme, scopeId) {
+  const t = normalizeTheme(theme || {})
+  const { colors, fontFamily, fontSize, borderRadius, boxShadow } = t
+  const decls = []
+  Object.entries(colors).forEach(([k, v]) => decls.push(`--color-${k}: ${Array.isArray(v) ? v[0] : v};`))
+  Object.entries(fontFamily).forEach(([k, v]) => {
+    const val = Array.isArray(v) ? v.map(x => (x.includes(' ') ? `'${x}'` : x)).join(', ') : v
+    decls.push(`--font-${k}: ${val};`)
+  })
+  Object.entries(fontSize).forEach(([k, v]) => {
+    if (Array.isArray(v)) {
+      const [size, opts] = v
+      decls.push(`--font-size-${k}: ${size};`)
+      if (opts?.lineHeight)
+        decls.push(`--line-height-${k}: ${opts.lineHeight};`)
+    }
+    else decls.push(`--font-size-${k}: ${v};`)
+  })
+  Object.entries(borderRadius).forEach(([k, v]) => decls.push(`--radius-${k}: ${v};`))
+  Object.entries(boxShadow).forEach(([k, v]) => decls.push(`--shadow-${k}: ${v};`))
+  return `[data-theme-scope="${scopeId}"]{${decls.join('')}}`
+}
+
 function setGlobalThemeVars(theme) {
   if (typeof window === 'undefined')
     return
@@ -119,7 +144,7 @@ const safeHtml = computed(() => {
 // Inject theme CSS variables into <head> for SSR + client
 useHead(() => ({
   style: [
-    { id: 'htmlcontent-theme-global', children: buildGlobalThemeCSS(props.theme) },
+    { id: 'htmlcontent-theme-global', children: buildScopedThemeCSS(props.theme, scopeId) },
   ],
 }))
 
@@ -537,7 +562,8 @@ onMounted(async () => {
   initEmblaCarousels(hostEl.value)
 
   // Apply global theme once (keeps one style tag for vars; blocks can still override locally if needed)
-  setGlobalThemeVars(props.theme)
+  // setGlobalThemeVars(props.theme)
+  setScopedThemeVars(hostEl.value, normalizeTheme(props.theme))
   // If you later need per-block overrides, keep the next line; otherwise, it can be omitted.
   // setScopedThemeVars(hostEl.value, normalizeTheme(props.theme))
   applyThemeClasses(hostEl.value, props.theme, (props.theme && props.theme.variant) || 'light')
@@ -550,7 +576,8 @@ watch(
     // Wait for DOM to reflect new v-html, then (re)wire behaviors and class mappings
     await nextTick()
     initEmblaCarousels(hostEl.value)
-    setGlobalThemeVars(props.theme)
+    // setGlobalThemeVars(props.theme)
+    setScopedThemeVars(hostEl.value, normalizeTheme(props.theme))
     applyThemeClasses(hostEl.value, props.theme, (props.theme && props.theme.variant) || 'light')
     rewriteAllClasses(hostEl.value, props.theme)
   },
@@ -561,7 +588,8 @@ watch(
   (val) => {
     const t = normalizeTheme(val)
     // 1) Write CSS variables globally
-    setGlobalThemeVars(t)
+    // setGlobalThemeVars(t)
+    setScopedThemeVars(hostEl.value, t)
     // 2) Apply classes based on `apply`, `slots`, and optional variants
     applyThemeClasses(hostEl.value, t, (val && val.variant) || 'light')
     rewriteAllClasses(hostEl.value, t)
@@ -576,5 +604,5 @@ onBeforeUnmount(() => {
 
 <template>
   <!-- Runtime CSS applies inside this container -->
-  <div ref="hostEl" class="block-content" v-html="safeHtml" />
+  <div ref="hostEl" class="block-content" :data-theme-scope="scopeId" v-html="safeHtml" />
 </template>

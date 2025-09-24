@@ -51,6 +51,7 @@ const state = reactive({
   reload: false,
   metaUpdate: {},
   loading: true,
+  afterLoad: false,
 })
 
 const resetArrayItems = (field) => {
@@ -76,7 +77,7 @@ const resetArrayItems = (field) => {
   }
 }
 
-const openEditor = () => {
+const openEditor = async () => {
   if (!props.editMode)
     return
   for (const key of Object.keys(modelValue.value?.meta || {})) {
@@ -89,8 +90,15 @@ const openEditor = () => {
   state.draft = JSON.parse(JSON.stringify(modelValue.value?.values || {}))
   state.meta = JSON.parse(JSON.stringify(modelValue.value?.meta || {}))
   for (const key of Object.keys(state.meta || {})) {
-    if (state.meta[key]?.apiQueryOptions && state.meta[key]?.apiQueryOptions.length > 0 && !state.meta[key].apiQueryItems) {
-      state.meta[key].apiQueryItems = {}
+    if (state.meta[key]?.apiQueryOptions && state.meta[key]?.apiQueryOptions.length > 0) {
+      if (!state.meta[key]?.apiQueryItems) {
+        state.meta[key].apiQueryItems = {}
+      }
+      for (const option of state.meta[key].apiQueryOptions) {
+        if (!state.meta[key].apiQueryItems?.[option.field]) {
+          state.meta[key].apiQueryItems[option.field] = ''
+        }
+      }
     }
   }
   const blockData = edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[modelValue.value.blockId]
@@ -111,6 +119,7 @@ const openEditor = () => {
   }
 
   state.open = true
+  state.afterLoad = true
 }
 
 const save = () => {
@@ -147,7 +156,10 @@ const orderedMeta = computed(() => {
 })
 
 const genTitleFromField = (field) => {
-  return field
+  if (field?.title)
+    return field.title
+  // Insert space before a capital only if it's followed by a lowercase
+  return field.field
     // Insert space before a capital only if it's followed by a lowercase
     .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
     .replace(/([a-z])([A-Z])/g, '$1 $2')
@@ -237,7 +249,7 @@ const loadingRender = (content) => {
     </edge-shad-dialog>
 
     <Sheet v-model:open="state.open">
-      <SheetContent class="w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl">
+      <SheetContent v-if="state.afterLoad" class="w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl">
         <SheetHeader>
           <SheetTitle>Edit Block</SheetTitle>
           <SheetDescription />
@@ -252,7 +264,7 @@ const loadingRender = (content) => {
                     <Card v-if="!state.reload" class="mb-4 bg-white shadow-sm border border-gray-200 p-4">
                       <CardHeader class="p-0 mb-2">
                         <div class="relative flex items-center bg-secondary p-2 justify-between sticky top-0 z-10 bg-primary rounded">
-                          <span class="text-lg font-semibold whitespace-nowrap pr-1"> {{ genTitleFromField(entry.field) }}</span>
+                          <span class="text-lg font-semibold whitespace-nowrap pr-1"> {{ genTitleFromField(entry) }}</span>
                           <div class="flex w-full items-center">
                             <div class="w-full border-t border-gray-300 dark:border-white/15" aria-hidden="true" />
                             <edge-shad-button variant="text" class="hover:text-primary/50 text-xs h-[26px] text-primary" @click="state.editMode = !state.editMode">
@@ -273,7 +285,7 @@ const loadingRender = (content) => {
                                         v-model="state.arrayItems[entry.field][schemaItem.field]"
                                         :type="schemaItem.type"
                                         :field="schemaItem.field"
-                                        :label="genTitleFromField(schemaItem.field)"
+                                        :label="genTitleFromField(schemaItem)"
                                       />
                                     </template>
                                     <CardFooter class="mt-2 flex justify-end">
@@ -308,7 +320,7 @@ const loadingRender = (content) => {
                                   <Popover>
                                     <PopoverTrigger as-child>
                                       <Alert class="w-[200px] text-xs py-1 px-2 cursor-pointer hover:bg-primary hover:text-white">
-                                        <AlertTitle> {{ genTitleFromField(schemaItem.field) }}</AlertTitle>
+                                        <AlertTitle> {{ genTitleFromField(schemaItem) }}</AlertTitle>
                                         <AlertDescription class="text-sm truncate max-w-[200px]">
                                           {{ element[schemaItem.field] }}
                                         </AlertDescription>
@@ -320,7 +332,7 @@ const loadingRender = (content) => {
                                           v-model="element[schemaItem.field]"
                                           :type="schemaItem.type"
                                           :field="`${schemaItem.field}-${index}-entry`"
-                                          :label="genTitleFromField(schemaItem.field)"
+                                          :label="genTitleFromField(schemaItem)"
                                         />
                                       </Card>
                                     </PopoverContent>
@@ -347,19 +359,16 @@ const loadingRender = (content) => {
                     v-model="state.draft[entry.field]"
                     :type="entry.meta.type"
                     :field="entry.field"
-                    :label="genTitleFromField(entry.field)"
+                    :label="genTitleFromField(entry)"
                   />
                 </div>
                 <div v-else>
                   <template v-if="entry.meta?.apiQueryOptions">
                     <div v-for="option in entry.meta.apiQueryOptions" :key="option.field" class="mb-2">
-                      <edge-shad-select
+                      <edge-cms-options-select
                         v-model="state.meta[entry.field].apiQueryItems[option.field]"
-                        :label="genTitleFromField(option.field)"
-                        :name="option.field"
-                        :items="option.options || []"
-                        :item-title="option.optionsKey"
-                        :item-value="option.optionsValue"
+                        :option="option"
+                        :label="genTitleFromField(option)"
                       />
                     </div>
                   </template>
@@ -369,7 +378,7 @@ const loadingRender = (content) => {
               <div v-else-if="entry.meta?.options">
                 <edge-shad-select
                   v-model="state.draft[entry.field]"
-                  :label="genTitleFromField(entry.field)"
+                  :label="genTitleFromField(entry)"
                   :name="entry.field"
                   :items="entry.meta.options || []"
                   item-title="title"
@@ -381,7 +390,7 @@ const loadingRender = (content) => {
                   v-model="state.draft[entry.field]"
                   :type="entry.meta.type"
                   :field="entry.field"
-                  :label="genTitleFromField(entry.field)"
+                  :label="genTitleFromField(entry)"
                 />
               </div>
             </template>
