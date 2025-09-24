@@ -78,10 +78,6 @@ const blockSchema = toTypedSchema(z.object({
   }).min(1, { message: 'Name is required' }),
 }))
 
-definePageMeta({
-  middleware: 'auth',
-})
-
 onMounted(() => {
   state.mounted = true
 })
