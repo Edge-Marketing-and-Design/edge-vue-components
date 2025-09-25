@@ -179,7 +179,7 @@ const renderWithValues = (content, values) => {
           list = maybe
       }
       list = Array.isArray(list) ? list : []
-      const limit = Number(cfg.apiLimit)
+      const limit = Number(cfg.limit)
       if (Number.isFinite(limit) && limit > 0)
         list = list.slice(0, limit)
       const childAlias = (typeof cfg.as === 'string' && cfg.as.trim())
@@ -215,7 +215,7 @@ const renderWithValues = (content, values) => {
           list = maybe
       }
       list = Array.isArray(list) ? list : []
-      const limit = Number(cfg.apiLimit)
+      const limit = Number(cfg.limit)
       if (Number.isFinite(limit) && limit > 0)
         list = list.slice(0, limit)
       const childAlias = (typeof cfg.as === 'string' && cfg.as.trim()) ? cfg.as.trim() : undefined

@@ -77,6 +77,7 @@ onBeforeMount(async () => {
       })
       .filter(Boolean) // remove nulls
   }
+  staticOption.options.unshift({ title: '(none)', name: null })
   state.loading = false
 })
 </script>

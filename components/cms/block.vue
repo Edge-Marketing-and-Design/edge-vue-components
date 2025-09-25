@@ -90,13 +90,13 @@ const openEditor = async () => {
   state.draft = JSON.parse(JSON.stringify(modelValue.value?.values || {}))
   state.meta = JSON.parse(JSON.stringify(modelValue.value?.meta || {}))
   for (const key of Object.keys(state.meta || {})) {
-    if (state.meta[key]?.apiQueryOptions && state.meta[key]?.apiQueryOptions.length > 0) {
-      if (!state.meta[key]?.apiQueryItems) {
-        state.meta[key].apiQueryItems = {}
+    if (state.meta[key]?.queryOptions && state.meta[key]?.queryOptions.length > 0) {
+      if (!state.meta[key]?.queryItems) {
+        state.meta[key].queryItems = {}
       }
-      for (const option of state.meta[key].apiQueryOptions) {
-        if (!state.meta[key].apiQueryItems?.[option.field]) {
-          state.meta[key].apiQueryItems[option.field] = ''
+      for (const option of state.meta[key].queryOptions) {
+        if (!state.meta[key].queryItems?.[option.field]) {
+          state.meta[key].queryItems[option.field] = ''
         }
       }
     }
@@ -161,6 +161,7 @@ const genTitleFromField = (field) => {
   // Insert space before a capital only if it's followed by a lowercase
   return field.field
     // Insert space before a capital only if it's followed by a lowercase
+    .replace('_', ' ')
     .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
     .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/^./, str => str.toUpperCase())
@@ -203,7 +204,6 @@ const loadingRender = (content) => {
         :meta="modelValue?.meta"
         :theme="props.theme"
       />
-
       <!-- Darken overlay on hover -->
       <div v-if="props.editMode" class="pointer-events-none absolute inset-0 bg-black/50 opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-10" />
 
@@ -259,7 +259,7 @@ const loadingRender = (content) => {
           <div class="p-6 space-y-4  h-[calc(100vh-120px)] overflow-y-auto">
             <template v-for="entry in orderedMeta" :key="entry.field">
               <div v-if="entry.meta.type === 'array'">
-                <div v-if="!entry.meta?.api">
+                <div v-if="!entry.meta?.api && !entry.meta?.collection">
                   <div v-if="entry.meta?.schema">
                     <Card v-if="!state.reload" class="mb-4 bg-white shadow-sm border border-gray-200 p-4">
                       <CardHeader class="p-0 mb-2">
@@ -363,16 +363,16 @@ const loadingRender = (content) => {
                   />
                 </div>
                 <div v-else>
-                  <template v-if="entry.meta?.apiQueryOptions">
-                    <div v-for="option in entry.meta.apiQueryOptions" :key="option.field" class="mb-2">
+                  <template v-if="entry.meta?.queryOptions">
+                    <div v-for="option in entry.meta.queryOptions" :key="option.field" class="mb-2">
                       <edge-cms-options-select
-                        v-model="state.meta[entry.field].apiQueryItems[option.field]"
+                        v-model="state.meta[entry.field].queryItems[option.field]"
                         :option="option"
                         :label="genTitleFromField(option)"
                       />
                     </div>
                   </template>
-                  <edge-shad-number v-model="state.meta[entry.field].apiLimit" name="apiLimit" label="API Limit" />
+                  <edge-shad-number v-model="state.meta[entry.field].limit" name="limit" label="Limit" />
                 </div>
               </div>
               <div v-else-if="entry.meta?.option">

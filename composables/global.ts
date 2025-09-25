@@ -398,6 +398,40 @@ const iconFromMenu = (route: { path: string }): string => {
   return best.icon
 }
 
+const cmsCollectionData = async (edgeFirebase: any, value: any, meta: any) => {
+  for (const key in meta) {
+    if (meta[key]?.collection) {
+      const staticSearch = new edgeFirebase.SearchStaticData()
+
+      const currentQuery = meta[key].collection.query || []
+      for (const queryKey in meta[key].queryItems || {}) {
+        console.log('key', queryKey)
+        if (meta[key].queryItems[queryKey]) {
+          const findIndex = currentQuery.findIndex((q: any) => q.field === queryKey)
+          const newQuery = { field: queryKey, operator: '==', value: meta[key].queryItems[queryKey] }
+          if (findIndex > -1) {
+            currentQuery[findIndex] = newQuery
+          }
+          else {
+            currentQuery.push(newQuery)
+          }
+        }
+        else {
+          const findIndex = currentQuery.findIndex((q: any) => q.field === queryKey)
+          if (findIndex > -1) {
+            currentQuery.splice(findIndex, 1)
+          }
+        }
+      }
+      console.log('Final Query:', currentQuery)
+      await staticSearch.getData(`${edgeState.organizationDocPath}/${meta[key].collection.path}`, currentQuery, meta[key].collection.order, meta[key].limit)
+
+      value[key] = Object.values(staticSearch.results.data)
+    }
+  }
+  return value
+}
+
 export const edgeGlobal = {
   edgeState,
   setOrganization,
@@ -415,4 +449,5 @@ export const edgeGlobal = {
   getRoleName,
   isAdminGlobal,
   iconFromMenu,
+  cmsCollectionData,
 }

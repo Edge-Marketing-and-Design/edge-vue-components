@@ -176,8 +176,8 @@ const blockModel = (html) => {
       val = !val ? PLACEHOLDERS.text : String(val)
     }
     else if (type === 'array') {
-      if (meta[field]?.apiLimit > 0) {
-        val = Array(meta[field].apiLimit).fill('placeholder')
+      if (meta[field]?.limit > 0) {
+        val = Array(meta[field].limit).fill('placeholder')
       }
       else {
         if (Array.isArray(val)) {

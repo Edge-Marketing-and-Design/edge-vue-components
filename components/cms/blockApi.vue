@@ -6,6 +6,8 @@
  * - Preserves original behavior: API fields override same-named props.values fields
  */
 
+import { computedAsync } from '@vueuse/core'
+
 const props = defineProps({
   content: {
     type: String,
@@ -24,9 +26,8 @@ const props = defineProps({
     default: null,
   },
 })
-
 const emit = defineEmits(['pending'])
-
+const edgeFirebase = inject('edgeFirebase')
 /* ---------------- helpers ---------------- */
 
 // Safe dot-path getter
@@ -93,7 +94,7 @@ const fetchAllArrays = async (meta, baseValues) => {
       if (!cfg || cfg.type !== 'array' || !cfg.api)
         return
 
-      const url = buildUrlWithQuery(String(cfg.api), String(cfg.apiQuery || ''), cfg.apiQueryItems || {})
+      const url = buildUrlWithQuery(String(cfg.api), String(cfg.apiQuery || ''), cfg.queryItems || {})
       // use $fetch for SSR-friendly HTTP
       const json = await $fetch(url, { method: 'GET' })
 
@@ -102,7 +103,7 @@ const fetchAllArrays = async (meta, baseValues) => {
         data = (data && typeof data === 'object') ? Object.values(data) : []
       }
 
-      const limit = Number(cfg.apiLimit)
+      const limit = Number(cfg.limit)
       if (Number.isFinite(limit) && limit > 0) {
         data = data.slice(0, limit)
       }
@@ -167,13 +168,32 @@ const loadingRender = (content) => {
 if (import.meta.client) {
   watch(pending, val => emit('pending', val), { immediate: true })
 }
+
+const collectionValues = computedAsync(
+  async () => {
+    const collectionData = await edgeGlobal.cmsCollectionData(
+      edgeFirebase,
+      mergedValues.value,
+      props.meta,
+    )
+    return collectionData
+  },
+  {},
+)
+
+const finalValues = computed(() => {
+  return {
+    ...(mergedValues.value || {}),
+    ...(collectionValues.value || {}),
+  }
+})
 </script>
 
 <template>
   <edge-cms-block-render
     :theme="props.theme"
     :content="loadingRender(props.content)"
-    :values="mergedValues"
+    :values="finalValues"
     :meta="props.meta"
   />
 </template>

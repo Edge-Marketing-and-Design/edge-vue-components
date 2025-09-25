@@ -1,5 +1,6 @@
 <script setup>
 import { Plus } from 'lucide-vue-next'
+
 const props = defineProps({
   blockOverride: {
     type: Object,
@@ -122,17 +123,17 @@ const blockLoaded = (isLoading, index) => {
 <template>
   <div v-if="props.blockOverride">
     <edge-cms-block-api
-      :content="blockOverride.content"
-      :values="blockOverride.values"
-      :meta="blockOverride.meta"
+      :content="props.blockOverride.content"
+      :values="props.blockOverride.values"
+      :meta="props.blockOverride.meta"
       :theme="props.theme"
       @pending="blockLoaded($event, 'block')"
     />
     <edge-cms-block-render
       v-if="!state.blocksLoaded.includes('block')"
-      :content="loadingRender(blockOverride.content)"
-      :values="blockOverride.values"
-      :meta="blockOverride.meta"
+      :content="loadingRender(props.blockOverride.content)"
+      :values="props.blockOverride.values"
+      :meta="props.blockOverride.meta"
       :theme="props.theme"
     />
   </div>
