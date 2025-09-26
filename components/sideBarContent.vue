@@ -149,30 +149,13 @@ const currentRoutePath = computed(() => {
 const isAdmin = computed(() => {
   return edgeGlobal.isAdminGlobal(edgeFirebase).value
 })
-
-const toBool = v => v === true || v === 'true' || v === 1 || v === '1'
-
-const allowMenuItem = (item) => {
-  const isDev = config.public.developmentMode
-  const adminOnly = toBool(item.adminOnly)
-  const devOnly = toBool(item.devOnly)
-  const override = toBool(item.override)
-  if (item.override !== undefined)
-    return override
-  if (adminOnly && !isAdmin.value)
-    return false
-  if (devOnly && !isDev)
-    return false
-  return true
-}
-
 const menuItems = computed(() => {
   return props.menuItems
-    .filter(allowMenuItem)
+    .filter(item => edgeGlobal.allowMenuItem(item, isAdmin.value))
     .map(item => ({
       ...item,
       submenu: Array.isArray(item.submenu)
-        ? item.submenu.filter(allowMenuItem)
+        ? item.submenu.filter(subItem => edgeGlobal.allowMenuItem(subItem, isAdmin.value))
         : item.submenu,
     }))
 })

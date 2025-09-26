@@ -397,6 +397,22 @@ const iconFromMenu = (route: { path: string }): string => {
   // 4) Fallback
   return best.icon
 }
+const toBool = (v: any): boolean => v === true || v === 'true' || v === 1 || v === '1'
+
+const allowMenuItem = (item: any, isAdmin: boolean) => {
+  const config = useRuntimeConfig()
+  const isDev = config.public.developmentMode
+  const adminOnly = toBool(item.adminOnly)
+  const devOnly = toBool(item.devOnly)
+  const override = toBool(item.override)
+  if (item.override !== undefined)
+    return override
+  if (adminOnly && !isAdmin)
+    return false
+  if (devOnly && !isDev)
+    return false
+  return true
+}
 
 const cmsCollectionData = async (edgeFirebase: any, value: any, meta: any) => {
   for (const key in meta) {
@@ -450,4 +466,5 @@ export const edgeGlobal = {
   isAdminGlobal,
   iconFromMenu,
   cmsCollectionData,
+  allowMenuItem,
 }
