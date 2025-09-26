@@ -231,7 +231,9 @@ const customMaskOptions = {
 </script>
 
 <template>
-  <edge-logging-in v-if="edgeFirebase.user.loggingIn || edgeFirebase.user.loggedIn" />
+  <div v-if="edgeFirebase.user.loggingIn || edgeFirebase.user.loggedIn">
+    <edge-logging-in />
+  </div>
   <Card v-else class="max-w-md">
     <slot />
     <CardContent>
