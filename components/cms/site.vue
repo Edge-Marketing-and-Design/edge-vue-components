@@ -384,7 +384,22 @@ const isAnyPagesPublished = computed(() => {
                   </span>
                 </div>
               </Transition>
-              <edge-cms-menu v-if="state.menus" v-model="state.menus" :site="props.site" :page="props.page" />
+              <Tabs default-value="pages" class="mt-2">
+                <TabsList class="grid w-full grid-cols-2 py-0">
+                  <TabsTrigger value="pages" class="py-0">
+                    Pages
+                  </TabsTrigger>
+                  <TabsTrigger value="posts" class="py-0">
+                    Posts
+                  </TabsTrigger>
+                </TabsList>
+                <TabsContent value="pages" class="p-0">
+                  <edge-cms-menu v-if="state.menus" v-model="state.menus" :site="props.site" :page="props.page" />
+                </TabsContent>
+                <TabsContent value="posts" class="p-0">
+                  <edge-cms-posts :site="props.site" />
+                </TabsContent>
+              </Tabs>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

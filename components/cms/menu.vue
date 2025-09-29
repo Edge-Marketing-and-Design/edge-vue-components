@@ -402,9 +402,9 @@ const titleFromSlug = (slug) => {
               <FolderPen />
               <span>Rename Folder</span>
             </DropdownMenuItem>
-            <DropdownMenuItem class="flex-col gap-0 items-start" :disabled="disabledFolderDelete(menuName, menu)" @click="deletePageShow({ name: menuName, item: '' })">
+            <DropdownMenuItem class="flex-col gap-0 items-start text-destructive" :disabled="disabledFolderDelete(menuName, menu) || ROOT_MENUS.includes(menuName)" @click="deletePageShow({ name: menuName, item: '' })">
               <span class="my-0 py-0 flex"> <FolderMinus class="mr-2 h-4 w-4" />Delete Folder</span>
-              <span v-if="disabledFolderDelete(menuName, menu) && ROOT_MENUS.includes(menuName)" class="my-0 text-gray-400 py-0 text-xs">(Cannot delete {{ menuName }})</span>
+              <span v-if="ROOT_MENUS.includes(menuName)" class="my-0 text-gray-400 py-0 text-xs">(Cannot delete {{ menuName }})</span>
               <span v-else-if="disabledFolderDelete(menuName, menu)" class="my-0 text-gray-400 py-0 text-xs">(Folder must be empty to delete)</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -468,7 +468,7 @@ const titleFromSlug = (slug) => {
                       <FileDown />
                       Unpublish
                     </DropdownMenuItem>
-                    <DropdownMenuItem @click="deletePageShow(element)">
+                    <DropdownMenuItem class="text-destructive" @click="deletePageShow(element)">
                       <FileMinus2 />
                       <span>Delete</span>
                     </DropdownMenuItem>

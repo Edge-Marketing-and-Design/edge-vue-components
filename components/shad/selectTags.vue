@@ -48,9 +48,13 @@ const props = defineProps({
     required: false,
     default: 'name',
   },
+  allowAdditions: {
+    type: Boolean,
+    default: false,
+  },
 })
 
-const emits = defineEmits(['update:modelValue'])
+const emits = defineEmits(['update:modelValue', 'add'])
 
 const computedItems = computed(() => {
   return props.items.map((item) => {
@@ -86,6 +90,52 @@ const valueToTitle = computed(() => {
   }
   return map
 })
+
+const existingValueMap = computed(() => {
+  const map = {}
+  for (const item of computedItems.value) {
+    const value = String(item[props.itemValue])
+    map[value.toLowerCase()] = value
+  }
+  return map
+})
+
+const normalize = value => String(value || '').trim()
+
+const addValueToModel = (value) => {
+  const normalized = normalize(value)
+  if (!normalized)
+    return
+  if (!modelValue.value.includes(normalized))
+    modelValue.value = [...modelValue.value, normalized]
+}
+
+const addFromSearch = () => {
+  if (!props.allowAdditions)
+    return
+  const raw = normalize(searchTerm.value)
+  if (!raw)
+    return
+
+  const existingValue = existingValueMap.value[raw.toLowerCase()]
+  if (existingValue) {
+    addValueToModel(existingValue)
+    searchTerm.value = ''
+    open.value = false
+    return
+  }
+
+  addValueToModel(raw)
+  emits('add', raw)
+  searchTerm.value = ''
+  open.value = false
+}
+
+const onEnter = () => {
+  if (!props.allowAdditions)
+    return
+  addFromSearch()
+}
 </script>
 
 <template>
@@ -111,7 +161,12 @@ const valueToTitle = computed(() => {
                   </div>
 
                   <ComboboxInput v-model="searchTerm" as-child>
-                    <TagsInputInput :disabled="props.disabled" :placeholder="props.placeholder" class="min-w-[200px] w-full p-0 border-none shadow-none focus-visible:ring-0 h-auto" @keydown.enter.prevent />
+                    <TagsInputInput
+                      :disabled="props.disabled"
+                      :placeholder="props.placeholder"
+                      class="min-w-[200px] w-full p-0 border-none shadow-none focus-visible:ring-0 h-auto"
+                      @keydown.enter.prevent="onEnter"
+                    />
                   </ComboboxInput>
                   <ComboboxTrigger as-child>
                     <Button variant="icon" class="!py-0 h-6">
@@ -121,18 +176,32 @@ const valueToTitle = computed(() => {
                 </TagsInput>
 
                 <ComboboxList class="w-[--reka-popper-anchor-width]">
-                  <ComboboxEmpty />
+                  <ComboboxEmpty>
+                    <button
+                      v-if="props.allowAdditions && searchTerm && searchTerm.trim() && !computedItems.some(item => String(item[props.itemValue]).toLowerCase() === searchTerm.trim().toLowerCase())"
+                      type="button"
+                      class="w-full rounded-sm px-2 py-1 text-left text-sm hover:bg-muted"
+                      @click.prevent="addFromSearch()"
+                    >
+                      Create "{{ searchTerm.trim() }}"
+                    </button>
+                    <span v-else-if="searchTerm && searchTerm.trim()" class="block px-2 py-1 text-sm text-muted-foreground">
+                      No results found
+                    </span>
+                    <span v-else class="block px-2 py-1 text-sm text-muted-foreground">
+                      Start typing to search
+                    </span>
+                  </ComboboxEmpty>
                   <ComboboxGroup>
                     <ComboboxItem
                       v-for="item in filteredItems" :key="item[props.itemValue]" :value="item[props.itemValue]"
                       @select.prevent="(ev) => {
                         if (typeof ev.detail.value === 'string') {
-                          searchTerm = ''
-                          modelValue.push(ev.detail.value)
+                          searchTerm.value = ''
+                          addValueToModel(ev.detail.value)
                         }
-                        if (filteredItems.length === 0) {
-                          open = false
-                        }
+                        if (filteredItems.length === 0)
+                          open.value = false
                       }"
                     >
                       {{ item[props.itemTitle] }}
