@@ -118,6 +118,21 @@ const formatters = {
       ? n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
       : (v == null ? '' : String(v))
   },
+  richtext: v => (v == null ? '' : String(v)), // pass HTML through
+}
+
+const getFieldType = (schemaMap, fieldKey) => {
+  if (!schemaMap || !fieldKey)
+    return undefined
+  const baseKey = String(fieldKey).split('.')[0]
+  if (Array.isArray(schemaMap)) {
+    const hit = schemaMap.find(e => e && e.field === baseKey)
+    return hit && (hit.type || hit.value)
+  }
+  if (schemaMap && typeof schemaMap === 'object') {
+    return schemaMap[baseKey]
+  }
+  return undefined
 }
 
 // Given a field name and value, apply schema-based formatting if present
@@ -127,11 +142,11 @@ const applySchemaFormat = (fieldKey, value, schemaMap) => {
 
   const baseKey = String(fieldKey).split('.')[0]
 
-  // Resolve type from either object schema or array schema
+  // Resolve type from either object schema or array schema; support legacy `value` as type
   let type
   if (Array.isArray(schemaMap)) {
     const hit = schemaMap.find(e => e && e.field === baseKey)
-    type = hit && hit.type
+    type = hit && (hit.type || hit.value)
   }
   else if (schemaMap && typeof schemaMap === 'object') {
     type = schemaMap[baseKey]
@@ -228,8 +243,9 @@ const renderWithValues = (content, values) => {
       const esc = alias.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')
       expanded = expanded.replace(new RegExp(`\\{\\{\\s*${esc}\\.([a-zA-Z0-9_.$]+)\\s*\\}\\}`, 'g'), (_m, p) => {
         const v = getByPath(data, p)
+        const type = getFieldType(schemaCtx, p)
         const formatted = applySchemaFormat(p, v, schemaCtx)
-        return escapeHtml(String(formatted))
+        return type === 'richtext' ? (formatted == null ? '' : String(formatted)) : escapeHtml(String(formatted))
       })
       expanded = expanded.replace(new RegExp(`\\{\\{\\s*${esc}\\s*\\}\\}`, 'g'), () => {
         return data == null ? '' : escapeHtml(String(data))
@@ -238,8 +254,9 @@ const renderWithValues = (content, values) => {
     // Always allow {{item.*}} to refer to THIS scope
     expanded = expanded.replace(/\{\{\s*item\.([a-zA-Z0-9_.$]+)\s*\}\}/g, (_m, p) => {
       const v = getByPath(data, p)
+      const type = getFieldType(schemaCtx, p)
       const formatted = applySchemaFormat(p, v, schemaCtx)
-      return formatted == null ? '' : escapeHtml(String(formatted))
+      return type === 'richtext' ? (formatted == null ? '' : String(formatted)) : (formatted == null ? '' : escapeHtml(String(formatted)))
     })
     expanded = expanded.replace(/\{\{\s*item\s*\}\}/g, () => {
       return data == null ? '' : escapeHtml(String(data))
@@ -303,6 +320,8 @@ const renderWithValues = (content, values) => {
     const val = raw == null ? '' : raw
     if (kind === 'text')
       return escapeHtml(String(val))
+    if (kind === 'richtext')
+      return String(val) // raw HTML
     // image → raw string; typically used inside src={}
     return String(val)
   })
@@ -332,6 +351,8 @@ const renderWithValues = (content, values) => {
     const val = raw == null ? '' : raw
     if (type === 'text')
       return escapeHtml(String(val))
+    if (type === 'richtext')
+      return String(val)
     return String(val)
   })
 }

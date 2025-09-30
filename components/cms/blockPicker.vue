@@ -14,6 +14,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  siteId: {
+    type: String,
+    default: '',
+  },
 })
 
 const emit = defineEmits(['pick'])
@@ -127,6 +131,7 @@ const blockLoaded = (isLoading, index) => {
       :values="props.blockOverride.values"
       :meta="props.blockOverride.meta"
       :theme="props.theme"
+      :site-id="props.siteId"
       @pending="blockLoaded($event, 'block')"
     />
     <edge-cms-block-render
@@ -135,6 +140,7 @@ const blockLoaded = (isLoading, index) => {
       :values="props.blockOverride.values"
       :meta="props.blockOverride.meta"
       :theme="props.theme"
+      :site-id="props.siteId"
     />
   </div>
   <div v-else-if="props.listOnly" class="p-6 space-y-4  h-[calc(100vh-50px)] overflow-y-auto">
@@ -153,7 +159,7 @@ const blockLoaded = (isLoading, index) => {
             <div class="text-4xl relative text-inherit text-center">
               {{ block.name }}
             </div>
-            <edge-cms-block-api :content="block.content" :theme="props.theme" :values="block.values" :meta="block.meta" @pending="blockLoaded($event, block.docId)" />
+            <edge-cms-block-api :site-id="props.siteId" :content="block.content" :theme="props.theme" :values="block.values" :meta="block.meta" @pending="blockLoaded($event, block.docId)" />
             <edge-cms-block-render
               v-if="!state.blocksLoaded.includes(block.docId)"
               :content="loadingRender(block.content)"
@@ -200,7 +206,7 @@ const blockLoaded = (isLoading, index) => {
                     <div class="text-4xl relative text-inherit text-center">
                       {{ block.name }}
                     </div>
-                    <edge-cms-block-api :content="block.content" :theme="props.theme" :values="block.values" :meta="block.meta" @pending="blockLoaded($event, block.docId)" />
+                    <edge-cms-block-api :site-id="props.siteId" :content="block.content" :theme="props.theme" :values="block.values" :meta="block.meta" @pending="blockLoaded($event, block.docId)" />
                     <edge-cms-block-render
                       v-if="!state.blocksLoaded.includes(block.docId)"
                       :content="loadingRender(block.content)"

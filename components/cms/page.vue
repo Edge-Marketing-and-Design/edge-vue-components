@@ -119,7 +119,7 @@ const isPublishedPageDiff = (pageId) => {
     return true
   }
   if (publishedPage && draftPage) {
-    return JSON.stringify({ content: publishedPage.content, metaTitle: publishedPage.metaTitle, metaDescription: publishedPage.metaDescription, structuredData: publishedPage.structuredData }) !== JSON.stringify({ content: draftPage.content, metaTitle: draftPage.metaTitle, metaDescription: draftPage.metaDescription, structuredData: draftPage.structuredData })
+    return JSON.stringify({ content: publishedPage.content, postContent: publishedPage.postContent, metaTitle: publishedPage.metaTitle, metaDescription: publishedPage.metaDescription, structuredData: publishedPage.structuredData }) !== JSON.stringify({ content: draftPage.content, postContent: draftPage.postContent, metaTitle: draftPage.metaTitle, metaDescription: draftPage.metaDescription, structuredData: draftPage.structuredData })
   }
   return false
 }
@@ -234,7 +234,7 @@ watch (currentPage, (newPage) => {
         <TabsContent value="list">
           <Separator class="my-4" />
           <edge-button-divider v-if="state.editMode" class="my-2">
-            <edge-cms-block-picker :theme="theme" @pick="(block) => blockPick(block, 0, slotProps)" />
+            <edge-cms-block-picker :site-id="props.site" :theme="theme" @pick="(block) => blockPick(block, 0, slotProps)" />
           </edge-button-divider>
           <div class="w-full mx-auto  bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30">
             <draggable
@@ -252,6 +252,7 @@ watch (currentPage, (newPage) => {
                     <div :class="state.editMode ? 'px-2 py-2 w-[98%]' : 'w-[100%]'">
                       <edge-cms-block
                         v-model="slotProps.workingDoc.content[index]"
+                        :site-id="props.site"
                         :edit-mode="state.editMode"
                         :block-id="element.id" class=""
                         :theme="theme"
@@ -261,7 +262,7 @@ watch (currentPage, (newPage) => {
                   </div>
                   <div v-if="state.editMode" class="w-full">
                     <edge-button-divider class="my-2">
-                      <edge-cms-block-picker :theme="theme" @pick="(block) => blockPick(block, index + 1, slotProps)" />
+                      <edge-cms-block-picker :site-id="props.site" :theme="theme" @pick="(block) => blockPick(block, index + 1, slotProps)" />
                     </edge-button-divider>
                   </div>
                 </div>
@@ -272,7 +273,7 @@ watch (currentPage, (newPage) => {
         <TabsContent value="post">
           <Separator class="my-4" />
           <edge-button-divider v-if="state.editMode" class="my-2">
-            <edge-cms-block-picker :theme="theme" @pick="(block) => blockPick(block, 0, slotProps, true)" />
+            <edge-cms-block-picker :site-id="props.site" :theme="theme" @pick="(block) => blockPick(block, 0, slotProps, true)" />
           </edge-button-divider>
           <div class="w-full mx-auto  bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30">
             <draggable
@@ -293,13 +294,14 @@ watch (currentPage, (newPage) => {
                         :edit-mode="state.editMode"
                         :block-id="element.id" class=""
                         :theme="theme"
+                        :site-id="props.site"
                         @delete="(block) => deleteBlock(block, slotProps, true)"
                       />
                     </div>
                   </div>
                   <div v-if="state.editMode" class="w-full">
                     <edge-button-divider class="my-2">
-                      <edge-cms-block-picker :theme="theme" @pick="(block) => blockPick(block, index + 1, slotProps, true)" />
+                      <edge-cms-block-picker :site-id="props.site" :theme="theme" @pick="(block) => blockPick(block, index + 1, slotProps, true)" />
                     </edge-button-divider>
                   </div>
                 </div>

@@ -18,6 +18,10 @@ const props = defineProps({
     type: Object,
     default: null,
   },
+  siteId: {
+    type: String,
+    default: '',
+  },
 })
 const emit = defineEmits(['update:modelValue', 'delete'])
 const edgeFirebase = inject('edgeFirebase')
@@ -195,8 +199,7 @@ const loadingRender = (content) => {
       @click="openEditor"
     >
       <!-- Content -->
-
-      <edge-cms-block-api :theme="props.theme" :content="modelValue?.content" :values="modelValue?.values" :meta="modelValue?.meta" @pending="state.loading = $event" />
+      <edge-cms-block-api :site-id="props.siteId" :theme="props.theme" :content="modelValue?.content" :values="modelValue?.values" :meta="modelValue?.meta" @pending="state.loading = $event" />
       <edge-cms-block-render
         v-if="state.loading"
         :content="loadingRender(modelValue?.content)"

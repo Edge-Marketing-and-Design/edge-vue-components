@@ -25,6 +25,10 @@ const props = defineProps({
     type: Object,
     default: null,
   },
+  siteId: {
+    type: String,
+    default: '',
+  },
 })
 const emit = defineEmits(['pending'])
 const edgeFirebase = inject('edgeFirebase')
@@ -175,6 +179,7 @@ const collectionValues = computedAsync(
       edgeFirebase,
       mergedValues.value,
       props.meta,
+      props.siteId,
     )
     return collectionData
   },

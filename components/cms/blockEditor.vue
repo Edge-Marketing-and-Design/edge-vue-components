@@ -30,6 +30,7 @@ const state = reactive({
   jsonEditorContent: '',
   jsonEditorError: '',
   editingContext: null,
+  renderSite: '',
 })
 
 const blockSchema = toTypedSchema(z.object({
@@ -337,6 +338,9 @@ onBeforeMount(async () => {
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`]) {
     await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`)
   }
+  if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]) {
+    await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/sites`)
+  }
 })
 
 const themes = computed(() => {
@@ -356,6 +360,18 @@ watch(() => state.jsonEditorOpen, (open) => {
   if (!open)
     resetJsonEditorState()
 })
+const sites = computed(() => {
+  return Object.values(edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`] || {})
+})
+
+watch (sites, async (newSites) => {
+  state.loading = true
+  if (!edgeGlobal.edgeState.blockEditorSite && newSites.length > 0) {
+    edgeGlobal.edgeState.blockEditorSite = newSites[0].docId
+  }
+  await nextTick()
+  state.loading = false
+}, { immediate: true, deep: true })
 </script>
 
 <template>
@@ -378,15 +394,29 @@ watch(() => state.jsonEditorOpen, (open) => {
         {{ slotProps.title }}
       </template>
       <template #header-center>
-        <div class="w-full px-4">
-          <edge-shad-select
-            v-if="!state.loading"
-            v-model="edgeGlobal.edgeState.blockEditorTheme"
-            label="Theme"
-            name="theme"
-            :items="themes.map(t => ({ title: t.name, name: t.docId }))"
-            placeholder="Select Theme"
-          />
+        <div class="w-full flex gap-1 px-4">
+          <div class="w-1/2">
+            <edge-shad-select
+              v-if="!state.loading"
+              v-model="edgeGlobal.edgeState.blockEditorTheme"
+              label="Theme"
+              name="theme"
+              :items="themes.map(t => ({ title: t.name, name: t.docId }))"
+              placeholder="Select Theme"
+              class="w-full"
+            />
+          </div>
+          <div class="w-1/2">
+            <edge-shad-select
+              v-if="!state.loading"
+              v-model="edgeGlobal.edgeState.blockEditorSite"
+              label="Site"
+              name="site"
+              :items="sites.map(s => ({ title: s.name, name: s.docId }))"
+              placeholder="Select Site"
+              class="w-full"
+            />
+          </div>
         </div>
       </template>
 
@@ -410,6 +440,7 @@ watch(() => state.jsonEditorOpen, (open) => {
             <div class="w-1/2">
               <div class="w-full mx-auto bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30">
                 <edge-cms-block-picker
+                  :site-id="edgeGlobal.edgeState.blockEditorSite"
                   :theme="theme"
                   :block-override="{ content: slotProps.workingDoc.content, values: state.workingDoc.values, meta: state.workingDoc.meta }"
                 />

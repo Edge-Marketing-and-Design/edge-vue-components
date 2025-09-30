@@ -17,6 +17,7 @@ const edgeState = reactive({
   redirectRoute: '',
   isEmulator: false,
   blockEditorTheme: '',
+  blockEditorSite: '',
 })
 
 const setOrganization = async (organization: string, edgeFirebase: any) => {
@@ -414,7 +415,7 @@ const allowMenuItem = (item: any, isAdmin: boolean) => {
   return true
 }
 
-const cmsCollectionData = async (edgeFirebase: any, value: any, meta: any) => {
+const cmsCollectionData = async (edgeFirebase: any, value: any, meta: any, currentSite: any = '') => {
   for (const key in meta) {
     if (meta[key]?.collection) {
       const staticSearch = new edgeFirebase.SearchStaticData()
@@ -439,8 +440,13 @@ const cmsCollectionData = async (edgeFirebase: any, value: any, meta: any) => {
           }
         }
       }
+      let collectionPath = `${edgeState.organizationDocPath}/${meta[key].collection.path}`
+      if (meta[key].collection.path === 'posts') {
+        collectionPath = `${edgeState.organizationDocPath}/sites/${currentSite}/published_posts`
+      }
+      console.log('Collection Path:', collectionPath)
       console.log('Final Query:', currentQuery)
-      await staticSearch.getData(`${edgeState.organizationDocPath}/${meta[key].collection.path}`, currentQuery, meta[key].collection.order, meta[key].limit)
+      await staticSearch.getData(collectionPath, currentQuery, meta[key].collection.order, meta[key].limit)
 
       value[key] = Object.values(staticSearch.results.data)
     }
