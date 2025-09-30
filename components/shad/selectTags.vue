@@ -136,6 +136,16 @@ const onEnter = () => {
     return
   addFromSearch()
 }
+
+const onSelectItem = (ev) => {
+  const value = ev?.detail?.value
+  if (typeof value === 'string') {
+    searchTerm.value = ''
+    addValueToModel(value)
+  }
+  if (filteredItems.value.length === 0)
+    open.value = false
+}
 </script>
 
 <template>
@@ -195,14 +205,7 @@ const onEnter = () => {
                   <ComboboxGroup>
                     <ComboboxItem
                       v-for="item in filteredItems" :key="item[props.itemValue]" :value="item[props.itemValue]"
-                      @select.prevent="(ev) => {
-                        if (typeof ev.detail.value === 'string') {
-                          searchTerm.value = ''
-                          addValueToModel(ev.detail.value)
-                        }
-                        if (filteredItems.length === 0)
-                          open.value = false
-                      }"
+                      @select.prevent="onSelectItem"
                     >
                       {{ item[props.itemTitle] }}
                     </ComboboxItem>

@@ -2,7 +2,7 @@
 import { computed, inject, onBeforeMount, reactive, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { File, FilePen, Loader2, MoreHorizontal, Plus, Trash2 } from 'lucide-vue-next'
+import { File, FileCheck, FilePen, FileWarning, Loader2, MoreHorizontal, Plus, Trash2 } from 'lucide-vue-next'
 
 const props = defineProps({
   site: {
@@ -15,14 +15,15 @@ const edgeFirebase = inject('edgeFirebase')
 
 const collection = computed(() => `sites/${props.site}/posts`)
 const collectionKey = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/${collection.value}`)
-const tagsCollection = computed(() => `sites/${props.site}/posttags`)
-const tagsCollectionKey = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/${tagsCollection.value}`)
+
+const publishedCollection = computed(() => `sites/${props.site}/published_posts`)
+const publishedCollectionKey = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/${publishedCollection.value}`)
 
 const schemas = {
   posts: toTypedSchema(z.object({
     name: z.string({
-      required_error: 'Slug is required',
-    }).min(1, { message: 'Slug is required' }),
+      required_error: 'Name is required',
+    }).min(1, { message: 'Name is required' }),
     title: z.string({
       required_error: 'Title is required',
     }).min(1, { message: 'Title is required' }),
@@ -36,9 +37,32 @@ const schemas = {
 
 const renameSchema = toTypedSchema(z.object({
   name: z.string({
-    required_error: 'Slug is required',
-  }).min(1, { message: 'Slug is required' }),
+    required_error: 'Name is required',
+  }).min(1, { message: 'Name is required' }),
 }))
+
+const isPublishedPostDiff = (postId) => {
+  const publishedPost = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published_posts`]?.[postId]
+  const draftPost = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/posts`]?.[postId]
+  if (!publishedPost && draftPost) {
+    return true
+  }
+  if (publishedPost && !draftPost) {
+    return true
+  }
+  if (publishedPost && draftPost) {
+    return JSON.stringify({ name: publishedPost.name, content: publishedPost.content, tags: publishedPost.tags, title: publishedPost.title, featuredImages: publishedPost.featuredImages }) !== JSON.stringify({ name: draftPost.name, content: draftPost.content, tags: draftPost.tags, title: draftPost.title, featuredImages: draftPost.featuredImages })
+  }
+  return false
+}
+
+const lastPublishedTime = (postId) => {
+  const timestamp = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`]?.[postId]?.last_updated
+  if (!timestamp)
+    return 'Never'
+  const date = new Date(timestamp)
+  return date.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })
+}
 
 const state = reactive({
   sheetOpen: false,
@@ -61,7 +85,7 @@ const state = reactive({
         cols: '12',
         bindings: {
           'field-type': 'text',
-          'label': 'Slug',
+          'label': 'Name',
         },
       },
       title: {
@@ -109,8 +133,8 @@ onBeforeMount(async () => {
   if (!edgeFirebase.data?.[collectionKey.value]) {
     await edgeFirebase.startSnapshot(collectionKey.value)
   }
-  if (!edgeFirebase.data?.[tagsCollectionKey.value]) {
-    await edgeFirebase.startSnapshot(tagsCollectionKey.value)
+  if (!edgeFirebase.data?.[publishedCollectionKey.value]) {
+    await edgeFirebase.startSnapshot(publishedCollectionKey.value)
   }
 })
 
@@ -118,7 +142,7 @@ const posts = computed(() => edgeFirebase.data?.[collectionKey.value] || {})
 const postsList = computed(() =>
   Object.entries(posts.value)
     .map(([id, data]) => ({ id, ...data }))
-    .sort((a, b) => (b.last_updated ?? b.doc_created_at ?? 0) - (a.last_updated ?? a.doc_created_at ?? 0)),
+    .sort((a, b) => (b.doc_created_at ?? 0) - (a.doc_created_at ?? 0)),
 )
 const hasPosts = computed(() => postsList.value.length > 0)
 const isCreating = computed(() => state.activePostId === 'new')
@@ -361,6 +385,7 @@ const deletePost = async () => {
   const postId = target.id
   try {
     await edgeFirebase.removeDoc(collectionKey.value, postId)
+    await edgeFirebase.removeDoc(publishedCollectionKey.value, postId)
     if (state.activePostId === postId)
       closeSheet()
   }
@@ -374,7 +399,48 @@ const deletePost = async () => {
 }
 
 const addTag = async (tag) => {
-  await edgeFirebase.storeDoc(tagsCollectionKey.value, { name: tag })
+  console.log('Tag to add:', tag)
+}
+
+const getTagsFromPosts = computed(() => {
+  const tagMap = new Map()
+  postsList.value.forEach((post) => {
+    if (Array.isArray(post.tags)) {
+      post.tags.forEach((tag) => {
+        if (tag && typeof tag === 'string' && !tagMap.has(tag)) {
+          tagMap.set(tag, { name: tag, title: tag })
+        }
+      })
+    }
+  })
+  return Array.from(tagMap.values()).sort((a, b) => a.title.localeCompare(b.title))
+})
+
+const publishPost = async (postId) => {
+  if (!postId)
+    return
+  const post = posts.value?.[postId]
+  if (!post)
+    return
+  try {
+    await edgeFirebase.storeDoc(publishedCollectionKey.value, post)
+  }
+
+  catch (error) {
+    console.error('Failed to publish post:', error)
+  }
+}
+
+const unPublishPost = async (postId) => {
+  if (!postId)
+    return
+  try {
+    await edgeFirebase.removeDoc(publishedCollectionKey.value, postId)
+  }
+
+  catch (error) {
+    console.error('Failed to unpublish post:', error)
+  }
 }
 </script>
 
@@ -388,7 +454,8 @@ const addTag = async (tag) => {
     <div v-if="hasPosts" class="space-y-2">
       <SidebarMenuItem v-for="post in postsList" :key="post.id">
         <SidebarMenuButton class="!px-0 hover:!bg-transparent" @click="editPost(post.id)">
-          <File class="w-5 h-5" />
+          <FileWarning v-if="isPublishedPostDiff(post.docId)" class="!text-yellow-600" />
+          <FileCheck v-else class="text-xs !text-green-700 font-normal" />
           <div class="ml-2 flex flex-col text-left">
             <span class="text-sm font-medium">{{ post.name || 'Untitled Post' }}</span>
           </div>
@@ -405,6 +472,15 @@ const addTag = async (tag) => {
                 <FilePen class="h-4 w-4" />
                 Rename
               </DropdownMenuItem>
+              <DropdownMenuItem v-if="isPublishedPostDiff(post.docId)" @click="publishPost(post.docId)">
+                <FileCheck class="h-4 w-4" />
+                Publish
+              </DropdownMenuItem>
+              <DropdownMenuItem v-else @click="unPublishPost(post.docId)">
+                <FileWarning class="h-4 w-4" />
+                Unpublish
+              </DropdownMenuItem>
+
               <DropdownMenuItem class="text-destructive" @click="showDeleteDialog(post)">
                 <Trash2 class="h-4 w-4" />
                 Delete
@@ -483,7 +559,7 @@ const addTag = async (tag) => {
             Update the slug used in URLs. Existing links will change after renaming.
           </DialogDescription>
         </DialogHeader>
-        <edge-shad-input v-model="state.renameValue" name="name" label="Slug" />
+        <edge-shad-input v-model="state.renameValue" name="name" label="Name" />
         <DialogFooter class="flex justify-between pt-2">
           <edge-shad-button variant="outline" @click="closeRenameDialog">
             Cancel
@@ -523,7 +599,7 @@ const addTag = async (tag) => {
             <edge-shad-input
               v-model="slotProps.workingDoc.name"
               name="name"
-              label="Slug"
+              label="Name"
             />
             <edge-shad-input
               v-model="slotProps.workingDoc.title"
@@ -537,14 +613,14 @@ const addTag = async (tag) => {
               label="Tags"
               placeholder="Add a tag"
               :disabled="slotProps.submitting"
-              :items="Object.values(edgeFirebase.data?.[tagsCollectionKey] || {}).map(tag => ({ title: tag.name, name: tag.name }))"
+              :items="getTagsFromPosts"
               :allow-additions="true"
               @add="addTag"
             />
             <edge-shad-html v-model="slotProps.workingDoc.content" :enabled-toggles="['bold', 'italic', 'strike', 'bulletlist', 'orderedlist', 'underline']" name="content" label="Content" :disabled="slotProps.submitting" />
           </div>
           <SheetFooter class="pt-2 flex justify-between">
-            <edge-shad-button variant="destructive" class="text-white" @click="state.pageSettings = false">
+            <edge-shad-button variant="destructive" class="text-white" @click="state.sheetOpen = false">
               Cancel
             </edge-shad-button>
             <edge-shad-button :disabled="slotProps.submitting" type="submit" class=" bg-slate-800 hover:bg-slate-400 w-full">

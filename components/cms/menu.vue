@@ -586,6 +586,13 @@ const titleFromSlug = (slug) => {
       >
         <template #main="slotProps">
           <div class="p-6 space-y-4  h-[calc(100vh-126px)] overflow-y-auto">
+            <edge-shad-checkbox
+              v-model="slotProps.workingDoc.post"
+              label="Is a Post Template"
+              name="post"
+            >
+              Post page.  When checked this will create two templates for this page: one for the post list (e.g. /{{ slotProps.workingDoc.name }}) and one for individual posts (e.g. /{{ slotProps.workingDoc.name }}/:slug).
+            </edge-shad-checkbox>
             <Card>
               <CardHeader>
                 <CardTitle>SEO</CardTitle>

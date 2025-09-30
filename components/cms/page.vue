@@ -21,6 +21,7 @@ const state = reactive({
     pages: {
       name: { bindings: { 'field-type': 'text', 'label': 'Name', 'helper': 'Name' }, cols: '12', value: '' },
       content: { value: [] },
+      postContent: { value: [] },
     },
   },
   editMode: false,
@@ -35,23 +36,32 @@ const schemas = {
   })),
 }
 
-const deleteBlock = (blockId, slotProps) => {
+const deleteBlock = (blockId, slotProps, post = false) => {
   console.log('Deleting block with ID:', blockId)
+  if (post) {
+    const index = slotProps.workingDoc.postContent.findIndex(block => block.id === blockId)
+    if (index !== -1) {
+      slotProps.workingDoc.postContent.splice(index, 1)
+    }
+    return
+  }
   const index = slotProps.workingDoc.content.findIndex(block => block.id === blockId)
   if (index !== -1) {
     slotProps.workingDoc.content.splice(index, 1)
   }
 }
 
-const blockPick = (block, index, slotProps) => {
-  console.log('Block picked:', block, 'at index:', index)
-  console.log(slotProps)
+const blockPick = (block, index, slotProps, post = false) => {
   const generatedId = edgeGlobal.generateShortId()
   block.id = generatedId
   if (index === 0 || index) {
-    slotProps.workingDoc.content.splice(index, 0, block)
+    if (post) {
+      slotProps.workingDoc.postContent.splice(index, 0, block)
+    }
+    else {
+      slotProps.workingDoc.content.splice(index, 0, block)
+    }
   }
-  console.log('Updated content:', slotProps.workingDoc.content)
 }
 
 onMounted(() => {
@@ -62,6 +72,8 @@ onMounted(() => {
 
 const editorDocUpdates = (workingDoc) => {
   const blockIds = workingDoc.content.map(block => block.blockId).filter(id => id)
+  const postBlockIds = workingDoc.postContent ? workingDoc.postContent.map(block => block.blockId).filter(id => id) : []
+  blockIds.push(...postBlockIds)
   const uniqueBlockIds = [...new Set(blockIds)]
   state.workingDoc.blockIds = uniqueBlockIds
 }
@@ -210,42 +222,92 @@ watch (currentPage, (newPage) => {
       </div>
     </template>
     <template #main="slotProps">
-      <Separator class="my-4" />
-      <edge-button-divider v-if="state.editMode" class="my-2">
-        <edge-cms-block-picker :theme="theme" @pick="(block) => blockPick(block, 0, slotProps)" />
-      </edge-button-divider>
-      <div class="w-full mx-auto  bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30">
-        <draggable
-          v-if="slotProps.workingDoc?.content && slotProps.workingDoc.content.length > 0"
-          v-model="slotProps.workingDoc.content"
-          handle=".handle"
-          item-key="id"
-        >
-          <template #item="{ element, index }">
-            <div :key="element.id" class="">
-              <div :class="{ 'border-1 border-dotted py-1 mb-1': state.editMode }" class="flex w-full items-center w-full">
-                <div v-if="state.editMode" class="text-left px-2">
-                  <Grip class="handle pointer" />
+      <Tabs class="w-full" default-value="list">
+        <TabsList v-if="slotProps.workingDoc?.post" class="w-full mt-3 bg-primary rounded-sm">
+          <TabsTrigger value="list">
+            List Page
+          </TabsTrigger>
+          <TabsTrigger value="post">
+            Post Page
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="list">
+          <Separator class="my-4" />
+          <edge-button-divider v-if="state.editMode" class="my-2">
+            <edge-cms-block-picker :theme="theme" @pick="(block) => blockPick(block, 0, slotProps)" />
+          </edge-button-divider>
+          <div class="w-full mx-auto  bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30">
+            <draggable
+              v-if="slotProps.workingDoc?.content && slotProps.workingDoc.content.length > 0"
+              v-model="slotProps.workingDoc.content"
+              handle=".handle"
+              item-key="id"
+            >
+              <template #item="{ element, index }">
+                <div :key="element.id" class="">
+                  <div :class="{ 'border-1 border-dotted py-1 mb-1': state.editMode }" class="flex w-full items-center w-full">
+                    <div v-if="state.editMode" class="text-left px-2">
+                      <Grip class="handle pointer" />
+                    </div>
+                    <div :class="state.editMode ? 'px-2 py-2 w-[98%]' : 'w-[100%]'">
+                      <edge-cms-block
+                        v-model="slotProps.workingDoc.content[index]"
+                        :edit-mode="state.editMode"
+                        :block-id="element.id" class=""
+                        :theme="theme"
+                        @delete="(block) => deleteBlock(block, slotProps)"
+                      />
+                    </div>
+                  </div>
+                  <div v-if="state.editMode" class="w-full">
+                    <edge-button-divider class="my-2">
+                      <edge-cms-block-picker :theme="theme" @pick="(block) => blockPick(block, index + 1, slotProps)" />
+                    </edge-button-divider>
+                  </div>
                 </div>
-                <div :class="state.editMode ? 'px-2 py-2 w-[98%]' : 'w-[100%]'">
-                  <edge-cms-block
-                    v-model="slotProps.workingDoc.content[index]"
-                    :edit-mode="state.editMode"
-                    :block-id="element.id" class=""
-                    :theme="theme"
-                    @delete="(block) => deleteBlock(block, slotProps)"
-                  />
+              </template>
+            </draggable>
+          </div>
+        </TabsContent>
+        <TabsContent value="post">
+          <Separator class="my-4" />
+          <edge-button-divider v-if="state.editMode" class="my-2">
+            <edge-cms-block-picker :theme="theme" @pick="(block) => blockPick(block, 0, slotProps, true)" />
+          </edge-button-divider>
+          <div class="w-full mx-auto  bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30">
+            <draggable
+              v-if="slotProps.workingDoc?.postContent && slotProps.workingDoc.postContent.length > 0"
+              v-model="slotProps.workingDoc.postContent"
+              handle=".handle"
+              item-key="id"
+            >
+              <template #item="{ element, index }">
+                <div :key="element.id" class="">
+                  <div :class="{ 'border-1 border-dotted py-1 mb-1': state.editMode }" class="flex w-full items-center w-full">
+                    <div v-if="state.editMode" class="text-left px-2">
+                      <Grip class="handle pointer" />
+                    </div>
+                    <div :class="state.editMode ? 'px-2 py-2 w-[98%]' : 'w-[100%]'">
+                      <edge-cms-block
+                        v-model="slotProps.workingDoc.postContent[index]"
+                        :edit-mode="state.editMode"
+                        :block-id="element.id" class=""
+                        :theme="theme"
+                        @delete="(block) => deleteBlock(block, slotProps, true)"
+                      />
+                    </div>
+                  </div>
+                  <div v-if="state.editMode" class="w-full">
+                    <edge-button-divider class="my-2">
+                      <edge-cms-block-picker :theme="theme" @pick="(block) => blockPick(block, index + 1, slotProps, true)" />
+                    </edge-button-divider>
+                  </div>
                 </div>
-              </div>
-              <div v-if="state.editMode" class="w-full">
-                <edge-button-divider class="my-2">
-                  <edge-cms-block-picker :theme="theme" @pick="(block) => blockPick(block, index + 1, slotProps)" />
-                </edge-button-divider>
-              </div>
-            </div>
-          </template>
-        </draggable>
-      </div>
+              </template>
+            </draggable>
+          </div>
+        </TabsContent>
+      </Tabs>
     </template>
   </edge-editor>
 </template>
