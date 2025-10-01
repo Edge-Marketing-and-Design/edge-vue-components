@@ -425,7 +425,9 @@ const cmsCollectionData = async (edgeFirebase: any, value: any, meta: any, curre
         console.log('key', queryKey)
         if (meta[key].queryItems[queryKey]) {
           const findIndex = currentQuery.findIndex((q: any) => q.field === queryKey)
-          const newQuery = { field: queryKey, operator: '==', value: meta[key].queryItems[queryKey] }
+          const queryOption = meta[key]?.queryOptions?.find((o: any) => o.field === queryKey)
+          const operator = queryOption?.operator || '=='
+          const newQuery = { field: queryKey, operator, value: meta[key].queryItems[queryKey] }
           if (findIndex > -1) {
             currentQuery[findIndex] = newQuery
           }
@@ -441,7 +443,7 @@ const cmsCollectionData = async (edgeFirebase: any, value: any, meta: any, curre
         }
       }
       let collectionPath = `${edgeState.organizationDocPath}/${meta[key].collection.path}`
-      if (meta[key].collection.path === 'posts') {
+      if (meta[key].collection.path === 'posts' || meta[key].collection.path === 'post') {
         collectionPath = `${edgeState.organizationDocPath}/sites/${currentSite}/published_posts`
       }
       console.log('Collection Path:', collectionPath)

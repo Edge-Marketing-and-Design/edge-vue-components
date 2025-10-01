@@ -100,7 +100,12 @@ const openEditor = async () => {
       }
       for (const option of state.meta[key].queryOptions) {
         if (!state.meta[key].queryItems?.[option.field]) {
-          state.meta[key].queryItems[option.field] = ''
+          if ((state.meta[key].collection?.path === 'posts' && option.field === 'tags')) {
+            state.meta[key].queryItems[option.field] = []
+          }
+          else {
+            state.meta[key].queryItems[option.field] = ''
+          }
         }
       }
     }
@@ -189,6 +194,29 @@ const loadingRender = (content) => {
   }
   return content
 }
+
+const postsList = computed(() => {
+  const postsCollectionPath = `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.siteId}/posts`
+  return Object.values(edgeFirebase.data[postsCollectionPath] || {}).sort((a, b) => {
+    if (a.publishDate && b.publishDate) {
+      return new Date(b.publishDate).getTime() - new Date(a.publishDate).getTime()
+    }
+    return 0
+  })
+})
+const getTagsFromPosts = computed(() => {
+  const tagMap = new Map()
+  postsList.value.forEach((post) => {
+    if (Array.isArray(post.tags)) {
+      post.tags.forEach((tag) => {
+        if (tag && typeof tag === 'string' && !tagMap.has(tag)) {
+          tagMap.set(tag, { name: tag, title: tag })
+        }
+      })
+    }
+  })
+  return Array.from(tagMap.values()).sort((a, b) => a.title.localeCompare(b.title))
+})
 </script>
 
 <template>
@@ -259,7 +287,7 @@ const loadingRender = (content) => {
         </SheetHeader>
 
         <edge-shad-form>
-          <div class="p-6 space-y-4  h-[calc(100vh-120px)] overflow-y-auto">
+          <div class="p-6 space-y-4  h-[calc(100vh-130px)] overflow-y-auto">
             <template v-for="entry in orderedMeta" :key="entry.field">
               <div v-if="entry.meta.type === 'array'">
                 <div v-if="!entry.meta?.api && !entry.meta?.collection">
@@ -368,14 +396,23 @@ const loadingRender = (content) => {
                 <div v-else>
                   <template v-if="entry.meta?.queryOptions">
                     <div v-for="option in entry.meta.queryOptions" :key="option.field" class="mb-2">
+                      <edge-shad-select-tags
+                        v-if="entry.meta?.collection?.path === 'posts' && option.field === 'tags'"
+                        v-model="state.meta[entry.field].queryItems[option.field]"
+                        :items="getTagsFromPosts"
+                        :label="`${genTitleFromField(option)} -test`"
+                        :name="option.field"
+                        :placeholder="`Select ${genTitleFromField(option)}`"
+                      />
                       <edge-cms-options-select
+                        v-else-if="entry.meta?.collection?.path !== 'post'"
                         v-model="state.meta[entry.field].queryItems[option.field]"
                         :option="option"
                         :label="genTitleFromField(option)"
                       />
                     </div>
                   </template>
-                  <edge-shad-number v-model="state.meta[entry.field].limit" name="limit" label="Limit" />
+                  <edge-shad-number v-if="entry.meta?.collection?.path !== 'post'" v-model="state.meta[entry.field].limit" name="limit" label="Limit" />
                 </div>
               </div>
               <div v-else-if="entry.meta?.option">

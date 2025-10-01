@@ -606,3 +606,9 @@ onBeforeUnmount(() => {
   <!-- Runtime CSS applies inside this container -->
   <div ref="hostEl" class="block-content" :data-theme-scope="scopeId" v-html="safeHtml" />
 </template>
+
+<style>
+p {
+  margin-bottom: 1em;
+}
+</style>

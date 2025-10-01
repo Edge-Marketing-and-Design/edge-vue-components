@@ -87,6 +87,12 @@ onBeforeMount(async () => {
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites`]) {
     await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites`)
   }
+  if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/posts`]) {
+    await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/posts`)
+  }
+  if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published_posts`]) {
+    await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published_posts`)
+  }
 })
 
 const isSiteDiff = computed(() => {
@@ -229,7 +235,7 @@ const isAnyPagesDiff = computed(() => {
     if (!publishedPage) {
       return true
     }
-    if (JSON.stringify({ content: pageData.content, metaTitle: pageData.metaTitle, metaDescription: pageData.metaDescription, structuredData: pageData.structuredData }) !== JSON.stringify({ content: publishedPage.content, metaTitle: publishedPage.metaTitle, metaDescription: publishedPage.metaDescription, structuredData: publishedPage.structuredData })) {
+    if (JSON.stringify({ content: pageData.content, postContent: pageData.postContent, metaTitle: pageData.metaTitle, metaDescription: pageData.metaDescription, structuredData: pageData.structuredData }) !== JSON.stringify({ content: publishedPage.content, postContent: publishedPage.postContent, metaTitle: publishedPage.metaTitle, metaDescription: publishedPage.metaDescription, structuredData: publishedPage.structuredData })) {
       return true
     }
   }
