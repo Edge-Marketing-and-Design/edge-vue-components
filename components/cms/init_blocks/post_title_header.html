@@ -1,0 +1,7 @@
+<div class="pa-8 bg-brand font-brand">
+{{{#array {"field":"list","schema":[{"field":"name","value":"text"}],"collection":{"path":"post","query":[{"field":"doc_created_at","operator":">","value":0}],"order":[{"field":"doc_created_at","direction":"desc"}]},"queryOptions":[],"limit":1,"value":[]}}}}
+    <h1 class="text-4xl">
+        {{item.title}}
+    </h1>
+{{{/array}}}
+</div>

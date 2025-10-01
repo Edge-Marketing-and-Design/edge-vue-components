@@ -33,6 +33,7 @@ const state = reactive({
   saving: false,
   siteSettings: false,
   hasError: false,
+  updating: false,
 })
 
 const pageInit = {
@@ -403,7 +404,7 @@ const isAnyPagesPublished = computed(() => {
                   <edge-cms-menu v-if="state.menus" v-model="state.menus" :site="props.site" :page="props.page" />
                 </TabsContent>
                 <TabsContent value="posts" class="p-0">
-                  <edge-cms-posts :site="props.site" />
+                  <edge-cms-posts :site="props.site" @updating="isUpdating => state.updating = isUpdating" />
                 </TabsContent>
               </Tabs>
             </SidebarMenu>
@@ -412,7 +413,7 @@ const isAnyPagesPublished = computed(() => {
       </ResizablePanel>
       <ResizablePanel ref="mainPanel">
         <Transition name="fade" mode="out-in">
-          <div v-if="props.page" :key="props.page" class="max-h-[calc(100vh-50px)] overflow-y-auto w-full">
+          <div v-if="props.page && !state.updating" :key="props.page" class="max-h-[calc(100vh-50px)] overflow-y-auto w-full">
             <NuxtPage class="flex flex-col flex-1 p-3 pt-0" />
           </div>
           <div v-else class="p-4 text-center flex text-slate-500 h-[calc(100vh-4rem)] justify-center items-center overflow-y-auto">

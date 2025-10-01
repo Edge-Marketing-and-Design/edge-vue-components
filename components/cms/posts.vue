@@ -11,6 +11,8 @@ const props = defineProps({
   },
 })
 
+const emit = defineEmits(['updating'])
+
 const edgeFirebase = inject('edgeFirebase')
 
 const collection = computed(() => `sites/${props.site}/posts`)
@@ -417,6 +419,7 @@ const getTagsFromPosts = computed(() => {
 })
 
 const publishPost = async (postId) => {
+  emit('updating', true)
   if (!postId)
     return
   const post = posts.value?.[postId]
@@ -425,10 +428,10 @@ const publishPost = async (postId) => {
   try {
     await edgeFirebase.storeDoc(publishedCollectionKey.value, post)
   }
-
   catch (error) {
     console.error('Failed to publish post:', error)
   }
+  emit('updating', false)
 }
 
 const unPublishPost = async (postId) => {

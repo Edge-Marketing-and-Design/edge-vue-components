@@ -1,0 +1,9 @@
+<div class="pa-8 bg-brand font-sans">
+<ul>
+{{{#array {"field":"list","schema":[{"field":"name","value":"text"},{"field":"content","value":"richtext"}],"collection":{"path":"posts","query":[{"field":"doc_created_at","operator":">","value":0}],"order":[{"field":"doc_created_at","direction":"desc"}]},"queryOptions":[{"field":"tags","operator":"array-contains-any","options":[]}],"limit":10,"value":[]}}}}
+    <li class="text-sm">
+       -- <a href="{{item.name}}">{{item.title }}</a>
+    </li>
+{{{/array}}}
+</ul>
+</div>
