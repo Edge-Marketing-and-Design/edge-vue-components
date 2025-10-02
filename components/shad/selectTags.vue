@@ -162,24 +162,31 @@ const onSelectItem = (ev) => {
           <FormControl>
             <Combobox v-model="modelValue" v-model:open="open" :ignore-filter="true" :disabled="props.disabled">
               <ComboboxAnchor as-child>
-                <TagsInput v-model="modelValue" :class="cn('px-2 gap-2 w-80', props.class)" :disabled="props.disabled">
-                  <div class="flex gap-2 flex-wrap items-center">
+                <TagsInput
+                  v-model="modelValue"
+                  :class="cn('relative flex items-center gap-2 flex-nowrap px-2 w-80', props.class)"
+                  :disabled="props.disabled"
+                >
+                  <!-- Wrapping area for tags + input -->
+                  <div class="flex flex-wrap items-center gap-2 flex-1 min-w-0">
                     <TagsInputItem v-for="val in modelValue" :key="val" class="h-8" :value="val">
                       <span class="px-1">{{ valueToTitle[val] ?? val }}</span>
                       <TagsInputItemDelete v-if="!props.disabled" />
                     </TagsInputItem>
+
+                    <ComboboxInput v-model="searchTerm" as-child>
+                      <TagsInputInput
+                        :disabled="props.disabled"
+                        :placeholder="props.placeholder"
+                        class="p-0 border-none shadow-none focus-visible:ring-0 h-auto grow min-w-[6rem] w-auto"
+                        @keydown.enter.prevent="onEnter"
+                      />
+                    </ComboboxInput>
                   </div>
 
-                  <ComboboxInput v-model="searchTerm" as-child>
-                    <TagsInputInput
-                      :disabled="props.disabled"
-                      :placeholder="props.placeholder"
-                      class="min-w-[200px] w-full p-0 border-none shadow-none focus-visible:ring-0 h-auto"
-                      @keydown.enter.prevent="onEnter"
-                    />
-                  </ComboboxInput>
+                  <!-- Non-wrapping trigger -->
                   <ComboboxTrigger as-child>
-                    <Button variant="icon" class="!py-0 h-6">
+                    <Button variant="icon" class="!py-0 h-6 flex-none shrink-0 ml-2">
                       <ChevronsUpDown class="h-4 w-4 shrink-0 opacity-50" />
                     </Button>
                   </ComboboxTrigger>
