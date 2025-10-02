@@ -1,5 +1,5 @@
 <script setup>
-import { ImagePlus, Loader2, Trash } from 'lucide-vue-next'
+import { ImagePlus, Loader2, Square, SquareCheckBig, Trash } from 'lucide-vue-next'
 const props = defineProps({
   item: {
     type: Object,
@@ -53,8 +53,25 @@ const timeAgo = (timestamp) => {
   <Card
     class="w-full group overflow-hidden rounded-2xl border bg-card hover:shadow-md hover:border-muted-foreground/20 transition-all"
   >
-    <!-- Full-width top media area (no aspect plugin) -->
     <div class="relative w-full h-48 sm:h-56 bg-muted">
+      <div class="z-10 absolute w-full flex inset-0 bg-black/20 justify-between items-start p-2">
+        <edge-shad-button
+          size="icon"
+          class="bg-primary/60"
+          @click="emits('select', !props.selected, item.docId)"
+        >
+          <Square v-if="!props.selected" class="!w-5 !h-5" />
+          <SquareCheckBig v-else class="!w-5 !h-5" />
+        </edge-shad-button>
+
+        <edge-shad-button
+          size="icon"
+          class="bg-red-700/50 text-foreground/90 hover:bg-muted/80 h-9 w-9 sm:h-10 sm:w-10 rounded-xl"
+          @click.stop="emits('delete', item.docId)"
+        >
+          <Trash class="!h-5 !w-5" />
+        </edge-shad-button>
+      </div>
       <Loader2
         v-if="!getThumbnail(item)"
         class="absolute inset-0 m-auto animate-spin h-6 w-6 text-muted-foreground"
@@ -85,54 +102,5 @@ const timeAgo = (timestamp) => {
     </CardContent>
 
     <!-- Footer with actions -->
-    <edge-shad-form>
-      <CardFooter class="flex justify-end gap-1 sm:gap-3 p-3 sm:p-4 border-t">
-        <div>
-          <edge-shad-select-tags
-            :model-value="state.tags"
-            :items="[]"
-            item-title="title"
-            item-value="value"
-            placeholder="Tags"
-            class="w-full"
-            name="tags"
-            :allow-additions="true"
-          />
-        </div>
-        <!-- Delete -->
-        <edge-shad-button
-          size="icon"
-          class="bg-muted text-foreground/90 hover:bg-muted/80 h-9 w-9 sm:h-10 sm:w-10 rounded-xl ring-1 ring-border"
-          :aria-label="`Delete ${item.name}`"
-          @click.stop="emits('delete', item.docId)"
-        >
-          <Trash class="h-4 w-4 sm:h-5 sm:w-5" />
-        </edge-shad-button>
-
-        <!-- Select -->
-        <label class="inline-flex items-center justify-center h-9 w-9 sm:h-10 sm:w-10 rounded-xl ring-1 ring-border bg-background hover:bg-accent/50 cursor-pointer">
-          <input
-            type="checkbox"
-            :checked="props.selected"
-            class="peer sr-only"
-            :aria-label="`Select ${item.name}`"
-            @click.stop
-            @change.stop="emits('select', $event.target.checked, item.docId)"
-          >
-          <div
-            class="h-4 w-4 sm:h-5 sm:w-5 rounded-[6px] ring-1 ring-border grid place-items-center
-                 peer-checked:bg-primary peer-checked:text-primary-foreground peer-checked:ring-primary"
-          >
-            <svg
-              v-if="props.selected"
-              xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
-              class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"
-            >
-              <path d="M20 6 9 17l-5-5" />
-            </svg>
-          </div>
-        </label>
-      </CardFooter>
-    </edge-shad-form>
   </Card>
 </template>

@@ -1,5 +1,5 @@
 <script setup>
-import { ImagePlus, Loader2 } from 'lucide-vue-next'
+import { ImagePlus, Loader2, Square, SquareCheckBig } from 'lucide-vue-next'
 const edgeFirebase = inject('edgeFirebase')
 
 const route = useRoute()
@@ -69,7 +69,7 @@ const deleteSelected = async () => {
 <template>
   <div
     v-if="edgeGlobal.edgeState.organizationDocPath"
-    class="w-full  mx-auto  bg-white rounded-[9.96px] shadow-md px-6"
+    class="w-full  mx-auto  bg-white rounded-[9.96px] px-0"
   >
     <edge-auto-file-upload
       v-model="state.file"
@@ -78,7 +78,7 @@ const deleteSelected = async () => {
       :accept="['image/jpg', 'image/jpeg', 'image/png', 'image/gif']"
       file-path="images"
       :r2="true"
-      class="w-full max-w-7xl mx-auto border-dashed border-secondary bg-slate-400 text-white rounded-[20px] my-5"
+      class="w-full max-w-7xl mx-auto border-dashed border-secondary bg-primary py-10 text-white rounded-[20px] my-5"
     >
       <template #title>
         <div class="flex items-center gap-2 justify-center gap-5">
@@ -86,11 +86,11 @@ const deleteSelected = async () => {
             <ImagePlus class="h-10 w-10" />
           </div>
           <div>
-            <h1 class="text-seconday text-[#457873] text-4xl font-[700] leading-none">
+            <h1 class="text-white text-4xl font-[700] leading-none">
               Drag & Drop
             </h1>
           </div>
-          <div class="text-xl pt-2  text-[#457873] font-sans font-semibold">
+          <div class="text-xl pt-2  text-white font-sans font-semibold">
             OR
           </div>
         </div>
@@ -110,7 +110,7 @@ const deleteSelected = async () => {
       collection="files"
     >
       <template #header>
-        <edge-menu class="bg-transparent text-foreground border-none shadow-none px-0 rounded-none gap-1">
+        <edge-menu class="bg-transparent text-foreground border-none shadow-none px-2 rounded-none gap-1">
           <template #start>
             <div />
           </template>
@@ -128,19 +128,22 @@ const deleteSelected = async () => {
             </div>
           </template>
           <template #end>
-            <div>
-              <Checkbox
-                v-model="state.selectAll"
-                :disabled="!filteredFiles.length"
-                class="h-9 w-9"
-              />
-            </div>
+            <div />
           </template>
         </edge-menu>
-        <div class="flex justify-end gap-2 mt-2">
+        <div class="flex justify-end gap-2 mt-2 px-3">
           <edge-shad-button
-            v-if="state.selected.length > 0"
-            :disabled="state.deleting"
+            class="w-[140px] h-[30px]"
+            @click="state.selectAll = !state.selectAll"
+          >
+            <Square v-if="!state.selectAll" class="h-5 w-5" />
+            <SquareCheckBig v-else class="h-5 w-5" />
+            {{ state.selectAll ? 'Deselect All' : 'Select All' }}
+          </edge-shad-button>
+          <edge-shad-button
+            variant="destructive"
+            :disabled="state.deleting || state.selected.length === 0"
+            class="h-[30px]"
             @click="deleteSelected"
           >
             <Loader2 v-if="state.deleting" class="animate-spin h-5 w-5 mr-2" />
@@ -149,7 +152,7 @@ const deleteSelected = async () => {
         </div>
       </template>
       <template #list="slotProps">
-        <div class="max-w-7xl mx-auto px-0 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div class="max-w-7xl mx-auto px-0 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <div v-for="item in slotProps.filtered" :key="item.docId" class="w-full">
             <edge-cms-media-card
               :item="item"
