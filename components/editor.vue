@@ -95,7 +95,7 @@ const unsavedChanges = computed(() => {
     return false
   }
   console.log('comparing', state.workingDoc, state.collectionData[props.docId])
-  // console.log('unsavedChanges', JSON.stringify(state.workingDoc) !== JSON.stringify(state.collectionData[props.docId]))
+  console.log('unsavedChanges', JSON.stringify(state.workingDoc) !== JSON.stringify(state.collectionData[props.docId]))
   return JSON.stringify(state.workingDoc) !== JSON.stringify(state.collectionData[props.docId])
 })
 
@@ -125,7 +125,7 @@ onBeforeRouteUpdate((to, from, next) => {
 })
 
 watch(() => unsavedChanges.value, (newVal) => {
-  // console.log('test', newVal)
+  console.log('test', newVal)
   emit('unsavedChanges', newVal)
 })
 
@@ -253,12 +253,14 @@ const onSubmit = async () => {
   // console.log('saving', state.workingDoc)
   const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, state.workingDoc)
   state.workingDoc.docId = result.meta.docId
-  edgeGlobal.edgeState.lastPaginatedDoc = state.workingDoc
+  edgeGlobal.edgeState.lastPaginatedDoc = JSON.parse(JSON.stringify(state.workingDoc))
 
   if (state.overrideClose) {
     state.submitting = false
     // state.overrideClose = false
+    emit('unsavedChanges', false)
     edgeGlobal.edgeState.changeTracker = {}
+    state.bypassUnsavedChanges = false
     return
   }
   edgeGlobal.edgeState.changeTracker = {}
@@ -459,7 +461,7 @@ watch(() => state.workingDoc, async () => {
   await formRef.value.validate()
   await nextTick()
   state.errors = formRef.value?.errors
-
+  emit('unsavedChanges', unsavedChanges.value)
   // console.log('formRef.value.errors', state.errors)
 }, { deep: true, immediate: false })
 

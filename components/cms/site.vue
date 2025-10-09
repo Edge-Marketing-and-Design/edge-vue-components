@@ -247,6 +247,13 @@ const isAnyPagesPublished = computed(() => {
   const publishedData = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`] || {}
   return Object.keys(publishedData).length > 0
 })
+
+const pageSettingsUpdated = async (pageData) => {
+  console.log('Page settings updated:', pageData)
+  state.updating = true
+  await nextTick()
+  state.updating = false
+}
 </script>
 
 <template>
@@ -401,7 +408,7 @@ const isAnyPagesPublished = computed(() => {
                   </TabsTrigger>
                 </TabsList>
                 <TabsContent value="pages" class="p-0">
-                  <edge-cms-menu v-if="state.menus" v-model="state.menus" :site="props.site" :page="props.page" />
+                  <edge-cms-menu v-if="state.menus" v-model="state.menus" :site="props.site" :page="props.page" @page-settings-update="pageSettingsUpdated" />
                 </TabsContent>
                 <TabsContent value="posts" class="p-0">
                   <edge-cms-posts :site="props.site" @updating="isUpdating => state.updating = isUpdating" />
@@ -443,7 +450,7 @@ const isAnyPagesPublished = computed(() => {
           @error="formErrors"
         >
           <template #main="slotProps">
-            <div class="p-6 space-y-4  h-[calc(100vh-120px)] overflow-y-auto">
+            <div class="p-6 space-y-4  h-[calc(100vh-140px)] overflow-y-auto">
               <edge-shad-input
                 v-model="slotProps.workingDoc.name"
                 name="name"

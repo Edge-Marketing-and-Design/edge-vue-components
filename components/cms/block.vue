@@ -400,7 +400,7 @@ const getTagsFromPosts = computed(() => {
                         v-if="entry.meta?.collection?.path === 'posts' && option.field === 'tags'"
                         v-model="state.meta[entry.field].queryItems[option.field]"
                         :items="getTagsFromPosts"
-                        :label="`${genTitleFromField(option)} -test`"
+                        :label="`${genTitleFromField(option)}`"
                         :name="option.field"
                         :placeholder="`Select ${genTitleFromField(option)}`"
                       />

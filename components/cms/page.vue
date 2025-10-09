@@ -142,6 +142,16 @@ watch (currentPage, (newPage) => {
   state.workingDoc.metaDescription = newPage?.metaDescription
   state.workingDoc.structuredData = newPage?.structuredData
 }, { immediate: true, deep: true })
+
+const hasUnsavedChanges = (changes) => {
+  console.log('Unsaved changes:', changes)
+  if (changes === true) {
+    edgeGlobal.edgeState.cmsPageWithUnsavedChanges = props.page
+  }
+  else {
+    edgeGlobal.edgeState.cmsPageWithUnsavedChanges = null
+  }
+}
 </script>
 
 <template>
@@ -156,6 +166,7 @@ watch (currentPage, (newPage) => {
     :no-close-after-save="true"
     :working-doc-overrides="state.workingDoc"
     @working-doc="editorDocUpdates"
+    @unsaved-changes="hasUnsavedChanges"
   >
     <template #header="slotProps">
       <div class="relative flex items-center bg-secondary p-2 justify-between sticky top-0 z-10 bg-primary rounded h-[50px]">

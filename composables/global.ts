@@ -18,6 +18,7 @@ const edgeState = reactive({
   isEmulator: false,
   blockEditorTheme: '',
   blockEditorSite: '',
+  cmsPageWithUnsavedChanges: null,
 })
 
 const setOrganization = async (organization: string, edgeFirebase: any) => {
@@ -456,6 +457,23 @@ const cmsCollectionData = async (edgeFirebase: any, value: any, meta: any, curre
   return value
 }
 
+const getImage = (file: any, type: string) => {
+  const variants = Array.isArray(file?.cloudflareImageVariants)
+    ? file.cloudflareImageVariants.filter((variant: any) => typeof variant === 'string' && variant.length)
+    : []
+  if (variants.length) {
+    const normalizedType = (type || '').trim().toLowerCase()
+    if (normalizedType) {
+      const match = variants.find((variant: string) => variant.toLowerCase().endsWith(`/${normalizedType}`))
+      if (match) {
+        return match
+      }
+    }
+    return variants[0]
+  }
+  return file?.r2Url || ''
+}
+
 export const edgeGlobal = {
   edgeState,
   setOrganization,
@@ -475,4 +493,5 @@ export const edgeGlobal = {
   iconFromMenu,
   cmsCollectionData,
   allowMenuItem,
+  getImage,
 }

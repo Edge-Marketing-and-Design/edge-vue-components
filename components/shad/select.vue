@@ -6,7 +6,7 @@ const props = defineProps({
     required: false,
   },
   modelValue: {
-    type: [String, Boolean, Number],
+    type: [String, Boolean, Number, Array],
     required: false,
   },
   class: {
@@ -46,6 +46,10 @@ const props = defineProps({
     required: false,
     default: 'name',
   },
+  multiple: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const emits = defineEmits(['update:modelValue'])
@@ -80,7 +84,7 @@ const modelValue = useVModel(props, 'modelValue', emits, {
           </div>
         </FormLabel>
         <div class="relative w-full items-center">
-          <Select v-model="modelValue" :disabled="props.disabled" :default-value="modelValue" v-bind="componentField">
+          <Select v-model="modelValue" :disabled="props.disabled" :multiple="props.multiple" :default-value="modelValue" v-bind="componentField">
             <FormControl>
               <SelectTrigger class="text-foreground" :class="[$slots.icon ? 'pr-8' : '', props.class]">
                 <SelectValue :placeholder="props.placeholder" />

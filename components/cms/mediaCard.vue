@@ -66,19 +66,19 @@ const timeAgo = (timestamp) => {
 
         <edge-shad-button
           size="icon"
-          class="bg-red-700/50 text-foreground/90 hover:bg-muted/80 h-9 w-9 sm:h-10 sm:w-10 rounded-xl"
+          class="bg-red-700/70 text-foreground/90 hover:bg-muted/80 h-9 w-9 sm:h-10 sm:w-10 rounded-xl"
           @click.stop="emits('delete', item.docId)"
         >
           <Trash class="!h-5 !w-5" />
         </edge-shad-button>
       </div>
       <Loader2
-        v-if="!getThumbnail(item)"
+        v-if="!edgeGlobal.getImage(item, 'thumbnail')"
         class="absolute inset-0 m-auto animate-spin h-6 w-6 text-muted-foreground"
       />
       <img
         v-else
-        :src="getThumbnail(item)"
+        :src="edgeGlobal.getImage(item, 'thumbnail')"
         alt=""
         class="absolute inset-0 h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
       >

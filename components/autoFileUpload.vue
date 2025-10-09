@@ -46,6 +46,18 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  disabled: {
+    type: Boolean,
+    default: false,
+  },
+  disabledText: {
+    type: String,
+    default: 'Disabled',
+  },
+  extraMeta: {
+    type: Object,
+    default: () => ({}),
+  },
 })
 
 const emits = defineEmits(['update:modelValue'])
@@ -78,6 +90,12 @@ const acceptRegex = computed(() => {
     : null
 })
 
+const resetUploadProgressAfterDelay = () => {
+  setTimeout(() => {
+    state.uploadProgress = 0
+  }, 5000)
+}
+
 const uploadFiles = async () => {
   const results = []
   if (state.files && state.files.length > 0) {
@@ -99,6 +117,7 @@ const uploadFiles = async () => {
             props.filePath,
             props.public,
             props.r2,
+            props.extraMeta,
           )
           results.push(result)
           state.uploadProgress = ((index + 1) / state.files.length) * 100
@@ -112,6 +131,7 @@ const uploadFiles = async () => {
     catch (error) {
       state.uploadErrors.push(error)
     }
+    resetUploadProgressAfterDelay()
     state.uploading = false
   }
 }
@@ -132,7 +152,8 @@ watch(dropFiles, () => {
 </script>
 
 <template>
-  <Card color="secondary" class="px-0 py-2 my-2 drop-active text-center z-10 top-0 cursor-pointer">
+  <Card color="secondary" class="px-0 relative py-2 my-2 drop-active text-center z-10 top-0 cursor-pointer">
+    <slot name="header" />
     <file-upload
       v-model="state.files"
       :accept="normalizedAccept"
@@ -142,17 +163,23 @@ watch(dropFiles, () => {
       :files="props.files"
       drop
       class="w-full cursor-pointer"
+      :disabled="props.disabled"
     >
-      <Card-title class="pt-6">
-        <slot name="title">
-          Upload Files
-        </slot>
-      </Card-title>
-      <CardContent style="width:100%;" class="pb-3">
-        <slot name="description">
-          Drag and drop files here or click to upload.
-        </slot>
-      </CardContent>
+      <div :class="props.disabled ? 'max-w-[800px]' : ''" class="relative rounded-lg max-w-[800px] mx-auto py-4">
+        <div v-if="props.disabled" class="absolute top-0 right-0 w-full h-full bg-black  opacity-95  flex flex-col items-center justify-center text-2xl font-bold text-white rounded-lg">
+          {{ disabledText }}
+        </div>
+        <Card-title class="pt-6">
+          <slot name="title">
+            Upload Files
+          </slot>
+        </Card-title>
+        <CardContent style="width:100%;" class="pb-3">
+          <slot name="description">
+            Drag and drop files here or click to upload.
+          </slot>
+        </CardContent>
+      </div>
     </file-upload>
 
     <Progress

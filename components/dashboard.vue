@@ -71,7 +71,7 @@ const props = defineProps({
     default: '',
   },
   queryValue: {
-    type: [String, Array],
+    type: [String, Array, Boolean],
     default: '',
   },
   queryOperator: {
@@ -171,6 +171,11 @@ const snapShotQuery = computed(() => {
     // console.log('snapShotQuery', state.queryField, state.queryOperator, state.queryValue)
     return [
       { field: state.queryField, operator: state.queryOperator, value: state.queryValue },
+    ]
+  }
+  if (state.queryValue === false) {
+    return [
+      { field: state.queryField, operator: '==', value: state.queryValue },
     ]
   }
   return []

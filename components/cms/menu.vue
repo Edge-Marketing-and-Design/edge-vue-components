@@ -36,7 +36,7 @@ const props = defineProps({
     default: '',
   },
 })
-const emit = defineEmits(['update:modelValue'])
+const emit = defineEmits(['update:modelValue', 'pageSettingsUpdate'])
 const ROOT_MENUS = ['Site Root', 'Not In Menu']
 const router = useRouter()
 const modelValue = useVModel(props, 'modelValue', emit)
@@ -349,6 +349,7 @@ const formErrors = (error) => {
 
 const onSubmit = () => {
   if (!state.hasError) {
+    emit('pageSettingsUpdate', state.pageData)
     state.pageSettings = false
   }
 }
@@ -360,6 +361,7 @@ const titleFromSlug = (slug) => {
 </script>
 
 <template>
+  unsaved change: {{ edgeGlobal.edgeState.cmsPageWithUnsavedChanges }}
   <!-- <SidebarMenuItem v-if="!props.prevMenu" class="mt-2" @click="addPageShow('', true)">
     <SidebarMenuButton class="!text-center" @click="addPageShow('', true)">
       <div class="w-full text-center flex gap-1 justify-center items-center">
@@ -585,7 +587,7 @@ const titleFromSlug = (slug) => {
         @error="formErrors"
       >
         <template #main="slotProps">
-          <div class="p-6 space-y-4  h-[calc(100vh-126px)] overflow-y-auto">
+          <div class="p-6 space-y-4  h-[calc(100vh-142px)] overflow-y-auto">
             <edge-shad-checkbox
               v-model="slotProps.workingDoc.post"
               label="Is a Post Template"
