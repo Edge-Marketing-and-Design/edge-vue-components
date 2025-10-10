@@ -432,9 +432,16 @@ const getTagsFromPosts = computed(() => {
                           <DialogDescription />
                         </DialogHeader>
                         <edge-cms-media-manager
+                          v-if="entry.meta?.tags && entry.meta.tags.length > 0"
                           :site="props.siteId"
                           :select-mode="true"
-                          :default-tags="['Background']"
+                          :default-tags="entry.meta.tags"
+                          @select="(url) => { state.draft[entry.field] = url; state.imageOpen = false; }"
+                        />
+                        <edge-cms-media-manager
+                          v-else
+                          :site="props.siteId"
+                          :select-mode="true"
                           @select="(url) => { state.draft[entry.field] = url; state.imageOpen = false; }"
                         />
                       </DialogContent>
