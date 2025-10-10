@@ -2,11 +2,31 @@
 import { ImagePlus, Loader2, Square, SquareCheckBig } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
+const props = defineProps({
+  site: {
+    type: String,
+    required: false,
+    default: 'all',
+  },
+  selectMode: {
+    type: Boolean,
+    required: false,
+    default: false,
+  },
+  defaultTags: {
+    type: Array,
+    required: false,
+    default: () => [],
+  },
+})
+
+// const edgeGlobal = inject('edgeGlobal')
+
+const emits = defineEmits(['select'])
+
 const edgeFirebase = inject('edgeFirebase')
 const route = useRoute()
 const router = useRouter()
-
-// const edgeGlobal = inject('edgeGlobal')
 
 const state = reactive({
   filter: '',
@@ -28,6 +48,7 @@ const state = reactive({
     },
   },
   clearingTags: false,
+  showUpload: false,
 })
 
 const files = computed(() => {
@@ -112,6 +133,31 @@ const clearTags = async () => {
   await nextTick()
   state.clearingTags = false
 }
+onBeforeMount(() => {
+  console.log('Default tags prop:', props.defaultTags)
+  if (props.defaultTags && Array.isArray(props.defaultTags) && props.defaultTags.length > 0) {
+    state.filterTags = [...props.defaultTags]
+  }
+})
+
+const canDeleteMedia = (item) => {
+  if (!props.site)
+    return true
+  if (item?.meta?.cmssite && Array.isArray(item.meta.cmssite)) {
+    return item.meta.cmssite.includes(props.site)
+  }
+  return false
+}
+
+const itemClick = (item) => {
+  if (props.selectMode) {
+    emits('select', edgeGlobal.getImage(item, 'public') || '')
+  }
+  else {
+    state.editMedia = true
+    state.workingDoc = item
+  }
+}
 </script>
 
 <template>
@@ -119,58 +165,67 @@ const clearTags = async () => {
     v-if="edgeGlobal.edgeState.organizationDocPath"
     class="w-full  mx-auto  bg-white rounded-[9.96px] px-0"
   >
-    <edge-auto-file-upload
-      v-model="state.file"
-      name="file"
-      :multiple="true"
-      :accept="['image/jpg', 'image/jpeg', 'image/png', 'image/gif']"
-      file-path="images"
-      :r2="true"
-      :disabled="state.tags.length === 0"
-      disabled-text="Tags are required"
-      class="w-full mx-auto border-dashed border-secondary bg-primary py-10 text-white rounded-[20px] my-3"
-      :extra-meta="{ tags: state.tags, cmsmedia: true }"
-    >
-      <template #header>
-        <edge-shad-form>
-          <edge-shad-select-tags
-            v-model="state.tags"
-            :items="getTagsFromMedia"
-            name="tags"
-            placeholder="Select tags"
-            :allow-additions="true"
-            class="w-full max-w-[800px] mx-auto mb-5 text-black"
-          />
-        </edge-shad-form>
-      </template>
-      <template #title>
-        <div class="flex items-center gap-2 justify-center gap-5">
-          <div>
-            <ImagePlus class="h-10 w-10" />
-          </div>
-          <div>
-            <h1 class="text-white text-4xl font-[700] leading-none">
-              Drag & Drop
-            </h1>
-          </div>
-          <div class="text-xl pt-2  text-white font-sans font-semibold">
-            OR
-          </div>
-        </div>
-      </template>
-      <template #description>
-        <edge-shad-button class="bg-secondary mt-3 text-primary">
-          Upload
-        </edge-shad-button>
-        <div class="hidden" />
-      </template>
-    </edge-auto-file-upload>
+    <Sheet v-model:open="state.showUpload">
+      <SheetContent side="top" class="w-full  max-w-none sm:max-w-none max-w-2xl">
+        <SheetHeader>
+          <SheetTitle />
+          <SheetDescription />
+        </SheetHeader>
+        <edge-auto-file-upload
+          v-model="state.file"
+          name="file"
+          :multiple="true"
+          :accept="['image/jpg', 'image/jpeg', 'image/png', 'image/gif']"
+          file-path="images"
+          :r2="true"
+          :disabled="state.tags.length === 0"
+          disabled-text="Tags are required"
+          class="w-full mx-auto border-dashed border-secondary bg-primary py-10 text-white rounded-[20px] my-3"
+          :extra-meta="{ tags: state.tags, cmsmedia: true, cmssite: [props.site] }"
+        >
+          <template #header>
+            <edge-shad-form>
+              <edge-shad-select-tags
+                v-model="state.tags"
+                :items="getTagsFromMedia"
+                name="tags"
+                placeholder="Select tags"
+                :allow-additions="true"
+                class="w-full max-w-[800px] mx-auto mb-5 text-black"
+              />
+            </edge-shad-form>
+          </template>
+          <template #title>
+            <div class="flex items-center gap-2 justify-center gap-5">
+              <div>
+                <ImagePlus class="h-10 w-10" />
+              </div>
+              <div>
+                <h1 class="text-white text-4xl font-[700] leading-none">
+                  Drag & Drop
+                </h1>
+              </div>
+              <div class="text-xl pt-2  text-white font-sans font-semibold">
+                OR
+              </div>
+            </div>
+          </template>
+          <template #description>
+            <edge-shad-button class="bg-secondary mt-3 text-primary">
+              Upload
+            </edge-shad-button>
+            <div class="hidden" />
+          </template>
+        </edge-auto-file-upload>
+      </SheetContent>
+    </Sheet>
     <edge-dashboard
       :filter="state.filter"
       sort-field="uploadTime"
-      query-field="meta.cmsmedia"
+      query-field="meta.cmssite"
       :filters="filters"
-      :query-value="true"
+      :query-value="['all', props.site]"
+      query-operator="array-contains-any"
       header-class=""
       sort-direction="desc" class="w-full flex-1 border-none shadow-none  bg-white"
       collection="files"
@@ -184,6 +239,12 @@ const clearTags = async () => {
             <div class="w-full px-0">
               <edge-shad-form>
                 <div class="flex justify-between items-center gap-2 w-full">
+                  <div>
+                    <edge-shad-button @click="state.showUpload = true">
+                      <ImagePlus class="h-5 w-5 mr-2" />
+                      Upload Media
+                    </edge-shad-button>
+                  </div>
                   <div class="w-1/2">
                     <edge-shad-select
                       v-if="!state.clearingTags"
@@ -192,7 +253,7 @@ const clearTags = async () => {
                       name="tags"
                       class="text-foreground w-full"
                       :items="getTagsFromMedia"
-                      placeholder="Tags"
+                      placeholder="Filter Tags"
                     >
                       <template v-if="state.filterTags.length > 0" #icon>
                         <X class="h-5 w-5 text-muted-foreground cursor-pointer" @click="clearTags" />
@@ -216,7 +277,7 @@ const clearTags = async () => {
             <div />
           </template>
         </edge-menu>
-        <div class="flex justify-end gap-2 mt-2 px-3">
+        <div v-if="!selectMode" class="flex justify-end gap-2 mt-2 px-3">
           <edge-shad-button
             class="w-[140px] h-[30px]"
             @click="state.selectAll = !state.selectAll"
@@ -237,12 +298,14 @@ const clearTags = async () => {
         </div>
       </template>
       <template #list="slotProps">
-        <div class=" mx-auto px-0 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-          <div v-for="item in slotProps.filtered" :key="item.docId" class="w-full cursor-pointer" @click="state.editMedia = true; state.workingDoc = item">
+        <div class=" mx-auto px-0 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div v-for="item in slotProps.filtered" :key="item.docId" class="w-full cursor-pointer" @click="itemClick(item)">
             <edge-cms-media-card
               :item="item"
               :selected="state.selected.includes(item.docId)"
               class="block w-full h-full"
+              :select-mode="props.selectMode"
+              :can-delete="canDeleteMedia(item)"
               @select="(checked, docId) => handleCheckboxChange(checked, docId)"
               @delete="(docId) => slotProps.deleteItem(docId)"
             />

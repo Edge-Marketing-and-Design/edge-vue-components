@@ -9,6 +9,14 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  selectMode: {
+    type: Boolean,
+    default: false,
+  },
+  canDelete: {
+    type: Boolean,
+    default: true,
+  },
 })
 const emits = defineEmits(['select', 'delete'])
 
@@ -53,18 +61,20 @@ const timeAgo = (timestamp) => {
   <Card
     class="w-full group overflow-hidden rounded-2xl border bg-card hover:shadow-md hover:border-muted-foreground/20 transition-all"
   >
-    <div class="relative w-full h-48 sm:h-56 bg-muted">
+    <div class="relative w-full h-[200px] bg-muted">
       <div class="z-10 absolute w-full flex inset-0 bg-black/20 justify-between items-start p-2">
         <edge-shad-button
+          v-if="!props.selectMode"
           size="icon"
           class="bg-primary/60"
-          @click="emits('select', !props.selected, item.docId)"
+          @click.stop="emits('select', !props.selected, item.docId)"
         >
           <Square v-if="!props.selected" class="!w-5 !h-5" />
           <SquareCheckBig v-else class="!w-5 !h-5" />
         </edge-shad-button>
-
+        <div v-else class="w-5 h-5" />
         <edge-shad-button
+          v-if="props.canDelete"
           size="icon"
           class="bg-red-700/70 text-foreground/90 hover:bg-muted/80 h-9 w-9 sm:h-10 sm:w-10 rounded-xl"
           @click.stop="emits('delete', item.docId)"

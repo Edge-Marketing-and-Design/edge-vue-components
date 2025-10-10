@@ -362,17 +362,8 @@ const titleFromSlug = (slug) => {
 
 <template>
   unsaved change: {{ edgeGlobal.edgeState.cmsPageWithUnsavedChanges }}
-  <!-- <SidebarMenuItem v-if="!props.prevMenu" class="mt-2" @click="addPageShow('', true)">
-    <SidebarMenuButton class="!text-center" @click="addPageShow('', true)">
-      <div class="w-full text-center flex gap-1 justify-center items-center">
-        <PlusIcon class="h-4 w-4" />
-        Add Top Level Menu
-      </div>
-    </SidebarMenuButton>
-  </SidebarMenuItem> -->
   <SidebarMenuItem v-for="(menu, menuName) in modelValue" :key="menu.name">
     <SidebarMenuButton class="!px-0 hover:!bg-transparent">
-      <!-- Open icon (visible when group IS open) -->
       <FolderOpen
         class="mr-2"
       />

@@ -1,6 +1,6 @@
 <script setup>
 import { useVModel } from '@vueuse/core'
-import { Plus } from 'lucide-vue-next'
+import { ImagePlus, Plus } from 'lucide-vue-next'
 const props = defineProps({
   modelValue: {
     type: Object,
@@ -56,6 +56,7 @@ const state = reactive({
   metaUpdate: {},
   loading: true,
   afterLoad: false,
+  imageOpen: false,
 })
 
 const resetArrayItems = (field) => {
@@ -413,6 +414,33 @@ const getTagsFromPosts = computed(() => {
                     </div>
                   </template>
                   <edge-shad-number v-if="entry.meta?.collection?.path !== 'post'" v-model="state.meta[entry.field].limit" name="limit" label="Limit" />
+                </div>
+              </div>
+              <div v-else-if="entry.meta?.type === 'image'" class="w-full">
+                <div class="relative bg-muted py-2 rounded-md">
+                  <div class="bg-black/80 absolute left-0 top-0 w-full h-full opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center z-10 cursor-pointer">
+                    <Dialog v-model:open="state.imageOpen">
+                      <DialogTrigger as-child>
+                        <edge-shad-button variant="outline" class="bg-white text-black hover:bg-gray-200">
+                          <ImagePlus class="h-5 w-5 mr-2" />
+                          Select Image
+                        </edge-shad-button>
+                      </DialogTrigger>
+                      <DialogContent class="w-full max-w-[1200px]">
+                        <DialogHeader>
+                          <DialogTitle>Select Image</DialogTitle>
+                          <DialogDescription />
+                        </DialogHeader>
+                        <edge-cms-media-manager
+                          :site="props.siteId"
+                          :select-mode="true"
+                          :default-tags="['Background']"
+                          @select="(url) => { state.draft[entry.field] = url; state.imageOpen = false; }"
+                        />
+                      </DialogContent>
+                    </Dialog>
+                  </div>
+                  <img v-if="state.draft[entry.field]" :src="state.draft[entry.field]" class="mb-2 max-h-40 mx-auto object-contain">
                 </div>
               </div>
               <div v-else-if="entry.meta?.option">
