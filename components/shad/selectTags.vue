@@ -164,12 +164,12 @@ const onSelectItem = (ev) => {
               <ComboboxAnchor as-child>
                 <TagsInput
                   v-model="modelValue"
-                  :class="cn('relative flex items-center gap-2 flex-nowrap px-2 w-80', props.class)"
+                  :class="cn('relative flex items-center gap-1 flex-nowrap px-2 pt-[7px] pb-[7px] w-80', props.class)"
                   :disabled="props.disabled"
                 >
                   <!-- Wrapping area for tags + input -->
                   <div class="flex flex-wrap items-center gap-2 flex-1 min-w-0">
-                    <TagsInputItem v-for="val in modelValue" :key="val" class="h-8" :value="val">
+                    <TagsInputItem v-for="val in modelValue" :key="val" class="h-6" :value="val">
                       <span class="px-1">{{ valueToTitle[val] ?? val }}</span>
                       <TagsInputItemDelete v-if="!props.disabled" />
                     </TagsInputItem>

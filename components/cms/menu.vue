@@ -361,7 +361,6 @@ const titleFromSlug = (slug) => {
 </script>
 
 <template>
-  unsaved change: {{ edgeGlobal.edgeState.cmsPageWithUnsavedChanges }}
   <SidebarMenuItem v-for="(menu, menuName) in modelValue" :key="menu.name">
     <SidebarMenuButton class="!px-0 hover:!bg-transparent">
       <FolderOpen
@@ -440,9 +439,12 @@ const titleFromSlug = (slug) => {
                       <File class="w-5 h-5" />  {{ ROOT_MENUS.includes(menuName) ? '' : menuName }}/{{ element.name }}
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem @click="showPageSettings(element)">
+                    <DropdownMenuItem :disabled="edgeGlobal.edgeState.cmsPageWithUnsavedChanges === element.item" @click="showPageSettings(element)">
                       <FileCog />
-                      <span>Settings</span>
+                      <div class="flex flex-col">
+                        <span>Settings</span>
+                        <span v-if="edgeGlobal.edgeState.cmsPageWithUnsavedChanges === element.item" class="text-xs text-red-500">(Unsaved Changes)</span>
+                      </div>
                     </DropdownMenuItem>
                     <DropdownMenuItem v-if="isPublishedPageDiff(element.item)" @click="publishPage(element.item)">
                       <FileUp />

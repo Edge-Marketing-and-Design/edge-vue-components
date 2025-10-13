@@ -258,7 +258,10 @@ const onSubmit = async () => {
   if (state.overrideClose) {
     state.submitting = false
     // state.overrideClose = false
+    // state.workingDoc = edgeGlobal.dupObject(state.collectionData[props.docId])
+    state.collectionData = edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`]
     emit('unsavedChanges', false)
+    // console.log('bypassUnsavedChanges', state.bypassUnsavedChanges)
     edgeGlobal.edgeState.changeTracker = {}
     state.bypassUnsavedChanges = false
     return

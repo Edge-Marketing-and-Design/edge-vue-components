@@ -20,6 +20,8 @@ const state = reactive({
     blocks: {
       name: { value: '' },
       content: { value: '' },
+      tags: { value: [] },
+      themes: { value: [] },
       version: 1,
     },
   },
@@ -372,6 +374,22 @@ watch (sites, async (newSites) => {
   await nextTick()
   state.loading = false
 }, { immediate: true, deep: true })
+
+const blocks = computed(() => {
+  return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`] || null
+})
+
+const getTagsFromBlocks = computed(() => {
+  const tagsSet = new Set()
+  console.log('blocks:', blocks.value)
+  Object.values(blocks.value || {}).forEach((block) => {
+    console.log('block:', block)
+    if (block.tags && Array.isArray(block.tags)) {
+      block.tags.forEach(tag => tagsSet.add(tag))
+    }
+  })
+  return Array.from(tagsSet).map(tag => ({ name: tag, title: tag }))
+})
 </script>
 
 <template>
@@ -399,10 +417,10 @@ watch (sites, async (newSites) => {
             <edge-shad-select
               v-if="!state.loading"
               v-model="edgeGlobal.edgeState.blockEditorTheme"
-              label="Theme"
+              label="Theme Viewer Select"
               name="theme"
               :items="themes.map(t => ({ title: t.name, name: t.docId }))"
-              placeholder="Select Theme"
+              placeholder="Theme Viewer Select"
               class="w-full"
             />
           </div>
@@ -422,11 +440,38 @@ watch (sites, async (newSites) => {
 
       <template #main="slotProps">
         <div class="pt-4">
-          <edge-shad-input
-            v-model="slotProps.workingDoc.name"
-            label="Block Name"
-            name="name"
-          />
+          <div class="flex w-full gap-2">
+            <div class="flex-auto">
+              <edge-shad-input
+                v-model="slotProps.workingDoc.name"
+                label="Block Name"
+                class="flex-auto"
+                name="name"
+              />
+            </div>
+            <div class="flex-auto">
+              <edge-shad-select-tags
+                v-model="slotProps.workingDoc.tags"
+                :items="getTagsFromBlocks"
+                name="tags"
+                placeholder="Select tags"
+                label="Tags"
+                :allow-additions="true"
+                class="w-full max-w-[800px] mx-auto mb-5 text-black"
+              />
+            </div>
+            <div class="flex-auto">
+              <edge-shad-select
+                v-model="slotProps.workingDoc.themes"
+                label="Allowed Themes"
+                name="themes"
+                :multiple="true"
+                :items="themes.map(t => ({ title: t.name, name: t.docId }))"
+                placeholder="Allowed Themes"
+                class="flex-auto"
+              />
+            </div>
+          </div>
           <div class="flex gap-4">
             <edge-cms-code-editor
               v-model="slotProps.workingDoc.content"
