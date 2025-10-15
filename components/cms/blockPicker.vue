@@ -1,5 +1,5 @@
 <script setup>
-import { Plus } from 'lucide-vue-next'
+import { Plus, Square, SquareCheckBig } from 'lucide-vue-next'
 
 const props = defineProps({
   blockOverride: {
@@ -25,6 +25,7 @@ const emit = defineEmits(['pick'])
 const state = reactive({
   keyMenu: false,
   blocksLoaded: [],
+  selectedTags: ['Quick Picks'],
 })
 
 const edgeFirebase = inject('edgeFirebase')
@@ -45,6 +46,17 @@ const blocks = computed(() => {
     return blocks.filter(block => block.themes && block.themes.includes(themeId.value))
   }
   return blocks
+})
+
+const filteredBlocks = computed(() => {
+  const selected = state.selectedTags
+  if (!selected.length)
+    return blocks.value
+
+  return blocks.value.filter((block) => {
+    const blockTags = Array.isArray(block.tags) ? block.tags : []
+    return selected.some(tag => blockTags.includes(tag))
+  })
 })
 
 onBeforeMount(async () => {
@@ -137,15 +149,45 @@ const blockLoaded = (isLoading, index) => {
 
 const getTagsFromBlocks = computed(() => {
   const tagsSet = new Set()
-  console.log('blocks:', blocks.value)
+
   Object.values(blocks.value || {}).forEach((block) => {
-    console.log('block:', block)
     if (block.tags && Array.isArray(block.tags)) {
       block.tags.forEach(tag => tagsSet.add(tag))
     }
   })
-  return Array.from(tagsSet).map(tag => ({ name: tag, title: tag }))
+
+  // Convert to array of objects
+  const tagsArray = Array.from(tagsSet).map(tag => ({ name: tag, title: tag }))
+
+  // Sort alphabetically
+  tagsArray.sort((a, b) => a.title.localeCompare(b.title))
+
+  // Remove "Quick Picks" if it exists
+  const filtered = tagsArray.filter(tag => tag.name !== 'Quick Picks')
+
+  // Always prepend it
+  return [{ name: 'Quick Picks', title: 'Quick Picks' }, ...filtered]
 })
+
+const hasActiveFilters = computed(() => state.selectedTags.length > 0)
+
+watch(getTagsFromBlocks, (tags) => {
+  const available = new Set(tags.map(tag => tag.name))
+  const filtered = state.selectedTags.filter(tag => available.has(tag))
+  if (filtered.length !== state.selectedTags.length)
+    state.selectedTags = filtered
+})
+
+const toggleTag = (tag) => {
+  if (state.selectedTags.includes(tag))
+    state.selectedTags = state.selectedTags.filter(t => t !== tag)
+  else
+    state.selectedTags = [...state.selectedTags, tag]
+}
+
+const clearTagFilters = () => {
+  state.selectedTags = []
+}
 </script>
 
 <template>
@@ -167,34 +209,62 @@ const getTagsFromBlocks = computed(() => {
       :site-id="props.siteId"
     />
   </div>
-  <div v-else-if="props.listOnly" class="p-6 space-y-4  h-[calc(100vh-50px)] overflow-y-auto">
-    <template v-for="block in blocks" :key="block.docId">
+  <div v-else-if="props.listOnly" class="p-6 h-[calc(100vh-50px)] overflow-hidden flex flex-col gap-4">
+    <div v-if="getTagsFromBlocks.length" class="flex flex-wrap items-center gap-2 text-sm">
+      <span class="font-medium text-muted-foreground">Filter by tags</span>
       <button
-        :ref="el => setBtnRef(block.docId, el)"
+        v-for="tagOption in getTagsFromBlocks"
+        :key="tagOption.name"
         type="button"
-        class="p-0 text-left hover:bg-primary text-slate-500  border !hover:text-white   border-dashed cursor-pointer w-full overflow-hidden relative"
+        class="px-3 py-1 rounded-full border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        :class="state.selectedTags.includes(tagOption.name) ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'bg-background text-muted-foreground hover:bg-muted border-border'"
+        @click="toggleTag(tagOption.name)"
       >
-        <div class="scale-wrapper">
-          <div
-            :ref="el => setInnerRef(block.docId, el)"
-            class="scale-inner scale p-4"
-            :data-block-id="block.docId"
-          >
-            <div class="text-4xl relative text-inherit text-center">
-              {{ block.name }}
-            </div>
-            <edge-cms-block-api :site-id="props.siteId" :content="block.content" :theme="props.theme" :values="block.values" :meta="block.meta" @pending="blockLoaded($event, block.docId)" />
-            <edge-cms-block-render
-              v-if="!state.blocksLoaded.includes(block.docId)"
-              :content="loadingRender(block.content)"
-              :values="block.values"
-              :meta="block.meta"
-              :theme="props.theme"
-            />
-          </div>
-        </div>
+        {{ tagOption.title }}
       </button>
-    </template>
+      <button
+        v-if="hasActiveFilters"
+        type="button"
+        class="ml-auto px-3 py-1 text-xs font-medium uppercase tracking-wide text-muted-foreground border border-transparent hover:text-primary hover:border-primary/30 rounded-full transition-colors"
+        @click="clearTagFilters"
+      >
+        Clear filters
+      </button>
+    </div>
+    <div class="space-y-4 overflow-y-auto pr-1">
+      <template v-if="filteredBlocks.length">
+        <template v-for="block in filteredBlocks" :key="block.docId">
+          <button
+            :ref="el => setBtnRef(block.docId, el)"
+            type="button"
+            class="p-0 text-left hover:bg-primary text-slate-500  border !hover:text-white   border-dashed cursor-pointer w-full overflow-hidden relative"
+          >
+            <div class="scale-wrapper">
+              <div
+                :ref="el => setInnerRef(block.docId, el)"
+                class="scale-inner scale p-4"
+                :data-block-id="block.docId"
+              >
+                <div class="text-4xl relative text-inherit text-center">
+                  {{ block.name }}
+                </div>
+                <edge-cms-block-api :site-id="props.siteId" :content="block.content" :theme="props.theme" :values="block.values" :meta="block.meta" @pending="blockLoaded($event, block.docId)" />
+                <edge-cms-block-render
+                  v-if="!state.blocksLoaded.includes(block.docId)"
+                  :content="loadingRender(block.content)"
+                  :values="block.values"
+                  :meta="block.meta"
+                  :theme="props.theme"
+                />
+              </div>
+            </div>
+          </button>
+        </template>
+      </template>
+      <p v-else class="text-sm text-muted-foreground">
+        No blocks match the selected tags yet.
+      </p>
+    </div>
   </div>
   <div v-else>
     <div class="flex justify-center items-center">
@@ -213,35 +283,65 @@ const getTagsFromBlocks = computed(() => {
         </SheetHeader>
 
         <edge-shad-form>
-          <div class="p-6 space-y-4  h-[calc(100vh-50px)] overflow-y-auto">
-            <template v-for="block in blocks" :key="block.docId">
+          <div class="p-6 h-[calc(100vh-50px)] overflow-hidden flex flex-col gap-4">
+            <span class="text-xs text-muted-foreground">Block Filter</span>
+            <div v-if="getTagsFromBlocks.length" class="flex flex-wrap items-center gap-2 text-sm">
               <button
-                :ref="el => setBtnRef(block.docId, el)"
+                v-for="tagOption in getTagsFromBlocks"
+                :key="tagOption.name"
                 type="button"
-                class="p-0 text-left hover:bg-primary text-slate-500  border !hover:text-white   border-dashed cursor-pointer w-full overflow-hidden relative"
-                @click="chooseBlock(block)"
+                class="px-3 py-1 rounded-full border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                :class="state.selectedTags.includes(tagOption.name) ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'bg-background text-muted-foreground hover:bg-muted border-border'"
+                @click="toggleTag(tagOption.name)"
               >
-                <div class="scale-wrapper">
-                  <div
-                    :ref="el => setInnerRef(block.docId, el)"
-                    class="scale-inner scale p-4"
-                    :data-block-id="block.docId"
-                  >
-                    <div class="text-4xl relative text-inherit text-center">
-                      {{ block.name }}
-                    </div>
-                    <edge-cms-block-api :site-id="props.siteId" :content="block.content" :theme="props.theme" :values="block.values" :meta="block.meta" @pending="blockLoaded($event, block.docId)" />
-                    <edge-cms-block-render
-                      v-if="!state.blocksLoaded.includes(block.docId)"
-                      :content="loadingRender(block.content)"
-                      :values="block.values"
-                      :meta="block.meta"
-                      :theme="props.theme"
-                    />
-                  </div>
-                </div>
+                <SquareCheckBig v-if="state.selectedTags.includes(tagOption.name)" class="w-4 h-4 inline-block mr-1" />
+                <Square v-else class="w-4 h-4 inline-block mr-1" />
+                {{ tagOption.title }}
               </button>
-            </template>
+              <button
+                v-if="hasActiveFilters"
+                type="button"
+                class="ml-auto px-3 py-1 text-xs font-medium uppercase tracking-wide text-muted-foreground border border-transparent hover:text-primary hover:border-primary/30 rounded-full transition-colors"
+                @click="clearTagFilters"
+              >
+                Clear filters
+              </button>
+            </div>
+            <div class="space-y-4 overflow-y-auto pr-1">
+              <template v-if="filteredBlocks.length">
+                <template v-for="block in filteredBlocks" :key="block.docId">
+                  <button
+                    :ref="el => setBtnRef(block.docId, el)"
+                    type="button"
+                    class="p-0 text-left hover:bg-primary text-slate-500  border !hover:text-white   border-dashed cursor-pointer w-full overflow-hidden relative"
+                    @click="chooseBlock(block)"
+                  >
+                    <div class="scale-wrapper">
+                      <div
+                        :ref="el => setInnerRef(block.docId, el)"
+                        class="scale-inner scale p-4"
+                        :data-block-id="block.docId"
+                      >
+                        <div class="text-4xl relative text-inherit text-center">
+                          {{ block.name }}
+                        </div>
+                        <edge-cms-block-api :site-id="props.siteId" :content="block.content" :theme="props.theme" :values="block.values" :meta="block.meta" @pending="blockLoaded($event, block.docId)" />
+                        <edge-cms-block-render
+                          v-if="!state.blocksLoaded.includes(block.docId)"
+                          :content="loadingRender(block.content)"
+                          :values="block.values"
+                          :meta="block.meta"
+                          :theme="props.theme"
+                        />
+                      </div>
+                    </div>
+                  </button>
+                </template>
+              </template>
+              <p v-else class="text-sm text-muted-foreground">
+                No blocks match the selected tags yet.
+              </p>
+            </div>
           </div>
         </edge-shad-form>
       </SheetContent>

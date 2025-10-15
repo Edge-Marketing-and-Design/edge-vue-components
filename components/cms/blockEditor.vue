@@ -381,14 +381,24 @@ const blocks = computed(() => {
 
 const getTagsFromBlocks = computed(() => {
   const tagsSet = new Set()
-  console.log('blocks:', blocks.value)
+
   Object.values(blocks.value || {}).forEach((block) => {
-    console.log('block:', block)
     if (block.tags && Array.isArray(block.tags)) {
       block.tags.forEach(tag => tagsSet.add(tag))
     }
   })
-  return Array.from(tagsSet).map(tag => ({ name: tag, title: tag }))
+
+  // Convert to array of objects
+  const tagsArray = Array.from(tagsSet).map(tag => ({ name: tag, title: tag }))
+
+  // Sort alphabetically
+  tagsArray.sort((a, b) => a.title.localeCompare(b.title))
+
+  // Remove "Quick Picks" if it exists
+  const filtered = tagsArray.filter(tag => tag.name !== 'Quick Picks')
+
+  // Always prepend it
+  return [{ name: 'Quick Picks', title: 'Quick Picks' }, ...filtered]
 })
 </script>
 

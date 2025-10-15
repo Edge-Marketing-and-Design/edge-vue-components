@@ -1,8 +1,8 @@
 <script setup lang="js">
-import { computed, inject, onBeforeMount, reactive, watch } from 'vue'
+import { computed, inject, onBeforeMount, reactive, ref, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { File, FileCheck, FilePen, FileWarning, Loader2, MoreHorizontal, Plus, Trash2 } from 'lucide-vue-next'
+import { File, FileCheck, FilePen, FileWarning, ImagePlus, Loader2, MoreHorizontal, Plus, Trash2 } from 'lucide-vue-next'
 
 const props = defineProps({
   site: {
@@ -80,6 +80,7 @@ const state = reactive({
   renameValue: '',
   renameSubmitting: false,
   renameInternalUpdate: false,
+  contentImageDialog: false,
   newDocs: {
     posts: {
       name: {
@@ -117,8 +118,8 @@ const state = reactive({
           'rows': '8',
         },
       },
-      featuredImages: {
-        value: [],
+      featuredImage: {
+        value: '',
         cols: '12',
         bindings: {
           'field-type': 'tags',
@@ -130,6 +131,8 @@ const state = reactive({
     },
   },
 })
+
+const contentEditor = ref(null)
 
 onBeforeMount(async () => {
   if (!edgeFirebase.data?.[collectionKey.value]) {
@@ -310,6 +313,17 @@ const closeSheet = () => {
 const handlePostSaved = () => {
   console.log('Post saved')
   closeSheet()
+}
+
+const openContentImageDialog = () => {
+  state.contentImageDialog = true
+}
+
+const handleContentImageSelect = (url) => {
+  if (url && contentEditor.value?.insertImage) {
+    contentEditor.value.insertImage(url)
+  }
+  state.contentImageDialog = false
 }
 
 const onWorkingDocUpdate = (doc) => {
@@ -610,6 +624,31 @@ const unPublishPost = async (postId) => {
               label="Title"
               :disabled="slotProps.submitting"
             />
+            <div class="relative bg-muted py-2 h-48 rounded-md flex items-center justify-center hover:opacity-80 transition-opacity cursor-pointer">
+              <div class="bg-black/80 absolute left-0 top-0 w-full h-full opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center z-10 cursor-pointer">
+                <Dialog v-model:open="state.imageOpen">
+                  <DialogTrigger as-child>
+                    <edge-shad-button variant="outline" class="bg-white text-black hover:bg-gray-200">
+                      <ImagePlus class="h-5 w-5" />
+                      Select Image
+                    </edge-shad-button>
+                  </DialogTrigger>
+                  <DialogContent class="w-full max-w-[1200px]">
+                    <DialogHeader>
+                      <DialogTitle>Select Image</DialogTitle>
+                      <DialogDescription />
+                    </DialogHeader>
+                    <edge-cms-media-manager
+                      :site="props.siteId"
+                      :select-mode="true"
+                      @select="(url) => { slotProps.workingDoc.featuredImage = url; state.imageOpen = false; }"
+                    />
+                  </DialogContent>
+                </Dialog>
+              </div>
+              <img v-if="slotProps.workingDoc.featuredImage" :src="slotProps.workingDoc.featuredImage" class="mb-2 max-h-40 mx-auto object-contain">
+              <span v-else class="text-sm text-muted-foreground italic">No featured image selected, click to select</span>
+            </div>
             <edge-shad-select-tags
               v-model="slotProps.workingDoc.tags"
               name="tags"
@@ -620,7 +659,28 @@ const unPublishPost = async (postId) => {
               :allow-additions="true"
               @add="addTag"
             />
-            <edge-shad-html v-model="slotProps.workingDoc.content" :enabled-toggles="['bold', 'italic', 'strike', 'bulletlist', 'orderedlist', 'underline']" name="content" label="Content" :disabled="slotProps.submitting" />
+            <edge-shad-html
+              ref="contentEditor"
+              v-model="slotProps.workingDoc.content"
+              :enabled-toggles="['bold', 'italic', 'strike', 'bulletlist', 'orderedlist', 'underline', 'image']"
+              name="content"
+              label="Content"
+              :disabled="slotProps.submitting"
+              @request-image="openContentImageDialog"
+            />
+            <Dialog v-model:open="state.contentImageDialog">
+              <DialogContent class="w-full max-w-[1200px]">
+                <DialogHeader>
+                  <DialogTitle>Select Image</DialogTitle>
+                  <DialogDescription />
+                </DialogHeader>
+                <edge-cms-media-manager
+                  :site="props.site"
+                  :select-mode="true"
+                  @select="handleContentImageSelect"
+                />
+              </DialogContent>
+            </Dialog>
           </div>
           <SheetFooter class="pt-2 flex justify-between">
             <edge-shad-button variant="destructive" class="text-white" @click="state.sheetOpen = false">

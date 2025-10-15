@@ -6,7 +6,11 @@ import Underline from '@tiptap/extension-underline'
 import ImageExt from '@tiptap/extension-image'
 import { Editor, EditorContent } from '@tiptap/vue-3'
 import { useVModel } from '@vueuse/core'
+import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
   Bold,
   Code,
   Heading1,
@@ -15,6 +19,7 @@ import {
   Heading4,
   Heading5,
   Heading6,
+  Image,
   Italic,
   List,
   ListOrdered,
@@ -26,6 +31,7 @@ import {
   SquareCode,
   Strikethrough,
   TextQuote,
+  Trash2,
   Underline as UnderlineIcon,
   Undo,
   WrapText,
@@ -74,11 +80,76 @@ const props = defineProps({
   enabledToggles: {
     type: Array,
     required: false,
-    default: () => ['bold', 'italic', 'strike', 'underline', 'code', 'codeBlock', 'heading1', 'heading2', 'heading3', 'heading4', 'heading5', 'heading6', 'bulletlist', 'orderedlist', 'blockquote', 'horizontalrule', 'hardbreak'],
+    default: () => ['bold', 'italic', 'strike', 'underline', 'code', 'codeBlock', 'heading1', 'heading2', 'heading3', 'heading4', 'heading5', 'heading6', 'bulletlist', 'orderedlist', 'blockquote', 'horizontalrule', 'hardbreak', 'image'],
   },
 })
+const emits = defineEmits(['update:modelValue', 'request-image'])
+const DEFAULT_IMAGE_WIDTH = 33
+const sizeWidths = {
+  small: 20,
+  medium: DEFAULT_IMAGE_WIDTH,
+  large: 50,
+  full: 100,
+}
 
-const emits = defineEmits(['update:modelValue'])
+const EdgeImage = ImageExt.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      size: {
+        default: 'medium',
+        parseHTML: element => element.getAttribute('data-size') || 'medium',
+        renderHTML: attributes => ({
+          'data-size': attributes.size || 'medium',
+        }),
+      },
+      float: {
+        default: 'left',
+        parseHTML: (element) => {
+          const styleFloat = element.style?.float || element.style?.cssFloat
+          return styleFloat || element.getAttribute('data-float') || 'left'
+        },
+        renderHTML: attributes => ({
+          'data-float': attributes.float || 'left',
+        }),
+      },
+  width: {
+    default: DEFAULT_IMAGE_WIDTH,
+        parseHTML: (element) => {
+          const attr = element.getAttribute('data-width')
+          if (attr)
+            return Number.parseFloat(attr)
+          const styleWidth = element.style?.width
+          if (styleWidth && styleWidth.endsWith('%'))
+            return Number.parseFloat(styleWidth.replace('%', ''))
+          const sizeAttr = element.getAttribute('data-size')
+          if (sizeAttr && sizeWidths[sizeAttr])
+            return sizeWidths[sizeAttr]
+          return DEFAULT_IMAGE_WIDTH
+        },
+    renderHTML: (attributes) => {
+      const widthValue = Number.parseFloat(attributes.width)
+      const width = Number.isFinite(widthValue) ? widthValue : DEFAULT_IMAGE_WIDTH
+      const floatValue = attributes.float || 'left'
+      let marginValue = '0.75rem 1.5rem 1rem 0'
+      if (floatValue === 'right')
+        marginValue = '0.75rem 0 1rem 1.5rem'
+      else if (floatValue === 'none')
+        marginValue = '1.25rem auto'
+      const styleSegments = [`width: ${width}%;`, `float: ${floatValue};`, `margin: ${marginValue};`]
+      return {
+        'data-width': width,
+        'style': styleSegments.join(' '),
+      }
+    },
+  },
+    }
+  },
+}).configure({
+  HTMLAttributes: {
+    class: 'edge-editor-image',
+  },
+})
 
 const modelValue = useVModel(props, 'modelValue', emits, {
   passive: false,
@@ -86,7 +157,43 @@ const modelValue = useVModel(props, 'modelValue', emits, {
 })
 
 const editor = ref(null)
+const imageState = reactive({
+  active: false,
+  size: 'medium',
+  float: 'left',
+  width: DEFAULT_IMAGE_WIDTH,
+})
+
+const updateImageState = () => {
+  if (!editor.value) {
+    imageState.active = false
+    imageState.size = 'medium'
+    imageState.float = 'left'
+    imageState.width = DEFAULT_IMAGE_WIDTH
+    return
+  }
+  const isActive = editor.value.isActive('image')
+  imageState.active = isActive
+  if (isActive) {
+    const attrs = editor.value.getAttributes('image') || {}
+    imageState.size = attrs.size || 'medium'
+    imageState.float = attrs.float || 'left'
+    let widthVal = Number.parseFloat(attrs.width)
+    if (!Number.isFinite(widthVal) && sizeWidths[imageState.size])
+      widthVal = sizeWidths[imageState.size]
+    if (Number.isFinite(widthVal))
+      imageState.width = Math.min(100, Math.max(10, Math.round(widthVal)))
+  }
+  else {
+    imageState.size = 'medium'
+    imageState.float = 'left'
+    imageState.width = DEFAULT_IMAGE_WIDTH
+  }
+}
+
 watch(modelValue, () => {
+  if (!editor.value)
+    return
   const isSame = editor.value.getHTML() === modelValue.value
 
   // JSON
@@ -97,6 +204,7 @@ watch(modelValue, () => {
   }
 
   editor.value.commands.setContent(modelValue.value, false)
+  updateImageState()
 })
 
 /* const PreventEnterSubmit = Extension.create({
@@ -119,7 +227,7 @@ onMounted(() => {
     extensions: [
       StarterKit,
       TextStyle,
-      ImageExt,
+      EdgeImage,
       Underline,
       // PreventEnterSubmit,
     ],
@@ -141,21 +249,96 @@ onMounted(() => {
 
       // JSON
       // this.$emit('update:modelValue', this.editor.getJSON())
+      updateImageState()
     },
   })
+  editor.value.on('selectionUpdate', updateImageState)
+  editor.value.on('transaction', updateImageState)
+  updateImageState()
 })
 
 onBeforeUnmount(() => {
-  editor.value.destroy()
+  if (editor.value) {
+    editor.value.off('selectionUpdate', updateImageState)
+    editor.value.off('transaction', updateImageState)
+    editor.value.destroy()
+  }
 })
 
 const addImage = () => {
-  const url = window.prompt('URL')
-
-  if (url) {
-    editor.value.chain().focus().setImage({ src: url }).run()
-  }
+  emits('request-image')
 }
+
+const insertImage = (url) => {
+  if (!url || !editor.value) {
+    return
+  }
+  editor.value.chain().focus().setImage({
+    src: url,
+    size: 'medium',
+    float: 'left',
+    width: DEFAULT_IMAGE_WIDTH,
+  }).run()
+  updateImageState()
+}
+
+const setImageSize = (size) => {
+  if (!editor.value || !imageState.active)
+    return
+  const width = sizeWidths[size] ?? 33
+  const attrs = { size, width }
+  if (size === 'full')
+    attrs.float = 'none'
+  editor.value.chain().focus().updateAttributes('image', attrs).run()
+  updateImageState()
+}
+
+const setImageFloat = (float) => {
+  if (!editor.value || !imageState.active)
+    return
+  const attrs = { float }
+  if (float !== 'none' && (imageState.size === 'full' || imageState.width >= 90)) {
+    attrs.size = 'large'
+    attrs.width = 50
+  }
+  if (float === 'none' && (imageState.size !== 'full' && imageState.width >= 90)) {
+    attrs.size = 'full'
+    attrs.width = 100
+  }
+  editor.value.chain().focus().updateAttributes('image', attrs).run()
+  updateImageState()
+}
+
+const setImageWidth = (width) => {
+  if (!editor.value || !imageState.active)
+    return
+  const normalized = Math.min(100, Math.max(10, Math.round(width)))
+  let size = 'custom'
+  if (normalized <= 22)
+    size = 'small'
+  else if (normalized < 41)
+    size = 'medium'
+  else if (normalized < 75)
+    size = 'large'
+  else if (normalized >= 95)
+    size = 'full'
+  const attrs = { width: normalized, size }
+  if (size === 'full')
+    attrs.float = 'none'
+  editor.value.chain().focus().updateAttributes('image', attrs).run()
+  updateImageState()
+}
+
+const removeImage = () => {
+  if (!editor.value || !imageState.active)
+    return
+  editor.value.chain().focus().deleteSelection().run()
+  updateImageState()
+}
+
+defineExpose({
+  insertImage,
+})
 </script>
 
 <template>
@@ -381,6 +564,95 @@ const addImage = () => {
                   <Redo :size="16" />
                 </Button>
               </div>
+              <div
+                v-if="enabledToggles.includes('image') && imageState.active"
+                class="flex flex-wrap items-center gap-2 border-t border-secondary/60 px-2 pt-2 mt-2"
+              >
+                <ToggleGroup type="single">
+                  <ToggleGroupItem
+                    value="imageSizeSmall"
+                    :data-state="imageState.size === 'small' ? 'on' : 'off'"
+                    title="Small image"
+                    @click.prevent="setImageSize('small')"
+                  >
+                    S
+                  </ToggleGroupItem>
+                  <ToggleGroupItem
+                    value="imageSizeMedium"
+                    :data-state="imageState.size === 'medium' ? 'on' : 'off'"
+                    title="Medium image"
+                    @click.prevent="setImageSize('medium')"
+                  >
+                    M
+                  </ToggleGroupItem>
+                  <ToggleGroupItem
+                    value="imageSizeLarge"
+                    :data-state="imageState.size === 'large' ? 'on' : 'off'"
+                    title="Large image"
+                    @click.prevent="setImageSize('large')"
+                  >
+                    L
+                  </ToggleGroupItem>
+                  <ToggleGroupItem
+                    value="imageSizeFull"
+                    :data-state="imageState.size === 'full' ? 'on' : 'off'"
+                    title="Full width image"
+                    @click.prevent="setImageSize('full')"
+                  >
+                    F
+                  </ToggleGroupItem>
+                </ToggleGroup>
+                <ToggleGroup type="single">
+                  <ToggleGroupItem
+                    value="imageFloatLeft"
+                    :data-state="imageState.float === 'left' ? 'on' : 'off'"
+                    title="Float left"
+                    @click.prevent="setImageFloat('left')"
+                  >
+                    <AlignLeft :size="16" />
+                  </ToggleGroupItem>
+                  <ToggleGroupItem
+                    value="imageFloatNone"
+                    :data-state="imageState.float === 'none' ? 'on' : 'off'"
+                    title="No float"
+                    @click.prevent="setImageFloat('none')"
+                  >
+                    <AlignCenter :size="16" />
+                  </ToggleGroupItem>
+                  <ToggleGroupItem
+                    value="imageFloatRight"
+                    :data-state="imageState.float === 'right' ? 'on' : 'off'"
+                    title="Float right"
+                    @click.prevent="setImageFloat('right')"
+                  >
+                    <AlignRight :size="16" />
+                  </ToggleGroupItem>
+                </ToggleGroup>
+                <div class="flex items-center gap-2 px-2">
+                  <span class="text-xs text-muted-foreground">
+                    Width
+                  </span>
+                  <input
+                    type="range"
+                    min="10"
+                    max="100"
+                    step="1"
+                    class="h-2 w-32 cursor-pointer"
+                    :value="imageState.width"
+                    @input="setImageWidth(Number(($event.target).value))"
+                  >
+                  <span class="text-xs w-12 text-right text-muted-foreground">
+                    {{ `${imageState.width}%` }}
+                  </span>
+                </div>
+                <Button
+                  variant="outline"
+                  title="Remove image"
+                  @click.prevent="removeImage"
+                >
+                  <Trash2 :size="16" />
+                </Button>
+              </div>
             </div>
             <EditorContent
               class="border border-secondary bg-background"
@@ -506,6 +778,67 @@ const addImage = () => {
     border: none;
     border-top: 1px solid var(--gray-2);
     margin: 2rem 0;
+  }
+
+  &::after {
+    content: '';
+    display: block;
+    clear: both;
+  }
+
+  img.edge-editor-image {
+    border-radius: 0.375rem;
+    display: inline-block;
+    height: auto;
+    max-width: 100%;
+  }
+
+  img.edge-editor-image[data-size='small'] {
+    width: 20%;
+    min-width: 120px;
+    max-width: 160px;
+  }
+
+  img.edge-editor-image[data-size='medium'] {
+    width: 33%;
+    min-width: 160px;
+    max-width: 320px;
+  }
+
+  img.edge-editor-image[data-size='large'] {
+    width: 50%;
+    min-width: 200px;
+    max-width: 480px;
+  }
+
+  img.edge-editor-image[data-size='full'] {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  img.edge-editor-image[data-float='left'] {
+    float: left;
+    margin: 0.75rem 1.5rem 1rem 0;
+  }
+
+  img.edge-editor-image[data-float='right'] {
+    float: right;
+    margin: 0.75rem 0 1rem 1.5rem;
+  }
+
+  img.edge-editor-image[data-float='none'] {
+    float: none;
+    display: block;
+    margin: 1.25rem auto;
+  }
+
+  img.edge-editor-image.ProseMirror-selectednode {
+   border: 2px solid black;
+  }
+
+  img.edge-editor-image[data-size='full'][data-float='none'] {
+    margin-left: 0;
+    margin-right: 0;
   }
 }
 </style>
