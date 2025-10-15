@@ -28,11 +28,23 @@ const state = reactive({
 })
 
 const edgeFirebase = inject('edgeFirebase')
+
+const themeId = computed(() => {
+  const site = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`][props.siteId]
+  console.log(site)
+  return site?.theme || null
+})
+
 const blocks = computed(() => {
+  const blocks = []
   if (edgeFirebase?.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]) {
-    return Object.values(edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/blocks`])
+    blocks.push(...Object.values(edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]))
   }
-  return []
+  if (props.theme) {
+    console.log('Filtering blocks by theme:', themeId.value)
+    return blocks.filter(block => block.themes && block.themes.includes(themeId.value))
+  }
+  return blocks
 })
 
 onBeforeMount(async () => {
@@ -122,6 +134,18 @@ const blockLoaded = (isLoading, index) => {
     state.blocksLoaded.push(index)
   }
 }
+
+const getTagsFromBlocks = computed(() => {
+  const tagsSet = new Set()
+  console.log('blocks:', blocks.value)
+  Object.values(blocks.value || {}).forEach((block) => {
+    console.log('block:', block)
+    if (block.tags && Array.isArray(block.tags)) {
+      block.tags.forEach(tag => tagsSet.add(tag))
+    }
+  })
+  return Array.from(tagsSet).map(tag => ({ name: tag, title: tag }))
+})
 </script>
 
 <template>
