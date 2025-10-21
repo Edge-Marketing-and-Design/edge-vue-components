@@ -1,7 +1,21 @@
-<div class="pa-8 bg-brand font-brand">
 {{{#array {"field":"list","schema":[{"field":"name","value":"text"}],"collection":{"path":"post","query":[{"field":"doc_created_at","operator":">","value":0}],"order":[{"field":"doc_created_at","direction":"desc"}]},"queryOptions":[],"limit":1,"value":[]}}}}
-    <h1 class="text-4xl">
-        {{item.title}}
-    </h1>
-{{{/array}}}
-</div>
+  <section
+    class="relative h-[50dvh] min-h-[260px] w-full bg-cover bg-center"
+    style="background-image: url('{{item.featuredImage}}')"
+  >
+    <!-- Dark overlay -->
+    <div class="absolute inset-0 bg-black/40"></div>
+
+    <!-- Centered content -->
+    <div class="relative z-10 flex h-full items-center justify-center">
+      <div class="px-6 text-center text-white">
+        <h1 class="mt-4 !text-3xl md:!text-4xl font-brand font-semibold tracking-[0.35em]">
+          {{item.title}}
+        </h1>
+      </div>
+    </div>
+
+    <!-- Optional vignette -->
+    <div class="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/30"></div>
+  </section>
+  {{{/array}}}

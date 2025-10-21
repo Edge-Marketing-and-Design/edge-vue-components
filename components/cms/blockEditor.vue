@@ -22,6 +22,7 @@ const state = reactive({
       content: { value: '' },
       tags: { value: [] },
       themes: { value: [] },
+      synced: { value: false },
       version: 1,
     },
   },
@@ -55,6 +56,81 @@ const PLACEHOLDERS = {
     'Sed do eiusmod tempor incididunt.',
   ],
   image: '/images/filler.png',
+}
+
+const contentEditorRef = ref(null)
+
+const BLOCK_CONTENT_SNIPPETS = [
+  {
+    label: 'Text Field',
+    snippet: '{{{#text {"field": "fieldName", "value": "" }}}}',
+    description: 'Simple text field placeholder',
+  },
+  {
+    label: 'Text Area',
+    snippet: '{{{#textarea {"field": "fieldName", "value": "" }}}}',
+    description: 'Textarea field placeholder',
+  },
+  {
+    label: 'Rich Text',
+    snippet: '{{{#richtext {"field": "content", "value": "" }}}}',
+    description: 'Rich text field placeholder',
+  },
+  {
+    label: 'Image',
+    snippet: '{{{#image {"field": "imageField", "value": "",   "tags": ["Backgrounds"] }}}}',
+    description: 'Image field placeholder',
+  },
+  {
+    label: 'Array (Basic)',
+    snippet: `{{{#array {"field": "items", "value": [] }}}}
+  <!-- iterate with {{item}} -->
+{{{/array}}}`,
+    description: 'Basic repeating array block',
+  },
+  {
+    label: 'Array (API)',
+    snippet: `{{{#array {"field":"List","schema":{"listing_price":"money","square_feet":"number","acres":"number"},"api":"https://api.clearwaterproperties.com/api/front/properties","apiField":"data","apiQuery":"?limit=20&filter_scope[agent][]=mt_nmar-mt.545000478","queryOptions":[{"field":"sort","optionsKey":"label","optionsValue":"value","options":[{"label":"Highest Price","value":"listing_price"},{"label":"Lowest Price","value":"-listing_price"},{"label":"Newest","value":"-list_date"}]},{"field":"filter_scope[agent][]","title":"Agent","optionsKey":"name","optionsValue":"mls.primary","options":"users"}],"limit":10,"value":[]}}}}
+  <!-- iterate with {{item}} -->
+{{{/array}}}`,
+    description: 'Array pulling data from an API',
+  },
+  {
+    label: 'Array (Collection)',
+    snippet: `{{{#array {"field":"list","schema":[{"field":"name","value":"text"}],"collection":{"path":"users","query":[{"field":"name","operator":">","value":""}],"order":[{"field":"name","direction":"asc"}]},"queryOptions":[{"field":"office_id","title":"Office","optionsKey":"label","optionsValue":"value","options":[{"label":"Office 1","value":"7"},{"label":"Office 2","value":"39"},{"label":"Office 3","value":"32"}]},{"field":"userId","title":"Agent","optionsKey":"name","optionsValue":"userId","options":"users"}],"limit":100,"value":[]}}}}
+    <h1 class="text-4xl">
+        {{item.name}}
+    </h1>
+{{{/array}}}`,
+    description: 'Array pulling data from a collection',
+  },
+  {
+    label: 'Subarray',
+    snippet: `{{{#subarray:child {"field": "item.children", "limit": 0 }}}}
+  {{child}}
+{{{/subarray}}}`,
+    description: 'Nested array inside an array item',
+  },
+  {
+    label: 'If / Else',
+    snippet: `{{{#if {"cond": "condition" }}}}
+  <!-- content when condition is true -->
+{{{#else}}}
+  <!-- content when condition is false -->
+{{{/if}}}`,
+    description: 'Conditional block with optional else',
+  },
+]
+
+function insertBlockContentSnippet(snippet) {
+  if (!snippet)
+    return
+  const editor = contentEditorRef.value
+  if (!editor || typeof editor.insertSnippet !== 'function') {
+    console.warn('Block content editor is not ready for snippet insertion')
+    return
+  }
+  editor.insertSnippet(snippet)
 }
 
 function normalizeConfigLiteral(str) {
@@ -481,17 +557,56 @@ const getTagsFromBlocks = computed(() => {
                 class="flex-auto"
               />
             </div>
+            <div class="flex-auto pt-2">
+              <edge-shad-checkbox
+                v-model="slotProps.workingDoc.synced"
+                name="synced"
+                label="Synced Block"
+              >
+                Synced Block
+              </edge-shad-checkbox>
+            </div>
           </div>
           <div class="flex gap-4">
-            <edge-cms-code-editor
-              v-model="slotProps.workingDoc.content"
-              title="Block Content"
-              language="html"
-              name="content"
-              height="calc(100vh - 300px)"
-              class="mb-4 w-1/2"
-              @line-click="payload => handleEditorLineClick(payload, slotProps.workingDoc)"
-            />
+            <div class="w-1/2">
+              <div class="flex gap-2">
+                <div class="w-2/12 mb-3 rounded-md border border-slate-200 bg-white/80 p-3 shadow-sm shadow-slate-200/60 dark:border-slate-800 dark:bg-slate-900/60">
+                  <div class="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                    Dynamic Content
+                  </div>
+                  <div class="mt-2 flex flex-wrap gap-2">
+                    <edge-tooltip
+                      v-for="snippet in BLOCK_CONTENT_SNIPPETS"
+                      :key="snippet.label"
+                    >
+                      <edge-shad-button
+                        size="sm"
+                        variant="outline"
+                        class="text-xs w-full"
+                        @click="insertBlockContentSnippet(snippet.snippet)"
+                      >
+                        {{ snippet.label }}
+                      </edge-shad-button>
+                      <template #content>
+                        <pre class="max-w-[320px] whitespace-pre-wrap break-words text-left text-xs font-mono leading-tight">{{ snippet.snippet }}</pre>
+                      </template>
+                    </edge-tooltip>
+                  </div>
+                </div>
+                <div class="w-10/12">
+                  <edge-cms-code-editor
+                    ref="contentEditorRef"
+                    v-model="slotProps.workingDoc.content"
+                    title="Block Content"
+                    language="html"
+                    name="content"
+                    height="calc(100vh - 300px)"
+                    class="mb-4 flex-1"
+                    @line-click="payload => handleEditorLineClick(payload, slotProps.workingDoc)"
+                  />
+                </div>
+              </div>
+            </div>
             <div class="w-1/2">
               <div class="w-full mx-auto bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30">
                 <edge-cms-block-picker

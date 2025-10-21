@@ -127,7 +127,7 @@ const openEditor = async () => {
       }
     }
   }
-
+  modelValue.value.blockUpdatedAt = new Date().toISOString()
   state.open = true
   state.afterLoad = true
 }
@@ -168,6 +168,8 @@ const orderedMeta = computed(() => {
 const genTitleFromField = (field) => {
   if (field?.title)
     return field.title
+  if (field?.meta?.title)
+    return field.meta.title
   // Insert space before a capital only if it's followed by a lowercase
   return field.field
     // Insert space before a capital only if it's followed by a lowercase
@@ -284,11 +286,13 @@ const getTagsFromPosts = computed(() => {
       <SheetContent v-if="state.afterLoad" class="w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl">
         <SheetHeader>
           <SheetTitle>Edit Block</SheetTitle>
-          <SheetDescription />
+          <SheetDescription v-if="modelValue.synced" class="text-sm text-red-500">
+            This is a synced block. Changes made here will be reflected across all instances of this block on your site.
+          </SheetDescription>
         </SheetHeader>
 
         <edge-shad-form>
-          <div class="p-6 space-y-4  h-[calc(100vh-130px)] overflow-y-auto">
+          <div :class="modelValue.synced ? 'h-[calc(100vh-160px)]' : 'h-[calc(100vh-130px)]'" class="p-6 space-y-4   overflow-y-auto">
             <template v-for="entry in orderedMeta" :key="entry.field">
               <div v-if="entry.meta.type === 'array'">
                 <div v-if="!entry.meta?.api && !entry.meta?.collection">
@@ -426,7 +430,7 @@ const getTagsFromPosts = computed(() => {
                           Select Image
                         </edge-shad-button>
                       </DialogTrigger>
-                      <DialogContent class="w-full max-w-[1200px]">
+                      <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-y-auto">
                         <DialogHeader>
                           <DialogTitle>Select Image</DialogTitle>
                           <DialogDescription />

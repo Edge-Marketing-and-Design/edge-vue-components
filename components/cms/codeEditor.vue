@@ -240,18 +240,35 @@ const formatCode = () => {
 }
 
 const insertBlock = (text) => {
-  console.log(text)
+  if (!text && text !== '')
+    return
   const editor = editorInstanceRef.value
   if (!editor)
     return console.error('Editor instance not ready')
-  const selection = editor.getSelection()
-  if (!selection)
-    return console.error('No selection available')
-  const op = { range: selection, text, forceMoveMarkers: true }
+
+  let range = editor.getSelection()
+
+  if (!range) {
+    const position = editor.getPosition()
+    if (!position)
+      return console.error('No active selection or cursor position')
+    range = {
+      startLineNumber: position.lineNumber,
+      startColumn: position.column,
+      endLineNumber: position.lineNumber,
+      endColumn: position.column,
+    }
+  }
+
+  const op = { range, text, forceMoveMarkers: true }
   editor.executeEdits('insert-block', [op])
   editor.focus()
   state.insertDialog = false
 }
+
+defineExpose({
+  insertSnippet: insertBlock,
+})
 
 const diffEditorRef = shallowRef()
 const handleMountDiff = (editor) => {

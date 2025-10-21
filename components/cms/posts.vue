@@ -633,13 +633,13 @@ const unPublishPost = async (postId) => {
                       Select Image
                     </edge-shad-button>
                   </DialogTrigger>
-                  <DialogContent class="w-full max-w-[1200px]">
+                  <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-y-auto">
                     <DialogHeader>
                       <DialogTitle>Select Image</DialogTitle>
                       <DialogDescription />
                     </DialogHeader>
                     <edge-cms-media-manager
-                      :site="props.siteId"
+                      :site="props.site"
                       :select-mode="true"
                       @select="(url) => { slotProps.workingDoc.featuredImage = url; state.imageOpen = false; }"
                     />
@@ -669,7 +669,7 @@ const unPublishPost = async (postId) => {
               @request-image="openContentImageDialog"
             />
             <Dialog v-model:open="state.contentImageDialog">
-              <DialogContent class="w-full max-w-[1200px]">
+              <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>Select Image</DialogTitle>
                   <DialogDescription />
