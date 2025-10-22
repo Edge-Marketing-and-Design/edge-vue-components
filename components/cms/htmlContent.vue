@@ -1,11 +1,12 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import DOMPurify from 'dompurify'
-
-import initUnocssRuntime, { defineConfig } from '@unocss/runtime'
+import { useHead } from '#imports'
 import presetWind4 from '@unocss/preset-wind4'
 
-import { useHead } from '#imports'
+import initUnocssRuntime, { defineConfig } from '@unocss/runtime'
+import DOMPurify from 'dompurify'
+
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+
 const props = defineProps({
   html: {
     type: String,
@@ -14,6 +15,11 @@ const props = defineProps({
   theme: {
     type: Object,
     default: () => ({}),
+  },
+  comp: {
+    type: String,
+    required: false,
+    default: null,
   },
 })
 
@@ -110,7 +116,9 @@ function buildScopedThemeCSS(theme, scopeId) {
       if (opts?.lineHeight)
         decls.push(`--line-height-${k}: ${opts.lineHeight};`)
     }
-    else decls.push(`--font-size-${k}: ${v};`)
+    else {
+      decls.push(`--font-size-${k}: ${v};`)
+    }
   })
   Object.entries(borderRadius).forEach(([k, v]) => decls.push(`--radius-${k}: ${v};`))
   Object.entries(boxShadow).forEach(([k, v]) => decls.push(`--shadow-${k}: ${v};`))
@@ -239,7 +247,7 @@ async function initEmblaCarousels(scope) {
       if (nextBtn)
         nextBtn.disabled = !api.canScrollNext()
     }
-    if (prevBtn)
+    if (prevBtn) {
       prevBtn.addEventListener('click', () => {
         if (loop && !api.canScrollPrev()) {
           const snaps = api.scrollSnapList()
@@ -248,7 +256,8 @@ async function initEmblaCarousels(scope) {
         }
         api.scrollPrev()
       })
-    if (nextBtn)
+    }
+    if (nextBtn) {
       nextBtn.addEventListener('click', () => {
         if (loop && !api.canScrollNext()) {
           api.scrollTo(0)
@@ -256,6 +265,7 @@ async function initEmblaCarousels(scope) {
         }
         api.scrollNext()
       })
+    }
 
     // Build dots based on scroll snaps (respects slidesToScroll & breakpoints)
     const dotsHost = root.querySelector('[data-carousel-dots]')
@@ -442,7 +452,7 @@ function toVarBackedUtilities(classList, theme) {
         return 'font-[var(--font-mono)]'
 
       // Generic matcher for custom font keys: e.g., font-brand, font-ui, etc.
-      const ffMatch = /^font-([a-zA-Z0-9_-]+)$/.exec(cls)
+      const ffMatch = /^font-([\w-]+)$/.exec(cls)
       if (ffMatch) {
         const key = ffMatch[1]
         // Only rewrite if that key exists in theme.extend.fontFamily
@@ -519,7 +529,7 @@ function rewriteAllClasses(scopeEl, theme) {
   if (!scopeEl)
     return
   // Utility regex for Uno/Tailwind classes
-  const utilRe = /^-?(p|px|py|pt|pr|pb|pl|m|mx|my|mt|mr|mb|ml|text|font|leading|tracking|bg|border|rounded|shadow|w|h|min-w|max-w|min-h|max-h|object|overflow|opacity|z|order|top|right|bottom|left|inset|translate|rotate|scale|skew|origin|grid|flex|items|justify|content|place|gap|space|columns|col|row|aspect|ring|outline|decoration|underline|line-through|no-underline|whitespace|break|truncate|sr-only|not-sr-only|cursor|select|duration|ease|delay|transition|animate)(-|$|\[)/
+  const utilRe = /^-?([pmwhz]|px|py|pt|pr|pb|pl|mx|my|mt|mr|mb|ml|text|font|leading|tracking|bg|border|rounded|shadow|min-w|max-w|min-h|max-h|object|overflow|opacity|order|top|right|bottom|left|inset|translate|rotate|scale|skew|origin|grid|flex|items|justify|content|place|gap|space|columns|col|row|aspect|ring|outline|decoration|underline|line-through|no-underline|whitespace|break|truncate|sr-only|not-sr-only|cursor|select|duration|ease|delay|transition|animate)(-|$|\[)/
   // Mark utility classes as important so block-level styles win over parents.
   const importantify = (core) => {
     if (!core || core.startsWith('!'))
@@ -604,7 +614,10 @@ onBeforeUnmount(() => {
 
 <template>
   <!-- Runtime CSS applies inside this container -->
-  <div ref="hostEl" class="block-content" :data-theme-scope="scopeId" v-html="safeHtml" />
+  <div ref="hostEl" class="block-content" :data-theme-scope="scopeId">
+    <component :is="props.comp" v-if="props.comp" />
+    <div v-else v-html="safeHtml" />
+  </div>
 </template>
 
 <style>

@@ -16,6 +16,10 @@ const props = defineProps({
     type: Object,
     default: null,
   },
+  isolated: {
+    type: Boolean,
+    default: true,
+  },
 })
 
 const defaultTheme = {
@@ -363,7 +367,7 @@ const rendered = computed(() => {
 </script>
 
 <template>
-  <edge-cms-html-content :html="rendered" :theme="theme" />
+  <edge-cms-html-content :html="rendered" :theme="theme" :isolated="props.isolated" />
 </template>
 
 <style scoped>
