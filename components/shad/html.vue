@@ -113,8 +113,8 @@ const EdgeImage = ImageExt.extend({
           'data-float': attributes.float || 'left',
         }),
       },
-  width: {
-    default: DEFAULT_IMAGE_WIDTH,
+      width: {
+        default: DEFAULT_IMAGE_WIDTH,
         parseHTML: (element) => {
           const attr = element.getAttribute('data-width')
           if (attr)
@@ -127,22 +127,22 @@ const EdgeImage = ImageExt.extend({
             return sizeWidths[sizeAttr]
           return DEFAULT_IMAGE_WIDTH
         },
-    renderHTML: (attributes) => {
-      const widthValue = Number.parseFloat(attributes.width)
-      const width = Number.isFinite(widthValue) ? widthValue : DEFAULT_IMAGE_WIDTH
-      const floatValue = attributes.float || 'left'
-      let marginValue = '0.75rem 1.5rem 1rem 0'
-      if (floatValue === 'right')
-        marginValue = '0.75rem 0 1rem 1.5rem'
-      else if (floatValue === 'none')
-        marginValue = '1.25rem auto'
-      const styleSegments = [`width: ${width}%;`, `float: ${floatValue};`, `margin: ${marginValue};`]
-      return {
-        'data-width': width,
-        'style': styleSegments.join(' '),
-      }
-    },
-  },
+        renderHTML: (attributes) => {
+          const widthValue = Number.parseFloat(attributes.width)
+          const width = Number.isFinite(widthValue) ? widthValue : DEFAULT_IMAGE_WIDTH
+          const floatValue = attributes.float || 'left'
+          let marginValue = '0.75rem 1.5rem 1rem 0'
+          if (floatValue === 'right')
+            marginValue = '0.75rem 0 1rem 1.5rem'
+          else if (floatValue === 'none')
+            marginValue = '1.25rem auto'
+          const styleSegments = [`width: ${width}%;`, `float: ${floatValue};`, `margin: ${marginValue};`]
+          return {
+            'data-width': width,
+            'style': styleSegments.join(' '),
+          }
+        },
+      },
     }
   },
 }).configure({

@@ -30,6 +30,9 @@ const schemas = {
       required_error: 'Title is required',
     }).min(1, { message: 'Title is required' }),
     tags: z.array(z.string()).optional(),
+    blurb: z.string({
+      required_error: 'Content blurb is required',
+    }).min(1, { message: 'Content blurb is required' }).max(500, { message: 'Content blurb must be at most 500 characters' }),
     content: z.string({
       required_error: 'Content is required',
     }).min(1, { message: 'Content is required' }),
@@ -53,7 +56,7 @@ const isPublishedPostDiff = (postId) => {
     return true
   }
   if (publishedPost && draftPost) {
-    return JSON.stringify({ name: publishedPost.name, content: publishedPost.content, tags: publishedPost.tags, title: publishedPost.title, featuredImages: publishedPost.featuredImages }) !== JSON.stringify({ name: draftPost.name, content: draftPost.content, tags: draftPost.tags, title: draftPost.title, featuredImages: draftPost.featuredImages })
+    return JSON.stringify({ name: publishedPost.name, content: publishedPost.content, blurb: publishedPost.blurb, tags: publishedPost.tags, title: publishedPost.title, featuredImages: publishedPost.featuredImages }) !== JSON.stringify({ name: draftPost.name, content: draftPost.content, blurb: draftPost.blurb, tags: draftPost.tags, title: draftPost.title, featuredImages: draftPost.featuredImages })
   }
   return false
 }
@@ -107,6 +110,15 @@ const state = reactive({
           'value-as': 'array',
           'label': 'Tags',
           'placeholder': 'Add a tag',
+        },
+      },
+      blurb: {
+        value: '',
+        cols: '12',
+        bindings: {
+          'field-type': 'textarea',
+          'label': 'Content Blurb / Preview',
+          'rows': '8',
         },
       },
       content: {
@@ -658,6 +670,13 @@ const unPublishPost = async (postId) => {
               :items="getTagsFromPosts"
               :allow-additions="true"
               @add="addTag"
+            />
+            <edge-shad-textarea
+              v-model="slotProps.workingDoc.blurb"
+              name="blurb"
+              label="Content Blurb / Preview"
+              :disabled="slotProps.submitting"
+              rows="8"
             />
             <edge-shad-html
               ref="contentEditor"
