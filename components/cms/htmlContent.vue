@@ -16,12 +16,18 @@ const props = defineProps({
     type: Object,
     default: () => ({}),
   },
+  isolated: {
+    type: Boolean,
+    default: true,
+  },
   comp: {
     type: String,
     required: false,
     default: null,
   },
 })
+
+const emit = defineEmits(['loaded'])
 
 const scopeId = `hc-${Math.random().toString(36).slice(2)}`
 
@@ -140,6 +146,13 @@ function setGlobalThemeVars(theme) {
 }
 
 const hostEl = ref(null)
+let hasMounted = false
+
+function notifyLoaded() {
+  if (!import.meta.client || !hasMounted)
+    return
+  requestAnimationFrame(() => emit('loaded'))
+}
 
 // --- SSR-safe HTML: raw on server, sanitized on client ---
 const safeHtml = computed(() => {
@@ -465,7 +478,7 @@ function toVarBackedUtilities(classList, theme) {
     .join(' ')
 }
 
-function applyThemeClasses(scopeEl, theme, variant = 'light') {
+function applyThemeClasses(scopeEl, theme, variant = 'light', isolated = true) {
   if (!scopeEl)
     return
   const t = normalizeTheme(theme)
@@ -483,7 +496,20 @@ function applyThemeClasses(scopeEl, theme, variant = 'light') {
   // Root classes
   if (apply.root) {
     const mapped = toVarBackedUtilities(apply.root, t)
-    scopeEl.className = `block-content ${mapped}`.trim()
+    if (isolated) {
+      scopeEl.className = `block-content ${mapped}`.trim()
+    }
+    else {
+      const applied = (scopeEl.dataset.themeRootClasses || '').split(/\s+/).filter(Boolean)
+      applied.forEach(cls => scopeEl.classList.remove(cls))
+      const next = mapped.split(/\s+/).filter(Boolean)
+      next.forEach(cls => scopeEl.classList.add(cls))
+      scopeEl.classList.add('block-content')
+      if (next.length)
+        scopeEl.dataset.themeRootClasses = next.join(' ')
+      else
+        delete scopeEl.dataset.themeRootClasses
+    }
   }
 
   // Optional convenience: map a few generic applies
@@ -525,7 +551,7 @@ function applyThemeClasses(scopeEl, theme, variant = 'light') {
 }
 
 // Add new helper to rewrite arbitrary class tokens with responsive and state prefixes
-function rewriteAllClasses(scopeEl, theme) {
+function rewriteAllClasses(scopeEl, theme, isolated = true) {
   if (!scopeEl)
     return
   // Utility regex for Uno/Tailwind classes
@@ -555,13 +581,29 @@ function rewriteAllClasses(scopeEl, theme) {
     const orig = el.className || ''
     if (!orig)
       return
-    const mapped = orig
-      .split(/\s+/)
-      .filter(Boolean)
+    const origTokens = orig.split(/\s+/).filter(Boolean)
+    if (isolated) {
+      const mapped = origTokens
+        .map(mapToken)
+        .join(' ')
+      if (mapped !== orig)
+        el.className = mapped
+      return
+    }
+
+    const prevApplied = (el.dataset.themeAugmentedClasses || '').split(/\s+/).filter(Boolean)
+    if (prevApplied.length)
+      prevApplied.forEach(cls => el.classList.remove(cls))
+
+    const additions = origTokens
       .map(mapToken)
-      .join(' ')
-    if (mapped !== orig)
-      el.className = mapped
+      .filter(cls => cls && !origTokens.includes(cls))
+    additions.forEach(cls => el.classList.add(cls))
+
+    if (additions.length)
+      el.dataset.themeAugmentedClasses = additions.join(' ')
+    else
+      delete el.dataset.themeAugmentedClasses
   })
 }
 
@@ -578,6 +620,9 @@ onMounted(async () => {
   // setScopedThemeVars(hostEl.value, normalizeTheme(props.theme))
   applyThemeClasses(hostEl.value, props.theme, (props.theme && props.theme.variant) || 'light')
   rewriteAllClasses(hostEl.value, props.theme)
+  await nextTick()
+  hasMounted = true
+  notifyLoaded()
 })
 
 watch(
@@ -588,14 +633,17 @@ watch(
     initEmblaCarousels(hostEl.value)
     // setGlobalThemeVars(props.theme)
     setScopedThemeVars(hostEl.value, normalizeTheme(props.theme))
+
     applyThemeClasses(hostEl.value, props.theme, (props.theme && props.theme.variant) || 'light')
     rewriteAllClasses(hostEl.value, props.theme)
+    await nextTick()
+    notifyLoaded()
   },
 )
 
 watch(
   () => props.theme,
-  (val) => {
+  async (val) => {
     const t = normalizeTheme(val)
     // 1) Write CSS variables globally
     // setGlobalThemeVars(t)
@@ -603,6 +651,8 @@ watch(
     // 2) Apply classes based on `apply`, `slots`, and optional variants
     applyThemeClasses(hostEl.value, t, (val && val.variant) || 'light')
     rewriteAllClasses(hostEl.value, t)
+    await nextTick()
+    notifyLoaded()
   },
   { immediate: true, deep: true },
 )
