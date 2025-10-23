@@ -27,6 +27,8 @@ const props = defineProps({
   },
 })
 
+const emit = defineEmits(['loaded'])
+
 const scopeId = `hc-${Math.random().toString(36).slice(2)}`
 
 // --- UnoCSS Runtime singleton (global, one init for the whole app) ---
@@ -144,6 +146,13 @@ function setGlobalThemeVars(theme) {
 }
 
 const hostEl = ref(null)
+let hasMounted = false
+
+function notifyLoaded() {
+  if (!import.meta.client || !hasMounted)
+    return
+  requestAnimationFrame(() => emit('loaded'))
+}
 
 // --- SSR-safe HTML: raw on server, sanitized on client ---
 const safeHtml = computed(() => {
@@ -609,8 +618,11 @@ onMounted(async () => {
   setScopedThemeVars(hostEl.value, normalizeTheme(props.theme))
   // If you later need per-block overrides, keep the next line; otherwise, it can be omitted.
   // setScopedThemeVars(hostEl.value, normalizeTheme(props.theme))
-  applyThemeClasses(hostEl.value, props.theme, (props.theme && props.theme.variant) || 'light', props.isolated)
-  rewriteAllClasses(hostEl.value, props.theme, props.isolated)
+  applyThemeClasses(hostEl.value, props.theme, (props.theme && props.theme.variant) || 'light')
+  rewriteAllClasses(hostEl.value, props.theme)
+  await nextTick()
+  hasMounted = true
+  notifyLoaded()
 })
 
 watch(
@@ -621,21 +633,26 @@ watch(
     initEmblaCarousels(hostEl.value)
     // setGlobalThemeVars(props.theme)
     setScopedThemeVars(hostEl.value, normalizeTheme(props.theme))
-    applyThemeClasses(hostEl.value, props.theme, (props.theme && props.theme.variant) || 'light', props.isolated)
-    rewriteAllClasses(hostEl.value, props.theme, props.isolated)
+
+    applyThemeClasses(hostEl.value, props.theme, (props.theme && props.theme.variant) || 'light')
+    rewriteAllClasses(hostEl.value, props.theme)
+    await nextTick()
+    notifyLoaded()
   },
 )
 
 watch(
   () => props.theme,
-  (val) => {
+  async (val) => {
     const t = normalizeTheme(val)
     // 1) Write CSS variables globally
     // setGlobalThemeVars(t)
     setScopedThemeVars(hostEl.value, t)
     // 2) Apply classes based on `apply`, `slots`, and optional variants
-    applyThemeClasses(hostEl.value, t, (val && val.variant) || 'light', props.isolated)
-    rewriteAllClasses(hostEl.value, t, props.isolated)
+    applyThemeClasses(hostEl.value, t, (val && val.variant) || 'light')
+    rewriteAllClasses(hostEl.value, t)
+    await nextTick()
+    notifyLoaded()
   },
   { immediate: true, deep: true },
 )

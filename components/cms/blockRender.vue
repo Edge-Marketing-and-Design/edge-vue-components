@@ -22,6 +22,8 @@ const props = defineProps({
   },
 })
 
+const emit = defineEmits(['loaded'])
+
 const defaultTheme = {
   extend: {
     colors: {
@@ -367,7 +369,12 @@ const rendered = computed(() => {
 </script>
 
 <template>
-  <edge-cms-html-content :html="rendered" :theme="theme" :isolated="props.isolated" />
+  <edge-cms-html-content
+    :html="rendered"
+    :theme="theme"
+    :isolated="props.isolated"
+    @loaded="emit('loaded')"
+  />
 </template>
 
 <style scoped>
