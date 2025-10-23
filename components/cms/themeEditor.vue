@@ -7,7 +7,9 @@ const props = defineProps({
     required: true,
   },
 })
+
 const emit = defineEmits(['head'])
+const edgeFirebase = inject('edgeFirebase')
 const state = reactive({
   filter: '',
   workingDoc: {},
@@ -70,6 +72,7 @@ const state = reactive({
     },
   },
   mounted: false,
+  loading: false,
 })
 
 const blockSchema = toTypedSchema(z.object({
@@ -79,7 +82,7 @@ const blockSchema = toTypedSchema(z.object({
 }))
 
 onMounted(() => {
-  state.mounted = true
+  // state.mounted = true
 })
 
 const editorDocUpdates = (workingDoc) => {
@@ -98,6 +101,26 @@ const headObject = computed(() => {
 watch(headObject, (newHeadElements) => {
   emit('head', newHeadElements)
 }, { immediate: true, deep: true })
+
+const sites = computed(() => {
+  return Object.values(edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`] || {})
+})
+
+watch (sites, async (newSites) => {
+  state.loading = true
+  if (!edgeGlobal.edgeState.blockEditorSite && newSites.length > 0) {
+    edgeGlobal.edgeState.blockEditorSite = newSites[0].docId
+  }
+  await nextTick()
+  state.loading = false
+}, { immediate: true, deep: true })
+
+onBeforeMount(async () => {
+  if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites`]) {
+    await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites`)
+  }
+  state.mounted = true
+})
 </script>
 
 <template>
@@ -118,6 +141,21 @@ watch(headObject, (newHeadElements) => {
       <template #header-start="slotProps">
         <FilePenLine class="mr-2" />
         {{ slotProps.title }}
+      </template>
+      <template #header-center>
+        <div class="w-full flex gap-1 px-4">
+          <div class="w-full">
+            <edge-shad-select
+              v-if="!state.loading"
+              v-model="edgeGlobal.edgeState.blockEditorSite"
+              label="Preview Site"
+              name="site"
+              :items="sites.map(s => ({ title: s.name, name: s.docId }))"
+              placeholder="Select Site"
+              class="w-full"
+            />
+          </div>
+        </div>
       </template>
       <template #main="slotProps">
         <div class="pt-4">
@@ -148,6 +186,7 @@ watch(headObject, (newHeadElements) => {
             <div class="w-1/2">
               <div class="w-full mx-auto bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30">
                 <edge-cms-block-picker
+                  :site-id="edgeGlobal.edgeState.blockEditorSite"
                   class="!h-[calc(100vh-220px)] overflow-y-auto"
                   list-only
                   :theme="JSON.parse(slotProps.workingDoc.theme)"

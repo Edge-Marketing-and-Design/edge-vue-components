@@ -1,5 +1,5 @@
 <script setup>
-import { Plus, Square, SquareCheckBig } from 'lucide-vue-next'
+import { Plus } from 'lucide-vue-next'
 
 const props = defineProps({
   blockOverride: {
@@ -31,19 +31,22 @@ const state = reactive({
 const edgeFirebase = inject('edgeFirebase')
 
 const themeId = computed(() => {
+  if (!props.siteId)
+    return null
   const site = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`][props.siteId]
   console.log(site)
   return site?.theme || null
 })
 
 const blocks = computed(() => {
-  const blocks = []
+  let blocks = []
   if (edgeFirebase?.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]) {
-    blocks.push(...Object.values(edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]))
+    blocks = Object.values(edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/blocks`])
   }
-  if (props.theme) {
+  console.log(props.theme)
+  if (themeId.value) {
     console.log('Filtering blocks by theme:', themeId.value)
-    return blocks.filter(block => block.themes && block.themes.includes(themeId.value))
+    blocks = blocks.filter(block => block.themes && block.themes.includes(themeId.value))
   }
   return blocks
 })
@@ -179,10 +182,8 @@ watch(getTagsFromBlocks, (tags) => {
 })
 
 const toggleTag = (tag) => {
-  if (state.selectedTags.includes(tag))
-    state.selectedTags = state.selectedTags.filter(t => t !== tag)
-  else
-    state.selectedTags = [...state.selectedTags, tag]
+  state.selectedTags = []
+  state.selectedTags.push(tag)
 }
 
 const clearTagFilters = () => {
@@ -211,7 +212,6 @@ const clearTagFilters = () => {
   </div>
   <div v-else-if="props.listOnly" class="p-6 h-[calc(100vh-50px)] overflow-hidden flex flex-col gap-4">
     <div v-if="getTagsFromBlocks.length" class="flex flex-wrap items-center gap-2 text-sm">
-      <span class="font-medium text-muted-foreground">Filter by tags</span>
       <button
         v-for="tagOption in getTagsFromBlocks"
         :key="tagOption.name"
@@ -294,8 +294,6 @@ const clearTagFilters = () => {
                 :class="state.selectedTags.includes(tagOption.name) ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'bg-background text-muted-foreground hover:bg-muted border-border'"
                 @click="toggleTag(tagOption.name)"
               >
-                <SquareCheckBig v-if="state.selectedTags.includes(tagOption.name)" class="w-4 h-4 inline-block mr-1" />
-                <Square v-else class="w-4 h-4 inline-block mr-1" />
                 {{ tagOption.title }}
               </button>
               <button

@@ -1,6 +1,6 @@
 <script setup>
+import { CheckCircle2 } from 'lucide-vue-next'
 import { cn } from '@/lib/utils'
-
 const props = defineProps({
   docId: {
     type: String,
@@ -86,6 +86,8 @@ const state = reactive({
   skipNextValidation: props.docId === 'new',
   overrideClose: false,
   collectionData: {},
+  successMessage: '',
+  dialog: false,
 })
 const edgeFirebase = inject('edgeFirebase')
 // const edgeGlobal = inject('edgeGlobal')
@@ -127,9 +129,13 @@ onBeforeRouteUpdate((to, from, next) => {
 watch(() => unsavedChanges.value, (newVal) => {
   console.log('test', newVal)
   emit('unsavedChanges', newVal)
+  if (newVal) {
+    state.successMessage = ''
+  }
 })
 
 const discardChanges = async () => {
+  state.successMessage = ''
   if (props.docId === 'new') {
     state.bypassUnsavedChanges = true
     edgeGlobal.edgeState.changeTracker = {}
@@ -227,6 +233,7 @@ const title = computed(() => {
 })
 
 const onSubmit = async () => {
+  state.successMessage = ''
   const workingDocOverrides = props.workingDocOverrides
   if (workingDocOverrides) {
     Object.keys(workingDocOverrides).forEach((key) => {
@@ -254,7 +261,7 @@ const onSubmit = async () => {
   const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, state.workingDoc)
   state.workingDoc.docId = result.meta.docId
   edgeGlobal.edgeState.lastPaginatedDoc = JSON.parse(JSON.stringify(state.workingDoc))
-
+  console.log('save result', result)
   if (state.overrideClose) {
     state.submitting = false
     // state.overrideClose = false
@@ -264,6 +271,7 @@ const onSubmit = async () => {
     // console.log('bypassUnsavedChanges', state.bypassUnsavedChanges)
     edgeGlobal.edgeState.changeTracker = {}
     state.bypassUnsavedChanges = false
+    state.successMessage = 'All changes saved. You can close or continue editing.'
     return
   }
   edgeGlobal.edgeState.changeTracker = {}
@@ -284,6 +292,7 @@ const onSubmit = async () => {
 }
 
 const onCancel = () => {
+  state.successMessage = ''
   if (props.saveRedirectOverride) {
     router.push(props.saveRedirectOverride)
   }
@@ -531,6 +540,18 @@ const onError = async () => {
         </edge-menu>
       </slot>
       <CardContent :class="cn('flex-1 flex flex-col px-4', props.cardContentClass)">
+        <Alert
+          v-if="state.successMessage"
+          class="mb-4 border border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-900/30 mt-2"
+        >
+          <CheckCircle2 class="h-5 w-5" />
+          <AlertTitle>
+            Changes saved
+          </AlertTitle>
+          <AlertDescription>
+            {{ state.successMessage }}
+          </AlertDescription>
+        </Alert>
         <slot name="main" :title="title" :on-cancel="onCancel" :submitting="state.submitting" :unsaved-changes="unsavedChanges" :on-submit="triggerSubmit" :working-doc="state.workingDoc">
           <div class="flex flex-wrap justify-between">
             <div v-for="(field, name, index) in props.newDocSchema" :key="index" class="w-full" :class="numColsToTailwind(field.cols)">

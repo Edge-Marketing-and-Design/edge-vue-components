@@ -34,6 +34,8 @@ const state = reactive({
   jsonEditorError: '',
   editingContext: null,
   renderSite: '',
+  initialBlocksSeeded: false,
+  seedingInitialBlocks: false,
 })
 
 const blockSchema = toTypedSchema(z.object({
@@ -43,7 +45,7 @@ const blockSchema = toTypedSchema(z.object({
 }))
 
 onMounted(() => {
-  state.mounted = true
+  // state.mounted = true
 })
 
 const PLACEHOLDERS = {
@@ -413,12 +415,18 @@ const editorDocUpdates = (workingDoc) => {
 }
 
 onBeforeMount(async () => {
+  console.log('Block Editor mounting - starting snapshots if needed')
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`]) {
     await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`)
   }
-  if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]) {
-    await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/sites`)
+  if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites`]) {
+    console.log('Starting sites snapshot for block editor')
+    await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites`)
   }
+  else {
+    console.log('Themes and Sites snapshots already started')
+  }
+  state.mounted = true
 })
 
 const themes = computed(() => {

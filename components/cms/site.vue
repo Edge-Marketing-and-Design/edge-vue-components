@@ -94,6 +94,7 @@ onBeforeMount(async () => {
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published_posts`]) {
     await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published_posts`)
   }
+  state.mounted = true
 })
 
 const isSiteDiff = computed(() => {
@@ -144,13 +145,23 @@ const pages = computed(() => {
 
 watch (() => siteData.value, () => {
   if (siteData.value?.menus) {
-    state.menus = siteData.value.menus
+    console.log('Loading menus from site data')
+    state.saving = true
+    state.menus = JSON.parse(JSON.stringify(siteData.value.menus))
+    state.saving = false
   }
 }, { immediate: true, deep: true })
 
 watch(() => state.menus, async (newVal) => {
-  if (state.saving)
+  if (JSON.stringify(siteData.value.menus) === JSON.stringify(newVal)) {
     return
+  }
+  if (!state.mounted) {
+    return
+  }
+  if (state.saving) {
+    return
+  }
   state.saving = true
   // todo loop through menus and if any item is a blank string use the name {name:'blah', item: ''} and used edgeFirebase to add that page and wait for complete and put docId as value of item
   const newPage = JSON.parse(JSON.stringify(pageInit))

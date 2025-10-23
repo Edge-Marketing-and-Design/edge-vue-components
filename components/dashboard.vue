@@ -223,6 +223,16 @@ const filterText = computed(() => {
   return state.filter
 })
 
+const allData = computed(() => {
+  if (!props.paginated) {
+    if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`]) {
+      return []
+    }
+    return Object.values(edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`])
+  }
+  return state.paginatedResults
+})
+
 const filtered = computed(() => {
   let allData = []
   if (!props.paginated) {
@@ -594,7 +604,7 @@ const addFilter = (field, value) => {
     <slot name="header" :add-filter="addFilter" :icon="edgeGlobal.iconFromMenu(route)" :add-title="capitalizeFirstLetter(singularize(props.collection))" :title="capitalizeFirstLetter(props.collection).replaceAll('-', ' ')">
       <edge-menu class="bg-primary text-foreground rounded-none sticky top-0" :class="props.headerClass">
         <template #start>
-          <slot name="header-start" :add-filter="addFilter" :icon="edgeGlobal.iconFromMenu(route)" :title="capitalizeFirstLetter(props.collection).replaceAll('-', ' ')">
+          <slot name="header-start" :record-count="allData.length" :add-filter="addFilter" :icon="edgeGlobal.iconFromMenu(route)" :title="capitalizeFirstLetter(props.collection).replaceAll('-', ' ')">
             <component :is="edgeGlobal.iconFromMenu(route)" class="mr-2" />
             <span class="capitalize">{{ capitalizeFirstLetter(props.collection).replaceAll('-', ' ') }}</span>
           </slot>
