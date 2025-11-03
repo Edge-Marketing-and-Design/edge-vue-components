@@ -161,7 +161,7 @@ onBeforeMount(async () => {
         <div class="pt-4">
           <edge-shad-input
             v-model="slotProps.workingDoc.name"
-            label="Block Name"
+            label="Theme Name"
             name="name"
           />
           <div class="flex gap-4">
