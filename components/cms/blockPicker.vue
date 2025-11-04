@@ -131,7 +131,32 @@ onBeforeUnmount(() => {
 // --- End robust tag parsing ---
 
 const chooseBlock = (block) => {
-  const blockModelData = edgeGlobal.dupObject(block)
+  let blockModelData = edgeGlobal.dupObject(block)
+
+  if (blockModelData?.synced) {
+    console.log('Original block data:', blockModelData)
+    const pages = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.siteId}/pages`] || {}
+    const pageEntries = Object.entries(pages)
+    for (const [pageId, pageData] of pageEntries) {
+      console.log('Checking page for synced block data:', pageId, pageData)
+      if (pageData.content && Array.isArray(pageData.content)) {
+        for (const pageBlock of pageData.content) {
+          if (pageBlock.blockId === block.docId) {
+            blockModelData = edgeGlobal.dupObject(pageBlock)
+            break
+          }
+        }
+      }
+      if (pageData.postContent && Array.isArray(pageData.postContent)) {
+        for (const pageBlock of pageData.postContent) {
+          if (pageBlock.blockId === block.docId) {
+            blockModelData = edgeGlobal.dupObject(pageBlock)
+            break
+          }
+        }
+      }
+    }
+  }
   blockModelData.name = block.name
   blockModelData.blockId = block.docId
   console.log('Chosen block:', blockModelData)
