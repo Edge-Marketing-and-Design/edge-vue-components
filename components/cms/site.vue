@@ -414,14 +414,34 @@ const pageSettingsUpdated = async (pageData) => {
             placeholder="Add or remove domains"
             class="w-full"
           />
-          <edge-g-input
-            v-model="slotProps.workingDoc.theme"
-            :disable-tracking="true"
-            field-type="collection"
-            :collection-path="`${edgeGlobal.edgeState.organizationDocPath}/themes`"
-            label="Theme"
+          <edge-shad-select-tags
+            v-if="isAdmin"
+            :model-value="Array.isArray(slotProps.workingDoc.allowedThemes) ? slotProps.workingDoc.allowedThemes : []"
+            name="allowedThemes"
+            label="Allowed Themes"
+            placeholder="Select allowed themes"
+            class="w-full"
+            :items="themeOptions"
+            item-title="label"
+            item-value="value"
+            @update:model-value="(value) => {
+              const normalized = Array.isArray(value) ? value : []
+              slotProps.workingDoc.allowedThemes = normalized
+              if (normalized.length && !normalized.includes(slotProps.workingDoc.theme)) {
+                slotProps.workingDoc.theme = normalized[0] || ''
+              }
+            }"
+          />
+          <edge-shad-select
+            :model-value="slotProps.workingDoc.theme || ''"
             name="theme"
-            :pass-through-props="state.workingDoc"
+            label="Theme"
+            placeholder="Select a theme"
+            class="w-full"
+            :items="themeItemsForAllowed(isAdmin ? slotProps.workingDoc.allowedThemes : themeOptions.map(option => option.value), slotProps.workingDoc.theme)"
+            item-title="label"
+            item-value="value"
+            @update:model-value="value => (slotProps.workingDoc.theme = value || '')"
           />
           <edge-shad-select-tags
             v-if="Object.values(edgeFirebase.state.users).length > 0"
@@ -627,7 +647,7 @@ const pageSettingsUpdated = async (pageData) => {
                   <edge-cms-media-manager
                     :site="props.site"
                     :select-mode="true"
-                    :default-tags="['Logo']"
+                    :default-tags="['Logos']"
                     @select="(url) => {
                       slotProps.workingDoc.logo = url
                       state.logoPickerOpen = false
