@@ -23,6 +23,9 @@ const state = reactive({
     sites: {
       name: { bindings: { 'field-type': 'text', 'label': 'Name' }, cols: '12', value: '' },
       theme: { bindings: { 'field-type': 'collection', 'label': 'Themes', 'collection-path': 'themes' }, cols: '12', value: '' },
+      allowedThemes: { bindings: { 'field-type': 'tags', 'label': 'Allowed Themes' }, cols: '12', value: [] },
+      logo: { bindings: { 'field-type': 'text', 'label': 'Logo' }, cols: '12', value: '' },
+      menuPosition: { bindings: { 'field-type': 'select', 'label': 'Menu Position', 'items': ['left', 'center', 'right'] }, cols: '12', value: 'right' },
       domains: { bindings: { 'field-type': 'tags', 'label': 'Domains', 'helper': 'Add or remove domains' }, cols: '12', value: [] },
       users: { bindings: { 'field-type': 'users', 'label': 'Users', 'hint': 'Choose users' }, cols: '12', value: [] },
     },
@@ -34,6 +37,7 @@ const state = reactive({
   siteSettings: false,
   hasError: false,
   updating: false,
+  logoPickerOpen: false,
 })
 
 const pageInit = {
@@ -56,6 +60,9 @@ const schemas = {
     theme: z.string({
       required_error: 'Theme is required',
     }).min(1, { message: 'Theme is required' }),
+    allowedThemes: z.array(z.string()).optional(),
+    logo: z.string().optional(),
+    menuPosition: z.enum(['left', 'center', 'right']).optional(),
   })),
   pages: toTypedSchema(z.object({
     name: z.string({
@@ -71,6 +78,65 @@ const isAdmin = computed(() => {
 const siteData = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site] || {}
 })
+
+const themeCollection = computed(() => {
+  return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`] || {}
+})
+
+const deriveThemeLabel = (doc = {}) => {
+  return doc?.name
+    || doc?.title
+    || doc?.theme?.name
+    || doc?.theme?.title
+    || doc?.meta?.name
+    || doc?.meta?.title
+    || ''
+}
+
+const themeOptions = computed(() => {
+  return Object.entries(themeCollection.value)
+    .map(([value, doc]) => ({
+      value,
+      label: deriveThemeLabel(doc) || value,
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label))
+})
+
+const themeOptionsMap = computed(() => {
+  const map = new Map()
+  for (const option of themeOptions.value) {
+    map.set(option.value, option)
+  }
+  return map
+})
+
+const themeItemsForAllowed = (allowed, current) => {
+  const base = themeOptions.value
+  const allowedList = Array.isArray(allowed) ? allowed.filter(Boolean) : []
+  if (allowedList.length) {
+    const allowedSet = new Set(allowedList)
+    const filtered = base.filter(option => allowedSet.has(option.value))
+    if (current && !allowedSet.has(current)) {
+      const currentOption = themeOptionsMap.value.get(current)
+      if (currentOption)
+        filtered.push(currentOption)
+    }
+    return filtered
+  }
+
+  if (current) {
+    const currentOption = themeOptionsMap.value.get(current)
+    return currentOption ? [currentOption] : []
+  }
+
+  return []
+}
+
+const menuPositionOptions = [
+  { value: 'left', label: 'Left' },
+  { value: 'center', label: 'Center' },
+  { value: 'right', label: 'Right' },
+]
 
 onBeforeMount(async () => {
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/published-site-settings`]) {
@@ -106,7 +172,21 @@ const isSiteDiff = computed(() => {
     return true
   }
   if (publishedSite && siteData.value) {
-    return JSON.stringify({ domains: publishedSite.domains, menus: publishedSite.menus, theme: publishedSite.theme }) !== JSON.stringify({ domains: siteData.value.domains, menus: siteData.value.menus, theme: siteData.value.theme })
+    return JSON.stringify({
+      domains: publishedSite.domains,
+      menus: publishedSite.menus,
+      theme: publishedSite.theme,
+      allowedThemes: publishedSite.allowedThemes,
+      logo: publishedSite.logo,
+      menuPosition: publishedSite.menuPosition,
+    }) !== JSON.stringify({
+      domains: siteData.value.domains,
+      menus: siteData.value.menus,
+      theme: siteData.value.theme,
+      allowedThemes: siteData.value.allowedThemes,
+      logo: siteData.value.logo,
+      menuPosition: siteData.value.menuPosition,
+    })
   }
   return false
 })
@@ -120,7 +200,14 @@ const discardSiteSettings = async () => {
   console.log('Discarding site settings for site:', props.site)
   const publishedSite = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`]?.[props.site]
   if (publishedSite) {
-    await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, { domains: publishedSite.domains || [], menus: publishedSite.menus || {} })
+    await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, {
+      domains: publishedSite.domains || [],
+      menus: publishedSite.menus || {},
+      theme: publishedSite.theme || '',
+      allowedThemes: publishedSite.allowedThemes || [],
+      logo: publishedSite.logo || '',
+      menuPosition: publishedSite.menuPosition || '',
+    })
   }
 }
 
@@ -151,6 +238,11 @@ watch (() => siteData.value, () => {
     state.saving = false
   }
 }, { immediate: true, deep: true })
+
+watch(() => state.siteSettings, (open) => {
+  if (!open)
+    state.logoPickerOpen = false
+})
 
 watch(() => state.menus, async (newVal) => {
   if (JSON.stringify(siteData.value.menus) === JSON.stringify(newVal)) {
@@ -327,7 +419,7 @@ const pageSettingsUpdated = async (pageData) => {
             :disable-tracking="true"
             field-type="collection"
             :collection-path="`${edgeGlobal.edgeState.organizationDocPath}/themes`"
-            label="Themes"
+            label="Theme"
             name="theme"
             :pass-through-props="state.workingDoc"
           />
@@ -476,14 +568,83 @@ const pageSettingsUpdated = async (pageData) => {
                 placeholder="Add or remove domains"
                 class="w-full"
               />
-              <edge-g-input
-                v-model="slotProps.workingDoc.theme"
-                :disable-tracking="true"
-                field-type="collection"
-                :collection-path="`${edgeGlobal.edgeState.organizationDocPath}/themes`"
-                label="Themes"
+              <edge-shad-select-tags
+                v-if="isAdmin"
+                :model-value="Array.isArray(slotProps.workingDoc.allowedThemes) ? slotProps.workingDoc.allowedThemes : []"
+                name="allowedThemes"
+                label="Allowed Themes"
+                placeholder="Select allowed themes"
+                class="w-full"
+                :items="themeOptions"
+                item-title="label"
+                item-value="value"
+                @update:model-value="(value) => {
+                  const normalized = Array.isArray(value) ? value : []
+                  slotProps.workingDoc.allowedThemes = normalized
+                  if (normalized.length && !normalized.includes(slotProps.workingDoc.theme)) {
+                    slotProps.workingDoc.theme = normalized[0] || ''
+                  }
+                }"
+              />
+              <edge-shad-select
+                :model-value="slotProps.workingDoc.theme || ''"
                 name="theme"
-                :pass-through-props="state.workingDoc"
+                label="Theme"
+                placeholder="Select a theme"
+                class="w-full"
+                :items="themeItemsForAllowed(slotProps.workingDoc.allowedThemes, slotProps.workingDoc.theme)"
+                item-title="label"
+                item-value="value"
+                @update:model-value="value => (slotProps.workingDoc.theme = value || '')"
+              />
+              <div class="space-y-2">
+                <label class="text-sm font-medium text-foreground flex items-center justify-between">
+                  Logo
+                  <edge-shad-button
+                    type="button"
+                    variant="link"
+                    class="px-0 h-auto text-sm"
+                    @click="state.logoPickerOpen = !state.logoPickerOpen"
+                  >
+                    {{ state.logoPickerOpen ? 'Hide picker' : 'Select logo' }}
+                  </edge-shad-button>
+                </label>
+                <div class="flex items-center gap-4">
+                  <div v-if="slotProps.workingDoc.logo" class="flex items-center gap-3">
+                    <img :src="slotProps.workingDoc.logo" alt="Logo preview" class="h-16 w-auto rounded-md border border-border bg-muted object-contain">
+                    <edge-shad-button
+                      type="button"
+                      variant="ghost"
+                      class="h-8"
+                      @click="slotProps.workingDoc.logo = ''"
+                    >
+                      Remove
+                    </edge-shad-button>
+                  </div>
+                  <span v-else class="text-sm text-muted-foreground italic">No logo selected</span>
+                </div>
+                <div v-if="state.logoPickerOpen" class="mt-2 border border-dashed rounded-lg p-2">
+                  <edge-cms-media-manager
+                    :site="props.site"
+                    :select-mode="true"
+                    :default-tags="['Logo']"
+                    @select="(url) => {
+                      slotProps.workingDoc.logo = url
+                      state.logoPickerOpen = false
+                    }"
+                  />
+                </div>
+              </div>
+              <edge-shad-select
+                :model-value="slotProps.workingDoc.menuPosition || ''"
+                name="menuPosition"
+                label="Menu Position"
+                placeholder="Select menu position"
+                class="w-full"
+                :items="menuPositionOptions"
+                item-title="label"
+                item-value="value"
+                @update:model-value="value => (slotProps.workingDoc.menuPosition = value || '')"
               />
               <edge-shad-select-tags
                 v-if="Object.values(edgeFirebase.state.users).length > 0"
