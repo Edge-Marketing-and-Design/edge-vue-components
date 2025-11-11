@@ -10,6 +10,10 @@ const props = defineProps({
     type: String,
     required: true,
   },
+  isTemplateSite: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const emit = defineEmits(['head'])
@@ -174,7 +178,7 @@ const hasUnsavedChanges = (changes) => {
 
         <div class="flex w-full items-center">
           <div class="w-full border-t border-gray-300 dark:border-white/15" aria-hidden="true" />
-          <div class="px-4 text-gray-600 dark:text-gray-300 whitespace-nowrap text-center">
+          <div v-if="!props.isTemplateSite" class="px-4 text-gray-600 dark:text-gray-300 whitespace-nowrap text-center">
             <edge-chip v-if="isPublishedPageDiff(page)" class="bg-yellow-100 text-yellow-800">
               <div class="w-full">
                 Unpublished Changes

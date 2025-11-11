@@ -35,6 +35,10 @@ const props = defineProps({
     required: false,
     default: '',
   },
+  isTemplateSite: {
+    type: Boolean,
+    default: false,
+  },
 })
 const emit = defineEmits(['update:modelValue', 'pageSettingsUpdate'])
 const ROOT_MENUS = ['Site Root', 'Not In Menu']
@@ -42,6 +46,12 @@ const router = useRouter()
 const modelValue = useVModel(props, 'modelValue', emit)
 const route = useRoute()
 const edgeFirebase = inject('edgeFirebase')
+
+const pageRouteBase = computed(() => {
+  return props.site === 'templates'
+    ? '/app/dashboard/templates'
+    : `/app/dashboard/sites/${props.site}`
+})
 
 const isPublishedPageDiff = (pageId) => {
   const publishedPage = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`]?.[pageId]
@@ -68,6 +78,7 @@ const schemas = {
     name: z.string({
       required_error: 'Name is required',
     }).min(1, { message: 'Name is required' }),
+    tags: z.array(z.string()).optional(),
   })),
 }
 
@@ -87,9 +98,28 @@ const state = reactive({
       name: { value: '' },
       content: { value: [] },
       blockIds: { value: [] },
+      tags: { value: [] },
     },
   },
   hasErrors: false,
+})
+
+const templateTagItems = computed(() => {
+  if (!props.isTemplateSite)
+    return []
+  const pages
+    = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`] || {}
+  const tags = new Set()
+  for (const doc of Object.values(pages)) {
+    if (Array.isArray(doc?.tags)) {
+      for (const tag of doc.tags) {
+        const normalized = typeof tag === 'string' ? tag.trim() : ''
+        if (normalized)
+          tags.add(normalized)
+      }
+    }
+  }
+  return Array.from(tags).sort((a, b) => a.localeCompare(b))
 })
 
 const renameFolderOrPageShow = (item) => {
@@ -265,7 +295,7 @@ const deletePageAction = async () => {
     return
   }
   if (props.page === state.deletePage.item) {
-    router.replace(`/app/dashboard/sites/${props.site}`)
+    router.replace(pageRouteBase.value)
   }
   for (const [menuName, items] of Object.entries(modelValue.value)) {
     for (const item of items) {
@@ -366,7 +396,7 @@ const titleFromSlug = (slug) => {
       <FolderOpen
         class="mr-2"
       />
-      <span>{{ menuName === 'Site Root' ? 'Site Menu' : menuName }}</span>
+      <span v-if="!props.isTemplateSite">{{ menuName === 'Site Root' ? 'Site Menu' : menuName }}</span>
       <SidebarGroupAction class="absolute right-2 top-0 hover:!bg-transparent">
         <DropdownMenu>
           <DropdownMenuTrigger as-child>
@@ -386,7 +416,7 @@ const titleFromSlug = (slug) => {
               <FilePlus2 />
               <span>New Page</span>
             </DropdownMenuItem>
-            <DropdownMenuItem v-if="!props.prevMenu" @click="addPageShow(menuName, true)">
+            <DropdownMenuItem v-if="!props.prevMenu && !props.isTemplateSite" @click="addPageShow(menuName, true)">
               <FolderPlus />
               <span>New Folder</span>
             </DropdownMenuItem>
@@ -414,12 +444,21 @@ const titleFromSlug = (slug) => {
       >
         <template #item="{ element, index }">
           <div class="handle list-group-item">
-            <edge-cms-menu v-if="typeof element.item === 'object'" v-model="modelValue[menuName][index].item" :prev-menu="menuName" :prev-model-value="modelValue" :site="props.site" :page="props.page" :prev-index="index" />
+            <edge-cms-menu
+              v-if="typeof element.item === 'object'"
+              v-model="modelValue[menuName][index].item"
+              :prev-menu="menuName"
+              :prev-model-value="modelValue"
+              :site="props.site"
+              :page="props.page"
+              :prev-index="index"
+              :is-template-site="props.isTemplateSite"
+            />
             <SidebarMenuSubItem v-else class="relative">
               <SidebarMenuSubButton :class="{ 'text-gray-400': element.item === '' }" as-child :is-active="element.item === props.page">
-                <NuxtLink :disabled="element.item === ''" :class="{ '!text-red-500': element.name === 'Deleting...' }" class="text-xs" :to="`/app/dashboard/sites/${props.site}/${element.item}`">
+                <NuxtLink :disabled="element.item === ''" :class="{ '!text-red-500': element.name === 'Deleting...' }" class="text-xs" :to="`${pageRouteBase}/${element.item}`">
                   <Loader2 v-if="element.item === '' || element.name === 'Deleting...'" :class="{ '!text-red-500': element.name === 'Deleting...' }" class="w-4 h-4 animate-spin" />
-                  <FileWarning v-else-if="isPublishedPageDiff(element.item)" class="!text-yellow-600" />
+                  <FileWarning v-else-if="isPublishedPageDiff(element.item) && !props.isTemplateSite" class="!text-yellow-600" />
                   <FileCheck v-else class="text-xs !text-green-700 font-normal" />
                   <span>{{ element.name }}</span>
                 </NuxtLink>
@@ -446,7 +485,7 @@ const titleFromSlug = (slug) => {
                         <span v-if="edgeGlobal.edgeState.cmsPageWithUnsavedChanges === element.item" class="text-xs text-red-500">(Unsaved Changes)</span>
                       </div>
                     </DropdownMenuItem>
-                    <DropdownMenuItem v-if="isPublishedPageDiff(element.item)" @click="publishPage(element.item)">
+                    <DropdownMenuItem v-if="!props.isTemplateSite && isPublishedPageDiff(element.item)" @click="publishPage(element.item)">
                       <FileUp />
                       Publish
                     </DropdownMenuItem>
@@ -455,11 +494,11 @@ const titleFromSlug = (slug) => {
                       <span>Rename</span>
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem v-if="isPublishedPageDiff(element.item) && isPublished(element.item)" @click="discardPageChanges(element.item)">
+                    <DropdownMenuItem v-if="!props.isTemplateSite && isPublishedPageDiff(element.item) && isPublished(element.item)" @click="discardPageChanges(element.item)">
                       <FileX />
                       Discard Changes
                     </DropdownMenuItem>
-                    <DropdownMenuItem v-if="isPublished(element.item)" @click="unPublishPage(element.item)">
+                    <DropdownMenuItem v-if="!props.isTemplateSite && isPublished(element.item)" @click="unPublishPage(element.item)">
                       <FileDown />
                       Unpublish
                     </DropdownMenuItem>
@@ -588,6 +627,15 @@ const titleFromSlug = (slug) => {
             >
               Post page.  When checked this will create two templates for this page: one for the post list (e.g. /{{ slotProps.workingDoc.name }}) and one for individual posts (e.g. /{{ slotProps.workingDoc.name }}/:slug).
             </edge-shad-checkbox>
+            <edge-shad-select-tags
+              v-if="props.isTemplateSite"
+              v-model="slotProps.workingDoc.tags"
+              name="tags"
+              label="Tags"
+              placeholder="Add tags"
+              :items="templateTagItems"
+              :allow-additions="true"
+            />
             <Card>
               <CardHeader>
                 <CardTitle>SEO</CardTitle>

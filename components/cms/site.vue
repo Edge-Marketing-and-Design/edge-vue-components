@@ -16,6 +16,8 @@ const props = defineProps({
 })
 const edgeFirebase = inject('edgeFirebase')
 
+const isTemplateSite = computed(() => props.site === 'templates')
+
 const state = reactive({
   filter: '',
   userFilter: 'all',
@@ -27,6 +29,9 @@ const state = reactive({
       logo: { bindings: { 'field-type': 'text', 'label': 'Logo' }, cols: '12', value: '' },
       menuPosition: { bindings: { 'field-type': 'select', 'label': 'Menu Position', 'items': ['left', 'center', 'right'] }, cols: '12', value: 'right' },
       domains: { bindings: { 'field-type': 'tags', 'label': 'Domains', 'helper': 'Add or remove domains' }, cols: '12', value: [] },
+      metaTitle: { bindings: { 'field-type': 'text', 'label': 'Meta Title' }, cols: '12', value: '' },
+      metaDescription: { bindings: { 'field-type': 'textarea', 'label': 'Meta Description' }, cols: '12', value: '' },
+      structuredData: { bindings: { 'field-type': 'textarea', 'label': 'Structured Data (JSON-LD)' }, cols: '12', value: '' },
       users: { bindings: { 'field-type': 'users', 'label': 'Users', 'hint': 'Choose users' }, cols: '12', value: [] },
     },
   },
@@ -63,6 +68,9 @@ const schemas = {
     allowedThemes: z.array(z.string()).optional(),
     logo: z.string().optional(),
     menuPosition: z.enum(['left', 'center', 'right']).optional(),
+    metaTitle: z.string().optional(),
+    metaDescription: z.string().optional(),
+    structuredData: z.string().optional(),
   })),
   pages: toTypedSchema(z.object({
     name: z.string({
@@ -179,6 +187,9 @@ const isSiteDiff = computed(() => {
       allowedThemes: publishedSite.allowedThemes,
       logo: publishedSite.logo,
       menuPosition: publishedSite.menuPosition,
+      metaTitle: publishedSite.metaTitle,
+      metaDescription: publishedSite.metaDescription,
+      structuredData: publishedSite.structuredData,
     }) !== JSON.stringify({
       domains: siteData.value.domains,
       menus: siteData.value.menus,
@@ -186,6 +197,9 @@ const isSiteDiff = computed(() => {
       allowedThemes: siteData.value.allowedThemes,
       logo: siteData.value.logo,
       menuPosition: siteData.value.menuPosition,
+      metaTitle: siteData.value.metaTitle,
+      metaDescription: siteData.value.metaDescription,
+      structuredData: siteData.value.structuredData,
     })
   }
   return false
@@ -207,6 +221,9 @@ const discardSiteSettings = async () => {
       allowedThemes: publishedSite.allowedThemes || [],
       logo: publishedSite.logo || '',
       menuPosition: publishedSite.menuPosition || '',
+      metaTitle: publishedSite.metaTitle || '',
+      metaDescription: publishedSite.metaDescription || '',
+      structuredData: publishedSite.structuredData || '',
     })
   }
 }
@@ -231,12 +248,35 @@ const pages = computed(() => {
 })
 
 watch (() => siteData.value, () => {
+  if (isTemplateSite.value)
+    return
   if (siteData.value?.menus) {
     console.log('Loading menus from site data')
     state.saving = true
     state.menus = JSON.parse(JSON.stringify(siteData.value.menus))
     state.saving = false
   }
+}, { immediate: true, deep: true })
+
+const buildTemplateMenus = (pagesCollection) => {
+  const items = Object.entries(pagesCollection || {})
+    .map(([id, doc]) => ({
+      name: doc?.name || 'Untitled Page',
+      item: id,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+  return {
+    'Site Root': items,
+  }
+}
+
+watch(pages, (pagesCollection) => {
+  if (!isTemplateSite.value)
+    return
+  const nextMenu = buildTemplateMenus(pagesCollection)
+  if (JSON.stringify(state.menus) === JSON.stringify(nextMenu))
+    return
+  state.menus = nextMenu
 }, { immediate: true, deep: true })
 
 watch(() => state.siteSettings, (open) => {
@@ -299,7 +339,8 @@ watch(() => state.menus, async (newVal) => {
       }
     }
   }
-  await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, { menus: state.menus })
+  if (!isTemplateSite.value)
+    await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, { menus: state.menus })
   state.saving = false
 }, { deep: true })
 
@@ -457,14 +498,14 @@ const pageSettingsUpdated = async (pageData) => {
         <edge-menu class="bg-secondary text-foreground rounded-none sticky top-0 py-2">
           <template #start>
             <div class="flex flex-col gap-0">
-              <span>{{ siteData.name || 'Site' }}</span>
+              <span>{{ siteData.name || 'Templates' }}</span>
             </div>
           </template>
           <template #center>
             <div />
           </template>
           <template #end>
-            <DropdownMenu>
+            <DropdownMenu v-if="!isTemplateSite">
               <DropdownMenuTrigger as-child>
                 <SidebarMenuAction class="mt-1">
                   <MoreHorizontal />
@@ -472,8 +513,9 @@ const pageSettingsUpdated = async (pageData) => {
               </DropdownMenuTrigger>
               <DropdownMenuContent side="right" align="start">
                 <DropdownMenuLabel class="flex items-center gap-2">
-                  <FileStack class="w-5 h-5" />{{ siteData.name || 'Site' }}
+                  <FileStack class="w-5 h-5" />{{ siteData.name || 'Templates' }}
                 </DropdownMenuLabel>
+
                 <DropdownMenuSeparator v-if="isSiteDiff" />
                 <DropdownMenuLabel v-if="isSiteDiff" class="flex items-center gap-2">
                   Site Settings
@@ -496,47 +538,54 @@ const pageSettingsUpdated = async (pageData) => {
                   <FolderDown />
                   Unpublish Site
                 </DropdownMenuItem>
+
                 <DropdownMenuItem @click="state.siteSettings = true">
                   <FolderCog />
                   <span>Settings</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            <div v-else />
           </template>
         </edge-menu>
         <SidebarGroup class="mt-0 pt-0">
           <SidebarGroupContent>
             <SidebarMenu>
-              <Transition name="fade" mode="out-in">
-                <div v-if="isSiteDiff" key="unpublished" class="flex gap-1 items-center mt-2 bg-yellow-100 text-xs py-1 px-4 text-yellow-800">
-                  <CircleAlert class="!text-yellow-800 w-3 h-3" />
-                  <span class="font-medium text-[10px]">
-                    Unpublished Settings
-                  </span>
-                </div>
-                <div v-else key="published" class="flex gap-1 items-center mt-2 bg-green-100 text-xs py-1 px-4 text-green-800">
-                  <FileCheck class="!text-green-800 w-3 h-3" />
-                  <span class="font-medium text-[10px]">
-                    Settings Published
-                  </span>
-                </div>
-              </Transition>
-              <Tabs default-value="pages" class="mt-2">
-                <TabsList class="grid w-full grid-cols-2 py-0">
-                  <TabsTrigger value="pages" class="py-0">
-                    Pages
-                  </TabsTrigger>
-                  <TabsTrigger value="posts" class="py-0">
-                    Posts
-                  </TabsTrigger>
-                </TabsList>
-                <TabsContent value="pages" class="p-0">
-                  <edge-cms-menu v-if="state.menus" v-model="state.menus" :site="props.site" :page="props.page" @page-settings-update="pageSettingsUpdated" />
-                </TabsContent>
-                <TabsContent value="posts" class="p-0">
-                  <edge-cms-posts :site="props.site" @updating="isUpdating => state.updating = isUpdating" />
-                </TabsContent>
-              </Tabs>
+              <template v-if="!isTemplateSite">
+                <Transition name="fade" mode="out-in">
+                  <div v-if="isSiteDiff" key="unpublished" class="flex gap-1 items-center mt-2 bg-yellow-100 text-xs py-1 px-4 text-yellow-800">
+                    <CircleAlert class="!text-yellow-800 w-3 h-3" />
+                    <span class="font-medium text-[10px]">
+                      Unpublished Settings
+                    </span>
+                  </div>
+                  <div v-else key="published" class="flex gap-1 items-center mt-2 bg-green-100 text-xs py-1 px-4 text-green-800">
+                    <FileCheck class="!text-green-800 w-3 h-3" />
+                    <span class="font-medium text-[10px]">
+                      Settings Published
+                    </span>
+                  </div>
+                </Transition>
+                <Tabs default-value="pages" class="mt-2">
+                  <TabsList class="grid w-full grid-cols-2 py-0">
+                    <TabsTrigger value="pages" class="py-0">
+                      Pages
+                    </TabsTrigger>
+                    <TabsTrigger value="posts" class="py-0">
+                      Posts
+                    </TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="pages" class="p-0">
+                    <edge-cms-menu v-if="state.menus" v-model="state.menus" :site="props.site" :page="props.page" :is-template-site="isTemplateSite" @page-settings-update="pageSettingsUpdated" />
+                  </TabsContent>
+                  <TabsContent value="posts" class="p-0">
+                    <edge-cms-posts :site="props.site" @updating="isUpdating => state.updating = isUpdating" />
+                  </TabsContent>
+                </Tabs>
+              </template>
+              <template v-else>
+                <edge-cms-menu v-if="state.menus" v-model="state.menus" :site="props.site" :page="props.page" :is-template-site="isTemplateSite" @page-settings-update="pageSettingsUpdated" />
+              </template>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -672,6 +721,32 @@ const pageSettingsUpdated = async (pageData) => {
                 :items="Object.values(edgeFirebase.state.users).filter(user => user.userId !== '')" name="users" label="Users"
                 item-title="meta.name" item-value="userId" placeholder="Select users" class="w-full" :multiple="true"
               />
+              <Card>
+                <CardHeader>
+                  <CardTitle>SEO</CardTitle>
+                  <CardDescription>Default settings if the information is not entered on the page.</CardDescription>
+                </CardHeader>
+                <CardContent class="pt-0">
+                  <edge-shad-input
+                    v-model="slotProps.workingDoc.metaTitle"
+                    label="Meta Title"
+                    name="metaTitle"
+                  />
+                  <edge-shad-textarea
+                    v-model="slotProps.workingDoc.metaDescription"
+                    label="Meta Description"
+                    name="metaDescription"
+                  />
+                  <edge-cms-code-editor
+                    v-model="slotProps.workingDoc.structuredData"
+                    title="Structured Data (JSON-LD)"
+                    language="json"
+                    name="structuredData"
+                    height="300px"
+                    class="mb-4 w-full"
+                  />
+                </CardContent>
+              </Card>
             </div>
             <SheetFooter class="pt-2 flex justify-between">
               <edge-shad-button variant="destructive" class="text-white" @click="state.siteSettings = false">
