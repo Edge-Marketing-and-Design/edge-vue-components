@@ -108,6 +108,9 @@ const state = reactive({
     },
   },
   hasErrors: false,
+  templateFilter: 'quick-picks',
+  selectedTemplateId: 'blank',
+  showTemplatePicker: false,
 })
 
 const templateTagItems = computed(() => {
@@ -120,13 +123,145 @@ const templateTagItems = computed(() => {
     if (Array.isArray(doc?.tags)) {
       for (const tag of doc.tags) {
         const normalized = typeof tag === 'string' ? tag.trim() : ''
-        if (normalized)
+        if (normalized && normalized.toLowerCase() !== 'quick picks')
           tags.add(normalized)
       }
     }
   }
-  return [{ name: 'Quick Picks', title: 'Quick Picks' }, ...Array.from(tags).sort((a, b) => a.localeCompare(b))]
+  const tagList = Array.from(tags).sort((a, b) => a.localeCompare(b)).map(tag => ({ name: tag, title: tag }))
+  return [{ name: 'Quick Picks', title: 'Quick Picks' }, ...tagList]
 })
+
+const resetAddPageDialogState = () => {
+  state.newPageName = ''
+  state.templateFilter = 'quick-picks'
+  state.selectedTemplateId = BLANK_TEMPLATE_ID
+  state.showTemplatePicker = false
+}
+
+watch(() => state.addPageDialog, (open) => {
+  if (!open)
+    resetAddPageDialogState()
+})
+
+onMounted(async () => {
+  if (!edgeGlobal.edgeState.organizationDocPath)
+    return
+  const path = TEMPLATE_COLLECTION_PATH.value
+  if (!edgeFirebase.data?.[path])
+    await edgeFirebase.startSnapshot(path)
+})
+
+const TEMPLATE_COLLECTION_PATH = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/templates/pages`)
+
+const templatePagesCollection = computed(() => {
+  return edgeFirebase.data?.[TEMPLATE_COLLECTION_PATH.value] || {}
+})
+
+const templatePagesList = computed(() => {
+  return Object.entries(templatePagesCollection.value).map(([docId, doc]) => ({
+    docId,
+    ...(doc || {}),
+    name: doc?.name || 'Untitled Template',
+    tags: Array.isArray(doc?.tags) ? doc.tags : [],
+    description: doc?.metaDescription || doc?.description || '',
+    content: Array.isArray(doc?.content) ? doc.content : [],
+  }))
+})
+
+const templateFilterOptions = computed(() => {
+  const tagSet = new Set()
+  for (const template of templatePagesList.value) {
+    for (const tag of template.tags || []) {
+      if (!tag)
+        continue
+      if (tag.toLowerCase() === 'quick picks')
+        continue
+      tagSet.add(tag)
+    }
+  }
+  const tagOptions = Array.from(tagSet)
+    .sort((a, b) => a.localeCompare(b))
+    .map(tag => ({ label: tag, value: tag }))
+  return [
+    { label: 'Quick Picks', value: 'quick-picks' },
+    ...tagOptions,
+  ]
+})
+
+const filterMatchesTemplate = (template, filterValue) => {
+  if (filterValue === 'all')
+    return true
+  if (filterValue === 'quick-picks')
+    return template.tags?.some(tag => tag?.toLowerCase() === 'quick picks'.toLowerCase())
+  return template.tags?.some(tag => tag === filterValue)
+}
+
+const filteredTemplates = computed(() => {
+  const templates = templatePagesList.value
+  const filterValue = state.templateFilter
+  const filtered = templates.filter(template => filterMatchesTemplate(template, filterValue))
+  if (filtered.length === 0 && filterValue === 'quick-picks')
+    return templates
+  if (filtered.length === 0 && filterValue !== 'all')
+    return templates
+  return filtered
+})
+
+watch(filteredTemplates, (templates) => {
+  if (state.selectedTemplateId === BLANK_TEMPLATE_ID)
+    return
+  if (!templates.some(template => template.docId === state.selectedTemplateId))
+    state.selectedTemplateId = BLANK_TEMPLATE_ID
+})
+
+const BLANK_TEMPLATE_ID = 'blank'
+
+const blankTemplateTile = {
+  docId: BLANK_TEMPLATE_ID,
+  name: 'Blank Page',
+  tags: ['Start from scratch'],
+  description: 'Create a new page without any blocks.',
+  content: [],
+}
+
+const templateGridItems = computed(() => {
+  return [blankTemplateTile, ...filteredTemplates.value]
+})
+
+const hasValidNewPageName = computed(() => !!(state.newPageName && state.newPageName.trim().length))
+
+const blocksCollection = computed(() => {
+  return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`] || {}
+})
+
+const resolveBlockForPreview = (block) => {
+  if (!block)
+    return null
+  if (block.content)
+    return {
+      content: block.content,
+      values: block.values || {},
+      meta: block.meta || {},
+    }
+  if (block.blockId && blocksCollection.value?.[block.blockId]) {
+    const libraryBlock = blocksCollection.value[block.blockId]
+    return {
+      content: libraryBlock.content,
+      values: block.values || libraryBlock.values || {},
+      meta: block.meta || libraryBlock.meta || {},
+    }
+  }
+  return null
+}
+
+const templateHasBlocks = template => Array.isArray(template?.content) && template.content.length > 0
+
+const templatePreviewBlocks = (template) => {
+  if (!templateHasBlocks(template))
+    return []
+  return template.content
+}
 
 const renameFolderOrPageShow = (item) => {
   state.renameItem = item
@@ -137,6 +272,7 @@ const renameFolderOrPageShow = (item) => {
 const addPageShow = (menuName, isMenu = false) => {
   state.addMenu = isMenu
   state.menuName = menuName
+  resetAddPageDialogState()
   state.addPageDialog = true
 }
 
@@ -220,6 +356,96 @@ const slugGenerator = (name, excludeName = '') => {
   return unique
 }
 
+const selectTemplate = (templateId) => {
+  state.selectedTemplateId = templateId
+  state.showTemplatePicker = false
+}
+
+const isTemplateSelected = templateId => state.selectedTemplateId === templateId
+
+const getTemplateDoc = (templateId) => {
+  if (templateId === BLANK_TEMPLATE_ID)
+    return null
+  return templatePagesCollection.value?.[templateId] || null
+}
+
+const extractBlockIds = (blocks = []) => {
+  if (!Array.isArray(blocks))
+    return []
+  return blocks
+    .map(block => block?.blockId || block?.id)
+    .filter(Boolean)
+}
+
+const deriveBlockIds = (pageDoc = {}) => {
+  const ids = [
+    ...extractBlockIds(pageDoc.content),
+    ...extractBlockIds(pageDoc.postContent),
+  ]
+  return Array.from(new Set(ids))
+}
+
+const getSyncedBlockFromSite = (blockId) => {
+  if (!blockId)
+    return null
+  const pages = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`] || {}
+  for (const page of Object.values(pages)) {
+    const contentBlocks = Array.isArray(page?.content) ? page.content : []
+    const postBlocks = Array.isArray(page?.postContent) ? page.postContent : []
+    for (const candidate of [...contentBlocks, ...postBlocks]) {
+      if (candidate?.blockId === blockId && candidate?.synced)
+        return edgeGlobal.dupObject(candidate)
+    }
+  }
+  return null
+}
+
+const hydrateSyncedBlocksFromSite = (blocks = []) => {
+  if (!Array.isArray(blocks) || !blocks.length)
+    return blocks
+
+  return blocks.map((block) => {
+    if (!block?.synced || !block.blockId)
+      return block
+    const existing = getSyncedBlockFromSite(block.blockId)
+    if (!existing)
+      return block
+    const hydrated = edgeGlobal.dupObject(existing)
+    hydrated.id = block.id || hydrated.id || edgeGlobal.generateShortId()
+    hydrated.blockId = block.blockId
+    hydrated.name = block.name || hydrated.name
+    return hydrated
+  })
+}
+
+const buildPagePayloadFromTemplate = (templateDoc, slug) => {
+  const timestamp = Date.now()
+  const basePayload = {
+    name: state.newPageName,
+    slug,
+    content: [],
+    postContent: [],
+    blockIds: [],
+    metaTitle: '',
+    metaDescription: '',
+    structuredData: '',
+    doc_created_at: timestamp,
+    last_updated: timestamp,
+  }
+  if (!templateDoc)
+    return basePayload
+  const copy = JSON.parse(JSON.stringify(templateDoc || {}))
+  delete copy.docId
+  copy.name = state.newPageName
+  copy.slug = slug
+  copy.doc_created_at = timestamp
+  copy.last_updated = timestamp
+  copy.content = Array.isArray(copy.content) ? hydrateSyncedBlocksFromSite(copy.content) : []
+  copy.postContent = Array.isArray(copy.postContent) ? hydrateSyncedBlocksFromSite(copy.postContent) : []
+  copy.blockIds = deriveBlockIds(copy)
+  return { ...basePayload, ...copy }
+}
+
 const renameFolderOrPageAction = async () => {
   const newSlug = slugGenerator(state.renameItem.name, state.renameItem.previousName || '')
 
@@ -275,6 +501,9 @@ const renameFolderOrPageAction = async () => {
 }
 
 const addPageAction = async () => {
+  state.newPageName = state.newPageName?.trim() || ''
+  if (!state.newPageName)
+    return
   const slug = slugGenerator(state.newPageName)
   if (!state.menuName) {
     modelValue.value[state.newPageName] = []
@@ -282,14 +511,26 @@ const addPageAction = async () => {
     state.addPageDialog = false
     return
   }
+
+  if (!Array.isArray(modelValue.value[state.menuName]))
+    modelValue.value[state.menuName] = []
+
   if (state.addMenu) {
     modelValue.value[state.menuName].push({ item: { [slug]: [] } })
   }
   else {
-    modelValue.value[state.menuName].push({ name: slug, item: '' })
+    const templateDoc = getTemplateDoc(state.selectedTemplateId)
+    const payload = buildPagePayloadFromTemplate(templateDoc, slug)
+    const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`, payload)
+    const docId = result?.meta?.docId
+    if (docId) {
+      const targetMenu = modelValue.value[state.menuName]
+      const alreadyExists = Array.isArray(targetMenu) && targetMenu.some(entry => entry?.item === docId)
+      if (!alreadyExists)
+        targetMenu.push({ name: slug, item: docId })
+    }
   }
 
-  state.newPageName = ''
   state.addPageDialog = false
 }
 const deletePageAction = async () => {
@@ -394,6 +635,19 @@ const titleFromSlug = (slug) => {
     return ''
   return slug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
 }
+
+const theme = computed(() => {
+  const theme = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site]?.theme || ''
+  console.log(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}`)
+  let themeContents = null
+  if (theme) {
+    themeContents = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`]?.[theme]?.theme || null
+  }
+  if (themeContents) {
+    return JSON.parse(themeContents)
+  }
+  return null
+})
 </script>
 
 <template>
@@ -549,34 +803,111 @@ const titleFromSlug = (slug) => {
       </DialogFooter>
     </DialogContent>
   </edge-shad-dialog>
-  <edge-shad-dialog
-    v-model="state.addPageDialog"
-  >
-    <DialogContent class="pt-10">
+  <edge-shad-dialog v-model="state.addPageDialog">
+    <DialogContent v-if="state.addMenu" class="pt-10">
       <edge-shad-form :schema="pages" @submit="addPageAction">
         <DialogHeader>
           <DialogTitle class="text-left">
             <span v-if="!state.menuName">Add Menu</span>
-            <span v-else-if="state.addMenu">Add folder to "{{ state.menuName }}"</span>
-            <span v-else>
-              Add page to "{{ state.menuName }}"
-            </span>
+            <span v-else>Add folder to "{{ state.menuName }}"</span>
           </DialogTitle>
           <DialogDescription />
         </DialogHeader>
-
-        <edge-shad-input v-model="state.newPageName" name="name" placeholder="Page Name" />
+        <edge-shad-input v-model="state.newPageName" name="name" placeholder="Folder Name" />
         <DialogFooter class="pt-2 flex justify-between">
-          <edge-shad-button variant="destructive" @click="state.addPageDialog = false">
+          <edge-shad-button type="button" variant="destructive" @click="state.addPageDialog = false">
             Cancel
           </edge-shad-button>
           <edge-shad-button type="submit" class="text-white bg-slate-800 hover:bg-slate-400 w-full">
-            <span v-if="state.addMenu">
-              Add Folder
-            </span>
-            <span v-else>
-              Add Page
-            </span>
+            Add Folder
+          </edge-shad-button>
+        </DialogFooter>
+      </edge-shad-form>
+    </DialogContent>
+    <DialogContent v-else class="pt-6 w-full max-w-6xl h-[90vh] flex flex-col">
+      <edge-shad-form :schema="pages" class="flex flex-col h-full" @submit="addPageAction">
+        <DialogHeader class="pb-2">
+          <DialogTitle class="text-left">
+            Add page to "{{ state.menuName }}"
+          </DialogTitle>
+          <DialogDescription>
+            Choose a template or start with a blank page. You can always customize it later.
+          </DialogDescription>
+        </DialogHeader>
+        <div>
+          <div class="w-full space-y-4">
+            <edge-shad-input v-model="state.newPageName" name="name" label="Page Name" placeholder="Enter page name" />
+            <edge-shad-select
+              v-model="state.templateFilter"
+              label="Template Tags"
+              :items="templateFilterOptions"
+              item-title="label"
+              item-value="value"
+              placeholder="Select tag"
+            />
+            <p class="text-xs text-muted-foreground">
+              Filter templates by tag or choose Quick Picks for the most commonly used layouts.
+            </p>
+          </div>
+          <edge-button-divider class="my-4">
+            <span class="text-xs text-muted-foreground !nowrap text-center">Select Template</span>
+          </edge-button-divider>
+          <div class="overflow-y-auto !h-[calc(100vh-560px)] pr-1">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 auto-rows-fr pb-2">
+              <button
+                v-for="template in templateGridItems"
+                :key="template.docId"
+                type="button"
+                class="rounded-lg border bg-card text-left p-3 flex flex-col gap-3 transition focus:outline-none focus-visible:ring-2"
+                :class="isTemplateSelected(template.docId) ? 'border-primary ring-2 ring-primary/50 shadow-lg' : 'border-border hover:border-primary/40'"
+                :aria-pressed="isTemplateSelected(template.docId)"
+                @click="selectTemplate(template.docId)"
+              >
+                <div class="flex items-center justify-between gap-2">
+                  <span class="font-semibold truncate">{{ template.name }}</span>
+                  <File class="w-4 h-4 text-muted-foreground" />
+                </div>
+                <div class="template-scale-wrapper border border-dashed border-border/60 rounded-md bg-background/80">
+                  <div class="template-scale-inner">
+                    <div class="template-scale-content space-y-4">
+                      <template v-if="template.docId === BLANK_TEMPLATE_ID">
+                        <div class="flex h-32 items-center justify-center text-4xl text-muted-foreground">
+                          Blank page
+                        </div>
+                      </template>
+                      <template v-else-if="templateHasBlocks(template)">
+                        <div
+                          v-for="(block, idx) in templatePreviewBlocks(template)"
+                          :key="`${template.docId}-block-${idx}`"
+                        >
+                          <edge-cms-block-api
+                            v-if="resolveBlockForPreview(block)"
+                            :content="resolveBlockForPreview(block).content"
+                            :values="resolveBlockForPreview(block).values"
+                            :meta="resolveBlockForPreview(block).meta"
+                            :theme="theme"
+                            :isolated="true"
+                          />
+                        </div>
+                      </template>
+                      <template v-else>
+                        <div class="flex h-32 items-center justify-center text-sm text-muted-foreground">
+                          No blocks yet
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+        <DialogFooter class="pt-4">
+          <edge-shad-button type="button" variant="destructive" @click="state.addPageDialog = false">
+            Cancel
+          </edge-shad-button>
+          <edge-shad-button type="submit" class="bg-slate-800 hover:bg-slate-400 text-white" :disabled="!hasValidNewPageName">
+            Create Page
           </edge-shad-button>
         </DialogFooter>
       </edge-shad-form>
@@ -696,3 +1027,26 @@ const titleFromSlug = (slug) => {
     </SheetContent>
   </Sheet>
 </template>
+
+<style lang="scss">
+.template-scale-wrapper {
+  width: 100%;
+  overflow: hidden;
+  position: relative;
+  border-radius: 0.5rem;
+}
+
+.template-scale-inner {
+  transform-origin: top left;
+  display: inline-block;
+  width: 100%;
+  height: 400px;
+  overflow: scroll;
+}
+
+.template-scale-content {
+  transform: scale(0.45);
+  transform-origin: top left;
+  width: 222%;
+}
+</style>

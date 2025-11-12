@@ -2,8 +2,9 @@
 import { useVModel } from '@vueuse/core'
 const props = defineProps({
   modelValue: {
-    type: [String, Boolean, Number],
+    type: [String, Boolean, Number, null],
     required: false,
+    default: null,
   },
   option: {
     type: Object,
@@ -20,6 +21,19 @@ const modelValue = useVModel(props, 'modelValue', emits, {
   passive: false,
   emits,
   prop: 'modelValue',
+})
+
+const NONE_VALUE = '__edge_none__'
+
+const selectValue = computed({
+  get() {
+    return (modelValue.value === null || modelValue.value === '')
+      ? NONE_VALUE
+      : modelValue.value
+  },
+  set(value) {
+    modelValue.value = value === NONE_VALUE ? null : value
+  },
 })
 
 let staticOption = null
@@ -77,7 +91,7 @@ onBeforeMount(async () => {
       })
       .filter(Boolean) // remove nulls
   }
-  staticOption.options.unshift({ title: '(none)', name: null })
+  staticOption.options.unshift({ title: '(none)', name: NONE_VALUE })
   state.loading = false
 })
 </script>
@@ -85,7 +99,7 @@ onBeforeMount(async () => {
 <template>
   <edge-shad-select
     v-if="!state.loading && staticOption.options.length > 0"
-    v-model="modelValue"
+    v-model="selectValue"
     :label="props.label"
     :name="props.option.field"
     :items="staticOption.options"
