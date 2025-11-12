@@ -39,6 +39,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  themeOptions: {
+    type: Array,
+    default: () => [],
+  },
 })
 const emit = defineEmits(['update:modelValue', 'pageSettingsUpdate'])
 const ROOT_MENUS = ['Site Root', 'Not In Menu']
@@ -79,6 +83,7 @@ const schemas = {
       required_error: 'Name is required',
     }).min(1, { message: 'Name is required' }),
     tags: z.array(z.string()).optional(),
+    allowedThemes: z.array(z.string()).optional(),
   })),
 }
 
@@ -99,6 +104,7 @@ const state = reactive({
       content: { value: [] },
       blockIds: { value: [] },
       tags: { value: [] },
+      allowedThemes: { value: [] },
     },
   },
   hasErrors: false,
@@ -119,7 +125,7 @@ const templateTagItems = computed(() => {
       }
     }
   }
-  return Array.from(tags).sort((a, b) => a.localeCompare(b))
+  return [{ name: 'Quick Picks', title: 'Quick Picks' }, ...Array.from(tags).sort((a, b) => a.localeCompare(b))]
 })
 
 const renameFolderOrPageShow = (item) => {
@@ -635,6 +641,19 @@ const titleFromSlug = (slug) => {
               placeholder="Add tags"
               :items="templateTagItems"
               :allow-additions="true"
+            />
+            <edge-shad-select-tags
+              v-if="props.themeOptions.length"
+              :model-value="Array.isArray(slotProps.workingDoc.allowedThemes) ? slotProps.workingDoc.allowedThemes : []"
+              name="allowedThemes"
+              label="Allowed Themes"
+              placeholder="Select allowed themes"
+              :items="props.themeOptions"
+              item-title="label"
+              item-value="value"
+              @update:model-value="(value) => {
+                slotProps.workingDoc.allowedThemes = Array.isArray(value) ? value : []
+              }"
             />
             <Card>
               <CardHeader>

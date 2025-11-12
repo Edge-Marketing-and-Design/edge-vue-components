@@ -576,7 +576,15 @@ const pageSettingsUpdated = async (pageData) => {
                     </TabsTrigger>
                   </TabsList>
                   <TabsContent value="pages" class="p-0">
-                    <edge-cms-menu v-if="state.menus" v-model="state.menus" :site="props.site" :page="props.page" :is-template-site="isTemplateSite" @page-settings-update="pageSettingsUpdated" />
+                    <edge-cms-menu
+                      v-if="state.menus"
+                      v-model="state.menus"
+                      :site="props.site"
+                      :page="props.page"
+                      :is-template-site="isTemplateSite"
+                      :theme-options="themeOptions"
+                      @page-settings-update="pageSettingsUpdated"
+                    />
                   </TabsContent>
                   <TabsContent value="posts" class="p-0">
                     <edge-cms-posts :site="props.site" @updating="isUpdating => state.updating = isUpdating" />
@@ -584,7 +592,15 @@ const pageSettingsUpdated = async (pageData) => {
                 </Tabs>
               </template>
               <template v-else>
-                <edge-cms-menu v-if="state.menus" v-model="state.menus" :site="props.site" :page="props.page" :is-template-site="isTemplateSite" @page-settings-update="pageSettingsUpdated" />
+                <edge-cms-menu
+                  v-if="state.menus"
+                  v-model="state.menus"
+                  :site="props.site"
+                  :page="props.page"
+                  :is-template-site="isTemplateSite"
+                  :theme-options="themeOptions"
+                  @page-settings-update="pageSettingsUpdated"
+                />
               </template>
             </SidebarMenu>
           </SidebarGroupContent>
