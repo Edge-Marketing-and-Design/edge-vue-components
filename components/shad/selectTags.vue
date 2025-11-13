@@ -78,6 +78,11 @@ const searchTerm = ref('')
 
 const { contains } = useFilter({ sensitivity: 'base' })
 
+const forceOpen = () => {
+  if (!props.disabled)
+    open.value = true
+}
+
 const filteredItems = computed(() => {
   const options = computedItems.value.filter(i => !modelValue.value.includes(i[props.itemValue]))
   return searchTerm.value ? options.filter(option => contains(option[props.itemTitle], searchTerm.value)) : options
@@ -166,6 +171,7 @@ const onSelectItem = (ev) => {
                   v-model="modelValue"
                   :class="cn('relative flex items-center gap-1 flex-nowrap pl-2 pr-1 pt-[7px] pb-[7px] w-80', props.class)"
                   :disabled="props.disabled"
+                  @click="forceOpen"
                 >
                   <!-- Wrapping area for tags + input -->
                   <div class="flex flex-wrap items-center gap-2 flex-1 min-w-0">
@@ -179,6 +185,7 @@ const onSelectItem = (ev) => {
                         :disabled="props.disabled"
                         :placeholder="props.placeholder"
                         class="p-0 border-none shadow-none focus-visible:ring-0 h-auto grow min-w-[6rem] w-auto"
+                        @input="forceOpen"
                         @keydown.enter.prevent="onEnter"
                       />
                     </ComboboxInput>
