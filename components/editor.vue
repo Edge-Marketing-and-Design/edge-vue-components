@@ -61,7 +61,7 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['unsavedChanges', 'workingDoc', 'error'])
+const emit = defineEmits(['unsavedChanges', 'workingDoc', 'error', 'saved'])
 
 const newDoc = computed(() => {
   return Object.entries(props.newDocSchema).reduce((newObj, [key, val]) => {
@@ -260,6 +260,11 @@ const onSubmit = async () => {
   // console.log('saving', state.workingDoc)
   const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, state.workingDoc)
   state.workingDoc.docId = result.meta.docId
+  emit('saved', {
+    collection: props.collection,
+    docId: state.workingDoc.docId,
+    data: edgeGlobal.dupObject(state.workingDoc),
+  })
   edgeGlobal.edgeState.lastPaginatedDoc = JSON.parse(JSON.stringify(state.workingDoc))
   console.log('save result', result)
   if (state.overrideClose) {

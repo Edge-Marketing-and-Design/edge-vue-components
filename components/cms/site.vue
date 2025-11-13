@@ -146,6 +146,203 @@ const menuPositionOptions = [
   { value: 'right', label: 'Right' },
 ]
 
+const TEMPLATE_PAGES_PATH = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/templates/pages`)
+const seededSiteIds = new Set()
+
+const slugify = (value) => {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)+/g, '')
+}
+
+const titleFromSlug = (slug) => {
+  return slug
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ') || 'New Page'
+}
+
+const ensureMenuBuckets = (menus) => {
+  const normalized = menus && typeof menus === 'object'
+    ? edgeGlobal.dupObject(menus)
+    : {}
+  if (!Array.isArray(normalized['Site Root']))
+    normalized['Site Root'] = []
+  if (!Array.isArray(normalized['Not In Menu']))
+    normalized['Not In Menu'] = []
+  return normalized
+}
+
+const ensureUniqueSlug = (candidate, templateDoc, usedSlugs) => {
+  const fallbackBase = slugify(templateDoc?.slug || templateDoc?.name || '')
+  let base = candidate && candidate.trim().length ? slugify(candidate) : ''
+  if (!base)
+    base = fallbackBase || `page-${usedSlugs.size + 1}`
+  let slugCandidate = base
+  let suffix = 2
+  while (usedSlugs.has(slugCandidate)) {
+    slugCandidate = `${base}-${suffix}`
+    suffix += 1
+  }
+  usedSlugs.add(slugCandidate)
+  return slugCandidate
+}
+
+const cloneBlocks = (blocks = []) => {
+  return Array.isArray(blocks) ? JSON.parse(JSON.stringify(blocks)) : []
+}
+
+const deriveBlockIdsFromDoc = (doc = {}) => {
+  const collect = (blocks) => {
+    if (!Array.isArray(blocks))
+      return []
+    return blocks
+      .map(block => block?.blockId)
+      .filter(Boolean)
+  }
+  const ids = new Set([
+    ...collect(doc.content),
+    ...collect(doc.postContent),
+  ])
+  return Array.from(ids)
+}
+
+const buildPagePayloadFromTemplateDoc = (templateDoc, slug, displayName = '') => {
+  const timestamp = Date.now()
+  const payload = {
+    name: displayName?.trim()?.length ? displayName : titleFromSlug(slug),
+    slug,
+    content: cloneBlocks(templateDoc?.content),
+    postContent: cloneBlocks(templateDoc?.postContent),
+    blockIds: [],
+    metaTitle: templateDoc?.metaTitle || '',
+    metaDescription: templateDoc?.metaDescription || '',
+    structuredData: templateDoc?.structuredData || '',
+    doc_created_at: timestamp,
+    last_updated: timestamp,
+  }
+  payload.blockIds = deriveBlockIdsFromDoc(payload)
+  return payload
+}
+
+const buildMenusFromDefaultPages = (defaultPages = []) => {
+  if (!Array.isArray(defaultPages) || !defaultPages.length)
+    return null
+  const menus = { 'Site Root': [], 'Not In Menu': [] }
+  const usedSlugs = new Set()
+  for (const entry of defaultPages) {
+    if (!entry?.pageId)
+      continue
+    const slug = ensureUniqueSlug(entry?.name || '', null, usedSlugs)
+    menus['Site Root'].push({
+      name: slug,
+      item: entry.pageId,
+    })
+  }
+  return menus
+}
+
+const deriveThemeMenus = (themeDoc = {}) => {
+  if (themeDoc?.defaultMenus && Object.keys(themeDoc.defaultMenus || {}).length)
+    return ensureMenuBuckets(themeDoc.defaultMenus)
+  if (Array.isArray(themeDoc?.defaultPages) && themeDoc.defaultPages.length)
+    return buildMenusFromDefaultPages(themeDoc.defaultPages)
+  return null
+}
+
+const ensureTemplatePagesSnapshot = async () => {
+  if (!edgeFirebase.data?.[TEMPLATE_PAGES_PATH.value])
+    await edgeFirebase.startSnapshot(TEMPLATE_PAGES_PATH.value)
+  return edgeFirebase.data?.[TEMPLATE_PAGES_PATH.value] || {}
+}
+
+const duplicateEntriesWithPages = async (entries = [], options) => {
+  const {
+    templatePages,
+    siteId,
+    usedSlugs,
+  } = options
+  const next = []
+  for (const entry of entries) {
+    if (!entry || entry.item == null)
+      continue
+    if (typeof entry.item === 'string' || entry.item === '') {
+      const templateDoc = templatePages?.[entry.item] || null
+      const slug = ensureUniqueSlug(entry.name || '', templateDoc, usedSlugs)
+      const payload = buildPagePayloadFromTemplateDoc(templateDoc, slug, entry.name || '')
+      try {
+        const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${siteId}/pages`, payload)
+        const docId = result?.meta?.docId
+        if (docId) {
+          next.push({
+            ...entry,
+            name: slug,
+            item: docId,
+          })
+        }
+      }
+      catch (error) {
+        console.error('Failed to duplicate template page for site seed', error)
+      }
+    }
+    else if (typeof entry.item === 'object') {
+      const folderName = Object.keys(entry.item || {})[0]
+      if (!folderName)
+        continue
+      const children = await duplicateEntriesWithPages(entry.item[folderName], options)
+      if (children.length) {
+        next.push({
+          ...entry,
+          item: {
+            [folderName]: children,
+          },
+        })
+      }
+    }
+  }
+  return next
+}
+
+const seedNewSiteFromTheme = async (siteId, themeId) => {
+  if (!siteId || !themeId)
+    return
+  const themeDoc = themeCollection.value?.[themeId]
+  if (!themeDoc)
+    return
+  const themeMenus = deriveThemeMenus(themeDoc)
+  if (!themeMenus)
+    return
+  const templatePages = await ensureTemplatePagesSnapshot()
+  const usedSlugs = new Set()
+  const seededMenus = ensureMenuBuckets(themeMenus)
+  seededMenus['Site Root'] = await duplicateEntriesWithPages(seededMenus['Site Root'], { templatePages, siteId, usedSlugs })
+  seededMenus['Not In Menu'] = await duplicateEntriesWithPages(seededMenus['Not In Menu'], { templatePages, siteId, usedSlugs })
+  await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, siteId, { menus: seededMenus })
+}
+
+const handleNewSiteSaved = async ({ docId, data, collection }) => {
+  if (props.site !== 'new')
+    return
+  if (collection !== 'sites')
+    return
+  if (!docId || seededSiteIds.has(docId))
+    return
+  const themeId = data?.theme
+  if (!themeId)
+    return
+  seededSiteIds.add(docId)
+  try {
+    await seedNewSiteFromTheme(docId, themeId)
+  }
+  catch (error) {
+    console.error('Failed to seed site from theme defaults', error)
+    seededSiteIds.delete(docId)
+  }
+}
+
 onBeforeMount(async () => {
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/published-site-settings`]) {
     await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/published-site-settings`)
@@ -412,6 +609,7 @@ const pageSettingsUpdated = async (pageData) => {
       :new-doc-schema="state.newDocs.sites"
       class="w-full mx-auto flex-1 bg-transparent flex flex-col border-none shadow-none"
       :show-footer="false"
+      @saved="handleNewSiteSaved"
     >
       <template #header-start="slotProps">
         <FilePenLine class="mr-2" />
