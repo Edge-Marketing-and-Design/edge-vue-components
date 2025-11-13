@@ -962,7 +962,7 @@ const theme = computed(() => {
               label="Is a Post Template"
               name="post"
             >
-              Post page.  When checked this will create two templates for this page: one for the post list (e.g. /{{ slotProps.workingDoc.name }}) and one for individual posts (e.g. /{{ slotProps.workingDoc.name }}/:slug).
+              List page.  When checked this will create two templates for this page: one for the list (like posts) (e.g. /{{ slotProps.workingDoc.name }}) and one for individual listing (like a single post) (e.g. /{{ slotProps.workingDoc.name }}/:slug).
             </edge-shad-checkbox>
             <edge-shad-select-tags
               v-if="props.isTemplateSite"

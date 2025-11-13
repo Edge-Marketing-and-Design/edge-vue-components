@@ -164,7 +164,7 @@ const onSelectItem = (ev) => {
               <ComboboxAnchor as-child>
                 <TagsInput
                   v-model="modelValue"
-                  :class="cn('relative flex items-center gap-1 flex-nowrap px-2 pt-[7px] pb-[7px] w-80', props.class)"
+                  :class="cn('relative flex items-center gap-1 flex-nowrap pl-2 pr-1 pt-[7px] pb-[7px] w-80', props.class)"
                   :disabled="props.disabled"
                 >
                   <!-- Wrapping area for tags + input -->
@@ -186,7 +186,7 @@ const onSelectItem = (ev) => {
 
                   <!-- Non-wrapping trigger -->
                   <ComboboxTrigger as-child>
-                    <Button variant="icon" class="!py-0 h-6 flex-none shrink-0 ml-2">
+                    <Button variant="ghost" size="icon" class="h-6 w-6 z-10">
                       <ChevronsUpDown class="h-4 w-4 shrink-0 opacity-50" />
                     </Button>
                   </ComboboxTrigger>
