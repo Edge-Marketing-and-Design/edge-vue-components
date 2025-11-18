@@ -292,6 +292,14 @@ const getTagsFromPosts = computed(() => {
         </SheetHeader>
 
         <edge-shad-form>
+          <div v-if="orderedMeta.length === 0">
+            <Alert variant="info" class="mt-4 mb-4">
+              <AlertTitle>No editable fields found</AlertTitle>
+              <AlertDescription class="text-sm">
+                This block does not have any editable fields defined.
+              </AlertDescription>
+            </Alert>
+          </div>
           <div :class="modelValue.synced ? 'h-[calc(100vh-160px)]' : 'h-[calc(100vh-130px)]'" class="p-6 space-y-4   overflow-y-auto">
             <template v-for="entry in orderedMeta" :key="entry.field">
               <div v-if="entry.meta.type === 'array'">
@@ -321,6 +329,7 @@ const getTagsFromPosts = computed(() => {
                                         v-model="state.arrayItems[entry.field][schemaItem.field]"
                                         :type="schemaItem.type"
                                         :field="schemaItem.field"
+                                        :schema="schemaItem"
                                         :label="genTitleFromField(schemaItem)"
                                       />
                                     </template>
@@ -367,6 +376,7 @@ const getTagsFromPosts = computed(() => {
                                         <edge-cms-block-input
                                           v-model="element[schemaItem.field]"
                                           :type="schemaItem.type"
+                                          :schema="schemaItem"
                                           :field="`${schemaItem.field}-${index}-entry`"
                                           :label="genTitleFromField(schemaItem)"
                                         />

@@ -264,8 +264,9 @@ const templatePreviewBlocks = (template) => {
 }
 
 const renameFolderOrPageShow = (item) => {
-  state.renameItem = item
-  state.renameItem.previousName = item.name
+  // Work on a copy so edits in the dialog do not mutate the live menu entry.
+  state.renameItem = edgeGlobal.dupObject(item || {})
+  state.renameItem.previousName = item?.name
   state.renameFolderOrPageDialog = true
 }
 
@@ -421,8 +422,7 @@ const hydrateSyncedBlocksFromSite = (blocks = []) => {
 const buildPagePayloadFromTemplate = (templateDoc, slug) => {
   const timestamp = Date.now()
   const basePayload = {
-    name: state.newPageName,
-    slug,
+    name: slug,
     content: [],
     postContent: [],
     blockIds: [],
@@ -436,8 +436,7 @@ const buildPagePayloadFromTemplate = (templateDoc, slug) => {
     return basePayload
   const copy = JSON.parse(JSON.stringify(templateDoc || {}))
   delete copy.docId
-  copy.name = state.newPageName
-  copy.slug = slug
+  copy.name = slug
   copy.doc_created_at = timestamp
   copy.last_updated = timestamp
   copy.content = Array.isArray(copy.content) ? hydrateSyncedBlocksFromSite(copy.content) : []
@@ -852,8 +851,8 @@ const theme = computed(() => {
           <edge-button-divider class="my-4">
             <span class="text-xs text-muted-foreground !nowrap text-center">Select Template</span>
           </edge-button-divider>
-          <div class="overflow-y-auto !h-[calc(100vh-560px)] pr-1">
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 auto-rows-fr pb-2">
+          <div class="overflow-y-auto !h-[calc(100vh-510px)] pr-1">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 auto-rows-fr pb-2">
               <button
                 v-for="template in templateGridItems"
                 :key="template.docId"
@@ -871,7 +870,7 @@ const theme = computed(() => {
                   <div class="template-scale-inner">
                     <div class="template-scale-content space-y-4">
                       <template v-if="template.docId === BLANK_TEMPLATE_ID">
-                        <div class="flex h-32 items-center justify-center text-4xl text-muted-foreground">
+                        <div class="flex h-32 items-center justify-center text-[100px] mt-[100px] text-muted-foreground">
                           Blank page
                         </div>
                       </template>
@@ -891,7 +890,7 @@ const theme = computed(() => {
                         </div>
                       </template>
                       <template v-else>
-                        <div class="flex h-32 items-center justify-center text-sm text-muted-foreground">
+                        <div class="flex h-32 items-center justify-center text-[100px] mt-[100px]  text-muted-foreground">
                           No blocks yet
                         </div>
                       </template>
@@ -962,7 +961,8 @@ const theme = computed(() => {
               label="Is a Post Template"
               name="post"
             >
-              List page.  When checked this will create two templates for this page: one for the list (like posts) (e.g. /{{ slotProps.workingDoc.name }}) and one for individual listing (like a single post) (e.g. /{{ slotProps.workingDoc.name }}/:slug).
+              Creates both an Index Page and a Detail Page for this section.
+              The Index Page lists all items (e.g., /{{ slotProps.workingDoc.name }}), while the Detail Page displays a single item (e.g., /{{ slotProps.workingDoc.name }}/:slug).
             </edge-shad-checkbox>
             <edge-shad-select-tags
               v-if="props.isTemplateSite"
@@ -1034,6 +1034,7 @@ const theme = computed(() => {
   overflow: hidden;
   position: relative;
   border-radius: 0.5rem;
+  height: 400px;
 }
 
 .template-scale-inner {
@@ -1041,12 +1042,12 @@ const theme = computed(() => {
   display: inline-block;
   width: 100%;
   height: 400px;
-  overflow: scroll;
+  overflow: hidden;
 }
 
 .template-scale-content {
-  transform: scale(0.45);
+  transform: scale(0.2);
   transform-origin: top left;
-  width: 222%;
+  width: 500%;
 }
 </style>

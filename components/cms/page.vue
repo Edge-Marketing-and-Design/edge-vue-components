@@ -1,4 +1,5 @@
 <script setup>
+import { Maximize2, Monitor, Smartphone, Tablet } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 const props = defineProps({
@@ -30,6 +31,7 @@ const state = reactive({
   },
   editMode: false,
   workingDoc: {},
+  previewViewport: 'full',
 })
 
 const schemas = {
@@ -38,6 +40,33 @@ const schemas = {
       required_error: 'Name is required',
     }).min(1, { message: 'Name is required' }),
   })),
+}
+
+const previewViewportOptions = [
+  { id: 'full', label: 'Wild Width', width: '100%', icon: Maximize2 },
+  { id: 'large', label: 'Large Screen', width: '1280px', icon: Monitor },
+  { id: 'medium', label: 'Medium', width: '992px', icon: Tablet },
+  { id: 'mobile', label: 'Mobile', width: '420px', icon: Smartphone },
+]
+
+const selectedPreviewViewport = computed(() => previewViewportOptions.find(option => option.id === state.previewViewport) || previewViewportOptions[0])
+
+const previewViewportStyle = computed(() => {
+  if (state.editMode)
+    return {}
+  const selected = selectedPreviewViewport.value
+  if (!selected || selected.id === 'full')
+    return { maxWidth: '100%' }
+  return {
+    width: '100%',
+    maxWidth: selected.width,
+    marginLeft: 'auto',
+    marginRight: 'auto',
+  }
+})
+
+const setPreviewViewport = (viewportId) => {
+  state.previewViewport = viewportId
 }
 
 const deleteBlock = (blockId, slotProps, post = false) => {
@@ -194,6 +223,22 @@ const hasUnsavedChanges = (changes) => {
           </div>
           <div class="w-full border-t border-gray-300 dark:border-white/15" aria-hidden="true" />
 
+          <div v-if="!state.editMode" class="flex items-center gap-1 pr-3">
+            <span class="text-[11px] uppercase tracking-wide text-primary/70">Viewport</span>
+            <edge-shad-button
+              v-for="option in previewViewportOptions"
+              :key="option.id"
+              type="button"
+              variant="ghost"
+              size="icon"
+              class="h-[26px] w-[26px] text-xs gap-1 border transition-colors"
+              :class="state.previewViewport === option.id ? 'bg-primary text-white border-primary' : 'bg-secondary text-primary border-primary/20 hover:bg-primary/10'"
+              @click="setPreviewViewport(option.id)"
+            >
+              <component :is="option.icon" class="w-3.5 h-3.5" />
+            </edge-shad-button>
+          </div>
+
           <edge-shad-button variant="text" class="hover:text-primary/50 text-xs h-[26px] text-primary" @click="state.editMode = !state.editMode">
             <template v-if="state.editMode">
               <Eye class="w-4 h-4" />
@@ -240,10 +285,10 @@ const hasUnsavedChanges = (changes) => {
       <Tabs class="w-full" default-value="list">
         <TabsList v-if="slotProps.workingDoc?.post" class="w-full mt-3 bg-primary rounded-sm">
           <TabsTrigger value="list">
-            List Page
+            Index Page
           </TabsTrigger>
           <TabsTrigger value="post">
-            Post Page
+            Detail Page
           </TabsTrigger>
         </TabsList>
         <TabsContent value="list">
@@ -251,7 +296,11 @@ const hasUnsavedChanges = (changes) => {
           <edge-button-divider v-if="state.editMode" class="my-2">
             <edge-cms-block-picker :site-id="props.site" :theme="theme" @pick="(block) => blockPick(block, 0, slotProps)" />
           </edge-button-divider>
-          <div class="w-full mx-auto  bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30">
+          <div
+            class="w-full mx-auto  bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30"
+            :class="{ 'transition-all duration-300': !state.editMode }"
+            :style="previewViewportStyle"
+          >
             <draggable
               v-if="slotProps.workingDoc?.content && slotProps.workingDoc.content.length > 0"
               v-model="slotProps.workingDoc.content"
@@ -290,7 +339,11 @@ const hasUnsavedChanges = (changes) => {
           <edge-button-divider v-if="state.editMode" class="my-2">
             <edge-cms-block-picker :site-id="props.site" :theme="theme" @pick="(block) => blockPick(block, 0, slotProps, true)" />
           </edge-button-divider>
-          <div class="w-full mx-auto  bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30">
+          <div
+            class="w-full mx-auto  bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30"
+            :class="{ 'transition-all duration-300': !state.editMode }"
+            :style="previewViewportStyle"
+          >
             <draggable
               v-if="slotProps.workingDoc?.postContent && slotProps.workingDoc.postContent.length > 0"
               v-model="slotProps.workingDoc.postContent"
