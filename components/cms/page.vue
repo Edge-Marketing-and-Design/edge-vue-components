@@ -52,8 +52,6 @@ const previewViewportOptions = [
 const selectedPreviewViewport = computed(() => previewViewportOptions.find(option => option.id === state.previewViewport) || previewViewportOptions[0])
 
 const previewViewportStyle = computed(() => {
-  if (state.editMode)
-    return {}
   const selected = selectedPreviewViewport.value
   if (!selected || selected.id === 'full')
     return { maxWidth: '100%' }
@@ -70,8 +68,6 @@ const setPreviewViewport = (viewportId) => {
 }
 
 const previewViewportMode = computed(() => {
-  if (state.editMode)
-    return 'auto'
   if (state.previewViewport === 'full')
     return 'auto'
   return state.previewViewport
