@@ -69,6 +69,14 @@ const setPreviewViewport = (viewportId) => {
   state.previewViewport = viewportId
 }
 
+const previewViewportMode = computed(() => {
+  if (state.editMode)
+    return 'auto'
+  if (state.previewViewport === 'full')
+    return 'auto'
+  return state.previewViewport
+})
+
 const deleteBlock = (blockId, slotProps, post = false) => {
   console.log('Deleting block with ID:', blockId)
   if (post) {
@@ -223,12 +231,12 @@ const hasUnsavedChanges = (changes) => {
           </div>
           <div class="w-full border-t border-gray-300 dark:border-white/15" aria-hidden="true" />
 
-          <div v-if="!state.editMode" class="flex items-center gap-1 pr-3">
-            <span class="text-[11px] uppercase tracking-wide text-primary/70">Viewport</span>
-            <edge-shad-button
-              v-for="option in previewViewportOptions"
-              :key="option.id"
-              type="button"
+        <div class="flex items-center gap-1 pr-3">
+          <span class="text-[11px] uppercase tracking-wide text-primary/70">Viewport</span>
+          <edge-shad-button
+            v-for="option in previewViewportOptions"
+            :key="option.id"
+            type="button"
               variant="ghost"
               size="icon"
               class="h-[26px] w-[26px] text-xs gap-1 border transition-colors"
@@ -318,6 +326,7 @@ const hasUnsavedChanges = (changes) => {
                         v-model="slotProps.workingDoc.content[index]"
                         :site-id="props.site"
                         :edit-mode="state.editMode"
+                        :viewport-mode="previewViewportMode"
                         :block-id="element.id" class=""
                         :theme="theme"
                         @delete="(block) => deleteBlock(block, slotProps)"
@@ -360,6 +369,7 @@ const hasUnsavedChanges = (changes) => {
                       <edge-cms-block
                         v-model="slotProps.workingDoc.postContent[index]"
                         :edit-mode="state.editMode"
+                        :viewport-mode="previewViewportMode"
                         :block-id="element.id" class=""
                         :theme="theme"
                         :site-id="props.site"

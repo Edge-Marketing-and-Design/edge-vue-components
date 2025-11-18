@@ -22,6 +22,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  viewportMode: {
+    type: String,
+    default: 'auto',
+  },
 })
 const emit = defineEmits(['update:modelValue', 'delete'])
 const edgeFirebase = inject('edgeFirebase')
@@ -230,13 +234,14 @@ const getTagsFromPosts = computed(() => {
       @click="openEditor"
     >
       <!-- Content -->
-      <edge-cms-block-api :site-id="props.siteId" :theme="props.theme" :content="modelValue?.content" :values="modelValue?.values" :meta="modelValue?.meta" @pending="state.loading = $event" />
+      <edge-cms-block-api :site-id="props.siteId" :theme="props.theme" :content="modelValue?.content" :values="modelValue?.values" :meta="modelValue?.meta" :viewport-mode="props.viewportMode" @pending="state.loading = $event" />
       <edge-cms-block-render
         v-if="state.loading"
         :content="loadingRender(modelValue?.content)"
         :values="modelValue?.values"
         :meta="modelValue?.meta"
         :theme="props.theme"
+        :viewport-mode="props.viewportMode"
       />
       <!-- Darken overlay on hover -->
       <div v-if="props.editMode" class="pointer-events-none absolute inset-0 bg-black/50 opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-10" />

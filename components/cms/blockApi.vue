@@ -29,6 +29,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  viewportMode: {
+    type: String,
+    default: 'auto',
+  },
 })
 const emit = defineEmits(['pending'])
 const edgeFirebase = inject('edgeFirebase')
@@ -200,6 +204,7 @@ const finalValues = computed(() => {
     :content="loadingRender(props.content)"
     :values="finalValues"
     :meta="props.meta"
+    :viewport-mode="props.viewportMode"
   />
 </template>
 

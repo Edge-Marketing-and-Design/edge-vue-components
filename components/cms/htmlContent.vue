@@ -25,6 +25,10 @@ const props = defineProps({
     required: false,
     default: null,
   },
+  viewportMode: {
+    type: String,
+    default: 'auto',
+  },
 })
 
 const emit = defineEmits(['loaded'])
@@ -551,7 +555,31 @@ function applyThemeClasses(scopeEl, theme, variant = 'light', isolated = true) {
 }
 
 // Add new helper to rewrite arbitrary class tokens with responsive and state prefixes
-function rewriteAllClasses(scopeEl, theme, isolated = true) {
+const BREAKPOINT_MIN_WIDTHS = {
+  sm: 640,
+  md: 768,
+  lg: 1024,
+  xl: 1280,
+  '2xl': 1536,
+}
+
+const VIEWPORT_WIDTHS = {
+  auto: null,
+  full: null,
+  large: 1280,
+  medium: 992,
+  mobile: 480,
+}
+
+const viewportModeToWidth = (mode) => {
+  if (!mode)
+    return null
+  if (Object.prototype.hasOwnProperty.call(VIEWPORT_WIDTHS, mode))
+    return VIEWPORT_WIDTHS[mode]
+  return null
+}
+
+function rewriteAllClasses(scopeEl, theme, isolated = true, viewportMode = 'auto') {
   if (!scopeEl)
     return
   // Utility regex for Uno/Tailwind classes
@@ -569,25 +597,46 @@ function rewriteAllClasses(scopeEl, theme, isolated = true) {
     }
     return core
   }
+  const forcedWidth = viewportModeToWidth(viewportMode)
   const mapToken = (token) => {
     // Support responsive/state prefixes like md:hover:bg-brand
     const parts = token.split(':')
     const core = parts.pop()
+    let drop = false
+    const nextParts = []
+    for (const part of parts) {
+      const normalized = part.replace(/^!/, '')
+      if (forcedWidth != null && Object.prototype.hasOwnProperty.call(BREAKPOINT_MIN_WIDTHS, normalized)) {
+        const minWidth = BREAKPOINT_MIN_WIDTHS[normalized]
+        if (forcedWidth >= minWidth)
+          continue
+        drop = true
+        break
+      }
+      nextParts.push(part)
+    }
+    if (drop)
+      return ''
     const mappedCore = toVarBackedUtilities(core, theme)
     const finalCore = importantify(mappedCore)
-    return [...parts, finalCore].join(':')
+    return [...nextParts, finalCore].filter(Boolean).join(':')
   }
   scopeEl.querySelectorAll('[class]').forEach((el) => {
-    const orig = el.className || ''
-    if (!orig)
+    let base = el.dataset.viewportBaseClass
+    if (typeof base !== 'string') {
+      base = el.className || ''
+      el.dataset.viewportBaseClass = base
+    }
+    const orig = base || ''
+    if (!orig.trim())
       return
     const origTokens = orig.split(/\s+/).filter(Boolean)
+    const mappedTokens = origTokens
+      .map(mapToken)
+      .filter(Boolean)
     if (isolated) {
-      const mapped = origTokens
-        .map(mapToken)
-        .join(' ')
-      if (mapped !== orig)
-        el.className = mapped
+      const mapped = mappedTokens.join(' ')
+      el.className = mapped
       return
     }
 
@@ -595,9 +644,7 @@ function rewriteAllClasses(scopeEl, theme, isolated = true) {
     if (prevApplied.length)
       prevApplied.forEach(cls => el.classList.remove(cls))
 
-    const additions = origTokens
-      .map(mapToken)
-      .filter(cls => cls && !origTokens.includes(cls))
+    const additions = mappedTokens.filter(cls => cls && !origTokens.includes(cls))
     additions.forEach(cls => el.classList.add(cls))
 
     if (additions.length)
@@ -619,7 +666,7 @@ onMounted(async () => {
   // If you later need per-block overrides, keep the next line; otherwise, it can be omitted.
   // setScopedThemeVars(hostEl.value, normalizeTheme(props.theme))
   applyThemeClasses(hostEl.value, props.theme, (props.theme && props.theme.variant) || 'light')
-  rewriteAllClasses(hostEl.value, props.theme)
+  rewriteAllClasses(hostEl.value, props.theme, props.isolated, props.viewportMode)
   await nextTick()
   hasMounted = true
   notifyLoaded()
@@ -635,7 +682,7 @@ watch(
     setScopedThemeVars(hostEl.value, normalizeTheme(props.theme))
 
     applyThemeClasses(hostEl.value, props.theme, (props.theme && props.theme.variant) || 'light')
-    rewriteAllClasses(hostEl.value, props.theme)
+    rewriteAllClasses(hostEl.value, props.theme, props.isolated, props.viewportMode)
     await nextTick()
     notifyLoaded()
   },
@@ -650,11 +697,19 @@ watch(
     setScopedThemeVars(hostEl.value, t)
     // 2) Apply classes based on `apply`, `slots`, and optional variants
     applyThemeClasses(hostEl.value, t, (val && val.variant) || 'light')
-    rewriteAllClasses(hostEl.value, t)
+    rewriteAllClasses(hostEl.value, t, props.isolated, props.viewportMode)
     await nextTick()
     notifyLoaded()
   },
   { immediate: true, deep: true },
+)
+
+watch(
+  () => props.viewportMode,
+  async () => {
+    await nextTick()
+    rewriteAllClasses(hostEl.value, props.theme, props.isolated, props.viewportMode)
+  },
 )
 
 onBeforeUnmount(() => {

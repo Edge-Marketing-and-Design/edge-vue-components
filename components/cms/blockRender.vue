@@ -22,6 +22,10 @@ const props = defineProps({
     type: Boolean,
     default: true,
   },
+  viewportMode: {
+    type: String,
+    default: 'auto',
+  },
 })
 
 const emit = defineEmits(['loaded'])
@@ -65,6 +69,7 @@ const rendered = computed(() => {
     :html="rendered"
     :theme="theme"
     :isolated="props.isolated"
+    :viewport-mode="props.viewportMode"
     @loaded="emit('loaded')"
   />
 </template>
