@@ -1,4 +1,5 @@
 <script setup>
+import { Maximize2, Monitor, Smartphone, Tablet } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 const props = defineProps({
@@ -36,6 +37,7 @@ const state = reactive({
   renderSite: '',
   initialBlocksSeeded: false,
   seedingInitialBlocks: false,
+  previewViewport: 'full',
 })
 
 const blockSchema = toTypedSchema(z.object({
@@ -43,6 +45,37 @@ const blockSchema = toTypedSchema(z.object({
     required_error: 'Name is required',
   }).min(1, { message: 'Name is required' }),
 }))
+
+const previewViewportOptions = [
+  { id: 'full', label: 'Wild Width', width: '100%', icon: Maximize2 },
+  { id: 'large', label: 'Large Screen', width: '1280px', icon: Monitor },
+  { id: 'medium', label: 'Medium', width: '992px', icon: Tablet },
+  { id: 'mobile', label: 'Mobile', width: '420px', icon: Smartphone },
+]
+
+const selectedPreviewViewport = computed(() => previewViewportOptions.find(option => option.id === state.previewViewport) || previewViewportOptions[0])
+
+const previewViewportStyle = computed(() => {
+  const selected = selectedPreviewViewport.value
+  if (!selected || selected.id === 'full')
+    return { maxWidth: '100%' }
+  return {
+    width: '100%',
+    maxWidth: selected.width,
+    marginLeft: 'auto',
+    marginRight: 'auto',
+  }
+})
+
+const setPreviewViewport = (viewportId) => {
+  state.previewViewport = viewportId
+}
+
+const previewViewportMode = computed(() => {
+  if (state.previewViewport === 'full')
+    return 'auto'
+  return state.previewViewport
+})
 
 onMounted(() => {
   // state.mounted = true
@@ -615,12 +648,33 @@ const getTagsFromBlocks = computed(() => {
                 </div>
               </div>
             </div>
-            <div class="w-1/2">
-              <div class="w-full mx-auto bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30">
+            <div class="w-1/2 space-y-2">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold uppercase tracking-wide text-slate-500">Viewport</span>
+                <div class="flex items-center gap-1">
+                  <edge-shad-button
+                    v-for="option in previewViewportOptions"
+                    :key="option.id"
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    class="h-[28px] w-[28px] text-xs border"
+                    :class="state.previewViewport === option.id ? 'bg-primary text-white border-primary' : 'bg-secondary text-primary border-primary/20 hover:bg-primary/10'"
+                    @click="setPreviewViewport(option.id)"
+                  >
+                    <component :is="option.icon" class="w-3.5 h-3.5" />
+                  </edge-shad-button>
+                </div>
+              </div>
+              <div
+                class="w-full mx-auto bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30"
+                :style="previewViewportStyle"
+              >
                 <edge-cms-block-picker
                   :site-id="edgeGlobal.edgeState.blockEditorSite"
                   :theme="theme"
                   :block-override="{ content: slotProps.workingDoc.content, values: state.workingDoc.values, meta: state.workingDoc.meta }"
+                  :viewport-mode="previewViewportMode"
                 />
               </div>
             </div>

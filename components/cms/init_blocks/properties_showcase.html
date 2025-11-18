@@ -8,14 +8,17 @@
         {{{#text {"field": "subHeader", "value": "" }}}}
       </p>
       <p>
-         {{{#text {"field": "thirdHeader", "value": "Hello" }}}}
+        {{{#text {"field": "thirdHeader", "value": "Hello" }}}}
       </p>
     </div>
   </div>
+
   <div class="max-w-7xl mx-auto px-4 grid md:grid-cols-2 lg:grid-cols-3 gap-6">
     {{{#array {"field":"showcaseproperties","schema":{"listing_price":"money","square_feet":"number","acres":"number"},"api":"https://api.clearwaterproperties.com/api/front/properties","apiField":"data","apiQuery":"","queryOptions":[{"field":"sort","optionsKey":"label","optionsValue":"value","options":[{"label":"Highest Price","value":"listing_price"},{"label":"Lowest Price","value":"-listing_price"},{"label":"Newest","value":"-list_date"}]},{"field":"filter_scope[agent][]","title":"Agent","optionsKey":"name","optionsValue":"mls.primary","options":"users"}],"limit":6,"value":[]}}}}
-      <div class="{{loading}}">
-        <div class="block bg-white shadow-md rounded-lg overflow-hidden animate-pulse">
+
+      <!-- Loading state -->
+      <div class="{{loading}} min-w-0">
+        <div class="block w-full bg-white shadow-md rounded-lg overflow-hidden animate-pulse">
           <!-- Image skeleton -->
           <div class="relative w-full h-64 bg-gray-200">
             <!-- Top left badge -->
@@ -39,10 +42,17 @@
           </div>
         </div>
       </div>
-      <div class="{{loaded}}">
-        <a  class="block bg-white shadow-md rounded-lg overflow-hidden">
+
+      <!-- Loaded state -->
+      <div class="{{loaded}} min-w-0">
+        <a class="block w-full bg-white shadow-md rounded-lg overflow-hidden">
           <div class="relative w-full h-64 bg-gray-200 bg-[url('/images/placeholder.jpg')] bg-cover bg-center">
-            <img src="{{item.thumbnail_url}}" alt="For Sale" loading="lazy"  class="w-full h-full object-cover">
+            <img
+              src="{{item.thumbnail_url}}"
+              alt="For Sale"
+              loading="lazy"
+              class="block w-full h-full object-cover"
+            />
 
             <div class="absolute top-2 left-2 bg-black/70 text-white px-2 py-1 rounded text-xs">
               {{item.listing_status}}
@@ -62,10 +72,10 @@
                 <span>{{item.total_bedrooms}} Beds</span>
               {{{/if}}}
               {{{#if {"cond": "item.total_bathrooms > 0"}}}}
-              <span>{{item.total_bathrooms}} Baths</span>
+                <span>{{item.total_bathrooms}} Baths</span>
               {{{/if}}}
               {{{#if {"cond": "item.property_type == 'ranch'"}}}}
-                  <span>{{item.acres}} Acres</span>
+                <span>{{item.acres}} Acres</span>
               {{{#else}}}
                 {{{#if {"cond": "item.square_feet > 0"}}}}
                   <span>{{item.square_feet}} Sq.Ft.</span>
@@ -75,9 +85,11 @@
           </div>
         </a>
       </div>
+
     {{{/array}}}
   </div>
-    <div class="max-w-7xl mx-auto px-4 py-4 text-center">
+
+  <div class="max-w-7xl mx-auto px-4 py-4 text-center">
     <a
       href="{{{#text {"field": "buttonURL", "value": "" }}}}"
       class="inline-flex items-center justify-center rounded-lg px-5 py-3 text-sm font-semibold bg-white text-gray-900 ring-1 ring-gray-300 shadow hover:bg-gray-50 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-900 transition"

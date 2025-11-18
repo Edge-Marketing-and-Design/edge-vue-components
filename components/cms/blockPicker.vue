@@ -18,6 +18,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  viewportMode: {
+    type: String,
+    default: 'auto',
+  },
 })
 
 const emit = defineEmits(['pick'])
@@ -224,16 +228,18 @@ const clearTagFilters = () => {
       :meta="props.blockOverride.meta"
       :theme="props.theme"
       :site-id="props.siteId"
+      :viewport-mode="props.viewportMode"
       @pending="blockLoaded($event, 'block')"
     />
-    <edge-cms-block-render
-      v-if="!state.blocksLoaded.includes('block')"
-      :content="loadingRender(props.blockOverride.content)"
-      :values="props.blockOverride.values"
-      :meta="props.blockOverride.meta"
-      :theme="props.theme"
-      :site-id="props.siteId"
-    />
+      <edge-cms-block-render
+        v-if="!state.blocksLoaded.includes('block')"
+        :content="loadingRender(props.blockOverride.content)"
+        :values="props.blockOverride.values"
+        :meta="props.blockOverride.meta"
+        :theme="props.theme"
+        :site-id="props.siteId"
+        :viewport-mode="props.viewportMode"
+      />
   </div>
   <div v-else-if="props.listOnly" class="p-6 h-[calc(100vh-50px)] overflow-hidden flex flex-col gap-4">
     <div v-if="getTagsFromBlocks.length" class="flex flex-wrap items-center gap-2 text-sm">
@@ -273,13 +279,14 @@ const clearTagFilters = () => {
                 <div class="text-4xl relative text-inherit text-center">
                   {{ block.name }}
                 </div>
-                <edge-cms-block-api :site-id="props.siteId" :content="block.content" :theme="props.theme" :values="block.values" :meta="block.meta" @pending="blockLoaded($event, block.docId)" />
+                <edge-cms-block-api :site-id="props.siteId" :content="block.content" :theme="props.theme" :values="block.values" :meta="block.meta" :viewport-mode="props.viewportMode" @pending="blockLoaded($event, block.docId)" />
                 <edge-cms-block-render
                   v-if="!state.blocksLoaded.includes(block.docId)"
                   :content="loadingRender(block.content)"
                   :values="block.values"
                   :meta="block.meta"
                   :theme="props.theme"
+                  :viewport-mode="props.viewportMode"
                 />
               </div>
             </div>
@@ -348,13 +355,14 @@ const clearTagFilters = () => {
                         <div class="text-4xl relative text-inherit text-center">
                           {{ block.name }}
                         </div>
-                        <edge-cms-block-api :site-id="props.siteId" :content="block.content" :theme="props.theme" :values="block.values" :meta="block.meta" @pending="blockLoaded($event, block.docId)" />
+                        <edge-cms-block-api :site-id="props.siteId" :content="block.content" :theme="props.theme" :values="block.values" :meta="block.meta" :viewport-mode="props.viewportMode" @pending="blockLoaded($event, block.docId)" />
                         <edge-cms-block-render
                           v-if="!state.blocksLoaded.includes(block.docId)"
                           :content="loadingRender(block.content)"
                           :values="block.values"
                           :meta="block.meta"
                           :theme="props.theme"
+                          :viewport-mode="props.viewportMode"
                         />
                       </div>
                     </div>
