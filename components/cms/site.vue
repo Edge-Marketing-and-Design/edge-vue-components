@@ -930,7 +930,7 @@ const pageSettingsUpdated = async (pageData) => {
                 @update:model-value="value => (slotProps.workingDoc.menuPosition = value || '')"
               />
               <edge-shad-select-tags
-                v-if="Object.values(edgeFirebase.state.users).length > 0"
+                v-if="Object.values(edgeFirebase.state.users).length > 0 && isAdmin"
                 v-model="slotProps.workingDoc.users" :disabled="!edgeGlobal.isAdminGlobal(edgeFirebase).value"
                 :items="Object.values(edgeFirebase.state.users).filter(user => user.userId !== '')" name="users" label="Users"
                 item-title="meta.name" item-value="userId" placeholder="Select users" class="w-full" :multiple="true"

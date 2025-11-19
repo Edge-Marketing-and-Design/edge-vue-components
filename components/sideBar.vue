@@ -5,7 +5,6 @@ import {
   Sidebar,
   useSidebar,
 } from '@/components/ui/sidebar'
-
 const props = defineProps({
   title: {
     type: String,
@@ -72,6 +71,8 @@ const props = defineProps({
     default: '',
   },
 })
+
+const edgeFirebase = inject('edgeFirebase')
 
 const attrs = useAttrs()
 
@@ -157,6 +158,22 @@ const submenu = computed(() => {
 const isDev = computed(() => {
   return process.dev
 })
+
+const isAdmin = computed(() => {
+  return edgeGlobal.isAdminGlobal(edgeFirebase).value
+})
+
+const subMenuItems = (items) => {
+  console.log('submenu items', items)
+  return items
+    .filter(item => edgeGlobal.allowMenuItem(item, isAdmin.value))
+    .map(item => ({
+      ...item,
+      submenu: Array.isArray(item.submenu)
+        ? item.submenu.filter(subItem => edgeGlobal.allowMenuItem(subItem, isAdmin.value))
+        : item.submenu,
+    }))
+}
 </script>
 
 <template>
@@ -185,7 +202,7 @@ const isDev = computed(() => {
     <!-- Submenu Sidebar -->
     <Transition name="slide-submenu">
       <Sidebar
-        v-if="submenu.length > 0 && !sidebarIsMobile"
+        v-if="subMenuItems(submenu).length > 0 && !sidebarIsMobile"
         side="left"
         :collapsible="collapsible"
         class="border-solid border-r w-[60px]"

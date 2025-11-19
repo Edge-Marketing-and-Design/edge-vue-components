@@ -86,6 +86,10 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  loadFirstIfOne: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 defineOptions({ name: 'EdgeDashboard' })
@@ -474,6 +478,12 @@ onBeforeMount(async () => {
     field: field.field,
     value: field.value,
   }))
+
+  console.log('after mount')
+  console.log(filtered.value)
+  if (props.loadFirstIfOne && filtered.value.length === 1) {
+    gotoSite(filtered.value[0].docId)
+  }
   state.afterMount = true
 })
 
