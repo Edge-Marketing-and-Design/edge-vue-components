@@ -46,7 +46,18 @@ const state = reactive({
       "text": "#1F2937",
       "muted": "#9CA3AF",
       "success": "#22C55E",
-      "danger": "#EF4444"
+      "danger": "#EF4444",
+      "border": "#E5E7EB",
+      "ring": "#93C5FD",
+      "link": "#3B82F6",
+      "linkHover": "#1D4ED8",
+      "navBg": "#000000",
+      "navText": "#FFFFFF",
+      "navMuted": "#6B7280",
+      "navBorder": "",
+      "navActive": "#3B82F6",
+      "navHoverBg": "",
+      "navActiveBg": ""
     },
     "fontFamily": {
       "sans": ["Overpass", "sans-serif"],

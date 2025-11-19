@@ -402,10 +402,11 @@ const iconFromMenu = (route: { path: string }): string => {
 const toBool = (v: any): boolean => v === true || v === 'true' || v === 1 || v === '1'
 
 const allowMenuItem = (item: any, isAdmin: boolean) => {
-  const config = useRuntimeConfig()
-  const isDev = config.public.developmentMode
+  // const config = useRuntimeConfig()
+  const isDev = process.dev
   const adminOnly = toBool(item.adminOnly)
   const devOnly = toBool(item.devOnly)
+  console.log('allowMenuItem', { item, isAdmin, isDev, adminOnly, devOnly })
   const override = toBool(item.override)
   if (item.override !== undefined)
     return override
