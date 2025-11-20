@@ -1,11 +1,11 @@
 <script setup>
-import { useHead } from '#imports'
 import presetWind4 from '@unocss/preset-wind4'
 
 import initUnocssRuntime, { defineConfig } from '@unocss/runtime'
 import DOMPurify from 'dompurify'
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useHead } from '#imports'
 
 const props = defineProps({
   html: {
@@ -418,6 +418,7 @@ function setScopedThemeVars(scopeEl, theme) {
 
 // Convert utility tokens like text-brand/bg-surface/rounded-xl/shadow-card
 // into variable-backed arbitrary values so we don't need to mutate Uno's theme.
+
 function toVarBackedUtilities(classList, theme) {
   if (!classList)
     return ''
@@ -433,17 +434,44 @@ function toVarBackedUtilities(classList, theme) {
       // colors: text-*, bg-*, border-* mapped when key exists
       const colorMatch = /^(text|bg|border)-(.*)$/.exec(cls)
       if (colorMatch) {
-        const [, kind, key] = colorMatch
-        if (colorKeys.has(key)) {
-          if (kind === 'text')
-            return `text-[color:var(--color-${key})]`
-          if (kind === 'bg')
-            return `bg-[var(--color-${key})]`
-          if (kind === 'border')
-            return `border-[var(--color-${key})]`
+        const [, kind, rawKey] = colorMatch
+
+        // support opacity suffix: bg-secondary/50, text-primary/80, etc.
+        let key = rawKey
+        let opacity = null
+        const alphaMatch = /^(.+)\/(\d{1,3})$/.exec(rawKey)
+        if (alphaMatch) {
+          key = alphaMatch[1]
+          opacity = alphaMatch[2]
         }
+
+        if (colorKeys.has(key)) {
+          const varRef = `var(--color-${key})`
+
+          // no /opacity → plain var()
+          if (!opacity) {
+            if (kind === 'text')
+              return `text-[${varRef}]`
+            if (kind === 'bg')
+              return `bg-[${varRef}]`
+            if (kind === 'border')
+              return `border-[${varRef}]`
+          }
+
+          // with /opacity → use slash opacity on arbitrary value
+          if (kind === 'text')
+            return `text-[${varRef}]/${opacity}`
+          if (kind === 'bg')
+            return `bg-[${varRef}]/${opacity}`
+          if (kind === 'border')
+            return `border-[${varRef}]/${opacity}`
+
+          return cls
+        }
+
         return cls
       }
+
       // radius
       const radiusMatch = /^rounded-(.*)$/.exec(cls)
       if (radiusMatch) {
@@ -452,6 +480,7 @@ function toVarBackedUtilities(classList, theme) {
           return `rounded-[var(--radius-${key})]`
         return cls
       }
+
       // shadow
       const shadowMatch = /^shadow-(.*)$/.exec(cls)
       if (shadowMatch) {
@@ -460,6 +489,7 @@ function toVarBackedUtilities(classList, theme) {
           return `shadow-[var(--shadow-${key})]`
         return cls
       }
+
       // font families via root apply, including custom keys like "brand"
       if (cls === 'font-sans')
         return 'font-[var(--font-sans)]'
@@ -468,15 +498,13 @@ function toVarBackedUtilities(classList, theme) {
       if (cls === 'font-mono')
         return 'font-[var(--font-mono)]'
 
-      // Generic matcher for custom font keys: e.g., font-brand, font-ui, etc.
       const ffMatch = /^font-([\w-]+)$/.exec(cls)
       if (ffMatch) {
         const key = ffMatch[1]
-        // Only rewrite if that key exists in theme.extend.fontFamily
-        if (Object.prototype.hasOwnProperty.call(tokens.fontFamily, key)) {
+        if (Object.prototype.hasOwnProperty.call(tokens.fontFamily, key))
           return `font-[var(--font-${key})]`
-        }
       }
+
       return cls
     })
     .join(' ')
@@ -556,10 +584,10 @@ function applyThemeClasses(scopeEl, theme, variant = 'light', isolated = true) {
 
 // Add new helper to rewrite arbitrary class tokens with responsive and state prefixes
 const BREAKPOINT_MIN_WIDTHS = {
-  sm: 640,
-  md: 768,
-  lg: 1024,
-  xl: 1280,
+  'sm': 640,
+  'md': 768,
+  'lg': 1024,
+  'xl': 1280,
   '2xl': 1536,
 }
 
@@ -598,29 +626,76 @@ function rewriteAllClasses(scopeEl, theme, isolated = true, viewportMode = 'auto
     return core
   }
   const forcedWidth = viewportModeToWidth(viewportMode)
+
+  const TEXT_SIZE_RE = /^text-(xs|sm|base|lg|xl|\d+xl)$/
+
   const mapToken = (token) => {
-    // Support responsive/state prefixes like md:hover:bg-brand
     const parts = token.split(':')
     const core = parts.pop()
+    const nakedCore = core.startsWith('!') ? core.slice(1) : core
+
+    //
+    // AUTO MODE: no breakpoint *simulation*, but we still:
+    // - map theme utilities
+    // - !important text sizes
+    // - !important breakpoint-based utilities (sm:, md:, lg:, etc.)
+    //
+    if (forcedWidth == null) {
+      let hadBreakpoint = false
+      const nextParts = []
+
+      for (const part of parts) {
+        const normalized = part.replace(/^!/, '')
+        if (Object.prototype.hasOwnProperty.call(BREAKPOINT_MIN_WIDTHS, normalized)) {
+          hadBreakpoint = true
+        }
+        nextParts.push(part)
+      }
+
+      const mappedCore = toVarBackedUtilities(core, theme)
+      const isTextSize = TEXT_SIZE_RE.test(nakedCore)
+      const shouldImportant = hadBreakpoint || isTextSize
+      const finalCore = shouldImportant ? importantify(mappedCore) : mappedCore
+
+      return [...nextParts, finalCore].filter(Boolean).join(':')
+    }
+
+    //
+    // SIZED MODES (mobile/medium/large/full): your existing branch stays as-is
+    //
     let drop = false
+    let hadBreakpoint = false
     const nextParts = []
+
     for (const part of parts) {
       const normalized = part.replace(/^!/, '')
-      if (forcedWidth != null && Object.prototype.hasOwnProperty.call(BREAKPOINT_MIN_WIDTHS, normalized)) {
+
+      if (Object.prototype.hasOwnProperty.call(BREAKPOINT_MIN_WIDTHS, normalized)) {
+        hadBreakpoint = true
         const minWidth = BREAKPOINT_MIN_WIDTHS[normalized]
-        if (forcedWidth >= minWidth)
+
+        if (forcedWidth >= minWidth) {
+        // We are "inside" this breakpoint → strip the prefix
           continue
+        }
+
+        // Too small for this breakpoint → drop the whole token
         drop = true
         break
       }
+
       nextParts.push(part)
     }
+
     if (drop)
       return ''
+
     const mappedCore = toVarBackedUtilities(core, theme)
-    const finalCore = importantify(mappedCore)
+    const finalCore = hadBreakpoint ? importantify(mappedCore) : mappedCore
+
     return [...nextParts, finalCore].filter(Boolean).join(':')
   }
+
   scopeEl.querySelectorAll('[class]').forEach((el) => {
     let base = el.dataset.viewportBaseClass
     if (typeof base !== 'string') {
