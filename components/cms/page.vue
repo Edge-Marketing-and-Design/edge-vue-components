@@ -119,13 +119,30 @@ const pageName = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`]?.[props.page]?.name || ''
 })
 
-const theme = computed(() => {
-  const theme = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site]?.theme || ''
-  console.log(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}`)
-  let themeContents = null
-  if (theme) {
-    themeContents = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`]?.[theme]?.theme || null
+const themes = computed(() => {
+  return Object.values(edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`] || {})
+})
+
+watch([themes, () => props.isTemplateSite], ([newThemes, isTemplate]) => {
+  if (!isTemplate)
+    return
+  const hasSelection = newThemes.some(themeDoc => themeDoc.docId === edgeGlobal.edgeState.blockEditorTheme)
+  if ((!edgeGlobal.edgeState.blockEditorTheme || !hasSelection) && newThemes.length > 0)
+    edgeGlobal.edgeState.blockEditorTheme = newThemes[0].docId
+}, { immediate: true, deep: true })
+
+const selectedThemeId = computed(() => {
+  if (props.isTemplateSite) {
+    return edgeGlobal.edgeState.blockEditorTheme || ''
   }
+  return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site]?.theme || ''
+})
+
+const theme = computed(() => {
+  const themeId = selectedThemeId.value
+  if (!themeId)
+    return null
+  const themeContents = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`]?.[themeId]?.theme || null
   if (themeContents) {
     return JSON.parse(themeContents)
   }
@@ -133,9 +150,11 @@ const theme = computed(() => {
 })
 
 const headObject = computed(() => {
-  const theme = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site]?.theme || ''
+  const themeId = selectedThemeId.value
+  if (!themeId)
+    return {}
   try {
-    return JSON.parse(edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`]?.[theme]?.headJSON || '{}')
+    return JSON.parse(edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`]?.[themeId]?.headJSON || '{}')
   }
   catch (e) {
     return {}
@@ -225,14 +244,23 @@ const hasUnsavedChanges = (changes) => {
               <span class="text-[10px]">Last Published: {{ lastPublishedTime(page) }}</span>
             </edge-chip>
           </div>
+          <div v-else class="px-4 w-full max-w-xs">
+            <edge-shad-select
+              v-model="edgeGlobal.edgeState.blockEditorTheme"
+              name="theme"
+              :items="themes.map(t => ({ title: t.name, name: t.docId }))"
+              placeholder="Select Theme"
+              class="w-full text-xs h-[32px]"
+            />
+          </div>
           <div class="w-full border-t border-gray-300 dark:border-white/15" aria-hidden="true" />
 
-        <div class="flex items-center gap-1 pr-3">
-          <span class="text-[11px] uppercase tracking-wide text-primary/70">Viewport</span>
-          <edge-shad-button
-            v-for="option in previewViewportOptions"
-            :key="option.id"
-            type="button"
+          <div class="flex items-center gap-1 pr-3">
+            <span class="text-[11px] uppercase tracking-wide text-primary/70">Viewport</span>
+            <edge-shad-button
+              v-for="option in previewViewportOptions"
+              :key="option.id"
+              type="button"
               variant="ghost"
               size="icon"
               class="h-[26px] w-[26px] text-xs gap-1 border transition-colors"

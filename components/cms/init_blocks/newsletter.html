@@ -1,0 +1,117 @@
+<section
+  class="relative cms-block cms-block-newsletter-placeholder rounded-2xl border border-dashed border-slate-300 bg-slate-50/70 px-4 py-6 sm:px-6 sm:py-8"
+  data-block-type="newsletter-placeholder"
+>
+  <!-- OVERLAY BADGE -->
+  <div
+    class="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-center pt-3"
+  >
+    <div
+      class="rounded-full border border-slate-300 bg-white/95 px-4 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600 shadow-sm"
+    >
+      Newsletter Placeholder
+    </div>
+  </div>
+
+  <div class="mx-auto max-w-2xl pt-6">
+    <!-- Hidden config field: emailTo -->
+
+    <!-- Header -->
+    <div class="mb-6 space-y-2 text-center sm:text-left">
+      <h2 class="text-xl font-semibold text-slate-900">
+        {{{#text {"field":"newsletterHeader","title":"Header","value":"Stay in the Loop"}}}}
+      </h2>
+      <p class="text-sm text-slate-600">
+        {{{#text {"field":"newsletterSubheader","title":"Subheader","value":"Get our latest news and updates"}}}}
+      </p>
+    </div>
+
+    <!-- Fields driven by CMS array (fieldName + fieldType as option) -->
+    <div class="space-y-4">
+      {{{#array {
+        "field":"newsletterFields",
+        "title":"Form Fields",
+        "schema":[
+          {
+            "field":"fieldName",
+            "type":"text",
+            "title":"Field Label"
+          },
+          {
+            "field":"fieldType",
+            "type":"option",
+            "title":"Field Type",
+            "option":{
+              "optionsKey":"title",
+              "optionsValue":"value",
+              "options":[
+                {
+                  "title":"Text",
+                  "value":"text"
+                },
+                {
+                  "title":"Email",
+                  "value":"email"
+                },
+                {
+                  "title":"Phone",
+                  "value":"tel"
+                },
+                {
+                  "title":"Textarea",
+                  "value":"textarea"
+                }
+              ]
+            },
+            "value":"text"
+          }
+        ],
+        "value":[
+          {
+            "fieldName":"Name",
+            "fieldType":"text"
+          },
+          {
+            "fieldName":"Email",
+            "fieldType":"email"
+          }
+        ]
+      }}}}
+        <div class="space-y-1">
+          <!-- Label preview -->
+          <p class="text-xs font-medium uppercase tracking-wide text-slate-600">
+            {{item.fieldName}}
+            {{{#if {"cond":"item.fieldType == 'textarea'"}}}}
+              <span class="ml-1 text-[10px] font-normal text-slate-400">
+                ({{item.fieldType}})
+              </span>
+              <div class="w-full rounded-lg bg-slate-100 h-20"></div>
+            {{{#else}}}
+              <span class="ml-1 text-[10px] font-normal text-slate-400">
+                ({{item.fieldType}})
+              </span>
+              <div class="w-full rounded-lg bg-slate-100 h-10"></div>
+            {{{/if}}}
+          </p>
+        </div>
+      {{{/array}}}
+    </div>
+
+    <!-- Submit button preview -->
+    <div class="mt-6">
+      <button
+        type="button"
+        class="inline-flex w-full items-center justify-center rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+        disabled
+      >
+        {{{#text {"field":"buttonText","title":"Button Text","value":"Subscribe"}}}}
+      </button>
+    </div>
+
+    <!-- Tiny note -->
+    <p class="mt-3 text-xs text-slate-400">
+      The CMS uses <code>emailTo</code> and <code>newsletterFields</code> (array of fieldName + fieldType)
+      to build the real newsletter signup form on the live site.
+    </p>
+  </div>
+</section>
