@@ -63,6 +63,49 @@ const state = reactive({
   imageOpen: false,
 })
 
+const ensureQueryItemsDefaults = (meta) => {
+  Object.keys(meta || {}).forEach((key) => {
+    const cfg = meta[key]
+    if (!cfg?.queryOptions || cfg.queryOptions.length === 0)
+      return
+
+    if (!cfg.queryItems)
+      cfg.queryItems = {}
+
+    for (const option of cfg.queryOptions) {
+      const hasField = Object.prototype.hasOwnProperty.call(cfg.queryItems, option.field)
+      if (!hasField) {
+        cfg.queryItems[option.field] = (cfg.collection?.path === 'posts' && option.field === 'tags') ? [] : null
+      }
+      else if (cfg.queryItems[option.field] === '') {
+        // Normalize empty strings from older saves so "(none)" stays unset
+        cfg.queryItems[option.field] = null
+      }
+    }
+  })
+}
+
+const sanitizeQueryItems = (meta) => {
+  const cleaned = JSON.parse(JSON.stringify(meta || {}))
+  for (const key of Object.keys(cleaned)) {
+    const cfg = cleaned[key]
+    if (!cfg?.queryItems || typeof cfg.queryItems !== 'object')
+      continue
+
+    for (const field of Object.keys(cfg.queryItems)) {
+      const value = cfg.queryItems[field]
+      const isEmptyArray = Array.isArray(value) && value.length === 0
+      if (value === null || value === '' || isEmptyArray) {
+        delete cfg.queryItems[field]
+      }
+    }
+
+    if (cfg.queryItems && Object.keys(cfg.queryItems).length === 0)
+      delete cfg.queryItems
+  }
+  return cleaned
+}
+
 const resetArrayItems = (field) => {
   if (!state.arrayItems?.[field]) {
     state.arrayItems[field] = {}
@@ -98,23 +141,7 @@ const openEditor = async () => {
   }
   state.draft = JSON.parse(JSON.stringify(modelValue.value?.values || {}))
   state.meta = JSON.parse(JSON.stringify(modelValue.value?.meta || {}))
-  for (const key of Object.keys(state.meta || {})) {
-    if (state.meta[key]?.queryOptions && state.meta[key]?.queryOptions.length > 0) {
-      if (!state.meta[key]?.queryItems) {
-        state.meta[key].queryItems = {}
-      }
-      for (const option of state.meta[key].queryOptions) {
-        if (!state.meta[key].queryItems?.[option.field]) {
-          if ((state.meta[key].collection?.path === 'posts' && option.field === 'tags')) {
-            state.meta[key].queryItems[option.field] = []
-          }
-          else {
-            state.meta[key].queryItems[option.field] = ''
-          }
-        }
-      }
-    }
-  }
+  ensureQueryItemsDefaults(state.meta)
   const blockData = edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[modelValue.value.blockId]
   state.metaUpdate = edgeGlobal.dupObject(modelValue.value?.meta) || {}
   if (blockData?.meta) {
@@ -140,7 +167,7 @@ const save = () => {
   const updated = {
     ...modelValue.value,
     values: JSON.parse(JSON.stringify(state.draft)),
-    meta: JSON.parse(JSON.stringify(state.meta)),
+    meta: sanitizeQueryItems(state.meta),
   }
   modelValue.value = updated
   state.open = false
