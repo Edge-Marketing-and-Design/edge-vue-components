@@ -185,7 +185,7 @@ const ensureBlocksArray = (workingDoc, key) => {
 }
 
 const createRow = (columns = 1) => {
-  return {
+  const row = {
     id: edgeGlobal.generateShortId(),
     width: 'full',
     gap: '4',
@@ -198,6 +198,8 @@ const createRow = (columns = 1) => {
       span: null,
     })),
   }
+  refreshRowTailwindClasses(row)
+  return row
 }
 
 const ensureStructureDefaults = (workingDoc, isPost = false) => {
@@ -260,6 +262,7 @@ const ensureStructureDefaults = (workingDoc, isPost = false) => {
       row.background = 'transparent'
       mutated = true
     }
+    refreshRowTailwindClasses(row)
   }
 
   const contentIds = new Set((workingDoc[contentKey] || []).map(block => block.id))
@@ -508,6 +511,11 @@ const rowGridClass = (row) => {
   return [base, rowGapClass(row)].filter(Boolean).join(' ')
 }
 
+const rowGridClassForData = (row) => {
+  const base = rowUsesSpans(row) ? 'grid grid-cols-1 sm:grid-cols-6' : (GRID_CLASSES[row.columns?.length] || GRID_CLASSES[1])
+  return [base, rowGapClass(row)].filter(Boolean).join(' ')
+}
+
 const rowVerticalAlignClass = (row) => {
   const map = {
     start: 'items-start',
@@ -543,6 +551,13 @@ const columnSpanStyle = (col) => {
   return { gridColumn: `span ${span} / span ${span}` }
 }
 
+const columnSpanClass = (col) => {
+  if (!Number.isFinite(col?.span))
+    return ''
+  const span = Math.min(Math.max(col.span, 1), 6)
+  return `col-span-${span}`
+}
+
 const columnMobileOrderClass = (row, idx) => {
   const len = row?.columns?.length || 0
   if (!len)
@@ -559,6 +574,36 @@ const columnMobileOrderStyle = (row, idx) => {
     return {}
   const order = row?.mobileOrder === 'reverse' ? (len - idx) : (idx + 1)
   return { order, gridRowStart: order }
+}
+
+const computeRowTailwindClasses = (row) => {
+  const classes = [
+    rowWidthClass(row?.width),
+    backgroundClass(row?.background),
+    rowGridClassForData(row),
+    rowVerticalAlignClass(row),
+    rowGapClass(row),
+  ]
+  return classes.filter(Boolean).join(' ').trim()
+}
+
+const computeColumnTailwindClasses = (row, idx) => {
+  const classes = [
+    columnSpanClass(row?.columns?.[idx]),
+    columnMobileOrderClass(row, idx),
+  ]
+  return classes.filter(Boolean).join(' ').trim()
+}
+
+const refreshRowTailwindClasses = (row) => {
+  if (!row)
+    return
+  row.tailwindClasses = computeRowTailwindClasses(row)
+  if (Array.isArray(row.columns)) {
+    row.columns.forEach((col, idx) => {
+      col.tailwindClasses = computeColumnTailwindClasses(row, idx)
+    })
+  }
 }
 
 const activeRowSettingsRow = computed(() => {
@@ -599,6 +644,7 @@ const saveRowSettings = () => {
   row.verticalAlign = draft.verticalAlign || 'start'
   row.background = draft.background || 'transparent'
   row.mobileOrder = draft.mobileOrder || 'normal'
+  refreshRowTailwindClasses(row)
   state.rowSettings.open = false
 }
 
@@ -672,7 +718,7 @@ const buildColumnsFromSpans = (spans) => {
 
 const createRowFromLayout = (spans) => {
   const safeSpans = layoutSpansFromString(spans, [6])
-  return {
+  const row = {
     id: edgeGlobal.generateShortId(),
     width: 'full',
     gap: '4',
@@ -681,6 +727,8 @@ const createRowFromLayout = (spans) => {
     mobileOrder: 'normal',
     columns: buildColumnsFromSpans(safeSpans),
   }
+  refreshRowTailwindClasses(row)
+  return row
 }
 
 const addRowAt = (workingDoc, layoutValue = '6', insertIndex = 0, isPost = false) => {
