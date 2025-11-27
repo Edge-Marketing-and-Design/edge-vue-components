@@ -1,6 +1,22 @@
 <script setup>
 import { Plus } from 'lucide-vue-next'
 
+const SHARED_PICKER_STATE = reactive({
+  hostId: null,
+  open: false,
+  activeInstance: null,
+  activeProps: {
+    siteId: '',
+    theme: null,
+    viewportMode: 'auto',
+  },
+  blocksLoaded: [],
+  selectedTags: ['Quick Picks'],
+})
+
+const HANDLERS = new Map()
+let blocksSnapshotStarted = false
+
 const props = defineProps({
   blockOverride: {
     type: Object,
@@ -26,37 +42,63 @@ const props = defineProps({
 
 const emit = defineEmits(['pick'])
 
-const state = reactive({
-  keyMenu: false,
+const localState = reactive({
+  open: false,
   blocksLoaded: [],
   selectedTags: ['Quick Picks'],
 })
 
+const isSharedMode = computed(() => !props.blockOverride && !props.listOnly)
+const instanceId = Symbol('blockPicker')
+
 const edgeFirebase = inject('edgeFirebase')
 
+const activeState = computed(() => isSharedMode.value ? SHARED_PICKER_STATE : localState)
+const pickerState = activeState
+
+const sheetOpen = computed({
+  get: () => isSharedMode.value ? SHARED_PICKER_STATE.open : localState.open,
+  set: (val) => {
+    if (isSharedMode.value)
+      SHARED_PICKER_STATE.open = val
+    else
+      localState.open = val
+  },
+})
+
+const isSharedHost = computed(() => isSharedMode.value && SHARED_PICKER_STATE.hostId === instanceId)
+
+const activeProps = computed(() => isSharedMode.value ? SHARED_PICKER_STATE.activeProps : {
+  siteId: props.siteId,
+  theme: props.theme,
+  viewportMode: props.viewportMode,
+})
+
 const themeId = computed(() => {
-  if (!props.siteId)
+  const siteId = activeProps.value.siteId
+  if (!siteId)
     return null
-  const site = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`][props.siteId]
-  console.log(site)
+  const site = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`][siteId]
   return site?.theme || null
 })
+
+const activeSiteId = computed(() => activeProps.value.siteId || '')
+const pickerTheme = computed(() => activeProps.value.theme || null)
+const pickerViewport = computed(() => activeProps.value.viewportMode || 'auto')
 
 const blocks = computed(() => {
   let blocks = []
   if (edgeFirebase?.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]) {
     blocks = Object.values(edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/blocks`])
   }
-  console.log(props.theme)
   if (themeId.value) {
-    console.log('Filtering blocks by theme:', themeId.value)
     blocks = blocks.filter(block => block.themes && block.themes.includes(themeId.value))
   }
   return blocks
 })
 
 const filteredBlocks = computed(() => {
-  const selected = state.selectedTags
+  const selected = pickerState.value.selectedTags
   if (!selected.length)
     return blocks.value
 
@@ -66,9 +108,12 @@ const filteredBlocks = computed(() => {
   })
 })
 
-onBeforeMount(async () => {
+async function ensureBlocksSnapshot() {
+  if (blocksSnapshotStarted)
+    return
+  blocksSnapshotStarted = true
   await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/blocks`)
-})
+}
 
 // --- Begin: auto-size buttons to visual (scaled) height ---
 const btnRefs = {}
@@ -118,13 +163,6 @@ function syncAllHeights() {
   }
 }
 
-watch(() => state.keyMenu, async (open) => {
-  if (open) {
-    await nextTick()
-    syncAllHeights()
-  }
-})
-
 onBeforeUnmount(() => {
   ro?.disconnect()
 })
@@ -134,12 +172,56 @@ onBeforeUnmount(() => {
 
 // --- End robust tag parsing ---
 
+watch(sheetOpen, async (open) => {
+  if (open) {
+    await nextTick()
+    syncAllHeights()
+  }
+})
+
+onBeforeMount(async () => {
+  await ensureBlocksSnapshot()
+})
+
+onMounted(() => {
+  HANDLERS.set(instanceId, block => emit('pick', block))
+  if (isSharedMode.value && !SHARED_PICKER_STATE.hostId)
+    SHARED_PICKER_STATE.hostId = instanceId
+})
+
+onBeforeUnmount(() => {
+  HANDLERS.delete(instanceId)
+  if (SHARED_PICKER_STATE.hostId === instanceId) {
+    const next = HANDLERS.keys().next().value || null
+    SHARED_PICKER_STATE.hostId = next
+    if (!next)
+      SHARED_PICKER_STATE.open = false
+  }
+})
+
+const openPicker = () => {
+  if (isSharedMode.value) {
+    SHARED_PICKER_STATE.activeInstance = instanceId
+    SHARED_PICKER_STATE.activeProps = {
+      siteId: props.siteId,
+      theme: props.theme,
+      viewportMode: props.viewportMode,
+    }
+    if (!SHARED_PICKER_STATE.hostId)
+      SHARED_PICKER_STATE.hostId = instanceId
+    sheetOpen.value = true
+  }
+  else {
+    sheetOpen.value = true
+  }
+}
+
 const chooseBlock = (block) => {
   let blockModelData = edgeGlobal.dupObject(block)
 
-  if (blockModelData?.synced) {
+  if (blockModelData?.synced && activeSiteId.value) {
     console.log('Original block data:', blockModelData)
-    const pages = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.siteId}/pages`] || {}
+    const pages = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${activeSiteId.value}/pages`] || {}
     const pageEntries = Object.entries(pages)
     for (const [pageId, pageData] of pageEntries) {
       console.log('Checking page for synced block data:', pageId, pageData)
@@ -164,8 +246,15 @@ const chooseBlock = (block) => {
   blockModelData.name = block.name
   blockModelData.blockId = block.docId
   console.log('Chosen block:', blockModelData)
-  emit('pick', blockModelData)
-  state.keyMenu = false
+  if (isSharedMode.value) {
+    const handler = HANDLERS.get(SHARED_PICKER_STATE.activeInstance)
+    handler?.(blockModelData)
+    sheetOpen.value = false
+  }
+  else {
+    emit('pick', blockModelData)
+    sheetOpen.value = false
+  }
 }
 const loadingRender = (content) => {
   content = content.replaceAll('{{loading}}', '')
@@ -174,8 +263,8 @@ const loadingRender = (content) => {
 }
 
 const blockLoaded = (isLoading, index) => {
-  if (!isLoading && !state.blocksLoaded.includes(index)) {
-    state.blocksLoaded.push(index)
+  if (!isLoading && !pickerState.value.blocksLoaded.includes(index)) {
+    pickerState.value.blocksLoaded.push(index)
   }
 }
 
@@ -201,22 +290,22 @@ const getTagsFromBlocks = computed(() => {
   return [{ name: 'Quick Picks', title: 'Quick Picks' }, ...filtered]
 })
 
-const hasActiveFilters = computed(() => state.selectedTags.length > 0)
+const hasActiveFilters = computed(() => pickerState.value.selectedTags.length > 0)
 
 watch(getTagsFromBlocks, (tags) => {
   const available = new Set(tags.map(tag => tag.name))
-  const filtered = state.selectedTags.filter(tag => available.has(tag))
-  if (filtered.length !== state.selectedTags.length)
-    state.selectedTags = filtered
+  const filtered = pickerState.value.selectedTags.filter(tag => available.has(tag))
+  if (filtered.length !== pickerState.value.selectedTags.length)
+    pickerState.value.selectedTags = filtered
 })
 
 const toggleTag = (tag) => {
-  state.selectedTags = []
-  state.selectedTags.push(tag)
+  pickerState.value.selectedTags = []
+  pickerState.value.selectedTags.push(tag)
 }
 
 const clearTagFilters = () => {
-  state.selectedTags = []
+  pickerState.value.selectedTags = []
 }
 </script>
 
@@ -226,19 +315,19 @@ const clearTagFilters = () => {
       :content="props.blockOverride.content"
       :values="props.blockOverride.values"
       :meta="props.blockOverride.meta"
-      :theme="props.theme"
-      :site-id="props.siteId"
-      :viewport-mode="props.viewportMode"
+      :theme="pickerTheme"
+      :site-id="activeSiteId"
+      :viewport-mode="pickerViewport"
       @pending="blockLoaded($event, 'block')"
     />
       <edge-cms-block-render
-        v-if="!state.blocksLoaded.includes('block')"
+        v-if="!pickerState.blocksLoaded.includes('block')"
         :content="loadingRender(props.blockOverride.content)"
         :values="props.blockOverride.values"
         :meta="props.blockOverride.meta"
-        :theme="props.theme"
-        :site-id="props.siteId"
-        :viewport-mode="props.viewportMode"
+        :theme="pickerTheme"
+        :site-id="activeSiteId"
+        :viewport-mode="pickerViewport"
       />
   </div>
   <div v-else-if="props.listOnly" class="p-6 h-[calc(100vh-50px)] overflow-hidden flex flex-col gap-4">
@@ -248,7 +337,7 @@ const clearTagFilters = () => {
         :key="tagOption.name"
         type="button"
         class="px-3 py-1 rounded-full border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-        :class="state.selectedTags.includes(tagOption.name) ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'bg-background text-muted-foreground hover:bg-muted border-border'"
+        :class="pickerState.selectedTags.includes(tagOption.name) ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'bg-background text-muted-foreground hover:bg-muted border-border'"
         @click="toggleTag(tagOption.name)"
       >
         {{ tagOption.title }}
@@ -279,14 +368,14 @@ const clearTagFilters = () => {
                 <div class="text-4xl relative text-inherit text-center">
                   {{ block.name }}
                 </div>
-                <edge-cms-block-api :site-id="props.siteId" :content="block.content" :theme="props.theme" :values="block.values" :meta="block.meta" :viewport-mode="props.viewportMode" @pending="blockLoaded($event, block.docId)" />
+                <edge-cms-block-api :site-id="activeSiteId" :content="block.content" :theme="pickerTheme" :values="block.values" :meta="block.meta" :viewport-mode="pickerViewport" @pending="blockLoaded($event, block.docId)" />
                 <edge-cms-block-render
-                  v-if="!state.blocksLoaded.includes(block.docId)"
+                  v-if="!pickerState.blocksLoaded.includes(block.docId)"
                   :content="loadingRender(block.content)"
                   :values="block.values"
                   :meta="block.meta"
-                  :theme="props.theme"
-                  :viewport-mode="props.viewportMode"
+                  :theme="pickerTheme"
+                  :viewport-mode="pickerViewport"
                 />
               </div>
             </div>
@@ -302,12 +391,12 @@ const clearTagFilters = () => {
     <div class="flex justify-center items-center">
       <edge-shad-button
         class="!my-1  px-2 h-[24px] bg-secondary text-secondary-foreground hover:text-white"
-        @click="state.keyMenu = true"
+        @click="openPicker"
       >
         <Plus class="w-4 h-4" />
       </edge-shad-button>
     </div>
-    <Sheet v-model:open="state.keyMenu">
+    <Sheet v-if="!isSharedMode || isSharedHost" v-model:open="sheetOpen">
       <SheetContent side="left" class="w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl">
         <SheetHeader>
           <SheetTitle>Pick a Block</SheetTitle>
@@ -323,7 +412,7 @@ const clearTagFilters = () => {
                 :key="tagOption.name"
                 type="button"
                 class="px-3 py-1 rounded-full border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                :class="state.selectedTags.includes(tagOption.name) ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'bg-background text-muted-foreground hover:bg-muted border-border'"
+                :class="pickerState.selectedTags.includes(tagOption.name) ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'bg-background text-muted-foreground hover:bg-muted border-border'"
                 @click="toggleTag(tagOption.name)"
               >
                 {{ tagOption.title }}
@@ -348,25 +437,25 @@ const clearTagFilters = () => {
                   >
                     <div class="scale-wrapper">
                       <div
-                        :ref="el => setInnerRef(block.docId, el)"
-                        class="scale-inner scale p-4"
-                        :data-block-id="block.docId"
-                      >
-                        <div class="text-4xl relative text-inherit text-center">
-                          {{ block.name }}
-                        </div>
-                        <edge-cms-block-api :site-id="props.siteId" :content="block.content" :theme="props.theme" :values="block.values" :meta="block.meta" :viewport-mode="props.viewportMode" @pending="blockLoaded($event, block.docId)" />
-                        <edge-cms-block-render
-                          v-if="!state.blocksLoaded.includes(block.docId)"
-                          :content="loadingRender(block.content)"
-                          :values="block.values"
-                          :meta="block.meta"
-                          :theme="props.theme"
-                          :viewport-mode="props.viewportMode"
-                        />
-                      </div>
-                    </div>
-                  </button>
+                :ref="el => setInnerRef(block.docId, el)"
+                class="scale-inner scale p-4"
+                :data-block-id="block.docId"
+              >
+                <div class="text-4xl relative text-inherit text-center">
+                  {{ block.name }}
+                </div>
+                <edge-cms-block-api :site-id="activeSiteId" :content="block.content" :theme="pickerTheme" :values="block.values" :meta="block.meta" :viewport-mode="pickerViewport" @pending="blockLoaded($event, block.docId)" />
+                <edge-cms-block-render
+                  v-if="!pickerState.blocksLoaded.includes(block.docId)"
+                  :content="loadingRender(block.content)"
+                  :values="block.values"
+                  :meta="block.meta"
+                  :theme="pickerTheme"
+                  :viewport-mode="pickerViewport"
+                />
+              </div>
+            </div>
+          </button>
                 </template>
               </template>
               <p v-else class="text-sm text-muted-foreground">
