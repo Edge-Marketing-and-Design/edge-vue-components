@@ -33,6 +33,8 @@ const state = reactive({
       metaDescription: { bindings: { 'field-type': 'textarea', 'label': 'Meta Description' }, cols: '12', value: '' },
       structuredData: { bindings: { 'field-type': 'textarea', 'label': 'Structured Data (JSON-LD)' }, cols: '12', value: '' },
       users: { bindings: { 'field-type': 'users', 'label': 'Users', 'hint': 'Choose users' }, cols: '12', value: [] },
+      aiAgentUserId: { bindings: { 'field-type': 'select', 'label': 'Agent Data for AI to use to build initial site' }, cols: '12', value: '' },
+      aiInstructions: { bindings: { 'field-type': 'textarea', 'label': 'Additional AI Instructions' }, cols: '12', value: '' },
     },
   },
   mounted: false,
@@ -43,6 +45,7 @@ const state = reactive({
   hasError: false,
   updating: false,
   logoPickerOpen: false,
+  aiSectionOpen: false,
 })
 
 const pageInit = {
@@ -71,6 +74,8 @@ const schemas = {
     metaTitle: z.string().optional(),
     metaDescription: z.string().optional(),
     structuredData: z.string().optional(),
+    aiAgentUserId: z.string().optional(),
+    aiInstructions: z.string().optional(),
   })),
   pages: toTypedSchema(z.object({
     name: z.string({
@@ -116,6 +121,16 @@ const themeOptionsMap = computed(() => {
     map.set(option.value, option)
   }
   return map
+})
+
+const orgUsers = computed(() => edgeFirebase.state?.users || {})
+const userOptions = computed(() => {
+  return Object.entries(orgUsers.value || {})
+    .map(([id, user]) => ({
+      value: user?.userId || id,
+      label: user?.meta?.name || user?.userId || id,
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label))
 })
 
 const themeItemsForAllowed = (allowed, current) => {
@@ -196,16 +211,32 @@ const cloneBlocks = (blocks = []) => {
 }
 
 const deriveBlockIdsFromDoc = (doc = {}) => {
-  const collect = (blocks) => {
+  const collectBlocks = (blocks) => {
     if (!Array.isArray(blocks))
       return []
     return blocks
       .map(block => block?.blockId)
       .filter(Boolean)
   }
+
+  const collectFromStructure = (structure) => {
+    if (!Array.isArray(structure))
+      return []
+    const ids = []
+    for (const row of structure) {
+      for (const column of row?.columns || []) {
+        if (Array.isArray(column?.blocks))
+          ids.push(...column.blocks.filter(Boolean))
+      }
+    }
+    return ids
+  }
+
   const ids = new Set([
-    ...collect(doc.content),
-    ...collect(doc.postContent),
+    ...collectBlocks(doc.content),
+    ...collectBlocks(doc.postContent),
+    ...collectFromStructure(doc.structure),
+    ...collectFromStructure(doc.postStructure),
   ])
   return Array.from(ids)
 }
@@ -217,6 +248,8 @@ const buildPagePayloadFromTemplateDoc = (templateDoc, slug, displayName = '') =>
     slug,
     content: cloneBlocks(templateDoc?.content),
     postContent: cloneBlocks(templateDoc?.postContent),
+    structure: cloneBlocks(templateDoc?.structure),
+    postStructure: cloneBlocks(templateDoc?.postStructure),
     blockIds: [],
     metaTitle: templateDoc?.metaTitle || '',
     metaDescription: templateDoc?.metaDescription || '',
@@ -344,6 +377,9 @@ const handleNewSiteSaved = async ({ docId, data, collection }) => {
 }
 
 onBeforeMount(async () => {
+  if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/users`]) {
+    await edgeFirebase.startUsersSnapshot(edgeGlobal.edgeState.organizationDocPath)
+  }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/published-site-settings`]) {
     await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/published-site-settings`)
   }
@@ -683,11 +719,54 @@ const pageSettingsUpdated = async (pageData) => {
             @update:model-value="value => (slotProps.workingDoc.theme = value || '')"
           />
           <edge-shad-select-tags
-            v-if="Object.values(edgeFirebase.state.users).length > 0"
+            v-if="Object.keys(orgUsers).length > 0"
             v-model="slotProps.workingDoc.users" :disabled="!edgeGlobal.isAdminGlobal(edgeFirebase).value"
-            :items="Object.values(edgeFirebase.state.users).filter(user => user.userId !== '')" name="users" label="Users"
-            item-title="meta.name" item-value="userId" placeholder="Select users" class="w-full" :multiple="true"
+            :items="Object.values(orgUsers)"
+            name="users"
+            label="Users"
+            item-title="meta.name"
+            item-value="userId"
+            placeholder="Select users"
+            class="w-full"
+            :multiple="true"
           />
+          <div class="rounded-lg border border-dashed border-slate-200 p-4 ">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <div class="text-sm font-semibold text-foreground">
+                  AI (optional)
+                </div>
+                <p class="text-xs text-muted-foreground">
+                  Include user data and instructions for the first AI-generated version of the site.
+                </p>
+              </div>
+              <!-- <edge-shad-switch
+                v-model="state.aiSectionOpen"
+                name="enableAi"
+                label="Add AI details"
+              /> -->
+            </div>
+            <div class="space-y-3">
+              <edge-shad-select
+                :model-value="slotProps.workingDoc.aiAgentUserId || ''"
+                name="aiAgentUserId"
+                label="User Data for AI to use to build initial site"
+                placeholder="- select one -"
+                class="w-full"
+                :items="userOptions"
+                item-title="label"
+                item-value="value"
+                @update:model-value="value => (slotProps.workingDoc.aiAgentUserId = value || '')"
+              />
+              <edge-shad-textarea
+                v-model="slotProps.workingDoc.aiInstructions"
+                name="aiInstructions"
+                label="Additional AI instructions"
+                placeholder="Share any goals, tone, or details the AI should prioritize"
+                class="w-full"
+              />
+            </div>
+          </div>
         </div>
       </template>
     </edge-editor>
@@ -930,9 +1009,9 @@ const pageSettingsUpdated = async (pageData) => {
                 @update:model-value="value => (slotProps.workingDoc.menuPosition = value || '')"
               />
               <edge-shad-select-tags
-                v-if="Object.values(edgeFirebase.state.users).length > 0 && isAdmin"
+                v-if="Object.keys(orgUsers).length > 0 && isAdmin"
                 v-model="slotProps.workingDoc.users" :disabled="!edgeGlobal.isAdminGlobal(edgeFirebase).value"
-                :items="Object.values(edgeFirebase.state.users).filter(user => user.userId !== '')" name="users" label="Users"
+                :items="Object.values(orgUsers)" name="users" label="Users"
                 item-title="meta.name" item-value="userId" placeholder="Select users" class="w-full" :multiple="true"
               />
               <Card>
