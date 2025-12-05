@@ -448,8 +448,6 @@ const cmsCollectionData = async (edgeFirebase: any, value: any, meta: any, curre
       if (meta[key].collection.path === 'posts' || meta[key].collection.path === 'post') {
         collectionPath = `${edgeState.organizationDocPath}/sites/${currentSite}/published_posts`
       }
-      console.log('Collection Path:', collectionPath)
-      console.log('Final Query:', currentQuery)
       await staticSearch.getData(collectionPath, currentQuery, meta[key].collection.order, meta[key].limit)
 
       value[key] = Object.values(staticSearch.results.data)
