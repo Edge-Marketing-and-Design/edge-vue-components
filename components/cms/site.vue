@@ -246,6 +246,7 @@ const buildPagePayloadFromTemplateDoc = (templateDoc, slug, displayName = '') =>
   const payload = {
     name: displayName?.trim()?.length ? displayName : titleFromSlug(slug),
     slug,
+    post: templateDoc?.post || false,
     content: cloneBlocks(templateDoc?.content),
     postContent: cloneBlocks(templateDoc?.postContent),
     structure: cloneBlocks(templateDoc?.structure),
