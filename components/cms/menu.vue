@@ -51,6 +51,22 @@ const modelValue = useVModel(props, 'modelValue', emit)
 const route = useRoute()
 const edgeFirebase = inject('edgeFirebase')
 
+const orderedMenus = computed(() => {
+  const menuEntries = Object.entries(modelValue.value || {}).map(([name, menu], originalIndex) => ({
+    name,
+    menu,
+    originalIndex,
+  }))
+  const priority = (name) => {
+    if (name === 'Site Root')
+      return 0
+    if (name === 'Not In Menu')
+      return 2
+    return 1
+  }
+  return menuEntries.sort((a, b) => priority(a.name) - priority(b.name) || a.originalIndex - b.originalIndex)
+})
+
 const pageRouteBase = computed(() => {
   return props.site === 'templates'
     ? '/app/dashboard/templates'
@@ -650,7 +666,7 @@ const theme = computed(() => {
 </script>
 
 <template>
-  <SidebarMenuItem v-for="(menu, menuName) in modelValue" :key="menu.name">
+  <SidebarMenuItem v-for="({ menu, name: menuName }) in orderedMenus" :key="menuName">
     <SidebarMenuButton class="!px-0 hover:!bg-transparent">
       <FolderOpen
         class="mr-2"
