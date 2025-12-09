@@ -1,5 +1,5 @@
 <script setup>
-import { ArrowDown, ArrowUp, Maximize2, Monitor, Smartphone, Tablet } from 'lucide-vue-next'
+import { AlertTriangle, ArrowDown, ArrowUp, Maximize2, Monitor, Smartphone, Tablet } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 const props = defineProps({
@@ -32,6 +32,7 @@ const state = reactive({
     },
   },
   editMode: false,
+  showUnpublishedChangesDialog: false,
   workingDoc: {},
   previewViewport: 'full',
   newRowLayout: '6',
@@ -778,6 +779,10 @@ const lastPublishedTime = (pageId) => {
   return date.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })
 }
 
+const publishedPage = computed(() => {
+  return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`]?.[props.page] || null
+})
+
 const currentPage = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`]?.[props.page] || null
 })
@@ -788,6 +793,163 @@ watch (currentPage, (newPage) => {
   state.workingDoc.metaDescription = newPage?.metaDescription
   state.workingDoc.structuredData = newPage?.structuredData
 }, { immediate: true, deep: true })
+
+const stringifyLimited = (value, limit = 600) => {
+  if (value == null)
+    return '—'
+  try {
+    const stringVal = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+    return stringVal.length > limit ? `${stringVal.slice(0, limit)}...` : stringVal
+  }
+  catch {
+    return '—'
+  }
+}
+
+const summarizeBlocks = (blocks) => {
+  if (!Array.isArray(blocks) || blocks.length === 0)
+    return 'No blocks'
+  const count = blocks.length
+  const names = blocks
+    .map(block => block?.type || block?.component || block?.layout || block?.name)
+    .filter(Boolean)
+  const sample = Array.from(new Set(names)).slice(0, 3).join(', ')
+  const suffix = names.length > 3 ? ', ...' : ''
+  return `${count} block${count === 1 ? '' : 's'}${sample ? ` (${sample}${suffix})` : ''}`
+}
+
+const summarizeChangeValue = (value, detailed = false) => {
+  if (value == null || value === '')
+    return '—'
+  if (Array.isArray(value)) {
+    return detailed ? stringifyLimited(value) : summarizeBlocks(value)
+  }
+  if (typeof value === 'object') {
+    return stringifyLimited(value, detailed ? 900 : 180)
+  }
+  const stringVal = String(value).trim()
+  return stringVal.length > (detailed ? 320 : 180) ? `${stringVal.slice(0, detailed ? 317 : 177)}...` : stringVal
+}
+
+const describeBlock = (block) => {
+  if (!block)
+    return 'Block'
+  const type = block.component || block.type || block.layout || 'Block'
+  const title = block.title || block.heading || block.label || block.name || ''
+  const summary = block.text || block.content || block.body || ''
+  const parts = [type]
+  if (title)
+    parts.push(`“${String(title)}”`)
+  if (summary && String(summary).length < 80)
+    parts.push(String(summary))
+  return parts.filter(Boolean).join(' - ')
+}
+
+const diffBlockFields = (publishedBlock, draftBlock) => {
+  const keys = new Set([
+    ...Object.keys(publishedBlock || {}),
+    ...Object.keys(draftBlock || {}),
+  ])
+  const changes = []
+  for (const key of keys) {
+    if (key === 'id' || key === 'blockId')
+      continue
+    const prevVal = publishedBlock?.[key]
+    const nextVal = draftBlock?.[key]
+    if (JSON.stringify(prevVal) !== JSON.stringify(nextVal)) {
+      changes.push(`${key}: ${summarizeChangeValue(prevVal, true)} → ${summarizeChangeValue(nextVal, true)}`)
+    }
+  }
+  return changes
+}
+
+const buildBlockChangeDetails = (publishedBlocks = [], draftBlocks = []) => {
+  const details = []
+  const publishedMap = new Map()
+  const draftMap = new Map()
+
+  publishedBlocks.forEach((block, index) => {
+    const key = block?.id || block?.blockId || `pub-${index}`
+    publishedMap.set(key, block)
+  })
+  draftBlocks.forEach((block, index) => {
+    const key = block?.id || block?.blockId || `draft-${index}`
+    draftMap.set(key, block)
+  })
+
+  for (const [key, draftBlock] of draftMap.entries()) {
+    if (!publishedMap.has(key)) {
+      details.push(`Added ${describeBlock(draftBlock)}`)
+      continue
+    }
+    const publishedBlock = publishedMap.get(key)
+    if (JSON.stringify(publishedBlock) !== JSON.stringify(draftBlock)) {
+      const fieldChanges = diffBlockFields(publishedBlock, draftBlock)
+      if (fieldChanges.length)
+        details.push(`Updated ${describeBlock(draftBlock)} (${fieldChanges.join('; ')})`)
+      else
+        details.push(`Updated ${describeBlock(draftBlock)}`)
+    }
+  }
+
+  for (const [key, publishedBlock] of publishedMap.entries()) {
+    if (!draftMap.has(key)) {
+      details.push(`Removed ${describeBlock(publishedBlock)}`)
+    }
+  }
+
+  return details
+}
+
+const unpublishedChangeDetails = computed(() => {
+  const changes = []
+  const draft = currentPage.value
+  const published = publishedPage.value
+
+  if (!draft && !published)
+    return changes
+
+  const compareField = (key, label, formatter = (v) => summarizeChangeValue(v, false), options = {}) => {
+    const publishedVal = published?.[key]
+    const draftVal = draft?.[key]
+    if (JSON.stringify(publishedVal) === JSON.stringify(draftVal))
+      return
+    const change = {
+      key,
+      label,
+      published: formatter(publishedVal),
+      draft: formatter(draftVal),
+    }
+    if (options.details)
+      change.details = options.details(publishedVal, draftVal)
+    changes.push(change)
+  }
+
+  if (!published && draft) {
+    changes.push({
+      key: 'unpublished',
+      label: 'Not yet published',
+      published: 'No published version',
+      draft: 'Draft ready to publish',
+    })
+  }
+  if (published && !draft) {
+    changes.push({
+      key: 'draft-missing',
+      label: 'Draft missing',
+      published: 'Published version exists',
+      draft: 'No draft available',
+    })
+  }
+
+  compareField('content', 'Index content', summarizeBlocks, { details: (pubVal, draftVal) => buildBlockChangeDetails(pubVal, draftVal) })
+  compareField('postContent', 'Post content', summarizeBlocks, { details: (pubVal, draftVal) => buildBlockChangeDetails(pubVal, draftVal) })
+  compareField('metaTitle', 'Meta title', val => summarizeChangeValue(val, true))
+  compareField('metaDescription', 'Meta description', val => summarizeChangeValue(val, true))
+  compareField('structuredData', 'Structured data', val => summarizeChangeValue(val, true))
+
+  return changes
+})
 
 const hasUnsavedChanges = (changes) => {
   console.log('Unsaved changes:', changes)
@@ -820,19 +982,25 @@ const hasUnsavedChanges = (changes) => {
 
         <div class="flex w-full items-center">
           <div class="w-full border-t border-gray-300 dark:border-white/15" aria-hidden="true" />
-          <div v-if="!props.isTemplateSite" class="px-4 text-gray-600 dark:text-gray-300 whitespace-nowrap text-center">
-            <edge-chip v-if="isPublishedPageDiff(page)" class="bg-yellow-100 text-yellow-800">
-              <div class="w-full">
+          <div v-if="!props.isTemplateSite" class="px-4 text-gray-600 dark:text-gray-300 whitespace-nowrap text-center flex flex-col items-center gap-1">
+            <template v-if="isPublishedPageDiff(page)">
+              <edge-shad-button
+                variant="outline"
+                class="bg-yellow-100 text-yellow-800 border-yellow-300 hover:bg-yellow-100 hover:text-yellow-900 text-xs h-[32px] gap-1"
+                @click="state.showUnpublishedChangesDialog = true"
+              >
+                <AlertTriangle class="w-4 h-4" />
                 Unpublished Changes
-              </div>
-              <span class="text-[10px]">Last Published: {{ lastPublishedTime(page) }}</span>
-            </edge-chip>
-            <edge-chip v-else class="bg-green-100 text-green-800">
-              <div class="w-full">
-                Published
-              </div>
-              <span class="text-[10px]">Last Published: {{ lastPublishedTime(page) }}</span>
-            </edge-chip>
+              </edge-shad-button>
+            </template>
+            <template v-else>
+              <edge-chip class="bg-green-100 text-green-800">
+                <div class="w-full">
+                  Published
+                </div>
+              </edge-chip>
+            </template>
+            <span class="text-[10px] leading-tight">Last Published: {{ lastPublishedTime(page) }}</span>
           </div>
           <div v-else class="px-4 w-full max-w-xs">
             <edge-shad-select
@@ -1486,6 +1654,62 @@ const hasUnsavedChanges = (changes) => {
       </Sheet>
     </template>
   </edge-editor>
+  <edge-shad-dialog v-model="state.showUnpublishedChangesDialog">
+    <DialogContent class="max-w-2xl">
+      <DialogHeader>
+        <DialogTitle class="text-left">
+          Unpublished Changes
+        </DialogTitle>
+        <DialogDescription class="text-left">
+          Review what changed since the last publish. Last Published: {{ lastPublishedTime(page) }}
+        </DialogDescription>
+      </DialogHeader>
+      <div v-if="unpublishedChangeDetails.length" class="space-y-3 mt-2">
+        <div
+          v-for="change in unpublishedChangeDetails"
+          :key="change.key"
+          class="rounded-md border border-gray-200 dark:border-white/10 bg-secondary p-3 text-left"
+        >
+          <div class="text-sm font-semibold text-primary mb-2">
+            {{ change.label }}
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+            <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
+              <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
+                Published
+              </div>
+              <div class="whitespace-pre-wrap break-words text-gray-900 dark:text-gray-100">
+                {{ change.published }}
+              </div>
+            </div>
+            <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
+              <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
+                Draft
+              </div>
+              <div class="whitespace-pre-wrap break-words text-gray-900 dark:text-gray-100">
+                {{ change.draft }}
+              </div>
+            </div>
+          </div>
+          <div v-if="change.details?.length" class="mt-2 text-sm text-gray-700 dark:text-gray-300">
+            <ul class="list-disc pl-5 space-y-1">
+              <li v-for="(detail, detailIndex) in change.details" :key="`${change.key}-${detailIndex}`">
+                {{ detail }}
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div v-else class="text-sm text-gray-600 dark:text-gray-300 text-left">
+        No unpublished differences detected.
+      </div>
+      <DialogFooter class="pt-4">
+        <edge-shad-button class="w-full" variant="outline" @click="state.showUnpublishedChangesDialog = false">
+          Close
+        </edge-shad-button>
+      </DialogFooter>
+    </DialogContent>
+  </edge-shad-dialog>
 </template>
 
 <style scoped>
