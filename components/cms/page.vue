@@ -140,6 +140,21 @@ const ROW_VERTICAL_ALIGN_OPTIONS = [
   { name: 'stretch', title: 'Stretch' },
 ]
 
+const normalizeForCompare = (value) => {
+  if (Array.isArray(value))
+    return value.map(normalizeForCompare)
+  if (value && typeof value === 'object') {
+    return Object.keys(value).sort().reduce((acc, key) => {
+      acc[key] = normalizeForCompare(value[key])
+      return acc
+    }, {})
+  }
+  return value
+}
+
+const stableSerialize = value => JSON.stringify(normalizeForCompare(value))
+const areEqualNormalized = (a, b) => stableSerialize(a) === stableSerialize(b)
+
 const layoutLabel = (spans) => {
   const key = spans.join('-')
   const map = {
@@ -766,7 +781,10 @@ const isPublishedPageDiff = (pageId) => {
     return true
   }
   if (publishedPage && draftPage) {
-    return JSON.stringify({ content: publishedPage.content, postContent: publishedPage.postContent, metaTitle: publishedPage.metaTitle, metaDescription: publishedPage.metaDescription, structuredData: publishedPage.structuredData }) !== JSON.stringify({ content: draftPage.content, postContent: draftPage.postContent, metaTitle: draftPage.metaTitle, metaDescription: draftPage.metaDescription, structuredData: draftPage.structuredData })
+    return !areEqualNormalized(
+      { content: publishedPage.content, postContent: publishedPage.postContent, metaTitle: publishedPage.metaTitle, metaDescription: publishedPage.metaDescription, structuredData: publishedPage.structuredData },
+      { content: draftPage.content, postContent: draftPage.postContent, metaTitle: draftPage.metaTitle, metaDescription: draftPage.metaDescription, structuredData: draftPage.structuredData },
+    )
   }
   return false
 }
@@ -856,7 +874,7 @@ const diffBlockFields = (publishedBlock, draftBlock) => {
       continue
     const prevVal = publishedBlock?.[key]
     const nextVal = draftBlock?.[key]
-    if (JSON.stringify(prevVal) !== JSON.stringify(nextVal)) {
+    if (!areEqualNormalized(prevVal, nextVal)) {
       changes.push(`${key}: ${summarizeChangeValue(prevVal, true)} → ${summarizeChangeValue(nextVal, true)}`)
     }
   }
@@ -883,7 +901,7 @@ const buildBlockChangeDetails = (publishedBlocks = [], draftBlocks = []) => {
       continue
     }
     const publishedBlock = publishedMap.get(key)
-    if (JSON.stringify(publishedBlock) !== JSON.stringify(draftBlock)) {
+    if (!areEqualNormalized(publishedBlock, draftBlock)) {
       const fieldChanges = diffBlockFields(publishedBlock, draftBlock)
       if (fieldChanges.length)
         details.push(`Updated ${describeBlock(draftBlock)} (${fieldChanges.join('; ')})`)
@@ -912,7 +930,7 @@ const unpublishedChangeDetails = computed(() => {
   const compareField = (key, label, formatter = (v) => summarizeChangeValue(v, false), options = {}) => {
     const publishedVal = published?.[key]
     const draftVal = draft?.[key]
-    if (JSON.stringify(publishedVal) === JSON.stringify(draftVal))
+    if (areEqualNormalized(publishedVal, draftVal))
       return
     const change = {
       key,

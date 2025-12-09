@@ -16,6 +16,21 @@ const props = defineProps({
 })
 const edgeFirebase = inject('edgeFirebase')
 
+const normalizeForCompare = (value) => {
+  if (Array.isArray(value))
+    return value.map(normalizeForCompare)
+  if (value && typeof value === 'object') {
+    return Object.keys(value).sort().reduce((acc, key) => {
+      acc[key] = normalizeForCompare(value[key])
+      return acc
+    }, {})
+  }
+  return value
+}
+
+const stableSerialize = value => JSON.stringify(normalizeForCompare(value))
+const areEqualNormalized = (a, b) => stableSerialize(a) === stableSerialize(b)
+
 const isTemplateSite = computed(() => props.site === 'templates')
 
 const state = reactive({
@@ -414,7 +429,7 @@ const isSiteDiff = computed(() => {
     return true
   }
   if (publishedSite && siteData.value) {
-    return JSON.stringify({
+    return !areEqualNormalized({
       domains: publishedSite.domains,
       menus: publishedSite.menus,
       theme: publishedSite.theme,
@@ -424,7 +439,7 @@ const isSiteDiff = computed(() => {
       metaTitle: publishedSite.metaTitle,
       metaDescription: publishedSite.metaDescription,
       structuredData: publishedSite.structuredData,
-    }) !== JSON.stringify({
+    }, {
       domains: siteData.value.domains,
       menus: siteData.value.menus,
       theme: siteData.value.theme,
@@ -508,7 +523,7 @@ watch(pages, (pagesCollection) => {
   if (!isTemplateSite.value)
     return
   const nextMenu = buildTemplateMenus(pagesCollection)
-  if (JSON.stringify(state.menus) === JSON.stringify(nextMenu))
+  if (areEqualNormalized(state.menus, nextMenu))
     return
   state.menus = nextMenu
 }, { immediate: true, deep: true })
@@ -519,7 +534,7 @@ watch(() => state.siteSettings, (open) => {
 })
 
 watch(() => state.menus, async (newVal) => {
-  if (JSON.stringify(siteData.value.menus) === JSON.stringify(newVal)) {
+  if (areEqualNormalized(siteData.value.menus, newVal)) {
     return
   }
   if (!state.mounted) {
@@ -614,7 +629,10 @@ const isAnyPagesDiff = computed(() => {
     if (!publishedPage) {
       return true
     }
-    if (JSON.stringify({ content: pageData.content, postContent: pageData.postContent, metaTitle: pageData.metaTitle, metaDescription: pageData.metaDescription, structuredData: pageData.structuredData }) !== JSON.stringify({ content: publishedPage.content, postContent: publishedPage.postContent, metaTitle: publishedPage.metaTitle, metaDescription: publishedPage.metaDescription, structuredData: publishedPage.structuredData })) {
+    if (!areEqualNormalized(
+      { content: pageData.content, postContent: pageData.postContent, metaTitle: pageData.metaTitle, metaDescription: pageData.metaDescription, structuredData: pageData.structuredData },
+      { content: publishedPage.content, postContent: publishedPage.postContent, metaTitle: publishedPage.metaTitle, metaDescription: publishedPage.metaDescription, structuredData: publishedPage.structuredData },
+    )) {
       return true
     }
   }

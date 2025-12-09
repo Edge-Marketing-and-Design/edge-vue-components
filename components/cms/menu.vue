@@ -51,6 +51,21 @@ const modelValue = useVModel(props, 'modelValue', emit)
 const route = useRoute()
 const edgeFirebase = inject('edgeFirebase')
 
+const normalizeForCompare = (value) => {
+  if (Array.isArray(value))
+    return value.map(normalizeForCompare)
+  if (value && typeof value === 'object') {
+    return Object.keys(value).sort().reduce((acc, key) => {
+      acc[key] = normalizeForCompare(value[key])
+      return acc
+    }, {})
+  }
+  return value
+}
+
+const stableSerialize = value => JSON.stringify(normalizeForCompare(value))
+const areEqualNormalized = (a, b) => stableSerialize(a) === stableSerialize(b)
+
 const orderedMenus = computed(() => {
   const menuEntries = Object.entries(modelValue.value || {}).map(([name, menu], originalIndex) => ({
     name,
@@ -83,7 +98,10 @@ const isPublishedPageDiff = (pageId) => {
     return true
   }
   if (publishedPage && draftPage) {
-    return JSON.stringify({ content: publishedPage.content, postContent: publishedPage.postContent, metaTitle: publishedPage.metaTitle, metaDescription: publishedPage.metaDescription, structuredData: publishedPage.structuredData }) !== JSON.stringify({ content: draftPage.content, postContent: draftPage.postContent, metaTitle: draftPage.metaTitle, metaDescription: draftPage.metaDescription, structuredData: draftPage.structuredData })
+    return !areEqualNormalized(
+      { content: publishedPage.content, postContent: publishedPage.postContent, metaTitle: publishedPage.metaTitle, metaDescription: publishedPage.metaDescription, structuredData: publishedPage.structuredData },
+      { content: draftPage.content, postContent: draftPage.postContent, metaTitle: draftPage.metaTitle, metaDescription: draftPage.metaDescription, structuredData: draftPage.structuredData },
+    )
   }
   return false
 }
