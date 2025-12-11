@@ -1030,10 +1030,10 @@ const hasUnsavedChanges = (changes) => {
               class="w-full text-xs h-[32px]"
             />
           </div>
-          <div class="w-full border-t border-gray-300 dark:border-white/15" aria-hidden="true" />
+          <div class="w-full border-t border-border" aria-hidden="true" />
 
           <div class="flex items-center gap-1 pr-3">
-            <span class="text-[11px] uppercase tracking-wide text-primary/70">Viewport</span>
+            <span class="text-[11px] uppercase tracking-wide text-muted-foreground">Viewport</span>
             <edge-shad-button
               v-for="option in previewViewportOptions"
               :key="option.id"
@@ -1041,7 +1041,7 @@ const hasUnsavedChanges = (changes) => {
               variant="ghost"
               size="icon"
               class="h-[26px] w-[26px] text-xs gap-1 border transition-colors"
-              :class="state.previewViewport === option.id ? 'bg-primary text-white border-primary' : 'bg-secondary text-primary border-primary/20 hover:bg-primary/10'"
+              :class="state.previewViewport === option.id ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'bg-muted text-foreground border-border hover:bg-muted/80'"
               @click="setPreviewViewport(option.id)"
             >
               <component :is="option.icon" class="w-3.5 h-3.5" />
@@ -1104,7 +1104,7 @@ const hasUnsavedChanges = (changes) => {
           <Separator class="my-4" />
           <div
             :key="selectedThemeId"
-            class="w-full mx-auto bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30 p-0 space-y-6"
+            class="w-full mx-auto bg-card border border-border rounded-lg shadow-sm md:shadow-md p-0 space-y-6"
             :class="{ 'transition-all duration-300': !state.editMode }"
             :style="previewViewportStyle"
           >
@@ -1355,7 +1355,7 @@ const hasUnsavedChanges = (changes) => {
           <Separator class="my-4" />
           <div
             :key="`${selectedThemeId}-post`"
-            class="w-full mx-auto bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30 p-4 space-y-6"
+            class="w-full mx-auto bg-card border border-border rounded-lg shadow-sm md:shadow-md p-4 space-y-6"
             :class="{ 'transition-all duration-300': !state.editMode }"
             :style="previewViewportStyle"
           >
