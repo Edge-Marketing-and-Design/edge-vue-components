@@ -650,7 +650,7 @@ const getTagsFromBlocks = computed(() => {
             </div>
             <div class="w-1/2 space-y-2">
               <div class="flex items-center justify-between">
-                <span class="text-xs font-semibold uppercase tracking-wide text-slate-500">Viewport</span>
+                <span class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Viewport</span>
                 <div class="flex items-center gap-1">
                   <edge-shad-button
                     v-for="option in previewViewportOptions"
@@ -658,8 +658,8 @@ const getTagsFromBlocks = computed(() => {
                     type="button"
                     size="icon"
                     variant="ghost"
-                    class="h-[28px] w-[28px] text-xs border"
-                    :class="state.previewViewport === option.id ? 'bg-primary text-white border-primary' : 'bg-secondary text-primary border-primary/20 hover:bg-primary/10'"
+                    class="h-[28px] w-[28px] text-xs border transition-colors"
+                    :class="state.previewViewport === option.id ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'bg-muted text-foreground border-border hover:bg-muted/80'"
                     @click="setPreviewViewport(option.id)"
                   >
                     <component :is="option.icon" class="w-3.5 h-3.5" />
@@ -667,7 +667,7 @@ const getTagsFromBlocks = computed(() => {
                 </div>
               </div>
               <div
-                class="w-full mx-auto bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30"
+                class="w-full mx-auto bg-card border border-border rounded-lg shadow-sm md:shadow-md"
                 :style="previewViewportStyle"
               >
                 <edge-cms-block-picker

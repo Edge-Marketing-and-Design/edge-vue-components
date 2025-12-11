@@ -62,11 +62,11 @@ const timeAgo = (timestamp) => {
     class="w-full group overflow-hidden rounded-2xl border bg-card hover:shadow-md hover:border-muted-foreground/20 transition-all"
   >
     <div class="relative w-full h-[200px] bg-muted">
-      <div class="z-10 absolute w-full flex inset-0 bg-black/20 justify-between items-start p-2">
+      <div class="z-10 absolute w-full flex inset-0 bg-black/10 dark:bg-black/30 justify-between items-start p-2">
         <edge-shad-button
           v-if="!props.selectMode"
           size="icon"
-          class="bg-primary/60"
+          class="bg-primary/80 text-primary-foreground hover:bg-primary shadow-sm"
           @click.stop="emits('select', !props.selected, item.docId)"
         >
           <Square v-if="!props.selected" class="!w-5 !h-5" />
@@ -76,7 +76,7 @@ const timeAgo = (timestamp) => {
         <edge-shad-button
           v-if="props.canDelete"
           size="icon"
-          class="bg-red-700/70 text-foreground/90 hover:bg-muted/80 h-9 w-9 sm:h-10 sm:w-10 rounded-xl"
+          class="bg-destructive/80 text-destructive-foreground hover:bg-destructive h-9 w-9 sm:h-10 sm:w-10 rounded-xl border border-destructive/40 shadow-sm"
           @click.stop="emits('delete', item.docId)"
         >
           <Trash class="!h-5 !w-5" />

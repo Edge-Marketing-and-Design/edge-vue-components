@@ -163,60 +163,67 @@ const itemClick = (item) => {
 <template>
   <div
     v-if="edgeGlobal.edgeState.organizationDocPath"
-    class="w-full  mx-auto  bg-white rounded-[9.96px] px-0"
+    class="w-full mx-auto bg-background text-foreground rounded-[9.96px] px-0 border border-border/70 shadow-sm"
   >
     <Sheet v-model:open="state.showUpload">
-      <SheetContent side="top" class="w-full  max-w-none sm:max-w-none max-w-2xl">
+      <SheetContent side="top" class="w-full max-w-none sm:max-w-none max-w-2xl bg-card text-foreground border border-border">
         <SheetHeader>
           <SheetTitle />
           <SheetDescription />
         </SheetHeader>
-        <edge-auto-file-upload
-          v-model="state.file"
-          name="file"
-          :multiple="true"
-          :accept="['image/jpg', 'image/jpeg', 'image/png', 'image/gif']"
-          file-path="images"
-          :r2="true"
-          :disabled="state.tags.length === 0"
-          disabled-text="Tags are required"
-          class="w-full mx-auto border-dashed border-secondary bg-primary py-10 text-white rounded-[20px] my-3"
-          :extra-meta="{ tags: state.tags, cmsmedia: true, cmssite: [props.site] }"
-        >
-          <template #header>
-            <edge-shad-form>
-              <edge-shad-select-tags
-                v-model="state.tags"
-                :items="getTagsFromMedia"
-                name="tags"
-                placeholder="Select tags"
-                :allow-additions="true"
-                class="w-full max-w-[800px] mx-auto mb-5 text-black"
-              />
-            </edge-shad-form>
-          </template>
-          <template #title>
-            <div class="flex items-center gap-2 justify-center gap-5">
-              <div>
-                <ImagePlus class="h-10 w-10" />
+        <edge-shad-form class="px-2 sm:px-4">
+          <edge-shad-select-tags
+            v-model="state.tags"
+            :items="getTagsFromMedia"
+            name="tags"
+            placeholder="Select tags"
+            :allow-additions="true"
+            class="w-full max-w-[800px] mx-auto mb-4 text-foreground"
+          />
+        </edge-shad-form>
+        <div class="relative">
+          <edge-auto-file-upload
+            v-model="state.file"
+            name="file"
+            :multiple="true"
+            :accept="['image/jpg', 'image/jpeg', 'image/png', 'image/gif']"
+            file-path="images"
+            :r2="true"
+            :disabled="state.tags.length === 0"
+            disabled-text="Tags are required"
+            class="w-full mx-auto border-dashed border-primary/60 bg-gradient-to-br from-primary/90 via-primary to-primary/90 dark:from-muted dark:via-muted/90 dark:to-muted border text-primary-foreground dark:text-foreground py-10 rounded-[20px] my-3 shadow-lg shadow-primary/20 dark:shadow-black/30"
+            :extra-meta="{ tags: state.tags, cmsmedia: true, cmssite: [props.site] }"
+          >
+            <template #title>
+              <div class="flex items-center gap-2 justify-center gap-5 text-primary-foreground dark:text-foreground drop-shadow">
+                <div>
+                  <ImagePlus class="h-10 w-10" />
+                </div>
+                <div>
+                  <h1 class="text-4xl font-[700] leading-none">
+                    Drag & Drop
+                  </h1>
+                </div>
+                <div class="text-xl pt-2 font-sans font-semibold">
+                  OR
+                </div>
               </div>
-              <div>
-                <h1 class="text-white text-4xl font-[700] leading-none">
-                  Drag & Drop
-                </h1>
-              </div>
-              <div class="text-xl pt-2  text-white font-sans font-semibold">
-                OR
-              </div>
-            </div>
-          </template>
-          <template #description>
-            <edge-shad-button class="bg-secondary mt-3 text-primary">
-              Upload
-            </edge-shad-button>
-            <div class="hidden" />
-          </template>
-        </edge-auto-file-upload>
+            </template>
+            <template #description>
+              <edge-shad-button class="bg-secondary mt-3 text-primary shadow-sm">
+                Upload
+              </edge-shad-button>
+              <div class="hidden" />
+            </template>
+          </edge-auto-file-upload>
+          <div
+            v-if="state.tags.length === 0"
+            class="pointer-events-auto absolute inset-0 z-20 rounded-[20px] border border-dashed border-border/70 bg-background/85 dark:bg-background/80 backdrop-blur-sm flex flex-col items-center justify-center text-center px-6 text-foreground"
+          >
+            <div class="text-lg font-semibold">Tags are required</div>
+            <div class="text-sm text-muted-foreground">Add tags above to enable upload</div>
+          </div>
+        </div>
       </SheetContent>
     </Sheet>
     <edge-dashboard
@@ -227,7 +234,7 @@ const itemClick = (item) => {
       :query-value="['all', props.site]"
       query-operator="array-contains-any"
       header-class=""
-      sort-direction="desc" class="w-full flex-1 border-none shadow-none  bg-white"
+      sort-direction="desc" class="w-full flex-1 border-none shadow-none bg-background"
       collection="files"
     >
       <template #header>
@@ -314,7 +321,7 @@ const itemClick = (item) => {
       </template>
     </edge-dashboard>
     <Sheet v-model:open="state.editMedia">
-      <SheetContent class="w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl">
+      <SheetContent class="w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl bg-card text-foreground border border-border">
         <SheetHeader>
           <SheetTitle>{{ state.workingDoc?.fileName }}</SheetTitle>
           <SheetDescription>
@@ -351,14 +358,14 @@ const itemClick = (item) => {
                 name="tags"
                 placeholder="Select tags"
                 :allow-additions="true"
-                class="w-full max-w-[800px] mx-auto mb-5 text-black"
+                class="w-full max-w-[800px] mx-auto mb-5 text-foreground"
               />
             </div>
             <SheetFooter class="pt-2 flex justify-between">
               <edge-shad-button variant="destructive" class="text-white" @click="state.editMedia = false">
                 Cancel
               </edge-shad-button>
-              <edge-shad-button :disabled="slotProps.submitting" type="submit" class=" bg-slate-800 hover:bg-slate-400 w-full">
+              <edge-shad-button :disabled="slotProps.submitting" type="submit" class="w-full">
                 <Loader2 v-if="slotProps.submitting" class=" h-4 w-4 animate-spin" />
                 Update
               </edge-shad-button>

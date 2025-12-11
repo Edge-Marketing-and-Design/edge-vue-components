@@ -356,10 +356,10 @@ const getChanges = () => {
             Format Code
           </template>
         </edge-tooltip>
-        <insert-menu :items="props.siteVars" var-prefix="siteVar" insert-type="vars" @value-sent="insertBlock">
+        <insert-menu v-if="props.siteVars && props.siteVars.length" :items="props.siteVars" var-prefix="siteVar" insert-type="vars" @value-sent="insertBlock">
           <Code class="w-4 h-4" /> Site Variables
         </insert-menu>
-        <insert-menu :items="props.globals" var-prefix="globalVar" insert-type="vars" @value-sent="insertBlock">
+        <insert-menu v-if="props.globals && props.globals.length" :items="props.globals" var-prefix="globalVar" insert-type="vars" @value-sent="insertBlock">
           <Globe class="w-4 h-4" /> Globals
         </insert-menu>
       </template>
