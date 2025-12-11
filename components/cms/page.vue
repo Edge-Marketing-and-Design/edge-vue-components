@@ -545,9 +545,10 @@ const rowVerticalAlignClass = (row) => {
 const rowGapClass = (row) => {
   const gap = Number(row?.gap)
   const allowed = new Set([0, 2, 4, 6, 8])
-  if (!allowed.has(gap))
-    return 'gap-4'
-  return `gap-${gap}`
+  const safeGap = allowed.has(gap) ? gap : 4
+  if (safeGap === 0)
+    return 'gap-0'
+  return ['gap-0', `sm:gap-${safeGap}`].join(' ')
 }
 
 const rowGridStyle = (row) => {
