@@ -100,9 +100,16 @@ const unsavedChanges = computed(() => {
   if (props.docId === 'new') {
     return false
   }
-  console.log('comparing', state.workingDoc, state.collectionData[props.docId])
-  console.log('unsavedChanges', JSON.stringify(state.workingDoc) !== JSON.stringify(state.collectionData[props.docId]))
-  return JSON.stringify(state.workingDoc) !== JSON.stringify(state.collectionData[props.docId])
+
+  // If the baseline doc is not yet loaded (e.g. on page refresh) avoid flagging unsaved changes
+  const baselineDoc = state.collectionData?.[props.docId]
+  if (!state.afterMount || !baselineDoc) {
+    return false
+  }
+
+  console.log('comparing', state.workingDoc, baselineDoc)
+  console.log('unsavedChanges', JSON.stringify(state.workingDoc) !== JSON.stringify(baselineDoc))
+  return JSON.stringify(state.workingDoc) !== JSON.stringify(baselineDoc)
 })
 
 onBeforeRouteLeave((to, from, next) => {
