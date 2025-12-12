@@ -59,6 +59,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  titleField: {
+    type: String,
+    default: 'name',
+  },
 })
 
 const emit = defineEmits(['unsavedChanges', 'workingDoc', 'error', 'saved'])
@@ -225,7 +229,7 @@ const title = computed(() => {
     // if (!state.collectionData?.[props.docId]?.name) {
     //   return capitalizeFirstLetter(`${state.collectionData[props.docId]}`)
     // }
-    return capitalizeFirstLetter(`${state.collectionData[props.docId].name}`)
+    return capitalizeFirstLetter(`${state.collectionData[props.docId][props.titleField]}`)
   }
   else {
     return `New ${toTitleCase(singularize(props.collection)).replace('-', ' ')}`
@@ -346,6 +350,8 @@ onBeforeMount(async () => {
   // console.log('starting snapshot for collection:', props.collection)
   // await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
   if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`]) {
+    console.log(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
+    console.log(props.docId)
     const docData = await edgeFirebase.getDocData(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, props.docId)
     state.collectionData[props.docId] = docData
     initData(state.collectionData)

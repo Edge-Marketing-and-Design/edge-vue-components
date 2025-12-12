@@ -1,7 +1,7 @@
 <script setup>
 const props = defineProps({
   modelValue: {
-    type: String,
+    type: [String, Object],
     default: '',
   },
   siteVars: {
@@ -61,6 +61,7 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue', 'lineClick'])
 const localModelValue = ref(null)
 const edgeFirebase = inject('edgeFirebase')
+const expectsJsonObject = ref(false)
 
 const editorOptions = {
   mode: 'htmlmixed',
@@ -90,15 +91,54 @@ onMounted(() => {
   })
 })
 
+const toEditorValue = (value) => {
+  if (props.language === 'json') {
+    if (value === null || value === undefined)
+      return ''
+    if (typeof value === 'object') {
+      try {
+        return JSON.stringify(value, null, 2)
+      }
+      catch (err) {
+        console.warn('Unable to stringify JSON object for editor', err)
+        return ''
+      }
+    }
+    if (typeof value === 'string') {
+      try {
+        return JSON.stringify(JSON.parse(value), null, 2)
+      }
+      catch {
+        return value
+      }
+    }
+  }
+  return value ?? ''
+}
+
+const toEmittedValue = (value) => {
+  if (props.language === 'json' && expectsJsonObject.value) {
+    try {
+      return value ? JSON.parse(value) : {}
+    }
+    catch (err) {
+      console.warn('Invalid JSON; emitting raw string instead of object')
+      return value
+    }
+  }
+  return value
+}
+
 watch(() => props.modelValue, (newValue) => {
   if (state.afterMount) {
-    localModelValue.value = edgeGlobal.dupObject(newValue)
+    expectsJsonObject.value = props.language === 'json' && newValue !== null && typeof newValue === 'object'
+    localModelValue.value = toEditorValue(newValue)
   }
 })
 
 watch(localModelValue, () => {
   if (state.afterMount) {
-    emit('update:modelValue', localModelValue.value)
+    emit('update:modelValue', toEmittedValue(localModelValue.value))
     if (!state.undoredo) {
       state.editHistory.push(localModelValue.value)
       state.currentHistory = state.editHistory.length - 1
@@ -139,19 +179,9 @@ const setCursor = () => {
 const initValue = ref()
 
 onBeforeMount(() => {
-  localModelValue.value = edgeGlobal.dupObject(props.modelValue)
-  initValue.value = edgeGlobal.dupObject(props.modelValue)
-  // Prettify JSON if language is 'json' and value is valid JSON
-  if (props.language === 'json') {
-    try {
-      const parsed = JSON.parse(initValue.value)
-      initValue.value = JSON.stringify(parsed, null, 2)
-      localModelValue.value = initValue.value
-    }
-    catch (err) {
-      console.warn('Invalid JSON; skipping prettify')
-    }
-  }
+  expectsJsonObject.value = props.language === 'json' && props.modelValue !== null && typeof props.modelValue === 'object'
+  localModelValue.value = toEditorValue(edgeGlobal.dupObject(props.modelValue))
+  initValue.value = localModelValue.value
   if (localModelValue.value) {
     state.editHistory.push(localModelValue.value)
     state.currentHistory = 0
