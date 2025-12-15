@@ -392,6 +392,12 @@ onBeforeMount(async () => {
                   height="400px"
                   class="mb-4 w-full"
                 />
+                <edge-cms-font-upload
+                  v-if="slotProps.workingDoc"
+                  v-model:head-json="slotProps.workingDoc.headJSON"
+                  :theme-id="props.themeId"
+                  class="mb-4"
+                />
                 <edge-cms-code-editor
                   v-model="slotProps.workingDoc.headJSON"
                   title="Head JSON"
