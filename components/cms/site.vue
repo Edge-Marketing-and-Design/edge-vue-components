@@ -32,6 +32,7 @@ const stableSerialize = value => JSON.stringify(normalizeForCompare(value))
 const areEqualNormalized = (a, b) => stableSerialize(a) === stableSerialize(b)
 
 const isTemplateSite = computed(() => props.site === 'templates')
+const router = useRouter()
 
 const state = reactive({
   filter: '',
@@ -61,6 +62,8 @@ const state = reactive({
   updating: false,
   logoPickerOpen: false,
   aiSectionOpen: false,
+  selectedPostId: '',
+  viewMode: 'pages',
 })
 
 const pageInit = {
@@ -496,6 +499,82 @@ const pages = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`] || {}
 })
 
+const publishedPages = computed(() => {
+  return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`] || {}
+})
+
+const pageRouteBase = computed(() => {
+  return props.site === 'templates'
+    ? '/app/dashboard/templates'
+    : `/app/dashboard/sites/${props.site}`
+})
+
+const pageList = computed(() => {
+  return Object.entries(pages.value || {})
+    .map(([id, data]) => ({
+      id,
+      name: data?.name || 'Untitled Page',
+      lastUpdated: data?.last_updated || data?.doc_created_at,
+    }))
+    .sort((a, b) => (b.lastUpdated ?? 0) - (a.lastUpdated ?? 0))
+})
+
+const formatTimestamp = (input) => {
+  if (!input)
+    return 'Not yet saved'
+  try {
+    return new Date(input).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })
+  }
+  catch {
+    return 'Not yet saved'
+  }
+}
+
+const isPublishedPageDiff = (pageId) => {
+  const publishedPage = publishedPages.value?.[pageId]
+  const draftPage = pages.value?.[pageId]
+  if (!publishedPage && draftPage) {
+    return true
+  }
+  if (publishedPage && !draftPage) {
+    return true
+  }
+  if (publishedPage && draftPage) {
+    return !areEqualNormalized(
+      { content: publishedPage.content, postContent: publishedPage.postContent, metaTitle: publishedPage.metaTitle, metaDescription: publishedPage.metaDescription, structuredData: publishedPage.structuredData },
+      { content: draftPage.content, postContent: draftPage.postContent, metaTitle: draftPage.metaTitle, metaDescription: draftPage.metaDescription, structuredData: draftPage.structuredData },
+    )
+  }
+  return false
+}
+
+const pageStatusLabel = pageId => (isPublishedPageDiff(pageId) ? 'Draft' : 'Published')
+const hasSelection = computed(() => Boolean(props.page) || Boolean(state.selectedPostId))
+const showSplitView = computed(() => isTemplateSite.value || state.viewMode === 'pages' || hasSelection.value)
+const isEditingPost = computed(() => state.viewMode === 'posts' && Boolean(state.selectedPostId))
+
+const setViewMode = (mode) => {
+  if (state.viewMode === mode)
+    return
+  state.viewMode = mode
+  state.selectedPostId = ''
+  if (props.page)
+    router.replace(pageRouteBase.value)
+}
+
+const handlePostSelect = (postId) => {
+  if (!postId)
+    return
+  state.selectedPostId = postId
+  state.viewMode = 'posts'
+  if (props.page)
+    router.replace(pageRouteBase.value)
+}
+
+const clearPostSelection = () => {
+  state.selectedPostId = ''
+}
+
 watch (() => siteData.value, () => {
   if (isTemplateSite.value)
     return
@@ -531,6 +610,17 @@ watch(pages, (pagesCollection) => {
 watch(() => state.siteSettings, (open) => {
   if (!open)
     state.logoPickerOpen = false
+})
+
+watch(() => props.page, (next) => {
+  if (next) {
+    state.selectedPostId = ''
+    state.viewMode = 'pages'
+    return
+  }
+  if (state.selectedPostId) {
+    state.viewMode = 'posts'
+  }
 })
 
 watch(() => state.menus, async (newVal) => {
@@ -789,15 +879,39 @@ const pageSettingsUpdated = async (pageData) => {
         </div>
       </template>
     </edge-editor>
-    <div v-else class="flex flex-col h-[calc(100vh-60px)]">
-      <div class="flex items-center justify-between gap-3 px-4 py-2 border-b bg-secondary">
-        <div class="flex items-center gap-2">
+    <div v-else class="flex flex-col h-[calc(100vh-58px)] overflow-hidden">
+      <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-2 border-b bg-secondary">
+        <div class="flex items-center gap-3">
           <FileStack class="w-5 h-5" />
           <span class="text-lg font-semibold">
             {{ siteData.name || 'Templates' }}
           </span>
         </div>
-        <div v-if="!isTemplateSite" class="flex items-center gap-3">
+        <div class="flex justify-center">
+          <div v-if="!isTemplateSite" class="flex items-center rounded-full border border-border bg-background p-1 shadow-sm">
+            <edge-shad-button
+              variant="ghost"
+              size="sm"
+              class="h-8 px-4 text-xs gap-2 rounded-full"
+              :class="state.viewMode === 'pages' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+              @click="setViewMode('pages')"
+            >
+              <FileStack class="h-4 w-4" />
+              Pages
+            </edge-shad-button>
+            <edge-shad-button
+              variant="ghost"
+              size="sm"
+              class="h-8 px-4 text-xs gap-2 rounded-full"
+              :class="state.viewMode === 'posts' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+              @click="setViewMode('posts')"
+            >
+              <FilePenLine class="h-4 w-4" />
+              Posts
+            </edge-shad-button>
+          </div>
+        </div>
+        <div v-if="!isTemplateSite" class="flex items-center gap-3 justify-end">
           <Transition name="fade" mode="out-in">
             <div v-if="isSiteDiff" key="unpublished" class="flex gap-1 items-center bg-yellow-100 text-xs py-1 px-3 text-yellow-800 rounded">
               <CircleAlert class="!text-yellow-800 w-3 h-3" />
@@ -855,22 +969,22 @@ const pageSettingsUpdated = async (pageData) => {
         </div>
         <div v-else />
       </div>
-      <ResizablePanelGroup direction="horizontal" class="w-full h-full flex-1">
-        <ResizablePanel class="bg-sidebar text-sidebar-foreground" :default-size="16">
-          <SidebarGroup class="mt-0 pt-0">
-            <SidebarGroupContent>
-              <SidebarMenu>
-                <template v-if="!isTemplateSite">
-                  <Tabs default-value="pages" class="mt-2">
-                    <TabsList class="grid w-full grid-cols-2 py-0">
-                      <TabsTrigger value="pages" class="py-0">
-                        Pages
-                      </TabsTrigger>
-                      <TabsTrigger value="posts" class="py-0">
-                        Posts
-                      </TabsTrigger>
-                    </TabsList>
-                    <TabsContent value="pages" class="p-0">
+      <div class="flex-1">
+        <Transition name="fade" mode="out-in">
+          <div v-if="isEditingPost" class="w-full h-full">
+            <edge-cms-posts
+              mode="editor"
+              :site="props.site"
+              :selected-post-id="state.selectedPostId"
+              @update:selected-post-id="clearPostSelection"
+            />
+          </div>
+          <ResizablePanelGroup v-else-if="showSplitView" direction="horizontal" class="w-full h-full flex-1">
+            <ResizablePanel class="bg-sidebar text-sidebar-foreground" :default-size="16">
+              <SidebarGroup class="mt-0 pt-0">
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    <template v-if="isTemplateSite || state.viewMode === 'pages'">
                       <edge-cms-menu
                         v-if="state.menus"
                         v-model="state.menus"
@@ -880,40 +994,46 @@ const pageSettingsUpdated = async (pageData) => {
                         :theme-options="themeOptions"
                         @page-settings-update="pageSettingsUpdated"
                       />
-                    </TabsContent>
-                    <TabsContent value="posts" class="p-0">
-                      <edge-cms-posts :site="props.site" @updating="isUpdating => state.updating = isUpdating" />
-                    </TabsContent>
-                  </Tabs>
-                </template>
-                <template v-else>
-                  <edge-cms-menu
-                    v-if="state.menus"
-                    v-model="state.menus"
-                    :site="props.site"
-                    :page="props.page"
-                    :is-template-site="isTemplateSite"
-                    :theme-options="themeOptions"
-                    @page-settings-update="pageSettingsUpdated"
-                  />
-                </template>
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        </ResizablePanel>
-        <ResizablePanel ref="mainPanel">
-          <Transition name="fade" mode="out-in">
-            <div v-if="props.page && !state.updating" :key="props.page" class="max-h-[calc(100vh-50px)] overflow-y-auto w-full">
-              <NuxtPage class="flex flex-col flex-1 px-0 mx-0 pt-0" />
+                    </template>
+                    <template v-else>
+                      <edge-cms-posts
+                        mode="list"
+                        list-variant="sidebar"
+                        :site="props.site"
+                        @updating="isUpdating => state.updating = isUpdating"
+                        @update:selected-post-id="handlePostSelect"
+                      />
+                    </template>
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            </ResizablePanel>
+            <ResizablePanel ref="mainPanel">
+              <Transition name="fade" mode="out-in">
+                <div v-if="props.page && !state.updating" :key="props.page" class="max-h-[calc(100vh-50px)] overflow-y-auto w-full">
+                  <NuxtPage class="flex flex-col flex-1 px-0 mx-0 pt-0" />
+                </div>
+                <div v-else class="p-4 text-center flex text-slate-500 h-[calc(100vh-4rem)] justify-center items-center overflow-y-auto">
+                  <div class="text-4xl">
+                    <ArrowLeft class="inline-block w-12 h-12 mr-2" /> Select a page to get started.
+                  </div>
+                </div>
+              </Transition>
+            </ResizablePanel>
+          </ResizablePanelGroup>
+          <div v-else class="flex-1 overflow-y-auto p-6">
+            <div class="mx-auto w-full max-w-5xl space-y-6">
+              <edge-cms-posts
+                mode="list"
+                list-variant="full"
+                :site="props.site"
+                @updating="isUpdating => state.updating = isUpdating"
+                @update:selected-post-id="handlePostSelect"
+              />
             </div>
-            <div v-else class="p-4 text-center flex text-slate-500 h-[calc(100vh-4rem)] justify-center items-center overflow-y-auto">
-              <div class="text-4xl">
-                <ArrowLeft class="inline-block w-12 h-12 mr-2" /> Select a page to get started.
-              </div>
-            </div>
-          </Transition>
-        </ResizablePanel>
-      </ResizablePanelGroup>
+          </div>
+        </Transition>
+      </div>
     </div>
     <Sheet v-model:open="state.siteSettings">
       <SheetContent side="left" class="w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl">
