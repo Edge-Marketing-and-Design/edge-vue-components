@@ -315,7 +315,7 @@ const getTagsFromPosts = computed(() => {
     </edge-shad-dialog>
 
     <Sheet v-model:open="state.open">
-      <SheetContent v-if="state.afterLoad" class="w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl">
+      <edge-cms-block-sheet-content v-if="state.afterLoad" class="w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl">
         <SheetHeader>
           <SheetTitle>Edit Block</SheetTitle>
           <SheetDescription v-if="modelValue.synced" class="text-sm text-red-500">
@@ -523,7 +523,7 @@ const getTagsFromPosts = computed(() => {
             </edge-shad-button>
           </SheetFooter>
         </edge-shad-form>
-      </SheetContent>
+      </edge-cms-block-sheet-content>
     </Sheet>
   </div>
 </template>
