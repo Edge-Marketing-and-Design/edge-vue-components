@@ -82,9 +82,15 @@ const props = defineProps({
     required: false,
     default: () => ['bold', 'italic', 'strike', 'underline', 'code', 'codeBlock', 'heading1', 'heading2', 'heading3', 'heading4', 'heading5', 'heading6', 'bulletlist', 'orderedlist', 'blockquote', 'horizontalrule', 'hardbreak', 'image'],
   },
+  heightClass: {
+    type: String,
+    required: false,
+    default: '',
+  },
 })
 const emits = defineEmits(['update:modelValue', 'request-image'])
 const DEFAULT_IMAGE_WIDTH = 33
+const DEFAULT_HEIGHT_CLASS = 'edge-editor-height-default'
 const sizeWidths = {
   small: 20,
   medium: DEFAULT_IMAGE_WIDTH,
@@ -163,6 +169,25 @@ const imageState = reactive({
   float: 'left',
   width: DEFAULT_IMAGE_WIDTH,
 })
+
+const appliedHeightClasses = ref([])
+
+const resolveHeightClasses = () => {
+  const raw = (props.heightClass || '').trim()
+  if (!raw)
+    return [DEFAULT_HEIGHT_CLASS]
+  return raw.split(/\s+/).filter(Boolean)
+}
+
+const applyHeightClasses = () => {
+  const dom = editor.value?.view?.dom
+  if (!dom)
+    return
+  appliedHeightClasses.value.forEach(cls => dom.classList.remove(cls))
+  const nextClasses = resolveHeightClasses()
+  nextClasses.forEach(cls => dom.classList.add(cls))
+  appliedHeightClasses.value = nextClasses
+}
 
 const updateImageState = () => {
   if (!editor.value) {
@@ -255,6 +280,7 @@ onMounted(() => {
   editor.value.on('selectionUpdate', updateImageState)
   editor.value.on('transaction', updateImageState)
   updateImageState()
+  applyHeightClasses()
 })
 
 onBeforeUnmount(() => {
@@ -263,6 +289,10 @@ onBeforeUnmount(() => {
     editor.value.off('transaction', updateImageState)
     editor.value.destroy()
   }
+})
+
+watch(() => props.heightClass, () => {
+  applyHeightClasses()
 })
 
 const addImage = () => {
@@ -677,8 +707,6 @@ defineExpose({
 <style lang="scss">
 /* Basic editor styles */
 .tiptap {
-  min-height: 300px;
-  max-height: 300px;
   overflow-y: auto;
 
   :first-child {
@@ -840,5 +868,10 @@ defineExpose({
     margin-left: 0;
     margin-right: 0;
   }
+}
+
+.tiptap.edge-editor-height-default {
+  min-height: 300px;
+  max-height: 300px;
 }
 </style>

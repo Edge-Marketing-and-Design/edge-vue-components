@@ -937,6 +937,7 @@ const unPublishPost = async (postId) => {
                   <edge-shad-html
                     ref="contentEditor"
                     v-model="slotProps.workingDoc.content"
+                    height-class="h-[calc(100vh-490px)]"
                     :enabled-toggles="['bold', 'italic', 'strike', 'bulletlist', 'orderedlist', 'underline', 'image']"
                     name="content"
                     label="Content"
