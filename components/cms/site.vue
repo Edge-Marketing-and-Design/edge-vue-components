@@ -2,7 +2,7 @@
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 
-import { CircleAlert, FileCheck, FileStack, FolderCog, FolderDown, FolderUp, FolderX, Loader2 } from 'lucide-vue-next'
+import { ArrowLeft, CircleAlert, FileCheck, FilePenLine, FileStack, FolderCog, FolderDown, FolderUp, FolderX, Loader2, MoreHorizontal } from 'lucide-vue-next'
 const props = defineProps({
   site: {
     type: String,
@@ -789,132 +789,132 @@ const pageSettingsUpdated = async (pageData) => {
         </div>
       </template>
     </edge-editor>
-    <ResizablePanelGroup v-else direction="horizontal" class="w-full h-full">
-      <ResizablePanel class="bg-sidebar text-sidebar-foreground" :default-size="16">
-        <edge-menu class="bg-secondary text-foreground rounded-none sticky top-0 py-2">
-          <template #start>
-            <div class="flex flex-col gap-0">
-              <span>{{ siteData.name || 'Templates' }}</span>
+    <div v-else class="flex flex-col h-[calc(100vh-60px)]">
+      <div class="flex items-center justify-between gap-3 px-4 py-2 border-b bg-secondary">
+        <div class="flex items-center gap-2">
+          <FileStack class="w-5 h-5" />
+          <span class="text-lg font-semibold">
+            {{ siteData.name || 'Templates' }}
+          </span>
+        </div>
+        <div v-if="!isTemplateSite" class="flex items-center gap-3">
+          <Transition name="fade" mode="out-in">
+            <div v-if="isSiteDiff" key="unpublished" class="flex gap-1 items-center bg-yellow-100 text-xs py-1 px-3 text-yellow-800 rounded">
+              <CircleAlert class="!text-yellow-800 w-3 h-3" />
+              <span class="font-medium text-[10px]">
+                Unpublished Settings
+              </span>
             </div>
-          </template>
-          <template #center>
-            <div />
-          </template>
-          <template #end>
-            <DropdownMenu v-if="!isTemplateSite">
-              <DropdownMenuTrigger as-child>
-                <SidebarMenuAction class="mt-1">
-                  <MoreHorizontal />
-                </SidebarMenuAction>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent side="right" align="start">
-                <DropdownMenuLabel class="flex items-center gap-2">
-                  <FileStack class="w-5 h-5" />{{ siteData.name || 'Templates' }}
-                </DropdownMenuLabel>
-
-                <DropdownMenuSeparator v-if="isSiteDiff" />
-                <DropdownMenuLabel v-if="isSiteDiff" class="flex items-center gap-2">
-                  Site Settings
-                </DropdownMenuLabel>
-
-                <DropdownMenuItem v-if="isSiteDiff" class="pl-4 text-xs" @click="publishSiteSettings">
-                  <FolderUp />
-                  Publish
-                </DropdownMenuItem>
-                <DropdownMenuItem v-if="isSiteDiff && isSiteSettingPublished" class="pl-4 text-xs" @click="discardSiteSettings">
-                  <FolderX />
-                  Discard Changes
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem v-if="isAnyPagesDiff" @click="publishSite">
-                  <FolderUp />
-                  Publish All Pages
-                </DropdownMenuItem>
-                <DropdownMenuItem v-if="isSiteSettingPublished || isAnyPagesPublished" @click="unPublishSite">
-                  <FolderDown />
-                  Unpublish Site
-                </DropdownMenuItem>
-
-                <DropdownMenuItem @click="state.siteSettings = true">
-                  <FolderCog />
-                  <span>Settings</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <div v-else />
-          </template>
-        </edge-menu>
-        <SidebarGroup class="mt-0 pt-0">
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <template v-if="!isTemplateSite">
-                <Transition name="fade" mode="out-in">
-                  <div v-if="isSiteDiff" key="unpublished" class="flex gap-1 items-center mt-2 bg-yellow-100 text-xs py-1 px-4 text-yellow-800">
-                    <CircleAlert class="!text-yellow-800 w-3 h-3" />
-                    <span class="font-medium text-[10px]">
-                      Unpublished Settings
-                    </span>
-                  </div>
-                  <div v-else key="published" class="flex gap-1 items-center mt-2 bg-green-100 text-xs py-1 px-4 text-green-800">
-                    <FileCheck class="!text-green-800 w-3 h-3" />
-                    <span class="font-medium text-[10px]">
-                      Settings Published
-                    </span>
-                  </div>
-                </Transition>
-                <Tabs default-value="pages" class="mt-2">
-                  <TabsList class="grid w-full grid-cols-2 py-0">
-                    <TabsTrigger value="pages" class="py-0">
-                      Pages
-                    </TabsTrigger>
-                    <TabsTrigger value="posts" class="py-0">
-                      Posts
-                    </TabsTrigger>
-                  </TabsList>
-                  <TabsContent value="pages" class="p-0">
-                    <edge-cms-menu
-                      v-if="state.menus"
-                      v-model="state.menus"
-                      :site="props.site"
-                      :page="props.page"
-                      :is-template-site="isTemplateSite"
-                      :theme-options="themeOptions"
-                      @page-settings-update="pageSettingsUpdated"
-                    />
-                  </TabsContent>
-                  <TabsContent value="posts" class="p-0">
-                    <edge-cms-posts :site="props.site" @updating="isUpdating => state.updating = isUpdating" />
-                  </TabsContent>
-                </Tabs>
-              </template>
-              <template v-else>
-                <edge-cms-menu
-                  v-if="state.menus"
-                  v-model="state.menus"
-                  :site="props.site"
-                  :page="props.page"
-                  :is-template-site="isTemplateSite"
-                  :theme-options="themeOptions"
-                  @page-settings-update="pageSettingsUpdated"
-                />
-              </template>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-      </ResizablePanel>
-      <ResizablePanel ref="mainPanel">
-        <Transition name="fade" mode="out-in">
-          <div v-if="props.page && !state.updating" :key="props.page" class="max-h-[calc(100vh-50px)] overflow-y-auto w-full">
-            <NuxtPage class="flex flex-col flex-1 p-3 pt-0" />
-          </div>
-          <div v-else class="p-4 text-center flex text-slate-500 h-[calc(100vh-4rem)] justify-center items-center overflow-y-auto">
-            <div class="text-4xl">
-              <ArrowLeft class="inline-block w-12 h-12 mr-2" /> Select a page to get started.
+            <div v-else key="published" class="flex gap-1 items-center bg-green-100 text-xs py-1 px-3 text-green-800 rounded">
+              <FileCheck class="!text-green-800 w-3 h-3" />
+              <span class="font-medium text-[10px]">
+                Settings Published
+              </span>
             </div>
-          </div>
-        </Transition>
-      </ResizablePanel>
-    </ResizablePanelGroup>
+          </Transition>
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <edge-shad-button variant="outline" size="icon" class="h-9 w-9">
+                <MoreHorizontal />
+              </edge-shad-button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="right" align="start">
+              <DropdownMenuLabel class="flex items-center gap-2">
+                <FileStack class="w-5 h-5" />{{ siteData.name || 'Templates' }}
+              </DropdownMenuLabel>
+
+              <DropdownMenuSeparator v-if="isSiteDiff" />
+              <DropdownMenuLabel v-if="isSiteDiff" class="flex items-center gap-2">
+                Site Settings
+              </DropdownMenuLabel>
+
+              <DropdownMenuItem v-if="isSiteDiff" class="pl-4 text-xs" @click="publishSiteSettings">
+                <FolderUp />
+                Publish
+              </DropdownMenuItem>
+              <DropdownMenuItem v-if="isSiteDiff && isSiteSettingPublished" class="pl-4 text-xs" @click="discardSiteSettings">
+                <FolderX />
+                Discard Changes
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem v-if="isAnyPagesDiff" @click="publishSite">
+                <FolderUp />
+                Publish All Pages
+              </DropdownMenuItem>
+              <DropdownMenuItem v-if="isSiteSettingPublished || isAnyPagesPublished" @click="unPublishSite">
+                <FolderDown />
+                Unpublish Site
+              </DropdownMenuItem>
+
+              <DropdownMenuItem @click="state.siteSettings = true">
+                <FolderCog />
+                <span>Settings</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+        <div v-else />
+      </div>
+      <ResizablePanelGroup direction="horizontal" class="w-full h-full flex-1">
+        <ResizablePanel class="bg-sidebar text-sidebar-foreground" :default-size="16">
+          <SidebarGroup class="mt-0 pt-0">
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <template v-if="!isTemplateSite">
+                  <Tabs default-value="pages" class="mt-2">
+                    <TabsList class="grid w-full grid-cols-2 py-0">
+                      <TabsTrigger value="pages" class="py-0">
+                        Pages
+                      </TabsTrigger>
+                      <TabsTrigger value="posts" class="py-0">
+                        Posts
+                      </TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="pages" class="p-0">
+                      <edge-cms-menu
+                        v-if="state.menus"
+                        v-model="state.menus"
+                        :site="props.site"
+                        :page="props.page"
+                        :is-template-site="isTemplateSite"
+                        :theme-options="themeOptions"
+                        @page-settings-update="pageSettingsUpdated"
+                      />
+                    </TabsContent>
+                    <TabsContent value="posts" class="p-0">
+                      <edge-cms-posts :site="props.site" @updating="isUpdating => state.updating = isUpdating" />
+                    </TabsContent>
+                  </Tabs>
+                </template>
+                <template v-else>
+                  <edge-cms-menu
+                    v-if="state.menus"
+                    v-model="state.menus"
+                    :site="props.site"
+                    :page="props.page"
+                    :is-template-site="isTemplateSite"
+                    :theme-options="themeOptions"
+                    @page-settings-update="pageSettingsUpdated"
+                  />
+                </template>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        </ResizablePanel>
+        <ResizablePanel ref="mainPanel">
+          <Transition name="fade" mode="out-in">
+            <div v-if="props.page && !state.updating" :key="props.page" class="max-h-[calc(100vh-50px)] overflow-y-auto w-full">
+              <NuxtPage class="flex flex-col flex-1 px-0 mx-0 pt-0" />
+            </div>
+            <div v-else class="p-4 text-center flex text-slate-500 h-[calc(100vh-4rem)] justify-center items-center overflow-y-auto">
+              <div class="text-4xl">
+                <ArrowLeft class="inline-block w-12 h-12 mr-2" /> Select a page to get started.
+              </div>
+            </div>
+          </Transition>
+        </ResizablePanel>
+      </ResizablePanelGroup>
+    </div>
     <Sheet v-model:open="state.siteSettings">
       <SheetContent side="left" class="w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl">
         <SheetHeader>

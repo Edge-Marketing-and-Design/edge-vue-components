@@ -928,7 +928,7 @@ const unpublishedChangeDetails = computed(() => {
   if (!draft && !published)
     return changes
 
-  const compareField = (key, label, formatter = (v) => summarizeChangeValue(v, false), options = {}) => {
+  const compareField = (key, label, formatter = v => summarizeChangeValue(v, false), options = {}) => {
     const publishedVal = published?.[key]
     const draftVal = draft?.[key]
     if (areEqualNormalized(publishedVal, draftVal))
@@ -987,7 +987,7 @@ const hasUnsavedChanges = (changes) => {
     :doc-id="page"
     :schema="schemas.pages"
     :new-doc-schema="state.newDocs.pages"
-    class="w-full mx-auto flex-1 bg-transparent flex flex-col border-none shadow-none pt-0"
+    class="w-full mx-auto flex-1 bg-transparent flex flex-col border-none shadow-none pt-0 px-0"
     :show-footer="false"
     :save-redirect-override="`/app/dashboard/sites/${site}`"
     :no-close-after-save="true"
@@ -996,7 +996,7 @@ const hasUnsavedChanges = (changes) => {
     @unsaved-changes="hasUnsavedChanges"
   >
     <template #header="slotProps">
-      <div class="relative flex items-center bg-secondary p-2 justify-between sticky top-0 z-10 bg-primary rounded h-[50px]">
+      <div class="relative flex items-center bg-secondary p-2 justify-between sticky top-0 z-50 bg-primary rounded h-[50px]">
         <span class="text-lg font-semibold whitespace-nowrap pr-1">{{ pageName }}</span>
 
         <div class="flex w-full items-center">
