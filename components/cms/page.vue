@@ -783,8 +783,24 @@ const isPublishedPageDiff = (pageId) => {
   }
   if (publishedPage && draftPage) {
     return !areEqualNormalized(
-      { content: publishedPage.content, postContent: publishedPage.postContent, metaTitle: publishedPage.metaTitle, metaDescription: publishedPage.metaDescription, structuredData: publishedPage.structuredData },
-      { content: draftPage.content, postContent: draftPage.postContent, metaTitle: draftPage.metaTitle, metaDescription: draftPage.metaDescription, structuredData: draftPage.structuredData },
+      {
+        content: publishedPage.content,
+        postContent: publishedPage.postContent,
+        structure: publishedPage.structure,
+        postStructure: publishedPage.postStructure,
+        metaTitle: publishedPage.metaTitle,
+        metaDescription: publishedPage.metaDescription,
+        structuredData: publishedPage.structuredData,
+      },
+      {
+        content: draftPage.content,
+        postContent: draftPage.postContent,
+        structure: draftPage.structure,
+        postStructure: draftPage.postStructure,
+        metaTitle: draftPage.metaTitle,
+        metaDescription: draftPage.metaDescription,
+        structuredData: draftPage.structuredData,
+      },
     )
   }
   return false
@@ -835,6 +851,19 @@ const summarizeBlocks = (blocks) => {
   const sample = Array.from(new Set(names)).slice(0, 3).join(', ')
   const suffix = names.length > 3 ? ', ...' : ''
   return `${count} block${count === 1 ? '' : 's'}${sample ? ` (${sample}${suffix})` : ''}`
+}
+
+const summarizeStructure = (rows) => {
+  if (!Array.isArray(rows) || rows.length === 0)
+    return 'No rows'
+  const count = rows.length
+  const columnCounts = rows
+    .map(row => row?.columns?.length)
+    .filter(val => typeof val === 'number')
+  const sample = columnCounts.slice(0, 3).join(', ')
+  const suffix = columnCounts.length > 3 ? ', ...' : ''
+  const layout = sample ? ` (cols: ${sample}${suffix})` : ''
+  return `${count} row${count === 1 ? '' : 's'}${layout}`
 }
 
 const summarizeChangeValue = (value, detailed = false) => {
@@ -963,6 +992,8 @@ const unpublishedChangeDetails = computed(() => {
 
   compareField('content', 'Index content', summarizeBlocks, { details: (pubVal, draftVal) => buildBlockChangeDetails(pubVal, draftVal) })
   compareField('postContent', 'Post content', summarizeBlocks, { details: (pubVal, draftVal) => buildBlockChangeDetails(pubVal, draftVal) })
+  compareField('structure', 'Index structure', summarizeStructure)
+  compareField('postStructure', 'Post structure', summarizeStructure)
   compareField('metaTitle', 'Meta title', val => summarizeChangeValue(val, true))
   compareField('metaDescription', 'Meta description', val => summarizeChangeValue(val, true))
   compareField('structuredData', 'Structured data', val => summarizeChangeValue(val, true))

@@ -99,8 +99,24 @@ const isPublishedPageDiff = (pageId) => {
   }
   if (publishedPage && draftPage) {
     return !areEqualNormalized(
-      { content: publishedPage.content, postContent: publishedPage.postContent, metaTitle: publishedPage.metaTitle, metaDescription: publishedPage.metaDescription, structuredData: publishedPage.structuredData },
-      { content: draftPage.content, postContent: draftPage.postContent, metaTitle: draftPage.metaTitle, metaDescription: draftPage.metaDescription, structuredData: draftPage.structuredData },
+      {
+        content: publishedPage.content,
+        postContent: publishedPage.postContent,
+        structure: publishedPage.structure,
+        postStructure: publishedPage.postStructure,
+        metaTitle: publishedPage.metaTitle,
+        metaDescription: publishedPage.metaDescription,
+        structuredData: publishedPage.structuredData,
+      },
+      {
+        content: draftPage.content,
+        postContent: draftPage.postContent,
+        structure: draftPage.structure,
+        postStructure: draftPage.postStructure,
+        metaTitle: draftPage.metaTitle,
+        metaDescription: draftPage.metaDescription,
+        structuredData: draftPage.structuredData,
+      },
     )
   }
   return false

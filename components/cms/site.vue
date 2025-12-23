@@ -541,8 +541,24 @@ const isPublishedPageDiff = (pageId) => {
   }
   if (publishedPage && draftPage) {
     return !areEqualNormalized(
-      { content: publishedPage.content, postContent: publishedPage.postContent, metaTitle: publishedPage.metaTitle, metaDescription: publishedPage.metaDescription, structuredData: publishedPage.structuredData },
-      { content: draftPage.content, postContent: draftPage.postContent, metaTitle: draftPage.metaTitle, metaDescription: draftPage.metaDescription, structuredData: draftPage.structuredData },
+      {
+        content: publishedPage.content,
+        postContent: publishedPage.postContent,
+        structure: publishedPage.structure,
+        postStructure: publishedPage.postStructure,
+        metaTitle: publishedPage.metaTitle,
+        metaDescription: publishedPage.metaDescription,
+        structuredData: publishedPage.structuredData,
+      },
+      {
+        content: draftPage.content,
+        postContent: draftPage.postContent,
+        structure: draftPage.structure,
+        postStructure: draftPage.postStructure,
+        metaTitle: draftPage.metaTitle,
+        metaDescription: draftPage.metaDescription,
+        structuredData: draftPage.structuredData,
+      },
     )
   }
   return false
@@ -720,8 +736,24 @@ const isAnyPagesDiff = computed(() => {
       return true
     }
     if (!areEqualNormalized(
-      { content: pageData.content, postContent: pageData.postContent, metaTitle: pageData.metaTitle, metaDescription: pageData.metaDescription, structuredData: pageData.structuredData },
-      { content: publishedPage.content, postContent: publishedPage.postContent, metaTitle: publishedPage.metaTitle, metaDescription: publishedPage.metaDescription, structuredData: publishedPage.structuredData },
+      {
+        content: pageData.content,
+        postContent: pageData.postContent,
+        structure: pageData.structure,
+        postStructure: pageData.postStructure,
+        metaTitle: pageData.metaTitle,
+        metaDescription: pageData.metaDescription,
+        structuredData: pageData.structuredData,
+      },
+      {
+        content: publishedPage.content,
+        postContent: publishedPage.postContent,
+        structure: publishedPage.structure,
+        postStructure: publishedPage.postStructure,
+        metaTitle: publishedPage.metaTitle,
+        metaDescription: publishedPage.metaDescription,
+        structuredData: publishedPage.structuredData,
+      },
     )) {
       return true
     }
