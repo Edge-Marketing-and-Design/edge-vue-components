@@ -43,6 +43,7 @@ const state = reactive({
       theme: { bindings: { 'field-type': 'collection', 'label': 'Themes', 'collection-path': 'themes' }, cols: '12', value: '' },
       allowedThemes: { bindings: { 'field-type': 'tags', 'label': 'Allowed Themes' }, cols: '12', value: [] },
       logo: { bindings: { 'field-type': 'text', 'label': 'Logo' }, cols: '12', value: '' },
+      favicon: { bindings: { 'field-type': 'text', 'label': 'Favicon' }, cols: '12', value: '' },
       menuPosition: { bindings: { 'field-type': 'select', 'label': 'Menu Position', 'items': ['left', 'center', 'right'] }, cols: '12', value: 'right' },
       domains: { bindings: { 'field-type': 'tags', 'label': 'Domains', 'helper': 'Add or remove domains' }, cols: '12', value: [] },
       metaTitle: { bindings: { 'field-type': 'text', 'label': 'Meta Title' }, cols: '12', value: '' },
@@ -61,6 +62,7 @@ const state = reactive({
   hasError: false,
   updating: false,
   logoPickerOpen: false,
+  faviconPickerOpen: false,
   aiSectionOpen: false,
   selectedPostId: '',
   viewMode: 'pages',
@@ -88,6 +90,7 @@ const schemas = {
     }).min(1, { message: 'Theme is required' }),
     allowedThemes: z.array(z.string()).optional(),
     logo: z.string().optional(),
+    favicon: z.string().optional(),
     menuPosition: z.enum(['left', 'center', 'right']).optional(),
     metaTitle: z.string().optional(),
     metaDescription: z.string().optional(),
@@ -438,6 +441,7 @@ const isSiteDiff = computed(() => {
       theme: publishedSite.theme,
       allowedThemes: publishedSite.allowedThemes,
       logo: publishedSite.logo,
+      favicon: publishedSite.favicon,
       menuPosition: publishedSite.menuPosition,
       metaTitle: publishedSite.metaTitle,
       metaDescription: publishedSite.metaDescription,
@@ -448,6 +452,7 @@ const isSiteDiff = computed(() => {
       theme: siteData.value.theme,
       allowedThemes: siteData.value.allowedThemes,
       logo: siteData.value.logo,
+      favicon: siteData.value.favicon,
       menuPosition: siteData.value.menuPosition,
       metaTitle: siteData.value.metaTitle,
       metaDescription: siteData.value.metaDescription,
@@ -472,6 +477,7 @@ const discardSiteSettings = async () => {
       theme: publishedSite.theme || '',
       allowedThemes: publishedSite.allowedThemes || [],
       logo: publishedSite.logo || '',
+      favicon: publishedSite.favicon || '',
       menuPosition: publishedSite.menuPosition || '',
       metaTitle: publishedSite.metaTitle || '',
       metaDescription: publishedSite.metaDescription || '',
@@ -626,6 +632,8 @@ watch(pages, (pagesCollection) => {
 watch(() => state.siteSettings, (open) => {
   if (!open)
     state.logoPickerOpen = false
+  if (!open)
+    state.faviconPickerOpen = false
 })
 
 watch(() => props.page, (next) => {
@@ -1164,6 +1172,44 @@ const pageSettingsUpdated = async (pageData) => {
                     @select="(url) => {
                       slotProps.workingDoc.logo = url
                       state.logoPickerOpen = false
+                    }"
+                  />
+                </div>
+              </div>
+              <div class="space-y-2">
+                <label class="text-sm font-medium text-foreground flex items-center justify-between">
+                  Favicon
+                  <edge-shad-button
+                    type="button"
+                    variant="link"
+                    class="px-0 h-auto text-sm"
+                    @click="state.faviconPickerOpen = !state.faviconPickerOpen"
+                  >
+                    {{ state.faviconPickerOpen ? 'Hide picker' : 'Select favicon' }}
+                  </edge-shad-button>
+                </label>
+                <div class="flex items-center gap-4">
+                  <div v-if="slotProps.workingDoc.favicon" class="flex items-center gap-3">
+                    <img :src="slotProps.workingDoc.favicon" alt="Favicon preview" class="h-12 w-12 rounded-md border border-border bg-muted object-contain">
+                    <edge-shad-button
+                      type="button"
+                      variant="ghost"
+                      class="h-8"
+                      @click="slotProps.workingDoc.favicon = ''"
+                    >
+                      Remove
+                    </edge-shad-button>
+                  </div>
+                  <span v-else class="text-sm text-muted-foreground italic">No favicon selected</span>
+                </div>
+                <div v-if="state.faviconPickerOpen" class="mt-2 border border-dashed rounded-lg p-2">
+                  <edge-cms-media-manager
+                    :site="props.site"
+                    :select-mode="true"
+                    :default-tags="['Logos']"
+                    @select="(url) => {
+                      slotProps.workingDoc.favicon = url
+                      state.faviconPickerOpen = false
                     }"
                   />
                 </div>

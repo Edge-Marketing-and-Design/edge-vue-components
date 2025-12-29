@@ -76,6 +76,45 @@ const edgeFirebase = inject('edgeFirebase')
 
 const attrs = useAttrs()
 
+const DEV_TAP_TARGET = 7
+const DEV_TAP_WINDOW_MS = 2000
+const DEV_OVERRIDE_KEY = 'edgeDevOverride'
+const devTapTimes = ref([])
+const devOverride = ref(false)
+
+onMounted(() => {
+  try {
+    devOverride.value = localStorage.getItem(DEV_OVERRIDE_KEY) === '1'
+    edgeGlobal.edgeState.devOverride = devOverride.value
+  } catch (error) {
+    console.warn('dev override read failed', error)
+  }
+})
+
+const toggleDevOverride = () => {
+  devOverride.value = !devOverride.value
+  edgeGlobal.edgeState.devOverride = devOverride.value
+  try {
+    if (devOverride.value) {
+      localStorage.setItem(DEV_OVERRIDE_KEY, '1')
+    } else {
+      localStorage.removeItem(DEV_OVERRIDE_KEY)
+    }
+  } catch (error) {
+    console.warn('dev override write failed', error)
+  }
+}
+
+const handleDevTap = () => {
+  const now = Date.now()
+  devTapTimes.value = devTapTimes.value.filter(time => now - time <= DEV_TAP_WINDOW_MS)
+  devTapTimes.value.push(now)
+  if (devTapTimes.value.length >= DEV_TAP_TARGET) {
+    devTapTimes.value = []
+    toggleDevOverride()
+  }
+}
+
 watch(() => props.modelValue, (newValue) => {
   setOpen(newValue)
 })
@@ -156,7 +195,7 @@ const submenu = computed(() => {
 })
 
 const isDev = computed(() => {
-  return process.dev
+  return process.dev || devOverride.value
 })
 
 const isAdmin = computed(() => {
@@ -180,7 +219,7 @@ const subMenuItems = (items) => {
   <div class="flex h-full">
     <!-- Primary Sidebar -->
     <Sidebar :style="styleOverrides" side="left" v-bind="attrs" :collapsible="collapsible">
-      <SidebarHeader :class="props.headerClasses">
+      <SidebarHeader :class="props.headerClasses" @click="handleDevTap">
         <div v-if="isDev" :class="edgeGlobal.edgeState.isEmulator ? 'bg-yellow-500' : 'bg-red-500'" class="text-xs text-white px-0 text-center ">
           {{ edgeGlobal.edgeState.isEmulator ? 'Emulator' : '! Production !' }}
         </div>
