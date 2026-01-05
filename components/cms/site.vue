@@ -46,6 +46,7 @@ const state = reactive({
       favicon: { bindings: { 'field-type': 'text', 'label': 'Favicon' }, cols: '12', value: '' },
       menuPosition: { bindings: { 'field-type': 'select', 'label': 'Menu Position', 'items': ['left', 'center', 'right'] }, cols: '12', value: 'right' },
       domains: { bindings: { 'field-type': 'tags', 'label': 'Domains', 'helper': 'Add or remove domains' }, cols: '12', value: [] },
+      contactEmail: { bindings: { 'field-type': 'text', 'label': 'Contact Email' }, cols: '12', value: '' },
       metaTitle: { bindings: { 'field-type': 'text', 'label': 'Meta Title' }, cols: '12', value: '' },
       metaDescription: { bindings: { 'field-type': 'textarea', 'label': 'Meta Description' }, cols: '12', value: '' },
       structuredData: { bindings: { 'field-type': 'textarea', 'label': 'Structured Data (JSON-LD)' }, cols: '12', value: '' },
@@ -85,6 +86,7 @@ const schemas = {
         message: 'At least one domain is required',
         path: ['domains', 0],
       }),
+    contactEmail: z.string().optional(),
     theme: z.string({
       required_error: 'Theme is required',
     }).min(1, { message: 'Theme is required' }),
@@ -443,6 +445,7 @@ const isSiteDiff = computed(() => {
       logo: publishedSite.logo,
       favicon: publishedSite.favicon,
       menuPosition: publishedSite.menuPosition,
+      contactEmail: publishedSite.contactEmail,
       metaTitle: publishedSite.metaTitle,
       metaDescription: publishedSite.metaDescription,
       structuredData: publishedSite.structuredData,
@@ -454,6 +457,7 @@ const isSiteDiff = computed(() => {
       logo: siteData.value.logo,
       favicon: siteData.value.favicon,
       menuPosition: siteData.value.menuPosition,
+      contactEmail: siteData.value.contactEmail,
       metaTitle: siteData.value.metaTitle,
       metaDescription: siteData.value.metaDescription,
       structuredData: siteData.value.structuredData,
@@ -479,6 +483,7 @@ const discardSiteSettings = async () => {
       logo: publishedSite.logo || '',
       favicon: publishedSite.favicon || '',
       menuPosition: publishedSite.menuPosition || '',
+      contactEmail: publishedSite.contactEmail || '',
       metaTitle: publishedSite.metaTitle || '',
       metaDescription: publishedSite.metaDescription || '',
       structuredData: publishedSite.structuredData || '',
@@ -1107,6 +1112,13 @@ const pageSettingsUpdated = async (pageData) => {
                 name="domains"
                 label="Domains"
                 placeholder="Add or remove domains"
+                class="w-full"
+              />
+              <edge-shad-input
+                v-model="slotProps.workingDoc.contactEmail"
+                name="contactEmail"
+                label="Contact Email"
+                placeholder="name@example.com"
                 class="w-full"
               />
               <edge-shad-select-tags
