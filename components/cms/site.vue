@@ -204,7 +204,7 @@ const titleFromSlug = (slug) => {
 }
 
 const ensureMenuBuckets = (menus) => {
-  const normalized = menus && typeof menus === 'object'
+  const normalized = (menus && typeof menus === 'object')
     ? edgeGlobal.dupObject(menus)
     : {}
   if (!Array.isArray(normalized['Site Root']))
@@ -216,7 +216,7 @@ const ensureMenuBuckets = (menus) => {
 
 const ensureUniqueSlug = (candidate, templateDoc, usedSlugs) => {
   const fallbackBase = slugify(templateDoc?.slug || templateDoc?.name || '')
-  let base = candidate && candidate.trim().length ? slugify(candidate) : ''
+  let base = (candidate && candidate.trim().length) ? slugify(candidate) : ''
   if (!base)
     base = fallbackBase || `page-${usedSlugs.size + 1}`
   let slugCandidate = base
