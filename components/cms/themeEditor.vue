@@ -57,7 +57,10 @@ const state = reactive({
       "navBorder": "",
       "navActive": "#3B82F6",
       "navHoverBg": "",
-      "navActiveBg": ""
+      "navActiveBg": "",
+      "sideNavBg": "#FFFFFF",
+      "sideNavText": "#000000",
+      "sideNavActive": "#AFBD23"
     },
     "fontFamily": {
       "sans": ["Overpass", "sans-serif"],
