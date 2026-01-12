@@ -197,6 +197,8 @@ const menuPositionOptions = [
   { value: 'right', label: 'Right' },
 ]
 
+const isExternalLinkEntry = entry => entry?.item && typeof entry.item === 'object' && entry.item.type === 'external'
+
 const TEMPLATE_PAGES_PATH = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/templates/pages`)
 const seededSiteIds = new Set()
 
@@ -339,6 +341,10 @@ const duplicateEntriesWithPages = async (entries = [], options) => {
   for (const entry of entries) {
     if (!entry || entry.item == null)
       continue
+    if (isExternalLinkEntry(entry)) {
+      next.push(edgeGlobal.dupObject(entry))
+      continue
+    }
     if (typeof entry.item === 'string' || entry.item === '') {
       const templateDoc = templatePages?.[entry.item] || null
       const slug = ensureUniqueSlug(entry.name || '', templateDoc, usedSlugs)
@@ -701,6 +707,8 @@ watch(() => state.menus, async (newVal) => {
   const newPage = JSON.parse(JSON.stringify(pageInit))
   for (const [menuName, items] of Object.entries(newVal)) {
     for (const [index, item] of items.entries()) {
+      if (isExternalLinkEntry(item))
+        continue
       if (typeof item.item === 'string') {
         if (item.item === '') {
           newPage.name = item.name
@@ -716,9 +724,11 @@ watch(() => state.menus, async (newVal) => {
           }
         }
       }
-      if (typeof item.item === 'object') {
+      if (typeof item.item === 'object' && !isExternalLinkEntry(item)) {
         for (const [subMenuName, subItems] of Object.entries(item.item)) {
           for (const [subIndex, subItem] of subItems.entries()) {
+            if (isExternalLinkEntry(subItem))
+              continue
             if (typeof subItem.item === 'string') {
               if (subItem.item === '') {
                 newPage.name = subItem.name
