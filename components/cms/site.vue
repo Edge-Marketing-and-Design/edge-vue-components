@@ -15,6 +15,7 @@ const props = defineProps({
   },
 })
 const edgeFirebase = inject('edgeFirebase')
+const { createDefaults: createSiteSettingsDefaults, createNewDocSchema: createSiteSettingsNewDocSchema } = useSiteSettingsTemplate()
 
 const normalizeForCompare = (value) => {
   if (Array.isArray(value))
@@ -38,27 +39,7 @@ const state = reactive({
   filter: '',
   userFilter: 'all',
   newDocs: {
-    sites: {
-      name: { bindings: { 'field-type': 'text', 'label': 'Name' }, cols: '12', value: '' },
-      theme: { bindings: { 'field-type': 'collection', 'label': 'Themes', 'collection-path': 'themes' }, cols: '12', value: '' },
-      allowedThemes: { bindings: { 'field-type': 'tags', 'label': 'Allowed Themes' }, cols: '12', value: [] },
-      logo: { bindings: { 'field-type': 'text', 'label': 'Dark logo' }, cols: '12', value: '' },
-      logoLight: { bindings: { 'field-type': 'text', 'label': 'Logo Light' }, cols: '12', value: '' },
-      logoText: { bindings: { 'field-type': 'text', 'label': 'Logo Text' }, cols: '12', value: '' },
-      logoType: { bindings: { 'field-type': 'select', 'label': 'Logo Type', 'items': ['image', 'text'] }, cols: '12', value: 'image' },
-      brandLogoDark: { bindings: { 'field-type': 'text', 'label': 'Brand Logo Dark' }, cols: '12', value: '' },
-      brandLogoLight: { bindings: { 'field-type': 'text', 'label': 'Brand Logo Light' }, cols: '12', value: '' },
-      favicon: { bindings: { 'field-type': 'text', 'label': 'Favicon' }, cols: '12', value: '' },
-      menuPosition: { bindings: { 'field-type': 'select', 'label': 'Menu Position', 'items': ['left', 'center', 'right'] }, cols: '12', value: 'right' },
-      domains: { bindings: { 'field-type': 'tags', 'label': 'Domains', 'helper': 'Add or remove domains' }, cols: '12', value: [] },
-      contactEmail: { bindings: { 'field-type': 'text', 'label': 'Contact Email' }, cols: '12', value: '' },
-      metaTitle: { bindings: { 'field-type': 'text', 'label': 'Meta Title' }, cols: '12', value: '' },
-      metaDescription: { bindings: { 'field-type': 'textarea', 'label': 'Meta Description' }, cols: '12', value: '' },
-      structuredData: { bindings: { 'field-type': 'textarea', 'label': 'Structured Data (JSON-LD)' }, cols: '12', value: '' },
-      users: { bindings: { 'field-type': 'users', 'label': 'Users', 'hint': 'Choose users' }, cols: '12', value: [] },
-      aiAgentUserId: { bindings: { 'field-type': 'select', 'label': 'Agent Data for AI to use to build initial site' }, cols: '12', value: '' },
-      aiInstructions: { bindings: { 'field-type': 'textarea', 'label': 'Additional AI Instructions' }, cols: '12', value: '' },
-    },
+    sites: createSiteSettingsNewDocSchema(),
   },
   mounted: false,
   page: {},
@@ -67,11 +48,6 @@ const state = reactive({
   siteSettings: false,
   hasError: false,
   updating: false,
-  logoPickerOpen: false,
-  logoLightPickerOpen: false,
-  brandLogoDarkPickerOpen: false,
-  brandLogoLightPickerOpen: false,
-  faviconPickerOpen: false,
   aiSectionOpen: false,
   selectedPostId: '',
   viewMode: 'pages',
@@ -110,6 +86,9 @@ const schemas = {
     metaTitle: z.string().optional(),
     metaDescription: z.string().optional(),
     structuredData: z.string().optional(),
+    trackingFacebookPixel: z.string().optional(),
+    trackingGoogleAnalytics: z.string().optional(),
+    trackingAdroll: z.string().optional(),
     aiAgentUserId: z.string().optional(),
     aiInstructions: z.string().optional(),
   })),
@@ -325,6 +304,35 @@ const deriveThemeMenus = (themeDoc = {}) => {
   return null
 }
 
+const shouldApplyThemeSetting = (currentValue, baseValue) => {
+  if (currentValue === undefined || currentValue === null)
+    return true
+  if (typeof currentValue === 'string')
+    return !currentValue.trim() || areEqualNormalized(currentValue, baseValue)
+  if (Array.isArray(currentValue))
+    return currentValue.length === 0 || areEqualNormalized(currentValue, baseValue)
+  if (typeof currentValue === 'object')
+    return Object.keys(currentValue).length === 0 || areEqualNormalized(currentValue, baseValue)
+  return areEqualNormalized(currentValue, baseValue)
+}
+
+const buildThemeSettingsPayload = (themeDoc = {}, siteDoc = {}) => {
+  if (!themeDoc?.defaultSiteSettings || typeof themeDoc.defaultSiteSettings !== 'object' || Array.isArray(themeDoc.defaultSiteSettings))
+    return {}
+  const baseDefaults = createSiteSettingsDefaults()
+  const payload = {}
+  for (const [key, baseValue] of Object.entries(baseDefaults)) {
+    if (!(key in themeDoc.defaultSiteSettings))
+      continue
+    const themeValue = themeDoc.defaultSiteSettings[key]
+    if (areEqualNormalized(themeValue, baseValue))
+      continue
+    if (shouldApplyThemeSetting(siteDoc?.[key], baseValue))
+      payload[key] = themeValue
+  }
+  return payload
+}
+
 const ensureTemplatePagesSnapshot = async () => {
   if (!edgeFirebase.data?.[TEMPLATE_PAGES_PATH.value])
     await edgeFirebase.startSnapshot(TEMPLATE_PAGES_PATH.value)
@@ -382,21 +390,26 @@ const duplicateEntriesWithPages = async (entries = [], options) => {
   return next
 }
 
-const seedNewSiteFromTheme = async (siteId, themeId) => {
+const seedNewSiteFromTheme = async (siteId, themeId, siteDoc) => {
   if (!siteId || !themeId)
     return
   const themeDoc = themeCollection.value?.[themeId]
   if (!themeDoc)
     return
+  const updatePayload = {}
   const themeMenus = deriveThemeMenus(themeDoc)
-  if (!themeMenus)
-    return
-  const templatePages = await ensureTemplatePagesSnapshot()
-  const usedSlugs = new Set()
-  const seededMenus = ensureMenuBuckets(themeMenus)
-  seededMenus['Site Root'] = await duplicateEntriesWithPages(seededMenus['Site Root'], { templatePages, siteId, usedSlugs })
-  seededMenus['Not In Menu'] = await duplicateEntriesWithPages(seededMenus['Not In Menu'], { templatePages, siteId, usedSlugs })
-  await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, siteId, { menus: seededMenus })
+  if (themeMenus) {
+    const templatePages = await ensureTemplatePagesSnapshot()
+    const usedSlugs = new Set()
+    const seededMenus = ensureMenuBuckets(themeMenus)
+    seededMenus['Site Root'] = await duplicateEntriesWithPages(seededMenus['Site Root'], { templatePages, siteId, usedSlugs })
+    seededMenus['Not In Menu'] = await duplicateEntriesWithPages(seededMenus['Not In Menu'], { templatePages, siteId, usedSlugs })
+    updatePayload.menus = seededMenus
+  }
+  const settingsPayload = buildThemeSettingsPayload(themeDoc, siteDoc || {})
+  Object.assign(updatePayload, settingsPayload)
+  if (Object.keys(updatePayload).length)
+    await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, siteId, updatePayload)
 }
 
 const handleNewSiteSaved = async ({ docId, data, collection }) => {
@@ -411,7 +424,7 @@ const handleNewSiteSaved = async ({ docId, data, collection }) => {
     return
   seededSiteIds.add(docId)
   try {
-    await seedNewSiteFromTheme(docId, themeId)
+    await seedNewSiteFromTheme(docId, themeId, data)
   }
   catch (error) {
     console.error('Failed to seed site from theme defaults', error)
@@ -473,6 +486,9 @@ const isSiteDiff = computed(() => {
       metaTitle: publishedSite.metaTitle,
       metaDescription: publishedSite.metaDescription,
       structuredData: publishedSite.structuredData,
+      trackingFacebookPixel: publishedSite.trackingFacebookPixel,
+      trackingGoogleAnalytics: publishedSite.trackingGoogleAnalytics,
+      trackingAdroll: publishedSite.trackingAdroll,
     }, {
       domains: siteData.value.domains,
       menus: siteData.value.menus,
@@ -490,6 +506,9 @@ const isSiteDiff = computed(() => {
       metaTitle: siteData.value.metaTitle,
       metaDescription: siteData.value.metaDescription,
       structuredData: siteData.value.structuredData,
+      trackingFacebookPixel: siteData.value.trackingFacebookPixel,
+      trackingGoogleAnalytics: siteData.value.trackingGoogleAnalytics,
+      trackingAdroll: siteData.value.trackingAdroll,
     })
   }
   return false
@@ -521,6 +540,9 @@ const discardSiteSettings = async () => {
       metaTitle: publishedSite.metaTitle || '',
       metaDescription: publishedSite.metaDescription || '',
       structuredData: publishedSite.structuredData || '',
+      trackingFacebookPixel: publishedSite.trackingFacebookPixel || '',
+      trackingGoogleAnalytics: publishedSite.trackingGoogleAnalytics || '',
+      trackingAdroll: publishedSite.trackingAdroll || '',
     })
   }
 }
@@ -667,19 +689,6 @@ watch(pages, (pagesCollection) => {
     return
   state.menus = nextMenu
 }, { immediate: true, deep: true })
-
-watch(() => state.siteSettings, (open) => {
-  if (!open)
-    state.logoPickerOpen = false
-  if (!open)
-    state.logoLightPickerOpen = false
-  if (!open)
-    state.brandLogoDarkPickerOpen = false
-  if (!open)
-    state.brandLogoLightPickerOpen = false
-  if (!open)
-    state.faviconPickerOpen = false
-})
 
 watch(() => props.page, (next) => {
   if (next) {
@@ -1144,318 +1153,17 @@ const pageSettingsUpdated = async (pageData) => {
         >
           <template #main="slotProps">
             <div class="p-6 h-[calc(100vh-140px)] overflow-y-auto">
-              <Tabs class="w-full" default-value="general">
-                <TabsList class="w-full flex flex-wrap gap-2 bg-muted/40 p-1 rounded-lg">
-                  <TabsTrigger value="general" class="text-md uppercase font-medium">
-                    General
-                  </TabsTrigger>
-                  <TabsTrigger value="appearance" class="text-md uppercase font-medium">
-                    Appearance
-                  </TabsTrigger>
-                  <TabsTrigger value="branding" class="text-md uppercase font-medium">
-                    Branding
-                  </TabsTrigger>
-                  <TabsTrigger value="seo" class="text-md uppercase font-medium">
-                    SEO
-                  </TabsTrigger>
-                </TabsList>
-                <TabsContent value="general" class="pt-4 space-y-4">
-                  <edge-shad-input
-                    v-model="slotProps.workingDoc.name"
-                    name="name"
-                    label="Name"
-                    placeholder="Enter name"
-                    class="w-full"
-                  />
-                  <edge-shad-tags
-                    v-model="slotProps.workingDoc.domains"
-                    name="domains"
-                    label="Domains"
-                    placeholder="Add or remove domains"
-                    class="w-full"
-                  />
-                  <edge-shad-input
-                    v-model="slotProps.workingDoc.contactEmail"
-                    name="contactEmail"
-                    label="Contact Email"
-                    placeholder="name@example.com"
-                    class="w-full"
-                  />
-                  <edge-shad-select-tags
-                    v-if="Object.keys(orgUsers).length > 0 && isAdmin"
-                    v-model="slotProps.workingDoc.users" :disabled="!edgeGlobal.isAdminGlobal(edgeFirebase).value"
-                    :items="userOptions" name="users" label="Users"
-                    item-title="label" item-value="value" placeholder="Select users" class="w-full" :multiple="true"
-                  />
-                  <p v-else class="text-sm text-muted-foreground">
-                    No organization users available for this site.
-                  </p>
-                </TabsContent>
-                <TabsContent value="appearance" class="pt-4 space-y-4">
-                  <edge-shad-select-tags
-                    v-if="isAdmin"
-                    :model-value="Array.isArray(slotProps.workingDoc.allowedThemes) ? slotProps.workingDoc.allowedThemes : []"
-                    name="allowedThemes"
-                    label="Allowed Themes"
-                    placeholder="Select allowed themes"
-                    class="w-full"
-                    :items="themeOptions"
-                    item-title="label"
-                    item-value="value"
-                    @update:model-value="(value) => {
-                      const normalized = Array.isArray(value) ? value : []
-                      slotProps.workingDoc.allowedThemes = normalized
-                      if (normalized.length && !normalized.includes(slotProps.workingDoc.theme)) {
-                        slotProps.workingDoc.theme = normalized[0] || ''
-                      }
-                    }"
-                  />
-                  <edge-shad-select
-                    :model-value="slotProps.workingDoc.theme || ''"
-                    name="theme"
-                    label="Theme"
-                    placeholder="Select a theme"
-                    class="w-full"
-                    :items="themeItemsForAllowed(slotProps.workingDoc.allowedThemes, slotProps.workingDoc.theme)"
-                    item-title="label"
-                    item-value="value"
-                    @update:model-value="value => (slotProps.workingDoc.theme = value || '')"
-                  />
-                  <edge-shad-select
-                    :model-value="slotProps.workingDoc.menuPosition || ''"
-                    name="menuPosition"
-                    label="Menu Position"
-                    placeholder="Select menu position"
-                    class="w-full"
-                    :items="menuPositionOptions"
-                    item-title="label"
-                    item-value="value"
-                    @update:model-value="value => (slotProps.workingDoc.menuPosition = value || '')"
-                  />
-                </TabsContent>
-                <TabsContent value="branding" class="pt-4 space-y-4">
-                  <div class="space-y-2">
-                    <label class="text-sm font-medium text-foreground flex items-center justify-between">
-                      Dark logo
-                      <edge-shad-button
-                        type="button"
-                        variant="link"
-                        class="px-0 h-auto text-sm"
-                        @click="state.logoPickerOpen = !state.logoPickerOpen"
-                      >
-                        {{ state.logoPickerOpen ? 'Hide picker' : 'Select logo' }}
-                      </edge-shad-button>
-                    </label>
-                    <div class="flex items-center gap-4">
-                      <div v-if="slotProps.workingDoc.logo" class="flex items-center gap-3">
-                        <img :src="slotProps.workingDoc.logo" alt="Logo preview" class="h-16 w-auto rounded-md border border-border bg-muted object-contain">
-                        <edge-shad-button
-                          type="button"
-                          variant="ghost"
-                          class="h-8"
-                          @click="slotProps.workingDoc.logo = ''"
-                        >
-                          Remove
-                        </edge-shad-button>
-                      </div>
-                      <span v-else class="text-sm text-muted-foreground italic">No logo selected</span>
-                    </div>
-                    <div v-if="state.logoPickerOpen" class="mt-2 border border-dashed rounded-lg p-2">
-                      <edge-cms-media-manager
-                        :site="props.site"
-                        :select-mode="true"
-                        :default-tags="['Logos']"
-                        @select="(url) => {
-                          slotProps.workingDoc.logo = url
-                          state.logoPickerOpen = false
-                        }"
-                      />
-                    </div>
-                  </div>
-                  <div class="space-y-2">
-                    <label class="text-sm font-medium text-foreground flex items-center justify-between">
-                      Light logo
-                      <edge-shad-button
-                        type="button"
-                        variant="link"
-                        class="px-0 h-auto text-sm"
-                        @click="state.logoLightPickerOpen = !state.logoLightPickerOpen"
-                      >
-                        {{ state.logoLightPickerOpen ? 'Hide picker' : 'Select logo' }}
-                      </edge-shad-button>
-                    </label>
-                    <div class="flex items-center gap-4">
-                      <div v-if="slotProps.workingDoc.logoLight" class="flex items-center gap-3">
-                        <img :src="slotProps.workingDoc.logoLight" alt="Light logo preview" class="h-16 w-auto rounded-md border border-border bg-muted object-contain">
-                        <edge-shad-button
-                          type="button"
-                          variant="ghost"
-                          class="h-8"
-                          @click="slotProps.workingDoc.logoLight = ''"
-                        >
-                          Remove
-                        </edge-shad-button>
-                      </div>
-                      <span v-else class="text-sm text-muted-foreground italic">No light logo selected</span>
-                    </div>
-                    <div v-if="state.logoLightPickerOpen" class="mt-2 border border-dashed rounded-lg p-2">
-                      <edge-cms-media-manager
-                        :site="props.site"
-                        :select-mode="true"
-                        :default-tags="['Logos']"
-                        @select="(url) => {
-                          slotProps.workingDoc.logoLight = url
-                          state.logoLightPickerOpen = false
-                        }"
-                      />
-                    </div>
-                  </div>
-                  <div v-if="isAdmin" class="space-y-4 border border-dashed rounded-lg p-4">
-                    <div class="text-sm font-semibold text-foreground">
-                      Umbrella Brand
-                    </div>
-                    <div class="space-y-2">
-                      <label class="text-sm font-medium text-foreground flex items-center justify-between">
-                        Dark brand logo
-                        <edge-shad-button
-                          type="button"
-                          variant="link"
-                          class="px-0 h-auto text-sm"
-                          @click="state.brandLogoDarkPickerOpen = !state.brandLogoDarkPickerOpen"
-                        >
-                          {{ state.brandLogoDarkPickerOpen ? 'Hide picker' : 'Select logo' }}
-                        </edge-shad-button>
-                      </label>
-                      <div class="flex items-center gap-4">
-                        <div v-if="slotProps.workingDoc.brandLogoDark" class="flex items-center gap-3">
-                          <img :src="slotProps.workingDoc.brandLogoDark" alt="Brand dark logo preview" class="h-16 w-auto rounded-md border border-border bg-muted object-contain">
-                          <edge-shad-button
-                            type="button"
-                            variant="ghost"
-                            class="h-8"
-                            @click="slotProps.workingDoc.brandLogoDark = ''"
-                          >
-                            Remove
-                          </edge-shad-button>
-                        </div>
-                        <span v-else class="text-sm text-muted-foreground italic">No brand dark logo selected</span>
-                      </div>
-                      <div v-if="state.brandLogoDarkPickerOpen" class="mt-2 border border-dashed rounded-lg p-2">
-                        <edge-cms-media-manager
-                          :site="props.site"
-                          :select-mode="true"
-                          :default-tags="['Logos']"
-                          @select="(url) => {
-                            slotProps.workingDoc.brandLogoDark = url
-                            state.brandLogoDarkPickerOpen = false
-                          }"
-                        />
-                      </div>
-                    </div>
-                    <div class="space-y-2">
-                      <label class="text-sm font-medium text-foreground flex items-center justify-between">
-                        Light brand logo
-                        <edge-shad-button
-                          type="button"
-                          variant="link"
-                          class="px-0 h-auto text-sm"
-                          @click="state.brandLogoLightPickerOpen = !state.brandLogoLightPickerOpen"
-                        >
-                          {{ state.brandLogoLightPickerOpen ? 'Hide picker' : 'Select logo' }}
-                        </edge-shad-button>
-                      </label>
-                      <div class="flex items-center gap-4">
-                        <div v-if="slotProps.workingDoc.brandLogoLight" class="flex items-center gap-3">
-                          <img :src="slotProps.workingDoc.brandLogoLight" alt="Brand light logo preview" class="h-16 w-auto rounded-md border border-border bg-muted object-contain">
-                          <edge-shad-button
-                            type="button"
-                            variant="ghost"
-                            class="h-8"
-                            @click="slotProps.workingDoc.brandLogoLight = ''"
-                          >
-                            Remove
-                          </edge-shad-button>
-                        </div>
-                        <span v-else class="text-sm text-muted-foreground italic">No brand light logo selected</span>
-                      </div>
-                      <div v-if="state.brandLogoLightPickerOpen" class="mt-2 border border-dashed rounded-lg p-2">
-                        <edge-cms-media-manager
-                          :site="props.site"
-                          :select-mode="true"
-                          :default-tags="['Logos']"
-                          @select="(url) => {
-                            slotProps.workingDoc.brandLogoLight = url
-                            state.brandLogoLightPickerOpen = false
-                          }"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                  <div class="space-y-2">
-                    <label class="text-sm font-medium text-foreground flex items-center justify-between">
-                      Favicon
-                      <edge-shad-button
-                        type="button"
-                        variant="link"
-                        class="px-0 h-auto text-sm"
-                        @click="state.faviconPickerOpen = !state.faviconPickerOpen"
-                      >
-                        {{ state.faviconPickerOpen ? 'Hide picker' : 'Select favicon' }}
-                      </edge-shad-button>
-                    </label>
-                    <div class="flex items-center gap-4">
-                      <div v-if="slotProps.workingDoc.favicon" class="flex items-center gap-3">
-                        <img :src="slotProps.workingDoc.favicon" alt="Favicon preview" class="h-12 w-12 rounded-md border border-border bg-muted object-contain">
-                        <edge-shad-button
-                          type="button"
-                          variant="ghost"
-                          class="h-8"
-                          @click="slotProps.workingDoc.favicon = ''"
-                        >
-                          Remove
-                        </edge-shad-button>
-                      </div>
-                      <span v-else class="text-sm text-muted-foreground italic">No favicon selected</span>
-                    </div>
-                    <div v-if="state.faviconPickerOpen" class="mt-2 border border-dashed rounded-lg p-2">
-                      <edge-cms-media-manager
-                        :site="props.site"
-                        :select-mode="true"
-                        :default-tags="['Logos']"
-                        @select="(url) => {
-                          slotProps.workingDoc.favicon = url
-                          state.faviconPickerOpen = false
-                        }"
-                      />
-                    </div>
-                  </div>
-                </TabsContent>
-                <TabsContent value="seo" class="pt-4">
-                  <div class="space-y-4">
-                    <p class="text-sm text-muted-foreground">
-                      Default settings if the information is not entered on the page.
-                    </p>
-                    <edge-shad-input
-                      v-model="slotProps.workingDoc.metaTitle"
-                      label="Meta Title"
-                      name="metaTitle"
-                    />
-                    <edge-shad-textarea
-                      v-model="slotProps.workingDoc.metaDescription"
-                      label="Meta Description"
-                      name="metaDescription"
-                    />
-                    <edge-cms-code-editor
-                      v-model="slotProps.workingDoc.structuredData"
-                      title="Structured Data (JSON-LD)"
-                      language="json"
-                      name="structuredData"
-                      height="300px"
-                      class="mb-4 w-full"
-                    />
-                  </div>
-                </TabsContent>
-              </Tabs>
+              <edge-cms-site-settings-form
+                :settings="slotProps.workingDoc"
+                :theme-options="themeOptions"
+                :user-options="userOptions"
+                :has-users="Object.keys(orgUsers).length > 0"
+                :show-users="true"
+                :show-theme-fields="true"
+                :is-admin="isAdmin"
+                :enable-media-picker="true"
+                :site-id="props.site"
+              />
             </div>
             <SheetFooter class="pt-2 flex justify-between">
               <edge-shad-button variant="destructive" class="text-white" @click="state.siteSettings = false">

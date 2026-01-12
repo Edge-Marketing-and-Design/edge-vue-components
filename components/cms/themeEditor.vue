@@ -1,5 +1,6 @@
 <script setup>
 import { toTypedSchema } from '@vee-validate/zod'
+import { FolderCog } from 'lucide-vue-next'
 import * as z from 'zod'
 const props = defineProps({
   themeId: {
@@ -10,6 +11,7 @@ const props = defineProps({
 
 const emit = defineEmits(['head'])
 const edgeFirebase = inject('edgeFirebase')
+const { createDefaults: createSiteSettingsDefaults } = useSiteSettingsTemplate()
 const state = reactive({
   filter: '',
   workingDoc: {},
@@ -90,10 +92,12 @@ const state = reactive({
           'Not In Menu': [],
         },
       },
+      defaultSiteSettings: { value: createSiteSettingsDefaults() },
     },
   },
   mounted: false,
   loading: false,
+  defaultSettingsOpen: false,
 })
 
 const blockSchema = toTypedSchema(z.object({
@@ -106,14 +110,19 @@ onMounted(() => {
   // state.mounted = true
 })
 
-const headObject = computed(() => {
+const lastValidHead = ref({})
+const lastValidTheme = ref({})
+
+const parseJsonSafe = (value, fallback) => {
   try {
-    return JSON.parse(state.workingDoc.headJSON || '{}')
+    return JSON.parse(value || '{}')
   }
-  catch (e) {
-    return {}
+  catch (error) {
+    return fallback
   }
-})
+}
+
+const headObject = computed(() => lastValidHead.value)
 
 watch(headObject, (newHeadElements) => {
   emit('head', newHeadElements)
@@ -151,6 +160,19 @@ const ensureDefaultMenusObject = (doc = state.workingDoc) => {
       doc.defaultMenus[key] = []
   }
   return doc.defaultMenus
+}
+
+const ensureDefaultSiteSettings = (doc = state.workingDoc) => {
+  if (!doc)
+    return {}
+  if (!doc.defaultSiteSettings || typeof doc.defaultSiteSettings !== 'object' || Array.isArray(doc.defaultSiteSettings))
+    doc.defaultSiteSettings = createSiteSettingsDefaults()
+  const defaults = createSiteSettingsDefaults()
+  for (const key of Object.keys(defaults)) {
+    if (doc.defaultSiteSettings[key] === undefined)
+      doc.defaultSiteSettings[key] = defaults[key]
+  }
+  return doc.defaultSiteSettings
 }
 
 const collectTemplateIdsFromMenus = (menus = {}) => {
@@ -275,6 +297,7 @@ const editorDocUpdates = (workingDoc) => {
   state.workingDoc = workingDoc
   ensureDefaultPagesArray(state.workingDoc)
   ensureDefaultMenusObject(state.workingDoc)
+  ensureDefaultSiteSettings(state.workingDoc)
   hydrateMenusFromDefaultPages(state.workingDoc)
   syncDefaultPagesFromMenus()
 }
@@ -311,6 +334,14 @@ watch(() => state.workingDoc?.defaultMenus, () => {
     return
   syncDefaultPagesFromMenus()
 }, { deep: true })
+
+watch(() => state.workingDoc?.headJSON, (value) => {
+  lastValidHead.value = parseJsonSafe(value, lastValidHead.value)
+}, { immediate: true })
+
+watch(() => state.workingDoc?.theme, (value) => {
+  lastValidTheme.value = parseJsonSafe(value, lastValidTheme.value)
+}, { immediate: true })
 
 onBeforeMount(async () => {
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites`]) {
@@ -362,9 +393,18 @@ onBeforeMount(async () => {
           <div class="lg:w-1/3 lg:max-w-sm w-full space-y-4">
             <Card class="h-full">
               <CardHeader class="pb-2">
-                <CardTitle class="text-base">
-                  Default Template Pages
-                </CardTitle>
+                <div class="flex items-center justify-between gap-2">
+                  <CardTitle class="text-base">
+                    Default Template Pages
+                  </CardTitle>
+                  <edge-shad-button
+                    size="icon"
+                    type="text"
+                    @click="state.defaultSettingsOpen = true"
+                  >
+                    <FolderCog class="h-4 w-4" />
+                  </edge-shad-button>
+                </div>
                 <CardDescription class="text-xs">
                   Choose which template pages are created for new sites and organize them into Site Menu or Not In Menu.
                 </CardDescription>
@@ -416,7 +456,7 @@ onBeforeMount(async () => {
                     :site-id="edgeGlobal.edgeState.blockEditorSite"
                     class="!h-[calc(100vh-220px)] overflow-y-auto"
                     list-only
-                    :theme="JSON.parse(slotProps.workingDoc.theme)"
+                    :theme="lastValidTheme"
                   />
                 </div>
               </div>
@@ -425,5 +465,30 @@ onBeforeMount(async () => {
         </div>
       </template>
     </edge-editor>
+    <Sheet v-model:open="state.defaultSettingsOpen">
+      <SheetContent side="left" class="w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl">
+        <SheetHeader>
+          <SheetTitle>Default Site Settings</SheetTitle>
+          <SheetDescription>
+            These values seed new sites created with this theme.
+          </SheetDescription>
+        </SheetHeader>
+        <div class="p-6 h-[calc(100vh-140px)] overflow-y-auto">
+          <edge-cms-site-settings-form
+            v-if="state.workingDoc"
+            :settings="state.workingDoc.defaultSiteSettings"
+            :show-users="false"
+            :show-theme-fields="false"
+            :is-admin="true"
+            :enable-media-picker="false"
+          />
+        </div>
+        <SheetFooter class="pt-2">
+          <edge-shad-button class="w-full" @click="state.defaultSettingsOpen = false">
+            Done
+          </edge-shad-button>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
   </div>
 </template>
