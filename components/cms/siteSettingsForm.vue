@@ -86,21 +86,24 @@ const menuPositionOptions = [
 
 <template>
   <Tabs class="w-full" default-value="general">
-    <TabsList class="w-full flex flex-wrap gap-2 bg-muted/40 p-1 rounded-lg">
-      <TabsTrigger value="general" class="text-md uppercase font-medium">
+    <TabsList class="w-full gap-2 bg-muted/40 p-1 rounded-lg">
+      <TabsTrigger value="general" class="text-sm uppercase font-medium">
         General
       </TabsTrigger>
-      <TabsTrigger value="appearance" class="text-md uppercase font-medium">
+      <TabsTrigger value="appearance" class="text-sm uppercase font-medium">
         Appearance
       </TabsTrigger>
-      <TabsTrigger value="branding" class="text-md uppercase font-medium">
+      <TabsTrigger value="branding" class="text-sm uppercase font-medium">
         Branding
       </TabsTrigger>
-      <TabsTrigger value="seo" class="text-md uppercase font-medium">
+      <TabsTrigger value="seo" class="text-sm uppercase font-medium">
         SEO
       </TabsTrigger>
-      <TabsTrigger value="tracking" class="text-md uppercase font-medium">
+      <TabsTrigger value="tracking" class="text-sm uppercase font-medium">
         Tracking Pixels
+      </TabsTrigger>
+      <TabsTrigger value="social" class="text-sm uppercase font-medium">
+        Social Media
       </TabsTrigger>
     </TabsList>
     <TabsContent value="general" class="pt-4 space-y-4">
@@ -123,6 +126,15 @@ const menuPositionOptions = [
         name="contactEmail"
         label="Contact Email"
         placeholder="name@example.com"
+        class="w-full"
+      />
+      <edge-shad-input
+        v-model="props.settings.contactPhone"
+        name="contactPhone"
+        type="tel"
+        label="Contact Phone"
+        placeholder="(555) 555-5555"
+        :mask-options="{ mask: '(###) ###-####' }"
         class="w-full"
       />
       <edge-shad-select-tags
@@ -468,6 +480,49 @@ const menuPositionOptions = [
           label="AdRoll ID"
           name="trackingAdroll"
           placeholder="ADROLL-ID"
+        />
+      </div>
+    </TabsContent>
+    <TabsContent value="social" class="pt-4">
+      <div class="space-y-4">
+        <p class="text-sm text-muted-foreground">
+          Add social media links for this site.
+        </p>
+        <edge-shad-input
+          v-model="props.settings.socialFacebook"
+          label="Facebook URL"
+          name="socialFacebook"
+          placeholder="https://facebook.com/yourpage"
+        />
+        <edge-shad-input
+          v-model="props.settings.socialInstagram"
+          label="Instagram URL"
+          name="socialInstagram"
+          placeholder="https://instagram.com/yourhandle"
+        />
+        <edge-shad-input
+          v-model="props.settings.socialTwitter"
+          label="X (Twitter) URL"
+          name="socialTwitter"
+          placeholder="https://x.com/yourhandle"
+        />
+        <edge-shad-input
+          v-model="props.settings.socialLinkedIn"
+          label="LinkedIn URL"
+          name="socialLinkedIn"
+          placeholder="https://linkedin.com/company/yourcompany"
+        />
+        <edge-shad-input
+          v-model="props.settings.socialYouTube"
+          label="YouTube URL"
+          name="socialYouTube"
+          placeholder="https://youtube.com/@yourchannel"
+        />
+        <edge-shad-input
+          v-model="props.settings.socialTikTok"
+          label="TikTok URL"
+          name="socialTikTok"
+          placeholder="https://tiktok.com/@yourhandle"
         />
       </div>
     </TabsContent>
