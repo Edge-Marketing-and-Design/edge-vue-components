@@ -1,5 +1,5 @@
 <script setup>
-import { AlertTriangle, ArrowDown, ArrowUp, Maximize2, Monitor, Smartphone, Tablet } from 'lucide-vue-next'
+import { AlertTriangle, ArrowDown, ArrowUp, Maximize2, Monitor, Smartphone, Sparkles, Tablet } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 const props = defineProps({
@@ -20,6 +20,7 @@ const props = defineProps({
 const emit = defineEmits(['head'])
 
 const edgeFirebase = inject('edgeFirebase')
+const { buildPageStructuredData } = useStructuredDataTemplates()
 
 const state = reactive({
   newDocs: {
@@ -29,11 +30,16 @@ const state = reactive({
       postContent: { value: [] },
       structure: { value: [] },
       postStructure: { value: [] },
+      metaTitle: { value: '' },
+      metaDescription: { value: '' },
+      structuredData: { value: buildPageStructuredData() },
     },
   },
   editMode: false,
   showUnpublishedChangesDialog: false,
   workingDoc: {},
+  seoAiLoading: false,
+  seoAiError: '',
   previewViewport: 'full',
   newRowLayout: '6',
   newPostRowLayout: '6',
@@ -197,6 +203,40 @@ const ensureBlocksArray = (workingDoc, key) => {
   for (const block of workingDoc[key]) {
     if (!block.id)
       block.id = edgeGlobal.generateShortId()
+  }
+}
+
+const applySeoAiResults = (payload) => {
+  if (!payload || typeof payload !== 'object')
+    return
+  if (payload.metaTitle)
+    state.workingDoc.metaTitle = payload.metaTitle
+  if (payload.metaDescription)
+    state.workingDoc.metaDescription = payload.metaDescription
+  if (payload.structuredData)
+    state.workingDoc.structuredData = payload.structuredData
+}
+
+const updateSeoWithAi = async () => {
+  if (!edgeFirebase?.user?.uid)
+    return
+  state.seoAiLoading = true
+  state.seoAiError = ''
+  try {
+    const results = await edgeFirebase.runFunction('cms-updateSeoFromAi', {
+      orgId: edgeGlobal.edgeState.currentOrganization,
+      siteId: props.site,
+      pageId: props.page,
+      uid: edgeFirebase.user.uid,
+    })
+    applySeoAiResults(results?.data || {})
+  }
+  catch (error) {
+    console.error('Failed to update SEO with AI', error)
+    state.seoAiError = 'Failed to update SEO. Try again.'
+  }
+  finally {
+    state.seoAiLoading = false
   }
 }
 
@@ -520,6 +560,15 @@ const layoutSpansFromString = (value, fallback = [6]) => {
 
 const rowUsesSpans = row => (row?.columns || []).some(col => Number.isFinite(col?.span))
 
+const rowGapClass = (row) => {
+  const gap = Number(row?.gap)
+  const allowed = new Set([0, 2, 4, 6, 8])
+  const safeGap = allowed.has(gap) ? gap : 4
+  if (safeGap === 0)
+    return 'gap-0'
+  return ['gap-0', `sm:gap-${safeGap}`].join(' ')
+}
+
 const rowGridClass = (row) => {
   const base = isMobilePreview.value
     ? 'grid grid-cols-1'
@@ -540,15 +589,6 @@ const rowVerticalAlignClass = (row) => {
     stretch: 'items-stretch',
   }
   return map[row?.verticalAlign] || map.start
-}
-
-const rowGapClass = (row) => {
-  const gap = Number(row?.gap)
-  const allowed = new Set([0, 2, 4, 6, 8])
-  const safeGap = allowed.has(gap) ? gap : 4
-  if (safeGap === 0)
-    return 'gap-0'
-  return ['gap-0', `sm:gap-${safeGap}`].join(' ')
 }
 
 const rowGridStyle = (row) => {
@@ -1119,6 +1159,23 @@ const hasUnsavedChanges = (changes) => {
             <span>Save</span>
           </edge-shad-button>
         </div>
+      </div>
+    </template>
+    <template #success-alert>
+      <div v-if="!props.isTemplateSite" class="mt-2 flex flex-wrap items-center gap-2">
+        <edge-shad-button
+          variant="outline"
+          class="text-xs h-[28px] gap-1"
+          :disabled="state.seoAiLoading"
+          @click="updateSeoWithAi"
+        >
+          <Loader2 v-if="state.seoAiLoading" class="w-3.5 h-3.5 animate-spin" />
+          <Sparkles v-else class="w-3.5 h-3.5" />
+          Update SEO with AI
+        </edge-shad-button>
+        <span v-if="state.seoAiError" class="text-xs text-destructive">
+          {{ state.seoAiError }}
+        </span>
       </div>
     </template>
     <template #main="slotProps">

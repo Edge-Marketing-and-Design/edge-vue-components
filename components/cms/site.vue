@@ -1,8 +1,9 @@
 <script setup lang="js">
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-
 import { ArrowLeft, CircleAlert, FileCheck, FilePenLine, FileStack, FolderCog, FolderDown, FolderUp, FolderX, Loader2, MoreHorizontal } from 'lucide-vue-next'
+import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
+
 const props = defineProps({
   site: {
     type: String,
@@ -16,6 +17,7 @@ const props = defineProps({
 })
 const edgeFirebase = inject('edgeFirebase')
 const { createDefaults: createSiteSettingsDefaults, createNewDocSchema: createSiteSettingsNewDocSchema } = useSiteSettingsTemplate()
+const { buildPageStructuredData } = useStructuredDataTemplates()
 
 const normalizeForCompare = (value) => {
   if (Array.isArray(value))
@@ -57,6 +59,9 @@ const pageInit = {
   name: '',
   content: [],
   blockIds: [],
+  metaTitle: '',
+  metaDescription: '',
+  structuredData: buildPageStructuredData(),
 }
 
 const schemas = {
@@ -267,6 +272,7 @@ const deriveBlockIdsFromDoc = (doc = {}) => {
 
 const buildPagePayloadFromTemplateDoc = (templateDoc, slug, displayName = '') => {
   const timestamp = Date.now()
+  const templateStructuredData = typeof templateDoc?.structuredData === 'string' ? templateDoc.structuredData.trim() : ''
   const payload = {
     name: displayName?.trim()?.length ? displayName : titleFromSlug(slug),
     slug,
@@ -278,7 +284,7 @@ const buildPagePayloadFromTemplateDoc = (templateDoc, slug, displayName = '') =>
     blockIds: [],
     metaTitle: templateDoc?.metaTitle || '',
     metaDescription: templateDoc?.metaDescription || '',
-    structuredData: templateDoc?.structuredData || '',
+    structuredData: templateStructuredData || buildPageStructuredData(),
     doc_created_at: timestamp,
     last_updated: timestamp,
   }
@@ -331,7 +337,9 @@ const buildThemeSettingsPayload = (themeDoc = {}, siteDoc = {}) => {
   for (const [key, baseValue] of Object.entries(baseDefaults)) {
     if (!(key in themeDoc.defaultSiteSettings))
       continue
-    const themeValue = themeDoc.defaultSiteSettings[key]
+    let themeValue = themeDoc.defaultSiteSettings[key]
+    if (key === 'structuredData' && typeof themeValue === 'string' && !themeValue.trim())
+      themeValue = baseValue
     if (areEqualNormalized(themeValue, baseValue))
       continue
     if (shouldApplyThemeSetting(siteDoc?.[key], baseValue))

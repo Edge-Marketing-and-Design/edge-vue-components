@@ -1,7 +1,7 @@
 <script setup>
-import { computed, reactive, watchEffect } from 'vue'
+import { computed, reactive, watch, watchEffect } from 'vue'
 import { useVModel } from '@vueuse/core'
-import { File as FileIcon, FileMinus2, FilePen, Folder, FolderMinus, FolderPen, FolderPlus, GripVertical, Plus } from 'lucide-vue-next'
+import { File as FileIcon, FileMinus2, FilePen, Folder, FolderMinus, FolderPen, FolderPlus, GripVertical, Link, Plus } from 'lucide-vue-next'
 
 const props = defineProps({
   modelValue: {
@@ -30,6 +30,15 @@ const state = reactive({
     open: false,
     menu: '',
     value: '',
+  },
+  linkDialog: {
+    open: false,
+    mode: 'add',
+    menu: '',
+    folder: '',
+    index: -1,
+    name: '',
+    url: '',
   },
   renameDialog: {
     open: false,
@@ -84,7 +93,24 @@ const uniqueSlug = (value, siblings = [], current = '', options = {}) => {
   return candidate
 }
 
-const isFolder = entry => entry && typeof entry.item === 'object'
+const uniqueDisplayName = (value, siblings = [], current = '') => {
+  const base = String(value || '').trim() || 'Link'
+  const siblingSet = new Set(siblings.filter(Boolean))
+  if (current)
+    siblingSet.delete(current)
+  if (!siblingSet.has(base))
+    return base
+  let suffix = 2
+  let candidate = `${base} (${suffix})`
+  while (siblingSet.has(candidate)) {
+    suffix += 1
+    candidate = `${base} (${suffix})`
+  }
+  return candidate
+}
+
+const isExternalLinkEntry = entry => entry?.item && typeof entry.item === 'object' && entry.item.type === 'external'
+const isFolder = entry => entry && typeof entry.item === 'object' && !isExternalLinkEntry(entry)
 
 const getFolderName = (entry) => {
   if (!isFolder(entry))
@@ -112,7 +138,13 @@ const resolveTemplateTitle = (pageId) => {
 
 const siblingSlugs = (list = [], excludeIndex = -1) => {
   return list
-    .map((entry, idx) => (idx === excludeIndex || typeof entry?.item !== 'string') ? null : entry.name)
+    .map((entry, idx) => (idx === excludeIndex || !entry?.name) ? null : entry.name)
+    .filter(Boolean)
+}
+
+const siblingNames = (list = [], excludeIndex = -1) => {
+  return list
+    .map((entry, idx) => (idx === excludeIndex ? null : entry?.name))
     .filter(Boolean)
 }
 
@@ -134,6 +166,21 @@ const addPageToMenu = (menuName, pageId, folderName = null) => {
   if (!targetList)
     return
   addPageToList(targetList, pageId, resolveTemplateTitle(pageId))
+}
+
+const addLinkToMenu = (menuName, label, url, folderName = null) => {
+  const targetList = getParentList(menuName, folderName)
+  if (!targetList)
+    return
+  const siblings = siblingNames(targetList)
+  const name = uniqueDisplayName(label, siblings)
+  targetList.push({
+    name,
+    item: {
+      type: 'external',
+      url,
+    },
+  })
 }
 
 const removePage = (menuName, index, folderName = null) => {
@@ -199,7 +246,7 @@ const deleteFolder = (menuName, index) => {
 
 const openRenameDialogForPage = (menuName, index, folderName = null) => {
   const parentList = getParentList(menuName, folderName)
-  if (!parentList?.[index])
+  if (!parentList?.[index] || isExternalLinkEntry(parentList[index]))
     return
   state.renameDialog = {
     open: true,
@@ -220,6 +267,62 @@ const openRenameDialogForFolder = (menuName, folderName, index) => {
     index,
     value: folderName,
   }
+}
+
+const resetLinkDialog = () => {
+  state.linkDialog.mode = 'add'
+  state.linkDialog.menu = ''
+  state.linkDialog.folder = ''
+  state.linkDialog.index = -1
+  state.linkDialog.name = ''
+  state.linkDialog.url = ''
+}
+
+watch(() => state.linkDialog.open, (open) => {
+  if (!open)
+    resetLinkDialog()
+})
+
+const openAddLinkDialog = (menuName, folderName = null) => {
+  state.linkDialog.mode = 'add'
+  state.linkDialog.menu = menuName
+  state.linkDialog.folder = folderName || ''
+  state.linkDialog.index = -1
+  state.linkDialog.name = ''
+  state.linkDialog.url = ''
+  state.linkDialog.open = true
+}
+
+const openEditLinkDialog = (menuName, index, entry, folderName = null) => {
+  state.linkDialog.mode = 'edit'
+  state.linkDialog.menu = menuName
+  state.linkDialog.folder = folderName || ''
+  state.linkDialog.index = index
+  state.linkDialog.name = entry?.name || ''
+  state.linkDialog.url = entry?.item?.url || ''
+  state.linkDialog.open = true
+}
+
+const submitLinkDialog = () => {
+  const label = state.linkDialog.name?.trim() || ''
+  const url = state.linkDialog.url?.trim() || ''
+  if (!label || !url)
+    return
+  const targetList = getParentList(state.linkDialog.menu, state.linkDialog.folder || null)
+  if (!targetList)
+    return
+  if (state.linkDialog.mode === 'edit') {
+    const target = targetList[state.linkDialog.index]
+    if (!target || !isExternalLinkEntry(target))
+      return
+    const siblings = siblingNames(targetList, state.linkDialog.index)
+    target.name = uniqueDisplayName(label, siblings, target.name)
+    target.item = { type: 'external', url }
+  }
+  else {
+    addLinkToMenu(state.linkDialog.menu, label, url, state.linkDialog.folder || null)
+  }
+  state.linkDialog.open = false
 }
 
 const submitRenameDialog = () => {
@@ -298,6 +401,11 @@ const hasEntries = computed(() => {
               <div v-else class="px-3 py-2 text-xs text-muted-foreground">
                 All template pages are already assigned.
               </div>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem @click="openAddLinkDialog(menuName)">
+                <Link class="w-4 h-4" />
+                <span>External Link</span>
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <edge-shad-button
@@ -377,11 +485,16 @@ const hasEntries = computed(() => {
                     <div v-else class="px-3 py-2 text-xs text-muted-foreground">
                       All template pages are already assigned.
                     </div>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem @click="openAddLinkDialog(menuName, getFolderName(element))">
+                      <Link class="w-4 h-4" />
+                      <span>External Link</span>
+                    </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
             </div>
-            <div class="space-y-3 border-l border-dashed border-border/80 px-3 py-3 ml-4">
+            <div class="space-y-2 border-l border-dashed border-border/80 px-2 py-2 ml-3">
               <div class="flex justify-end" />
               <draggable
                 :list="element.item[getFolderName(element)]"
@@ -391,21 +504,42 @@ const hasEntries = computed(() => {
                 :group="dragGroup"
               >
                 <template #item="{ element: child, index: childIndex }">
-                  <div class="flex items-center justify-between gap-3 rounded-md border border-border/70 bg-card px-3 py-2">
-                    <div class="flex items-center gap-2">
+                  <div class="flex items-center justify-between gap-2 rounded-md border border-border/70 bg-card px-2 py-1.5">
+                    <div class="flex items-center gap-2 flex-1 min-w-0">
                       <GripVertical class="w-4 h-4 text-muted-foreground drag-handle" />
-                      <div>
-                        <div class="text-sm font-semibold flex items-center gap-1">
-                          <FileIcon class="w-4 h-4" />
-                          {{ element.item[getFolderName(element)][childIndex].name }}
+                      <div class="min-w-0">
+                        <div class="text-xs font-semibold flex items-center gap-1 leading-tight">
+                          <template v-if="isExternalLinkEntry(child)">
+                            <Link class="w-3.5 h-3.5" />
+                            {{ child.name }}
+                          </template>
+                          <template v-else>
+                            <FileIcon class="w-3.5 h-3.5" />
+                            {{ child.name }}
+                          </template>
                         </div>
-                        <div class="text-[11px] text-muted-foreground">
-                          Template: {{ resolveTemplateTitle(element.item[getFolderName(element)][childIndex].item) }}
+                        <div class="text-[10px] text-muted-foreground leading-tight">
+                          <template v-if="isExternalLinkEntry(child)">
+                            {{ child.item?.url || 'External link' }}
+                          </template>
+                          <template v-else>
+                            Template: {{ resolveTemplateTitle(child.item) }}
+                          </template>
                         </div>
                       </div>
                     </div>
                     <div class="flex gap-1">
                       <edge-shad-button
+                        v-if="isExternalLinkEntry(child)"
+                        variant="ghost"
+                        size="icon"
+                        class="h-7 w-7"
+                        @click="openEditLinkDialog(menuName, childIndex, child, getFolderName(element))"
+                      >
+                        <Link class="w-3.5 h-3.5" />
+                      </edge-shad-button>
+                      <edge-shad-button
+                        v-else
                         variant="ghost"
                         size="icon"
                         class="h-7 w-7"
@@ -435,21 +569,42 @@ const hasEntries = computed(() => {
               </draggable>
             </div>
           </div>
-          <div v-else class="flex items-center justify-between gap-3 rounded-md border border-border/70 bg-card px-3 py-2">
-            <div class="flex items-center gap-2">
+          <div v-else class="flex items-center justify-between gap-2 rounded-md border border-border/70 bg-card px-2 py-1.5">
+            <div class="flex items-center gap-2 flex-1 min-w-0">
               <GripVertical class="w-4 h-4 text-muted-foreground drag-handle" />
-              <div>
-                <div class="text-sm font-semibold flex items-center gap-1">
-                  <FileIcon class="w-4 h-4" />
-                  {{ element.name }}
+              <div class="min-w-0">
+                <div class="text-xs font-semibold flex items-center gap-1 leading-tight">
+                  <template v-if="isExternalLinkEntry(element)">
+                    <Link class="w-3.5 h-3.5" />
+                    {{ element.name }}
+                  </template>
+                  <template v-else>
+                    <FileIcon class="w-3.5 h-3.5" />
+                    {{ element.name }}
+                  </template>
                 </div>
-                <div class="text-[11px] text-muted-foreground">
-                  Template: {{ resolveTemplateTitle(element.item) }}
+                <div class="text-[10px] text-muted-foreground leading-tight">
+                  <template v-if="isExternalLinkEntry(element)">
+                    {{ element.item?.url || 'External link' }}
+                  </template>
+                  <template v-else>
+                    Template: {{ resolveTemplateTitle(element.item) }}
+                  </template>
                 </div>
               </div>
             </div>
             <div class="flex gap-1">
               <edge-shad-button
+                v-if="isExternalLinkEntry(element)"
+                variant="ghost"
+                size="icon"
+                class="h-7 w-7"
+                @click="openEditLinkDialog(menuName, index, element)"
+              >
+                <Link class="w-3.5 h-3.5" />
+              </edge-shad-button>
+              <edge-shad-button
+                v-else
                 variant="ghost"
                 size="icon"
                 class="h-7 w-7"
@@ -509,6 +664,46 @@ const hasEntries = computed(() => {
           @click="submitFolderDialog"
         >
           Create
+        </edge-shad-button>
+      </DialogFooter>
+    </DialogContent>
+  </edge-shad-dialog>
+
+  <edge-shad-dialog v-model="state.linkDialog.open">
+    <DialogContent class="pt-10">
+      <DialogHeader>
+        <DialogTitle>
+          {{ state.linkDialog.mode === 'edit' ? 'Edit External Link' : 'Add External Link' }}
+        </DialogTitle>
+      </DialogHeader>
+      <div class="space-y-4">
+        <edge-shad-input
+          v-model="state.linkDialog.name"
+          name="linkName"
+          label="Label"
+          placeholder="Link label"
+        />
+        <edge-shad-input
+          v-model="state.linkDialog.url"
+          name="linkUrl"
+          label="URL"
+          placeholder="https://example.com or tel:123-456-7890"
+        />
+      </div>
+      <DialogFooter class="pt-2">
+        <edge-shad-button
+          variant="destructive"
+          @click="state.linkDialog.open = false"
+        >
+          Cancel
+        </edge-shad-button>
+        <edge-shad-button
+          type="button"
+          class="bg-slate-800 hover:bg-slate-500 text-white"
+          :disabled="!state.linkDialog.name?.trim()?.length || !state.linkDialog.url?.trim()?.length"
+          @click="submitLinkDialog"
+        >
+          {{ state.linkDialog.mode === 'edit' ? 'Update Link' : 'Add Link' }}
         </edge-shad-button>
       </DialogFooter>
     </DialogContent>

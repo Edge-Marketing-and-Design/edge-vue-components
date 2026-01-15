@@ -1,4 +1,7 @@
+import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
+
 export const useSiteSettingsTemplate = () => {
+  const { buildSiteStructuredData } = useStructuredDataTemplates()
   const createDefaults = () => ({
     name: '',
     theme: '',
@@ -16,7 +19,7 @@ export const useSiteSettingsTemplate = () => {
     contactPhone: '',
     metaTitle: '',
     metaDescription: '',
-    structuredData: '',
+    structuredData: buildSiteStructuredData(),
     trackingFacebookPixel: '',
     trackingGoogleAnalytics: '',
     trackingAdroll: '',

@@ -390,7 +390,7 @@ onBeforeMount(async () => {
       </template>
       <template #main="slotProps">
         <div class="pt-4 flex flex-col gap-6 lg:flex-row">
-          <div class="lg:w-1/3 lg:max-w-sm w-full space-y-4">
+          <div class="lg:w-72 lg:max-w-xs w-full space-y-4">
             <Card class="h-full">
               <CardHeader class="pb-2">
                 <div class="flex items-center justify-between gap-2">

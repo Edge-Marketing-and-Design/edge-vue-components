@@ -569,6 +569,7 @@ const onError = async () => {
           <AlertDescription>
             {{ state.successMessage }}
           </AlertDescription>
+          <slot name="success-alert" :message="state.successMessage" :working-doc="state.workingDoc" />
         </Alert>
         <slot name="main" :title="title" :on-cancel="onCancel" :submitting="state.submitting" :unsaved-changes="unsavedChanges" :on-submit="triggerSubmit" :working-doc="state.workingDoc">
           <div class="flex flex-wrap justify-between">

@@ -3,6 +3,7 @@ import { useVModel } from '@vueuse/core'
 import { File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePlus2, FileUp, FileWarning, FileX, Folder, FolderMinus, FolderOpen, FolderPen, FolderPlus, Link } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
+import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
 
 const props = defineProps({
   prevModelValue: {
@@ -50,6 +51,7 @@ const router = useRouter()
 const modelValue = useVModel(props, 'modelValue', emit)
 const route = useRoute()
 const edgeFirebase = inject('edgeFirebase')
+const { buildPageStructuredData } = useStructuredDataTemplates()
 
 const isExternalLinkEntry = entry => entry?.item && typeof entry.item === 'object' && entry.item.type === 'external'
 const isLinkUrlSpecial = url => /^tel:|^mailto:/i.test(String(url || '').trim())
@@ -164,6 +166,9 @@ const state = reactive({
       name: { value: '' },
       content: { value: [] },
       blockIds: { value: [] },
+      metaTitle: { value: '' },
+      metaDescription: { value: '' },
+      structuredData: { value: buildPageStructuredData() },
       tags: { value: [] },
       allowedThemes: { value: [] },
     },
@@ -504,6 +509,8 @@ const hydrateSyncedBlocksFromSite = (blocks = []) => {
 
 const buildPagePayloadFromTemplate = (templateDoc, slug) => {
   const timestamp = Date.now()
+  const templateStructuredData = typeof templateDoc?.structuredData === 'string' ? templateDoc.structuredData.trim() : ''
+  const structuredData = templateDoc ? (templateStructuredData || buildPageStructuredData()) : buildPageStructuredData()
   const basePayload = {
     name: slug,
     content: [],
@@ -511,7 +518,7 @@ const buildPagePayloadFromTemplate = (templateDoc, slug) => {
     blockIds: [],
     metaTitle: '',
     metaDescription: '',
-    structuredData: '',
+    structuredData,
     doc_created_at: timestamp,
     last_updated: timestamp,
   }
@@ -525,6 +532,8 @@ const buildPagePayloadFromTemplate = (templateDoc, slug) => {
   copy.content = Array.isArray(copy.content) ? hydrateSyncedBlocksFromSite(copy.content) : []
   copy.postContent = Array.isArray(copy.postContent) ? hydrateSyncedBlocksFromSite(copy.postContent) : []
   copy.blockIds = deriveBlockIds(copy)
+  if (!String(copy.structuredData || '').trim())
+    copy.structuredData = structuredData
   return { ...basePayload, ...copy }
 }
 
@@ -1203,7 +1212,7 @@ const theme = computed(() => {
               :allow-additions="true"
             />
             <edge-shad-select-tags
-              v-if="props.themeOptions.length"
+              v-if="props.isTemplateSite && props.themeOptions.length"
               :model-value="Array.isArray(slotProps.workingDoc.allowedThemes) ? slotProps.workingDoc.allowedThemes : []"
               name="allowedThemes"
               label="Allowed Themes"
