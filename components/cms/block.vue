@@ -1,6 +1,6 @@
 <script setup>
 import { useVModel } from '@vueuse/core'
-import { ImagePlus, Plus } from 'lucide-vue-next'
+import { ImagePlus, Loader2, Plus, Sparkles } from 'lucide-vue-next'
 const props = defineProps({
   modelValue: {
     type: Object,
@@ -49,6 +49,7 @@ function extractFieldsInOrder(template) {
 }
 
 const modelValue = useVModel(props, 'modelValue', emit)
+const blockFormRef = ref(null)
 
 const state = reactive({
   open: false,
@@ -61,6 +62,11 @@ const state = reactive({
   loading: true,
   afterLoad: false,
   imageOpen: false,
+  aiDialogOpen: false,
+  aiInstructions: '',
+  aiSelectedFields: {},
+  aiGenerating: false,
+  aiError: '',
 })
 
 const ensureQueryItemsDefaults = (meta) => {
@@ -209,6 +215,116 @@ const genTitleFromField = (field) => {
     .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/^./, str => str.toUpperCase())
 }
+
+const aiFieldOptions = computed(() => {
+  return orderedMeta.value
+    .map(entry => ({
+      id: entry.field,
+      label: genTitleFromField(entry),
+      type: entry.meta?.type || 'text',
+    }))
+    .filter(option => option.type !== 'image' && option.type !== 'color' && !/url/i.test(option.id) && !/color/i.test(option.id))
+})
+
+const selectedAiFieldIds = computed(() => {
+  return aiFieldOptions.value
+    .filter(option => state.aiSelectedFields?.[option.id])
+    .map(option => option.id)
+})
+
+const allAiFieldsSelected = computed({
+  get: () => {
+    if (!aiFieldOptions.value.length)
+      return false
+    return aiFieldOptions.value.every(option => state.aiSelectedFields?.[option.id])
+  },
+  set: (value) => {
+    const next = {}
+    aiFieldOptions.value.forEach((option) => {
+      next[option.id] = value
+    })
+    state.aiSelectedFields = next
+  },
+})
+
+const resetAiSelections = () => {
+  const next = {}
+  aiFieldOptions.value.forEach((option) => {
+    next[option.id] = true
+  })
+  state.aiSelectedFields = next
+}
+
+const openAiDialog = () => {
+  state.aiError = ''
+  state.aiInstructions = ''
+  resetAiSelections()
+  state.aiDialogOpen = true
+}
+
+const closeAiDialog = () => {
+  state.aiDialogOpen = false
+}
+
+const generateWithAi = async () => {
+  if (state.aiGenerating)
+    return
+  const selectedFields = selectedAiFieldIds.value
+  if (!selectedFields.length) {
+    state.aiError = 'Select at least one field for AI generation.'
+    return
+  }
+
+  state.aiGenerating = true
+  state.aiError = ''
+
+  try {
+    const fields = aiFieldOptions.value.filter(option => selectedFields.includes(option.id))
+    const currentValues = selectedFields.reduce((acc, field) => {
+      acc[field] = state.draft?.[field]
+      return acc
+    }, {})
+    const meta = selectedFields.reduce((acc, field) => {
+      acc[field] = state.meta?.[field]
+      return acc
+    }, {})
+
+    const response = await edgeFirebase.runFunction('cms-generateBlockFields', {
+      orgId: edgeGlobal.edgeState.currentOrganization,
+      uid: edgeFirebase?.user?.uid || '',
+      blockId: modelValue.value?.blockId || props.blockId,
+      blockName: modelValue.value?.name || '',
+      content: modelValue.value?.content || '',
+      instructions: state.aiInstructions || '',
+      fields,
+      currentValues,
+      meta,
+    })
+
+    const aiFields = response?.data?.fields || {}
+    Object.keys(aiFields).forEach((field) => {
+      if (selectedFields.includes(field)) {
+        state.draft[field] = aiFields[field]
+        blockFormRef.value?.setFieldValue?.(field, aiFields[field])
+      }
+    })
+
+    const missingFields = selectedFields.filter(field => !(field in aiFields))
+    if (missingFields.length) {
+      state.aiError = `AI skipped: ${missingFields.join(', ')}`
+      return
+    }
+
+    closeAiDialog()
+  }
+  catch (error) {
+    console.error('Failed to generate block fields with AI', error)
+    state.aiError = 'AI generation failed. Try again.'
+  }
+  finally {
+    state.aiGenerating = false
+  }
+}
 const addToArray = async (field) => {
   state.reload = true
   state.draft[field].push(JSON.parse(JSON.stringify(state.arrayItems[field])))
@@ -317,13 +433,28 @@ const getTagsFromPosts = computed(() => {
     <Sheet v-model:open="state.open">
       <edge-cms-block-sheet-content v-if="state.afterLoad" class="w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl">
         <SheetHeader>
-          <SheetTitle>Edit Block</SheetTitle>
-          <SheetDescription v-if="modelValue.synced" class="text-sm text-red-500">
-            This is a synced block. Changes made here will be reflected across all instances of this block on your site.
-          </SheetDescription>
+          <div class="flex flex-col gap-3 pr-10 md:flex-row md:items-start md:justify-between">
+            <div class="min-w-0">
+              <SheetTitle>Edit Block</SheetTitle>
+              <SheetDescription v-if="modelValue.synced" class="text-sm text-red-500">
+                This is a synced block. Changes made here will be reflected across all instances of this block on your site.
+              </SheetDescription>
+            </div>
+            <edge-shad-button
+              type="button"
+              size="sm"
+              class="h-8 gap-2 md:self-start"
+              variant="outline"
+              :disabled="!aiFieldOptions.length"
+              @click="openAiDialog"
+            >
+              <Sparkles class="w-4 h-4" />
+              Generate with AI
+            </edge-shad-button>
+          </div>
         </SheetHeader>
 
-        <edge-shad-form>
+        <edge-shad-form ref="blockFormRef">
           <div v-if="orderedMeta.length === 0">
             <Alert variant="info" class="mt-4 mb-4">
               <AlertTitle>No editable fields found</AlertTitle>
@@ -523,6 +654,71 @@ const getTagsFromPosts = computed(() => {
             </edge-shad-button>
           </SheetFooter>
         </edge-shad-form>
+
+        <edge-shad-dialog v-model="state.aiDialogOpen">
+          <DialogContent class="max-w-[640px]">
+            <DialogHeader>
+              <DialogTitle>Generate with AI</DialogTitle>
+              <DialogDescription>
+                Choose which fields the AI should fill and add any optional instructions.
+              </DialogDescription>
+            </DialogHeader>
+            <div class="space-y-4">
+              <edge-shad-textarea
+                v-model="state.aiInstructions"
+                name="aiInstructions"
+                label="Instructions (Optional)"
+                placeholder="Share tone, audience, and any details the AI should include."
+              />
+              <div class="space-y-2">
+                <div class="flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  <span>Fields</span>
+                  <span>{{ selectedAiFieldIds.length }} selected</span>
+                </div>
+                <edge-shad-checkbox v-model="allAiFieldsSelected" name="aiSelectAll">
+                  Select all fields
+                </edge-shad-checkbox>
+                <div v-if="aiFieldOptions.length" class="grid gap-2 md:grid-cols-2">
+                  <edge-shad-checkbox
+                    v-for="option in aiFieldOptions"
+                    :key="option.id"
+                    v-model="state.aiSelectedFields[option.id]"
+                    :name="`ai-field-${option.id}`"
+                  >
+                    {{ option.label }}
+                    <span class="ml-2 text-xs text-muted-foreground">({{ option.type }})</span>
+                  </edge-shad-checkbox>
+                </div>
+                <Alert v-else variant="info">
+                  <AlertTitle>No editable fields</AlertTitle>
+                  <AlertDescription class="text-sm">
+                    Add editable fields to this block to enable AI generation.
+                  </AlertDescription>
+                </Alert>
+              </div>
+              <Alert v-if="state.aiError" variant="destructive">
+                <AlertTitle>AI generation failed</AlertTitle>
+                <AlertDescription class="text-sm">
+                  {{ state.aiError }}
+                </AlertDescription>
+              </Alert>
+            </div>
+            <DialogFooter class="pt-4 flex justify-between">
+              <edge-shad-button type="button" variant="destructive" class="text-white" @click="closeAiDialog">
+                Cancel
+              </edge-shad-button>
+              <edge-shad-button
+                type="button"
+                class="w-full"
+                :disabled="state.aiGenerating || !selectedAiFieldIds.length"
+                @click="generateWithAi"
+              >
+                <Loader2 v-if="state.aiGenerating" class="w-4 h-4 mr-2 animate-spin" />
+                Generate
+              </edge-shad-button>
+            </DialogFooter>
+          </DialogContent>
+        </edge-shad-dialog>
       </edge-cms-block-sheet-content>
     </Sheet>
   </div>
