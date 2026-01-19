@@ -1430,8 +1430,11 @@ const pageSettingsUpdated = async (pageData) => {
                         </div>
                       </CardHeader>
                       <CardContent class="space-y-4">
-                        <div class="rounded-lg border border-border/60 bg-muted/40 p-3 text-sm text-foreground">
-                          {{ getSubmissionMessage(selectedSubmission.data) || 'No message provided.' }}
+                        <div
+                          v-if="getSubmissionMessage(selectedSubmission.data)"
+                          class="rounded-lg border border-border/60 bg-muted/40 p-3 text-sm text-foreground"
+                        >
+                          {{ getSubmissionMessage(selectedSubmission.data) }}
                         </div>
                         <div class="grid gap-3 md:grid-cols-2">
                           <div
