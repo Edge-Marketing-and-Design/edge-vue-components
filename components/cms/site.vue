@@ -202,7 +202,7 @@ const collectSubmissionEntries = (data) => {
     addEntry(key, value)
   })
 
-  return entries
+  return entries.sort((a, b) => String(a.key).localeCompare(String(b.key)))
 }
 
 const getSubmissionLabel = (data) => {
@@ -650,6 +650,12 @@ onBeforeMount(async () => {
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published_posts`]) {
     await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published_posts`)
+  }
+  if (props.site !== 'templates') {
+    const submissionsPath = `organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/lead-actions`
+    if (!edgeFirebase.data?.[submissionsPath]) {
+      await edgeFirebase.startSnapshot(submissionsPath, [{ field: 'action', operator: '==', value: 'Contact Form' }])
+    }
   }
   state.mounted = true
 })
