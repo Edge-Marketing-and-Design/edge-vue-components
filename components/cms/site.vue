@@ -1,7 +1,7 @@
 <script setup lang="js">
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { ArrowLeft, CircleAlert, FileCheck, FilePenLine, FileStack, FolderCog, FolderDown, FolderUp, FolderX, Loader2, MoreHorizontal } from 'lucide-vue-next'
+import { ArrowLeft, CircleAlert, FileCheck, FilePenLine, FileStack, FolderCog, FolderDown, FolderUp, FolderX, Inbox, Loader2, Mail, MailOpen, MoreHorizontal } from 'lucide-vue-next'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
 
 const props = defineProps({
@@ -37,6 +37,10 @@ const areEqualNormalized = (a, b) => stableSerialize(a) === stableSerialize(b)
 const isTemplateSite = computed(() => props.site === 'templates')
 const router = useRouter()
 
+const SUBMISSION_IGNORE_FIELDS = new Set(['orgId', 'siteId', 'pageId', 'blockId'])
+const SUBMISSION_LABEL_KEYS = ['name', 'fullName', 'firstName', 'lastName', 'email', 'phone']
+const SUBMISSION_MESSAGE_KEYS = ['message', 'comments', 'notes', 'inquiry', 'details']
+
 const state = reactive({
   filter: '',
   userFilter: 'all',
@@ -53,6 +57,8 @@ const state = reactive({
   aiSectionOpen: false,
   selectedPostId: '',
   viewMode: 'pages',
+  submissionFilter: '',
+  selectedSubmissionId: '',
 })
 
 const pageInit = {
@@ -117,6 +123,179 @@ const isAdmin = computed(() => {
 
 const siteData = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site] || {}
+})
+
+const submissionsCollection = computed(() => `sites/${props.site}/lead-actions`)
+const isViewingSubmissions = computed(() => state.viewMode === 'submissions')
+const submissionsMap = computed(() => {
+  return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/${submissionsCollection.value}`] || {}
+})
+const selectedSubmission = computed(() => {
+  return submissionsMap.value?.[state.selectedSubmissionId] || null
+})
+const unreadSubmissionsCount = computed(() => {
+  return Object.values(submissionsMap.value || {}).filter((item) => {
+    if (item?.action !== 'Contact Form')
+      return false
+    return !item.readAt
+  }).length
+})
+
+const formatSubmissionValue = (value) => {
+  if (value === undefined || value === null)
+    return ''
+  if (typeof value === 'string')
+    return value
+  if (typeof value === 'number' || typeof value === 'boolean')
+    return String(value)
+  try {
+    return JSON.stringify(value)
+  }
+  catch {
+    return String(value)
+  }
+}
+
+const collectSubmissionEntries = (data) => {
+  if (!data || typeof data !== 'object')
+    return []
+  const entries = []
+  const seen = new Set()
+  const addEntry = (key, value) => {
+    const normalizedKey = String(key || '').trim()
+    if (!normalizedKey)
+      return
+    const lowerKey = normalizedKey.toLowerCase()
+    if (SUBMISSION_IGNORE_FIELDS.has(normalizedKey) || SUBMISSION_IGNORE_FIELDS.has(lowerKey))
+      return
+    if (value === undefined || value === null || value === '')
+      return
+    if (seen.has(lowerKey))
+      return
+    entries.push({ key: normalizedKey, value })
+    seen.add(lowerKey)
+  }
+
+  const addArrayFields = (fields) => {
+    if (!Array.isArray(fields))
+      return
+    fields.forEach((field) => {
+      if (!field)
+        return
+      const name = field.field || field.name || field.fieldName || field.label || field.title
+      const value = field.value ?? field.fieldValue ?? field.val
+      addEntry(name, value)
+    })
+  }
+
+  addArrayFields(data.fields)
+  addArrayFields(data.formFields)
+  addArrayFields(data.formData)
+
+  if (data.fields && typeof data.fields === 'object' && !Array.isArray(data.fields)) {
+    Object.entries(data.fields).forEach(([key, value]) => addEntry(key, value))
+  }
+
+  Object.entries(data).forEach(([key, value]) => {
+    if (key === 'fields' || key === 'formFields' || key === 'formData')
+      return
+    addEntry(key, value)
+  })
+
+  return entries
+}
+
+const getSubmissionLabel = (data) => {
+  if (!data || typeof data !== 'object')
+    return 'Contact Form Submission'
+  const name = [data.firstName, data.lastName].filter(Boolean).join(' ').trim()
+  if (name)
+    return name
+  const direct = SUBMISSION_LABEL_KEYS.find(key => String(data[key] || '').trim().length)
+  if (direct)
+    return String(data[direct]).trim()
+  return 'Contact Form Submission'
+}
+
+const getSubmissionMessage = (data) => {
+  if (!data || typeof data !== 'object')
+    return ''
+  const direct = SUBMISSION_MESSAGE_KEYS.find(key => String(data[key] || '').trim().length)
+  if (direct)
+    return String(data[direct]).trim()
+  return ''
+}
+
+const formatSubmissionKey = (key) => {
+  return String(key || '')
+    .trim()
+    .replace(/_/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/\s+/g, ' ')
+    .replace(/^./, str => str.toUpperCase())
+}
+
+const getSubmissionEntriesPreview = (data, limit = 6) => {
+  return collectSubmissionEntries(data).slice(0, limit)
+}
+
+const formatSubmissionTimestamp = (timestamp) => {
+  const date = timestamp?.toDate?.() || (timestamp ? new Date(timestamp) : null)
+  if (!date || Number.isNaN(date.getTime()))
+    return ''
+  return new Intl.DateTimeFormat('en-US', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date)
+}
+
+const isSubmissionUnread = item => item && item.action === 'Contact Form' && !item.readAt
+
+const markSubmissionRead = async (docId) => {
+  const item = submissionsMap.value?.[docId]
+  if (!item || !isSubmissionUnread(item))
+    return
+  try {
+    await edgeFirebase.changeDoc(
+      `${edgeGlobal.edgeState.organizationDocPath}/${submissionsCollection.value}`,
+      docId,
+      { readAt: new Date().toISOString() },
+    )
+  }
+  catch (error) {
+    console.error('Failed to mark submission as read', error)
+  }
+}
+
+const markSubmissionUnread = async (docId) => {
+  const item = submissionsMap.value?.[docId]
+  if (!item || isSubmissionUnread(item))
+    return
+  try {
+    await edgeFirebase.changeDoc(
+      `${edgeGlobal.edgeState.organizationDocPath}/${submissionsCollection.value}`,
+      docId,
+      { readAt: null },
+    )
+  }
+  catch (error) {
+    console.error('Failed to mark submission as unread', error)
+  }
+}
+
+const getSubmissionSortTime = (item) => {
+  const date = item?.timestamp?.toDate?.() || (item?.timestamp ? new Date(item.timestamp) : null)
+  if (!date || Number.isNaN(date.getTime()))
+    return 0
+  return date.getTime()
+}
+
+const sortedSubmissionIds = computed(() => {
+  return Object.values(submissionsMap.value || {})
+    .filter(item => item?.docId)
+    .map(item => ({ id: item.docId, time: getSubmissionSortTime(item) }))
+    .sort((a, b) => b.time - a.time)
+    .map(item => item.id)
 })
 
 const themeCollection = computed(() => {
@@ -677,6 +856,8 @@ const setViewMode = (mode) => {
     return
   state.viewMode = mode
   state.selectedPostId = ''
+  if (mode !== 'submissions')
+    state.selectedSubmissionId = ''
   if (props.page)
     router.replace(pageRouteBase.value)
 }
@@ -736,6 +917,20 @@ watch(() => props.page, (next) => {
     state.viewMode = 'posts'
   }
 })
+
+watch([isViewingSubmissions, sortedSubmissionIds], () => {
+  if (!isViewingSubmissions.value)
+    return
+  const ids = sortedSubmissionIds.value
+  if (!ids.length) {
+    state.selectedSubmissionId = ''
+    return
+  }
+  if (!state.selectedSubmissionId || !submissionsMap.value?.[state.selectedSubmissionId]) {
+    state.selectedSubmissionId = ids[0]
+    markSubmissionRead(ids[0])
+  }
+}, { immediate: true })
 
 watch(() => state.menus, async (newVal) => {
   if (areEqualNormalized(siteData.value.menus, newVal)) {
@@ -1043,6 +1238,22 @@ const pageSettingsUpdated = async (pageData) => {
               <FilePenLine class="h-4 w-4" />
               Posts
             </edge-shad-button>
+            <edge-shad-button
+              variant="ghost"
+              size="sm"
+              class="h-8 px-4 text-xs gap-2 rounded-full"
+              :class="state.viewMode === 'submissions' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+              @click="setViewMode('submissions')"
+            >
+              <Inbox class="h-4 w-4" />
+              Inbox
+              <span
+                v-if="unreadSubmissionsCount"
+                class="ml-1 rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold text-primary-foreground"
+              >
+                {{ unreadSubmissionsCount }}
+              </span>
+            </edge-shad-button>
           </div>
         </div>
         <div v-if="!isTemplateSite" class="flex items-center gap-3 justify-end">
@@ -1105,7 +1316,144 @@ const pageSettingsUpdated = async (pageData) => {
       </div>
       <div class="flex-1">
         <Transition name="fade" mode="out-in">
-          <div v-if="isEditingPost" class="w-full h-full">
+          <div v-if="isViewingSubmissions" class="flex-1 overflow-y-auto p-6">
+            <edge-dashboard
+              :collection="submissionsCollection"
+              query-field="action"
+              query-value="Contact Form"
+              query-operator="=="
+              :filter="state.submissionFilter"
+              :filter-fields="['data.name', 'data.fullName', 'data.firstName', 'data.lastName', 'data.email', 'data.phone', 'data.message', 'data.comments', 'data.notes']"
+              sort-field="timestamp"
+              sort-direction="desc"
+              class="pt-0 flex-1"
+            >
+              <template #header-start="slotProps">
+                <Inbox class="mr-2 h-4 w-4" />
+                Submissions
+                <!-- <span class="ml-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Contact Form
+                </span> -->
+              </template>
+              <template #header-center>
+                <div class="w-full px-4 md:px-6">
+                  <edge-shad-input
+                    v-model="state.submissionFilter"
+                    name="submissionFilter"
+                    placeholder="Search submissions..."
+                    class="w-full"
+                  />
+                </div>
+              </template>
+              <template #header-end="slotProps">
+                <span class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  {{ slotProps.recordCount }} total • {{ unreadSubmissionsCount }} unread
+                </span>
+              </template>
+              <template #list="slotProps">
+                <div class="grid gap-4 pt-4 w-full md:grid-cols-[320px_minmax(0,1fr)]">
+                  <div class="space-y-2">
+                    <div
+                      v-for="item in slotProps.filtered"
+                      :key="item.docId"
+                      role="button"
+                      tabindex="0"
+                      class="group rounded-lg border p-3 text-left transition hover:border-primary/60 hover:bg-muted/60"
+                      :class="state.selectedSubmissionId === item.docId ? 'border-primary/70 bg-muted/70 shadow-sm' : 'border-border/60 bg-card'"
+                      @click="state.selectedSubmissionId = item.docId; markSubmissionRead(item.docId)"
+                      @keyup.enter="state.selectedSubmissionId = item.docId; markSubmissionRead(item.docId)"
+                    >
+                      <div class="flex items-start justify-between gap-2">
+                        <div class="min-w-0">
+                          <div class="truncate text-sm font-semibold text-foreground">
+                            {{ getSubmissionLabel(item.data) }}
+                          </div>
+                          <div v-if="item.data?.pageName" class="truncate text-xs text-muted-foreground">
+                            {{ item.data.pageName }}
+                          </div>
+                        </div>
+                        <div class="flex items-center gap-2 text-[11px] text-muted-foreground">
+                          <span v-if="isSubmissionUnread(item)" class="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-primary">
+                            Unread
+                          </span>
+                          <span>{{ formatSubmissionTimestamp(item.timestamp) }}</span>
+                        </div>
+                      </div>
+                      <div v-if="getSubmissionMessage(item.data)" class="mt-2 text-xs text-muted-foreground line-clamp-2">
+                        {{ getSubmissionMessage(item.data) }}
+                      </div>
+                    </div>
+                  </div>
+                  <div>
+                    <Card v-if="selectedSubmission" class="border border-border/70 bg-card/95 shadow-sm">
+                      <CardHeader class="flex flex-col gap-2">
+                        <div class="flex flex-wrap items-start justify-between gap-2">
+                          <div>
+                            <CardTitle class="text-xl">
+                              {{ getSubmissionLabel(selectedSubmission.data) }}
+                            </CardTitle>
+                            <CardDescription class="text-xs">
+                              {{ formatSubmissionTimestamp(selectedSubmission.timestamp) }}
+                            </CardDescription>
+                          </div>
+                          <div class="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            <span>
+                              {{ selectedSubmission.data?.pageName || selectedSubmission.data?.pageId || 'Site submission' }}
+                            </span>
+                            <edge-shad-button
+                              v-if="isSubmissionUnread(selectedSubmission)"
+                              size="sm"
+                              variant="outline"
+                              class="h-7 gap-2 text-[11px]"
+                              @click="markSubmissionRead(selectedSubmission.docId)"
+                            >
+                              <MailOpen class="h-3.5 w-3.5" />
+                              Mark read
+                            </edge-shad-button>
+                            <edge-shad-button
+                              v-else
+                              size="sm"
+                              variant="outline"
+                              class="h-7 gap-2 text-[11px]"
+                              @click="markSubmissionUnread(selectedSubmission.docId)"
+                            >
+                              <Mail class="h-3.5 w-3.5" />
+                              Mark unread
+                            </edge-shad-button>
+                          </div>
+                        </div>
+                      </CardHeader>
+                      <CardContent class="space-y-4">
+                        <div class="rounded-lg border border-border/60 bg-muted/40 p-3 text-sm text-foreground">
+                          {{ getSubmissionMessage(selectedSubmission.data) || 'No message provided.' }}
+                        </div>
+                        <div class="grid gap-3 md:grid-cols-2">
+                          <div
+                            v-for="entry in collectSubmissionEntries(selectedSubmission.data)"
+                            :key="entry.key"
+                            class="rounded-lg border border-border/60 bg-background p-3"
+                          >
+                            <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                              {{ formatSubmissionKey(entry.key) }}
+                            </div>
+                            <div class="mt-1 text-sm text-foreground break-words">
+                              {{ formatSubmissionValue(entry.value) }}
+                            </div>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                    <Card v-else class="border border-dashed border-border/80 bg-muted/30">
+                      <CardContent class="py-12 text-center text-sm text-muted-foreground">
+                        Select a submission to view details.
+                      </CardContent>
+                    </Card>
+                  </div>
+                </div>
+              </template>
+            </edge-dashboard>
+          </div>
+          <div v-else-if="isEditingPost" class="w-full h-full">
             <edge-cms-posts
               mode="editor"
               :site="props.site"
