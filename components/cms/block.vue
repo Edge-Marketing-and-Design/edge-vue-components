@@ -67,6 +67,7 @@ const state = reactive({
   aiSelectedFields: {},
   aiGenerating: false,
   aiError: '',
+  validationErrors: [],
 })
 
 const ensureQueryItemsDefaults = (meta) => {
@@ -165,19 +166,59 @@ const openEditor = async () => {
     }
   }
   modelValue.value.blockUpdatedAt = new Date().toISOString()
+  state.validationErrors = []
   state.open = true
   state.afterLoad = true
 }
 
-const save = () => {
-  const updated = {
-    ...modelValue.value,
-    values: JSON.parse(JSON.stringify(state.draft)),
-    meta: sanitizeQueryItems(state.meta),
-  }
-  modelValue.value = updated
-  state.open = false
+const normalizeValidationNumber = (value) => {
+  if (value === null || value === undefined || value === '')
+    return null
+  const parsed = Number(value)
+  return Number.isNaN(parsed) ? null : parsed
 }
+
+const stringLength = (value) => {
+  if (value === null || value === undefined)
+    return 0
+  return String(value).trim().length
+}
+
+const validateValueAgainstRules = (value, rules, label, typeHint) => {
+  if (!rules || typeof rules !== 'object')
+    return []
+
+  const errors = []
+  if (rules.required) {
+    const isEmptyArray = Array.isArray(value) && value.length === 0
+    const isEmptyString = typeof value === 'string' && stringLength(value) === 0
+    if (value === null || value === undefined || isEmptyArray || isEmptyString) {
+      errors.push(`${label} is required.`)
+      return errors
+    }
+  }
+
+  if (typeHint === 'number') {
+    const numericValue = normalizeValidationNumber(value)
+    if (numericValue !== null) {
+      if (rules.min !== undefined && numericValue < rules.min)
+        errors.push(`${label} must be at least ${rules.min}.`)
+      if (rules.max !== undefined && numericValue > rules.max)
+        errors.push(`${label} must be ${rules.max} or less.`)
+    }
+    return errors
+  }
+
+  const length = Array.isArray(value) ? value.length : stringLength(value)
+  if (rules.min !== undefined && length < rules.min) {
+    errors.push(`${label} must be at least ${rules.min} ${Array.isArray(value) ? 'items' : 'characters'}.`)
+  }
+  if (rules.max !== undefined && length > rules.max) {
+    errors.push(`${label} must be ${rules.max} ${Array.isArray(value) ? 'items' : 'characters'} or less.`)
+  }
+  return errors
+}
+
 const orderedMeta = computed(() => {
   const metaObj = state.metaUpdate || {}
   const tpl = modelValue.value?.content || ''
@@ -214,6 +255,51 @@ const genTitleFromField = (field) => {
     .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
     .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/^./, str => str.toUpperCase())
+}
+
+const collectValidationErrors = () => {
+  const errors = []
+  for (const entry of orderedMeta.value) {
+    const label = genTitleFromField(entry)
+    const value = state.draft?.[entry.field]
+
+    if (entry.meta?.type === 'array' && !entry.meta?.api && !entry.meta?.collection) {
+      const itemCount = Array.isArray(value) ? value.length : 0
+      if (itemCount < 1) {
+        errors.push(`${label} requires at least one item.`)
+      }
+
+      if (Array.isArray(value) && entry.meta?.schema) {
+        value.forEach((item, index) => {
+          for (const schemaItem of entry.meta.schema) {
+            const itemLabel = `${label} ${index + 1} · ${genTitleFromField(schemaItem)}`
+            const itemValue = item?.[schemaItem.field]
+            errors.push(...validateValueAgainstRules(itemValue, schemaItem.validation, itemLabel, schemaItem.type))
+          }
+        })
+      }
+    }
+
+    const topLevelErrors = validateValueAgainstRules(value, entry.meta?.validation, label, entry.meta?.type)
+    errors.push(...topLevelErrors)
+  }
+  return errors
+}
+
+const save = () => {
+  const validationErrors = collectValidationErrors()
+  if (validationErrors.length) {
+    state.validationErrors = validationErrors
+    return
+  }
+  state.validationErrors = []
+  const updated = {
+    ...modelValue.value,
+    values: JSON.parse(JSON.stringify(state.draft)),
+    meta: sanitizeQueryItems(state.meta),
+  }
+  modelValue.value = updated
+  state.open = false
 }
 
 const aiFieldOptions = computed(() => {
@@ -645,14 +731,24 @@ const getTagsFromPosts = computed(() => {
             </template>
           </div>
 
-          <SheetFooter class="pt-2 flex justify-between">
-            <edge-shad-button variant="destructive" class="text-white" @click="state.open = false">
-              Cancel
-            </edge-shad-button>
-            <edge-shad-button class=" bg-slate-800 hover:bg-slate-400 w-full" @click="save">
-              Save changes
-            </edge-shad-button>
-          </SheetFooter>
+          <div class="sticky bottom-0 bg-background px-6 pb-4 pt-2">
+            <Alert v-if="state.validationErrors.length" variant="destructive" class="mb-3">
+              <AlertTitle>Fix the highlighted fields</AlertTitle>
+              <AlertDescription class="text-sm">
+                <div v-for="(error, index) in state.validationErrors" :key="`${error}-${index}`">
+                  {{ error }}
+                </div>
+              </AlertDescription>
+            </Alert>
+            <SheetFooter class="flex justify-between">
+              <edge-shad-button variant="destructive" class="text-white" @click="state.open = false">
+                Cancel
+              </edge-shad-button>
+              <edge-shad-button class=" bg-slate-800 hover:bg-slate-400 w-full" @click="save">
+                Save changes
+              </edge-shad-button>
+            </SheetFooter>
+          </div>
         </edge-shad-form>
 
         <edge-shad-dialog v-model="state.aiDialogOpen">

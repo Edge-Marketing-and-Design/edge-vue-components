@@ -1,4 +1,6 @@
 <script setup lang="js">
+import { CircleAlert } from 'lucide-vue-next'
+
 const props = defineProps({
   settings: {
     type: Object,
@@ -36,7 +38,13 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  domainError: {
+    type: String,
+    default: '',
+  },
 })
+
+const edgeFirebase = inject('edgeFirebase')
 
 const state = reactive({
   logoPickerOpen: false,
@@ -82,6 +90,23 @@ const menuPositionOptions = [
   { value: 'center', label: 'Center' },
   { value: 'right', label: 'Right' },
 ]
+
+const domainError = computed(() => String(props.domainError || '').trim())
+const serverPagesProject = ref('')
+const pagesProject = computed(() => String(serverPagesProject.value || '').trim())
+const pagesDomain = computed(() => (pagesProject.value ? `${pagesProject.value}.pages.dev` : '(CLOUDFLARE_PAGES_PROJECT).pages.dev'))
+
+onMounted(async () => {
+  if (!edgeFirebase?.runFunction)
+    return
+  try {
+    const response = await edgeFirebase.runFunction('cms-getCloudflarePagesProject', {})
+    serverPagesProject.value = String(response?.data?.project || '').trim()
+  }
+  catch {
+    serverPagesProject.value = ''
+  }
+})
 </script>
 
 <template>
@@ -121,6 +146,39 @@ const menuPositionOptions = [
         placeholder="Add or remove domains"
         class="w-full"
       />
+      <Alert v-if="domainError" variant="destructive">
+        <CircleAlert class="h-4 w-4" />
+        <AlertTitle>Domain error</AlertTitle>
+        <AlertDescription class="text-sm">
+          {{ domainError }}
+        </AlertDescription>
+      </Alert>
+      <div class="rounded-lg border border-border/60 bg-muted/40 p-4 space-y-3">
+        <div class="flex items-center justify-between">
+          <div class="text-sm font-semibold text-foreground">
+            Domain DNS records
+          </div>
+          <div class="text-xs text-muted-foreground">
+            Target: <span class="font-mono">{{ pagesDomain }}</span>
+          </div>
+        </div>
+        <p class="text-sm text-muted-foreground">
+          Add these records at your DNS provider.
+        </p>
+        <div class="space-y-2 text-sm">
+          <div class="grid grid-cols-[70px_1fr] gap-3">
+            <div class="text-muted-foreground">CNAME</div>
+            <div class="font-mono">www → {{ pagesDomain }}</div>
+          </div>
+          <div class="grid grid-cols-[70px_1fr] gap-3">
+            <div class="text-muted-foreground">CNAME</div>
+            <div class="font-mono">@ → {{ pagesDomain }}</div>
+          </div>
+        </div>
+        <p class="text-xs text-muted-foreground">
+          Then forward the root/apex (TLD) domain to <span class="font-mono">www</span> with a 301 redirect.
+        </p>
+      </div>
       <edge-shad-input
         v-model="props.settings.contactEmail"
         name="contactEmail"

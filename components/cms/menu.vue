@@ -1163,6 +1163,12 @@ const theme = computed(() => {
           <DialogDescription />
         </DialogHeader>
         <edge-shad-input v-model="state.renameItem.name" name="name" placeholder="New Name" />
+        <p
+          v-if="state.renameItem.item !== ''"
+          class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700"
+        >
+          Renaming a page changes its URL. If search engines already indexed the old URL, rankings may drop temporarily.
+        </p>
         <DialogFooter class="pt-2 flex justify-between">
           <edge-shad-button variant="destructive" @click="state.renameFolderOrPageDialog = false">
             Cancel

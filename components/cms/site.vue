@@ -1326,15 +1326,6 @@ const pageSettingsUpdated = async (pageData) => {
         </div>
         <div v-else />
       </div>
-      <div v-if="domainError" class="px-4 pt-3">
-        <Alert variant="destructive">
-          <CircleAlert class="h-4 w-4" />
-          <AlertTitle>Domain error</AlertTitle>
-          <AlertDescription class="text-sm">
-            {{ domainError }}
-          </AlertDescription>
-        </Alert>
-      </div>
       <div class="flex-1">
         <Transition name="fade" mode="out-in">
           <div v-if="isViewingSubmissions" class="flex-1 overflow-y-auto p-6">
@@ -1571,6 +1562,7 @@ const pageSettingsUpdated = async (pageData) => {
                 :is-admin="isAdmin"
                 :enable-media-picker="true"
                 :site-id="props.site"
+                :domain-error="domainError"
               />
             </div>
             <SheetFooter class="pt-2 flex justify-between">
