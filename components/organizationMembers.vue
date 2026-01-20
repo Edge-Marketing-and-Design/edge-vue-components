@@ -80,6 +80,9 @@ const state = reactive({
     role: '',
     isTemplate: false,
   },
+  inviteOrgIds: [],
+  editOrgIds: [],
+  removeOrgIds: [],
   loaded: false,
 })
 
@@ -91,6 +94,37 @@ const roleNamesOnly = computed(() => {
 
 const edgeUsers = toRef(edgeFirebase.state, 'users')
 const users = computed(() => Object.values(edgeUsers.value ?? {}))
+
+const orgCollectionPath = orgId => `organizations-${String(orgId).replaceAll('/', '-')}`
+
+const adminOrgOptions = computed(() => {
+  const orgs = edgeGlobal.edgeState.organizations || []
+  const roles = edgeFirebase?.user?.roles || []
+  return orgs.filter(org =>
+    roles.some(role => role.collectionPath === orgCollectionPath(org.docId) && role.role === 'admin'),
+  )
+})
+
+const inviteOrgOptions = computed(() => adminOrgOptions.value)
+
+const editOrgOptions = computed(() => adminOrgOptions.value)
+
+const removeOrgOptions = computed(() => {
+  const userRoles = state.workingItem?.roles || []
+  return adminOrgOptions.value.filter(org =>
+    userRoles.some(role => role.collectionPath.startsWith(orgCollectionPath(org.docId))),
+  )
+})
+
+const showInviteOrgSelect = computed(() => inviteOrgOptions.value.length > 1)
+const showEditOrgSelect = computed(() => editOrgOptions.value.length > 1)
+const showRemoveOrgSelect = computed(() => removeOrgOptions.value.length > 1)
+
+const selfRemoveBlocked = computed(() => {
+  return state.workingItem.userId === edgeFirebase.user.uid
+    && adminCount.value === 1
+    && state.removeOrgIds.includes(edgeGlobal.edgeState.currentOrganization)
+})
 
 const WIDTHS = {
   1: 'md:col-span-1',
@@ -175,6 +209,8 @@ const addItem = () => {
   state.workingItem = newItem
   state.workingItem.id = edgeGlobal.generateShortId()
   state.currentTitle = 'Invite User'
+  state.inviteOrgIds = [edgeGlobal.edgeState.currentOrganization]
+  state.editOrgIds = []
   state.dialog = true
 }
 
@@ -184,6 +220,9 @@ const editItem = (item) => {
   state.workingItem = edgeGlobal.dupObject(item)
   state.workingItem.meta = edgeGlobal.dupObject(item.meta)
   state.workingItem.role = edgeGlobal.getRoleName(item.roles, edgeGlobal.edgeState.currentOrganization)
+  state.editOrgIds = editOrgOptions.value
+    .filter(org => state.workingItem.roles.some(role => role.collectionPath.startsWith(orgCollectionPath(org.docId))))
+    .map(org => org.docId)
   const newItemKeys = Object.keys(state.newItem)
   newItemKeys.forEach((key) => {
     if (!state.workingItem?.[key]) {
@@ -205,15 +244,20 @@ const editItem = (item) => {
 const deleteConfirm = (item) => {
   state.currentTitle = item.name
   state.workingItem = edgeGlobal.dupObject(item)
+  state.removeOrgIds = [edgeGlobal.edgeState.currentOrganization]
   state.deleteDialog = true
 }
 
 const deleteAction = async () => {
+  const targetUserId = state.workingItem.docId || state.workingItem.userId
+  const selectedOrgIds = state.removeOrgIds.length > 0
+    ? state.removeOrgIds
+    : [edgeGlobal.edgeState.currentOrganization]
   const userRoles = state.workingItem.roles.filter((role) => {
-    return role.collectionPath.startsWith(edgeGlobal.edgeState.organizationDocPath.replaceAll('/', '-'))
+    return selectedOrgIds.some(orgId => role.collectionPath.startsWith(orgCollectionPath(orgId)))
   })
   for (const role of userRoles) {
-    await edgeFirebase.removeUserRoles(state.workingItem.docId, role.collectionPath)
+    await edgeFirebase.removeUserRoles(targetUserId, role.collectionPath)
     // console.log(role.collectionPath)
   }
   state.deleteDialog = false
@@ -229,10 +273,49 @@ const disableTracking = computed(() => {
   return state.saveButton === 'Invite User'
 })
 
+const updateInviteOrgSelection = (orgId, checked) => {
+  const selections = new Set(state.inviteOrgIds)
+  if (checked) {
+    selections.add(orgId)
+  }
+  else {
+    selections.delete(orgId)
+  }
+  state.inviteOrgIds = Array.from(selections)
+}
+
+const updateEditOrgSelection = (orgId, checked) => {
+  const selections = new Set(state.editOrgIds)
+  if (checked) {
+    selections.add(orgId)
+  }
+  else {
+    selections.delete(orgId)
+  }
+  state.editOrgIds = Array.from(selections)
+}
+
+const updateRemoveOrgSelection = (orgId, checked) => {
+  const selections = new Set(state.removeOrgIds)
+  if (checked) {
+    selections.add(orgId)
+  }
+  else {
+    selections.delete(orgId)
+  }
+  state.removeOrgIds = Array.from(selections)
+}
+
 const onSubmit = async () => {
   state.loading = true
-  const userRoles = edgeGlobal.orgUserRoles(edgeGlobal.edgeState.currentOrganization)
-  const roles = userRoles.find(role => role.name === state.workingItem.role).roles
+  const selectedOrgIds = state.inviteOrgIds.length > 0
+    ? state.inviteOrgIds
+    : [edgeGlobal.edgeState.currentOrganization]
+  const roles = selectedOrgIds.flatMap((orgId) => {
+    const userRoles = edgeGlobal.orgUserRoles(orgId)
+    const roleMatch = userRoles.find(role => role.name === state.workingItem.role)
+    return roleMatch ? roleMatch.roles : []
+  })
   if (state.saveButton === 'Invite User') {
     if (!state.workingItem.isTemplate) {
       await edgeFirebase.addUser({ roles, meta: state.workingItem.meta })
@@ -242,20 +325,39 @@ const onSubmit = async () => {
     }
   }
   else {
-    const oldRoles = state.workingItem.roles.filter((role) => {
-      return role.collectionPath.startsWith(edgeGlobal.edgeState.organizationDocPath.replaceAll('/', '-'))
-        && !roles.find(r => r.collectionPath === role.collectionPath)
-    })
-
-    for (const role of oldRoles) {
-      await edgeFirebase.removeUserRoles(state.workingItem.docId, role.collectionPath)
+    const targetUserId = state.workingItem.docId || state.workingItem.userId
+    const selectedOrgIds = state.editOrgIds
+    for (const org of editOrgOptions.value) {
+      const orgId = org.docId
+      const orgPath = orgCollectionPath(orgId)
+      const shouldHave = selectedOrgIds.includes(orgId)
+      const existingRoles = state.workingItem.roles.filter(role =>
+        role.collectionPath.startsWith(orgPath),
+      )
+      if (!shouldHave && existingRoles.length > 0) {
+        for (const role of existingRoles) {
+          await edgeFirebase.removeUserRoles(targetUserId, role.collectionPath)
+        }
+        continue
+      }
+      if (shouldHave) {
+        const orgRoles = edgeGlobal.orgUserRoles(orgId)
+        const roleMatch = orgRoles.find(role => role.name === state.workingItem.role)
+        if (!roleMatch)
+          continue
+        for (const role of existingRoles) {
+          if (!roleMatch.roles.some(r => r.collectionPath === role.collectionPath && r.role === role.role)) {
+            await edgeFirebase.removeUserRoles(targetUserId, role.collectionPath)
+          }
+        }
+        for (const role of roleMatch.roles) {
+          if (!existingRoles.some(r => r.collectionPath === role.collectionPath && r.role === role.role)) {
+            await edgeFirebase.storeUserRoles(targetUserId, role.collectionPath, role.role)
+          }
+        }
+      }
     }
-
-    for (const role of roles) {
-      await edgeFirebase.storeUserRoles(state.workingItem.docId, role.collectionPath, role.role)
-    }
-    const stagedUserId = state.workingItem.docId
-    await edgeFirebase.setUserMeta(state.workingItem.meta, '', stagedUserId)
+    await edgeFirebase.setUserMeta(state.workingItem.meta, targetUserId)
   }
   edgeGlobal.edgeState.changeTracker = {}
   state.loading = false
@@ -386,21 +488,34 @@ onBeforeMount(async () => {
             <DialogDescription />
           </DialogHeader>
 
-          <h3 v-if="state.workingItem.userId === edgeFirebase.user.uid && adminCount > 1">
-            Are you sure you want to remove yourself from the organization "{{ currentOrganization.name }}"? You will no longer have access to any of the organization's data.
-          </h3>
-          <h3 v-else-if="state.workingItem.userId === edgeFirebase.user.uid && adminCount === 1">
+          <h3 v-if="selfRemoveBlocked">
             You cannot remove yourself from this organization because you are the only admin. You can delete the organization or add another admin.
           </h3>
-          <h3 v-else>
-            Are you sure you want to remove "{{ state.workingItem.meta.name }}" from the organization "{{ currentOrganization.name }}"?
+          <h3 v-else-if="state.workingItem.userId === edgeFirebase.user.uid">
+            <span v-if="showRemoveOrgSelect">Select the organizations you want to leave.</span>
+            <span v-else>Are you sure you want to remove yourself from the organization "{{ currentOrganization.name }}"? You will no longer have access to any of the organization's data.</span>
           </h3>
+          <h3 v-else>
+            <span v-if="showRemoveOrgSelect">Select the organizations you want to remove "{{ state.workingItem.meta.name }}" from.</span>
+            <span v-else>Are you sure you want to remove "{{ state.workingItem.meta.name }}" from the organization "{{ currentOrganization.name }}"?</span>
+          </h3>
+          <div v-if="showRemoveOrgSelect" class="mt-4 w-full flex flex-wrap gap-2">
+            <div v-for="org in removeOrgOptions" :key="org.docId" class="flex-1 min-w-[220px]">
+              <edge-shad-checkbox
+                :name="`remove-org-${org.docId}`"
+                :model-value="state.removeOrgIds.includes(org.docId)"
+                @update:model-value="val => updateRemoveOrgSelection(org.docId, val)"
+              >
+                {{ org.name }}
+              </edge-shad-checkbox>
+            </div>
+          </div>
           <DialogFooter class="pt-6 flex justify-between">
             <edge-shad-button class="text-white  bg-slate-800 hover:bg-slate-400" @click="state.deleteDialog = false">
               Cancel
             </edge-shad-button>
             <edge-shad-button
-              :disabled="adminCount === 1 && state.workingItem.userId === edgeFirebase.user.uid"
+              :disabled="selfRemoveBlocked"
               class="w-full"
               variant="destructive"
               @click="deleteAction()"
@@ -437,6 +552,38 @@ onBeforeMount(async () => {
                 :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
                 :disabled="state.workingItem.userId === edgeFirebase.user.uid"
               />
+              <div v-if="state.saveButton !== 'Invite User' && showEditOrgSelect" class="mt-4 w-full">
+                <div class="text-sm font-medium text-foreground">
+                  Organizations
+                </div>
+                <div class="mt-2 w-full flex flex-wrap gap-2">
+                  <div v-for="org in editOrgOptions" :key="org.docId" class="flex-1 min-w-[220px]">
+                    <edge-shad-checkbox
+                      :name="`edit-add-org-${org.docId}`"
+                      :model-value="state.editOrgIds.includes(org.docId)"
+                      @update:model-value="val => updateEditOrgSelection(org.docId, val)"
+                    >
+                      {{ org.name }}
+                    </edge-shad-checkbox>
+                  </div>
+                </div>
+              </div>
+              <div v-if="state.saveButton === 'Invite User' && showInviteOrgSelect" class="mt-4 w-full">
+                <div class="text-sm font-medium text-foreground">
+                  Add to organizations
+                </div>
+                <div class="mt-2 w-full flex flex-wrap gap-2">
+                  <div v-for="org in inviteOrgOptions" :key="org.docId" class="flex-1 min-w-[220px]">
+                    <edge-shad-checkbox
+                      :name="`invite-org-${org.docId}`"
+                      :model-value="state.inviteOrgIds.includes(org.docId)"
+                      @update:model-value="val => updateInviteOrgSelection(org.docId, val)"
+                    >
+                      {{ org.name }}
+                    </edge-shad-checkbox>
+                  </div>
+                </div>
+              </div>
               <edge-g-input
                 v-if="state.saveButton === 'Invite User'"
                 v-model="state.workingItem.meta.email"

@@ -30,10 +30,29 @@ const state = reactive({
   },
   deleteDialog: false,
   loading: false,
+  bringUserIds: [],
+})
+
+const edgeUsers = toRef(edgeFirebase.state, 'users')
+const users = computed(() => Object.values(edgeUsers.value ?? {}))
+const roles = computed(() => edgeFirebase.user.roles)
+
+const bringUserOptions = computed(() => {
+  return users.value.filter(user => user.userId !== edgeFirebase.user.uid)
+})
+
+const showBringUsers = computed(() => {
+  return state.saveButton === 'Add Organization' && bringUserOptions.value.length > 0
 })
 
 const newItem = {
   name: '',
+}
+
+const startUsersSnapshot = async () => {
+  if (!edgeGlobal.edgeState.currentOrganization)
+    return
+  await edgeFirebase.startUsersSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}`)
 }
 
 const addItem = () => {
@@ -42,6 +61,7 @@ const addItem = () => {
   state.workingItem = edgeGlobal.dupObject(newItem)
   state.workingItem.id = edgeGlobal.generateShortId()
   state.currentTitle = 'Add Organization'
+  state.bringUserIds = []
   state.dialog = true
 }
 
@@ -75,9 +95,77 @@ const register = reactive({
   dynamicDocumentFieldValue: '',
 })
 
+const updateBringUserSelection = (docId, checked) => {
+  const selections = new Set(state.bringUserIds)
+  if (checked) {
+    selections.add(docId)
+  }
+  else {
+    selections.delete(docId)
+  }
+  state.bringUserIds = Array.from(selections)
+}
+
+const addUsersToOrganization = async (orgId) => {
+  if (!orgId || state.bringUserIds.length === 0)
+    return
+  const targetUsers = users.value.filter(user => state.bringUserIds.includes(user.docId))
+  for (const user of targetUsers) {
+    const roleName = edgeGlobal.getRoleName(user.roles, edgeGlobal.edgeState.currentOrganization)
+    const resolvedRoleName = roleName === 'Unknown' ? 'User' : roleName
+    const orgRoles = edgeGlobal.orgUserRoles(orgId)
+    const roleMatch = orgRoles.find(role => role.name === resolvedRoleName)
+    if (!roleMatch)
+      continue
+    for (const role of roleMatch.roles) {
+      await edgeFirebase.storeUserRoles(user.docId, role.collectionPath, role.role)
+    }
+  }
+}
+
+const waitForOrgRole = async (orgId) => {
+  const orgPath = `organizations-${String(orgId).replaceAll('/', '-')}`
+  const maxAttempts = 30
+  const delayMs = 300
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (edgeFirebase.user.roles.some(role => role.collectionPath === orgPath)) {
+      return true
+    }
+    await new Promise(resolve => setTimeout(resolve, delayMs))
+  }
+  return false
+}
+
+const waitForNewOrgRole = async (previousOrgPaths) => {
+  const maxAttempts = 30
+  const delayMs = 300
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const currentOrgRoles = edgeFirebase.user.roles.filter(role => role.collectionPath.startsWith('organizations-'))
+    const newOrgRole = currentOrgRoles.find(role => !previousOrgPaths.includes(role.collectionPath))
+    if (newOrgRole) {
+      return newOrgRole
+    }
+    await new Promise(resolve => setTimeout(resolve, delayMs))
+  }
+  return null
+}
+
+onBeforeMount(async () => {
+  await startUsersSnapshot()
+})
+
+watch(() => edgeGlobal.edgeState.currentOrganization, async (nextOrg, prevOrg) => {
+  if (nextOrg && nextOrg !== prevOrg) {
+    await startUsersSnapshot()
+  }
+})
+
 const onSubmit = async () => {
   const registerSend = edgeGlobal.dupObject(register)
   state.loading = true
+  const existingOrgPaths = edgeFirebase.user.roles
+    .filter(role => role.collectionPath.startsWith('organizations-'))
+    .map(role => role.collectionPath)
   if (state.saveButton === 'Add Organization') {
     registerSend.dynamicDocumentFieldValue = state.workingItem.name
   }
@@ -86,7 +174,14 @@ const onSubmit = async () => {
     registerSend.registrationCode = state.workingItem.name
   }
   const results = await edgeFirebase.currentUserRegister(registerSend)
-  edgeGlobal.getOrganizations(edgeFirebase)
+  await edgeGlobal.getOrganizations(edgeFirebase)
+  if (state.saveButton === 'Add Organization') {
+    const newOrgRole = await waitForNewOrgRole(existingOrgPaths)
+    const newOrgId = newOrgRole?.collectionPath?.replace('organizations-', '')
+    if (newOrgId) {
+      await addUsersToOrganization(newOrgId)
+    }
+  }
   console.log(results)
   edgeGlobal.edgeState.changeTracker = {}
   state.dialog = false
@@ -189,6 +284,22 @@ const schema = toTypedSchema(z.object({
         <template v-else>
           To join an existing organization, please enter the registration code provided by the organization.
         </template>
+        <div v-if="showBringUsers" class="mt-4 w-full">
+          <div class="text-sm font-medium text-foreground">
+            Users to bring over (you will be added automatically)
+          </div>
+          <div class="mt-2 w-full flex flex-wrap gap-2">
+            <div v-for="user in bringUserOptions" :key="user.docId" class="flex-1 min-w-[220px]">
+              <edge-shad-checkbox
+                :name="`bring-user-${user.docId}`"
+                :model-value="state.bringUserIds.includes(user.docId)"
+                @update:model-value="val => updateBringUserSelection(user.docId, val)"
+              >
+                {{ user.meta.name }}
+              </edge-shad-checkbox>
+            </div>
+          </div>
+        </div>
         <DialogFooter class="pt-6 flex justify-between">
           <edge-shad-button variant="destructive" @click="closeDialog">
             Close
