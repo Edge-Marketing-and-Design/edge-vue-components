@@ -124,6 +124,12 @@ const isAdmin = computed(() => {
 const siteData = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site] || {}
 })
+const publishedSiteSettings = computed(() => {
+  return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`]?.[props.site] || {}
+})
+const domainError = computed(() => {
+  return String(publishedSiteSettings.value?.domainError || '').trim()
+})
 
 const submissionsCollection = computed(() => `sites/${props.site}/lead-actions`)
 const isViewingSubmissions = computed(() => state.viewMode === 'submissions')
@@ -1319,6 +1325,15 @@ const pageSettingsUpdated = async (pageData) => {
           </DropdownMenu>
         </div>
         <div v-else />
+      </div>
+      <div v-if="domainError" class="px-4 pt-3">
+        <Alert variant="destructive">
+          <CircleAlert class="h-4 w-4" />
+          <AlertTitle>Domain error</AlertTitle>
+          <AlertDescription class="text-sm">
+            {{ domainError }}
+          </AlertDescription>
+        </Alert>
       </div>
       <div class="flex-1">
         <Transition name="fade" mode="out-in">
