@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils'
 const props = defineProps({
   title: {
     type: String,
-    default: 'Organization(s)',
+    default: 'Organization',
   },
   buttonClass: {
     type: String,
@@ -26,6 +26,20 @@ const isAdmin = computed(() => {
 
   return orgRole && orgRole.role === 'admin'
 })
+const organizations = computed(() => edgeGlobal.edgeState.organizations || [])
+const currentOrg = computed(() => organizations.value.find(org => org.docId === edgeGlobal.edgeState.currentOrganization))
+const currentOrgName = computed(() => currentOrg.value?.name || 'Organization')
+const hasMultipleOrgs = computed(() => organizations.value.length > 1)
+const orgDialogOpen = ref(false)
+const openOrgDialog = () => {
+  if (hasMultipleOrgs.value) {
+    orgDialogOpen.value = true
+  }
+}
+const selectOrg = (orgId) => {
+  edgeGlobal.setOrganization(orgId, edgeFirebase)
+  orgDialogOpen.value = false
+}
 const route = useRoute()
 const router = useRouter()
 const goTo = (path) => {
@@ -69,19 +83,16 @@ const firstPart = computed(() => {
       <DropdownMenuLabel v-if="!props.singleOrg" class="text-xs text-muted-foreground">
         {{ props.title }}
       </DropdownMenuLabel>
-      <template v-for="org in edgeGlobal.edgeState.organizations">
-        <DropdownMenuItem
-          v-if="!props.singleOrg"
-          :key="org.docId"
-          class="cursor-pointer"
-          :class="{ 'bg-accent': org.docId === edgeGlobal.edgeState.currentOrganization }"
-          @click="edgeGlobal.setOrganization(org.docId, edgeFirebase)"
-        >
-          {{ org.name }}
-          <Check v-if="org.docId === edgeGlobal.edgeState.currentOrganization" class="h-3 w-3 mr-2 ml-auto" />
-          <div v-else class="h-3 w-3 mr-2" />
-        </DropdownMenuItem>
-      </template>
+      <DropdownMenuItem
+        v-if="!props.singleOrg"
+        class="cursor-pointer"
+        :disabled="!hasMultipleOrgs"
+        @click="openOrgDialog"
+      >
+        <span class="truncate max-w-[180px]">{{ currentOrgName }}</span>
+        <span v-if="hasMultipleOrgs" class="ml-auto text-xs text-muted-foreground">Switch</span>
+        <ChevronsUpDown v-if="hasMultipleOrgs" class="h-4 w-4 ml-2" />
+      </DropdownMenuItem>
       <template v-if="isAdmin">
         <DropdownMenuSeparator />
         <DropdownMenuLabel class="text-xs text-muted-foreground">
@@ -145,4 +156,29 @@ const firstPart = computed(() => {
       </DropdownMenuItem>
     </DropdownMenuContent>
   </DropdownMenu>
+
+  <edge-shad-dialog v-model="orgDialogOpen">
+    <DialogContent class="w-full max-w-3xl max-h-[80vh] flex flex-col">
+      <DialogHeader>
+        <DialogTitle>Select Organization</DialogTitle>
+        <DialogDescription class="text-left">
+          Choose an organization to switch context.
+        </DialogDescription>
+      </DialogHeader>
+      <div class="mt-4 flex-1 overflow-y-auto">
+        <div class="space-y-2">
+          <edge-shad-button
+            v-for="org in organizations"
+            :key="org.docId"
+            variant="ghost"
+            class="w-full justify-between"
+            @click="selectOrg(org.docId)"
+          >
+            <span class="truncate text-left">{{ org.name }}</span>
+            <Check v-if="org.docId === edgeGlobal.edgeState.currentOrganization" class="h-4 w-4" />
+          </edge-shad-button>
+        </div>
+      </div>
+    </DialogContent>
+  </edge-shad-dialog>
 </template>

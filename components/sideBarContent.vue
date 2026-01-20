@@ -17,7 +17,7 @@ const props = defineProps({
   },
   organizationTitle: {
     type: String,
-    default: 'Organization(s)',
+    default: 'Organization',
   },
   singleOrg: {
     type: Boolean,

@@ -4,7 +4,7 @@ import { inject } from 'vue'
 const props = defineProps({
   title: {
     type: String,
-    default: 'Organization(s)',
+    default: 'Organization',
   },
 })
 const edgeFirebase = inject('edgeFirebase')

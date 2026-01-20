@@ -16,7 +16,7 @@ const props = defineProps({
   },
   organizationTitle: {
     type: String,
-    default: 'Organization(s)',
+    default: 'Organization',
   },
   menuItems: {
     type: Array,
@@ -86,7 +86,8 @@ onMounted(() => {
   try {
     devOverride.value = localStorage.getItem(DEV_OVERRIDE_KEY) === '1'
     edgeGlobal.edgeState.devOverride = devOverride.value
-  } catch (error) {
+  }
+  catch (error) {
     console.warn('dev override read failed', error)
   }
 })
@@ -97,10 +98,12 @@ const toggleDevOverride = () => {
   try {
     if (devOverride.value) {
       localStorage.setItem(DEV_OVERRIDE_KEY, '1')
-    } else {
+    }
+    else {
       localStorage.removeItem(DEV_OVERRIDE_KEY)
     }
-  } catch (error) {
+  }
+  catch (error) {
     console.warn('dev override write failed', error)
   }
 }
