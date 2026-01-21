@@ -54,6 +54,9 @@ const edgeFirebase = inject('edgeFirebase')
 const { buildPageStructuredData } = useStructuredDataTemplates()
 
 const isExternalLinkEntry = entry => entry?.item && typeof entry.item === 'object' && entry.item.type === 'external'
+const isPageEntry = entry => typeof entry?.item === 'string'
+const isRenameDisabled = entry => isPageEntry(entry) && !!entry?.disableRename
+const isDeleteDisabled = entry => isPageEntry(entry) && !!entry?.disableDelete
 const isLinkUrlSpecial = url => /^tel:|^mailto:/i.test(String(url || '').trim())
 const linkTarget = url => (isLinkUrlSpecial(url) ? null : '_blank')
 const linkRel = url => (isLinkUrlSpecial(url) ? null : 'noopener noreferrer')
@@ -343,6 +346,8 @@ const templatePreviewBlocks = (template) => {
 }
 
 const renameFolderOrPageShow = (item) => {
+  if (isRenameDisabled(item))
+    return
   // Work on a copy so edits in the dialog do not mutate the live menu entry.
   state.renameItem = edgeGlobal.dupObject(item || {})
   state.renameItem.previousName = item?.name
@@ -357,6 +362,8 @@ const addPageShow = (menuName, isMenu = false) => {
 }
 
 const deletePageShow = (page) => {
+  if (isDeleteDisabled(page))
+    return
   state.deletePage = page
   state.deletePageDialog = true
 }
@@ -538,6 +545,11 @@ const buildPagePayloadFromTemplate = (templateDoc, slug) => {
 }
 
 const renameFolderOrPageAction = async () => {
+  if (isRenameDisabled(state.renameItem)) {
+    state.renameFolderOrPageDialog = false
+    state.renameItem = {}
+    return
+  }
   if (isExternalLinkEntry(state.renameItem)) {
     const nextName = state.renameItem.name?.trim() || ''
     if (!nextName) {
@@ -691,6 +703,11 @@ const submitLinkDialog = () => {
   state.addLinkDialog = false
 }
 const deletePageAction = async () => {
+  if (isDeleteDisabled(state.deletePage)) {
+    state.deletePageDialog = false
+    state.deletePage = {}
+    return
+  }
   if (isExternalLinkEntry(state.deletePage)) {
     const menuName = state.deletePage.menuName
     const index = state.deletePage.index
@@ -941,7 +958,7 @@ const theme = computed(() => {
                         <FileUp />
                         Publish
                       </DropdownMenuItem>
-                      <DropdownMenuItem @click="renameFolderOrPageShow({ ...element, menuName, index })">
+                      <DropdownMenuItem :disabled="isRenameDisabled(element)" @click="renameFolderOrPageShow({ ...element, menuName, index })">
                         <FilePen />
                         <span>Rename</span>
                       </DropdownMenuItem>
@@ -954,7 +971,7 @@ const theme = computed(() => {
                         <FileDown />
                         Unpublish
                       </DropdownMenuItem>
-                      <DropdownMenuItem class="text-destructive" @click="deletePageShow({ ...element, menuName, index })">
+                      <DropdownMenuItem class="text-destructive" :disabled="isDeleteDisabled(element)" @click="deletePageShow({ ...element, menuName, index })">
                         <FileMinus2 />
                         <span>Delete</span>
                       </DropdownMenuItem>

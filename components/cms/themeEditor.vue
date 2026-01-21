@@ -251,6 +251,8 @@ const hydrateMenusFromDefaultPages = (doc = state.workingDoc) => {
     return {
       name: slug,
       item: entry.pageId,
+      disableRename: !!entry?.disableRename,
+      disableDelete: !!entry?.disableDelete,
     }
   })
 }
@@ -267,6 +269,8 @@ const flattenMenusToDefaultPages = (menus = {}) => {
         collected.push({
           pageId: entry.item,
           name: templatePageName(entry.item, entry.name),
+          disableRename: !!entry?.disableRename,
+          disableDelete: !!entry?.disableDelete,
         })
       }
       else if (typeof entry.item === 'object') {
@@ -288,7 +292,11 @@ const syncDefaultPagesFromMenus = () => {
   const defaults = ensureDefaultPagesArray()
   const sameLength = defaults.length === normalized.length
   const sameOrder = sameLength && defaults.every((entry, index) => entry.pageId === normalized[index].pageId)
-  if (sameLength && sameOrder)
+  const sameFlags = sameLength && defaults.every((entry, index) => (
+    !!entry.disableRename === !!normalized[index]?.disableRename
+    && !!entry.disableDelete === !!normalized[index]?.disableDelete
+  ))
+  if (sameLength && sameOrder && sameFlags)
     return
   defaults.splice(0, defaults.length, ...normalized)
 }

@@ -489,6 +489,8 @@ const buildMenusFromDefaultPages = (defaultPages = []) => {
     menus['Site Root'].push({
       name: slug,
       item: entry.pageId,
+      disableRename: !!entry?.disableRename,
+      disableDelete: !!entry?.disableDelete,
     })
   }
   return menus
@@ -1507,7 +1509,7 @@ const pageSettingsUpdated = async (pageData) => {
             </ResizablePanel>
             <ResizablePanel ref="mainPanel">
               <Transition name="fade" mode="out-in">
-                <div v-if="props.page && !state.updating" :key="props.page" class="max-h-[calc(100vh-50px)] overflow-y-auto w-full">
+                <div v-if="props.page && !state.updating" :key="props.page" class="max-h-[calc(100vh-100px)] overflow-y-auto w-full">
                   <NuxtPage class="flex flex-col flex-1 px-0 mx-0 pt-0" />
                 </div>
                 <div v-else class="p-4 text-center flex text-slate-500 h-[calc(100vh-4rem)] justify-center items-center overflow-y-auto">

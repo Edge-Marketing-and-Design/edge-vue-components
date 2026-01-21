@@ -1,7 +1,7 @@
 <script setup>
 import { computed, reactive, watch, watchEffect } from 'vue'
 import { useVModel } from '@vueuse/core'
-import { File as FileIcon, FileMinus2, FilePen, Folder, FolderMinus, FolderPen, FolderPlus, GripVertical, Link, Plus } from 'lucide-vue-next'
+import { FileCog, File as FileIcon, FileMinus2, FilePen, Folder, FolderMinus, FolderPen, FolderPlus, GripVertical, Link, Plus } from 'lucide-vue-next'
 
 const props = defineProps({
   modelValue: {
@@ -111,6 +111,7 @@ const uniqueDisplayName = (value, siblings = [], current = '') => {
 
 const isExternalLinkEntry = entry => entry?.item && typeof entry.item === 'object' && entry.item.type === 'external'
 const isFolder = entry => entry && typeof entry.item === 'object' && !isExternalLinkEntry(entry)
+const isPageEntry = entry => typeof entry?.item === 'string'
 
 const getFolderName = (entry) => {
   if (!isFolder(entry))
@@ -156,6 +157,8 @@ const addPageToList = (list, pageId, nameHint) => {
   list.push({
     name: slug,
     item: pageId,
+    disableRename: false,
+    disableDelete: false,
   })
 }
 
@@ -523,7 +526,7 @@ const hasEntries = computed(() => {
                             {{ child.item?.url || 'External link' }}
                           </template>
                           <template v-else>
-                            Template: {{ resolveTemplateTitle(child.item) }}
+                            {{ resolveTemplateTitle(child.item) }}
                           </template>
                         </div>
                       </div>
@@ -547,6 +550,25 @@ const hasEntries = computed(() => {
                       >
                         <FilePen class="w-3.5 h-3.5" />
                       </edge-shad-button>
+                      <DropdownMenu v-if="isPageEntry(child)">
+                        <DropdownMenuTrigger as-child>
+                          <edge-shad-button
+                            variant="ghost"
+                            size="icon"
+                            class="h-7 w-7"
+                          >
+                            <FileCog class="w-3.5 h-3.5" />
+                          </edge-shad-button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" class="w-48">
+                          <DropdownMenuCheckboxItem v-model="child.disableRename">
+                            Disable Rename
+                          </DropdownMenuCheckboxItem>
+                          <DropdownMenuCheckboxItem v-model="child.disableDelete">
+                            Disable Delete
+                          </DropdownMenuCheckboxItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                       <edge-shad-button
                         variant="ghost"
                         size="icon"
@@ -588,7 +610,7 @@ const hasEntries = computed(() => {
                     {{ element.item?.url || 'External link' }}
                   </template>
                   <template v-else>
-                    Template: {{ resolveTemplateTitle(element.item) }}
+                    {{ resolveTemplateTitle(element.item) }}
                   </template>
                 </div>
               </div>
@@ -612,6 +634,25 @@ const hasEntries = computed(() => {
               >
                 <FilePen class="w-3.5 h-3.5" />
               </edge-shad-button>
+              <DropdownMenu v-if="isPageEntry(element)">
+                <DropdownMenuTrigger as-child>
+                  <edge-shad-button
+                    variant="ghost"
+                    size="icon"
+                    class="h-7 w-7"
+                  >
+                    <FileCog class="w-3.5 h-3.5" />
+                  </edge-shad-button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" class="w-48">
+                  <DropdownMenuCheckboxItem v-model="element.disableRename">
+                    Disable Rename
+                  </DropdownMenuCheckboxItem>
+                  <DropdownMenuCheckboxItem v-model="element.disableDelete">
+                    Disable Delete
+                  </DropdownMenuCheckboxItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <edge-shad-button
                 variant="ghost"
                 size="icon"
