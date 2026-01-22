@@ -342,6 +342,8 @@ function handleEditorLineClick(payload, workingDoc) {
   const tag = findTagAtOffset(workingDoc.content, offset)
   if (!tag)
     return
+  if (tag.type === 'if')
+    return
 
   const parsedCfg = safeParseConfig(tag.rawCfg)
   state.jsonEditorError = ''
@@ -430,13 +432,27 @@ const buildPreviewBlock = (workingDoc, parsed) => {
       nextValues[field] = parsed.values[field]
   })
 
+  const previousMeta = state.previewBlock?.meta || {}
+  const nextMeta = {}
+  Object.keys(parsed.meta || {}).forEach((field) => {
+    if (previousMeta[field]) {
+      nextMeta[field] = {
+        ...previousMeta[field],
+        ...parsed.meta[field],
+      }
+    }
+    else {
+      nextMeta[field] = parsed.meta[field]
+    }
+  })
+
   return {
     id: state.previewBlock?.id || 'preview',
     blockId: props.blockId,
     name: workingDoc?.name || state.previewBlock?.name || '',
     content,
     values: nextValues,
-    meta: parsed.meta || {},
+    meta: nextMeta,
     synced: !!workingDoc?.synced,
   }
 }

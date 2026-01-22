@@ -62,6 +62,7 @@ const state = reactive({
   loading: true,
   afterLoad: false,
   imageOpen: false,
+  imageOpenByField: {},
   aiDialogOpen: false,
   aiInstructions: '',
   aiSelectedFields: {},
@@ -680,9 +681,12 @@ const getTagsFromPosts = computed(() => {
                 </div>
               </div>
               <div v-else-if="entry.meta?.type === 'image'" class="w-full">
+                <div class="mb-2 text-sm font-medium text-foreground">
+                  {{ genTitleFromField(entry) }}
+                </div>
                 <div class="relative bg-muted py-2 rounded-md">
                   <div class="bg-black/80 absolute left-0 top-0 w-full h-full opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center z-10 cursor-pointer">
-                    <Dialog v-model:open="state.imageOpen">
+                    <Dialog v-model:open="state.imageOpenByField[entry.field]">
                       <DialogTrigger as-child>
                         <edge-shad-button variant="outline" class="bg-white text-black hover:bg-gray-200">
                           <ImagePlus class="h-5 w-5 mr-2" />
@@ -699,13 +703,13 @@ const getTagsFromPosts = computed(() => {
                           :site="props.siteId"
                           :select-mode="true"
                           :default-tags="entry.meta.tags"
-                          @select="(url) => { state.draft[entry.field] = url; state.imageOpen = false; }"
+                          @select="(url) => { state.draft[entry.field] = url; state.imageOpenByField[entry.field] = false }"
                         />
                         <edge-cms-media-manager
                           v-else
                           :site="props.siteId"
                           :select-mode="true"
-                          @select="(url) => { state.draft[entry.field] = url; state.imageOpen = false; }"
+                          @select="(url) => { state.draft[entry.field] = url; state.imageOpenByField[entry.field] = false }"
                         />
                       </DialogContent>
                     </Dialog>
