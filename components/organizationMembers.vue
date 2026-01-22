@@ -357,7 +357,10 @@ const onSubmit = async () => {
         }
       }
     }
-    await edgeFirebase.setUserMeta(state.workingItem.meta, targetUserId)
+    const stagedUserId = state.workingItem.docId
+    console.log('Staged User ID:', stagedUserId)
+    console.log('Updating meta:', state.workingItem.meta)
+    await edgeFirebase.setUserMeta(state.workingItem.meta, '', stagedUserId)
   }
   edgeGlobal.edgeState.changeTracker = {}
   state.loading = false

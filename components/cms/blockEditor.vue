@@ -38,6 +38,7 @@ const state = reactive({
   initialBlocksSeeded: false,
   seedingInitialBlocks: false,
   previewViewport: 'full',
+  previewBlock: null,
 })
 
 const blockSchema = toTypedSchema(z.object({
@@ -94,6 +95,8 @@ const PLACEHOLDERS = {
 }
 
 const contentEditorRef = ref(null)
+
+const ignorePreviewDelete = () => {}
 
 const BLOCK_CONTENT_SNIPPETS = [
   {
@@ -416,6 +419,28 @@ function handleJsonEditorSave() {
   closeJsonEditor()
 }
 
+const buildPreviewBlock = (workingDoc, parsed) => {
+  const content = workingDoc?.content || ''
+  const nextValues = {}
+  const previousValues = state.previewBlock?.values || {}
+  Object.keys(parsed.values || {}).forEach((field) => {
+    if (previousValues[field] !== undefined)
+      nextValues[field] = previousValues[field]
+    else
+      nextValues[field] = parsed.values[field]
+  })
+
+  return {
+    id: state.previewBlock?.id || 'preview',
+    blockId: props.blockId,
+    name: workingDoc?.name || state.previewBlock?.name || '',
+    content,
+    values: nextValues,
+    meta: parsed.meta || {},
+    synced: !!workingDoc?.synced,
+  }
+}
+
 const theme = computed(() => {
   const theme = edgeGlobal.edgeState.blockEditorTheme || ''
   let themeContents = null
@@ -443,7 +468,9 @@ watch(headObject, (newHeadElements) => {
 }, { immediate: true, deep: true })
 
 const editorDocUpdates = (workingDoc) => {
-  state.workingDoc = blockModel(workingDoc.content)
+  const parsed = blockModel(workingDoc.content)
+  state.workingDoc = parsed
+  state.previewBlock = buildPreviewBlock(workingDoc, parsed)
   console.log('Editor workingDoc update:', state.workingDoc)
 }
 
@@ -670,11 +697,15 @@ const getTagsFromBlocks = computed(() => {
                 class="w-full mx-auto bg-card border border-border rounded-lg shadow-sm md:shadow-md"
                 :style="previewViewportStyle"
               >
-                <edge-cms-block-picker
+                <edge-cms-block
+                  v-if="state.previewBlock"
+                  v-model="state.previewBlock"
                   :site-id="edgeGlobal.edgeState.blockEditorSite"
                   :theme="theme"
-                  :block-override="{ content: slotProps.workingDoc.content, values: state.workingDoc.values, meta: state.workingDoc.meta }"
+                  :edit-mode="true"
                   :viewport-mode="previewViewportMode"
+                  :block-id="state.previewBlock.id"
+                  @delete="ignorePreviewDelete"
                 />
               </div>
             </div>

@@ -166,6 +166,12 @@ const redo = () => {
 
 const editorCompRef = ref(null)
 const editorInstanceRef = shallowRef(null)
+let editorDomNode = null
+
+const stopEnterPropagation = (event) => {
+  if (event.key === 'Enter')
+    event.stopPropagation()
+}
 
 const setCursor = () => {
   const editor = editorInstanceRef.value
@@ -226,6 +232,9 @@ const runChatGpt = async () => {
 const handleMount = (editor) => {
   editorInstanceRef.value = editor
   editorInstanceRef.value?.getAction('editor.action.formatDocument').run()
+  editorDomNode = editor.getDomNode?.()
+  if (editorDomNode)
+    editorDomNode.addEventListener('keydown', stopEnterPropagation)
   editor.onMouseDown((event) => {
     const position = event?.target?.position
     const model = editor.getModel?.()
@@ -314,6 +323,12 @@ const getChanges = () => {
     formatCode()
   }
 }
+
+onBeforeUnmount(() => {
+  if (editorDomNode)
+    editorDomNode.removeEventListener('keydown', stopEnterPropagation)
+  editorDomNode = null
+})
 </script>
 
 <template>

@@ -163,6 +163,10 @@ const modelValue = useVModel(props, 'modelValue', emits, {
 })
 
 const editor = ref(null)
+const enterKeyHandler = (event) => {
+  if (event.key === 'Enter')
+    event.stopPropagation()
+}
 const imageState = reactive({
   active: false,
   size: 'medium',
@@ -279,6 +283,7 @@ onMounted(() => {
   })
   editor.value.on('selectionUpdate', updateImageState)
   editor.value.on('transaction', updateImageState)
+  editor.value?.view?.dom?.addEventListener('keydown', enterKeyHandler)
   updateImageState()
   applyHeightClasses()
 })
@@ -287,6 +292,7 @@ onBeforeUnmount(() => {
   if (editor.value) {
     editor.value.off('selectionUpdate', updateImageState)
     editor.value.off('transaction', updateImageState)
+    editor.value?.view?.dom?.removeEventListener('keydown', enterKeyHandler)
     editor.value.destroy()
   }
 })
