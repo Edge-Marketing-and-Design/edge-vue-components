@@ -1,8 +1,9 @@
-{{{#array {"field":"list","schema":[{"field":"name","value":"text"}],"collection":{"path":"post","query":[{"field":"doc_created_at","operator":">","value":0}],"order":[{"field":"doc_created_at","direction":"desc"}]},"queryOptions":[],"limit":1,"value":[]}}}}
-  <section
-    class="relative h-[50dvh] min-h-[260px] w-full bg-cover bg-center"
-    style="background-image: url('{{item.featuredImage}}')"
-  >
+<div class="relative h-[20dvh] md:h-[30dvh] w-full bg-cover bg-center {{{#text {"
+  field":"backgroundColor","option":{"optionsKey":"title","optionsValue":"value","options":[{"title":"Brand","value":"bg-brand"},{"title":"Primary","value":"bg-primary"},{"title":"Secondary","value":"bg-secondary"},{"title":"White","value":"bg-white"},{"title":"Transparent","value":"bg-transparent"}]},"value":"bg-primary"}}}}">
+  {{{#array
+  {"field":"list","schema":[{"field":"name","value":"text"}],"collection":{"path":"posts","uniqueKey":"{orgId}:{siteId}","query":[],"order":[]},"queryOptions":[],"limit":1,"value":[]}}}}
+  <section class="relativeh-[20dvh] md:h-[30dvh] w-full bg-cover bg-center"
+    style="background-image: url('{{item.featuredImage}}')">
     <!-- Dark overlay -->
     <div class="absolute inset-0 bg-black/40"></div>
 
@@ -19,3 +20,4 @@
     <div class="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/30"></div>
   </section>
   {{{/array}}}
+</div>

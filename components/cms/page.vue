@@ -438,6 +438,54 @@ const blockPick = (block, index, slotProps, post = false) => {
   }
 }
 
+const applyCollectionUniqueKeys = (workingDoc) => {
+  const resolveUniqueKey = (template) => {
+    if (!template || typeof template !== 'string')
+      return ''
+    let resolved = template
+    const orgId = edgeGlobal.edgeState.currentOrganization || ''
+    const siteId = props.site || ''
+    if (resolved.includes('{orgId}') && orgId)
+      resolved = resolved.replaceAll('{orgId}', orgId)
+    if (resolved.includes('{siteId}') && siteId)
+      resolved = resolved.replaceAll('{siteId}', siteId)
+    return resolved
+  }
+
+  const applyToBlocks = (blocks) => {
+    if (!Array.isArray(blocks))
+      return
+    blocks.forEach((block) => {
+      const meta = block?.meta
+      if (!meta || typeof meta !== 'object')
+        return
+      Object.keys(meta).forEach((fieldKey) => {
+        const cfg = meta[fieldKey]
+        if (!cfg?.collection?.uniqueKey)
+          return
+        const resolved = resolveUniqueKey(cfg.collection.uniqueKey)
+        if (!resolved)
+          return
+        if (cfg.queryItems && !Object.prototype.hasOwnProperty.call(cfg, 'uniqueKey')) {
+          const reordered = {}
+          Object.keys(cfg).forEach((key) => {
+            reordered[key] = cfg[key]
+            if (key === 'queryItems')
+              reordered.uniqueKey = resolved
+          })
+          block.meta[fieldKey] = reordered
+        }
+        else {
+          cfg.uniqueKey = resolved
+        }
+      })
+    })
+  }
+
+  applyToBlocks(workingDoc?.content)
+  applyToBlocks(workingDoc?.postContent)
+}
+
 onMounted(() => {
   if (props.page === 'new') {
     state.editMode = true
@@ -448,6 +496,7 @@ const editorDocUpdates = (workingDoc) => {
   ensureStructureDefaults(workingDoc, false)
   if (workingDoc?.post || (Array.isArray(workingDoc?.postContent) && workingDoc.postContent.length > 0) || Array.isArray(workingDoc?.postStructure))
     ensureStructureDefaults(workingDoc, true)
+  applyCollectionUniqueKeys(workingDoc)
   const blockIds = (workingDoc.content || []).map(block => block.blockId).filter(id => id)
   const postBlockIds = workingDoc.postContent ? workingDoc.postContent.map(block => block.blockId).filter(id => id) : []
   blockIds.push(...postBlockIds)

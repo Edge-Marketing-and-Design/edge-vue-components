@@ -1,20 +1,21 @@
 <div class="p-8 bg-gray-50 font-sans">
   <div class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-    {{{#array {"field":"list","schema":[{"field":"name","value":"text"},{"field":"content","value":"richtext"}],"collection":{"path":"posts","query":[{"field":"doc_created_at","operator":">","value":0}],"order":[{"field":"doc_created_at","direction":"desc"}]},"queryOptions":[{"field":"tags","operator":"array-contains-any","options":[]}],"limit":10,"value":[]}}}}
-
-    <div class="bg-white rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-200 overflow-hidden flex flex-col">
+    {{{#array
+    {"field":"list","schema":[{"field":"name","value":"text"},{"field":"content","value":"richtext"}],"collection":{"path":"posts","uniqueKey":"{orgId}:{siteId}","query":[{"field":"doc_created_at","operator":">","value":0}],"order":[{"field":"doc_created_at","direction":"desc"}]},"queryOptions":[{"field":"tags","operator":"array-contains-any","options":[]}],"limit":10,"value":[]}}}}
+    <div
+      class="bg-white rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-200 overflow-hidden flex flex-col">
       <img src="{{item.featuredImage}}" alt="{{item.title}}" class="h-48 w-full object-cover" />
       <div class="p-5 flex flex-col flex-1">
         <h2 class="text-lg font-semibold text-gray-800 mb-2 line-clamp-2">{{ item.title }}</h2>
         <div class="text-gray-600 text-sm flex-1 mb-4 line-clamp-3">
           {{ item.blurb }}
         </div>
-        <a href="/posts/{{item.name}}" class="inline-block mt-auto self-start text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors duration-150">
+        <a href="{{item.name}}"
+          class="inline-block mt-auto self-start text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors duration-150">
           Read More →
         </a>
       </div>
     </div>
-
     {{{/array}}}
   </div>
 </div>

@@ -1,7 +1,8 @@
 <div class="pa-8 bg-white font-sans">
-{{{#array {"field":"list","schema":[{"field":"name","value":"text"},{"field":"content","value":"richtext"}],"collection":{"path":"post","query":[{"field":"doc_created_at","operator":">","value":0}],"order":[{"field":"doc_created_at","direction":"desc"}]},"queryOptions":[],"limit":1,"value":[]}}}}
+    {{{#array
+    {"field":"list","schema":[{"field":"name","value":"text"},{"field":"content","value":"richtext"}],"collection":{"path":"posts","uniqueKey":"{orgId}:{siteId}","query":[],"order":[]},"queryOptions":[],"limit":1,"value":[]}}}}
     <h1 class="text-sm">
         {{item.content}}
     </h1>
-{{{/array}}}
+    {{{/array}}}
 </div>

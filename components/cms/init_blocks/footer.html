@@ -1,24 +1,19 @@
-<footer id="global-footer" class="bg-neutral-900 text-white">
-  <div class="mx-auto max-w-7xl px-6 py-12"> <!-- Top: Brand / Map / Contact -->
-    <div class="grid gap-10 md:grid-cols-3"> <!-- Brand / Title -->
-      <div class="text-center md:text-left">
-        <h6 class="text-lg font-semibold tracking-wide">{{{#text {"field":"name","value":""}}}}</h6>
-        <p class="mt-2 whitespace-pre-line text-sm text-neutral-300"> {{{#text {"field":"title","value":""}}}} </p>
-      </div> <!-- Map -->
-      <div> </div> <!-- Contact -->
-      <div class="text-center md:text-left">
-        <h6 class="text-lg font-semibold tracking-wide">Contact Us</h6>
-        <div class="mt-2 space-y-2 text-sm">
-          <p> Phone: <a class="font-normal hover:opacity-90 underline underline-offset-4" href="tel:2025502730"
-              aria-label="Call (202) 550-2730"> {{{#text {"field":"phone","value":""}}}} </a> </p>
-          <p> Office: <a class="font-normal hover:opacity-90 underline underline-offset-4" href="tel:6154755616"
-              aria-label="Call (615) 475-5616"> {{{#text {"field":"officeNumber","value":""}}}} </a> </p>
-          <div>
-            <div class="text-neutral-300">{{{#text {"field":"streetAddress","value":""}}}}</div>
-            <div class="text-neutral-300">{{{#text {"field":"city","value":"","title":"City, State & Zip"}}}}</div>
-          </div>
-        </div>
+<footer id="global-footer" class="bg-footerBg text-white h-[344px] overflow-hidden">
+  <div class="mx-auto px-2 sm:px-[100px] py-12 h-full w-full"> <!-- Top: Brand / Map / Contact -->
+    <div class="grid gap-10  md:grid-cols-2 h-full w-full">
+    {{{#array {"field":"agent","schema":[{"field":"contactEmail","value":"text"}],"collection":{"path":"users","uniqueKey":"{orgId}"},"queryOptions":[{"field":"userId","title":"Agent","optionsKey":"name","optionsValue":"userId","options":"users"}],"limit":1,"value":[]}}}}
+      <div class="text-center md:text-left relative h-full">
+         
+              Phone: {{item.contactPhone}} <br />
+              Email: {{item.contactEmail}}
       </div>
+      <div class="text-right">
+            {{item.socialFacebook}}
+            {{item.socialInstagram}}
+            {{item.socialLinkedIn}}
+            {{item.socialYouTube}}
+      </div>
+      {{{/array}}}
     </div>
   </div>
 </footer>
