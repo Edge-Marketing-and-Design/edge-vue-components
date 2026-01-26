@@ -1,5 +1,5 @@
 <script setup>
-import { AlertTriangle, ArrowDown, ArrowUp, Maximize2, Monitor, Smartphone, Sparkles, Tablet } from 'lucide-vue-next'
+import { AlertTriangle, ArrowDown, ArrowUp, Maximize2, Monitor, Smartphone, Sparkles, Tablet, UploadCloud } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 const props = defineProps({
@@ -37,6 +37,7 @@ const state = reactive({
   },
   editMode: false,
   showUnpublishedChangesDialog: false,
+  publishLoading: false,
   workingDoc: {},
   seoAiLoading: false,
   seoAiError: '',
@@ -1090,6 +1091,21 @@ const unpublishedChangeDetails = computed(() => {
   return changes
 })
 
+const publishPage = async (pageId) => {
+  if (state.publishLoading)
+    return
+  const pageData = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`] || {}
+  if (!pageData[pageId])
+    return
+  state.publishLoading = true
+  try {
+    await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`, pageData[pageId])
+  }
+  finally {
+    state.publishLoading = false
+  }
+}
+
 const hasUnsavedChanges = (changes) => {
   console.log('Unsaved changes:', changes)
   if (changes === true) {
@@ -1123,14 +1139,25 @@ const hasUnsavedChanges = (changes) => {
           <div class="w-full border-t border-gray-300 dark:border-white/15" aria-hidden="true" />
           <div v-if="!props.isTemplateSite" class="px-4 text-gray-600 dark:text-gray-300 whitespace-nowrap text-center flex flex-col items-center gap-1">
             <template v-if="isPublishedPageDiff(page)">
-              <edge-shad-button
-                variant="outline"
-                class="bg-yellow-100 text-yellow-800 border-yellow-300 hover:bg-yellow-100 hover:text-yellow-900 text-xs h-[32px] gap-1"
-                @click="state.showUnpublishedChangesDialog = true"
-              >
-                <AlertTriangle class="w-4 h-4" />
-                Unpublished Changes
-              </edge-shad-button>
+              <div class="flex items-center gap-2">
+                <edge-shad-button
+                  variant="outline"
+                  class="bg-yellow-100 text-yellow-800 border-yellow-300 hover:bg-yellow-100 hover:text-yellow-900 text-xs h-[32px] gap-1"
+                  @click="state.showUnpublishedChangesDialog = true"
+                >
+                  <AlertTriangle class="w-4 h-4" />
+                  Unpublished Changes
+                </edge-shad-button>
+                <edge-shad-button
+                  class="bg-primary text-primary-foreground hover:bg-primary/90 text-xs h-[32px] gap-1 shadow-sm"
+                  :disabled="state.publishLoading"
+                  @click="publishPage(page)"
+                >
+                  <Loader2 v-if="state.publishLoading" class="w-4 h-4 animate-spin" />
+                  <UploadCloud v-else class="w-4 h-4" />
+                  Publish
+                </edge-shad-button>
+              </div>
             </template>
             <template v-else>
               <edge-chip class="bg-green-100 text-green-800">

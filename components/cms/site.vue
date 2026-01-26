@@ -59,6 +59,7 @@ const state = reactive({
   viewMode: 'pages',
   submissionFilter: '',
   selectedSubmissionId: '',
+  publishSiteLoading: false,
 })
 
 const pageInit = {
@@ -791,6 +792,19 @@ const publishSite = async () => {
   }
 }
 
+const publishSiteAndSettings = async () => {
+  if (state.publishSiteLoading)
+    return
+  state.publishSiteLoading = true
+  try {
+    await publishSiteSettings()
+    await publishSite()
+  }
+  finally {
+    state.publishSiteLoading = false
+  }
+}
+
 const pages = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`] || {}
 })
@@ -1272,11 +1286,22 @@ const pageSettingsUpdated = async (pageData) => {
         </div>
         <div v-if="!isTemplateSite" class="flex items-center gap-3 justify-end">
           <Transition name="fade" mode="out-in">
-            <div v-if="isSiteDiff" key="unpublished" class="flex gap-1 items-center bg-yellow-100 text-xs py-1 px-3 text-yellow-800 rounded">
-              <CircleAlert class="!text-yellow-800 w-3 h-3" />
-              <span class="font-medium text-[10px]">
-                Unpublished Settings
-              </span>
+            <div v-if="isSiteDiff || isAnyPagesDiff" key="unpublished" class="flex gap-2 items-center">
+              <div class="flex gap-1 items-center bg-yellow-100 text-xs py-1 px-3 text-yellow-800 rounded">
+                <CircleAlert class="!text-yellow-800 w-3 h-6" />
+                <span class="font-medium text-[10px]">
+                  {{ isSiteDiff ? 'Unpublished Settings' : 'Unpublished Pages' }}
+                </span>
+              </div>
+              <edge-shad-button
+                class="h-8 px-4 text-xs gap-2 bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm"
+                :disabled="state.publishSiteLoading"
+                @click="publishSiteAndSettings"
+              >
+                <Loader2 v-if="state.publishSiteLoading" class="h-3.5 w-3.5 animate-spin" />
+                <FolderUp v-else class="h-3.5 w-3.5" />
+                Publish Site
+              </edge-shad-button>
             </div>
             <div v-else key="published" class="flex gap-1 items-center bg-green-100 text-xs py-1 px-3 text-green-800 rounded">
               <FileCheck class="!text-green-800 w-3 h-3" />

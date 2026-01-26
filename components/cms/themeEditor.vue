@@ -84,6 +84,9 @@ const state = reactive({
   }
 }`,
       },
+      extraCSS: {
+        value: '',
+      },
       version: 1,
       defaultPages: { value: [] },
       defaultMenus: {
@@ -455,6 +458,14 @@ onBeforeMount(async () => {
                   language="json"
                   name="headJSON"
                   height="400px"
+                  class="mb-4 w-full"
+                />
+                <edge-cms-code-editor
+                  v-model="slotProps.workingDoc.extraCSS"
+                  title="Extra CSS"
+                  language="css"
+                  name="extraCSS"
+                  height="300px"
                   class="mb-4 w-full"
                 />
               </div>
