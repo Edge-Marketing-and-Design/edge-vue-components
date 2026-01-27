@@ -71,6 +71,14 @@ const state = reactive({
   validationErrors: [],
 })
 
+const isLightName = (value) => {
+  if (!value)
+    return false
+  return String(value).toLowerCase().includes('light')
+}
+
+const previewBackgroundClass = value => (isLightName(value) ? 'bg-neutral-900/90' : 'bg-neutral-100')
+
 const ensureQueryItemsDefaults = (meta) => {
   Object.keys(meta || {}).forEach((key) => {
     const cfg = meta[key]
@@ -684,7 +692,7 @@ const getTagsFromPosts = computed(() => {
                 <div class="mb-2 text-sm font-medium text-foreground">
                   {{ genTitleFromField(entry) }}
                 </div>
-                <div class="relative bg-muted py-2 rounded-md">
+                <div class="relative py-2 rounded-md flex items-center justify-center" :class="previewBackgroundClass(state.draft[entry.field])">
                   <div class="bg-black/80 absolute left-0 top-0 w-full h-full opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center z-10 cursor-pointer">
                     <Dialog v-model:open="state.imageOpenByField[entry.field]">
                       <DialogTrigger as-child>
@@ -714,7 +722,11 @@ const getTagsFromPosts = computed(() => {
                       </DialogContent>
                     </Dialog>
                   </div>
-                  <img v-if="state.draft[entry.field]" :src="state.draft[entry.field]" class="mb-2 max-h-40 mx-auto object-contain">
+                  <img
+                    v-if="state.draft[entry.field]"
+                    :src="state.draft[entry.field]"
+                    class="max-h-40 max-w-full h-auto w-auto object-contain"
+                  >
                 </div>
               </div>
               <div v-else-if="entry.meta?.option">

@@ -313,7 +313,7 @@ const previewBackgroundClass = computed(() => (isLightName(state.workingDoc?.nam
         </div>
       </template>
       <template #list="slotProps">
-        <div class=" mx-auto px-0 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div class="mx-auto px-0 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
           <div v-for="item in slotProps.filtered" :key="item.docId" class="w-full cursor-pointer" @click="itemClick(item)">
             <edge-cms-media-card
               :item="item"

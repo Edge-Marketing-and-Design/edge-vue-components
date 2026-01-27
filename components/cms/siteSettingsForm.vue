@@ -63,6 +63,14 @@ const themeOptionsMap = computed(() => {
   return map
 })
 
+const isLightName = (value) => {
+  if (!value)
+    return false
+  return String(value).toLowerCase().includes('light')
+}
+
+const previewBackgroundClass = value => (isLightName(value) ? 'bg-neutral-900/90' : 'bg-neutral-100')
+
 const themeItemsForAllowed = (allowed, current) => {
   const base = props.themeOptions || []
   const allowedList = Array.isArray(allowed) ? allowed.filter(Boolean) : []
@@ -269,7 +277,11 @@ onMounted(async () => {
         </label>
         <div class="flex items-center gap-4">
           <div v-if="props.settings.logo" class="flex items-center gap-3">
-            <img :src="props.settings.logo" alt="Logo preview" class="h-16 w-auto rounded-md border border-border bg-muted object-contain">
+            <img
+              :src="props.settings.logo"
+              alt="Logo preview"
+              :class="['max-h-16 max-w-[220px] h-auto w-auto rounded-md border border-border object-contain', previewBackgroundClass(props.settings.logo)]"
+            >
             <edge-shad-button
               type="button"
               variant="ghost"
@@ -315,7 +327,11 @@ onMounted(async () => {
         </label>
         <div class="flex items-center gap-4">
           <div v-if="props.settings.logoLight" class="flex items-center gap-3">
-            <img :src="props.settings.logoLight" alt="Light logo preview" class="h-16 w-auto rounded-md border border-border bg-muted object-contain">
+            <img
+              :src="props.settings.logoLight"
+              alt="Light logo preview"
+              :class="['max-h-16 max-w-[220px] h-auto w-auto rounded-md border border-border object-contain', previewBackgroundClass(props.settings.logoLight)]"
+            >
             <edge-shad-button
               type="button"
               variant="ghost"
@@ -365,7 +381,11 @@ onMounted(async () => {
           </label>
           <div class="flex items-center gap-4">
             <div v-if="props.settings.brandLogoDark" class="flex items-center gap-3">
-              <img :src="props.settings.brandLogoDark" alt="Brand dark logo preview" class="h-16 w-auto rounded-md border border-border bg-muted object-contain">
+              <img
+                :src="props.settings.brandLogoDark"
+                alt="Brand dark logo preview"
+                :class="['max-h-16 max-w-[220px] h-auto w-auto rounded-md border border-border object-contain', previewBackgroundClass(props.settings.brandLogoDark)]"
+              >
               <edge-shad-button
                 type="button"
                 variant="ghost"
@@ -411,7 +431,11 @@ onMounted(async () => {
           </label>
           <div class="flex items-center gap-4">
             <div v-if="props.settings.brandLogoLight" class="flex items-center gap-3">
-              <img :src="props.settings.brandLogoLight" alt="Brand light logo preview" class="h-16 w-auto rounded-md border border-border bg-muted object-contain">
+              <img
+                :src="props.settings.brandLogoLight"
+                alt="Brand light logo preview"
+                :class="['max-h-16 max-w-[220px] h-auto w-auto rounded-md border border-border object-contain', previewBackgroundClass(props.settings.brandLogoLight)]"
+              >
               <edge-shad-button
                 type="button"
                 variant="ghost"
@@ -458,7 +482,11 @@ onMounted(async () => {
         </label>
         <div class="flex items-center gap-4">
           <div v-if="props.settings.favicon" class="flex items-center gap-3">
-            <img :src="props.settings.favicon" alt="Favicon preview" class="h-12 w-12 rounded-md border border-border bg-muted object-contain">
+            <img
+              :src="props.settings.favicon"
+              alt="Favicon preview"
+              :class="['max-h-12 max-w-12 h-auto w-auto rounded-md border border-border object-contain', previewBackgroundClass(props.settings.favicon)]"
+            >
             <edge-shad-button
               type="button"
               variant="ghost"
