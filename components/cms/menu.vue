@@ -201,6 +201,8 @@ const templateTagItems = computed(() => {
   return [{ name: 'Quick Picks', title: 'Quick Picks' }, ...tagList]
 })
 
+const BLANK_TEMPLATE_ID = 'blank'
+
 const resetAddPageDialogState = () => {
   state.newPageName = ''
   state.templateFilter = 'quick-picks'
@@ -226,6 +228,8 @@ watch(() => state.addLinkDialog, (open) => {
     resetLinkDialogState()
 })
 
+const TEMPLATE_COLLECTION_PATH = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/templates/pages`)
+
 onMounted(async () => {
   if (!edgeGlobal.edgeState.organizationDocPath)
     return
@@ -233,8 +237,6 @@ onMounted(async () => {
   if (!edgeFirebase.data?.[path])
     await edgeFirebase.startSnapshot(path)
 })
-
-const TEMPLATE_COLLECTION_PATH = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/templates/pages`)
 
 const templatePagesCollection = computed(() => {
   return edgeFirebase.data?.[TEMPLATE_COLLECTION_PATH.value] || {}
@@ -296,8 +298,6 @@ watch(filteredTemplates, (templates) => {
   if (!templates.some(template => template.docId === state.selectedTemplateId))
     state.selectedTemplateId = BLANK_TEMPLATE_ID
 })
-
-const BLANK_TEMPLATE_ID = 'blank'
 
 const blankTemplateTile = {
   docId: BLANK_TEMPLATE_ID,

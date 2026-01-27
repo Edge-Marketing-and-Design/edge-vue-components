@@ -1304,7 +1304,7 @@ const pageSettingsUpdated = async (pageData) => {
               </edge-shad-button>
             </div>
             <div v-else key="published" class="flex gap-1 items-center bg-green-100 text-xs py-1 px-3 text-green-800 rounded">
-              <FileCheck class="!text-green-800 w-3 h-3" />
+              <FileCheck class="!text-green-800 w-3 h-6" />
               <span class="font-medium text-[10px]">
                 Settings Published
               </span>
