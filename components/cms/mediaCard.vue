@@ -55,13 +55,24 @@ const timeAgo = (timestamp) => {
     return `${minutes} minute${minutes > 1 ? 's' : ''} ago`
   return `${seconds} second${seconds > 1 ? 's' : ''} ago`
 }
+
+const isLightName = (name) => {
+  if (!name)
+    return false
+  return String(name).toLowerCase().includes('light')
+}
+
+const previewBackgroundClass = computed(() => {
+  const displayName = props.item?.name
+  return isLightName(displayName) ? 'bg-neutral-900/90' : 'bg-neutral-100'
+})
 </script>
 
 <template>
   <Card
     class="w-full group overflow-hidden rounded-2xl border bg-card hover:shadow-md hover:border-muted-foreground/20 transition-all"
   >
-    <div class="relative w-full h-[200px] bg-muted flex items-center justify-center">
+    <div class="relative w-full h-[200px] flex items-center justify-center" :class="previewBackgroundClass">
       <div class="z-10 absolute w-full flex inset-0 bg-black/10 dark:bg-black/30 justify-between items-start p-2">
         <edge-shad-button
           v-if="!props.selectMode"

@@ -158,6 +158,14 @@ const itemClick = (item) => {
     state.workingDoc = item
   }
 }
+
+const isLightName = (name) => {
+  if (!name)
+    return false
+  return String(name).toLowerCase().includes('light')
+}
+
+const previewBackgroundClass = computed(() => (isLightName(state.workingDoc?.name) ? 'bg-neutral-900/90' : 'bg-neutral-100'))
 </script>
 
 <template>
@@ -305,7 +313,7 @@ const itemClick = (item) => {
         </div>
       </template>
       <template #list="slotProps">
-        <div class=" mx-auto px-0 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class=" mx-auto px-0 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           <div v-for="item in slotProps.filtered" :key="item.docId" class="w-full cursor-pointer" @click="itemClick(item)">
             <edge-cms-media-card
               :item="item"
@@ -325,7 +333,13 @@ const itemClick = (item) => {
         <SheetHeader>
           <SheetTitle>{{ state.workingDoc?.fileName }}</SheetTitle>
           <SheetDescription>
-            <img :src="edgeGlobal.getImage(state.workingDoc, 'public')" alt="" class="h-[450px] m-auto object-fit rounded-lg mb-4">
+            <div class="h-[450px] rounded-lg mb-4 flex items-center justify-center overflow-hidden" :class="previewBackgroundClass">
+              <img
+                :src="edgeGlobal.getImage(state.workingDoc, 'public')"
+                alt=""
+                class="max-h-full max-w-full h-auto w-auto object-contain"
+              >
+            </div>
             Original Name: <span class="font-semibold">{{ state.workingDoc?.fileName }}</span>, Size: <span class="font-semibold">{{ (state.workingDoc?.fileSize / 1024).toFixed(2) }} KB</span>
           </SheetDescription>
         </SheetHeader>
