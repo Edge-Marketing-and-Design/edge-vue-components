@@ -836,11 +836,11 @@ const theme = computed(() => {
 
 <template>
   <SidebarMenuItem v-for="({ menu, name: menuName }) in orderedMenus" :key="menuName">
-    <SidebarMenuButton class="!px-0 hover:!bg-transparent">
+    <SidebarMenuButton class="group !px-0 hover:!bg-transparent">
       <FolderOpen
-        class="mr-2"
+        class="mr-2 group-hover:text-black"
       />
-      <span v-if="!props.isTemplateSite">{{ menuName === 'Site Root' ? 'Site Menu' : menuName }}</span>
+      <span v-if="!props.isTemplateSite" class="hover:text-black !text-black">{{ menuName === 'Site Root' ? 'Site Menu' : menuName }}</span>
       <SidebarGroupAction class="absolute right-2 top-0 hover:!bg-transparent">
         <DropdownMenu>
           <DropdownMenuTrigger as-child>
