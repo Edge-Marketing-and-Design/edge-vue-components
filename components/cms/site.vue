@@ -1367,7 +1367,7 @@ const pageSettingsUpdated = async (pageData) => {
               sort-direction="desc"
               class="pt-0 flex-1"
             >
-              <template #header-start="slotProps">
+              <template #header-start>
                 <Inbox class="mr-2 h-4 w-4" />
                 Submissions
                 <!-- <span class="ml-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
