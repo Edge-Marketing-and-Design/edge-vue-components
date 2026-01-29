@@ -859,6 +859,9 @@ const isPublishedPageDiff = (pageId) => {
         metaTitle: publishedPage.metaTitle,
         metaDescription: publishedPage.metaDescription,
         structuredData: publishedPage.structuredData,
+        postMetaTitle: publishedPage.postMetaTitle,
+        postMetaDescription: publishedPage.postMetaDescription,
+        postStructuredData: publishedPage.postStructuredData,
       },
       {
         content: draftPage.content,
@@ -868,6 +871,9 @@ const isPublishedPageDiff = (pageId) => {
         metaTitle: draftPage.metaTitle,
         metaDescription: draftPage.metaDescription,
         structuredData: draftPage.structuredData,
+        postMetaTitle: draftPage.postMetaTitle,
+        postMetaDescription: draftPage.postMetaDescription,
+        postStructuredData: draftPage.postStructuredData,
       },
     )
   }
@@ -1069,6 +1075,9 @@ const isAnyPagesDiff = computed(() => {
         metaTitle: pageData.metaTitle,
         metaDescription: pageData.metaDescription,
         structuredData: pageData.structuredData,
+        postMetaTitle: pageData.postMetaTitle,
+        postMetaDescription: pageData.postMetaDescription,
+        postStructuredData: pageData.postStructuredData,
       },
       {
         content: publishedPage.content,
@@ -1078,6 +1087,9 @@ const isAnyPagesDiff = computed(() => {
         metaTitle: publishedPage.metaTitle,
         metaDescription: publishedPage.metaDescription,
         structuredData: publishedPage.structuredData,
+        postMetaTitle: publishedPage.postMetaTitle,
+        postMetaDescription: publishedPage.postMetaDescription,
+        postStructuredData: publishedPage.postStructuredData,
       },
     )) {
       return true

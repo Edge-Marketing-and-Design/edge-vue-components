@@ -75,6 +75,17 @@ const normalizeForCompare = (value) => {
 
 const stableSerialize = value => JSON.stringify(normalizeForCompare(value))
 const areEqualNormalized = (a, b) => stableSerialize(a) === stableSerialize(b)
+const isBlankString = value => String(value || '').trim() === ''
+const ensurePostSeoDefaults = (doc) => {
+  if (!doc?.post)
+    return
+  if (isBlankString(doc.postMetaTitle))
+    doc.postMetaTitle = doc.metaTitle || ''
+  if (isBlankString(doc.postMetaDescription))
+    doc.postMetaDescription = doc.metaDescription || ''
+  if (isBlankString(doc.postStructuredData))
+    doc.postStructuredData = doc.structuredData || buildPageStructuredData()
+}
 
 const orderedMenus = computed(() => {
   const menuEntries = Object.entries(modelValue.value || {}).map(([name, menu], originalIndex) => ({
@@ -117,6 +128,9 @@ const isPublishedPageDiff = (pageId) => {
         metaTitle: publishedPage.metaTitle,
         metaDescription: publishedPage.metaDescription,
         structuredData: publishedPage.structuredData,
+        postMetaTitle: publishedPage.postMetaTitle,
+        postMetaDescription: publishedPage.postMetaDescription,
+        postStructuredData: publishedPage.postStructuredData,
       },
       {
         content: draftPage.content,
@@ -126,6 +140,9 @@ const isPublishedPageDiff = (pageId) => {
         metaTitle: draftPage.metaTitle,
         metaDescription: draftPage.metaDescription,
         structuredData: draftPage.structuredData,
+        postMetaTitle: draftPage.postMetaTitle,
+        postMetaDescription: draftPage.postMetaDescription,
+        postStructuredData: draftPage.postStructuredData,
       },
     )
   }
@@ -172,6 +189,9 @@ const state = reactive({
       metaTitle: { value: '' },
       metaDescription: { value: '' },
       structuredData: { value: buildPageStructuredData() },
+      postMetaTitle: { value: '' },
+      postMetaDescription: { value: '' },
+      postStructuredData: { value: '' },
       tags: { value: [] },
       allowedThemes: { value: [] },
     },
@@ -526,6 +546,9 @@ const buildPagePayloadFromTemplate = (templateDoc, slug) => {
     metaTitle: '',
     metaDescription: '',
     structuredData,
+    postMetaTitle: '',
+    postMetaDescription: '',
+    postStructuredData: '',
     doc_created_at: timestamp,
     last_updated: timestamp,
   }
@@ -795,6 +818,10 @@ const showPageSettings = (page) => {
   console.log('showPageSettings', page)
   state.pageData = page
   state.pageSettings = true
+}
+
+const handlePageWorkingDoc = (doc) => {
+  ensurePostSeoDefaults(doc)
 }
 
 const formErrors = (error) => {
@@ -1214,6 +1241,7 @@ const theme = computed(() => {
         :save-function-override="onSubmit"
         card-content-class="px-0"
         @error="formErrors"
+        @working-doc="handlePageWorkingDoc"
       >
         <template #main="slotProps">
           <div class="p-6 space-y-4  h-[calc(100vh-142px)] overflow-y-auto">
@@ -1253,24 +1281,69 @@ const theme = computed(() => {
                 <CardDescription>Meta tags for the page.</CardDescription>
               </CardHeader>
               <CardContent class="pt-0">
-                <edge-shad-input
-                  v-model="slotProps.workingDoc.metaTitle"
-                  label="Meta Title"
-                  name="metaTitle"
-                />
-                <edge-shad-textarea
-                  v-model="slotProps.workingDoc.metaDescription"
-                  label="Meta Description"
-                  name="metaDescription"
-                />
-                <edge-cms-code-editor
-                  v-model="slotProps.workingDoc.structuredData"
-                  title="Structured Data (JSON-LD)"
-                  language="json"
-                  name="structuredData"
-                  height="300px"
-                  class="mb-4 w-full"
-                />
+                <Tabs class="w-full" default-value="list">
+                  <TabsList v-if="slotProps.workingDoc?.post" class="w-full grid grid-cols-2 gap-1 rounded-lg border border-border/60 bg-muted/30 p-1">
+                    <TabsTrigger
+                      value="list"
+                      class="text-xs font-semibold uppercase tracking-wide transition-all data-[state=active]:bg-slate-900 data-[state=active]:text-white data-[state=active]:shadow-sm"
+                    >
+                      Index Page
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="post"
+                      class="text-xs font-semibold uppercase tracking-wide transition-all data-[state=active]:bg-slate-900 data-[state=active]:text-white data-[state=active]:shadow-sm"
+                    >
+                      Detail Page
+                    </TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="list" class="mt-4 space-y-4">
+                    <edge-shad-input
+                      v-model="slotProps.workingDoc.metaTitle"
+                      label="Meta Title"
+                      name="metaTitle"
+                    />
+                    <edge-shad-textarea
+                      v-model="slotProps.workingDoc.metaDescription"
+                      label="Meta Description"
+                      name="metaDescription"
+                    />
+                    <edge-cms-code-editor
+                      v-model="slotProps.workingDoc.structuredData"
+                      title="Structured Data (JSON-LD)"
+                      language="json"
+                      name="structuredData"
+                      height="300px"
+                      class="mb-4 w-full"
+                    />
+                  </TabsContent>
+                  <TabsContent value="post" class="mt-4 space-y-4">
+                    <div class="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                      You can use template keys in double curly braces to pull data from the detail record.
+                      Example: <span v-pre class="font-semibold text-foreground">"{{name}}"</span> will be replaced with the record’s name.
+                      Dot notation is supported for nested objects, e.g. <span v-pre class="font-semibold text-foreground">"{{data.name}}"</span>.
+                      These keys work in the Title, Description, and Structured Data fields.
+                    </div>
+                    <edge-shad-input
+                      v-model="slotProps.workingDoc.postMetaTitle"
+                      label="Meta Title"
+                      name="postMetaTitle"
+                    />
+                    <edge-shad-textarea
+                      v-model="slotProps.workingDoc.postMetaDescription"
+                      label="Meta Description"
+                      name="postMetaDescription"
+                    />
+
+                    <edge-cms-code-editor
+                      v-model="slotProps.workingDoc.postStructuredData"
+                      title="Structured Data (JSON-LD)"
+                      language="json"
+                      name="postStructuredData"
+                      height="300px"
+                      class="mb-4 w-full"
+                    />
+                  </TabsContent>
+                </Tabs>
               </CardContent>
             </Card>
           </div>

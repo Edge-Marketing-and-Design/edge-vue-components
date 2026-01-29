@@ -881,6 +881,9 @@ const isPublishedPageDiff = (pageId) => {
         metaTitle: publishedPage.metaTitle,
         metaDescription: publishedPage.metaDescription,
         structuredData: publishedPage.structuredData,
+        postMetaTitle: publishedPage.postMetaTitle,
+        postMetaDescription: publishedPage.postMetaDescription,
+        postStructuredData: publishedPage.postStructuredData,
       },
       {
         content: draftPage.content,
@@ -890,6 +893,9 @@ const isPublishedPageDiff = (pageId) => {
         metaTitle: draftPage.metaTitle,
         metaDescription: draftPage.metaDescription,
         structuredData: draftPage.structuredData,
+        postMetaTitle: draftPage.postMetaTitle,
+        postMetaDescription: draftPage.postMetaDescription,
+        postStructuredData: draftPage.postStructuredData,
       },
     )
   }
@@ -1087,6 +1093,9 @@ const unpublishedChangeDetails = computed(() => {
   compareField('metaTitle', 'Meta title', val => summarizeChangeValue(val, true))
   compareField('metaDescription', 'Meta description', val => summarizeChangeValue(val, true))
   compareField('structuredData', 'Structured data', val => summarizeChangeValue(val, true))
+  compareField('postMetaTitle', 'Detail meta title', val => summarizeChangeValue(val, true))
+  compareField('postMetaDescription', 'Detail meta description', val => summarizeChangeValue(val, true))
+  compareField('postStructuredData', 'Detail structured data', val => summarizeChangeValue(val, true))
 
   return changes
 })
