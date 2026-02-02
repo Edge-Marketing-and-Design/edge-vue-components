@@ -2,15 +2,16 @@ export const useStructuredDataTemplates = () => {
   const buildSiteStructuredData = () => JSON.stringify({
     '@context': 'https://schema.org',
     '@type': 'WebSite',
+    '@id': '{{cms-site}}#website',
     'name': '',
-    'url': '',
+    'url': '{{cms-site}}',
     'description': '',
     'publisher': {
       '@type': 'Organization',
       'name': '',
       'logo': {
         '@type': 'ImageObject',
-        'url': '',
+        'url': '{{cms-logo}}',
       },
     },
     'sameAs': [],
@@ -19,13 +20,12 @@ export const useStructuredDataTemplates = () => {
   const buildPageStructuredData = () => JSON.stringify({
     '@context': 'https://schema.org',
     '@type': 'WebPage',
+    '@id': '{{cms-site}}#webpage',
     'name': '',
-    'url': '',
+    'url': '{{cms-url}}',
     'description': '',
     'isPartOf': {
-      '@type': 'WebSite',
-      'name': '',
-      'url': '',
+      '@id': '{{cms-site}}#website',
     },
   }, null, 2)
 

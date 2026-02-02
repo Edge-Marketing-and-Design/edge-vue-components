@@ -1307,6 +1307,12 @@ const theme = computed(() => {
                       label="Meta Description"
                       name="metaDescription"
                     />
+                    <div class="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                      CMS tokens in double curly braces are replaced on the front end.
+                      Example: <span v-pre class="font-semibold text-foreground">"{{cms-site}}"</span> for the site URL,
+                      <span v-pre class="font-semibold text-foreground">"{{cms-url}}"</span> for the page URL, and
+                      <span v-pre class="font-semibold text-foreground">"{{cms-logo}}"</span> for the logo URL. Keep the tokens intact.
+                    </div>
                     <edge-cms-code-editor
                       v-model="slotProps.workingDoc.structuredData"
                       title="Structured Data (JSON-LD)"
@@ -1334,6 +1340,12 @@ const theme = computed(() => {
                       name="postMetaDescription"
                     />
 
+                    <div class="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                      CMS tokens in double curly braces are replaced on the front end.
+                      Example: <span v-pre class="font-semibold text-foreground">"{{cms-site}}"</span> for the site URL,
+                      <span v-pre class="font-semibold text-foreground">"{{cms-url}}"</span> for the page URL, and
+                      <span v-pre class="font-semibold text-foreground">"{{cms-logo}}"</span> for the logo URL. Keep the tokens intact.
+                    </div>
                     <edge-cms-code-editor
                       v-model="slotProps.workingDoc.postStructuredData"
                       title="Structured Data (JSON-LD)"
