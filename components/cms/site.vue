@@ -33,6 +33,22 @@ const normalizeForCompare = (value) => {
 
 const stableSerialize = value => JSON.stringify(normalizeForCompare(value))
 const areEqualNormalized = (a, b) => stableSerialize(a) === stableSerialize(b)
+const isJsonInvalid = (value) => {
+  if (value === null || value === undefined)
+    return false
+  if (typeof value === 'object')
+    return false
+  const text = String(value).trim()
+  if (!text)
+    return false
+  try {
+    JSON.parse(text)
+    return false
+  }
+  catch {
+    return true
+  }
+}
 
 const isTemplateSite = computed(() => props.site === 'templates')
 const router = useRouter()
@@ -1608,7 +1624,7 @@ const pageSettingsUpdated = async (pageData) => {
               <edge-shad-button variant="destructive" class="text-white" @click="state.siteSettings = false">
                 Cancel
               </edge-shad-button>
-              <edge-shad-button :disabled="slotProps.submitting" type="submit" class=" bg-slate-800 hover:bg-slate-400 w-full">
+              <edge-shad-button :disabled="slotProps.submitting || isJsonInvalid(slotProps.workingDoc?.structuredData)" type="submit" class=" bg-slate-800 hover:bg-slate-400 w-full">
                 <Loader2 v-if="slotProps.submitting" class=" h-4 w-4 animate-spin" />
                 Update
               </edge-shad-button>

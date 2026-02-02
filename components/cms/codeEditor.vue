@@ -56,12 +56,34 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  validateJson: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const emit = defineEmits(['update:modelValue', 'lineClick'])
 const localModelValue = ref(null)
 const edgeFirebase = inject('edgeFirebase')
 const expectsJsonObject = ref(false)
+const jsonValidationError = computed(() => {
+  if (!props.validateJson || props.language !== 'json')
+    return ''
+  const raw = localModelValue.value
+  if (raw === null || raw === undefined)
+    return ''
+  const text = String(raw).trim()
+  if (!text)
+    return ''
+  try {
+    JSON.parse(text)
+    return ''
+  }
+  catch (error) {
+    return `Invalid JSON: ${error.message}`
+  }
+})
+const displayError = computed(() => props.error || jsonValidationError.value)
 
 const editorOptions = {
   mode: 'htmlmixed',
@@ -379,11 +401,11 @@ onBeforeUnmount(() => {
       </template>
       <template #center>
         <div class="w-full px-2">
-          <Alert v-if="props.error" variant="destructive" class="rounded-[6px] py-1">
+          <Alert v-if="displayError" variant="destructive" class="rounded-[6px] py-1">
             <TriangleAlert class="h-4 w-4" />
             <AlertTitle>Error</AlertTitle>
             <AlertDescription>
-              {{ props.error }}
+              {{ displayError }}
             </AlertDescription>
           </Alert>
         </div>

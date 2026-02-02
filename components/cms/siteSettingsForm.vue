@@ -545,6 +545,7 @@ onMounted(async () => {
           title="Structured Data (JSON-LD)"
           language="json"
           name="structuredData"
+          validate-json
           height="300px"
           class="mb-4 w-full"
         />

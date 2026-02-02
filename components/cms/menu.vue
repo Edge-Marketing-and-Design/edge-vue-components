@@ -76,6 +76,31 @@ const normalizeForCompare = (value) => {
 const stableSerialize = value => JSON.stringify(normalizeForCompare(value))
 const areEqualNormalized = (a, b) => stableSerialize(a) === stableSerialize(b)
 const isBlankString = value => String(value || '').trim() === ''
+const isJsonInvalid = (value) => {
+  if (value === null || value === undefined)
+    return false
+  if (typeof value === 'object')
+    return false
+  const text = String(value).trim()
+  if (!text)
+    return false
+  try {
+    JSON.parse(text)
+    return false
+  }
+  catch {
+    return true
+  }
+}
+const hasStructuredDataErrors = (doc) => {
+  if (!doc)
+    return false
+  if (isJsonInvalid(doc.structuredData))
+    return true
+  if (doc.post && isJsonInvalid(doc.postStructuredData))
+    return true
+  return false
+}
 const ensurePostSeoDefaults = (doc) => {
   if (!doc?.post)
     return
@@ -1318,6 +1343,7 @@ const theme = computed(() => {
                       title="Structured Data (JSON-LD)"
                       language="json"
                       name="structuredData"
+                      validate-json
                       height="300px"
                       class="mb-4 w-full"
                     />
@@ -1351,6 +1377,7 @@ const theme = computed(() => {
                       title="Structured Data (JSON-LD)"
                       language="json"
                       name="postStructuredData"
+                      validate-json
                       height="300px"
                       class="mb-4 w-full"
                     />
@@ -1363,7 +1390,7 @@ const theme = computed(() => {
             <edge-shad-button variant="destructive" class="text-white" @click="state.pageSettings = false">
               Cancel
             </edge-shad-button>
-            <edge-shad-button :disabled="slotProps.submitting" type="submit" class=" bg-slate-800 hover:bg-slate-400 w-full">
+            <edge-shad-button :disabled="slotProps.submitting || hasStructuredDataErrors(slotProps.workingDoc)" type="submit" class=" bg-slate-800 hover:bg-slate-400 w-full">
               <Loader2 v-if="slotProps.submitting" class=" h-4 w-4 animate-spin" />
               Update
             </edge-shad-button>
