@@ -20,7 +20,7 @@ export const useStructuredDataTemplates = () => {
   const buildPageStructuredData = () => JSON.stringify({
     '@context': 'https://schema.org',
     '@type': 'WebPage',
-    '@id': '{{cms-site}}#webpage',
+    '@id': '{{cms-url}}#webpage',
     'name': '',
     'url': '{{cms-url}}',
     'description': '',
