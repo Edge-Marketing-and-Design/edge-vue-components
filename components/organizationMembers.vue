@@ -176,20 +176,23 @@ function setByPath(obj, path, value) {
 }
 
 const sortedFilteredUsers = computed(() => {
-  const filter = state.filter.toLowerCase()
+  const filter = String(state.filter || '').toLowerCase()
 
   const getLastName = (fullName) => {
     if (!fullName)
       return ''
-    const parts = fullName.trim().split(/\s+/)
+    const parts = String(fullName).trim().split(/\s+/)
     return parts[parts.length - 1] || ''
   }
 
   return users.value
-    .filter(user => user.meta.name.toLowerCase().includes(filter))
+    .filter((user) => {
+      const name = String(user?.meta?.name || '')
+      return name.toLowerCase().includes(filter)
+    })
     .sort((a, b) => {
-      const lastA = getLastName(a.meta.name).toLowerCase()
-      const lastB = getLastName(b.meta.name).toLowerCase()
+      const lastA = getLastName(a?.meta?.name).toLowerCase()
+      const lastB = getLastName(b?.meta?.name).toLowerCase()
       return lastA.localeCompare(lastB)
     })
 })

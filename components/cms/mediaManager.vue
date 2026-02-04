@@ -137,6 +137,7 @@ onBeforeMount(() => {
   console.log('Default tags prop:', props.defaultTags)
   if (props.defaultTags && Array.isArray(props.defaultTags) && props.defaultTags.length > 0) {
     state.filterTags = [...props.defaultTags]
+    state.tags = [...props.defaultTags]
   }
 })
 
