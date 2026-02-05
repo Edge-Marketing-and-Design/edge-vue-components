@@ -2,7 +2,7 @@
 import { useVModel } from '@vueuse/core'
 const props = defineProps({
   modelValue: {
-    type: [String, Boolean, Number, null],
+    type: [String, Boolean, Number, Array, null],
     required: false,
     default: null,
   },
@@ -13,6 +13,10 @@ const props = defineProps({
   label: {
     type: String,
     required: false,
+  },
+  multiple: {
+    type: Boolean,
+    default: false,
   },
 })
 const emits = defineEmits(['update:modelValue'])
@@ -91,17 +95,30 @@ onBeforeMount(async () => {
       })
       .filter(Boolean) // remove nulls
   }
-  staticOption.options.unshift({ title: '(none)', name: NONE_VALUE })
+  if (!props.multiple) {
+    staticOption.options.unshift({ title: '(none)', name: NONE_VALUE })
+  }
   state.loading = false
 })
 </script>
 
 <template>
   <edge-shad-select
-    v-if="!state.loading && staticOption.options.length > 0"
+    v-if="!state.loading && staticOption.options.length > 0 && !props.multiple"
     v-model="selectValue"
     :label="props.label"
     :name="props.option.field"
     :items="staticOption.options"
+  />
+  <edge-shad-select-tags
+    v-else-if="!state.loading && staticOption.options.length > 0 && props.multiple"
+    :model-value="Array.isArray(modelValue) ? modelValue : []"
+    :label="props.label"
+    :name="props.option.field"
+    :items="staticOption.options"
+    item-title="title"
+    item-value="name"
+    :allow-additions="false"
+    @update:model-value="value => (modelValue = Array.isArray(value) ? value : [])"
   />
 </template>

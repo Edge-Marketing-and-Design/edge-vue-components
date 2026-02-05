@@ -451,7 +451,10 @@ const cmsCollectionData = async (edgeFirebase: any, value: any, meta: any, curre
           const findIndex = currentQuery.findIndex((q: any) => q.field === queryKey)
           const queryOption = meta[key]?.queryOptions?.find((o: any) => o.field === queryKey)
           const operator = queryOption?.operator || '=='
-          const newQuery = { field: queryKey, operator, value: meta[key].queryItems[queryKey] }
+          let value = meta[key].queryItems[queryKey]
+          if (operator === 'array-contains-any' && !Array.isArray(value))
+            value = [value]
+          const newQuery = { field: queryKey, operator, value }
           if (findIndex > -1) {
             currentQuery[findIndex] = newQuery
           }

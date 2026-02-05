@@ -699,10 +699,18 @@ function rewriteAllClasses(scopeEl, theme, isolated = true, viewportMode = 'auto
   scopeEl.querySelectorAll('[class]').forEach((el) => {
     let base = el.dataset.viewportBaseClass
     if (typeof base !== 'string') {
-      base = el.className || ''
+      if (typeof el.className === 'string') {
+        base = el.className
+      }
+      else if (el.className && typeof el.className.baseVal === 'string') {
+        base = el.className.baseVal
+      }
+      else {
+        base = el.getAttribute('class') || ''
+      }
       el.dataset.viewportBaseClass = base
     }
-    const orig = base || ''
+    const orig = typeof base === 'string' ? base : String(base || '')
     if (!orig.trim())
       return
     const origTokens = orig.split(/\s+/).filter(Boolean)

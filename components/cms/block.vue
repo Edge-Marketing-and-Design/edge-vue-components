@@ -122,11 +122,13 @@ const sanitizeQueryItems = (meta) => {
   return cleaned
 }
 
-const resetArrayItems = (field) => {
+const resetArrayItems = (field, metaSource = null) => {
+  const meta = metaSource || modelValue.value?.meta || {}
+  const fieldMeta = meta?.[field]
   if (!state.arrayItems?.[field]) {
     state.arrayItems[field] = {}
   }
-  for (const schemaItem of modelValue.value.meta[field].schema) {
+  for (const schemaItem of (fieldMeta?.schema || [])) {
     if (schemaItem.type === 'text') {
       state.arrayItems[field][schemaItem.field] = ''
     }
@@ -148,25 +150,35 @@ const resetArrayItems = (field) => {
 const openEditor = async () => {
   if (!props.editMode)
     return
-  for (const key of Object.keys(modelValue.value?.meta || {})) {
-    if (modelValue.value.meta[key]?.type === 'array' && modelValue.value.meta[key]?.schema) {
-      if (!modelValue.value.meta[key]?.api) {
-        resetArrayItems(key)
-      }
-    }
-  }
-  state.draft = JSON.parse(JSON.stringify(modelValue.value?.values || {}))
-  state.meta = JSON.parse(JSON.stringify(modelValue.value?.meta || {}))
-  ensureQueryItemsDefaults(state.meta)
   const blockData = edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[modelValue.value.blockId]
-  state.metaUpdate = edgeGlobal.dupObject(modelValue.value?.meta) || {}
-  if (blockData?.meta) {
-    for (const key of Object.keys(blockData.meta)) {
-      if (!(key in state.metaUpdate)) {
-        state.metaUpdate[key] = blockData.meta[key]
+  const templateMeta = blockData?.meta || modelValue.value?.meta || {}
+  const storedMeta = modelValue.value?.meta || {}
+  const mergedMeta = edgeGlobal.dupObject(templateMeta) || {}
+
+  for (const key of Object.keys(mergedMeta)) {
+    const storedField = storedMeta?.[key]
+    if (!storedField || typeof storedField !== 'object')
+      continue
+    if (storedField.queryItems && typeof storedField.queryItems === 'object') {
+      mergedMeta[key].queryItems = edgeGlobal.dupObject(storedField.queryItems)
+    }
+    if (storedField.limit !== undefined) {
+      mergedMeta[key].limit = storedField.limit
+    }
+  }
+
+  for (const key of Object.keys(mergedMeta || {})) {
+    if (mergedMeta[key]?.type === 'array' && mergedMeta[key]?.schema) {
+      if (!mergedMeta[key]?.api) {
+        resetArrayItems(key, mergedMeta)
       }
     }
   }
+
+  state.draft = JSON.parse(JSON.stringify(modelValue.value?.values || {}))
+  state.meta = JSON.parse(JSON.stringify(mergedMeta || {}))
+  ensureQueryItemsDefaults(state.meta)
+  state.metaUpdate = edgeGlobal.dupObject(mergedMeta) || {}
   if (blockData?.values) {
     for (const key of Object.keys(blockData.values)) {
       if (!(key in state.draft)) {
@@ -682,6 +694,7 @@ const getTagsFromPosts = computed(() => {
                         v-model="state.meta[entry.field].queryItems[option.field]"
                         :option="option"
                         :label="genTitleFromField(option)"
+                        :multiple="option?.multiple || false"
                       />
                     </div>
                   </template>
