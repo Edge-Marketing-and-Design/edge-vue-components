@@ -130,6 +130,14 @@ const showInviteOrgSelect = computed(() => inviteOrgOptions.value.length > 1)
 const showEditOrgSelect = computed(() => editOrgOptions.value.length > 1)
 const showRemoveOrgSelect = computed(() => removeOrgOptions.value.length > 1)
 
+const adminCount = computed(() => {
+  return users.value.filter((item) => {
+    return item.roles.find((role) => {
+      return role.collectionPath === edgeGlobal.edgeState.organizationDocPath.replaceAll('/', '-') && role.role === 'admin'
+    })
+  }).length
+})
+
 const selfRemoveBlocked = computed(() => {
   return state.workingItem.userId === edgeFirebase.user.uid
     && adminCount.value === 1
@@ -243,14 +251,6 @@ const sortedFilteredUsers = computed(() => {
       const lastB = getLastName(b?.meta?.name).toLowerCase()
       return lastA.localeCompare(lastB)
     })
-})
-
-const adminCount = computed(() => {
-  return users.value.filter((item) => {
-    return item.roles.find((role) => {
-      return role.collectionPath === edgeGlobal.edgeState.organizationDocPath.replaceAll('/', '-') && role.role === 'admin'
-    })
-  }).length
 })
 
 const addItem = () => {
@@ -529,7 +529,7 @@ onBeforeMount(async () => {
                   @click="editItem(user)"
                 >
                   <div class="flex w-full items-start gap-3" :class="!user.userId ? 'opacity-70' : ''">
-                  <Avatar class="h-12 w-12 rounded-md border bg-muted/40 flex items-center justify-center overflow-hidden">
+                    <Avatar class="h-12 w-12 rounded-md border bg-muted/40 flex items-center justify-center overflow-hidden">
                       <img
                         v-if="user?.meta?.profilephoto"
                         :src="profileImageUrl(user.meta.profilephoto)"
@@ -654,15 +654,15 @@ onBeforeMount(async () => {
                           :persistent-hint="state.saveButton !== 'Invite User'"
                           :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
                         />
-                    <edge-g-input
-                      v-model="state.workingItem.meta.phone"
-                      name="meta.phone"
-                      :disable-tracking="true"
-                      field-type="text"
-                      label="Phone"
-                      :mask-options="{ mask: '(###) ###-####' }"
-                      :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
-                    />
+                        <edge-g-input
+                          v-model="state.workingItem.meta.phone"
+                          name="meta.phone"
+                          :disable-tracking="true"
+                          field-type="text"
+                          label="Phone"
+                          :mask-options="{ mask: '(###) ###-####' }"
+                          :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
+                        />
                       </div>
                     </div>
                   </div>
@@ -759,21 +759,21 @@ onBeforeMount(async () => {
                           {{ mergeDisabledNote(field?.hint, field) }}
                         </p>
                       </div>
-                    <edge-g-input
-                      v-else-if="field?.type === 'textarea'"
-                      :model-value="getByPath(state.workingItem.meta, field.field, '')"
-                      :name="`meta.${field.field}`"
-                      :field-type="field?.type"
-                      :label="field?.label"
-                      parent-tracker-id="user-settings"
-                      :hint="mergeDisabledNote(field?.hint, field)"
-                      :persistent-hint="Boolean(mergeDisabledNote(field?.hint, field))"
-                      :disable-tracking="true"
-                      :bindings="{ class: 'h-60' }"
-                      :mask-options="field?.maskOptions"
-                      :disabled="field?.disabled || false"
-                      @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
-                    />
+                      <edge-g-input
+                        v-else-if="field?.type === 'textarea'"
+                        :model-value="getByPath(state.workingItem.meta, field.field, '')"
+                        :name="`meta.${field.field}`"
+                        :field-type="field?.type"
+                        :label="field?.label"
+                        parent-tracker-id="user-settings"
+                        :hint="mergeDisabledNote(field?.hint, field)"
+                        :persistent-hint="Boolean(mergeDisabledNote(field?.hint, field))"
+                        :disable-tracking="true"
+                        :bindings="{ class: 'h-60' }"
+                        :mask-options="field?.maskOptions"
+                        :disabled="field?.disabled || false"
+                        @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
+                      />
                       <edge-shad-tags
                         v-else-if="field?.type === 'tags' || field?.type === 'commaTags'"
                         :model-value="getByPath(state.workingItem.meta, field.field, '')"
@@ -786,20 +786,20 @@ onBeforeMount(async () => {
                         :disabled="field?.disabled || false"
                         @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
                       />
-                  <edge-g-input
-                    v-else
-                    :model-value="getByPath(state.workingItem.meta, field.field, '')"
-                    :name="`meta.${field.field}`"
-                    :field-type="field?.type"
-                    :label="field?.label"
-                    parent-tracker-id="user-settings"
-                    :hint="mergeDisabledNote(field?.hint, field)"
-                    :persistent-hint="Boolean(mergeDisabledNote(field?.hint, field))"
-                    :disable-tracking="true"
-                    :mask-options="field?.maskOptions"
-                    :disabled="field?.disabled || false"
-                    @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
-                  />
+                      <edge-g-input
+                        v-else
+                        :model-value="getByPath(state.workingItem.meta, field.field, '')"
+                        :name="`meta.${field.field}`"
+                        :field-type="field?.type"
+                        :label="field?.label"
+                        parent-tracker-id="user-settings"
+                        :hint="mergeDisabledNote(field?.hint, field)"
+                        :persistent-hint="Boolean(mergeDisabledNote(field?.hint, field))"
+                        :disable-tracking="true"
+                        :mask-options="field?.maskOptions"
+                        :disabled="field?.disabled || false"
+                        @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
+                      />
                     </div>
                   </div>
 
