@@ -1,6 +1,7 @@
 <script setup>
 // TODO: pass possible roles in prop
 import { toTypedSchema } from '@vee-validate/zod'
+import { ArrowLeft, Loader2, Trash2, User } from 'lucide-vue-next'
 import * as z from 'zod'
 const props = defineProps({
   usersCollectionPath: {
@@ -49,12 +50,21 @@ const props = defineProps({
             name: z
               .string({ required_error: 'Name is required' })
               .min(1, { message: 'Name is required' }),
+            email: z
+              .string({ required_error: 'Email is required' })
+              .email({ message: 'Invalid email address' })
+              .min(6, { message: 'Email must be at least 6 characters long' })
+              .max(50, { message: 'Email must be less than 50 characters long' }),
           }),
           role: z
             .string({ required_error: 'Role is required' })
             .min(1, { message: 'Role is required' }),
         }),
       ),
+  },
+  metaFieldsSchema: {
+    type: Object,
+    default: null,
   },
 })
 // TODO: If a removed user no longer has roles to any organiztions, need to a create new organization for them with
@@ -126,6 +136,8 @@ const selfRemoveBlocked = computed(() => {
     && state.removeOrgIds.includes(edgeGlobal.edgeState.currentOrganization)
 })
 
+const emailDisabledHint = 'This field is tied to the user\'s username and can only be changed by them.'
+
 const WIDTHS = {
   1: 'md:col-span-1',
   2: 'md:col-span-2',
@@ -142,6 +154,42 @@ const WIDTHS = {
 }
 
 const numColsToTailwind = cols => WIDTHS[cols] || 'md:col-span-12'
+
+const disabledNoteText = 'Contact admin to change.'
+
+const getDisabledNote = (field) => {
+  if (!field?.disabled)
+    return ''
+  return field?.disabledNote || disabledNoteText
+}
+
+const mergeDisabledNote = (text, field) => {
+  const note = getDisabledNote(field)
+  if (!note)
+    return text || ''
+  if (text)
+    return `${text} ${note}`
+  return note
+}
+
+const userKey = (user) => {
+  return user?.docId || user?.userId || user?.id || user?.uid || ''
+}
+
+const PROFILE_IMAGE_SIZE = 96
+const PROFILE_IMAGE_VARIANT = `width=${PROFILE_IMAGE_SIZE},height=${PROFILE_IMAGE_SIZE},fit=cover,quality=85`
+
+const profileImageUrl = (url) => {
+  if (!url || typeof url !== 'string')
+    return ''
+  if (url.includes('/cdn-cgi/image/'))
+    return url
+  if (url.includes('width=') && url.includes('height='))
+    return url
+  if (url.endsWith('/thumbnail'))
+    return url.replace(/\/thumbnail$/, `/${PROFILE_IMAGE_VARIANT}`)
+  return url
+}
 
 // Helpers to read/write nested keys like "profile.firstName" on plain objects
 function getByPath(obj, path, fallback = undefined) {
@@ -209,6 +257,8 @@ const addItem = () => {
   state.saveButton = 'Invite User'
   const newItem = edgeGlobal.dupObject(state.newItem)
   newItem.meta.email = ''
+  newItem.meta.name = ''
+  newItem.meta.profilephoto = ''
   state.workingItem = newItem
   state.workingItem.id = edgeGlobal.generateShortId()
   state.currentTitle = 'Invite User'
@@ -370,10 +420,48 @@ const onSubmit = async () => {
   state.dialog = false
 }
 
+const roleSchema = z
+  .string({ required_error: 'Role is required' })
+  .min(1, { message: 'Role is required' })
+
+const baseMetaSchema = z.object({
+  name: z
+    .string({ required_error: 'Name is required' })
+    .min(1, { message: 'Name is required' }),
+  email: z
+    .string({ required_error: 'Email is required' })
+    .email({ message: 'Invalid email address' })
+    .min(6, { message: 'Email must be at least 6 characters long' })
+    .max(50, { message: 'Email must be less than 50 characters long' }),
+})
+
+const buildMetaSchema = () => {
+  const extra = props.metaFieldsSchema
+  if (!extra)
+    return baseMetaSchema
+  if (extra?.shape && typeof extra.shape === 'object')
+    return baseMetaSchema.merge(extra)
+  if (typeof extra === 'object')
+    return baseMetaSchema.extend(extra)
+  return baseMetaSchema
+}
+
+const computedNewUserSchema = computed(() => {
+  if (!props.metaFieldsSchema)
+    return props.newUserSchema
+  return toTypedSchema(z.object({ meta: buildMetaSchema(), role: roleSchema }))
+})
+
+const computedUpdateUserSchema = computed(() => {
+  if (!props.metaFieldsSchema)
+    return props.updateUserSchema
+  return toTypedSchema(z.object({ meta: buildMetaSchema(), role: roleSchema }))
+})
+
 const computedUserSchema = computed(() =>
   state.saveButton === 'Invite User'
-    ? props.newUserSchema
-    : props.updateUserSchema,
+    ? computedNewUserSchema.value
+    : computedUpdateUserSchema.value,
 )
 
 const currentOrganization = computed(() => {
@@ -409,223 +497,295 @@ onBeforeMount(async () => {
 </script>
 
 <template>
-  <Card v-if="state.loaded" class="w-full flex-1 bg-muted/50 mx-auto w-full border-none shadow-none pt-2">
-    <slot name="header" :add-item="addItem">
-      <edge-menu class="bg-secondary text-foreground rounded-none sticky top-0 py-6">
-        <template #start>
-          <slot name="header-start">
-            <component :is="edgeGlobal.iconFromMenu(route)" class="mr-2" />
-            <span class="capitalize">Members</span>
-          </slot>
-        </template>
-        <template #center>
-          <slot name="header-center">
-            <div class="w-full px-6" />
-          </slot>
-        </template>
-        <template #end>
-          <slot name="header-end" :add-item="addItem">
-            <edge-shad-button class="bg-primary mx-2 h-6 text-xs" @click="addItem()">
-              Invite Member
-            </edge-shad-button>
-          </slot>
-        </template>
-      </edge-menu>
-    </slot>
-    <CardContent class="p-3 w-full overflow-y-auto scroll-area">
-      <Input
-        v-model="state.filter"
-        class="mb-2"
-        placeholder="Filter members..."
-      />
-      <div v-if="sortedFilteredUsers.length > 0">
-        <div v-for="user in sortedFilteredUsers" :key="user.id" class="flex w-full py-2 justify-between items-center cursor-pointer" @click="editItem(user)">
-          <slot name="user" :user="user">
-            <Avatar class="handle pointer p-0 h-6 w-6 mr-2">
-              <User width="18" height="18" />
-            </Avatar>
-            <div class="flex gap-2 mr-2 items-center">
-              <div class="text-md text-bold mr-2">
-                {{ user.meta.name }}
+  <div v-if="state.loaded" class="w-full flex-1 min-h-0 h-[calc(100vh-58px)] overflow-hidden">
+    <ResizablePanelGroup direction="horizontal" class="w-full h-full flex-1">
+      <ResizablePanel class="bg-sidebar text-sidebar-foreground min-w-[400px]" :default-size="22" :min-size="30">
+        <div class="flex flex-col h-full">
+          <div class="px-3 py-3 border-b border-sidebar-border bg-sidebar/90">
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex items-center gap-2 text-sm font-semibold">
+                <component :is="edgeGlobal.iconFromMenu(route)" class="h-4 w-4" />
+                <span>Members</span>
               </div>
-              <edge-chip v-if="user.userId === edgeFirebase.user.uid">
-                You
-              </edge-chip>
-              <!-- <edge-chip v-if="!user.userId" class="bg-primary">
-                Invited, Not Registered
-              </edge-chip> -->
+              <edge-shad-button size="sm" class="h-7 text-xs bg-primary" @click="addItem()">
+                Invite
+              </edge-shad-button>
             </div>
-            <div class="grow flex gap-2 justify-end">
-              <template v-if="!user.userId">
-                <edge-chip class="bg-slate-600 w-[200px]">
-                  {{ user.docId }}
-                  <edge-clipboard-button class="relative ml-1 top-[2px] mt-0" :text="user.docId" />
-                </edge-chip>
-              </template>
-              <edge-chip>
-                {{ edgeGlobal.getRoleName(user.roles, edgeGlobal.edgeState.currentOrganization) }}
-              </edge-chip>
-            </div>
-            <edge-shad-button
-              :disabled="users.length === 1"
-              class="bg-red-400 mx-2 h-6 w-[80px] text-xs"
-              variant="outline"
-              @click.stop="deleteConfirm(user)"
-            >
-              <span v-if="user.userId === edgeFirebase.user.uid">Leave</span>
-              <span v-else>Remove</span>
-            </edge-shad-button>
-          </slot>
-        </div>
-      </div>
-      <edge-shad-dialog
-        v-model="state.deleteDialog"
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              <span v-if="state.workingItem.userId === edgeFirebase.user.uid">
-                Remove Yourself?
-              </span>
-              <span v-else>
-                Remove "{{ state.workingItem.meta.name }}"
-              </span>
-            </DialogTitle>
-            <DialogDescription />
-          </DialogHeader>
-
-          <h3 v-if="selfRemoveBlocked">
-            You cannot remove yourself from this organization because you are the only admin. You can delete the organization or add another admin.
-          </h3>
-          <h3 v-else-if="state.workingItem.userId === edgeFirebase.user.uid">
-            <span v-if="showRemoveOrgSelect">Select the organizations you want to leave.</span>
-            <span v-else>Are you sure you want to remove yourself from the organization "{{ currentOrganization.name }}"? You will no longer have access to any of the organization's data.</span>
-          </h3>
-          <h3 v-else>
-            <span v-if="showRemoveOrgSelect">Select the organizations you want to remove "{{ state.workingItem.meta.name }}" from.</span>
-            <span v-else>Are you sure you want to remove "{{ state.workingItem.meta.name }}" from the organization "{{ currentOrganization.name }}"?</span>
-          </h3>
-          <div v-if="showRemoveOrgSelect" class="mt-4 w-full flex flex-wrap gap-2">
-            <div v-for="org in removeOrgOptions" :key="org.docId" class="flex-1 min-w-[220px]">
-              <edge-shad-checkbox
-                :name="`remove-org-${org.docId}`"
-                :model-value="state.removeOrgIds.includes(org.docId)"
-                @update:model-value="val => updateRemoveOrgSelection(org.docId, val)"
-              >
-                {{ org.name }}
-              </edge-shad-checkbox>
-            </div>
+            <Input
+              v-model="state.filter"
+              class="mt-3 h-8 w-full"
+              placeholder="Filter members..."
+            />
           </div>
-          <DialogFooter class="pt-6 flex justify-between">
-            <edge-shad-button class="text-white  bg-slate-800 hover:bg-slate-400" @click="state.deleteDialog = false">
-              Cancel
-            </edge-shad-button>
-            <edge-shad-button
-              :disabled="selfRemoveBlocked"
-              class="w-full"
-              variant="destructive"
-              @click="deleteAction()"
+          <div class="flex-1 overflow-y-auto">
+            <SidebarMenu class="px-2 py-2 space-y-0">
+              <SidebarMenuItem
+                v-for="user in sortedFilteredUsers"
+                :key="userKey(user)"
+              >
+                <SidebarMenuButton
+                  class="w-full !h-auto items-start px-3 py-2"
+                  :class="state.dialog && userKey(state.workingItem) && userKey(state.workingItem) === userKey(user) ? 'bg-sidebar-accent text-sidebar-accent-foreground' : ''"
+                  @click="editItem(user)"
+                >
+                  <div class="flex w-full items-start gap-3" :class="!user.userId ? 'opacity-70' : ''">
+                  <Avatar class="h-12 w-12 rounded-md border bg-muted/40 flex items-center justify-center overflow-hidden">
+                      <img
+                        v-if="user?.meta?.profilephoto"
+                        :src="profileImageUrl(user.meta.profilephoto)"
+                        alt=""
+                        class="h-full w-full object-cover"
+                      >
+                      <User v-else width="24" height="24" />
+                    </Avatar>
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-2">
+                        <span class="text-sm font-medium leading-snug whitespace-normal uppercase">
+                          {{ user?.meta?.name || user?.meta?.email || 'Unnamed Member' }}
+                        </span>
+                        <!-- <span v-if="!user.userId" class="text-[10px] uppercase tracking-wide text-muted-foreground">
+                          -
+                        </span> -->
+                        <edge-chip v-if="user.userId === edgeFirebase.user.uid">
+                          You
+                        </edge-chip>
+                      </div>
+                      <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground leading-snug">
+                        <span class="rounded-full bg-secondary px-2 py-0.5 text-[10px] text-secondary-foreground">
+                          {{ edgeGlobal.getRoleName(user.roles, edgeGlobal.edgeState.currentOrganization) }}
+                        </span>
+                        <span v-if="!user.userId && user.docId" class="inline-flex items-center gap-1 whitespace-normal">
+                          {{ user.docId }}
+                          <edge-clipboard-button class="relative top-[1px]" :text="user.docId" />
+                        </span>
+                      </div>
+                    </div>
+                    <edge-shad-button
+                      size="icon"
+                      variant="ghost"
+                      class="h-7 w-7 text-destructive/80 hover:text-destructive"
+                      @click.stop="deleteConfirm(user)"
+                    >
+                      <Trash2 class="h-4 w-4" />
+                    </edge-shad-button>
+                  </div>
+                </SidebarMenuButton>
+                <Separator class="my-1" />
+              </SidebarMenuItem>
+              <div v-if="sortedFilteredUsers.length === 0" class="px-4 py-6 text-xs text-muted-foreground">
+                No members found.
+              </div>
+            </SidebarMenu>
+          </div>
+        </div>
+      </ResizablePanel>
+      <ResizablePanel class="bg-background">
+        <div class="h-full flex flex-col">
+          <div v-if="state.dialog" class="h-full flex flex-col">
+            <edge-shad-form
+              :key="userKey(state.workingItem) || state.workingItem?.id || 'member-form'"
+              :initial-values="state.workingItem"
+              :schema="computedUserSchema"
+              class="flex flex-col h-full"
+              @submit="onSubmit"
             >
-              <span v-if="state.workingItem.userId === edgeFirebase.user.uid">
-                Leave
-              </span>
-              <span v-else>
-                Remove
-              </span>
-            </edge-shad-button>
-          </DialogFooter>
-        </DialogContent>
-      </edge-shad-dialog>
-      <edge-shad-dialog
-        v-model="state.dialog"
-      >
-        <DialogContent class="w-full max-w-[1200px]">
-          <edge-shad-form :initial-values="state.workingItem" :schema="computedUserSchema" @submit="onSubmit">
-            <DialogHeader class="mb-4">
-              <DialogTitle>
-                {{ state.currentTitle }}
-              </DialogTitle>
-              <DialogDescription />
-            </DialogHeader>
-            <slot name="edit-fields" :working-item="state.workingItem">
-              <edge-g-input
-                v-model="state.workingItem.role"
-                name="role"
-                :disable-tracking="true"
-                :items="roleNamesOnly"
-                field-type="select"
-                label="Role"
-                :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
-                :disabled="state.workingItem.userId === edgeFirebase.user.uid"
-              />
-              <div v-if="state.saveButton !== 'Invite User' && showEditOrgSelect" class="mt-4 w-full">
-                <div class="text-sm font-medium text-foreground">
-                  Organizations
+              <div class="flex items-center justify-between border-b bg-secondary px-4 py-3">
+                <div class="text-sm font-semibold">
+                  {{ state.currentTitle || 'Member' }}
                 </div>
-                <div class="mt-2 w-full flex flex-wrap gap-2">
-                  <div v-for="org in editOrgOptions" :key="org.docId" class="flex-1 min-w-[220px]">
-                    <edge-shad-checkbox
-                      :name="`edit-add-org-${org.docId}`"
-                      :model-value="state.editOrgIds.includes(org.docId)"
-                      @update:model-value="val => updateEditOrgSelection(org.docId, val)"
-                    >
-                      {{ org.name }}
-                    </edge-shad-checkbox>
-                  </div>
+                <div class="flex items-center gap-2">
+                  <edge-shad-button variant="text" class="text-xs text-red-700" @click="closeDialog">
+                    Close
+                  </edge-shad-button>
+                  <edge-shad-button
+                    type="submit"
+                    class="text-xs bg-primary"
+                    :disabled="state.loading"
+                  >
+                    <Loader2 v-if="state.loading" class="w-4 h-4 mr-2 animate-spin" />
+                    {{ state.saveButton }}
+                  </edge-shad-button>
                 </div>
               </div>
-              <div v-if="state.saveButton === 'Invite User' && showInviteOrgSelect" class="mt-4 w-full">
-                <div class="text-sm font-medium text-foreground">
-                  Add to organizations
-                </div>
-                <div class="mt-2 w-full flex flex-wrap gap-2">
-                  <div v-for="org in inviteOrgOptions" :key="org.docId" class="flex-1 min-w-[220px]">
-                    <edge-shad-checkbox
-                      :name="`invite-org-${org.docId}`"
-                      :model-value="state.inviteOrgIds.includes(org.docId)"
-                      @update:model-value="val => updateInviteOrgSelection(org.docId, val)"
-                    >
-                      {{ org.name }}
-                    </edge-shad-checkbox>
+              <div class="flex-1 overflow-y-auto p-6 space-y-4">
+                <slot name="edit-fields" :working-item="state.workingItem">
+                  <div class="rounded-xl border bg-card p-4 space-y-4 shadow-sm">
+                    <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Member Details
+                    </div>
+                    <div class="flex flex-col gap-4 md:flex-row md:items-stretch">
+                      <div class="w-full md:w-[260px] self-stretch">
+                        <edge-image-picker
+                          v-model="state.workingItem.meta.profilephoto"
+                          label="Profile Photo"
+                          dialog-title="Select Profile Photo"
+                          site="clearwater-hub-images"
+                          :default-tags="['Agents']"
+                          height-class="h-full min-h-[180px]"
+                        />
+                      </div>
+                      <div class="flex-1 space-y-4">
+                        <edge-g-input
+                          v-model="state.workingItem.role"
+                          name="role"
+                          :disable-tracking="true"
+                          :items="roleNamesOnly"
+                          field-type="select"
+                          label="Role"
+                          :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
+                          :disabled="state.workingItem.userId === edgeFirebase.user.uid"
+                        />
+                        <edge-g-input
+                          v-model="state.workingItem.meta.name"
+                          name="meta.name"
+                          :disable-tracking="true"
+                          field-type="text"
+                          label="Name"
+                          :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
+                        />
+                        <edge-g-input
+                          v-model="state.workingItem.meta.email"
+                          name="meta.email"
+                          :disable-tracking="true"
+                          field-type="text"
+                          label="Email"
+                          :disabled="state.saveButton !== 'Invite User'"
+                          :hint="state.saveButton !== 'Invite User' ? emailDisabledHint : ''"
+                          :persistent-hint="state.saveButton !== 'Invite User'"
+                          :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
+                        />
+                    <edge-g-input
+                      v-model="state.workingItem.meta.phone"
+                      name="meta.phone"
+                      :disable-tracking="true"
+                      field-type="text"
+                      label="Phone"
+                      :mask-options="{ mask: '(###) ###-####' }"
+                      :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
+                    />
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-              <edge-g-input
-                v-if="state.saveButton === 'Invite User'"
-                v-model="state.workingItem.meta.email"
-                name="meta.email"
-                :disable-tracking="true"
-                field-type="text"
-                label="Email"
-                :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
-              />
-              <Separator class="my-6" />
-              <div class="grid grid-cols-12 gap-2">
-                <div v-for="field in props.metaFields" :key="field.field" class="mb-3 col-span-12" :class="numColsToTailwind(field.cols)">
-                  <!-- Use explicit model binding so dotted paths (e.g., "address.street") work -->
-                  <edge-g-input
-                    v-if="field?.type === 'textarea'"
-                    :model-value="getByPath(state.workingItem.meta, field.field, '')"
-                    :name="`meta.${field.field}`"
-                    :field-type="field?.type"
-                    :label="field?.label"
-                    parent-tracker-id="user-settings"
-                    :hint="field?.hint"
-                    :disable-tracking="true"
-                    :bindings="{ class: 'h-60' }"
-                    @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
-                  />
-                  <edge-shad-tags
-                    v-else-if="field?.type === 'tags' || field?.type === 'commaTags'"
-                    :model-value="getByPath(state.workingItem.meta, field.field, '')"
-                    :name="`meta.${field.field}`"
-                    :field-type="field?.type"
-                    :label="field?.label"
-                    parent-tracker-id="user-settings"
-                    :hint="field?.hint"
-                    :disable-tracking="true"
-                    @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
-                  />
+                  <div v-if="state.saveButton !== 'Invite User' && showEditOrgSelect" class="mt-4 w-full">
+                    <div class="text-sm font-medium text-foreground">
+                      Organizations
+                    </div>
+                    <div class="mt-2 w-full flex flex-wrap gap-2">
+                      <div v-for="org in editOrgOptions" :key="org.docId" class="flex-1 min-w-[220px]">
+                        <edge-shad-checkbox
+                          :name="`edit-add-org-${org.docId}`"
+                          :model-value="state.editOrgIds.includes(org.docId)"
+                          @update:model-value="val => updateEditOrgSelection(org.docId, val)"
+                        >
+                          {{ org.name }}
+                        </edge-shad-checkbox>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-if="state.saveButton === 'Invite User' && showInviteOrgSelect" class="mt-4 w-full">
+                    <div class="text-sm font-medium text-foreground">
+                      Add to organizations
+                    </div>
+                    <div class="mt-2 w-full flex flex-wrap gap-2">
+                      <div v-for="org in inviteOrgOptions" :key="org.docId" class="flex-1 min-w-[220px]">
+                        <edge-shad-checkbox
+                          :name="`invite-org-${org.docId}`"
+                          :model-value="state.inviteOrgIds.includes(org.docId)"
+                          @update:model-value="val => updateInviteOrgSelection(org.docId, val)"
+                        >
+                          {{ org.name }}
+                        </edge-shad-checkbox>
+                      </div>
+                    </div>
+                  </div>
+                  <Separator class="my-6" />
+                  <div class="grid grid-cols-12 gap-2">
+                    <div v-for="field in props.metaFields" :key="field.field" class="mb-3 col-span-12" :class="numColsToTailwind(field.cols)">
+                      <!-- Use explicit model binding so dotted paths (e.g., "address.street") work -->
+                      <edge-image-picker
+                        v-if="field?.type === 'imagePicker'"
+                        :model-value="getByPath(state.workingItem.meta, field.field, '')"
+                        :label="field?.label || 'Photo'"
+                        :dialog-title="field?.dialogTitle || 'Select Image'"
+                        :site="field?.site || 'clearwater-hub-images'"
+                        :default-tags="field?.tags || []"
+                        :height-class="field?.heightClass || 'h-[160px]'"
+                        :disabled="field?.disabled || false"
+                        @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
+                      />
+                      <p v-if="field?.type === 'imagePicker' && field?.disabled" class="mt-1 text-xs text-muted-foreground">
+                        {{ getDisabledNote(field) }}
+                      </p>
+                      <div v-else-if="field?.type === 'richText'" class="member-richtext">
+                        <edge-shad-html
+                          :model-value="getByPath(state.workingItem.meta, field.field, '')"
+                          :name="`meta.${field.field}`"
+                          :label="field?.label"
+                          :disabled="field?.disabled || false"
+                          :description="mergeDisabledNote(field?.description, field)"
+                          :enabled-toggles="field?.enabledToggles || ['bold', 'italic', 'strike', 'bulletlist', 'orderedlist', 'underline']"
+                          @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
+                        />
+                      </div>
+                      <edge-shad-select-tags
+                        v-else-if="field?.type === 'selectTags'"
+                        :model-value="getByPath(state.workingItem.meta, field.field, [])"
+                        :name="`meta.${field.field}`"
+                        :label="field?.label"
+                        :description="mergeDisabledNote(field?.description, field)"
+                        :items="field?.items || []"
+                        :item-title="field?.itemTitle || 'title'"
+                        :item-value="field?.itemValue || 'name'"
+                        :allow-additions="field?.allowAdditions || false"
+                        :placeholder="field?.placeholder"
+                        :disabled="field?.disabled || false"
+                        @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
+                      />
+                      <div v-else-if="field?.type === 'boolean'" class="space-y-1 -mt-3">
+                        <div class="text-sm font-medium leading-none opacity-0 select-none h-4">
+                          {{ field?.label || '' }}
+                        </div>
+                        <edge-g-input
+                          :model-value="getByPath(state.workingItem.meta, field.field, false)"
+                          :name="`meta.${field.field}`"
+                          :field-type="field?.type"
+                          :label="field?.label"
+                          parent-tracker-id="user-settings"
+                          :disable-tracking="true"
+                          :disabled="field?.disabled || false"
+                          @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
+                        />
+                        <p v-if="mergeDisabledNote(field?.hint, field)" class="text-xs text-muted-foreground">
+                          {{ mergeDisabledNote(field?.hint, field) }}
+                        </p>
+                      </div>
+                    <edge-g-input
+                      v-else-if="field?.type === 'textarea'"
+                      :model-value="getByPath(state.workingItem.meta, field.field, '')"
+                      :name="`meta.${field.field}`"
+                      :field-type="field?.type"
+                      :label="field?.label"
+                      parent-tracker-id="user-settings"
+                      :hint="mergeDisabledNote(field?.hint, field)"
+                      :persistent-hint="Boolean(mergeDisabledNote(field?.hint, field))"
+                      :disable-tracking="true"
+                      :bindings="{ class: 'h-60' }"
+                      :mask-options="field?.maskOptions"
+                      :disabled="field?.disabled || false"
+                      @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
+                    />
+                      <edge-shad-tags
+                        v-else-if="field?.type === 'tags' || field?.type === 'commaTags'"
+                        :model-value="getByPath(state.workingItem.meta, field.field, '')"
+                        :name="`meta.${field.field}`"
+                        :field-type="field?.type"
+                        :label="field?.label"
+                        parent-tracker-id="user-settings"
+                        :description="mergeDisabledNote(field?.description || field?.hint, field)"
+                        :disable-tracking="true"
+                        :disabled="field?.disabled || false"
+                        @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
+                      />
                   <edge-g-input
                     v-else
                     :model-value="getByPath(state.workingItem.meta, field.field, '')"
@@ -633,43 +793,107 @@ onBeforeMount(async () => {
                     :field-type="field?.type"
                     :label="field?.label"
                     parent-tracker-id="user-settings"
-                    :hint="field?.hint"
+                    :hint="mergeDisabledNote(field?.hint, field)"
+                    :persistent-hint="Boolean(mergeDisabledNote(field?.hint, field))"
                     :disable-tracking="true"
+                    :mask-options="field?.maskOptions"
+                    :disabled="field?.disabled || false"
                     @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
                   />
-                </div>
-              </div>
+                    </div>
+                  </div>
 
-              <edge-g-input
-                v-if="state.saveButton === 'Invite User'"
-                v-model="state.workingItem.isTemplate"
-                name="isTemplate"
-                :disable-tracking="true"
-                field-type="boolean"
-                label="Template User"
-                :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
-              />
-            </slot>
-            <DialogFooter class="pt-6 flex justify-between">
-              <edge-shad-button variant="destructive" @click="closeDialog">
-                Cancel
-              </edge-shad-button>
-              <edge-shad-button
-                :disabled="state.loading"
-                class="text-white  w-100 bg-slate-800 hover:bg-slate-400"
-                type="submit"
-              >
-                <Loader2 v-if="state.loading" class="w-4 h-4 mr-2 animate-spin" />
-                {{ state.saveButton }}
-              </edge-shad-button>
-            </DialogFooter>
-          </edge-shad-form>
-        </DialogContent>
-      </edge-shad-dialog>
-    </CardContent>
-  </Card>
+                  <edge-g-input
+                    v-if="state.saveButton === 'Invite User'"
+                    v-model="state.workingItem.isTemplate"
+                    name="isTemplate"
+                    :disable-tracking="true"
+                    field-type="boolean"
+                    label="Template User"
+                    :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
+                  />
+                </slot>
+              </div>
+            </edge-shad-form>
+          </div>
+          <div v-else class="p-4 text-center flex text-slate-500 h-[calc(100vh-4rem)] justify-center items-center overflow-y-auto">
+            <div class="text-4xl">
+              <ArrowLeft class="inline-block w-12 h-12 mr-2" /> Select a member to view details.
+            </div>
+          </div>
+        </div>
+      </ResizablePanel>
+    </ResizablePanelGroup>
+
+    <edge-shad-dialog
+      v-model="state.deleteDialog"
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            <span v-if="state.workingItem.userId === edgeFirebase.user.uid">
+              Remove Yourself?
+            </span>
+            <span v-else>
+              Remove "{{ state.workingItem.meta.name }}"
+            </span>
+          </DialogTitle>
+          <DialogDescription />
+        </DialogHeader>
+
+        <h3 v-if="selfRemoveBlocked">
+          You cannot remove yourself from this organization because you are the only admin. You can delete the organization or add another admin.
+        </h3>
+        <h3 v-else-if="state.workingItem.userId === edgeFirebase.user.uid">
+          <span v-if="showRemoveOrgSelect">Select the organizations you want to leave.</span>
+          <span v-else>Are you sure you want to remove yourself from the organization "{{ currentOrganization.name }}"? You will no longer have access to any of the organization's data.</span>
+        </h3>
+        <h3 v-else>
+          <span v-if="showRemoveOrgSelect">Select the organizations you want to remove "{{ state.workingItem.meta.name }}" from.</span>
+          <span v-else>Are you sure you want to remove "{{ state.workingItem.meta.name }}" from the organization "{{ currentOrganization.name }}"?</span>
+        </h3>
+        <div v-if="showRemoveOrgSelect" class="mt-4 w-full flex flex-wrap gap-2">
+          <div v-for="org in removeOrgOptions" :key="org.docId" class="flex-1 min-w-[220px]">
+            <edge-shad-checkbox
+              :name="`remove-org-${org.docId}`"
+              :model-value="state.removeOrgIds.includes(org.docId)"
+              @update:model-value="val => updateRemoveOrgSelection(org.docId, val)"
+            >
+              {{ org.name }}
+            </edge-shad-checkbox>
+          </div>
+        </div>
+        <DialogFooter class="pt-6 flex justify-between">
+          <edge-shad-button class="text-white  bg-slate-800 hover:bg-slate-400" @click="state.deleteDialog = false">
+            Cancel
+          </edge-shad-button>
+          <edge-shad-button
+            :disabled="selfRemoveBlocked"
+            class="w-full"
+            variant="destructive"
+            @click="deleteAction()"
+          >
+            <span v-if="state.workingItem.userId === edgeFirebase.user.uid">
+              Leave
+            </span>
+            <span v-else>
+              Remove
+            </span>
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
+  </div>
 </template>
 
 <style lang="scss" scoped>
+:deep(.member-richtext .tiptap) {
+  min-height: 220px;
+  padding: 0.75rem 1rem;
+}
 
+:deep(.member-richtext .tiptap p) {
+  margin-top: 0;
+  margin-bottom: 1rem;
+}
 </style>

@@ -34,6 +34,7 @@ const updateUser = async () => {
   state.userError = { success: state.userError.success, message: state.userError.message.replace('Firebase: ', '').replace(' (auth/invalid-email)', '') }
   if (state.userError.success) {
     state.userError = { success: true, message: 'A verification link has been sent to your new email address. Please click the link to complete the email change process.' }
+    await edgeFirebase.setUserMeta({ email: state.username })
   }
   edgeGlobal.edgeState.changeTracker = {}
   state.loaded = false

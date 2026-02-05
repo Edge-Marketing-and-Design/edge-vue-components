@@ -77,6 +77,47 @@ const register = reactive({
   requestedOrgId: '',
 })
 
+const resolveAuthEmail = () => {
+  return (
+    edgeFirebase?.user?.email
+    || edgeFirebase?.user?.firebaseUser?.email
+    || edgeFirebase?.user?.firebaseUser?.providerData?.find(p => p?.email)?.email
+    || ''
+  )
+}
+
+const waitForUserSnapshot = async (timeoutMs = 8000) => {
+  const findUser = () => {
+    const users = Object.values(edgeFirebase.state?.users || {})
+    const stagedDocId = edgeFirebase?.user?.stagedDocId
+    const uid = edgeFirebase?.user?.uid
+    return users.find(u => (stagedDocId && u?.docId === stagedDocId) || (uid && u?.userId === uid))
+  }
+
+  if (findUser())
+    return true
+
+  return await new Promise((resolve) => {
+    let timeoutId = null
+    const stop = watch(
+      () => edgeFirebase.state?.users,
+      () => {
+        if (findUser()) {
+          stop()
+          if (timeoutId)
+            clearTimeout(timeoutId)
+          resolve(true)
+        }
+      },
+      { immediate: true, deep: true },
+    )
+    timeoutId = setTimeout(() => {
+      stop()
+      resolve(false)
+    }, timeoutMs)
+  })
+}
+
 const onSubmit = async () => {
   state.registering = true
 
@@ -108,6 +149,9 @@ const onSubmit = async () => {
     if (state.showRegistrationCode || !props.registrationCode) {
       register.registrationCode = state.registrationCode
     }
+    if (state.provider === 'email' && register.email) {
+      register.meta.email = register.email
+    }
     const result = await edgeFirebase.registerUser(register, state.provider)
     state.error.error = !result.success
     if (result.message === `${props.requestedOrgIdLabel} already exists.`) {
@@ -118,6 +162,13 @@ const onSubmit = async () => {
       result.message = `${orgLabel} already exists. Please choose another.`
     }
     state.error.message = result.message.code ? result.message.code : result.message
+    if (result.success) {
+      const authEmail = resolveAuthEmail()
+      if (authEmail && (!register.meta.email || register.meta.email !== authEmail)) {
+        await waitForUserSnapshot()
+        await edgeFirebase.setUserMeta({ email: authEmail })
+      }
+    }
   }
 
   state.registering = false
