@@ -355,8 +355,9 @@ const themeOptionsMap = computed(() => {
 const orgUsers = computed(() => edgeFirebase.state?.users || {})
 const userOptions = computed(() => {
   return Object.entries(orgUsers.value || {})
+    .filter(([, user]) => Boolean(user?.userId))
     .map(([id, user]) => ({
-      value: user?.userId || id,
+      value: user?.userId,
       label: user?.meta?.name || user?.userId || id,
     }))
     .sort((a, b) => a.label.localeCompare(b.label))
