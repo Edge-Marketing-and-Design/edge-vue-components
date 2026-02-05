@@ -249,9 +249,10 @@ const menuIcon = computed(() => {
                   v-model="state.meta.profilephoto"
                   label="Profile Photo"
                   dialog-title="Select Profile Photo"
-                  :site="'clearwater-hub-images'"
-                  :default-tags="['Agents']"
+                  :site="`${clearwater - hub - images}-${edgeFirebase.user.uid}`"
+                  :default-tags="['Headshots']"
                   height-class="h-full min-h-[180px]"
+                  :include-cms-all="false"
                 />
               </div>
               <div class="flex-1 space-y-4">
@@ -294,6 +295,7 @@ const menuIcon = computed(() => {
                   :label="field?.label || 'Photo'"
                   :dialog-title="field?.dialogTitle || 'Select Image'"
                   :site="field?.site || 'clearwater-hub-images'"
+                  :include-cms-all="false"
                   :default-tags="field?.tags || []"
                   :height-class="field?.heightClass || 'h-[160px]'"
                   :disabled="field?.disabled || false"

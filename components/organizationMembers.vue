@@ -8,6 +8,12 @@ const props = defineProps({
     type: String,
     default: () => `organizations/${edgeGlobal.edgeState.currentOrganization}`,
   },
+  defaultImageTags: {
+    type: Array,
+    default: () => [
+      'Headshots',
+    ],
+  },
   metaFields: {
     type: Array,
     default: () => [
@@ -620,8 +626,9 @@ onBeforeMount(async () => {
                           label="Profile Photo"
                           dialog-title="Select Profile Photo"
                           site="clearwater-hub-images"
-                          :default-tags="['Agents']"
+                          :default-tags="props.defaultImageTags"
                           height-class="h-full min-h-[180px]"
+                          :include-cms-all="false"
                         />
                       </div>
                       <div class="flex-1 space-y-4">
@@ -711,6 +718,7 @@ onBeforeMount(async () => {
                         :default-tags="field?.tags || []"
                         :height-class="field?.heightClass || 'h-[160px]'"
                         :disabled="field?.disabled || false"
+                        :include-cms-all="false"
                         @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
                       />
                       <p v-if="field?.type === 'imagePicker' && field?.disabled" class="mt-1 text-xs text-muted-foreground">

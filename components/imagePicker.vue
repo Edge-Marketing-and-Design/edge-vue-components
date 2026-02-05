@@ -23,6 +23,10 @@ const props = defineProps({
     type: Array,
     default: () => [],
   },
+  includeCmsAll: {
+    type: Boolean,
+    default: true,
+  },
   heightClass: {
     type: String,
     default: 'h-[160px]',
@@ -113,6 +117,7 @@ const clearImage = () => {
       <edge-cms-media-manager
         :site="props.site"
         :default-tags="props.defaultTags"
+        :include-cms-all="props.includeCmsAll"
         :select-mode="true"
         @select="selectImage"
       />

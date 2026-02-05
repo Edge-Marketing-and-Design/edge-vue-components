@@ -8,6 +8,11 @@ const props = defineProps({
     required: false,
     default: 'all',
   },
+  includeCmsAll: {
+    type: Boolean,
+    required: false,
+    default: true,
+  },
   selectMode: {
     type: Boolean,
     required: false,
@@ -167,6 +172,12 @@ const isLightName = (name) => {
 }
 
 const previewBackgroundClass = computed(() => (isLightName(state.workingDoc?.name) ? 'bg-neutral-900/90' : 'bg-neutral-100'))
+
+const siteQueryValue = computed(() => {
+  if (!props.site)
+    return []
+  return props.includeCmsAll ? ['all', props.site] : [props.site]
+})
 </script>
 
 <template>
@@ -229,8 +240,12 @@ const previewBackgroundClass = computed(() => (isLightName(state.workingDoc?.nam
             v-if="state.tags.length === 0"
             class="pointer-events-auto absolute inset-0 z-20 rounded-[20px] border border-dashed border-border/70 bg-background/85 dark:bg-background/80 backdrop-blur-sm flex flex-col items-center justify-center text-center px-6 text-foreground"
           >
-            <div class="text-lg font-semibold">Tags are required</div>
-            <div class="text-sm text-muted-foreground">Add tags above to enable upload</div>
+            <div class="text-lg font-semibold">
+              Tags are required
+            </div>
+            <div class="text-sm text-muted-foreground">
+              Add tags above to enable upload
+            </div>
           </div>
         </div>
       </SheetContent>
@@ -240,7 +255,7 @@ const previewBackgroundClass = computed(() => (isLightName(state.workingDoc?.nam
       sort-field="uploadTime"
       query-field="meta.cmssite"
       :filters="filters"
-      :query-value="['all', props.site]"
+      :query-value="siteQueryValue"
       query-operator="array-contains-any"
       header-class=""
       sort-direction="desc" class="w-full flex-1 border-none shadow-none bg-background"
