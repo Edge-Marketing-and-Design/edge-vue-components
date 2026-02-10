@@ -132,7 +132,10 @@ watch(headObject, (newHeadElements) => {
 }, { immediate: true, deep: true })
 
 const sites = computed(() => {
-  return Object.values(edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`] || {})
+  const sitesMap = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`] || {}
+  return Object.entries(sitesMap)
+    .map(([docId, data]) => ({ docId, ...(data || {}) }))
+    .filter(site => site.docId && site.docId !== 'templates')
 })
 
 const templatePages = computed(() => {
@@ -324,9 +327,12 @@ const templatePageOptions = computed(() => {
 
 watch (sites, async (newSites) => {
   state.loading = true
-  if (!edgeGlobal.edgeState.blockEditorSite && newSites.length > 0) {
+  const selectedSite = String(edgeGlobal.edgeState.blockEditorSite || '').trim()
+  const hasSelectedSite = newSites.some(site => site.docId === selectedSite)
+  if ((!selectedSite || !hasSelectedSite) && newSites.length > 0)
     edgeGlobal.edgeState.blockEditorSite = newSites[0].docId
-  }
+  else if (!newSites.length)
+    edgeGlobal.edgeState.blockEditorSite = ''
   await nextTick()
   state.loading = false
 }, { immediate: true, deep: true })
