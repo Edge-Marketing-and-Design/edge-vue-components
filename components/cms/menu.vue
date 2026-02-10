@@ -382,12 +382,82 @@ const resolveBlockForPreview = (block) => {
   return null
 }
 
-const templateHasBlocks = template => Array.isArray(template?.content) && template.content.length > 0
-
-const templatePreviewBlocks = (template) => {
-  if (!templateHasBlocks(template))
+const normalizePreviewColumns = (row) => {
+  if (!Array.isArray(row?.columns) || !row.columns.length)
     return []
-  return template.content
+  return row.columns.map((column, idx) => ({
+    id: column?.id || `${row?.id || 'row'}-col-${idx}`,
+    span: Number(column?.span) || null,
+    blocks: Array.isArray(column?.blocks) ? column.blocks.filter(Boolean) : [],
+  }))
+}
+
+const templatePreviewRows = (template) => {
+  const structureRows = Array.isArray(template?.structure) ? template.structure : []
+  if (structureRows.length) {
+    return structureRows
+      .map((row, rowIndex) => ({
+        id: row?.id || `${template?.docId || 'template'}-row-${rowIndex}`,
+        columns: normalizePreviewColumns(row),
+      }))
+      .filter(row => row.columns.length > 0)
+  }
+
+  const legacyBlocks = Array.isArray(template?.content) ? template.content.filter(Boolean) : []
+  if (!legacyBlocks.length)
+    return []
+  return [{
+    id: `${template?.docId || 'template'}-legacy-row`,
+    columns: [{
+      id: `${template?.docId || 'template'}-legacy-col`,
+      span: null,
+      blocks: legacyBlocks,
+    }],
+  }]
+}
+
+const templateHasPreview = template => templatePreviewRows(template).length > 0
+
+const resolveTemplateBlockSource = (template, blockRef) => {
+  if (!blockRef)
+    return null
+  if (typeof blockRef === 'object')
+    return blockRef
+  const lookupId = String(blockRef).trim()
+  if (!lookupId)
+    return null
+  const templateBlocks = Array.isArray(template?.content) ? template.content : []
+  return templateBlocks.find(block => block?.id === lookupId || block?.blockId === lookupId) || null
+}
+
+const resolveTemplateBlockForPreview = (template, blockRef) => {
+  const source = resolveTemplateBlockSource(template, blockRef)
+  return resolveBlockForPreview(source)
+}
+
+const hasPreviewSpans = row => (row?.columns || []).some(column => Number.isFinite(Number(column?.span)))
+
+const previewGridClass = (row) => {
+  if (hasPreviewSpans(row))
+    return 'grid grid-cols-1 sm:grid-cols-6 gap-4'
+  const count = row?.columns?.length || 1
+  const map = {
+    1: 'grid grid-cols-1 gap-4',
+    2: 'grid grid-cols-1 sm:grid-cols-2 gap-4',
+    3: 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4',
+    4: 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4',
+    5: 'grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-4',
+    6: 'grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-4',
+  }
+  return map[count] || map[1]
+}
+
+const previewColumnStyle = (column) => {
+  const span = Number(column?.span)
+  if (!Number.isFinite(span))
+    return {}
+  const safeSpan = Math.min(Math.max(span, 1), 6)
+  return { gridColumn: `span ${safeSpan} / span ${safeSpan}` }
 }
 
 const renameFolderOrPageShow = (item) => {
@@ -1155,19 +1225,34 @@ const theme = computed(() => {
                           Blank page
                         </div>
                       </template>
-                      <template v-else-if="templateHasBlocks(template)">
+                      <template v-else-if="templateHasPreview(template)">
                         <div
-                          v-for="(block, idx) in templatePreviewBlocks(template)"
-                          :key="`${template.docId}-block-${idx}`"
+                          v-for="(row, rowIndex) in templatePreviewRows(template)"
+                          :key="`${template.docId}-row-${row.id || rowIndex}`"
+                          class="w-full"
                         >
-                          <edge-cms-block-api
-                            v-if="resolveBlockForPreview(block)"
-                            :content="resolveBlockForPreview(block).content"
-                            :values="resolveBlockForPreview(block).values"
-                            :meta="resolveBlockForPreview(block).meta"
-                            :theme="theme"
-                            :isolated="true"
-                          />
+                          <div :class="previewGridClass(row)">
+                            <div
+                              v-for="(column, colIndex) in row.columns"
+                              :key="`${template.docId}-row-${row.id || rowIndex}-col-${column.id || colIndex}`"
+                              class="min-w-0"
+                              :style="previewColumnStyle(column)"
+                            >
+                              <div
+                                v-for="(blockRef, blockIdx) in column.blocks || []"
+                                :key="`${template.docId}-row-${row.id || rowIndex}-col-${column.id || colIndex}-block-${blockIdx}`"
+                              >
+                                <edge-cms-block-api
+                                  v-if="resolveTemplateBlockForPreview(template, blockRef)"
+                                  :content="resolveTemplateBlockForPreview(template, blockRef).content"
+                                  :values="resolveTemplateBlockForPreview(template, blockRef).values"
+                                  :meta="resolveTemplateBlockForPreview(template, blockRef).meta"
+                                  :theme="theme"
+                                  :isolated="true"
+                                />
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       </template>
                       <template v-else>
