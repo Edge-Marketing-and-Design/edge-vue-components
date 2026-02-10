@@ -170,6 +170,20 @@ const getByPath = (obj, path) => {
   }, obj)
 }
 
+const normalizeCollectionItems = (collectionMap = {}) => {
+  const items = Object.entries(collectionMap).map(([docId, data]) => {
+    const source = (data && typeof data === 'object') ? data : {}
+    return {
+      ...source,
+      docId: String(source.docId || docId || ''),
+    }
+  })
+  if (props.collection === 'sites') {
+    return items.filter(item => item.docId !== 'templates')
+  }
+  return items
+}
+
 const snapShotQuery = computed(() => {
   if (state.queryField && state.queryValue) {
     // console.log('snapShotQuery', state.queryField, state.queryOperator, state.queryValue)
@@ -232,7 +246,10 @@ const allData = computed(() => {
     if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`]) {
       return []
     }
-    return Object.values(edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`])
+    return normalizeCollectionItems(edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`])
+  }
+  if (props.collection === 'sites') {
+    return state.paginatedResults.filter(item => String(item?.docId || '') !== 'templates')
   }
   return state.paginatedResults
 })
@@ -243,10 +260,12 @@ const filtered = computed(() => {
     if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`]) {
       return []
     }
-    allData = Object.values(edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`])
+    allData = normalizeCollectionItems(edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`])
   }
   else {
-    allData = state.paginatedResults
+    allData = props.collection === 'sites'
+      ? state.paginatedResults.filter(item => String(item?.docId || '') !== 'templates')
+      : state.paginatedResults
   }
 
   const qRaw = filterText.value
