@@ -81,6 +81,7 @@ const route = useRoute()
 const edgeFirebase = inject('edgeFirebase')
 const state = reactive({
   filter: '',
+  roleFilter: 'all',
   workingItem: {},
   dialog: false,
   form: false,
@@ -190,6 +191,42 @@ const userKey = (user) => {
   return user?.docId || user?.userId || user?.id || user?.uid || ''
 }
 
+const userRoleName = (user) => {
+  return String(edgeGlobal.getRoleName(user?.roles, edgeGlobal.edgeState.currentOrganization) || '').trim()
+}
+
+const selectedRole = computed(() => {
+  if (state.roleFilter === 'all' || state.roleFilter === 'no-role')
+    return ''
+  return String(state.roleFilter || '').trim()
+})
+
+const roleFilterOptions = computed(() => {
+  const allRoleNames = Array.from(new Set([
+    ...roleNamesOnly.value,
+    ...users.value.map(user => userRoleName(user)),
+  ]
+    .map(name => String(name || '').trim())
+    .filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b))
+
+  return [
+    { name: 'All Roles', docId: 'all' },
+    { name: 'No Role', docId: 'no-role' },
+    ...allRoleNames.map(role => ({ name: role, docId: role })),
+  ]
+})
+
+const usersByRoleFilter = computed(() => {
+  if (state.roleFilter === 'all')
+    return users.value
+  if (state.roleFilter === 'no-role')
+    return users.value.filter(user => !userRoleName(user))
+  if (!selectedRole.value)
+    return users.value
+  return users.value.filter(user => userRoleName(user) === selectedRole.value)
+})
+
 const PROFILE_IMAGE_SIZE = 96
 const PROFILE_IMAGE_VARIANT = `width=${PROFILE_IMAGE_SIZE},height=${PROFILE_IMAGE_SIZE},fit=cover,quality=85`
 
@@ -247,16 +284,23 @@ const sortedFilteredUsers = computed(() => {
     return parts[parts.length - 1] || ''
   }
 
-  return users.value
+  return usersByRoleFilter.value
     .filter((user) => {
-      const name = String(user?.meta?.name || '')
-      return name.toLowerCase().includes(filter)
+      const name = String(user?.meta?.name || '').toLowerCase()
+      const email = String(user?.meta?.email || '').toLowerCase()
+      return name.includes(filter) || email.includes(filter)
     })
     .sort((a, b) => {
       const lastA = getLastName(a?.meta?.name).toLowerCase()
       const lastB = getLastName(b?.meta?.name).toLowerCase()
       return lastA.localeCompare(lastB)
     })
+})
+
+const detailViewKey = computed(() => {
+  if (!state.dialog)
+    return 'member-empty'
+  return `member-${userKey(state.workingItem) || state.workingItem?.id || 'new'}-${state.saveButton}`
 })
 
 const addItem = () => {
@@ -517,11 +561,28 @@ onBeforeMount(async () => {
                 Invite
               </edge-shad-button>
             </div>
-            <Input
-              v-model="state.filter"
-              class="mt-3 h-8 w-full"
-              placeholder="Filter members..."
-            />
+            <div class="mt-3 flex items-center gap-2">
+              <div class="w-1/2 min-w-0">
+                <edge-shad-combobox
+                  v-model="state.roleFilter"
+                  :items="roleFilterOptions"
+                  name="roleFilter"
+                  item-title="name"
+                  item-value="docId"
+                  placeholder="Select role"
+                  class="w-full !h-8"
+                />
+              </div>
+              <div class="w-1/2 min-w-0">
+                <edge-shad-input
+                  v-model="state.filter"
+                  label=""
+                  name="filter"
+                  class="h-8 w-full"
+                  placeholder="Filter members..."
+                />
+              </div>
+            </div>
           </div>
           <div class="flex-1 overflow-y-auto">
             <SidebarMenu class="px-2 py-2 space-y-0">
@@ -587,248 +648,250 @@ onBeforeMount(async () => {
       </ResizablePanel>
       <ResizablePanel class="bg-background">
         <div class="h-full flex flex-col">
-          <div v-if="state.dialog" class="h-full flex flex-col">
-            <edge-shad-form
-              :key="userKey(state.workingItem) || state.workingItem?.id || 'member-form'"
-              :initial-values="state.workingItem"
-              :schema="computedUserSchema"
-              class="flex flex-col h-full"
-              @submit="onSubmit"
-            >
-              <div class="flex items-center justify-between border-b bg-secondary px-4 py-3">
-                <div class="text-sm font-semibold">
-                  {{ state.currentTitle || 'Member' }}
+          <Transition name="fade" mode="out-in">
+            <div v-if="state.dialog" :key="detailViewKey" class="h-full flex flex-col">
+              <edge-shad-form
+                :key="userKey(state.workingItem) || state.workingItem?.id || 'member-form'"
+                :initial-values="state.workingItem"
+                :schema="computedUserSchema"
+                class="flex flex-col h-full"
+                @submit="onSubmit"
+              >
+                <div class="flex items-center justify-between border-b bg-secondary px-4 py-3">
+                  <div class="text-sm font-semibold">
+                    {{ state.currentTitle || 'Member' }}
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <edge-shad-button variant="text" class="text-xs text-red-700" @click="closeDialog">
+                      Close
+                    </edge-shad-button>
+                    <edge-shad-button
+                      type="submit"
+                      class="text-xs bg-primary"
+                      :disabled="state.loading"
+                    >
+                      <Loader2 v-if="state.loading" class="w-4 h-4 mr-2 animate-spin" />
+                      {{ state.saveButton }}
+                    </edge-shad-button>
+                  </div>
                 </div>
-                <div class="flex items-center gap-2">
-                  <edge-shad-button variant="text" class="text-xs text-red-700" @click="closeDialog">
-                    Close
-                  </edge-shad-button>
-                  <edge-shad-button
-                    type="submit"
-                    class="text-xs bg-primary"
-                    :disabled="state.loading"
-                  >
-                    <Loader2 v-if="state.loading" class="w-4 h-4 mr-2 animate-spin" />
-                    {{ state.saveButton }}
-                  </edge-shad-button>
-                </div>
-              </div>
-              <div class="flex-1 overflow-y-auto p-6 space-y-4">
-                <slot name="edit-fields" :working-item="state.workingItem">
-                  <div class="rounded-xl border bg-card p-4 space-y-4 shadow-sm">
-                    <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Member Details
+                <div class="flex-1 overflow-y-auto p-6 space-y-4">
+                  <slot name="edit-fields" :working-item="state.workingItem">
+                    <div class="rounded-xl border bg-card p-4 space-y-4 shadow-sm">
+                      <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Member Details
+                      </div>
+                      <div class="flex flex-col gap-4 md:flex-row md:items-stretch">
+                        <div class="w-full md:w-[260px] self-stretch">
+                          <edge-image-picker
+                            v-model="state.workingItem.meta.profilephoto"
+                            label="Profile Photo"
+                            dialog-title="Select Profile Photo"
+                            site="clearwater-hub-images"
+                            :default-tags="props.defaultImageTags"
+                            height-class="h-full min-h-[180px]"
+                            :include-cms-all="false"
+                          />
+                        </div>
+                        <div class="flex-1 space-y-4">
+                          <edge-g-input
+                            v-model="state.workingItem.role"
+                            name="role"
+                            :disable-tracking="true"
+                            :items="roleNamesOnly"
+                            field-type="select"
+                            label="Role"
+                            :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
+                            :disabled="state.workingItem.userId === edgeFirebase.user.uid"
+                          />
+                          <edge-g-input
+                            v-model="state.workingItem.meta.name"
+                            name="meta.name"
+                            :disable-tracking="true"
+                            field-type="text"
+                            label="Name"
+                            :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
+                          />
+                          <edge-g-input
+                            v-model="state.workingItem.meta.email"
+                            name="meta.email"
+                            :disable-tracking="true"
+                            field-type="text"
+                            label="Email"
+                            :disabled="state.saveButton !== 'Invite User'"
+                            :hint="state.saveButton !== 'Invite User' ? emailDisabledHint : ''"
+                            :persistent-hint="state.saveButton !== 'Invite User'"
+                            :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
+                          />
+                          <edge-g-input
+                            v-model="state.workingItem.meta.phone"
+                            name="meta.phone"
+                            :disable-tracking="true"
+                            field-type="text"
+                            label="Phone"
+                            :mask-options="{ mask: '(###) ###-####' }"
+                            :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
+                          />
+                        </div>
+                      </div>
                     </div>
-                    <div class="flex flex-col gap-4 md:flex-row md:items-stretch">
-                      <div class="w-full md:w-[260px] self-stretch">
+                    <div v-if="state.saveButton !== 'Invite User' && showEditOrgSelect" class="mt-4 w-full">
+                      <div class="text-sm font-medium text-foreground">
+                        Organizations
+                      </div>
+                      <div class="mt-2 w-full flex flex-wrap gap-2">
+                        <div v-for="org in editOrgOptions" :key="org.docId" class="flex-1 min-w-[220px]">
+                          <edge-shad-checkbox
+                            :name="`edit-add-org-${org.docId}`"
+                            :model-value="state.editOrgIds.includes(org.docId)"
+                            @update:model-value="val => updateEditOrgSelection(org.docId, val)"
+                          >
+                            {{ org.name }}
+                          </edge-shad-checkbox>
+                        </div>
+                      </div>
+                    </div>
+                    <div v-if="state.saveButton === 'Invite User' && showInviteOrgSelect" class="mt-4 w-full">
+                      <div class="text-sm font-medium text-foreground">
+                        Add to organizations
+                      </div>
+                      <div class="mt-2 w-full flex flex-wrap gap-2">
+                        <div v-for="org in inviteOrgOptions" :key="org.docId" class="flex-1 min-w-[220px]">
+                          <edge-shad-checkbox
+                            :name="`invite-org-${org.docId}`"
+                            :model-value="state.inviteOrgIds.includes(org.docId)"
+                            @update:model-value="val => updateInviteOrgSelection(org.docId, val)"
+                          >
+                            {{ org.name }}
+                          </edge-shad-checkbox>
+                        </div>
+                      </div>
+                    </div>
+                    <Separator class="my-6" />
+                    <div class="grid grid-cols-12 gap-2">
+                      <div v-for="field in props.metaFields" :key="field.field" class="mb-3 col-span-12" :class="numColsToTailwind(field.cols)">
+                        <!-- Use explicit model binding so dotted paths (e.g., "address.street") work -->
                         <edge-image-picker
-                          v-model="state.workingItem.meta.profilephoto"
-                          label="Profile Photo"
-                          dialog-title="Select Profile Photo"
-                          site="clearwater-hub-images"
-                          :default-tags="props.defaultImageTags"
-                          height-class="h-full min-h-[180px]"
-                          :include-cms-all="false"
-                        />
-                      </div>
-                      <div class="flex-1 space-y-4">
-                        <edge-g-input
-                          v-model="state.workingItem.role"
-                          name="role"
-                          :disable-tracking="true"
-                          :items="roleNamesOnly"
-                          field-type="select"
-                          label="Role"
-                          :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
-                          :disabled="state.workingItem.userId === edgeFirebase.user.uid"
-                        />
-                        <edge-g-input
-                          v-model="state.workingItem.meta.name"
-                          name="meta.name"
-                          :disable-tracking="true"
-                          field-type="text"
-                          label="Name"
-                          :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
-                        />
-                        <edge-g-input
-                          v-model="state.workingItem.meta.email"
-                          name="meta.email"
-                          :disable-tracking="true"
-                          field-type="text"
-                          label="Email"
-                          :disabled="state.saveButton !== 'Invite User'"
-                          :hint="state.saveButton !== 'Invite User' ? emailDisabledHint : ''"
-                          :persistent-hint="state.saveButton !== 'Invite User'"
-                          :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
-                        />
-                        <edge-g-input
-                          v-model="state.workingItem.meta.phone"
-                          name="meta.phone"
-                          :disable-tracking="true"
-                          field-type="text"
-                          label="Phone"
-                          :mask-options="{ mask: '(###) ###-####' }"
-                          :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                  <div v-if="state.saveButton !== 'Invite User' && showEditOrgSelect" class="mt-4 w-full">
-                    <div class="text-sm font-medium text-foreground">
-                      Organizations
-                    </div>
-                    <div class="mt-2 w-full flex flex-wrap gap-2">
-                      <div v-for="org in editOrgOptions" :key="org.docId" class="flex-1 min-w-[220px]">
-                        <edge-shad-checkbox
-                          :name="`edit-add-org-${org.docId}`"
-                          :model-value="state.editOrgIds.includes(org.docId)"
-                          @update:model-value="val => updateEditOrgSelection(org.docId, val)"
-                        >
-                          {{ org.name }}
-                        </edge-shad-checkbox>
-                      </div>
-                    </div>
-                  </div>
-                  <div v-if="state.saveButton === 'Invite User' && showInviteOrgSelect" class="mt-4 w-full">
-                    <div class="text-sm font-medium text-foreground">
-                      Add to organizations
-                    </div>
-                    <div class="mt-2 w-full flex flex-wrap gap-2">
-                      <div v-for="org in inviteOrgOptions" :key="org.docId" class="flex-1 min-w-[220px]">
-                        <edge-shad-checkbox
-                          :name="`invite-org-${org.docId}`"
-                          :model-value="state.inviteOrgIds.includes(org.docId)"
-                          @update:model-value="val => updateInviteOrgSelection(org.docId, val)"
-                        >
-                          {{ org.name }}
-                        </edge-shad-checkbox>
-                      </div>
-                    </div>
-                  </div>
-                  <Separator class="my-6" />
-                  <div class="grid grid-cols-12 gap-2">
-                    <div v-for="field in props.metaFields" :key="field.field" class="mb-3 col-span-12" :class="numColsToTailwind(field.cols)">
-                      <!-- Use explicit model binding so dotted paths (e.g., "address.street") work -->
-                      <edge-image-picker
-                        v-if="field?.type === 'imagePicker'"
-                        :model-value="getByPath(state.workingItem.meta, field.field, '')"
-                        :label="field?.label || 'Photo'"
-                        :dialog-title="field?.dialogTitle || 'Select Image'"
-                        :site="field?.site || 'clearwater-hub-images'"
-                        :default-tags="field?.tags || []"
-                        :height-class="field?.heightClass || 'h-[160px]'"
-                        :disabled="field?.disabled || false"
-                        :include-cms-all="false"
-                        @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
-                      />
-                      <p v-if="field?.type === 'imagePicker' && field?.disabled" class="mt-1 text-xs text-muted-foreground">
-                        {{ getDisabledNote(field) }}
-                      </p>
-                      <div v-else-if="field?.type === 'richText'" class="member-richtext">
-                        <edge-shad-html
+                          v-if="field?.type === 'imagePicker'"
                           :model-value="getByPath(state.workingItem.meta, field.field, '')"
-                          :name="`meta.${field.field}`"
-                          :label="field?.label"
+                          :label="field?.label || 'Photo'"
+                          :dialog-title="field?.dialogTitle || 'Select Image'"
+                          :site="field?.site || 'clearwater-hub-images'"
+                          :default-tags="field?.tags || []"
+                          :height-class="field?.heightClass || 'h-[160px]'"
                           :disabled="field?.disabled || false"
-                          :description="mergeDisabledNote(field?.description, field)"
-                          :enabled-toggles="field?.enabledToggles || ['bold', 'italic', 'strike', 'bulletlist', 'orderedlist', 'underline']"
+                          :include-cms-all="false"
                           @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
                         />
-                      </div>
-                      <edge-shad-select-tags
-                        v-else-if="field?.type === 'selectTags'"
-                        :model-value="getByPath(state.workingItem.meta, field.field, [])"
-                        :name="`meta.${field.field}`"
-                        :label="field?.label"
-                        :description="mergeDisabledNote(field?.description, field)"
-                        :items="field?.items || []"
-                        :item-title="field?.itemTitle || 'title'"
-                        :item-value="field?.itemValue || 'name'"
-                        :allow-additions="field?.allowAdditions || false"
-                        :placeholder="field?.placeholder"
-                        :disabled="field?.disabled || false"
-                        @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
-                      />
-                      <div v-else-if="field?.type === 'boolean'" class="space-y-1 -mt-3">
-                        <div class="text-sm font-medium leading-none opacity-0 select-none h-4">
-                          {{ field?.label || '' }}
+                        <p v-if="field?.type === 'imagePicker' && field?.disabled" class="mt-1 text-xs text-muted-foreground">
+                          {{ getDisabledNote(field) }}
+                        </p>
+                        <div v-else-if="field?.type === 'richText'" class="member-richtext">
+                          <edge-shad-html
+                            :model-value="getByPath(state.workingItem.meta, field.field, '')"
+                            :name="`meta.${field.field}`"
+                            :label="field?.label"
+                            :disabled="field?.disabled || false"
+                            :description="mergeDisabledNote(field?.description, field)"
+                            :enabled-toggles="field?.enabledToggles || ['bold', 'italic', 'strike', 'bulletlist', 'orderedlist', 'underline']"
+                            @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
+                          />
+                        </div>
+                        <edge-shad-select-tags
+                          v-else-if="field?.type === 'selectTags'"
+                          :model-value="getByPath(state.workingItem.meta, field.field, [])"
+                          :name="`meta.${field.field}`"
+                          :label="field?.label"
+                          :description="mergeDisabledNote(field?.description, field)"
+                          :items="field?.items || []"
+                          :item-title="field?.itemTitle || 'title'"
+                          :item-value="field?.itemValue || 'name'"
+                          :allow-additions="field?.allowAdditions || false"
+                          :placeholder="field?.placeholder"
+                          :disabled="field?.disabled || false"
+                          @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
+                        />
+                        <div v-else-if="field?.type === 'boolean'" class="space-y-1 -mt-3">
+                          <div class="text-sm font-medium leading-none opacity-0 select-none h-4">
+                            {{ field?.label || '' }}
+                          </div>
+                          <edge-g-input
+                            :model-value="getByPath(state.workingItem.meta, field.field, false)"
+                            :name="`meta.${field.field}`"
+                            :field-type="field?.type"
+                            :label="field?.label"
+                            parent-tracker-id="user-settings"
+                            :disable-tracking="true"
+                            :disabled="field?.disabled || false"
+                            @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
+                          />
+                          <p v-if="mergeDisabledNote(field?.hint, field)" class="text-xs text-muted-foreground">
+                            {{ mergeDisabledNote(field?.hint, field) }}
+                          </p>
                         </div>
                         <edge-g-input
-                          :model-value="getByPath(state.workingItem.meta, field.field, false)"
+                          v-else-if="field?.type === 'textarea'"
+                          :model-value="getByPath(state.workingItem.meta, field.field, '')"
                           :name="`meta.${field.field}`"
                           :field-type="field?.type"
                           :label="field?.label"
                           parent-tracker-id="user-settings"
+                          :hint="mergeDisabledNote(field?.hint, field)"
+                          :persistent-hint="Boolean(mergeDisabledNote(field?.hint, field))"
+                          :disable-tracking="true"
+                          :bindings="{ class: 'h-60' }"
+                          :mask-options="field?.maskOptions"
+                          :disabled="field?.disabled || false"
+                          @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
+                        />
+                        <edge-shad-tags
+                          v-else-if="field?.type === 'tags' || field?.type === 'commaTags'"
+                          :model-value="getByPath(state.workingItem.meta, field.field, '')"
+                          :name="`meta.${field.field}`"
+                          :field-type="field?.type"
+                          :label="field?.label"
+                          parent-tracker-id="user-settings"
+                          :description="mergeDisabledNote(field?.description || field?.hint, field)"
                           :disable-tracking="true"
                           :disabled="field?.disabled || false"
                           @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
                         />
-                        <p v-if="mergeDisabledNote(field?.hint, field)" class="text-xs text-muted-foreground">
-                          {{ mergeDisabledNote(field?.hint, field) }}
-                        </p>
+                        <edge-g-input
+                          v-else
+                          :model-value="getByPath(state.workingItem.meta, field.field, '')"
+                          :name="`meta.${field.field}`"
+                          :field-type="field?.type"
+                          :label="field?.label"
+                          parent-tracker-id="user-settings"
+                          :hint="mergeDisabledNote(field?.hint, field)"
+                          :persistent-hint="Boolean(mergeDisabledNote(field?.hint, field))"
+                          :disable-tracking="true"
+                          :mask-options="field?.maskOptions"
+                          :disabled="field?.disabled || false"
+                          @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
+                        />
                       </div>
-                      <edge-g-input
-                        v-else-if="field?.type === 'textarea'"
-                        :model-value="getByPath(state.workingItem.meta, field.field, '')"
-                        :name="`meta.${field.field}`"
-                        :field-type="field?.type"
-                        :label="field?.label"
-                        parent-tracker-id="user-settings"
-                        :hint="mergeDisabledNote(field?.hint, field)"
-                        :persistent-hint="Boolean(mergeDisabledNote(field?.hint, field))"
-                        :disable-tracking="true"
-                        :bindings="{ class: 'h-60' }"
-                        :mask-options="field?.maskOptions"
-                        :disabled="field?.disabled || false"
-                        @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
-                      />
-                      <edge-shad-tags
-                        v-else-if="field?.type === 'tags' || field?.type === 'commaTags'"
-                        :model-value="getByPath(state.workingItem.meta, field.field, '')"
-                        :name="`meta.${field.field}`"
-                        :field-type="field?.type"
-                        :label="field?.label"
-                        parent-tracker-id="user-settings"
-                        :description="mergeDisabledNote(field?.description || field?.hint, field)"
-                        :disable-tracking="true"
-                        :disabled="field?.disabled || false"
-                        @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
-                      />
-                      <edge-g-input
-                        v-else
-                        :model-value="getByPath(state.workingItem.meta, field.field, '')"
-                        :name="`meta.${field.field}`"
-                        :field-type="field?.type"
-                        :label="field?.label"
-                        parent-tracker-id="user-settings"
-                        :hint="mergeDisabledNote(field?.hint, field)"
-                        :persistent-hint="Boolean(mergeDisabledNote(field?.hint, field))"
-                        :disable-tracking="true"
-                        :mask-options="field?.maskOptions"
-                        :disabled="field?.disabled || false"
-                        @update:model-value="val => setByPath(state.workingItem.meta, field.field, val)"
-                      />
                     </div>
-                  </div>
 
-                  <edge-g-input
-                    v-if="state.saveButton === 'Invite User'"
-                    v-model="state.workingItem.isTemplate"
-                    name="isTemplate"
-                    :disable-tracking="true"
-                    field-type="boolean"
-                    label="Template User"
-                    :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
-                  />
-                </slot>
-              </div>
-            </edge-shad-form>
-          </div>
-          <div v-else class="p-4 text-center flex text-slate-500 h-[calc(100vh-4rem)] justify-center items-center overflow-y-auto">
-            <div class="text-4xl">
-              <ArrowLeft class="inline-block w-12 h-12 mr-2" /> Select a member to view details.
+                    <edge-g-input
+                      v-if="state.saveButton === 'Invite User'"
+                      v-model="state.workingItem.isTemplate"
+                      name="isTemplate"
+                      :disable-tracking="true"
+                      field-type="boolean"
+                      label="Template User"
+                      :parent-tracker-id="`inviteUser-${state.workingItem.id}`"
+                    />
+                  </slot>
+                </div>
+              </edge-shad-form>
             </div>
-          </div>
+            <div v-else :key="detailViewKey" class="p-4 text-center flex text-slate-500 h-[calc(100vh-4rem)] justify-center items-center overflow-y-auto">
+              <div class="text-4xl">
+                <ArrowLeft class="inline-block w-12 h-12 mr-2" /> Select a member to view details.
+              </div>
+            </div>
+          </Transition>
         </div>
       </ResizablePanel>
     </ResizablePanelGroup>
@@ -903,5 +966,15 @@ onBeforeMount(async () => {
 :deep(.member-richtext .tiptap p) {
   margin-top: 0;
   margin-bottom: 1rem;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>

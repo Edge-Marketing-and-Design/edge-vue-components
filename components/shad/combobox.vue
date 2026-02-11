@@ -188,11 +188,11 @@ const triggerTitle = computed(() => {
               variant="outline"
               role="combobox"
               :aria-expanded="open"
-              class="w-[200px] justify-between text-foreground"
+              class="w-[200px] min-w-0 justify-between text-foreground"
               :class="props.class"
               :disabled="props.disabled"
             >
-              {{ triggerTitle }}
+              <span class="min-w-0 flex-1 truncate text-left" :title="triggerTitle">{{ triggerTitle }}</span>
               <ChevronsUpDown class="ml-2 h-4 w-4 shrink-0 opacity-50" />
             </Button>
           </FormControl>

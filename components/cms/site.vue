@@ -14,6 +14,11 @@ const props = defineProps({
     required: false,
     default: '',
   },
+  disableAddSiteForNonAdmin: {
+    type: Boolean,
+    required: false,
+    default: false,
+  },
 })
 const edgeFirebase = inject('edgeFirebase')
 const { createDefaults: createSiteSettingsDefaults, createNewDocSchema: createSiteSettingsNewDocSchema } = useSiteSettingsTemplate()
@@ -136,6 +141,17 @@ const schemas = {
 
 const isAdmin = computed(() => {
   return edgeGlobal.isAdminGlobal(edgeFirebase).value
+})
+const currentOrgRoleName = computed(() => {
+  return String(edgeGlobal.getRoleName(edgeFirebase?.user?.roles || [], edgeGlobal.edgeState.currentOrganization) || '').toLowerCase()
+})
+const isOrgAdmin = computed(() => {
+  return currentOrgRoleName.value === 'admin'
+})
+const canCreateSite = computed(() => {
+  if (!props.disableAddSiteForNonAdmin)
+    return true
+  return isOrgAdmin.value
 })
 
 const siteData = computed(() => {
@@ -362,6 +378,65 @@ const userOptions = computed(() => {
     }))
     .sort((a, b) => a.label.localeCompare(b.label))
 })
+const authUid = computed(() => String(edgeFirebase?.user?.uid || '').trim())
+const currentOrgUser = computed(() => {
+  if (!authUid.value)
+    return null
+  const users = Object.values(orgUsers.value || {})
+  return users.find((user) => {
+    const userId = String(user?.userId || '').trim()
+    const docId = String(user?.docId || '').trim()
+    const uid = String(user?.uid || '').trim()
+    return userId === authUid.value || docId === authUid.value || uid === authUid.value
+  }) || null
+})
+const currentOrgUserId = computed(() => {
+  return String(
+    currentOrgUser.value?.userId
+    || currentOrgUser.value?.docId
+    || authUid.value
+    || '',
+  ).trim()
+})
+const currentUserOption = computed(() => {
+  if (!currentOrgUserId.value)
+    return null
+  return {
+    value: currentOrgUserId.value,
+    label: currentOrgUser.value?.meta?.name || currentOrgUser.value?.meta?.email || currentOrgUserId.value,
+  }
+})
+const shouldForceCurrentUserForNewSite = computed(() => !isAdmin.value && props.site === 'new')
+const aiUserOptions = computed(() => {
+  if (!shouldForceCurrentUserForNewSite.value)
+    return userOptions.value
+  return currentUserOption.value ? [currentUserOption.value] : []
+})
+const normalizeUserIds = items => (Array.isArray(items) ? items : [])
+  .map(item => String(item || '').trim())
+  .filter(Boolean)
+const getSiteUsersModel = (workingDoc) => {
+  if (!workingDoc || typeof workingDoc !== 'object')
+    return []
+  const users = normalizeUserIds(workingDoc?.users)
+  if (!shouldForceCurrentUserForNewSite.value)
+    return users
+  if (!currentOrgUserId.value)
+    return users
+  if (users.length === 1 && users[0] === currentOrgUserId.value)
+    return users
+  workingDoc.users = [currentOrgUserId.value]
+  return workingDoc.users
+}
+const updateSiteUsersModel = (workingDoc, value) => {
+  if (!workingDoc || typeof workingDoc !== 'object')
+    return
+  if (shouldForceCurrentUserForNewSite.value) {
+    workingDoc.users = currentOrgUserId.value ? [currentOrgUserId.value] : []
+    return
+  }
+  workingDoc.users = normalizeUserIds(value)
+}
 
 const themeItemsForAllowed = (allowed, current) => {
   const base = themeOptions.value
@@ -1133,7 +1208,7 @@ const pageSettingsUpdated = async (pageData) => {
     v-if="edgeGlobal.edgeState.organizationDocPath"
   >
     <edge-editor
-      v-if="!props.page && props.site === 'new'"
+      v-if="!props.page && props.site === 'new' && canCreateSite"
       collection="sites"
       :doc-id="props.site"
       :schema="schemas.sites"
@@ -1215,7 +1290,8 @@ const pageSettingsUpdated = async (pageData) => {
           />
           <edge-shad-select-tags
             v-if="Object.keys(orgUsers).length > 0"
-            v-model="slotProps.workingDoc.users" :disabled="!edgeGlobal.isAdminGlobal(edgeFirebase).value"
+            :model-value="getSiteUsersModel(slotProps.workingDoc)"
+            :disabled="shouldForceCurrentUserForNewSite || !edgeGlobal.isAdminGlobal(edgeFirebase).value"
             :items="userOptions"
             name="users"
             label="Users"
@@ -1224,6 +1300,7 @@ const pageSettingsUpdated = async (pageData) => {
             placeholder="Select users"
             class="w-full"
             :multiple="true"
+            @update:model-value="value => updateSiteUsersModel(slotProps.workingDoc, value)"
           />
           <div class="rounded-lg border border-dashed border-slate-200 p-4 ">
             <div class="flex items-start justify-between gap-3">
@@ -1248,7 +1325,7 @@ const pageSettingsUpdated = async (pageData) => {
                 label="User Data for AI to use to build initial site"
                 placeholder="- select one -"
                 class="w-full"
-                :items="userOptions"
+                :items="aiUserOptions"
                 item-title="label"
                 item-value="value"
                 @update:model-value="value => (slotProps.workingDoc.aiAgentUserId = value || '')"
@@ -1265,6 +1342,9 @@ const pageSettingsUpdated = async (pageData) => {
         </div>
       </template>
     </edge-editor>
+    <div v-else-if="!props.page && props.site === 'new' && !canCreateSite" class="p-6 text-sm text-red-600">
+      Only organization admins can create sites.
+    </div>
     <div v-else class="flex flex-col h-[calc(100vh-58px)] overflow-hidden">
       <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-2 border-b bg-secondary">
         <div class="flex items-center gap-3">
