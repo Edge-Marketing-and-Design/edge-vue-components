@@ -428,7 +428,7 @@ const allowMenuItem = (item: any, isAdmin: boolean) => {
   const isDev = process.dev || devOverrideEnabled()
   const adminOnly = toBool(item.adminOnly)
   const devOnly = toBool(item.devOnly)
-  console.log('allowMenuItem', { item, isAdmin, isDev, adminOnly, devOnly })
+  // console.log('allowMenuItem', { item, isAdmin, isDev, adminOnly, devOnly })
   const override = toBool(item.override)
   if (item.override !== undefined)
     return override
