@@ -1,6 +1,16 @@
+import { resolve as resolvePath } from 'node:path'
 import { cmsRoutes } from './routes'
 
-export const createCmsNuxtHooks = (resolve) => {
+const resolveRouteFileFromCwd = (file) => {
+  const normalizedPath = String(file || '').replace(/^\.\//, '')
+  return resolvePath(process.cwd(), normalizedPath)
+}
+
+export const createCmsNuxtHooks = (resolveFile) => {
+  const resolveRouteFile = typeof resolveFile === 'function'
+    ? resolveFile
+    : resolveRouteFileFromCwd
+
   const routeExists = (routeList, name) => {
     for (const route of routeList) {
       if (route.name === name)
@@ -18,7 +28,7 @@ export const createCmsNuxtHooks = (resolve) => {
       path: shouldStripAppPrefix
         ? route.path.replace(/^\/app\/?/, '')
         : route.path,
-      file: resolve(route.file),
+      file: resolveRouteFile(route.file),
     }
 
     if (route.children?.length)
