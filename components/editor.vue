@@ -96,6 +96,46 @@ const state = reactive({
 const edgeFirebase = inject('edgeFirebase')
 // const edgeGlobal = inject('edgeGlobal')
 
+const normalizeObject = (value) => {
+  if (Array.isArray(value)) {
+    return value.map(item => normalizeObject(item))
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.keys(value)
+      .sort()
+      .reduce((acc, key) => {
+        acc[key] = normalizeObject(value[key])
+        return acc
+      }, {})
+  }
+
+  return value
+}
+
+const withSchemaDefaults = (doc = {}) => {
+  const normalizedDoc = edgeGlobal.dupObject(doc || {})
+  Object.keys(newDoc.value).forEach((field) => {
+    if (!edgeGlobal.objHas(normalizedDoc, field)) {
+      normalizedDoc[field] = newDoc.value[field]
+    }
+  })
+  return normalizedDoc
+}
+
+const comparableDoc = (doc = {}) => {
+  const sourceDoc = (doc && typeof doc === 'object') ? doc : {}
+  const comparable = {}
+  Object.keys(props.newDocSchema || {}).forEach((field) => {
+    if (edgeGlobal.objHas(sourceDoc, field)) {
+      comparable[field] = sourceDoc[field]
+      return
+    }
+    comparable[field] = newDoc.value[field]
+  })
+  return normalizeObject(comparable)
+}
+
 const unsavedChanges = computed(() => {
   if (props.docId === 'new') {
     return false
@@ -107,9 +147,9 @@ const unsavedChanges = computed(() => {
     return false
   }
 
-  console.log('comparing', state.workingDoc, baselineDoc)
-  console.log('unsavedChanges', JSON.stringify(state.workingDoc) !== JSON.stringify(baselineDoc))
-  return JSON.stringify(state.workingDoc) !== JSON.stringify(baselineDoc)
+  const workingComparable = comparableDoc(state.workingDoc)
+  const baselineComparable = comparableDoc(baselineDoc)
+  return JSON.stringify(workingComparable) !== JSON.stringify(baselineComparable)
 })
 
 onBeforeRouteLeave((to, from, next) => {
@@ -164,7 +204,7 @@ const discardChanges = async () => {
     }
     return
   }
-  state.workingDoc = await edgeGlobal.dupObject(state.collectionData[props.docId])
+  state.workingDoc = withSchemaDefaults(state.collectionData[props.docId])
   state.bypassUnsavedChanges = true
   state.dialog = false
   edgeGlobal.edgeState.changeTracker = {}
@@ -328,44 +368,63 @@ const initData = (newVal) => {
     if (edgeGlobal.objHas(newVal, props.docId) === false) {
       return
     }
-    state.workingDoc = edgeGlobal.dupObject(newVal[props.docId])
-    Object.keys(newDoc.value).forEach((field) => {
-      if (!edgeGlobal.objHas(state.workingDoc, field)) {
-        state.workingDoc[field] = newDoc.value[field]
-      }
-    })
+    state.workingDoc = withSchemaDefaults(newVal[props.docId])
     state.afterMount = true
   }
   else {
     if (!state.afterMount) {
-      state.workingDoc = edgeGlobal.dupObject(newDoc.value)
+      state.workingDoc = withSchemaDefaults(newDoc.value)
     }
     state.afterMount = true
   }
 }
 
-onBeforeMount(async () => {
-  state.bypassUnsavedChanges = false
-  edgeGlobal.edgeState.changeTracker = {}
-  for (const field of Object.keys(props.newDocSchema)) {
+const startCollectionSnapshots = async () => {
+  for (const field of Object.keys(props.newDocSchema || {})) {
     if (props.newDocSchema[field].type === 'collection') {
       await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${field}`)
     }
   }
+}
+
+const setCollectionData = async () => {
+  const collectionPath = `${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`
+  if (!edgeFirebase.data?.[collectionPath]) {
+    if (props.docId !== 'new') {
+      const docData = await edgeFirebase.getDocData(collectionPath, props.docId)
+      state.collectionData = {
+        ...(state.collectionData || {}),
+        [props.docId]: docData,
+      }
+    }
+    else if (!state.collectionData || typeof state.collectionData !== 'object') {
+      state.collectionData = {}
+    }
+    return
+  }
+  state.collectionData = edgeFirebase.data[collectionPath]
+}
+
+const resetEditorState = () => {
+  state.bypassUnsavedChanges = false
+  state.bypassRoute = ''
+  state.afterMount = false
+  state.dialog = false
+  state.successMessage = ''
+  state.skipNextValidation = props.docId === 'new'
+  edgeGlobal.edgeState.changeTracker = {}
+}
+
+const refreshEditorData = async () => {
+  resetEditorState()
+  await startCollectionSnapshots()
+  await setCollectionData()
+  initData(state.collectionData)
   emit('unsavedChanges', unsavedChanges.value)
-  // console.log('mounting editor for', props.collection, props.docId)
-  // console.log('starting snapshot for collection:', props.collection)
-  // await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
-  if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`]) {
-    console.log(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
-    console.log(props.docId)
-    const docData = await edgeFirebase.getDocData(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, props.docId)
-    state.collectionData[props.docId] = docData
-    initData(state.collectionData)
-  }
-  else {
-    state.collectionData = edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`]
-  }
+}
+
+onBeforeMount(async () => {
+  await refreshEditorData()
   if (props.noCloseAfterSave) {
     state.overrideClose = true
   }
@@ -374,6 +433,17 @@ onBeforeMount(async () => {
 watch(() => state.collectionData, (newVal) => {
   initData(newVal)
 })
+
+watch(() => [props.collection, props.docId], async (newVal, oldVal) => {
+  if (!oldVal) {
+    return
+  }
+  if (newVal[0] === oldVal[0] && newVal[1] === oldVal[1]) {
+    return
+  }
+  await refreshEditorData()
+})
+
 onActivated(() => {
   // console.log('activated')
   state.bypassUnsavedChanges = false
@@ -384,17 +454,12 @@ onActivated(() => {
     if (edgeGlobal.objHas(state.collectionData, props.docId) === false) {
       return
     }
-    state.workingDoc = edgeGlobal.dupObject(state.collectionData[props.docId])
-    Object.keys(newDoc.value).forEach((field) => {
-      if (!edgeGlobal.objHas(state.workingDoc, field)) {
-        state.workingDoc[field] = newDoc.value[field]
-      }
-    })
+    state.workingDoc = withSchemaDefaults(state.collectionData[props.docId])
 
     // console.log('state.workingDoc', state.workingDoc)
   }
   else {
-    state.workingDoc = edgeGlobal.dupObject(newDoc.value)
+    state.workingDoc = withSchemaDefaults(newDoc.value)
     Object.entries(route.query).forEach(([key, value]) => {
     // Check if the key exists in state.workingDoc, and if so, set the value
       if (key in state.workingDoc) {
