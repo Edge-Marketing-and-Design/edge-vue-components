@@ -101,41 +101,222 @@ const menuPositionOptions = [
 
 const domainError = computed(() => String(props.domainError || '').trim())
 const serverPagesProject = ref('')
+const domainRegistry = ref({})
+const loadingDomainRegistry = ref(false)
 const pagesProject = computed(() => String(serverPagesProject.value || '').trim())
 const pagesDomain = computed(() => (pagesProject.value ? `${pagesProject.value}.pages.dev` : '(CLOUDFLARE_PAGES_PROJECT).pages.dev'))
+const forwardApexEnabled = computed({
+  get: () => props.settings?.forwardApex !== false,
+  set: (value) => {
+    props.settings.forwardApex = !!value
+  },
+})
 
-onMounted(async () => {
+const normalizeDomain = (value) => {
+  if (!value)
+    return ''
+  let normalized = String(value).trim().toLowerCase()
+  if (!normalized)
+    return ''
+  if (normalized.includes('://')) {
+    try {
+      normalized = new URL(normalized).host
+    }
+    catch {
+      normalized = normalized.split('://').pop() || normalized
+    }
+  }
+  normalized = normalized.split('/')[0] || ''
+  if (normalized.includes(':') && !normalized.startsWith('[')) {
+    normalized = normalized.split(':')[0] || ''
+  }
+  return normalized.replace(/\.+$/g, '')
+}
+
+const isIpv4Address = (value) => {
+  const parts = String(value || '').split('.')
+  if (parts.length !== 4)
+    return false
+  return parts.every((part) => {
+    if (!/^\d{1,3}$/.test(part))
+      return false
+    const num = Number(part)
+    return num >= 0 && num <= 255
+  })
+}
+
+const isIpv6Address = (value) => {
+  const normalized = String(value || '').toLowerCase()
+  if (!normalized.includes(':'))
+    return false
+  return /^[0-9a-f:]+$/.test(normalized)
+}
+
+const isIpAddress = value => isIpv4Address(value) || isIpv6Address(value)
+
+const shouldDisplayDomainDnsRecords = (domain) => {
+  if (!domain)
+    return false
+  if (domain.includes('localhost'))
+    return false
+  if (isIpAddress(domain))
+    return false
+  if (domain.endsWith('.dev'))
+    return false
+  return true
+}
+
+const getCloudflareApexDomain = (domain) => {
+  if (!domain)
+    return ''
+  if (domain.startsWith('www.'))
+    return domain.slice(4)
+  return domain
+}
+
+const getCloudflarePagesDomain = (domain) => {
+  if (!domain)
+    return ''
+  if (domain.startsWith('www.'))
+    return domain
+  return `www.${domain}`
+}
+
+const normalizedDomains = computed(() => {
+  const values = Array.isArray(props.settings?.domains) ? props.settings.domains : []
+  return Array.from(new Set(values.map(normalizeDomain).filter(Boolean)))
+})
+
+const dnsEligibleDomains = computed(() => normalizedDomains.value.filter(shouldDisplayDomainDnsRecords))
+
+const organizationId = computed(() => String(edgeGlobal?.edgeState?.currentOrganization || '').trim())
+
+const buildFallbackDomainEntry = (domain) => {
+  const apexDomain = getCloudflareApexDomain(domain)
+  const wwwDomain = getCloudflarePagesDomain(apexDomain)
+  const target = pagesDomain.value
+  const hasTarget = !!String(target || '').trim()
+  return {
+    domain,
+    apexDomain,
+    wwwDomain,
+    apexAttempted: false,
+    apexAdded: false,
+    apexError: '',
+    dnsGuidance: 'Add the www CNAME record. Apex is unavailable; forward apex to www.',
+    dnsRecords: {
+      target,
+      www: {
+        type: 'CNAME',
+        name: 'www',
+        host: wwwDomain,
+        value: target,
+        enabled: hasTarget,
+      },
+      apex: {
+        type: 'CNAME',
+        name: '@',
+        host: apexDomain,
+        value: target,
+        enabled: false,
+      },
+    },
+  }
+}
+
+const domainDnsEntries = computed(() => {
+  return dnsEligibleDomains.value.map((domain) => {
+    const fallback = buildFallbackDomainEntry(domain)
+    const value = domainRegistry.value?.[domain] || {}
+    const dnsRecords = {
+      ...fallback.dnsRecords,
+      ...(value.dnsRecords || {}),
+      www: {
+        ...fallback.dnsRecords.www,
+        ...(value?.dnsRecords?.www || {}),
+      },
+      apex: {
+        ...fallback.dnsRecords.apex,
+        ...(value?.dnsRecords?.apex || {}),
+      },
+    }
+    const apexAdded = value?.apexAdded === true
+    return {
+      ...fallback,
+      ...value,
+      dnsRecords,
+      apexAdded,
+      apexAttempted: value?.apexAttempted === true,
+      apexError: String(value?.apexError || '').trim(),
+      dnsGuidance: String(value?.dnsGuidance || '').trim()
+        || (apexAdded ? '' : fallback.dnsGuidance),
+    }
+  })
+})
+
+const fetchDomainRegistry = async () => {
   if (!edgeFirebase?.runFunction)
     return
+  const domains = normalizedDomains.value
+  loadingDomainRegistry.value = true
   try {
-    const response = await edgeFirebase.runFunction('cms-getCloudflarePagesProject', {})
+    const response = await edgeFirebase.runFunction('cms-getCloudflarePagesProject', {
+      orgId: organizationId.value,
+      siteId: props.siteId || '',
+      domains,
+    })
     serverPagesProject.value = String(response?.data?.project || '').trim()
+    const nextRegistry = response?.data?.domainRegistry
+    if (domains.length && nextRegistry && typeof nextRegistry === 'object')
+      domainRegistry.value = nextRegistry
+    else
+      domainRegistry.value = {}
   }
   catch {
     serverPagesProject.value = ''
+    domainRegistry.value = {}
   }
+  finally {
+    loadingDomainRegistry.value = false
+  }
+}
+
+onMounted(async () => {
+  await fetchDomainRegistry()
 })
+
+watch(() => `${props.siteId}:${organizationId.value}:${normalizedDomains.value.join('|')}`, async () => {
+  await fetchDomainRegistry()
+})
+
+watch(() => props.settings?.forwardApex, (value) => {
+  if (value === undefined)
+    props.settings.forwardApex = true
+}, { immediate: true })
 </script>
 
 <template>
   <Tabs class="w-full" default-value="general">
-    <TabsList class="w-full gap-2 bg-muted/40 p-1 rounded-lg">
-      <TabsTrigger value="general" class="text-sm uppercase font-medium">
+    <TabsList class="w-full mt-3 bg-secondary rounded-sm grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-1">
+      <TabsTrigger value="general" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
         General
       </TabsTrigger>
-      <TabsTrigger value="appearance" class="text-sm uppercase font-medium">
+      <TabsTrigger value="domains" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+        Domains
+      </TabsTrigger>
+      <TabsTrigger value="appearance" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
         Appearance
       </TabsTrigger>
-      <TabsTrigger value="branding" class="text-sm uppercase font-medium">
+      <TabsTrigger value="branding" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
         Branding
       </TabsTrigger>
-      <TabsTrigger value="seo" class="text-sm uppercase font-medium">
+      <TabsTrigger value="seo" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
         SEO
       </TabsTrigger>
-      <TabsTrigger value="tracking" class="text-sm uppercase font-medium">
+      <TabsTrigger value="tracking" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
         Tracking Pixels
       </TabsTrigger>
-      <TabsTrigger value="social" class="text-sm uppercase font-medium">
+      <TabsTrigger value="social" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
         Social Media
       </TabsTrigger>
     </TabsList>
@@ -147,46 +328,6 @@ onMounted(async () => {
         placeholder="Enter name"
         class="w-full"
       />
-      <edge-shad-tags
-        v-model="props.settings.domains"
-        name="domains"
-        label="Domains"
-        placeholder="Add or remove domains"
-        class="w-full"
-      />
-      <Alert v-if="domainError" variant="destructive">
-        <CircleAlert class="h-4 w-4" />
-        <AlertTitle>Domain error</AlertTitle>
-        <AlertDescription class="text-sm">
-          {{ domainError }}
-        </AlertDescription>
-      </Alert>
-      <div class="rounded-lg border border-border/60 bg-muted/40 p-4 space-y-3">
-        <div class="flex items-center justify-between">
-          <div class="text-sm font-semibold text-foreground">
-            Domain DNS records
-          </div>
-          <div class="text-xs text-muted-foreground">
-            Target: <span class="font-mono">{{ pagesDomain }}</span>
-          </div>
-        </div>
-        <p class="text-sm text-muted-foreground">
-          Add these records at your DNS provider.
-        </p>
-        <div class="space-y-2 text-sm">
-          <div class="grid grid-cols-[70px_1fr] gap-3">
-            <div class="text-muted-foreground">CNAME</div>
-            <div class="font-mono">www → {{ pagesDomain }}</div>
-          </div>
-          <div class="grid grid-cols-[70px_1fr] gap-3">
-            <div class="text-muted-foreground">CNAME</div>
-            <div class="font-mono">@ → {{ pagesDomain }}</div>
-          </div>
-        </div>
-        <p class="text-xs text-muted-foreground">
-          Then forward the root/apex (TLD) domain to <span class="font-mono">www</span> with a 301 redirect.
-        </p>
-      </div>
       <edge-shad-input
         v-model="props.settings.contactEmail"
         name="contactEmail"
@@ -218,6 +359,99 @@ onMounted(async () => {
       <p v-else-if="props.showUsers" class="text-sm text-muted-foreground">
         No organization users available for this site.
       </p>
+    </TabsContent>
+    <TabsContent value="domains" class="pt-4 space-y-4">
+      <edge-shad-tags
+        v-model="props.settings.domains"
+        name="domains"
+        label="Domains"
+        placeholder="Add or remove domains"
+        class="w-full"
+      />
+      <div class="rounded-lg border border-border/60 bg-muted/40 p-4 space-y-3">
+        <edge-shad-switch
+          v-model="forwardApexEnabled"
+          name="forwardApex"
+          label="Forward Apex (non-www) domains to www"
+          class="w-full"
+        >
+          Use a single canonical host (www) to avoid duplicate URLs and consolidate SEO signals.
+        </edge-shad-switch>
+        <p class="text-xs text-amber-700 dark:text-amber-300">
+          Warning: if your DNS provider already redirects www to non-www, this can create a redirect loop.
+        </p>
+      </div>
+      <Alert v-if="domainError" variant="destructive">
+        <CircleAlert class="h-4 w-4" />
+        <AlertTitle>Domain error</AlertTitle>
+        <AlertDescription class="text-sm">
+          {{ domainError }}
+        </AlertDescription>
+      </Alert>
+      <div class="rounded-lg border border-border/60 bg-muted/40 p-4 space-y-3">
+        <div class="flex items-center justify-between">
+          <div class="text-sm font-semibold text-foreground">
+            Domain DNS records
+          </div>
+          <div class="text-xs text-muted-foreground">
+            Target: <span class="font-mono">{{ pagesDomain }}</span>
+          </div>
+        </div>
+        <p class="text-sm text-muted-foreground">
+          Records are listed for each domain.
+        </p>
+        <p v-if="loadingDomainRegistry" class="text-xs text-muted-foreground">
+          Refreshing domain status...
+        </p>
+        <div v-if="!domainDnsEntries.length" class="text-sm text-muted-foreground italic">
+          Add at least one valid domain to see DNS records.
+        </div>
+        <div
+          v-for="entry in domainDnsEntries"
+          :key="entry.domain"
+          class="rounded-md border border-border/50 bg-background/70 p-3 space-y-3"
+        >
+          <div class="flex items-center justify-between gap-3">
+            <div class="text-sm font-semibold text-foreground font-mono">
+              {{ entry.domain }}
+            </div>
+            <div class="text-xs">
+              <span
+                v-if="entry.apexAdded"
+                class="rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-2 py-1"
+              >
+                Apex added
+              </span>
+              <span
+                v-else
+                class="rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 px-2 py-1"
+              >
+                Apex not added
+              </span>
+            </div>
+          </div>
+          <div class="space-y-2 text-sm">
+            <div class="grid grid-cols-[70px_1fr] gap-3">
+              <div class="text-muted-foreground">CNAME</div>
+              <div class="font-mono">
+                {{ entry?.dnsRecords?.www?.name || 'www' }} → {{ entry?.dnsRecords?.www?.value || pagesDomain }}
+              </div>
+            </div>
+            <div class="grid grid-cols-[70px_1fr] gap-3">
+              <div class="text-muted-foreground">CNAME</div>
+              <div class="font-mono">
+                {{ entry?.dnsRecords?.apex?.name || '@' }} → {{ entry?.dnsRecords?.apex?.value || pagesDomain }}
+              </div>
+            </div>
+          </div>
+          <p v-if="entry.apexError" class="text-xs text-amber-700 dark:text-amber-300">
+            {{ entry.apexError }}
+          </p>
+          <p v-if="!entry.apexAdded && entry.dnsGuidance" class="text-xs text-muted-foreground">
+            {{ entry.dnsGuidance }}
+          </p>
+        </div>
+      </div>
     </TabsContent>
     <TabsContent value="appearance" class="pt-4 space-y-4">
       <edge-shad-select-tags
