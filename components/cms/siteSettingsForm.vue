@@ -42,6 +42,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  settingsOpen: {
+    type: Boolean,
+    default: true,
+  },
 })
 
 const edgeFirebase = inject('edgeFirebase')
@@ -103,6 +107,7 @@ const domainError = computed(() => String(props.domainError || '').trim())
 const serverPagesProject = ref('')
 const domainRegistry = ref({})
 const loadingDomainRegistry = ref(false)
+const hasLoadedDomainRegistry = ref(false)
 const pagesProject = computed(() => String(serverPagesProject.value || '').trim())
 const pagesDomain = computed(() => (pagesProject.value ? `${pagesProject.value}.pages.dev` : '(CLOUDFLARE_PAGES_PROJECT).pages.dev'))
 const forwardApexEnabled = computed({
@@ -190,6 +195,13 @@ const normalizedDomains = computed(() => {
 const dnsEligibleDomains = computed(() => normalizedDomains.value.filter(shouldDisplayDomainDnsRecords))
 
 const organizationId = computed(() => String(edgeGlobal?.edgeState?.currentOrganization || '').trim())
+const shouldShowDomainRegistryLoading = computed(() => {
+  if (!normalizedDomains.value.length)
+    return false
+  return loadingDomainRegistry.value || !hasLoadedDomainRegistry.value
+})
+const DOMAIN_REGISTRY_POLL_MS = 2500
+let domainRegistryPollTimer = null
 
 const buildFallbackDomainEntry = (domain) => {
   const apexDomain = getCloudflareApexDomain(domain)
@@ -254,11 +266,13 @@ const domainDnsEntries = computed(() => {
   })
 })
 
-const fetchDomainRegistry = async () => {
+const fetchDomainRegistry = async (options = {}) => {
+  const { background = false } = options
   if (!edgeFirebase?.runFunction)
     return
   const domains = normalizedDomains.value
-  loadingDomainRegistry.value = true
+  if (!background)
+    loadingDomainRegistry.value = true
   try {
     const response = await edgeFirebase.runFunction('cms-getCloudflarePagesProject', {
       orgId: organizationId.value,
@@ -271,22 +285,56 @@ const fetchDomainRegistry = async () => {
       domainRegistry.value = nextRegistry
     else
       domainRegistry.value = {}
+    hasLoadedDomainRegistry.value = true
   }
   catch {
     serverPagesProject.value = ''
     domainRegistry.value = {}
+    hasLoadedDomainRegistry.value = true
   }
   finally {
-    loadingDomainRegistry.value = false
+    if (!background)
+      loadingDomainRegistry.value = false
   }
 }
 
-onMounted(async () => {
-  await fetchDomainRegistry()
-})
+const stopDomainRegistryPolling = () => {
+  if (domainRegistryPollTimer) {
+    clearInterval(domainRegistryPollTimer)
+    domainRegistryPollTimer = null
+  }
+}
+
+const startDomainRegistryPolling = () => {
+  stopDomainRegistryPolling()
+  if (!props.settingsOpen)
+    return
+  if (!normalizedDomains.value.length)
+    return
+  domainRegistryPollTimer = setInterval(() => {
+    fetchDomainRegistry({ background: true }).catch(() => {})
+  }, DOMAIN_REGISTRY_POLL_MS)
+}
 
 watch(() => `${props.siteId}:${organizationId.value}:${normalizedDomains.value.join('|')}`, async () => {
+  hasLoadedDomainRegistry.value = false
   await fetchDomainRegistry()
+  startDomainRegistryPolling()
+})
+
+watch(() => props.settingsOpen, async (open) => {
+  if (open) {
+    hasLoadedDomainRegistry.value = false
+    await fetchDomainRegistry()
+    startDomainRegistryPolling()
+  }
+  else {
+    stopDomainRegistryPolling()
+  }
+}, { immediate: true })
+
+onBeforeUnmount(() => {
+  stopDomainRegistryPolling()
 })
 
 watch(() => props.settings?.forwardApex, (value) => {
@@ -400,8 +448,8 @@ watch(() => props.settings?.forwardApex, (value) => {
         <p class="text-sm text-muted-foreground">
           Records are listed for each domain.
         </p>
-        <p v-if="loadingDomainRegistry" class="text-xs text-muted-foreground">
-          Refreshing domain status...
+        <p v-if="shouldShowDomainRegistryLoading" class="text-xs text-muted-foreground">
+          Waiting for latest domain sync results...
         </p>
         <div v-if="!domainDnsEntries.length" class="text-sm text-muted-foreground italic">
           Add at least one valid domain to see DNS records.

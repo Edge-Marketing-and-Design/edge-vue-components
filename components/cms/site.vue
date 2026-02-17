@@ -1703,6 +1703,7 @@ const pageSettingsUpdated = async (pageData) => {
                 :enable-media-picker="true"
                 :site-id="props.site"
                 :domain-error="domainError"
+                :settings-open="state.siteSettings"
               />
             </div>
             <SheetFooter class="pt-2 flex justify-between">
