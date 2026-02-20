@@ -87,6 +87,24 @@ const filteredMetaFields = computed(() => {
   return (props.metaFields || []).filter(field => !skipFields.has(field.field))
 })
 
+const profilePhotoField = computed(() => {
+  return (props.metaFields || []).find(field => field?.field === 'profilephoto') || {}
+})
+
+const profilePhotoSite = computed(() => {
+  const baseSite = String(profilePhotoField.value?.site || 'system-images').trim() || 'system-images'
+  const uid = edgeFirebase?.user?.uid
+  if (!uid)
+    return baseSite
+  return `${baseSite}-${uid}`
+})
+
+const profilePhotoTags = computed(() => {
+  if (Array.isArray(profilePhotoField.value?.tags) && profilePhotoField.value.tags.length)
+    return profilePhotoField.value.tags
+  return ['Headshots']
+})
+
 const initializeDefaults = (meta) => {
   defaultFields.forEach((field) => {
     if (!(field.field in meta))
@@ -249,8 +267,8 @@ const menuIcon = computed(() => {
                   v-model="state.meta.profilephoto"
                   label="Profile Photo"
                   dialog-title="Select Profile Photo"
-                  :site="`${clearwater - hub - images}-${edgeFirebase.user.uid}`"
-                  :default-tags="['Headshots']"
+                  :site="profilePhotoSite"
+                  :default-tags="profilePhotoTags"
                   height-class="h-full min-h-[180px]"
                   :include-cms-all="false"
                 />
@@ -294,7 +312,7 @@ const menuIcon = computed(() => {
                   :model-value="getByPath(state.meta, field.field, '')"
                   :label="field?.label || 'Photo'"
                   :dialog-title="field?.dialogTitle || 'Select Image'"
-                  :site="field?.site || 'clearwater-hub-images'"
+                  :site="field?.site || 'system-images'"
                   :include-cms-all="false"
                   :default-tags="field?.tags || []"
                   :height-class="field?.heightClass || 'h-[160px]'"
