@@ -1,10 +1,14 @@
 <script setup>
+import { useEdgeCmsDialogPositionFix } from '~/edge/composables/useEdgeCmsDialogPositionFix'
+
 const route = useRoute()
 
 const state = reactive({
   mounted: false,
   head: null,
 })
+
+useEdgeCmsDialogPositionFix()
 
 const page = computed(() => {
   if (route.params?.page) {

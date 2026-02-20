@@ -1,8 +1,13 @@
 <script setup>
+import { useEdgeCmsDialogPositionFix } from '~/edge/composables/useEdgeCmsDialogPositionFix'
+
 const route = useRoute()
 const state = reactive({
   mounted: false,
 })
+
+useEdgeCmsDialogPositionFix()
+
 definePageMeta({
   middleware: 'auth',
   head: null,

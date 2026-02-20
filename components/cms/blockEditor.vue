@@ -92,7 +92,7 @@ const PLACEHOLDERS = {
     'Consectetur adipiscing elit.',
     'Sed do eiusmod tempor incididunt.',
   ],
-  image: '/images/filler.png',
+  image: 'https://imagedelivery.net/h7EjKG0X9kOxmLp41mxOng/f1f7f610-dfa9-4011-08a3-7a98d95e7500/thumbnail',
 }
 
 const contentEditorRef = ref(null)

@@ -1,4 +1,8 @@
 <script setup>
+import { useEdgeCmsDialogPositionFix } from '~/edge/composables/useEdgeCmsDialogPositionFix'
+
+useEdgeCmsDialogPositionFix()
+
 definePageMeta({
   middleware: 'auth',
 })
