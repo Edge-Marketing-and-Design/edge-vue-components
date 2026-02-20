@@ -960,13 +960,13 @@ const theme = computed(() => {
   <SidebarMenuItem v-for="({ menu, name: menuName }) in orderedMenus" :key="menuName">
     <SidebarMenuButton class="group !px-0 hover:!bg-transparent">
       <FolderOpen
-        class="mr-2 group-hover:text-black"
+        class="mr-2 group-hover:text-foreground"
       />
-      <span v-if="!props.isTemplateSite" class="hover:text-black !text-black">{{ menuName === 'Site Root' ? 'Site Menu' : menuName }}</span>
+      <span v-if="!props.isTemplateSite" class="!text-foreground">{{ menuName === 'Site Root' ? 'Site Menu' : menuName }}</span>
       <SidebarGroupAction class="absolute right-2 top-0 hover:!bg-transparent">
         <DropdownMenu>
           <DropdownMenuTrigger as-child>
-            <SidebarMenuAction>
+            <SidebarMenuAction class="hover:bg-primary text-foreground hover:text-primary-foreground">
               <PlusIcon />
             </SidebarMenuAction>
           </DropdownMenuTrigger>
@@ -1029,6 +1029,7 @@ const theme = computed(() => {
                 :class="{ 'text-gray-400': element.item === '' }"
                 as-child
                 :is-active="!isExternalLinkEntry(element) && element.item === props.page"
+                class="text-foreground hover:bg-primary hover:text-primary-foreground"
               >
                 <NuxtLink
                   v-if="!isExternalLinkEntry(element)"
@@ -1056,7 +1057,7 @@ const theme = computed(() => {
               <div class="absolute right-0 -top-0.5">
                 <DropdownMenu>
                   <DropdownMenuTrigger as-child>
-                    <SidebarMenuAction>
+                    <SidebarMenuAction class="hover:bg-primary text-foreground hover:text-primary-foreground">
                       <MoreHorizontal />
                     </SidebarMenuAction>
                   </DropdownMenuTrigger>

@@ -854,7 +854,7 @@ const discardSiteSettings = async () => {
       brandLogoLight: publishedSite.brandLogoLight || '',
       favicon: publishedSite.favicon || '',
       menuPosition: publishedSite.menuPosition || '',
-      forwardApex: publishedSite.forwardApex === false ? false : true,
+      forwardApex: publishedSite.forwardApex !== false,
       contactEmail: publishedSite.contactEmail || '',
       contactPhone: publishedSite.contactPhone || '',
       metaTitle: publishedSite.metaTitle || '',
@@ -1617,7 +1617,7 @@ const pageSettingsUpdated = async (pageData) => {
             />
           </div>
           <ResizablePanelGroup v-else-if="showSplitView" direction="horizontal" class="w-full h-full flex-1">
-            <ResizablePanel class="bg-sidebar text-sidebar-foreground" :default-size="16">
+            <ResizablePanel class="bg-primary-foreground text-black" :default-size="16">
               <SidebarGroup class="mt-0 pt-0">
                 <SidebarGroupContent>
                   <SidebarMenu>
