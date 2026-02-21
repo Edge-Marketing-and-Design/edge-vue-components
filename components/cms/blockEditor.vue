@@ -659,55 +659,53 @@ const getTagsFromBlocks = computed(() => {
           </div>
           <div class="flex gap-4">
             <div class="w-1/2">
-              <div class="flex gap-2">
-                <div class="w-2/12 mb-3 rounded-md border border-slate-200 bg-white/80 p-3 shadow-sm shadow-slate-200/60 dark:border-slate-800 dark:bg-slate-900/60">
-                  <div class="flex flex-col gap-2">
-                    <edge-shad-button
-                      type="button"
-                      size="sm"
-                      variant="secondary"
-                      class="w-full h-8 px-2 text-[11px] uppercase tracking-wide gap-2"
-                      @click="state.helpOpen = true"
-                    >
-                      <HelpCircle class="w-4 h-4" />
-                      Block Help
-                    </edge-shad-button>
-                    <div class="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300 whitespace-nowrap">
-                      Dynamic Content
-                    </div>
-                  </div>
-                  <div class="mt-2 flex flex-wrap gap-2">
-                    <edge-tooltip
-                      v-for="snippet in BLOCK_CONTENT_SNIPPETS"
-                      :key="snippet.label"
-                    >
+              <edge-cms-code-editor
+                ref="contentEditorRef"
+                v-model="slotProps.workingDoc.content"
+                title="Block Content"
+                language="html"
+                name="content"
+                :enable-formatting="false"
+                height="calc(100vh - 300px)"
+                class="mb-4 flex-1"
+                @line-click="payload => handleEditorLineClick(payload, slotProps.workingDoc)"
+              >
+                <template #end-actions>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger as-child>
                       <edge-shad-button
+                        type="button"
                         size="sm"
                         variant="outline"
-                        class="text-xs w-full"
+                        class="h-8 px-2 text-[11px] uppercase tracking-wide"
+                      >
+                        Dynamic Content
+                      </edge-shad-button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" class="w-72">
+                      <DropdownMenuItem
+                        v-for="snippet in BLOCK_CONTENT_SNIPPETS"
+                        :key="snippet.label"
+                        class="cursor-pointer flex-col items-start gap-0.5"
                         @click="insertBlockContentSnippet(snippet.snippet)"
                       >
-                        {{ snippet.label }}
-                      </edge-shad-button>
-                      <template #content>
-                        <pre class="max-w-[320px] whitespace-pre-wrap break-words text-left text-xs font-mono leading-tight">{{ snippet.snippet }}</pre>
-                      </template>
-                    </edge-tooltip>
-                  </div>
-                </div>
-                <div class="w-10/12">
-                  <edge-cms-code-editor
-                    ref="contentEditorRef"
-                    v-model="slotProps.workingDoc.content"
-                    title="Block Content"
-                    language="html"
-                    name="content"
-                    height="calc(100vh - 300px)"
-                    class="mb-4 flex-1"
-                    @line-click="payload => handleEditorLineClick(payload, slotProps.workingDoc)"
-                  />
-                </div>
-              </div>
+                        <span class="text-sm font-medium">{{ snippet.label }}</span>
+                        <span class="text-xs text-muted-foreground whitespace-normal">{{ snippet.description }}</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <edge-shad-button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    class="h-8 px-2 text-[11px] uppercase tracking-wide gap-2"
+                    @click="state.helpOpen = true"
+                  >
+                    <HelpCircle class="w-4 h-4" />
+                    Block Help
+                  </edge-shad-button>
+                </template>
+              </edge-cms-code-editor>
             </div>
             <div class="w-1/2 space-y-2">
               <div class="flex items-center justify-between">

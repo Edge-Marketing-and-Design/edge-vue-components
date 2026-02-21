@@ -28,13 +28,17 @@ const state = reactive({
   fontFamily: '',
   fontDisplay: 'swap',
   fileMeta: {},
+  renamingDocId: null,
+  renameDrafts: {},
+  busyDocId: null,
+  loadingFonts: false,
 })
 
 const acceptList = ['.woff', '.woff2', '.ttf', '.otf', 'font/woff', 'font/woff2', 'application/font-woff', 'application/font-woff2', 'application/x-font-ttf', 'application/x-font-otf']
 const normalizedAccept = computed(() => acceptList.join(','))
-const collectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/files`)
+const collectionPath = computed(() => edgeGlobal.edgeState.organizationDocPath ? `${edgeGlobal.edgeState.organizationDocPath}/files` : '')
 
-const slugify = (value) => String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '')
+const slugify = value => String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '')
 
 const parseHead = () => {
   try {
@@ -46,6 +50,15 @@ const parseHead = () => {
   }
 }
 
+const parsedHead = computed(() => {
+  try {
+    return JSON.parse(headJson.value || '{}') || {}
+  }
+  catch {
+    return {}
+  }
+})
+
 const setHeadJson = (head) => {
   if (!head || typeof head !== 'object')
     return
@@ -53,6 +66,208 @@ const setHeadJson = (head) => {
 }
 
 const fileKey = file => file?.name || file?.file?.name || crypto.randomUUID()
+
+const fileCollection = computed(() => edgeFirebase.data?.[collectionPath.value] || {})
+
+const uploadedFonts = computed(() => {
+  return Object.values(fileCollection.value || {})
+    .filter((doc) => {
+      const meta = doc?.meta || {}
+      return !!meta.cmsFont && meta.themeId === props.themeId
+    })
+    .sort((a, b) => (b?.uploadTime || 0) - (a?.uploadTime || 0))
+})
+
+const fontLabel = (doc) => {
+  return doc?.name || doc?.fileName || doc?.docId || 'Untitled font'
+}
+
+const styleEntryContent = (entry = {}) => String(entry?.children || entry?.innerHTML || '')
+
+const urlVariants = (url = '') => {
+  return [
+    String(url || ''),
+    encodeURI(String(url || '')),
+    decodeURI(String(url || '')),
+  ].filter(Boolean)
+}
+
+const entryMatchesUrl = (entry, url = '') => {
+  const content = styleEntryContent(entry)
+  if (!content)
+    return false
+  const variants = urlVariants(url)
+  return variants.some(v => content.includes(v))
+}
+
+const extractFontFamilyFromCss = (css = '') => {
+  const match = String(css || '').match(/font-family:\s*["']?([^;"'\n]+)["']?\s*;/i)
+  return (match?.[1] || '').trim()
+}
+
+const formatUploadedAt = (value) => {
+  if (!value)
+    return ''
+
+  let date = null
+  if (typeof value?.toDate === 'function')
+    date = value.toDate()
+  else if (typeof value?.seconds === 'number')
+    date = new Date(value.seconds * 1000)
+  else
+    date = new Date(value)
+
+  if (!date || Number.isNaN(date.getTime()))
+    return ''
+
+  return date.toLocaleDateString()
+}
+
+const relatedDocsForRename = (doc) => {
+  const groupId = doc?.meta?.fontGroupId
+  if (!groupId)
+    return [doc]
+  const related = uploadedFonts.value.filter(item => item?.meta?.fontGroupId === groupId)
+  return related.length ? related : [doc]
+}
+
+const currentFamilyForDoc = (doc) => {
+  const head = parsedHead.value
+  if (!head || !Array.isArray(head.style))
+    return ''
+
+  const docs = relatedDocsForRename(doc)
+  for (const item of docs) {
+    const url = item?.r2URL
+    if (!url)
+      continue
+    const match = head.style.find(entry => entryMatchesUrl(entry, url))
+    if (match) {
+      const family = extractFontFamilyFromCss(styleEntryContent(match))
+      if (family)
+        return family
+    }
+  }
+  return ''
+}
+
+const startRename = (doc) => {
+  if (!doc?.docId)
+    return
+  const family = currentFamilyForDoc(doc)
+  state.renamingDocId = doc.docId
+  state.renameDrafts[doc.docId] = family || doc?.name || doc?.fileName || ''
+}
+
+const cancelRename = () => {
+  if (state.renamingDocId)
+    delete state.renameDrafts[state.renamingDocId]
+  state.renamingDocId = null
+}
+
+const saveRename = async (doc) => {
+  if (!doc?.docId)
+    return
+  const nextName = (state.renameDrafts[doc.docId] || '').trim()
+  if (!nextName) {
+    state.errors.push('Font family is required.')
+    return
+  }
+
+  state.busyDocId = doc.docId
+  try {
+    const { ok, head } = parseHead()
+    if (!ok || !head || !Array.isArray(head.style)) {
+      state.errors.push('Head JSON is invalid or missing style entries.')
+      return
+    }
+
+    const docs = relatedDocsForRename(doc)
+    const targets = docs.flatMap(item => urlVariants(item?.r2URL || ''))
+    const hasTarget = value => targets.some(url => value.includes(url))
+
+    let updated = false
+    const nextStyle = head.style.map((entry) => {
+      const content = styleEntryContent(entry)
+      if (!content || !hasTarget(content))
+        return entry
+
+      const replaced = content.replace(
+        /font-family:\s*("[^"]*"|'[^']*'|[^;]+)\s*;/i,
+        `font-family: "${nextName}";`,
+      )
+      if (replaced !== content)
+        updated = true
+
+      return {
+        ...entry,
+        children: replaced,
+        innerHTML: replaced,
+      }
+    })
+
+    if (!updated) {
+      state.errors.push(`No @font-face entries were found in Head JSON for "${fontLabel(doc)}".`)
+      return
+    }
+
+    head.style = nextStyle
+    setHeadJson(head)
+    cancelRename()
+  }
+  catch (error) {
+    state.errors.push(`Font family update failed for "${fontLabel(doc)}": ${error?.message || error}`)
+  }
+  finally {
+    state.busyDocId = null
+  }
+}
+
+const stripFontFromHead = (doc) => {
+  if (!doc?.r2URL)
+    return
+
+  const { ok, head } = parseHead()
+  if (!ok || !head)
+    return
+
+  const hasVariant = (value = '') => urlVariants(doc.r2URL).some(v => value.includes(v))
+
+  if (Array.isArray(head.link)) {
+    head.link = head.link.filter((entry) => {
+      const href = String(entry?.href || '')
+      return !hasVariant(href)
+    })
+  }
+
+  if (Array.isArray(head.style)) {
+    head.style = head.style.filter((entry) => {
+      const content = String(entry?.children || entry?.innerHTML || '')
+      return !hasVariant(content)
+    })
+  }
+
+  setHeadJson(head)
+}
+
+const deleteFont = async (doc) => {
+  if (!doc?.docId)
+    return
+
+  state.busyDocId = doc.docId
+  try {
+    await edgeFirebase.removeDoc(collectionPath.value, doc.docId)
+    stripFontFromHead(doc)
+    if (state.renamingDocId === doc.docId)
+      cancelRename()
+  }
+  catch (error) {
+    state.errors.push(`Delete failed for "${fontLabel(doc)}": ${error?.message || error}`)
+  }
+  finally {
+    state.busyDocId = null
+  }
+}
 
 const formatFromName = (name = '', contentType = '') => {
   const lower = (name || '').toLowerCase()
@@ -124,6 +339,25 @@ const ensureMetaForFiles = () => {
 }
 
 watch(() => state.files, () => ensureMetaForFiles(), { deep: true })
+
+onBeforeMount(async () => {
+  if (!collectionPath.value)
+    return
+
+  state.loadingFonts = true
+  try {
+    await edgeFirebase.startSnapshot(collectionPath.value)
+  }
+  finally {
+    state.loadingFonts = false
+  }
+})
+
+onBeforeUnmount(() => {
+  if (!collectionPath.value)
+    return
+  edgeFirebase.stopSnapshot(collectionPath.value)
+})
 
 const waitForR2 = async (docId) => {
   if (!docId || !collectionPath.value)
@@ -307,6 +541,88 @@ const processFonts = async () => {
       >
         {{ state.uploading ? 'Processing…' : 'Process fonts' }}
       </edge-shad-button>
+    </div>
+    <div class="rounded-md border border-border/70 bg-muted/20 p-2 space-y-2">
+      <div class="flex items-center justify-between text-xs text-muted-foreground">
+        <span>Uploaded custom fonts</span>
+        <span>{{ uploadedFonts.length }}</span>
+      </div>
+
+      <div v-if="state.loadingFonts" class="text-xs text-muted-foreground">
+        Loading fonts...
+      </div>
+
+      <div v-else-if="uploadedFonts.length === 0" class="text-xs text-muted-foreground">
+        No custom fonts uploaded for this theme yet.
+      </div>
+
+      <div v-else class="space-y-1">
+        <div
+          v-for="font in uploadedFonts"
+          :key="font.docId"
+          class="flex items-start gap-2 rounded border border-border/60 bg-background/60 px-2 py-2"
+        >
+          <div class="flex-1 min-w-0">
+            <div v-if="state.renamingDocId === font.docId">
+              <edge-shad-input
+                v-model="state.renameDrafts[font.docId]"
+                label="Font family"
+                name="fontFamilyName"
+                placeholder="Font family"
+                class="w-full"
+              />
+            </div>
+            <div v-else class="space-y-0.5">
+              <div class="truncate text-sm font-medium text-foreground">
+                {{ currentFamilyForDoc(font) || fontLabel(font) }}
+              </div>
+              <div class="truncate text-[11px] text-muted-foreground">
+                {{ font.fileName || font.docId }}
+              </div>
+              <div v-if="formatUploadedAt(font.uploadTime)" class="text-[11px] text-muted-foreground">
+                Uploaded {{ formatUploadedAt(font.uploadTime) }}
+              </div>
+            </div>
+          </div>
+          <div class="flex items-center gap-1">
+            <template v-if="state.renamingDocId === font.docId">
+              <edge-shad-button
+                size="sm"
+                :disabled="state.busyDocId === font.docId"
+                @click="saveRename(font)"
+              >
+                Save
+              </edge-shad-button>
+              <edge-shad-button
+                size="sm"
+                variant="outline"
+                :disabled="state.busyDocId === font.docId"
+                @click="cancelRename"
+              >
+                Cancel
+              </edge-shad-button>
+            </template>
+            <template v-else>
+              <edge-shad-button
+                size="sm"
+                variant="outline"
+                :disabled="state.busyDocId === font.docId"
+                @click="startRename(font)"
+              >
+                Edit family
+              </edge-shad-button>
+              <edge-shad-button
+                size="sm"
+                variant="destructive"
+                :disabled="state.busyDocId === font.docId"
+                @click="deleteFont(font)"
+              >
+                Delete
+              </edge-shad-button>
+            </template>
+          </div>
+        </div>
+      </div>
     </div>
     <template v-if="state.errors.length">
       <Alert

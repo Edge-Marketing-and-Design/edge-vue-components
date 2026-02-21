@@ -103,6 +103,8 @@ const state = reactive({
   defaultSettingsOpen: false,
 })
 
+const editorViewportHeight = 'calc(100vh - 420px)'
+
 const blockSchema = toTypedSchema(z.object({
   name: z.string({
     required_error: 'Name is required',
@@ -406,84 +408,114 @@ onBeforeMount(async () => {
         </div>
       </template>
       <template #main="slotProps">
-        <div class="pt-4 flex flex-col gap-6 lg:flex-row">
-          <div class="lg:w-72 lg:max-w-xs w-full space-y-4">
-            <Card class="h-full">
-              <CardHeader class="pb-2">
-                <div class="flex items-center justify-between gap-2">
-                  <CardTitle class="text-base">
-                    Default Template Pages
-                  </CardTitle>
-                  <edge-shad-button
-                    size="icon"
-                    type="text"
-                    @click="state.defaultSettingsOpen = true"
-                  >
-                    <FolderCog class="h-4 w-4" />
-                  </edge-shad-button>
-                </div>
-                <CardDescription class="text-xs">
-                  Choose which template pages are created for new sites and organize them into Site Menu or Not In Menu.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <edge-cms-theme-default-menu
-                  v-if="slotProps.workingDoc"
-                  v-model="slotProps.workingDoc.defaultMenus"
-                  :template-options="templatePageOptions"
-                  :template-pages="templatePages"
-                />
-              </CardContent>
-            </Card>
-          </div>
-          <div class="flex-1 space-y-4">
-            <edge-shad-input
-              v-model="slotProps.workingDoc.name"
-              label="Theme Name"
-              name="name"
-            />
-            <div class="flex flex-col gap-4 xl:flex-row">
-              <div class="w-1/2">
-                <edge-cms-code-editor
-                  v-model="slotProps.workingDoc.theme"
-                  title="Theme JSON"
-                  language="json"
-                  name="content"
-                  height="400px"
-                  class="mb-4 w-full"
-                />
-                <edge-cms-font-upload
-                  v-if="slotProps.workingDoc"
-                  v-model:head-json="slotProps.workingDoc.headJSON"
-                  :theme-id="props.themeId"
-                  class="mb-4"
-                />
-                <edge-cms-code-editor
-                  v-model="slotProps.workingDoc.headJSON"
-                  title="Head JSON"
-                  language="json"
-                  name="headJSON"
-                  height="400px"
-                  class="mb-4 w-full"
-                />
-                <edge-cms-code-editor
-                  v-model="slotProps.workingDoc.extraCSS"
-                  title="Extra CSS"
-                  language="css"
-                  name="extraCSS"
-                  height="300px"
-                  class="mb-4 w-full"
-                />
-              </div>
-              <div class="w-1/2">
-                <div class="w-full mx-auto bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30">
-                  <edge-cms-block-picker
-                    :site-id="edgeGlobal.edgeState.blockEditorSite"
-                    class="!h-[calc(100vh-220px)] overflow-y-auto"
-                    list-only
-                    :theme="lastValidTheme"
+        <div class="pt-4 space-y-4">
+          <edge-shad-input
+            v-model="slotProps.workingDoc.name"
+            label="Theme Name"
+            name="name"
+          />
+          <div class="flex flex-col gap-4 xl:flex-row">
+            <div class="w-full xl:w-1/2">
+              <Tabs class="w-full" default-value="theme-json">
+                <TabsList class="w-full mt-3 bg-secondary rounded-sm grid grid-cols-2 xl:grid-cols-5">
+                  <TabsTrigger value="theme-json" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+                    Theme JSON
+                  </TabsTrigger>
+                  <TabsTrigger value="head-json" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+                    Head JSON
+                  </TabsTrigger>
+                  <TabsTrigger value="custom-fonts" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+                    Custom Fonts
+                  </TabsTrigger>
+                  <TabsTrigger value="extra-css" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+                    Extra CSS
+                  </TabsTrigger>
+                  <TabsTrigger value="default-templates" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+                    Default Templates
+                  </TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="theme-json" class="mt-4">
+                  <edge-cms-code-editor
+                    v-model="slotProps.workingDoc.theme"
+                    title="Theme JSON"
+                    language="json"
+                    name="content"
+                    :height="editorViewportHeight"
+                    class="w-full"
                   />
-                </div>
+                </TabsContent>
+
+                <TabsContent value="head-json" class="mt-4">
+                  <edge-cms-code-editor
+                    v-model="slotProps.workingDoc.headJSON"
+                    title="Head JSON"
+                    language="json"
+                    name="headJSON"
+                    :height="editorViewportHeight"
+                    class="w-full"
+                  />
+                </TabsContent>
+
+                <TabsContent value="custom-fonts" class="mt-4">
+                  <edge-cms-font-upload
+                    v-if="slotProps.workingDoc"
+                    v-model:head-json="slotProps.workingDoc.headJSON"
+                    :theme-id="props.themeId"
+                    class="w-full"
+                  />
+                </TabsContent>
+
+                <TabsContent value="extra-css" class="mt-4">
+                  <edge-cms-code-editor
+                    v-model="slotProps.workingDoc.extraCSS"
+                    title="Extra CSS"
+                    language="css"
+                    name="extraCSS"
+                    :height="editorViewportHeight"
+                    class="w-full"
+                  />
+                </TabsContent>
+
+                <TabsContent value="default-templates" class="mt-4">
+                  <Card class="h-full">
+                    <CardHeader class="pb-2">
+                      <div class="flex items-center justify-between gap-2">
+                        <CardTitle class="text-base">
+                          Default Templates
+                        </CardTitle>
+                        <edge-shad-button
+                          size="icon"
+                          type="text"
+                          @click="state.defaultSettingsOpen = true"
+                        >
+                          <FolderCog class="h-4 w-4" />
+                        </edge-shad-button>
+                      </div>
+                      <CardDescription class="text-xs">
+                        Choose which template pages are created for new sites and organize them into Site Menu or Not In Menu.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <edge-cms-theme-default-menu
+                        v-if="slotProps.workingDoc"
+                        v-model="slotProps.workingDoc.defaultMenus"
+                        :template-options="templatePageOptions"
+                        :template-pages="templatePages"
+                      />
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+              </Tabs>
+            </div>
+            <div class="w-full xl:w-1/2">
+              <div class="w-full mx-auto bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30">
+                <edge-cms-block-picker
+                  :site-id="edgeGlobal.edgeState.blockEditorSite"
+                  class="!h-[calc(100vh-220px)] overflow-y-auto"
+                  list-only
+                  :theme="lastValidTheme"
+                />
               </div>
             </div>
           </div>

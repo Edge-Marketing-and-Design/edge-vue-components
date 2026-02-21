@@ -60,6 +60,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  enableFormatting: {
+    type: Boolean,
+    default: true,
+  },
 })
 
 const emit = defineEmits(['update:modelValue', 'lineClick'])
@@ -253,7 +257,8 @@ const runChatGpt = async () => {
 
 const handleMount = (editor) => {
   editorInstanceRef.value = editor
-  editorInstanceRef.value?.getAction('editor.action.formatDocument').run()
+  if (props.enableFormatting)
+    editorInstanceRef.value?.getAction('editor.action.formatDocument').run()
   editorDomNode = editor.getDomNode?.()
   if (editorDomNode)
     editorDomNode.addEventListener('keydown', stopEnterPropagation)
@@ -274,6 +279,9 @@ const handleMount = (editor) => {
 }
 
 const formatCode = () => {
+  if (!props.enableFormatting)
+    return
+
   const editorInstance = editorInstanceRef.value
   if (!editorInstance)
     return console.error('Editor instance not found')
@@ -411,7 +419,7 @@ onBeforeUnmount(() => {
         </div>
       </template>
       <template #end>
-        <edge-tooltip>
+        <edge-tooltip v-if="props.enableFormatting">
           <edge-shad-button
             size="icon"
             class="bg-slate-400 w-8 h-8"
@@ -423,6 +431,7 @@ onBeforeUnmount(() => {
             Format Code
           </template>
         </edge-tooltip>
+        <slot name="end-actions" />
         <insert-menu v-if="props.siteVars && props.siteVars.length" :items="props.siteVars" var-prefix="siteVar" insert-type="vars" @value-sent="insertBlock">
           <Code class="w-4 h-4" /> Site Variables
         </insert-menu>
@@ -466,8 +475,8 @@ onBeforeUnmount(() => {
             :language="props.language"
             :options="{
               automaticLayout: true,
-              formatOnType: true,
-              formatOnPaste: true,
+              formatOnType: props.enableFormatting,
+              formatOnPaste: props.enableFormatting,
             }"
             style="height: calc(100vh - 120px)"
             @mount="handleMountDiff"
@@ -483,8 +492,8 @@ onBeforeUnmount(() => {
         :language="props.language"
         :options="{
           automaticLayout: true,
-          formatOnType: true,
-          formatOnPaste: true,
+          formatOnType: props.enableFormatting,
+          formatOnPaste: props.enableFormatting,
         }"
         @mount="handleMount"
       />
