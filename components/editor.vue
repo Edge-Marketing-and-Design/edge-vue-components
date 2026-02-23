@@ -27,6 +27,10 @@ const props = defineProps({
     type: Boolean,
     default: true,
   },
+  headerClass: {
+    type: String,
+    default: 'py-4 bg-secondary text-foreground rounded-none sticky top-0',
+  },
   class: {
     type: String,
     default: '',
@@ -583,7 +587,7 @@ const onError = async () => {
       @error="onError"
     >
       <slot name="header" :on-submit="triggerSubmit" :on-cancel="onCancel" :submitting="state.submitting" :unsaved-changes="unsavedChanges" :title="title" :working-doc="state.workingDoc" :errors="state.errors">
-        <edge-menu v-if="props.showHeader" class="py-4 bg-secondary text-foreground rounded-none sticky top-0">
+        <edge-menu v-if="props.showHeader" :class="props.headerClass">
           <template #start>
             <slot name="header-start" :unsaved-changes="unsavedChanges" :title="title" :errors="state.errors" :working-doc="state.workingDoc">
               <FilePenLine class="mr-2" />

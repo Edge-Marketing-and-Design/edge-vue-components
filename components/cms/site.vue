@@ -1,7 +1,7 @@
 <script setup lang="js">
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { ArrowLeft, CircleAlert, FileCheck, FilePenLine, FileStack, FolderCog, FolderDown, FolderUp, FolderX, Inbox, Loader2, Mail, MailOpen, MoreHorizontal } from 'lucide-vue-next'
+import { ArrowLeft, CircleAlert, FileCheck, FilePenLine, FileStack, FolderCog, FolderDown, FolderUp, FolderX, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Upload } from 'lucide-vue-next'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
 
 const props = defineProps({
@@ -67,6 +67,16 @@ const state = reactive({
   userFilter: 'all',
   newDocs: {
     sites: createSiteSettingsNewDocSchema(),
+    pages: {
+      name: { bindings: { 'field-type': 'text', 'label': 'Name', 'helper': 'Name' }, cols: '12', value: '' },
+      content: { value: [] },
+      postContent: { value: [] },
+      structure: { value: [] },
+      postStructure: { value: [] },
+      metaTitle: { value: '' },
+      metaDescription: { value: '' },
+      structuredData: { value: buildPageStructuredData() },
+    },
   },
   mounted: false,
   page: {},
@@ -81,7 +91,18 @@ const state = reactive({
   submissionFilter: '',
   selectedSubmissionId: '',
   publishSiteLoading: false,
+  importingPages: false,
+  importPageDocIdDialogOpen: false,
+  importPageDocIdValue: '',
+  importPageConflictDialogOpen: false,
+  importPageConflictDocId: '',
+  importPageErrorDialogOpen: false,
+  importPageErrorMessage: '',
 })
+
+const pageImportInputRef = ref(null)
+const pageImportDocIdResolver = ref(null)
+const pageImportConflictResolver = ref(null)
 
 const pageInit = {
   name: '',
@@ -925,6 +946,311 @@ const pageList = computed(() => {
     .sort((a, b) => (b.lastUpdated ?? 0) - (a.lastUpdated ?? 0))
 })
 
+const INVALID_PAGE_IMPORT_MESSAGE = 'Invalid file. Please import a valid page file.'
+const pageImportCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`)
+
+const readTextFile = file => new Promise((resolve, reject) => {
+  if (typeof FileReader === 'undefined') {
+    reject(new Error('File import is only available in the browser.'))
+    return
+  }
+  const reader = new FileReader()
+  reader.onload = () => resolve(String(reader.result || ''))
+  reader.onerror = () => reject(new Error('Could not read the selected file.'))
+  reader.readAsText(file)
+})
+
+const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value)
+
+const normalizeImportedPageDoc = (payload, fallbackDocId = '') => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload))
+    throw new Error(INVALID_PAGE_IMPORT_MESSAGE)
+
+  if (payload.document && typeof payload.document === 'object' && !Array.isArray(payload.document)) {
+    const normalized = { ...payload.document }
+    if (!normalized.docId && payload.docId)
+      normalized.docId = payload.docId
+    if (!normalized.docId && fallbackDocId)
+      normalized.docId = fallbackDocId
+    return normalized
+  }
+
+  const normalized = { ...payload }
+  if (!normalized.docId && fallbackDocId)
+    normalized.docId = fallbackDocId
+  return normalized
+}
+
+const cloneSchemaValue = (value) => {
+  if (isPlainObject(value) || Array.isArray(value))
+    return edgeGlobal.dupObject(value)
+  return value
+}
+
+const getDocDefaultsFromSchema = (schema = {}) => {
+  const defaults = {}
+  for (const [key, schemaEntry] of Object.entries(schema || {})) {
+    const hasValueProp = isPlainObject(schemaEntry) && Object.prototype.hasOwnProperty.call(schemaEntry, 'value')
+    const baseValue = hasValueProp ? schemaEntry.value : schemaEntry
+    defaults[key] = cloneSchemaValue(baseValue)
+  }
+  return defaults
+}
+
+const getPageDocDefaults = () => getDocDefaultsFromSchema(state.newDocs?.pages || {})
+
+const validateImportedPageDoc = (doc) => {
+  if (!isPlainObject(doc))
+    throw new Error(INVALID_PAGE_IMPORT_MESSAGE)
+
+  const requiredKeys = Object.keys(state.newDocs?.pages || {})
+  const missing = requiredKeys.filter(key => !Object.prototype.hasOwnProperty.call(doc, key))
+  if (missing.length)
+    throw new Error(INVALID_PAGE_IMPORT_MESSAGE)
+
+  return doc
+}
+
+const normalizeMenusForImport = (menus) => {
+  const normalized = isPlainObject(menus) ? edgeGlobal.dupObject(menus) : {}
+  if (!Array.isArray(normalized['Site Root']))
+    normalized['Site Root'] = []
+  if (!Array.isArray(normalized['Not In Menu']))
+    normalized['Not In Menu'] = []
+  return normalized
+}
+
+const walkMenuEntries = (items, callback) => {
+  if (!Array.isArray(items))
+    return
+  for (const entry of items) {
+    if (!entry || typeof entry !== 'object')
+      continue
+    callback(entry)
+    if (isPlainObject(entry.item)) {
+      for (const nested of Object.values(entry.item)) {
+        if (Array.isArray(nested))
+          walkMenuEntries(nested, callback)
+      }
+    }
+  }
+}
+
+const menuIncludesDocId = (menus, docId) => {
+  let found = false
+  const checkEntry = (entry) => {
+    if (found)
+      return
+    if (typeof entry?.item === 'string' && entry.item === docId)
+      found = true
+  }
+  for (const menuItems of Object.values(menus || {})) {
+    walkMenuEntries(menuItems, checkEntry)
+    if (found)
+      return true
+  }
+  return false
+}
+
+const collectMenuPageNames = (menus) => {
+  const names = new Set()
+  const collectEntry = (entry) => {
+    if (typeof entry?.item !== 'string')
+      return
+    const name = String(entry?.name || '').trim()
+    if (name)
+      names.add(name)
+  }
+  for (const menuItems of Object.values(menus || {}))
+    walkMenuEntries(menuItems, collectEntry)
+  return names
+}
+
+const slugifyMenuPageName = (value) => {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)+/g, '') || 'page'
+}
+
+const makeUniqueMenuPageName = (value, existingNames = new Set()) => {
+  const base = slugifyMenuPageName(value)
+  let candidate = base
+  let suffix = 2
+  while (existingNames.has(candidate)) {
+    candidate = `${base}-${suffix}`
+    suffix += 1
+  }
+  return candidate
+}
+
+const addImportedPageToSiteMenu = (docId, pageName = '') => {
+  if (isTemplateSite.value)
+    return
+
+  const nextDocId = String(docId || '').trim()
+  if (!nextDocId)
+    return
+
+  const menus = normalizeMenusForImport(siteData.value?.menus || state.menus)
+  if (menuIncludesDocId(menus, nextDocId)) {
+    state.menus = menus
+    return
+  }
+
+  const existingNames = collectMenuPageNames(menus)
+  const menuName = makeUniqueMenuPageName(pageName || nextDocId, existingNames)
+  menus['Site Root'].push({ name: menuName, item: nextDocId })
+  state.menus = menus
+}
+
+const makeRandomPageDocId = (docsMap = {}) => {
+  let nextDocId = String(edgeGlobal.generateShortId() || '').trim()
+  while (!nextDocId || docsMap[nextDocId])
+    nextDocId = String(edgeGlobal.generateShortId() || '').trim()
+  return nextDocId
+}
+
+const makeImportedPageNameForNew = (baseName, docsMap = {}) => {
+  const normalizedBase = String(baseName || '').trim() || 'page'
+  const existingNames = new Set(
+    Object.values(docsMap || {})
+      .map(doc => String(doc?.name || '').trim().toLowerCase())
+      .filter(Boolean),
+  )
+
+  let suffix = 1
+  let candidate = `${normalizedBase}-${suffix}`
+  while (existingNames.has(candidate.toLowerCase())) {
+    suffix += 1
+    candidate = `${normalizedBase}-${suffix}`
+  }
+  return candidate
+}
+
+const requestPageImportDocId = (initialValue = '') => {
+  state.importPageDocIdValue = String(initialValue || '')
+  state.importPageDocIdDialogOpen = true
+  return new Promise((resolve) => {
+    pageImportDocIdResolver.value = resolve
+  })
+}
+
+const resolvePageImportDocId = (value = '') => {
+  const resolver = pageImportDocIdResolver.value
+  pageImportDocIdResolver.value = null
+  state.importPageDocIdDialogOpen = false
+  if (resolver)
+    resolver(String(value || '').trim())
+}
+
+const requestPageImportConflict = (docId) => {
+  state.importPageConflictDocId = String(docId || '')
+  state.importPageConflictDialogOpen = true
+  return new Promise((resolve) => {
+    pageImportConflictResolver.value = resolve
+  })
+}
+
+const resolvePageImportConflict = (action = 'cancel') => {
+  const resolver = pageImportConflictResolver.value
+  pageImportConflictResolver.value = null
+  state.importPageConflictDialogOpen = false
+  if (resolver)
+    resolver(action)
+}
+
+const getImportDocId = async (incomingDoc, fallbackDocId = '') => {
+  let nextDocId = String(incomingDoc?.docId || '').trim()
+  if (!nextDocId)
+    nextDocId = await requestPageImportDocId(fallbackDocId)
+  if (!nextDocId)
+    throw new Error('Import canceled. A docId is required.')
+  if (nextDocId.includes('/'))
+    throw new Error('docId cannot include "/".')
+  return nextDocId
+}
+
+const openImportErrorDialog = (message) => {
+  state.importPageErrorMessage = String(message || 'Failed to import page.')
+  state.importPageErrorDialogOpen = true
+}
+
+const triggerPageImport = () => {
+  pageImportInputRef.value?.click()
+}
+
+const importSinglePageFile = async (file, existingPages = {}, fallbackDocId = '') => {
+  const fileText = await readTextFile(file)
+  const parsed = JSON.parse(fileText)
+  const importedDoc = validateImportedPageDoc(normalizeImportedPageDoc(parsed, fallbackDocId))
+  const incomingDocId = await getImportDocId(importedDoc, fallbackDocId)
+  let targetDocId = incomingDocId
+  let importDecision = 'create'
+
+  if (existingPages[targetDocId]) {
+    const decision = await requestPageImportConflict(targetDocId)
+    if (decision === 'cancel')
+      return
+    if (decision === 'new') {
+      targetDocId = makeRandomPageDocId(existingPages)
+      importedDoc.name = makeImportedPageNameForNew(importedDoc.name || incomingDocId, existingPages)
+      importDecision = 'new'
+    }
+    else {
+      importDecision = 'overwrite'
+    }
+  }
+
+  const payload = { ...getPageDocDefaults(), ...importedDoc, docId: targetDocId }
+  await edgeFirebase.storeDoc(pageImportCollectionPath.value, payload, targetDocId)
+  existingPages[targetDocId] = payload
+  addImportedPageToSiteMenu(targetDocId, payload.name)
+
+  if (importDecision === 'overwrite')
+    edgeFirebase?.toast?.success?.(`Overwrote page "${targetDocId}".`)
+  else if (importDecision === 'new')
+    edgeFirebase?.toast?.success?.(`Imported page as new "${targetDocId}".`)
+  else
+    edgeFirebase?.toast?.success?.(`Imported page "${targetDocId}".`)
+}
+
+const handlePageImport = async (event) => {
+  const input = event?.target
+  const files = Array.from(input?.files || [])
+  if (!files.length)
+    return
+
+  state.importingPages = true
+  const existingPages = { ...(pages.value || {}) }
+  try {
+    if (!edgeFirebase.data?.[pageImportCollectionPath.value])
+      await edgeFirebase.startSnapshot(pageImportCollectionPath.value)
+
+    for (const file of files) {
+      try {
+        await importSinglePageFile(file, existingPages, '')
+      }
+      catch (error) {
+        console.error('Failed to import page file', error)
+        const message = error?.message || 'Failed to import page file.'
+        if (/^Import canceled\./i.test(message))
+          continue
+        if (error instanceof SyntaxError || message === INVALID_PAGE_IMPORT_MESSAGE)
+          openImportErrorDialog(INVALID_PAGE_IMPORT_MESSAGE)
+        else
+          openImportErrorDialog(message)
+      }
+    }
+  }
+  finally {
+    state.importingPages = false
+    if (input)
+      input.value = ''
+  }
+}
+
 const formatTimestamp = (input) => {
   if (!input)
     return 'Not yet saved'
@@ -1004,6 +1330,22 @@ const handlePostSelect = (postId) => {
 const clearPostSelection = () => {
   state.selectedPostId = ''
 }
+
+watch(() => state.importPageDocIdDialogOpen, (open) => {
+  if (!open && pageImportDocIdResolver.value) {
+    const resolver = pageImportDocIdResolver.value
+    pageImportDocIdResolver.value = null
+    resolver('')
+  }
+})
+
+watch(() => state.importPageConflictDialogOpen, (open) => {
+  if (!open && pageImportConflictResolver.value) {
+    const resolver = pageImportConflictResolver.value
+    pageImportConflictResolver.value = null
+    resolver('cancel')
+  }
+})
 
 watch (() => siteData.value, () => {
   if (isTemplateSite.value)
@@ -1350,10 +1692,13 @@ const pageSettingsUpdated = async (pageData) => {
       Only organization admins can create sites.
     </div>
     <div v-else class="flex flex-col h-[calc(100vh-58px)] overflow-hidden">
-      <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-2 border-b bg-secondary">
+      <div
+        class="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-2 border bg-secondary"
+        :class="isTemplateSite ? 'min-h-[68px]' : ''"
+      >
         <div class="flex items-center gap-3">
           <FileStack class="w-5 h-5" />
-          <span class="text-lg font-semibold">
+          <span class="text-lg font-normal">
             {{ siteData.name || 'Templates' }}
           </span>
         </div>
@@ -1397,74 +1742,96 @@ const pageSettingsUpdated = async (pageData) => {
             </edge-shad-button>
           </div>
         </div>
-        <div v-if="!isTemplateSite" class="flex items-center gap-3 justify-end">
-          <Transition name="fade" mode="out-in">
-            <div v-if="isSiteDiff || isAnyPagesDiff" key="unpublished" class="flex gap-2 items-center">
-              <div class="flex gap-1 items-center bg-yellow-100 text-xs py-1 px-3 text-yellow-800 rounded">
-                <CircleAlert class="!text-yellow-800 w-3 h-6" />
+        <div class="flex items-center gap-3 justify-end">
+          <input
+            ref="pageImportInputRef"
+            type="file"
+            multiple
+            accept=".json,application/json"
+            class="hidden"
+            @change="handlePageImport"
+          >
+          <edge-shad-button
+            type="button"
+            size="icon"
+            variant="outline"
+            class="h-9 w-9"
+            :disabled="state.importingPages"
+            title="Import Page"
+            aria-label="Import Page"
+            @click="triggerPageImport"
+          >
+            <Loader2 v-if="state.importingPages" class="h-3.5 w-3.5 animate-spin" />
+            <Upload v-else class="h-3.5 w-3.5" />
+          </edge-shad-button>
+          <template v-if="!isTemplateSite">
+            <Transition name="fade" mode="out-in">
+              <div v-if="isSiteDiff || isAnyPagesDiff" key="unpublished" class="flex gap-2 items-center">
+                <div class="flex gap-1 items-center bg-yellow-100 text-xs py-1 px-3 text-yellow-800 rounded">
+                  <CircleAlert class="!text-yellow-800 w-3 h-6" />
+                  <span class="font-medium text-[10px]">
+                    {{ isSiteDiff ? 'Unpublished Settings' : 'Unpublished Pages' }}
+                  </span>
+                </div>
+                <edge-shad-button
+                  class="h-8 px-4 text-xs gap-2 bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm"
+                  :disabled="state.publishSiteLoading"
+                  @click="publishSiteAndSettings"
+                >
+                  <Loader2 v-if="state.publishSiteLoading" class="h-3.5 w-3.5 animate-spin" />
+                  <FolderUp v-else class="h-3.5 w-3.5" />
+                  Publish Site
+                </edge-shad-button>
+              </div>
+              <div v-else key="published" class="flex gap-1 items-center bg-green-100 text-xs py-1 px-3 text-green-800 rounded">
+                <FileCheck class="!text-green-800 w-3 h-6" />
                 <span class="font-medium text-[10px]">
-                  {{ isSiteDiff ? 'Unpublished Settings' : 'Unpublished Pages' }}
+                  Settings Published
                 </span>
               </div>
-              <edge-shad-button
-                class="h-8 px-4 text-xs gap-2 bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm"
-                :disabled="state.publishSiteLoading"
-                @click="publishSiteAndSettings"
-              >
-                <Loader2 v-if="state.publishSiteLoading" class="h-3.5 w-3.5 animate-spin" />
-                <FolderUp v-else class="h-3.5 w-3.5" />
-                Publish Site
-              </edge-shad-button>
-            </div>
-            <div v-else key="published" class="flex gap-1 items-center bg-green-100 text-xs py-1 px-3 text-green-800 rounded">
-              <FileCheck class="!text-green-800 w-3 h-6" />
-              <span class="font-medium text-[10px]">
-                Settings Published
-              </span>
-            </div>
-          </Transition>
-          <DropdownMenu>
-            <DropdownMenuTrigger as-child>
-              <edge-shad-button variant="outline" size="icon" class="h-9 w-9">
-                <MoreHorizontal />
-              </edge-shad-button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent side="right" align="start">
-              <DropdownMenuLabel class="flex items-center gap-2">
-                <FileStack class="w-5 h-5" />{{ siteData.name || 'Templates' }}
-              </DropdownMenuLabel>
+            </Transition>
+            <DropdownMenu>
+              <DropdownMenuTrigger as-child>
+                <edge-shad-button variant="outline" size="icon" class="h-9 w-9">
+                  <MoreHorizontal />
+                </edge-shad-button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="right" align="start">
+                <DropdownMenuLabel class="flex items-center gap-2">
+                  <FileStack class="w-5 h-5" />{{ siteData.name || 'Templates' }}
+                </DropdownMenuLabel>
 
-              <DropdownMenuSeparator v-if="isSiteDiff" />
-              <DropdownMenuLabel v-if="isSiteDiff" class="flex items-center gap-2">
-                Site Settings
-              </DropdownMenuLabel>
+                <DropdownMenuSeparator v-if="isSiteDiff" />
+                <DropdownMenuLabel v-if="isSiteDiff" class="flex items-center gap-2">
+                  Site Settings
+                </DropdownMenuLabel>
 
-              <DropdownMenuItem v-if="isSiteDiff" class="pl-4 text-xs" @click="publishSiteSettings">
-                <FolderUp />
-                Publish
-              </DropdownMenuItem>
-              <DropdownMenuItem v-if="isSiteDiff && isSiteSettingPublished" class="pl-4 text-xs" @click="discardSiteSettings">
-                <FolderX />
-                Discard Changes
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem v-if="isAnyPagesDiff" @click="publishSite">
-                <FolderUp />
-                Publish All Pages
-              </DropdownMenuItem>
-              <DropdownMenuItem v-if="isSiteSettingPublished || isAnyPagesPublished" @click="unPublishSite">
-                <FolderDown />
-                Unpublish Site
-              </DropdownMenuItem>
+                <DropdownMenuItem v-if="isSiteDiff" class="pl-4 text-xs" @click="publishSiteSettings">
+                  <FolderUp />
+                  Publish
+                </DropdownMenuItem>
+                <DropdownMenuItem v-if="isSiteDiff && isSiteSettingPublished" class="pl-4 text-xs" @click="discardSiteSettings">
+                  <FolderX />
+                  Discard Changes
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem v-if="isAnyPagesDiff" @click="publishSite">
+                  <FolderUp />
+                  Publish All Pages
+                </DropdownMenuItem>
+                <DropdownMenuItem v-if="isSiteSettingPublished || isAnyPagesPublished" @click="unPublishSite">
+                  <FolderDown />
+                  Unpublish Site
+                </DropdownMenuItem>
 
-              <DropdownMenuItem @click="state.siteSettings = true">
-                <FolderCog />
-                <span>Settings</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                <DropdownMenuItem @click="state.siteSettings = true">
+                  <FolderCog />
+                  <span>Settings</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </template>
         </div>
-        <div v-else />
       </div>
       <div class="flex-1">
         <Transition name="fade" mode="out-in">
@@ -1672,6 +2039,72 @@ const pageSettingsUpdated = async (pageData) => {
         </Transition>
       </div>
     </div>
+    <edge-shad-dialog v-model="state.importPageDocIdDialogOpen">
+      <DialogContent class="pt-8">
+        <DialogHeader>
+          <DialogTitle class="text-left">
+            Enter Page Doc ID
+          </DialogTitle>
+          <DialogDescription>
+            This file does not include a <code>docId</code>. Enter the doc ID you want to import into this site.
+          </DialogDescription>
+        </DialogHeader>
+        <edge-shad-input
+          v-model="state.importPageDocIdValue"
+          name="site-page-import-doc-id"
+          label="Doc ID"
+          placeholder="example-page-id"
+        />
+        <DialogFooter class="pt-2 flex justify-between">
+          <edge-shad-button variant="outline" @click="resolvePageImportDocId('')">
+            Cancel
+          </edge-shad-button>
+          <edge-shad-button @click="resolvePageImportDocId(state.importPageDocIdValue)">
+            Continue
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
+    <edge-shad-dialog v-model="state.importPageConflictDialogOpen">
+      <DialogContent class="pt-8">
+        <DialogHeader>
+          <DialogTitle class="text-left">
+            Page Already Exists
+          </DialogTitle>
+          <DialogDescription>
+            <code>{{ state.importPageConflictDocId }}</code> already exists in this {{ isTemplateSite ? 'template library' : 'site' }}. Choose to overwrite it or import as a new page.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter class="pt-2 flex justify-between">
+          <edge-shad-button variant="outline" @click="resolvePageImportConflict('cancel')">
+            Cancel
+          </edge-shad-button>
+          <edge-shad-button variant="outline" @click="resolvePageImportConflict('new')">
+            Add As New
+          </edge-shad-button>
+          <edge-shad-button @click="resolvePageImportConflict('overwrite')">
+            Overwrite
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
+    <edge-shad-dialog v-model="state.importPageErrorDialogOpen">
+      <DialogContent class="pt-8">
+        <DialogHeader>
+          <DialogTitle class="text-left">
+            Import Failed
+          </DialogTitle>
+          <DialogDescription class="text-left">
+            {{ state.importPageErrorMessage }}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter class="pt-2">
+          <edge-shad-button @click="state.importPageErrorDialogOpen = false">
+            Close
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
     <Sheet v-model:open="state.siteSettings">
       <SheetContent side="left" class="w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl">
         <SheetHeader>

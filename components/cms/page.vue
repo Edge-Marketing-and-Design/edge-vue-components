@@ -1,5 +1,5 @@
 <script setup>
-import { AlertTriangle, ArrowDown, ArrowUp, Maximize2, Monitor, Smartphone, Sparkles, Tablet, UploadCloud } from 'lucide-vue-next'
+import { AlertTriangle, ArrowDown, ArrowUp, Download, Maximize2, Monitor, Smartphone, Sparkles, Tablet, UploadCloud } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 const props = defineProps({
@@ -20,6 +20,7 @@ const props = defineProps({
 const emit = defineEmits(['head'])
 
 const edgeFirebase = inject('edgeFirebase')
+const router = useRouter()
 const { buildPageStructuredData } = useStructuredDataTemplates()
 
 const state = reactive({
@@ -41,6 +42,13 @@ const state = reactive({
   workingDoc: {},
   seoAiLoading: false,
   seoAiError: '',
+  importingJson: false,
+  importDocIdDialogOpen: false,
+  importDocIdValue: '',
+  importConflictDialogOpen: false,
+  importConflictDocId: '',
+  importErrorDialogOpen: false,
+  importErrorMessage: '',
   previewViewport: 'full',
   newRowLayout: '6',
   newPostRowLayout: '6',
@@ -67,6 +75,10 @@ const state = reactive({
     postBetween: {},
   },
 })
+
+const pageImportInputRef = ref(null)
+const pageImportDocIdResolver = ref(null)
+const pageImportConflictResolver = ref(null)
 
 const schemas = {
   pages: toTypedSchema(z.object({
@@ -918,6 +930,382 @@ const currentPage = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`]?.[props.page] || null
 })
 
+const pagesCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`)
+const pagesCollection = computed(() => edgeFirebase.data?.[pagesCollectionPath.value] || {})
+const pageEditorBasePath = computed(() => (props.isTemplateSite ? '/app/dashboard/templates' : `/app/dashboard/sites/${props.site}`))
+const INVALID_PAGE_IMPORT_MESSAGE = 'Invalid file. Please import a valid page file.'
+
+const downloadJsonFile = (payload, filename) => {
+  if (typeof window === 'undefined')
+    return
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+  const objectUrl = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = objectUrl
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(objectUrl)
+}
+
+const readTextFile = file => new Promise((resolve, reject) => {
+  if (typeof FileReader === 'undefined') {
+    reject(new Error('File import is only available in the browser.'))
+    return
+  }
+  const reader = new FileReader()
+  reader.onload = () => resolve(String(reader.result || ''))
+  reader.onerror = () => reject(new Error('Could not read the selected file.'))
+  reader.readAsText(file)
+})
+
+const normalizeImportedDoc = (payload, fallbackDocId = '') => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload))
+    throw new Error(INVALID_PAGE_IMPORT_MESSAGE)
+
+  if (payload.document && typeof payload.document === 'object' && !Array.isArray(payload.document)) {
+    const normalized = { ...payload.document }
+    if (!normalized.docId && payload.docId)
+      normalized.docId = payload.docId
+    if (!normalized.docId && fallbackDocId)
+      normalized.docId = fallbackDocId
+    return normalized
+  }
+
+  const normalized = { ...payload }
+  if (!normalized.docId && fallbackDocId)
+    normalized.docId = fallbackDocId
+  return normalized
+}
+
+const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value)
+
+const cloneSchemaValue = (value) => {
+  if (isPlainObject(value) || Array.isArray(value))
+    return edgeGlobal.dupObject(value)
+  return value
+}
+
+const getDocDefaultsFromSchema = (schema = {}) => {
+  const defaults = {}
+  for (const [key, schemaEntry] of Object.entries(schema || {})) {
+    const hasValueProp = isPlainObject(schemaEntry) && Object.prototype.hasOwnProperty.call(schemaEntry, 'value')
+    const baseValue = hasValueProp ? schemaEntry.value : schemaEntry
+    defaults[key] = cloneSchemaValue(baseValue)
+  }
+  return defaults
+}
+
+const getPageDocDefaults = () => getDocDefaultsFromSchema(state.newDocs?.pages || {})
+
+const validateImportedPageDoc = (doc) => {
+  if (!isPlainObject(doc))
+    throw new Error(INVALID_PAGE_IMPORT_MESSAGE)
+
+  const requiredKeys = Object.keys(state.newDocs?.pages || {})
+  const missing = requiredKeys.filter(key => !Object.prototype.hasOwnProperty.call(doc, key))
+  if (missing.length)
+    throw new Error(INVALID_PAGE_IMPORT_MESSAGE)
+
+  return doc
+}
+
+const normalizeMenusForImport = (menus) => {
+  const normalized = isPlainObject(menus) ? edgeGlobal.dupObject(menus) : {}
+  if (!Array.isArray(normalized['Site Root']))
+    normalized['Site Root'] = []
+  if (!Array.isArray(normalized['Not In Menu']))
+    normalized['Not In Menu'] = []
+  return normalized
+}
+
+const walkMenuEntries = (items, callback) => {
+  if (!Array.isArray(items))
+    return
+  for (const entry of items) {
+    if (!entry || typeof entry !== 'object')
+      continue
+    callback(entry)
+    if (isPlainObject(entry.item)) {
+      for (const nested of Object.values(entry.item)) {
+        if (Array.isArray(nested))
+          walkMenuEntries(nested, callback)
+      }
+    }
+  }
+}
+
+const menuIncludesDocId = (menus, docId) => {
+  let found = false
+  const checkEntry = (entry) => {
+    if (found)
+      return
+    if (typeof entry?.item === 'string' && entry.item === docId)
+      found = true
+  }
+  for (const menuItems of Object.values(menus || {})) {
+    walkMenuEntries(menuItems, checkEntry)
+    if (found)
+      return true
+  }
+  return false
+}
+
+const collectMenuPageNames = (menus) => {
+  const names = new Set()
+  const collectEntry = (entry) => {
+    if (typeof entry?.item !== 'string')
+      return
+    const name = String(entry?.name || '').trim()
+    if (name)
+      names.add(name)
+  }
+  for (const menuItems of Object.values(menus || {}))
+    walkMenuEntries(menuItems, collectEntry)
+  return names
+}
+
+const slugifyMenuPageName = (value) => {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)+/g, '') || 'page'
+}
+
+const makeUniqueMenuPageName = (value, existingNames = new Set()) => {
+  const base = slugifyMenuPageName(value)
+  let candidate = base
+  let suffix = 2
+  while (existingNames.has(candidate)) {
+    candidate = `${base}-${suffix}`
+    suffix += 1
+  }
+  return candidate
+}
+
+const addImportedPageToSiteMenu = async (docId, pageName = '') => {
+  const nextDocId = String(docId || '').trim()
+  if (!nextDocId)
+    return
+  const siteId = String(props.site || '').trim()
+  if (!siteId)
+    return
+
+  const sitesCollectionPath = `${edgeGlobal.edgeState.organizationDocPath}/sites`
+  const siteDoc = edgeFirebase.data?.[sitesCollectionPath]?.[siteId] || {}
+  const menus = normalizeMenusForImport(siteDoc?.menus)
+  if (menuIncludesDocId(menus, nextDocId))
+    return
+
+  const existingNames = collectMenuPageNames(menus)
+  const menuName = makeUniqueMenuPageName(pageName || nextDocId, existingNames)
+  menus['Site Root'].push({ name: menuName, item: nextDocId })
+
+  const results = await edgeFirebase.changeDoc(sitesCollectionPath, siteId, { menus })
+  if (results?.success === false)
+    throw new Error('Could not save updated site menu.')
+}
+
+const makeRandomPageDocId = (docsMap = {}) => {
+  let nextDocId = String(edgeGlobal.generateShortId() || '').trim()
+  while (!nextDocId || docsMap[nextDocId])
+    nextDocId = String(edgeGlobal.generateShortId() || '').trim()
+  return nextDocId
+}
+
+const makeImportedPageNameForNew = (baseName, docsMap = {}) => {
+  const normalizedBase = String(baseName || '').trim() || 'page'
+  const existingNames = new Set(
+    Object.values(docsMap || {})
+      .map(doc => String(doc?.name || '').trim().toLowerCase())
+      .filter(Boolean),
+  )
+
+  let suffix = 1
+  let candidate = `${normalizedBase}-${suffix}`
+  while (existingNames.has(candidate.toLowerCase())) {
+    suffix += 1
+    candidate = `${normalizedBase}-${suffix}`
+  }
+  return candidate
+}
+
+const requestPageImportDocId = (initialValue = '') => {
+  state.importDocIdValue = String(initialValue || '')
+  state.importDocIdDialogOpen = true
+  return new Promise((resolve) => {
+    pageImportDocIdResolver.value = resolve
+  })
+}
+
+const resolvePageImportDocId = (value = '') => {
+  const resolver = pageImportDocIdResolver.value
+  pageImportDocIdResolver.value = null
+  state.importDocIdDialogOpen = false
+  if (resolver)
+    resolver(String(value || '').trim())
+}
+
+const requestPageImportConflict = (docId) => {
+  state.importConflictDocId = String(docId || '')
+  state.importConflictDialogOpen = true
+  return new Promise((resolve) => {
+    pageImportConflictResolver.value = resolve
+  })
+}
+
+const resolvePageImportConflict = (action = 'cancel') => {
+  const resolver = pageImportConflictResolver.value
+  pageImportConflictResolver.value = null
+  state.importConflictDialogOpen = false
+  if (resolver)
+    resolver(action)
+}
+
+watch(() => state.importDocIdDialogOpen, (open) => {
+  if (!open && pageImportDocIdResolver.value) {
+    const resolver = pageImportDocIdResolver.value
+    pageImportDocIdResolver.value = null
+    resolver('')
+  }
+})
+
+watch(() => state.importConflictDialogOpen, (open) => {
+  if (!open && pageImportConflictResolver.value) {
+    const resolver = pageImportConflictResolver.value
+    pageImportConflictResolver.value = null
+    resolver('cancel')
+  }
+})
+
+const getImportDocId = async (incomingDoc, fallbackDocId = '') => {
+  let nextDocId = String(incomingDoc?.docId || '').trim()
+  if (!nextDocId)
+    nextDocId = await requestPageImportDocId(fallbackDocId)
+  if (!nextDocId)
+    throw new Error('Import canceled. A docId is required.')
+  if (nextDocId.includes('/'))
+    throw new Error('docId cannot include "/".')
+  return nextDocId
+}
+
+const notifySuccess = (message) => {
+  edgeFirebase?.toast?.success?.(message)
+}
+
+const notifyError = (message) => {
+  edgeFirebase?.toast?.error?.(message)
+}
+
+const openImportErrorDialog = (message) => {
+  state.importErrorMessage = String(message || 'Failed to import page JSON.')
+  state.importErrorDialogOpen = true
+}
+
+const exportCurrentPage = () => {
+  const doc = currentPage.value
+  if (!doc || !props.page || props.page === 'new') {
+    notifyError('Save this page before exporting.')
+    return
+  }
+  const docId = String(doc.docId || props.page).trim()
+  const exportPayload = { ...getPageDocDefaults(), ...doc, docId }
+  downloadJsonFile(exportPayload, `page-${docId}.json`)
+  notifySuccess(`Exported page "${docId}".`)
+}
+
+const triggerPageImport = () => {
+  pageImportInputRef.value?.click()
+}
+
+const importSinglePageFile = async (file, existingPages = {}, fallbackDocId = '') => {
+  const fileText = await readTextFile(file)
+  const parsed = JSON.parse(fileText)
+  const importedDoc = validateImportedPageDoc(normalizeImportedDoc(parsed, fallbackDocId))
+  const incomingDocId = await getImportDocId(importedDoc, fallbackDocId)
+  let targetDocId = incomingDocId
+  let importDecision = 'create'
+
+  if (existingPages[targetDocId]) {
+    const decision = await requestPageImportConflict(targetDocId)
+    if (decision === 'cancel')
+      return ''
+    if (decision === 'new') {
+      targetDocId = makeRandomPageDocId(existingPages)
+      importedDoc.name = makeImportedPageNameForNew(importedDoc.name || incomingDocId, existingPages)
+      importDecision = 'new'
+    }
+    else {
+      importDecision = 'overwrite'
+    }
+  }
+
+  const isCreatingNewPage = !existingPages[targetDocId]
+  const payload = { ...getPageDocDefaults(), ...importedDoc, docId: targetDocId }
+  await edgeFirebase.storeDoc(pagesCollectionPath.value, payload, targetDocId)
+  existingPages[targetDocId] = payload
+
+  if (isCreatingNewPage) {
+    try {
+      await addImportedPageToSiteMenu(targetDocId, importedDoc.name)
+    }
+    catch (menuError) {
+      console.error('Imported page but failed to update site menu', menuError)
+      openImportErrorDialog('Imported page, but could not add it to Site Menu automatically.')
+    }
+  }
+
+  if (importDecision === 'overwrite')
+    notifySuccess(`Overwrote page "${targetDocId}".`)
+  else if (importDecision === 'new')
+    notifySuccess(`Imported page as new "${targetDocId}".`)
+  else
+    notifySuccess(`Imported page "${targetDocId}".`)
+
+  return targetDocId
+}
+
+const handlePageImport = async (event) => {
+  const input = event?.target
+  const files = Array.from(input?.files || [])
+  if (!files.length)
+    return
+
+  state.importingJson = true
+  const fallbackDocId = props.page !== 'new' ? props.page : ''
+  const existingPages = { ...(pagesCollection.value || {}) }
+  let lastImportedDocId = ''
+  try {
+    for (const file of files) {
+      try {
+        const importedDocId = await importSinglePageFile(file, existingPages, fallbackDocId)
+        if (importedDocId)
+          lastImportedDocId = importedDocId
+      }
+      catch (error) {
+        console.error('Failed to import page JSON', error)
+        const message = error?.message || 'Failed to import page JSON.'
+        if (/^Import canceled\./i.test(message))
+          continue
+        if (error instanceof SyntaxError || message === INVALID_PAGE_IMPORT_MESSAGE)
+          openImportErrorDialog(INVALID_PAGE_IMPORT_MESSAGE)
+        else
+          openImportErrorDialog(message)
+      }
+    }
+
+    if (files.length === 1 && lastImportedDocId && lastImportedDocId !== props.page)
+      await router.push(`${pageEditorBasePath.value}/${lastImportedDocId}`)
+  }
+  finally {
+    state.importingJson = false
+    if (input)
+      input.value = ''
+  }
+}
+
 watch (currentPage, (newPage) => {
   state.workingDoc.last_updated = newPage?.last_updated
   state.workingDoc.metaTitle = newPage?.metaTitle
@@ -1187,6 +1575,21 @@ const hasUnsavedChanges = (changes) => {
             />
           </div>
           <div class="w-full border-t border-border" aria-hidden="true" />
+
+          <div class="flex items-center gap-2 px-3">
+            <edge-shad-button
+              type="button"
+              size="icon"
+              variant="outline"
+              class="h-8 w-8"
+              :disabled="!currentPage || !props.page || props.page === 'new'"
+              title="Export Page"
+              aria-label="Export Page"
+              @click="exportCurrentPage"
+            >
+              <Download class="w-3.5 h-3.5" />
+            </edge-shad-button>
+          </div>
 
           <div class="flex items-center gap-1 pr-3">
             <span class="text-[11px] uppercase tracking-wide text-muted-foreground">Viewport</span>
@@ -1846,6 +2249,72 @@ const hasUnsavedChanges = (changes) => {
       </Sheet>
     </template>
   </edge-editor>
+  <edge-shad-dialog v-model="state.importDocIdDialogOpen">
+    <DialogContent class="pt-8">
+      <DialogHeader>
+        <DialogTitle class="text-left">
+          Enter Page Doc ID
+        </DialogTitle>
+        <DialogDescription>
+          This JSON file does not include a <code>docId</code>. Enter the doc ID you want to import into this site.
+        </DialogDescription>
+      </DialogHeader>
+      <edge-shad-input
+        v-model="state.importDocIdValue"
+        name="page-import-doc-id"
+        label="Doc ID"
+        placeholder="example-page-id"
+      />
+      <DialogFooter class="pt-2 flex justify-between">
+        <edge-shad-button variant="outline" @click="resolvePageImportDocId('')">
+          Cancel
+        </edge-shad-button>
+        <edge-shad-button @click="resolvePageImportDocId(state.importDocIdValue)">
+          Continue
+        </edge-shad-button>
+      </DialogFooter>
+    </DialogContent>
+  </edge-shad-dialog>
+  <edge-shad-dialog v-model="state.importConflictDialogOpen">
+    <DialogContent class="pt-8">
+      <DialogHeader>
+        <DialogTitle class="text-left">
+          Page Already Exists
+        </DialogTitle>
+        <DialogDescription>
+          <code>{{ state.importConflictDocId }}</code> already exists in this site. Choose to overwrite it or import as a new page.
+        </DialogDescription>
+      </DialogHeader>
+      <DialogFooter class="pt-2 flex justify-between">
+        <edge-shad-button variant="outline" @click="resolvePageImportConflict('cancel')">
+          Cancel
+        </edge-shad-button>
+        <edge-shad-button variant="outline" @click="resolvePageImportConflict('new')">
+          Add As New
+        </edge-shad-button>
+        <edge-shad-button @click="resolvePageImportConflict('overwrite')">
+          Overwrite
+        </edge-shad-button>
+      </DialogFooter>
+    </DialogContent>
+  </edge-shad-dialog>
+  <edge-shad-dialog v-model="state.importErrorDialogOpen">
+    <DialogContent class="pt-8">
+      <DialogHeader>
+        <DialogTitle class="text-left">
+          Import Failed
+        </DialogTitle>
+        <DialogDescription class="text-left">
+          {{ state.importErrorMessage }}
+        </DialogDescription>
+      </DialogHeader>
+      <DialogFooter class="pt-2">
+        <edge-shad-button @click="state.importErrorDialogOpen = false">
+          Close
+        </edge-shad-button>
+      </DialogFooter>
+    </DialogContent>
+  </edge-shad-dialog>
   <edge-shad-dialog v-model="state.showUnpublishedChangesDialog">
     <DialogContent class="max-w-2xl">
       <DialogHeader>

@@ -1,5 +1,5 @@
 <script setup>
-import { HelpCircle, Maximize2, Monitor, Smartphone, Tablet } from 'lucide-vue-next'
+import { Download, HelpCircle, Maximize2, Monitor, Smartphone, Tablet } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 const props = defineProps({
@@ -12,20 +12,12 @@ const props = defineProps({
 const emit = defineEmits(['head'])
 
 const edgeFirebase = inject('edgeFirebase')
-
-const route = useRoute()
+const { blocks: blockNewDocSchema } = useCmsNewDocs()
 
 const state = reactive({
   filter: '',
   newDocs: {
-    blocks: {
-      name: { value: '' },
-      content: { value: '' },
-      tags: { value: [] },
-      themes: { value: [] },
-      synced: { value: false },
-      version: 1,
-    },
+    blocks: blockNewDocSchema.value,
   },
   mounted: false,
   workingDoc: {},
@@ -567,6 +559,59 @@ const getTagsFromBlocks = computed(() => {
   // Always prepend it
   return [{ name: 'Quick Picks', title: 'Quick Picks' }, ...filtered]
 })
+
+const downloadJsonFile = (payload, filename) => {
+  if (typeof window === 'undefined')
+    return
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+  const objectUrl = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = objectUrl
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(objectUrl)
+}
+
+const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value)
+
+const cloneSchemaValue = (value) => {
+  if (isPlainObject(value) || Array.isArray(value))
+    return edgeGlobal.dupObject(value)
+  return value
+}
+
+const getDocDefaultsFromSchema = (schema = {}) => {
+  const defaults = {}
+  for (const [key, schemaEntry] of Object.entries(schema || {})) {
+    const hasValueProp = isPlainObject(schemaEntry) && Object.prototype.hasOwnProperty.call(schemaEntry, 'value')
+    const baseValue = hasValueProp ? schemaEntry.value : schemaEntry
+    defaults[key] = cloneSchemaValue(baseValue)
+  }
+  return defaults
+}
+
+const getBlockDocDefaults = () => getDocDefaultsFromSchema(blockNewDocSchema.value || {})
+
+const notifySuccess = (message) => {
+  edgeFirebase?.toast?.success?.(message)
+}
+
+const notifyError = (message) => {
+  edgeFirebase?.toast?.error?.(message)
+}
+
+const exportCurrentBlock = () => {
+  const doc = blocks.value?.[props.blockId]
+  if (!doc || !doc.docId) {
+    notifyError('Save this block before exporting.')
+    return
+  }
+  const exportPayload = { ...getBlockDocDefaults(), ...doc }
+  downloadJsonFile(exportPayload, `block-${doc.docId}.json`)
+  notifySuccess(`Exported block "${doc.docId}".`)
+}
 </script>
 
 <template>
@@ -578,7 +623,9 @@ const getTagsFromBlocks = computed(() => {
       :doc-id="props.blockId"
       :schema="blockSchema"
       :new-doc-schema="state.newDocs.blocks"
-      class="w-full mx-auto flex-1 bg-transparent flex flex-col border-none shadow-none"
+      header-class="py-2 bg-secondary text-foreground rounded-none sticky top-0 border"
+      class="w-full mx-auto flex-1 bg-transparent flex flex-col border-none shadow-none pt-0 px-0"
+      card-content-class="px-0"
       :show-footer="false"
       :no-close-after-save="true"
       :working-doc-overrides="state.workingDoc"
@@ -589,28 +636,40 @@ const getTagsFromBlocks = computed(() => {
         {{ slotProps.title }}
       </template>
       <template #header-center>
-        <div class="w-full flex gap-1 px-4">
-          <div class="w-1/2">
+        <div class="w-full flex gap-2 px-4 items-center">
+          <div class="flex-1">
             <edge-shad-select
               v-if="!state.loading"
               v-model="edgeGlobal.edgeState.blockEditorTheme"
-              label="Theme Viewer Select"
               name="theme"
               :items="themes.map(t => ({ title: t.name, name: t.docId }))"
               placeholder="Theme Viewer Select"
               class="w-full"
             />
           </div>
-          <div class="w-1/2">
+          <div class="flex-1">
             <edge-shad-select
               v-if="!state.loading"
               v-model="edgeGlobal.edgeState.blockEditorSite"
-              label="Site"
               name="site"
               :items="sites.map(s => ({ title: s.name, name: s.docId }))"
               placeholder="Select Site"
               class="w-full"
             />
+          </div>
+          <div class="flex items-center gap-2">
+            <edge-shad-button
+              type="button"
+              size="icon"
+              variant="outline"
+              class="h-9 w-9"
+              :disabled="props.blockId === 'new' || !blocks?.[props.blockId]"
+              title="Export Block"
+              aria-label="Export Block"
+              @click="exportCurrentBlock"
+            >
+              <Download class="h-4 w-4" />
+            </edge-shad-button>
           </div>
         </div>
       </template>
