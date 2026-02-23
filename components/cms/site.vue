@@ -1848,7 +1848,7 @@ const pageSettingsUpdated = async (pageData) => {
           </template>
         </div>
       </div>
-      <div class="flex-1">
+      <div class="flex-1 min-h-0">
         <Transition name="fade" mode="out-in">
           <div v-if="isViewingSubmissions" class="flex-1 overflow-y-auto p-6">
             <edge-dashboard
@@ -1998,11 +1998,11 @@ const pageSettingsUpdated = async (pageData) => {
               @update:selected-post-id="clearPostSelection"
             />
           </div>
-          <ResizablePanelGroup v-else-if="showSplitView" direction="horizontal" class="w-full h-full flex-1">
-            <ResizablePanel class="bg-primary-foreground text-black" :default-size="16">
-              <SidebarGroup class="mt-0 pt-0">
-                <SidebarGroupContent>
-                  <SidebarMenu>
+          <ResizablePanelGroup v-else-if="showSplitView" direction="horizontal" class="w-full h-full flex-1 min-h-0">
+            <ResizablePanel class="bg-primary-foreground text-black min-h-0 overflow-hidden" :default-size="16">
+              <SidebarGroup class="mt-0 pt-0 h-full min-h-0">
+                <SidebarGroupContent class="h-full min-h-0 overflow-y-auto">
+                  <SidebarMenu class="pb-4">
                     <template v-if="isTemplateSite || state.viewMode === 'pages'">
                       <edge-cms-menu
                         v-if="state.menus"
@@ -2027,7 +2027,7 @@ const pageSettingsUpdated = async (pageData) => {
                 </SidebarGroupContent>
               </SidebarGroup>
             </ResizablePanel>
-            <ResizablePanel ref="mainPanel">
+            <ResizablePanel ref="mainPanel" class="min-h-0">
               <Transition name="fade" mode="out-in">
                 <div v-if="props.page && !state.updating" :key="props.page" class="max-h-[calc(100vh-100px)] overflow-y-auto w-full">
                   <NuxtPage class="flex flex-col flex-1 px-0 mx-0 pt-0" />
