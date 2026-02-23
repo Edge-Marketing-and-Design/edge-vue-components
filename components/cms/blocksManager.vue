@@ -680,7 +680,7 @@ const handleBlockImport = async (event) => {
                         @update:model-value="setBlockSelection(item.docId, $event)"
                       />
                     </div>
-                    <p class="text-lg font-semibold leading-snug line-clamp-2 text-white flex-1">
+                    <p class="text-lg font-semibold leading-snug line-clamp-2 text-foreground flex-1">
                       {{ item.name }}
                     </p>
                     <edge-shad-button
