@@ -32,6 +32,7 @@ const state = reactive({
   seedingInitialBlocks: false,
   previewViewport: 'full',
   previewBlock: null,
+  themeDefaultAppliedForBlockId: '',
 })
 
 const blockSchema = toTypedSchema(z.object({
@@ -451,15 +452,26 @@ const buildPreviewBlock = (workingDoc, parsed) => {
 }
 
 const theme = computed(() => {
-  const theme = edgeGlobal.edgeState.blockEditorTheme || ''
-  let themeContents = null
-  if (theme) {
-    themeContents = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`]?.[theme]?.theme || null
-  }
-  if (themeContents) {
+  const selectedThemeId = String(edgeGlobal.edgeState.blockEditorTheme || '').trim()
+  if (!selectedThemeId)
+    return null
+  const themeContents = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`]?.[selectedThemeId]?.theme || null
+  if (!themeContents)
+    return null
+  if (typeof themeContents === 'object')
+    return themeContents
+  try {
     return JSON.parse(themeContents)
   }
-  return null
+  catch {
+    return null
+  }
+})
+
+const previewThemeRenderKey = computed(() => {
+  const themeId = String(edgeGlobal.edgeState.blockEditorTheme || 'no-theme')
+  const siteId = String(edgeGlobal.edgeState.blockEditorSite || 'no-site')
+  return `${themeId}:${siteId}:${state.previewViewport}`
 })
 
 const headObject = computed(() => {
@@ -502,11 +514,51 @@ const themes = computed(() => {
   return Object.values(edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`] || {})
 })
 
-watch (themes, async (newThemes) => {
-  state.loading = true
-  if (!edgeGlobal.edgeState.blockEditorTheme && newThemes.length > 0) {
-    edgeGlobal.edgeState.blockEditorTheme = newThemes[0].docId
+const availableThemeIds = computed(() => {
+  return themes.value
+    .map(themeDoc => String(themeDoc?.docId || '').trim())
+    .filter(Boolean)
+})
+
+const currentBlockAllowedThemeIds = computed(() => {
+  const currentBlockDoc = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[props.blockId]
+  if (!Array.isArray(currentBlockDoc?.themes))
+    return []
+  return currentBlockDoc.themes.map(themeId => String(themeId || '').trim()).filter(Boolean)
+})
+
+const preferredThemeDefaultForBlock = computed(() => {
+  const firstAllowedAvailable = currentBlockAllowedThemeIds.value.find(themeId => availableThemeIds.value.includes(themeId))
+  if (firstAllowedAvailable)
+    return firstAllowedAvailable
+  return availableThemeIds.value[0] || ''
+})
+
+const applyThemeDefaultForBlock = () => {
+  const blockId = String(props.blockId || '').trim()
+  if (!blockId)
+    return
+  if (state.themeDefaultAppliedForBlockId === blockId)
+    return
+
+  const preferredThemeId = preferredThemeDefaultForBlock.value
+  if (!preferredThemeId) {
+    if (!availableThemeIds.value.length)
+      edgeGlobal.edgeState.blockEditorTheme = ''
+    return
   }
+
+  edgeGlobal.edgeState.blockEditorTheme = preferredThemeId
+  state.themeDefaultAppliedForBlockId = blockId
+}
+
+watch(() => props.blockId, () => {
+  state.themeDefaultAppliedForBlockId = ''
+}, { immediate: true })
+
+watch([availableThemeIds, currentBlockAllowedThemeIds, () => props.blockId], async () => {
+  state.loading = true
+  applyThemeDefaultForBlock()
   await nextTick()
   state.loading = false
 }, { immediate: true, deep: true })
@@ -790,6 +842,7 @@ const exportCurrentBlock = () => {
               >
                 <edge-cms-block
                   v-if="state.previewBlock"
+                  :key="previewThemeRenderKey"
                   v-model="state.previewBlock"
                   :site-id="edgeGlobal.edgeState.blockEditorSite"
                   :theme="theme"

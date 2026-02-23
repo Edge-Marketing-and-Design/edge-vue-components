@@ -357,7 +357,7 @@ const clearTagFilters = () => {
           <button
             :ref="el => setBtnRef(block.docId, el)"
             type="button"
-            class="p-0 text-left hover:bg-primary text-slate-500  border !hover:text-white   border-dashed cursor-pointer w-full overflow-hidden relative"
+            class="p-0 text-left text-slate-500 border border-dashed border-border/70 hover:border-primary hover:ring-1 hover:ring-primary/40 cursor-pointer w-full overflow-hidden relative transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
           >
             <div class="scale-wrapper">
               <div
@@ -432,7 +432,7 @@ const clearTagFilters = () => {
                   <button
                     :ref="el => setBtnRef(block.docId, el)"
                     type="button"
-                    class="p-0 text-left hover:bg-primary text-slate-500  border !hover:text-white   border-dashed cursor-pointer w-full overflow-hidden relative"
+                    class="p-0 text-left text-slate-500 border border-dashed border-border/70 hover:border-primary hover:ring-1 hover:ring-primary/40 cursor-pointer w-full overflow-hidden relative transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
                     @click="chooseBlock(block)"
                   >
                     <div class="scale-wrapper">

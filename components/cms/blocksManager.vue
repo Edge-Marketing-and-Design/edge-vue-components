@@ -6,6 +6,9 @@ const state = reactive({
   mounted: false,
   picksFilter: [],
   themesFilter: [],
+  selectedBlockDocIds: [],
+  bulkDeleteDialogOpen: false,
+  bulkDeleting: false,
   importingJson: false,
   importDocIdDialogOpen: false,
   importDocIdValue: '',
@@ -79,8 +82,7 @@ const seedInitialBlocks = async () => {
 }
 
 const getThemeFromId = (themeId) => {
-  const theme = edgeFirebase.data[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`]?.[themeId]
-  console.log('getThemeFromId', themeId, theme.name)
+  const theme = edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`]?.[themeId]
   return theme?.name || 'Unknown'
 }
 
@@ -150,6 +152,47 @@ const themeOptions = computed(() => {
     .sort((a, b) => a.title.localeCompare(b.title))
 })
 
+const themesCollection = computed(() => {
+  return edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`] || {}
+})
+
+const parsedThemesById = computed(() => {
+  const parsed = {}
+  for (const [themeId, themeDoc] of Object.entries(themesCollection.value || {})) {
+    const rawTheme = themeDoc?.theme
+    if (!rawTheme)
+      continue
+    if (typeof rawTheme === 'string') {
+      try {
+        parsed[themeId] = JSON.parse(rawTheme)
+      }
+      catch {
+        continue
+      }
+      continue
+    }
+    if (typeof rawTheme === 'object' && !Array.isArray(rawTheme))
+      parsed[themeId] = rawTheme
+  }
+  return parsed
+})
+
+const firstThemeId = computed(() => themeOptions.value?.[0]?.name || '')
+
+const getPreviewThemeForBlock = (block) => {
+  const allowedThemeIds = Array.isArray(block?.themes)
+    ? block.themes.map(themeId => String(themeId || '').trim()).filter(Boolean)
+    : []
+
+  let preferredThemeId = allowedThemeIds.find(themeId => !!parsedThemesById.value?.[themeId]) || ''
+  if (!preferredThemeId)
+    preferredThemeId = firstThemeId.value
+  if (!preferredThemeId)
+    return null
+
+  return parsedThemesById.value?.[preferredThemeId] || null
+}
+
 const listFilters = computed(() => {
   const filters = []
   if (state.picksFilter.length)
@@ -161,6 +204,107 @@ const listFilters = computed(() => {
 
 const blockCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/blocks`)
 const blocksCollection = computed(() => edgeFirebase.data?.[blockCollectionPath.value] || {})
+const selectedBlockSet = computed(() => new Set(state.selectedBlockDocIds))
+const selectedBlockCount = computed(() => state.selectedBlockDocIds.length)
+
+const normalizeDocId = value => String(value || '').trim()
+
+const isBlockSelected = docId => selectedBlockSet.value.has(normalizeDocId(docId))
+
+const setBlockSelection = (docId, checked) => {
+  const normalizedDocId = normalizeDocId(docId)
+  if (!normalizedDocId)
+    return
+  const shouldSelect = checked === true || checked === 'indeterminate'
+  if (shouldSelect) {
+    if (!selectedBlockSet.value.has(normalizedDocId))
+      state.selectedBlockDocIds = [...state.selectedBlockDocIds, normalizedDocId]
+    return
+  }
+  state.selectedBlockDocIds = state.selectedBlockDocIds.filter(id => id !== normalizedDocId)
+}
+
+const getVisibleSelectionState = (visibleItems = []) => {
+  if (!visibleItems.length)
+    return false
+  let selectedVisibleCount = 0
+  for (const item of visibleItems) {
+    if (isBlockSelected(item?.docId))
+      selectedVisibleCount += 1
+  }
+  if (selectedVisibleCount === 0)
+    return false
+  if (selectedVisibleCount === visibleItems.length)
+    return true
+  return 'indeterminate'
+}
+
+const toggleVisibleBlockSelection = (visibleItems = [], checked) => {
+  if (!visibleItems.length)
+    return
+  const shouldSelect = checked === true || checked === 'indeterminate'
+  const visibleDocIds = visibleItems.map(item => normalizeDocId(item?.docId)).filter(Boolean)
+  if (shouldSelect) {
+    state.selectedBlockDocIds = [...new Set([...state.selectedBlockDocIds, ...visibleDocIds])]
+    return
+  }
+  const visibleDocIdSet = new Set(visibleDocIds)
+  state.selectedBlockDocIds = state.selectedBlockDocIds.filter(id => !visibleDocIdSet.has(id))
+}
+
+const clearSelectedBlocks = () => {
+  state.selectedBlockDocIds = []
+}
+
+const openBulkDeleteDialog = () => {
+  if (!selectedBlockCount.value)
+    return
+  state.bulkDeleteDialogOpen = true
+}
+
+const bulkDeleteAction = async () => {
+  if (state.bulkDeleting || !selectedBlockCount.value) {
+    state.bulkDeleteDialogOpen = false
+    return
+  }
+
+  state.bulkDeleting = true
+  const selectedDocIds = [...state.selectedBlockDocIds]
+  const blocks = blocksCollection.value || {}
+  const failedDocIds = []
+  let deletedCount = 0
+
+  try {
+    for (const docId of selectedDocIds) {
+      if (!blocks[docId])
+        continue
+      try {
+        await edgeFirebase.removeDoc(blockCollectionPath.value, docId)
+        deletedCount += 1
+      }
+      catch (error) {
+        failedDocIds.push(docId)
+        console.error(`Failed to delete block "${docId}"`, error)
+      }
+    }
+
+    state.selectedBlockDocIds = failedDocIds
+    state.bulkDeleteDialogOpen = false
+
+    if (deletedCount)
+      edgeFirebase?.toast?.success?.(`Deleted ${deletedCount} block${deletedCount === 1 ? '' : 's'}.`)
+    if (failedDocIds.length)
+      edgeFirebase?.toast?.error?.(`Failed to delete ${failedDocIds.length} block${failedDocIds.length === 1 ? '' : 's'}.`)
+  }
+  finally {
+    state.bulkDeleting = false
+  }
+}
+
+watch(blocksCollection, (collection) => {
+  const validDocIds = new Set(Object.keys(collection || {}))
+  state.selectedBlockDocIds = state.selectedBlockDocIds.filter(docId => validDocIds.has(docId))
+}, { deep: true })
 
 const readTextFile = file => new Promise((resolve, reject) => {
   if (typeof FileReader === 'undefined') {
@@ -474,75 +618,123 @@ const handleBlockImport = async (event) => {
         </div>
       </template>
       <template #list="slotProps">
-        <div
-          class="grid gap-4 pt-4 w-full"
-          style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));"
-        >
+        <div class="w-full pt-4 space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/50 bg-background/60 px-3 py-2">
+            <div class="flex items-center gap-2">
+              <Checkbox
+                :model-value="getVisibleSelectionState(slotProps.filtered)"
+                aria-label="Select visible blocks"
+                class="border-border bg-background/90 shadow-sm data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground"
+                @click.stop
+                @update:model-value="toggleVisibleBlockSelection(slotProps.filtered, $event)"
+              />
+              <span class="text-xs text-muted-foreground">
+                Select visible ({{ slotProps.filtered.length }})
+              </span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-muted-foreground">{{ selectedBlockCount }} selected</span>
+              <edge-shad-button
+                variant="outline"
+                class="h-8 text-xs"
+                :disabled="selectedBlockCount === 0"
+                @click="clearSelectedBlocks"
+              >
+                Clear
+              </edge-shad-button>
+              <edge-shad-button
+                variant="destructive"
+                class="h-8 text-xs text-white"
+                :disabled="selectedBlockCount === 0"
+                @click="openBulkDeleteDialog"
+              >
+                Delete selected
+              </edge-shad-button>
+            </div>
+          </div>
           <div
-            v-for="item in slotProps.filtered"
-            :key="item.docId"
-            role="button"
-            tabindex="0"
-            class="w-full h-full"
-            @click="router.push(`/app/dashboard/blocks/${item.docId}`)"
-            @keyup.enter="router.push(`/app/dashboard/blocks/${item.docId}`)"
+            class="grid gap-4 w-full"
+            style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));"
           >
-            <Card class="h-full cursor-pointer border border-white/5 bg-gradient-to-br from-slate-950/85 via-slate-950/65 to-slate-900/60 hover:border-primary/50 hover:shadow-[0_22px_55px_-24px_rgba(0,0,0,0.7)] transition">
-              <CardContent class="flex flex-col gap-1 p-4 sm:p-5">
-                <div class="flex items-start justify-between gap-3">
-                  <p class="text-lg font-semibold leading-snug line-clamp-2 text-white">
-                    {{ item.name }}
-                  </p>
-                  <edge-shad-button
-                    size="icon"
-                    variant="ghost"
-                    class="h-8 w-8 text-white/80 hover:text-white hover:bg-white/10"
-                    @click.stop="slotProps.deleteItem(item.docId)"
-                  >
-                    <Trash class="h-4 w-4" />
-                  </edge-shad-button>
-                </div>
-                <div v-if="item.content" class="block-preview">
-                  <div class="scale-wrapper">
-                    <div class="scale-inner scale p-4">
-                      <edge-cms-block-render
-                        :content="loadingRender(item.content)"
-                        :values="item.values"
-                        :meta="item.meta"
+            <div
+              v-for="item in slotProps.filtered"
+              :key="item.docId"
+              role="button"
+              tabindex="0"
+              class="w-full h-full"
+              @click="router.push(`/app/dashboard/blocks/${item.docId}`)"
+              @keyup.enter="router.push(`/app/dashboard/blocks/${item.docId}`)"
+            >
+              <Card
+                class="h-full cursor-pointer border border-border/60 bg-card/40 hover:border-primary/50 hover:shadow-[0_22px_55px_-24px_rgba(0,0,0,0.4)] transition"
+                :class="isBlockSelected(item.docId) ? 'border-primary/70 ring-2 ring-primary/50' : 'border-white/5'"
+              >
+                <CardContent class="flex flex-col gap-1 p-4 sm:p-5">
+                  <div class="flex items-start gap-3">
+                    <div class="pt-1" @click.stop>
+                      <Checkbox
+                        :model-value="isBlockSelected(item.docId)"
+                        :aria-label="`Select block ${item.name || item.docId}`"
+                        class="border-border bg-background/90 shadow-sm data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground"
+                        @click.stop
+                        @update:model-value="setBlockSelection(item.docId, $event)"
                       />
                     </div>
+                    <p class="text-lg font-semibold leading-snug line-clamp-2 text-white flex-1">
+                      {{ item.name }}
+                    </p>
+                    <edge-shad-button
+                      size="icon"
+                      variant="ghost"
+                      class="h-8 w-8 text-foreground/75 hover:text-foreground hover:bg-muted/80"
+                      @click.stop="slotProps.deleteItem(item.docId)"
+                    >
+                      <Trash class="h-4 w-4" />
+                    </edge-shad-button>
                   </div>
-                  <div class="preview-overlay" />
-                </div>
-                <div v-else class="block-preview-empty">
-                  Preview unavailable for this block.
-                </div>
-                <div class="flex flex-wrap items-center gap-1 text-[11px] text-slate-300 uppercase tracking-wide overflow-hidden">
-                  <edge-chip
-                    v-for="tag in item.tags?.slice(0, 3) ?? []"
-                    :key="tag"
-                    class="bg-primary/40 text-white px-2 py-0.5 text-[10px]"
-                  >
-                    {{ tag }}
-                  </edge-chip>
-                  <span v-if="item.tags?.length > 3" class="text-white/60">+{{ item.tags.length - 3 }}</span>
-                  <edge-chip
-                    v-for="theme in item.themes?.slice(0, 2) ?? []"
-                    :key="theme"
-                    class="bg-slate-800 text-white px-2 py-0.5 text-[10px]"
-                  >
-                    {{ getThemeFromId(theme) }}
-                  </edge-chip>
-                  <span v-if="item.themes?.length > 2" class="text-white/60">+{{ item.themes.length - 2 }}</span>
-                  <span
-                    v-if="!(item.tags?.length) && !(item.themes?.length)"
-                    class="text-slate-500 lowercase"
-                  >
-                    none
-                  </span>
-                </div>
-              </CardContent>
-            </Card>
+                  <div v-if="item.content" class="block-preview">
+                    <div class="scale-wrapper">
+                      <div class="scale-inner scale p-4">
+                        <edge-cms-block-render
+                          :content="loadingRender(item.content)"
+                          :values="item.values"
+                          :meta="item.meta"
+                          :theme="getPreviewThemeForBlock(item)"
+                        />
+                      </div>
+                    </div>
+                    <div class="preview-overlay" />
+                  </div>
+                  <div v-else class="block-preview-empty">
+                    Preview unavailable for this block.
+                  </div>
+                  <div class="flex flex-wrap items-center gap-1 text-[11px] text-slate-300 uppercase tracking-wide overflow-hidden">
+                    <edge-chip
+                      v-for="tag in item.tags?.slice(0, 3) ?? []"
+                      :key="tag"
+                      class="bg-primary/40 text-white px-2 py-0.5 text-[10px]"
+                    >
+                      {{ tag }}
+                    </edge-chip>
+                    <span v-if="item.tags?.length > 3" class="text-white/60">+{{ item.tags.length - 3 }}</span>
+                    <edge-chip
+                      v-for="theme in item.themes?.slice(0, 2) ?? []"
+                      :key="theme"
+                      class="bg-slate-800 text-white px-2 py-0.5 text-[10px]"
+                    >
+                      {{ getThemeFromId(theme) }}
+                    </edge-chip>
+                    <span v-if="item.themes?.length > 2" class="text-white/60">+{{ item.themes.length - 2 }}</span>
+                    <span
+                      v-if="!(item.tags?.length) && !(item.themes?.length)"
+                      class="text-slate-500 lowercase"
+                    >
+                      none
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           </div>
         </div>
       </template>
@@ -613,6 +805,36 @@ const handleBlockImport = async (event) => {
         </DialogFooter>
       </DialogContent>
     </edge-shad-dialog>
+    <edge-shad-dialog v-model="state.bulkDeleteDialogOpen">
+      <DialogContent class="pt-8">
+        <DialogHeader>
+          <DialogTitle class="text-left">
+            Delete Selected Blocks?
+          </DialogTitle>
+          <DialogDescription class="text-left">
+            This action cannot be undone. {{ selectedBlockCount }} block{{ selectedBlockCount === 1 ? '' : 's' }} will be permanently deleted.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter class="pt-2 flex justify-between">
+          <edge-shad-button
+            class="text-white bg-slate-800 hover:bg-slate-400"
+            :disabled="state.bulkDeleting"
+            @click="state.bulkDeleteDialogOpen = false"
+          >
+            Cancel
+          </edge-shad-button>
+          <edge-shad-button
+            variant="destructive"
+            class="text-white w-full"
+            :disabled="state.bulkDeleting || selectedBlockCount === 0"
+            @click="bulkDeleteAction"
+          >
+            <Loader2 v-if="state.bulkDeleting" class="h-4 w-4 animate-spin" />
+            <span v-else>Delete Selected</span>
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
   </div>
 </template>
 
@@ -621,15 +843,10 @@ const handleBlockImport = async (event) => {
   position: relative;
   height: 220px;
   border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background:
-    radial-gradient(140% 120% at 15% 15%, rgba(96, 165, 250, 0.08), transparent),
-    radial-gradient(120% 120% at 85% 0%, rgba(168, 85, 247, 0.07), transparent),
-    linear-gradient(145deg, rgba(10, 14, 26, 0.95), rgba(17, 24, 39, 0.7));
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: transparent;
   overflow: hidden;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.02),
-    0 18px 38px rgba(0, 0, 0, 0.35);
+  box-shadow: none;
 }
 
 .block-preview-empty {
@@ -645,10 +862,7 @@ const handleBlockImport = async (event) => {
 }
 
 .preview-overlay {
-  pointer-events: none;
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(180deg, rgba(15, 23, 42, 0) 20%, rgba(15, 23, 42, 0.35) 100%);
+  display: none;
 }
 
 .scale-wrapper {
