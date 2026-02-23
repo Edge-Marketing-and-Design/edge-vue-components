@@ -999,6 +999,21 @@ const getDocDefaultsFromSchema = (schema = {}) => {
 
 const getPageDocDefaults = () => getDocDefaultsFromSchema(state.newDocs?.pages || {})
 
+const isBlankString = value => String(value || '').trim() === ''
+
+const applyImportedPageSeoDefaults = (doc) => {
+  if (!isPlainObject(doc))
+    return doc
+
+  if (isBlankString(doc.structuredData))
+    doc.structuredData = buildPageStructuredData()
+
+  if (doc.post && isBlankString(doc.postStructuredData))
+    doc.postStructuredData = doc.structuredData || buildPageStructuredData()
+
+  return doc
+}
+
 const validateImportedPageDoc = (doc) => {
   if (!isPlainObject(doc))
     throw new Error(INVALID_PAGE_IMPORT_MESSAGE)
@@ -1223,7 +1238,7 @@ const triggerPageImport = () => {
 const importSinglePageFile = async (file, existingPages = {}, fallbackDocId = '') => {
   const fileText = await readTextFile(file)
   const parsed = JSON.parse(fileText)
-  const importedDoc = validateImportedPageDoc(normalizeImportedDoc(parsed, fallbackDocId))
+  const importedDoc = applyImportedPageSeoDefaults(validateImportedPageDoc(normalizeImportedDoc(parsed, fallbackDocId)))
   const incomingDocId = await getImportDocId(importedDoc, fallbackDocId)
   let targetDocId = incomingDocId
   let importDecision = 'create'
