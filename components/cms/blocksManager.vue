@@ -92,6 +92,7 @@ const loadingRender = (content) => {
 }
 
 const FILTER_STORAGE_KEY = 'edge.blocks.filters'
+const NO_TAGS_FILTER_VALUE = '__no_tags__'
 
 const restoreFilters = () => {
   if (typeof localStorage === 'undefined')
@@ -142,7 +143,8 @@ const tagOptions = computed(() => {
     if (Array.isArray(block.tags))
       block.tags.forEach(tag => tagsSet.add(tag))
   })
-  return Array.from(tagsSet).sort((a, b) => a.localeCompare(b)).map(tag => ({ name: tag, title: tag }))
+  const tagItems = Array.from(tagsSet).sort((a, b) => a.localeCompare(b)).map(tag => ({ name: tag, title: tag }))
+  return [{ name: NO_TAGS_FILTER_VALUE, title: 'No Tags' }, ...tagItems]
 })
 
 const themeOptions = computed(() => {
@@ -195,12 +197,33 @@ const getPreviewThemeForBlock = (block) => {
 
 const listFilters = computed(() => {
   const filters = []
-  if (state.picksFilter.length)
-    filters.push({ filterFields: ['tags'], value: state.picksFilter })
   if (state.themesFilter.length)
     filters.push({ filterFields: ['themes'], value: state.themesFilter })
   return filters
 })
+
+const applyTagSelectionFilter = (items = []) => {
+  const selectedFilters = Array.isArray(state.picksFilter) ? state.picksFilter : []
+  if (!selectedFilters.length)
+    return items
+
+  const includeNoTags = selectedFilters.includes(NO_TAGS_FILTER_VALUE)
+  const selectedTags = selectedFilters.filter(value => value !== NO_TAGS_FILTER_VALUE)
+
+  return items.filter((item) => {
+    const tags = Array.isArray(item?.tags) ? item.tags : []
+    const hasNoTags = tags.length === 0
+    const hasSelectedTag = selectedTags.length > 0
+      ? tags.some(tag => selectedTags.includes(tag))
+      : false
+
+    if (includeNoTags && selectedTags.length > 0)
+      return hasNoTags || hasSelectedTag
+    if (includeNoTags)
+      return hasNoTags
+    return hasSelectedTag
+  })
+}
 
 const blockCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/blocks`)
 const blocksCollection = computed(() => edgeFirebase.data?.[blockCollectionPath.value] || {})
@@ -622,14 +645,14 @@ const handleBlockImport = async (event) => {
           <div class="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/50 bg-background/60 px-3 py-2">
             <div class="flex items-center gap-2">
               <Checkbox
-                :model-value="getVisibleSelectionState(slotProps.filtered)"
+                :model-value="getVisibleSelectionState(applyTagSelectionFilter(slotProps.filtered))"
                 aria-label="Select visible blocks"
                 class="border-border bg-background/90 shadow-sm data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground"
                 @click.stop
-                @update:model-value="toggleVisibleBlockSelection(slotProps.filtered, $event)"
+                @update:model-value="toggleVisibleBlockSelection(applyTagSelectionFilter(slotProps.filtered), $event)"
               />
               <span class="text-xs text-muted-foreground">
-                Select visible ({{ slotProps.filtered.length }})
+                Select visible ({{ applyTagSelectionFilter(slotProps.filtered).length }})
               </span>
             </div>
             <div class="flex items-center gap-2">
@@ -657,7 +680,7 @@ const handleBlockImport = async (event) => {
             style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));"
           >
             <div
-              v-for="item in slotProps.filtered"
+              v-for="item in applyTagSelectionFilter(slotProps.filtered)"
               :key="item.docId"
               role="button"
               tabindex="0"
@@ -680,7 +703,7 @@ const handleBlockImport = async (event) => {
                         @update:model-value="setBlockSelection(item.docId, $event)"
                       />
                     </div>
-                    <p class="text-lg font-semibold leading-snug line-clamp-2 text-white flex-1">
+                    <p class="text-lg font-semibold leading-snug line-clamp-2 text-foreground flex-1">
                       {{ item.name }}
                     </p>
                     <edge-shad-button
