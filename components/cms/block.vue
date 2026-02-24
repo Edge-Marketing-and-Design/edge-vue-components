@@ -29,22 +29,107 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:modelValue', 'delete'])
 const edgeFirebase = inject('edgeFirebase')
+
+function normalizeConfigLiteral(str) {
+  return str
+    .replace(/(\{|,)\s*([A-Za-z_][\w-]*)\s*:/g, '$1"$2":')
+    .replace(/'/g, '"')
+}
+
+function safeParseTagConfig(raw) {
+  try {
+    return JSON.parse(normalizeConfigLiteral(raw))
+  }
+  catch {
+    return null
+  }
+}
+
+function findMatchingBrace(str, startIdx) {
+  let depth = 0
+  let inString = false
+  let quote = null
+  let escape = false
+
+  for (let i = startIdx; i < str.length; i++) {
+    const ch = str[i]
+    if (inString) {
+      if (escape) {
+        escape = false
+        continue
+      }
+      if (ch === '\\') {
+        escape = true
+        continue
+      }
+      if (ch === quote) {
+        inString = false
+        quote = null
+      }
+      continue
+    }
+
+    if (ch === '"' || ch === '\'') {
+      inString = true
+      quote = ch
+      continue
+    }
+    if (ch === '{')
+      depth++
+    else if (ch === '}') {
+      depth--
+      if (depth === 0)
+        return i
+    }
+  }
+
+  return -1
+}
+
 function extractFieldsInOrder(template) {
   if (!template || typeof template !== 'string')
     return []
+
   const fields = []
   const seen = new Set()
-  const TAG_RE = /\{\{\{#[^\s]+\s+(\{[\s\S]*?\})\}\}\}/g
-  let m = TAG_RE.exec(template)
-  while (m) {
-    const cfg = m[1]
-    const fm = cfg.match(/"field"\s*:\s*"([^"]+)"/)
-    if (fm && !seen.has(fm[1])) {
-      fields.push(fm[1])
-      seen.add(fm[1])
+
+  const TAG_START_RE = /\{\{\{\#([A-Za-z0-9_-]+)\s*\{/g
+  TAG_START_RE.lastIndex = 0
+
+  for (;;) {
+    const m = TAG_START_RE.exec(template)
+    if (!m)
+      break
+
+    const configStart = TAG_START_RE.lastIndex - 1
+    if (configStart < 0 || template[configStart] !== '{')
+      continue
+
+    const configEnd = findMatchingBrace(template, configStart)
+    if (configEnd === -1)
+      continue
+
+    const rawCfg = template.slice(configStart, configEnd + 1)
+    const parsedCfg = safeParseTagConfig(rawCfg)
+
+    let field = typeof parsedCfg?.field === 'string'
+      ? parsedCfg.field.trim()
+      : ''
+
+    if (!field) {
+      const fm = rawCfg.match(/["']?field["']?\s*:\s*["']([^"']+)["']/)
+      field = fm?.[1]?.trim() || ''
     }
-    m = TAG_RE.exec(template)
+
+    if (field && !seen.has(field)) {
+      fields.push(field)
+      seen.add(field)
+    }
+
+    const closeTriple = template.indexOf('}}}', configEnd)
+    TAG_START_RE.lastIndex = closeTriple !== -1 ? closeTriple + 3 : configEnd + 1
   }
+
   return fields
 }
 
