@@ -35,6 +35,44 @@ const emit = defineEmits(['loaded'])
 
 const scopeId = `hc-${Math.random().toString(36).slice(2)}`
 
+const themeExtraCSS = computed(() => {
+  const value = props.theme?.extraCSS
+  return typeof value === 'string' ? value : ''
+})
+
+const toCssVarToken = (key) => {
+  return String(key || '')
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .replace(/[\s_]+/g, '-')
+    .replace(/[^a-zA-Z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .toLowerCase()
+}
+
+const isSafeLegacyVarKey = key => /^[A-Za-z0-9_-]+$/.test(String(key || ''))
+
+const pushVarDecl = (decls, prefix, key, value) => {
+  const token = toCssVarToken(key)
+  if (!token)
+    return
+
+  const normalizedName = `--${prefix}-${token}`
+  decls.push(`${normalizedName}: ${value};`)
+
+  const legacyKey = String(key || '')
+  if (!isSafeLegacyVarKey(legacyKey))
+    return
+
+  const legacyName = `--${prefix}-${legacyKey}`
+  if (legacyName !== normalizedName)
+    decls.push(`${legacyName}: ${value};`)
+}
+
+const cssVarRef = (prefix, key) => `var(--${prefix}-${toCssVarToken(key)})`
+const escapeClassToken = value => String(value || '').replace(/([^a-zA-Z0-9_-])/g, '\\$1')
+
 // --- UnoCSS Runtime singleton (global, one init for the whole app) ---
 async function ensureUnoRuntime() {
   if (typeof window === 'undefined')
@@ -89,24 +127,24 @@ function buildGlobalThemeCSS(theme) {
   const t = normalizeTheme(theme || {})
   const { colors, fontFamily, fontSize, borderRadius, boxShadow } = t
   const decls = []
-  Object.entries(colors).forEach(([k, v]) => decls.push(`--color-${k}: ${Array.isArray(v) ? v[0] : v};`))
+  Object.entries(colors).forEach(([k, v]) => pushVarDecl(decls, 'color', k, Array.isArray(v) ? v[0] : v))
   Object.entries(fontFamily).forEach(([k, v]) => {
     const val = Array.isArray(v) ? v.map(x => (x.includes(' ') ? `'${x}'` : x)).join(', ') : v
-    decls.push(`--font-${k}: ${val};`)
+    pushVarDecl(decls, 'font', k, val)
   })
   Object.entries(fontSize).forEach(([k, v]) => {
     if (Array.isArray(v)) {
       const [size, opts] = v
-      decls.push(`--font-size-${k}: ${size};`)
+      pushVarDecl(decls, 'font-size', k, size)
       if (opts && opts.lineHeight)
-        decls.push(`--line-height-${k}: ${opts.lineHeight};`)
+        pushVarDecl(decls, 'line-height', k, opts.lineHeight)
     }
     else {
-      decls.push(`--font-size-${k}: ${v};`)
+      pushVarDecl(decls, 'font-size', k, v)
     }
   })
-  Object.entries(borderRadius).forEach(([k, v]) => decls.push(`--radius-${k}: ${v};`))
-  Object.entries(boxShadow).forEach(([k, v]) => decls.push(`--shadow-${k}: ${v};`))
+  Object.entries(borderRadius).forEach(([k, v]) => pushVarDecl(decls, 'radius', k, v))
+  Object.entries(boxShadow).forEach(([k, v]) => pushVarDecl(decls, 'shadow', k, v))
   return `:root{${decls.join('')}}`
 }
 
@@ -114,25 +152,34 @@ function buildScopedThemeCSS(theme, scopeId) {
   const t = normalizeTheme(theme || {})
   const { colors, fontFamily, fontSize, borderRadius, boxShadow } = t
   const decls = []
-  Object.entries(colors).forEach(([k, v]) => decls.push(`--color-${k}: ${Array.isArray(v) ? v[0] : v};`))
+  Object.entries(colors).forEach(([k, v]) => pushVarDecl(decls, 'color', k, Array.isArray(v) ? v[0] : v))
   Object.entries(fontFamily).forEach(([k, v]) => {
     const val = Array.isArray(v) ? v.map(x => (x.includes(' ') ? `'${x}'` : x)).join(', ') : v
-    decls.push(`--font-${k}: ${val};`)
+    pushVarDecl(decls, 'font', k, val)
   })
   Object.entries(fontSize).forEach(([k, v]) => {
     if (Array.isArray(v)) {
       const [size, opts] = v
-      decls.push(`--font-size-${k}: ${size};`)
+      pushVarDecl(decls, 'font-size', k, size)
       if (opts?.lineHeight)
-        decls.push(`--line-height-${k}: ${opts.lineHeight};`)
+        pushVarDecl(decls, 'line-height', k, opts.lineHeight)
     }
     else {
-      decls.push(`--font-size-${k}: ${v};`)
+      pushVarDecl(decls, 'font-size', k, v)
     }
   })
-  Object.entries(borderRadius).forEach(([k, v]) => decls.push(`--radius-${k}: ${v};`))
-  Object.entries(boxShadow).forEach(([k, v]) => decls.push(`--shadow-${k}: ${v};`))
-  return `[data-theme-scope="${scopeId}"]{${decls.join('')}}`
+  Object.entries(borderRadius).forEach(([k, v]) => pushVarDecl(decls, 'radius', k, v))
+  Object.entries(boxShadow).forEach(([k, v]) => pushVarDecl(decls, 'shadow', k, v))
+
+  const rules = [`[data-theme-scope="${scopeId}"]{${decls.join('')}}`]
+  Object.keys(colors || {}).forEach((key) => {
+    const escapedKey = escapeClassToken(key)
+    const colorRef = cssVarRef('color', key)
+    rules.push(`[data-theme-scope="${scopeId}"] .bg-${escapedKey}{background-color:${colorRef} !important;}`)
+    rules.push(`[data-theme-scope="${scopeId}"] .text-${escapedKey}{color:${colorRef} !important;}`)
+    rules.push(`[data-theme-scope="${scopeId}"] .border-${escapedKey}{border-color:${colorRef} !important;}`)
+  })
+  return rules.join('')
 }
 
 function setGlobalThemeVars(theme) {
@@ -167,11 +214,18 @@ const safeHtml = computed(() => {
 })
 
 // Inject theme CSS variables into <head> for SSR + client
-useHead(() => ({
-  style: [
-    { id: 'htmlcontent-theme-global', children: buildScopedThemeCSS(props.theme, scopeId) },
-  ],
-}))
+useHead(() => {
+  const style = [
+    { id: `htmlcontent-theme-vars-${scopeId}`, children: buildScopedThemeCSS(props.theme, scopeId) },
+  ]
+  if (themeExtraCSS.value.trim()) {
+    style.push({
+      id: `htmlcontent-theme-extra-${scopeId}`,
+      children: themeExtraCSS.value,
+    })
+  }
+  return { style }
+})
 
 // --- Embla initializer (runs client-side only) ---
 async function initEmblaCarousels(scope) {
@@ -339,10 +393,106 @@ async function initEmblaCarousels(scope) {
   })
 }
 
+function initCmsNavHelpers(scope) {
+  if (!scope || !import.meta.client)
+    return
+
+  const roots = scope.querySelectorAll('.cms-nav-root, [data-cms-nav-root]')
+  roots.forEach((root) => {
+    if (root.dataset.cmsNavInit === 'true')
+      return
+
+    root.dataset.cmsNavInit = 'true'
+    const openClass = root.getAttribute('data-cms-nav-open-class') || 'is-open'
+    const panel = root.querySelector('.cms-nav-panel, [data-cms-nav-panel]')
+    const overlay = root.querySelector('.cms-nav-overlay, [data-cms-nav-overlay]')
+    const toggles = Array.from(root.querySelectorAll('.cms-nav-toggle, [data-cms-nav-toggle]'))
+    const closeButtons = Array.from(root.querySelectorAll('.cms-nav-close, [data-cms-nav-close]'))
+    const links = Array.from(root.querySelectorAll('.cms-nav-link, [data-cms-nav-link]'))
+    const closeOnLink = root.getAttribute('data-cms-nav-close-on-link') !== 'false'
+
+    const markInteractive = (el) => {
+      if (!el)
+        return
+      el.setAttribute('data-cms-interactive', 'true')
+    }
+
+    toggles.forEach(markInteractive)
+    closeButtons.forEach(markInteractive)
+    links.forEach(markInteractive)
+    markInteractive(panel)
+    markInteractive(overlay)
+
+    const isOpen = () => root.classList.contains(openClass)
+
+    const setOpen = (open) => {
+      root.classList.toggle(openClass, open)
+      root.setAttribute('data-cms-nav-open', open ? 'true' : 'false')
+
+      toggles.forEach((btn) => {
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false')
+      })
+
+      if (panel) {
+        panel.classList.toggle('translate-x-0', open)
+        panel.classList.toggle('opacity-100', open)
+        panel.classList.toggle('pointer-events-auto', open)
+        panel.classList.toggle('translate-x-full', !open)
+        panel.classList.toggle('opacity-0', !open)
+        panel.classList.toggle('pointer-events-none', !open)
+        panel.setAttribute('aria-hidden', open ? 'false' : 'true')
+      }
+
+      if (overlay) {
+        overlay.classList.toggle('opacity-100', open)
+        overlay.classList.toggle('pointer-events-auto', open)
+        overlay.classList.toggle('opacity-0', !open)
+        overlay.classList.toggle('pointer-events-none', !open)
+        overlay.setAttribute('aria-hidden', open ? 'false' : 'true')
+      }
+    }
+
+    setOpen(root.classList.contains(openClass) || root.getAttribute('data-cms-nav-open') === 'true')
+
+    toggles.forEach((btn) => {
+      btn.addEventListener('click', (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        setOpen(!isOpen())
+      })
+    })
+
+    closeButtons.forEach((btn) => {
+      btn.addEventListener('click', (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        setOpen(false)
+      })
+    })
+
+    if (overlay) {
+      overlay.addEventListener('click', (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        setOpen(false)
+      })
+    }
+
+    if (closeOnLink) {
+      links.forEach((link) => {
+        link.addEventListener('click', () => {
+          setOpen(false)
+        })
+      })
+    }
+  })
+}
+
 function renderSafeHtml(content) {
   if (hostEl.value) {
     // The HTML is already in the DOM via v-html; just (re)wire behaviors
     initEmblaCarousels(hostEl.value)
+    initCmsNavHelpers(hostEl.value)
   }
 }
 
@@ -378,42 +528,7 @@ function setScopedThemeVars(scopeEl, theme) {
     document.head.appendChild(styleEl)
   }
 
-  // Build CSS custom properties from theme tokens
-  const { colors, fontFamily, fontSize, borderRadius, boxShadow } = theme
-
-  const decls = []
-  // colors
-  Object.entries(colors).forEach(([k, v]) => {
-    decls.push(`--color-${k}: ${Array.isArray(v) ? v[0] : v};`)
-  })
-  // fonts
-  Object.entries(fontFamily).forEach(([k, v]) => {
-    const val = Array.isArray(v) ? v.map(x => (x.includes(' ') ? `'${x}'` : x)).join(', ') : v
-    decls.push(`--font-${k}: ${val};`)
-  })
-  // font sizes
-  Object.entries(fontSize).forEach(([k, v]) => {
-    if (Array.isArray(v)) {
-      const [size, opts] = v
-      decls.push(`--font-size-${k}: ${size};`)
-      if (opts && opts.lineHeight)
-        decls.push(`--line-height-${k}: ${opts.lineHeight};`)
-    }
-    else {
-      decls.push(`--font-size-${k}: ${v};`)
-    }
-  })
-  // radii
-  Object.entries(borderRadius).forEach(([k, v]) => {
-    decls.push(`--radius-${k}: ${v};`)
-  })
-  // shadows
-  Object.entries(boxShadow).forEach(([k, v]) => {
-    decls.push(`--shadow-${k}: ${v};`)
-  })
-
-  styleEl.textContent = `
-[data-theme-scope="${scopeId}"]{${decls.join('')}}`
+  styleEl.textContent = buildScopedThemeCSS(theme, scopeId)
 }
 
 // Convert utility tokens like text-brand/bg-surface/rounded-xl/shadow-card
@@ -446,7 +561,7 @@ function toVarBackedUtilities(classList, theme) {
         }
 
         if (colorKeys.has(key)) {
-          const varRef = `var(--color-${key})`
+          const varRef = cssVarRef('color', key)
 
           // no /opacity → plain var()
           if (!opacity) {
@@ -477,7 +592,7 @@ function toVarBackedUtilities(classList, theme) {
       if (radiusMatch) {
         const key = radiusMatch[1]
         if (radiusKeys.has(key))
-          return `rounded-[var(--radius-${key})]`
+          return `rounded-[${cssVarRef('radius', key)}]`
         return cls
       }
 
@@ -486,28 +601,57 @@ function toVarBackedUtilities(classList, theme) {
       if (shadowMatch) {
         const key = shadowMatch[1]
         if (shadowKeys.has(key))
-          return `shadow-[var(--shadow-${key})]`
+          return `shadow-[${cssVarRef('shadow', key)}]`
         return cls
       }
 
       // font families via root apply, including custom keys like "brand"
       if (cls === 'font-sans')
-        return 'font-[var(--font-sans)]'
+        return `font-[${cssVarRef('font', 'sans')}]`
       if (cls === 'font-serif')
-        return 'font-[var(--font-serif)]'
+        return `font-[${cssVarRef('font', 'serif')}]`
       if (cls === 'font-mono')
-        return 'font-[var(--font-mono)]'
+        return `font-[${cssVarRef('font', 'mono')}]`
 
       const ffMatch = /^font-([\w-]+)$/.exec(cls)
       if (ffMatch) {
         const key = ffMatch[1]
         if (Object.prototype.hasOwnProperty.call(tokens.fontFamily, key))
-          return `font-[var(--font-${key})]`
+          return `font-[${cssVarRef('font', key)}]`
       }
 
       return cls
     })
     .join(' ')
+}
+
+function readElementClass(el) {
+  if (!el)
+    return ''
+  if (typeof el.className === 'string')
+    return el.className
+  if (el.className && typeof el.className.baseVal === 'string')
+    return el.className.baseVal
+  return el.getAttribute('class') || ''
+}
+
+function writeElementClass(el, nextClass = '') {
+  if (!el)
+    return
+  const normalized = typeof nextClass === 'string' ? nextClass : String(nextClass || '')
+  if (typeof el.className === 'string') {
+    el.className = normalized
+    return
+  }
+  el.setAttribute('class', normalized)
+}
+
+function appendElementClasses(el, classList) {
+  const additions = typeof classList === 'string' ? classList.trim() : ''
+  if (!additions)
+    return
+  const base = readElementClass(el)
+  writeElementClass(el, `${base} ${additions}`.trim())
 }
 
 function applyThemeClasses(scopeEl, theme, variant = 'light', isolated = true) {
@@ -529,7 +673,7 @@ function applyThemeClasses(scopeEl, theme, variant = 'light', isolated = true) {
   if (apply.root) {
     const mapped = toVarBackedUtilities(apply.root, t)
     if (isolated) {
-      scopeEl.className = `block-content ${mapped}`.trim()
+      writeElementClass(scopeEl, `block-content ${mapped}`.trim())
     }
     else {
       const applied = (scopeEl.dataset.themeRootClasses || '').split(/\s+/).filter(Boolean)
@@ -547,22 +691,22 @@ function applyThemeClasses(scopeEl, theme, variant = 'light', isolated = true) {
   // Optional convenience: map a few generic applies
   if (apply.link) {
     scopeEl.querySelectorAll('a').forEach((el) => {
-      el.className = `${el.className} ${toVarBackedUtilities(apply.link, t)}`.trim()
+      appendElementClasses(el, toVarBackedUtilities(apply.link, t))
     })
   }
   if (apply.heading) {
     scopeEl.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach((el) => {
-      el.className = `${el.className} ${toVarBackedUtilities(apply.heading, t)}`.trim()
+      appendElementClasses(el, toVarBackedUtilities(apply.heading, t))
     })
   }
   if (apply.button) {
     scopeEl.querySelectorAll('button,[data-theme="button"]').forEach((el) => {
-      el.className = `${el.className} ${toVarBackedUtilities(apply.button, t)}`.trim()
+      appendElementClasses(el, toVarBackedUtilities(apply.button, t))
     })
   }
   if (apply.badge) {
     scopeEl.querySelectorAll('[data-theme="badge"]').forEach((el) => {
-      el.className = `${el.className} ${toVarBackedUtilities(apply.badge, t)}`.trim()
+      appendElementClasses(el, toVarBackedUtilities(apply.badge, t))
     })
   }
 
@@ -573,7 +717,7 @@ function applyThemeClasses(scopeEl, theme, variant = 'light', isolated = true) {
     Object.entries(obj).forEach(([part, classes]) => {
       const sel = `[data-slot="${slotBase}.${part}"]`
       scopeEl.querySelectorAll(sel).forEach((el) => {
-        el.className = `${el.className} ${toVarBackedUtilities(classes, t)}`.trim()
+        appendElementClasses(el, toVarBackedUtilities(classes, t))
       })
     })
   }
@@ -628,6 +772,7 @@ function rewriteAllClasses(scopeEl, theme, isolated = true, viewportMode = 'auto
   const forcedWidth = viewportModeToWidth(viewportMode)
 
   const TEXT_SIZE_RE = /^text-(xs|sm|base|lg|xl|\d+xl)$/
+  const FONT_UTILITY_RE = /^font-([\w-]+|\[[^\]]+\])$/
 
   const mapToken = (token) => {
     const parts = token.split(':')
@@ -654,7 +799,8 @@ function rewriteAllClasses(scopeEl, theme, isolated = true, viewportMode = 'auto
 
       const mappedCore = toVarBackedUtilities(core, theme)
       const isTextSize = TEXT_SIZE_RE.test(nakedCore)
-      const shouldImportant = hadBreakpoint || isTextSize
+      const isFontUtility = FONT_UTILITY_RE.test(nakedCore)
+      const shouldImportant = hadBreakpoint || isTextSize || isFontUtility
       const finalCore = shouldImportant ? importantify(mappedCore) : mappedCore
 
       return [...nextParts, finalCore].filter(Boolean).join(':')
@@ -691,7 +837,10 @@ function rewriteAllClasses(scopeEl, theme, isolated = true, viewportMode = 'auto
       return ''
 
     const mappedCore = toVarBackedUtilities(core, theme)
-    const finalCore = hadBreakpoint ? importantify(mappedCore) : mappedCore
+    const isTextSize = TEXT_SIZE_RE.test(nakedCore)
+    const isFontUtility = FONT_UTILITY_RE.test(nakedCore)
+    const shouldImportant = hadBreakpoint || isTextSize || isFontUtility
+    const finalCore = shouldImportant ? importantify(mappedCore) : mappedCore
 
     return [...nextParts, finalCore].filter(Boolean).join(':')
   }
@@ -699,15 +848,7 @@ function rewriteAllClasses(scopeEl, theme, isolated = true, viewportMode = 'auto
   scopeEl.querySelectorAll('[class]').forEach((el) => {
     let base = el.dataset.viewportBaseClass
     if (typeof base !== 'string') {
-      if (typeof el.className === 'string') {
-        base = el.className
-      }
-      else if (el.className && typeof el.className.baseVal === 'string') {
-        base = el.className.baseVal
-      }
-      else {
-        base = el.getAttribute('class') || ''
-      }
+      base = readElementClass(el)
       el.dataset.viewportBaseClass = base
     }
     const orig = typeof base === 'string' ? base : String(base || '')
@@ -719,7 +860,7 @@ function rewriteAllClasses(scopeEl, theme, isolated = true, viewportMode = 'auto
       .filter(Boolean)
     if (isolated) {
       const mapped = mappedTokens.join(' ')
-      el.className = mapped
+      writeElementClass(el, mapped)
       return
     }
 
@@ -742,10 +883,11 @@ onMounted(async () => {
 
   // Initialize carousels/behaviors for SSR-inserted HTML
   initEmblaCarousels(hostEl.value)
+  initCmsNavHelpers(hostEl.value)
 
   // Apply global theme once (keeps one style tag for vars; blocks can still override locally if needed)
   // setGlobalThemeVars(props.theme)
-  setScopedThemeVars(hostEl.value, normalizeTheme(props.theme))
+  setScopedThemeVars(hostEl.value, props.theme)
   // If you later need per-block overrides, keep the next line; otherwise, it can be omitted.
   // setScopedThemeVars(hostEl.value, normalizeTheme(props.theme))
   applyThemeClasses(hostEl.value, props.theme, (props.theme && props.theme.variant) || 'light')
@@ -761,8 +903,9 @@ watch(
     // Wait for DOM to reflect new v-html, then (re)wire behaviors and class mappings
     await nextTick()
     initEmblaCarousels(hostEl.value)
+    initCmsNavHelpers(hostEl.value)
     // setGlobalThemeVars(props.theme)
-    setScopedThemeVars(hostEl.value, normalizeTheme(props.theme))
+    setScopedThemeVars(hostEl.value, props.theme)
 
     applyThemeClasses(hostEl.value, props.theme, (props.theme && props.theme.variant) || 'light')
     rewriteAllClasses(hostEl.value, props.theme, props.isolated, props.viewportMode)
@@ -774,13 +917,11 @@ watch(
 watch(
   () => props.theme,
   async (val) => {
-    const t = normalizeTheme(val)
-    // 1) Write CSS variables globally
-    // setGlobalThemeVars(t)
-    setScopedThemeVars(hostEl.value, t)
+    // 1) Write scoped CSS variables from the raw theme object
+    setScopedThemeVars(hostEl.value, val)
     // 2) Apply classes based on `apply`, `slots`, and optional variants
-    applyThemeClasses(hostEl.value, t, (val && val.variant) || 'light')
-    rewriteAllClasses(hostEl.value, t, props.isolated, props.viewportMode)
+    applyThemeClasses(hostEl.value, val, (val && val.variant) || 'light')
+    rewriteAllClasses(hostEl.value, val, props.isolated, props.viewportMode)
     await nextTick()
     notifyLoaded()
   },

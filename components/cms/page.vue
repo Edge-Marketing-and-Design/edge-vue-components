@@ -109,6 +109,14 @@ const previewViewportStyle = computed(() => {
   }
 })
 
+const previewViewportContainStyle = computed(() => {
+  const shouldContain = !state.editMode
+  return {
+    ...(previewViewportStyle.value || {}),
+    ...(shouldContain ? { transform: 'translateZ(0)' } : {}),
+  }
+})
+
 const setPreviewViewport = (viewportId) => {
   state.previewViewport = viewportId
 }
@@ -120,6 +128,13 @@ const previewViewportMode = computed(() => {
 })
 
 const isMobilePreview = computed(() => previewViewportMode.value === 'mobile')
+const pagePreviewRenderKey = computed(() => {
+  const siteKey = String(props.site || '')
+  const pageKey = String(props.page || '')
+  const themeKey = String(effectiveThemeId.value || selectedThemeId.value || 'no-theme')
+  const modeKey = state.editMode ? 'edit' : 'preview'
+  return `${siteKey}:${pageKey}:${themeKey}:${modeKey}`
+})
 
 const GRID_CLASSES = {
   1: 'grid grid-cols-1 gap-4',
@@ -505,6 +520,41 @@ onMounted(() => {
   }
 })
 
+const previewSnapshotsBootstrapping = ref(false)
+
+const ensurePreviewSnapshots = async () => {
+  const orgId = String(edgeGlobal.edgeState.currentOrganization || '').trim()
+  if (!orgId)
+    return
+
+  if (previewSnapshotsBootstrapping.value)
+    return
+  previewSnapshotsBootstrapping.value = true
+
+  const themesPath = `organizations/${orgId}/themes`
+  const sitesPath = `organizations/${orgId}/sites`
+
+  // Non-blocking bootstrap: never hold page render on snapshot latency.
+  try {
+    if (!edgeFirebase.data?.[themesPath]) {
+      await edgeFirebase.startSnapshot(themesPath)
+    }
+    if (!edgeFirebase.data?.[sitesPath]) {
+      await edgeFirebase.startSnapshot(sitesPath)
+    }
+  }
+  catch (error) {
+    console.error('Failed to start page preview snapshots', error)
+  }
+  finally {
+    previewSnapshotsBootstrapping.value = false
+  }
+}
+
+onBeforeMount(() => {
+  ensurePreviewSnapshots()
+})
+
 const editorDocUpdates = (workingDoc) => {
   ensureStructureDefaults(workingDoc, false)
   if (workingDoc?.post || (Array.isArray(workingDoc?.postContent) && workingDoc.postContent.length > 0) || Array.isArray(workingDoc?.postStructure))
@@ -540,19 +590,204 @@ const selectedThemeId = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site]?.theme || ''
 })
 
-const theme = computed(() => {
-  const themeId = selectedThemeId.value
-  if (!themeId)
-    return null
-  const themeContents = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`]?.[themeId]?.theme || null
+const themePreviewCache = useState('edge-cms-page-theme-preview-cache', () => ({}))
+const themeCacheKey = computed(() => {
+  const orgId = String(edgeGlobal.edgeState.currentOrganization || 'no-org').trim() || 'no-org'
+  const siteKey = props.isTemplateSite ? 'templates' : String(props.site || 'no-site').trim() || 'no-site'
+  return `${orgId}:${siteKey}`
+})
+
+const hydrateThemeCache = () => {
+  const cache = themePreviewCache.value?.[themeCacheKey.value] || {}
+  return {
+    themeId: typeof cache?.themeId === 'string' ? cache.themeId : '',
+    theme: cache?.theme && typeof cache.theme === 'object' ? cache.theme : null,
+    head: cache?.head && typeof cache.head === 'object' ? cache.head : {},
+  }
+}
+
+const writeThemeCache = (patch = {}) => {
+  const current = themePreviewCache.value?.[themeCacheKey.value] || {}
+  themePreviewCache.value = {
+    ...(themePreviewCache.value || {}),
+    [themeCacheKey.value]: {
+      ...current,
+      ...patch,
+    },
+  }
+}
+
+const initialThemeCache = hydrateThemeCache()
+const lastStableThemeId = ref(initialThemeCache.themeId)
+const lastResolvedTheme = ref(initialThemeCache.theme)
+const lastResolvedHead = ref(initialThemeCache.head)
+
+const parseThemeDoc = (themeDoc) => {
+  const themeContents = themeDoc?.theme || null
   if (!themeContents)
     return null
+  const extraCSS = typeof themeDoc?.extraCSS === 'string' ? themeDoc.extraCSS : ''
   try {
-    return typeof themeContents === 'string' ? JSON.parse(themeContents) : themeContents
+    const parsed = typeof themeContents === 'string' ? JSON.parse(themeContents) : themeContents
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+      return null
+    return { ...parsed, extraCSS }
   }
-  catch (e) {
+  catch {
     return null
   }
+}
+
+const parseHeadDoc = (themeDoc) => {
+  try {
+    const parsed = JSON.parse(themeDoc?.headJSON || '{}')
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+      return parsed
+  }
+  catch {}
+  return {}
+}
+
+const applyResolvedTheme = (themeDoc, themeId = '') => {
+  const normalizedThemeId = String(themeId || themeDoc?.docId || '').trim()
+  if (normalizedThemeId)
+    lastStableThemeId.value = normalizedThemeId
+
+  const parsedTheme = parseThemeDoc(themeDoc)
+  if (parsedTheme && typeof parsedTheme === 'object') {
+    lastResolvedTheme.value = parsedTheme
+    writeThemeCache({ theme: parsedTheme })
+  }
+
+  const parsedHead = parseHeadDoc(themeDoc)
+  if (parsedHead && typeof parsedHead === 'object') {
+    lastResolvedHead.value = parsedHead
+    writeThemeCache({ head: parsedHead })
+  }
+
+  if (normalizedThemeId)
+    writeThemeCache({ themeId: normalizedThemeId })
+}
+
+const themeFallbackLoading = ref(false)
+const loadSiteThemeFallback = async () => {
+  if (themeFallbackLoading.value)
+    return
+
+  const orgPath = String(edgeGlobal.edgeState.organizationDocPath || '').trim()
+  if (!orgPath)
+    return
+
+  const selectedId = String(selectedThemeId.value || '').trim()
+  if (props.isTemplateSite) {
+    if (!selectedId)
+      return
+    const fromSnapshot = edgeFirebase.data?.[`${orgPath}/themes`]?.[selectedId] || null
+    if (fromSnapshot)
+      applyResolvedTheme(fromSnapshot, selectedId)
+    return
+  }
+
+  const siteId = String(props.site || '').trim()
+  if (!siteId || siteId === 'new')
+    return
+
+  themeFallbackLoading.value = true
+  try {
+    let themeId = selectedId
+    if (!themeId) {
+      const siteDoc = await edgeFirebase.getDocData(`${orgPath}/sites`, siteId)
+      themeId = String(siteDoc?.theme || '').trim()
+    }
+    if (!themeId)
+      return
+
+    writeThemeCache({ themeId })
+    lastStableThemeId.value = themeId
+
+    const fromSnapshot = edgeFirebase.data?.[`${orgPath}/themes`]?.[themeId] || null
+    if (fromSnapshot) {
+      applyResolvedTheme(fromSnapshot, themeId)
+      if (lastResolvedTheme.value)
+        return
+    }
+
+    const themeDoc = await edgeFirebase.getDocData(`${orgPath}/themes`, themeId)
+    if (themeDoc)
+      applyResolvedTheme(themeDoc, themeId)
+  }
+  catch (error) {
+    console.error('Failed to load fallback theme for page preview', error)
+  }
+  finally {
+    themeFallbackLoading.value = false
+  }
+}
+
+watch(
+  () => edgeGlobal.edgeState.currentOrganization,
+  () => {
+    ensurePreviewSnapshots()
+    loadSiteThemeFallback()
+  },
+  { immediate: true },
+)
+
+watch(
+  () => [props.site, props.page, props.isTemplateSite],
+  () => {
+    loadSiteThemeFallback()
+  },
+  { immediate: true },
+)
+
+watch(
+  themeCacheKey,
+  () => {
+    const hydrated = hydrateThemeCache()
+    if (hydrated.themeId)
+      lastStableThemeId.value = hydrated.themeId
+    if (hydrated.theme && typeof hydrated.theme === 'object')
+      lastResolvedTheme.value = hydrated.theme
+    if (hydrated.head && typeof hydrated.head === 'object')
+      lastResolvedHead.value = hydrated.head
+  },
+  { immediate: true },
+)
+
+watch(selectedThemeId, (themeId) => {
+  const normalized = String(themeId || '').trim()
+  if (normalized) {
+    lastStableThemeId.value = normalized
+    writeThemeCache({ themeId: normalized })
+  }
+  loadSiteThemeFallback()
+}, { immediate: true })
+
+const effectiveThemeId = computed(() => {
+  const normalized = String(selectedThemeId.value || '').trim()
+  if (normalized)
+    return normalized
+  return lastStableThemeId.value
+})
+
+const parsedTheme = computed(() => {
+  const themeId = effectiveThemeId.value
+  if (!themeId)
+    return null
+  const themeDoc = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`]?.[themeId] || null
+  return parseThemeDoc(themeDoc)
+})
+
+watch(parsedTheme, (nextTheme) => {
+  if (nextTheme && typeof nextTheme === 'object') {
+    lastResolvedTheme.value = nextTheme
+    writeThemeCache({ theme: nextTheme })
+  }
+}, { immediate: true, deep: true })
+
+const theme = computed(() => {
+  return parsedTheme.value || lastResolvedTheme.value || null
 })
 
 const themeColorMap = computed(() => {
@@ -859,14 +1094,20 @@ const addRowAt = (workingDoc, layoutValue = '6', insertIndex = 0, isPost = false
 }
 
 const headObject = computed(() => {
-  const themeId = selectedThemeId.value
+  const themeId = effectiveThemeId.value
   if (!themeId)
-    return {}
+    return lastResolvedHead.value || {}
   try {
-    return JSON.parse(edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`]?.[themeId]?.headJSON || '{}')
+    const parsedHead = parseHeadDoc(edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`]?.[themeId] || null)
+    if (parsedHead && typeof parsedHead === 'object') {
+      lastResolvedHead.value = parsedHead
+      writeThemeCache({ head: parsedHead })
+      return parsedHead
+    }
+    return lastResolvedHead.value || {}
   }
   catch (e) {
-    return {}
+    return lastResolvedHead.value || {}
   }
 })
 
@@ -1694,10 +1935,10 @@ const hasUnsavedChanges = (changes) => {
         <TabsContent value="list">
           <Separator class="my-4" />
           <div
-            :key="selectedThemeId"
-            class="w-full mx-auto bg-card border border-border rounded-lg shadow-sm md:shadow-md p-0 space-y-6"
-            :class="{ 'transition-all duration-300': !state.editMode }"
-            :style="previewViewportStyle"
+            :key="`${pagePreviewRenderKey}:list`"
+            class="w-full mx-auto bg-card border border-border shadow-sm md:shadow-md p-0 space-y-6"
+            :class="[{ 'transition-all duration-300': !state.editMode }, state.editMode ? 'rounded-lg' : 'rounded-none']"
+            :style="previewViewportContainStyle"
           >
             <edge-button-divider v-if="state.editMode" class="my-2">
               <Popover v-model:open="state.addRowPopoverOpen.listTop">
@@ -1837,9 +2078,11 @@ const hasUnsavedChanges = (changes) => {
                               <div :key="blockId" class="relative group">
                                 <edge-cms-block
                                   v-if="blockIndex(slotProps.workingDoc, blockId, false) !== -1"
+                                  :key="`${pagePreviewRenderKey}:${blockId}:${effectiveThemeId}:list`"
                                   v-model="slotProps.workingDoc.content[blockIndex(slotProps.workingDoc, blockId, false)]"
                                   :site-id="props.site"
                                   :edit-mode="state.editMode"
+                                  :contain-fixed="true"
                                   :viewport-mode="previewViewportMode"
                                   :block-id="blockId"
                                   :theme="theme"
@@ -1945,10 +2188,10 @@ const hasUnsavedChanges = (changes) => {
         <TabsContent value="post">
           <Separator class="my-4" />
           <div
-            :key="`${selectedThemeId}-post`"
-            class="w-full mx-auto bg-card border border-border rounded-lg shadow-sm md:shadow-md p-4 space-y-6"
-            :class="{ 'transition-all duration-300': !state.editMode }"
-            :style="previewViewportStyle"
+            :key="`${pagePreviewRenderKey}:post`"
+            class="w-full mx-auto bg-card border border-border shadow-sm md:shadow-md p-4 space-y-6"
+            :class="[{ 'transition-all duration-300': !state.editMode }, state.editMode ? 'rounded-lg' : 'rounded-none']"
+            :style="previewViewportContainStyle"
           >
             <edge-button-divider v-if="state.editMode" class="my-2">
               <Popover v-model:open="state.addRowPopoverOpen.postTop">
@@ -2088,8 +2331,10 @@ const hasUnsavedChanges = (changes) => {
                               <div :key="blockId" class="relative group">
                                 <edge-cms-block
                                   v-if="blockIndex(slotProps.workingDoc, blockId, true) !== -1"
+                                  :key="`${pagePreviewRenderKey}:${blockId}:${effectiveThemeId}:post`"
                                   v-model="slotProps.workingDoc.postContent[blockIndex(slotProps.workingDoc, blockId, true)]"
                                   :edit-mode="state.editMode"
+                                  :contain-fixed="true"
                                   :viewport-mode="previewViewportMode"
                                   :block-id="blockId"
                                   :theme="theme"

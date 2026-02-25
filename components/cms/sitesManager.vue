@@ -7,6 +7,7 @@ const isAiBusy = status => status === 'queued' || status === 'running'
 const state = reactive({
   filter: '',
 })
+const cmsMultiOrg = useState('cmsMultiOrg', () => false)
 
 const isAdmin = computed(() => {
   return edgeGlobal.isAdminGlobal(edgeFirebase).value
@@ -25,21 +26,21 @@ const canAddSite = computed(() => {
 })
 
 const queryField = computed(() => {
-  if (!isAdmin.value) {
+  if (!isAdmin.value && !cmsMultiOrg.value) {
     return 'users'
   }
   return ''
 })
 
 const queryValue = computed(() => {
-  if (!isAdmin.value) {
+  if (!isAdmin.value && !cmsMultiOrg.value) {
     return [edgeFirebase?.user?.uid]
   }
   return ''
 })
 
 const queryOperator = computed(() => {
-  if (!isAdmin.value) {
+  if (!isAdmin.value && !cmsMultiOrg.value) {
     return 'array-contains-any'
   }
   return ''
@@ -100,7 +101,7 @@ const queryOperator = computed(() => {
         <Separator class="dark:bg-slate-600" />
       </template>
       <div
-        v-if="slotProps.filtered.length === 0 && !isAdmin && disableAddSiteForNonAdmin"
+        v-if="slotProps.filtered.length === 0 && !isAdmin && disableAddSiteForNonAdmin && !cmsMultiOrg"
         class="px-4 py-6 text-sm text-muted-foreground"
       >
         No sites are assigned to your account. Contact an organization admin to add a site for you.

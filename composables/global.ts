@@ -439,22 +439,54 @@ const allowMenuItem = (item: any, isAdmin: boolean) => {
   return true
 }
 
+const resolveCmsCollectionTokens = (input: any, currentSite: any = '') => {
+  const orgId = String(edgeState.currentOrganization || '')
+  const siteId = String(currentSite || '')
+
+  const replaceTokens = (raw: string) => {
+    let resolved = raw
+    if (orgId && resolved.includes('{orgId}'))
+      resolved = resolved.replaceAll('{orgId}', orgId)
+    if (siteId && resolved.includes('{siteId}'))
+      resolved = resolved.replaceAll('{siteId}', siteId)
+    return resolved
+  }
+
+  const walk = (value: any): any => {
+    if (typeof value === 'string')
+      return replaceTokens(value)
+    if (Array.isArray(value))
+      return value.map(item => walk(item))
+    if (value && typeof value === 'object') {
+      const out: Record<string, any> = {}
+      for (const [key, child] of Object.entries(value))
+        out[key] = walk(child)
+      return out
+    }
+    return value
+  }
+
+  return walk(input)
+}
+
 const cmsCollectionData = async (edgeFirebase: any, value: any, meta: any, currentSite: any = '') => {
   for (const key in meta) {
     if (meta[key]?.collection) {
       const staticSearch = new edgeFirebase.SearchStaticData()
 
-      const currentQuery = meta[key].collection.query || []
+      const currentQuery = Array.isArray(meta[key].collection.query)
+        ? resolveCmsCollectionTokens(dupObject(meta[key].collection.query), currentSite)
+        : []
       for (const queryKey in meta[key].queryItems || {}) {
         console.log('key', queryKey)
         if (meta[key].queryItems[queryKey]) {
           const findIndex = currentQuery.findIndex((q: any) => q.field === queryKey)
           const queryOption = meta[key]?.queryOptions?.find((o: any) => o.field === queryKey)
           const operator = queryOption?.operator || '=='
-          let value = meta[key].queryItems[queryKey]
-          if (operator === 'array-contains-any' && !Array.isArray(value))
-            value = [value]
-          const newQuery = { field: queryKey, operator, value }
+          let queryValue = resolveCmsCollectionTokens(meta[key].queryItems[queryKey], currentSite)
+          if (operator === 'array-contains-any' && !Array.isArray(queryValue))
+            queryValue = [queryValue]
+          const newQuery = { field: queryKey, operator, value: queryValue }
           if (findIndex > -1) {
             currentQuery[findIndex] = newQuery
           }

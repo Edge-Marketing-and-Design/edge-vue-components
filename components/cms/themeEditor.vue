@@ -49,6 +49,16 @@ const parseJsonSafe = (value, fallback) => {
 }
 
 const headObject = computed(() => lastValidHead.value)
+const previewTheme = computed(() => {
+  const isObjectTheme = !!lastValidTheme.value
+    && typeof lastValidTheme.value === 'object'
+    && !Array.isArray(lastValidTheme.value)
+  const baseTheme = isObjectTheme ? lastValidTheme.value : {}
+  return {
+    ...baseTheme,
+    extraCSS: typeof state.workingDoc?.extraCSS === 'string' ? state.workingDoc.extraCSS : '',
+  }
+})
 
 watch(headObject, (newHeadElements) => {
   emit('head', newHeadElements)
@@ -506,7 +516,7 @@ onBeforeMount(async () => {
                   :site-id="edgeGlobal.edgeState.blockEditorSite"
                   class="!h-[calc(100vh-220px)] overflow-y-auto"
                   list-only
-                  :theme="lastValidTheme"
+                  :theme="previewTheme"
                 />
               </div>
             </div>

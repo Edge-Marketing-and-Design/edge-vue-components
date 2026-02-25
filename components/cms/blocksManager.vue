@@ -1,4 +1,5 @@
 <script setup>
+const emit = defineEmits(['head'])
 const edgeFirebase = inject('edgeFirebase')
 const { blocks: blockNewDocSchema } = useCmsNewDocs()
 const state = reactive({
@@ -65,6 +66,7 @@ const seedInitialBlocks = async () => {
         docId: block.docId,
         name: block.name,
         content: block.content,
+        previewType: 'light',
         tags: [],
         themes: [],
         synced: false,
@@ -84,6 +86,16 @@ const seedInitialBlocks = async () => {
 const getThemeFromId = (themeId) => {
   const theme = edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`]?.[themeId]
   return theme?.name || 'Unknown'
+}
+
+const normalizePreviewType = (value) => {
+  return value === 'dark' ? 'dark' : 'light'
+}
+
+const previewSurfaceClass = (value) => {
+  return normalizePreviewType(value) === 'dark'
+    ? 'preview-surface-dark'
+    : 'preview-surface-light'
 }
 
 const loadingRender = (content) => {
@@ -158,15 +170,76 @@ const themesCollection = computed(() => {
   return edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`] || {}
 })
 
+const parseHeadJson = (raw) => {
+  if (!raw)
+    return {}
+  if (typeof raw === 'object' && !Array.isArray(raw))
+    return raw
+  if (typeof raw !== 'string')
+    return {}
+  try {
+    return JSON.parse(raw)
+  }
+  catch {
+    return {}
+  }
+}
+
+const dedupeHeadEntries = (entries) => {
+  const seen = new Set()
+  return entries.filter((entry) => {
+    const key = JSON.stringify(entry || {})
+    if (seen.has(key))
+      return false
+    seen.add(key)
+    return true
+  })
+}
+
+const mergedThemeHeadObject = computed(() => {
+  const themes = Object.values(themesCollection.value || {})
+  const link = []
+  const script = []
+  const style = []
+  const meta = []
+
+  themes.forEach((themeDoc) => {
+    const parsedHead = parseHeadJson(themeDoc?.headJSON)
+    if (Array.isArray(parsedHead?.link))
+      link.push(...parsedHead.link)
+    if (Array.isArray(parsedHead?.script))
+      script.push(...parsedHead.script)
+    if (Array.isArray(parsedHead?.style))
+      style.push(...parsedHead.style)
+    if (Array.isArray(parsedHead?.meta))
+      meta.push(...parsedHead.meta)
+  })
+
+  return {
+    link: dedupeHeadEntries(link),
+    script: dedupeHeadEntries(script),
+    style: dedupeHeadEntries(style),
+    meta: dedupeHeadEntries(meta),
+  }
+})
+
+watch(mergedThemeHeadObject, (newHeadElements) => {
+  emit('head', newHeadElements || {})
+}, { immediate: true, deep: true })
+
 const parsedThemesById = computed(() => {
   const parsed = {}
   for (const [themeId, themeDoc] of Object.entries(themesCollection.value || {})) {
     const rawTheme = themeDoc?.theme
     if (!rawTheme)
       continue
+    const extraCSS = typeof themeDoc?.extraCSS === 'string' ? themeDoc.extraCSS : ''
     if (typeof rawTheme === 'string') {
       try {
-        parsed[themeId] = JSON.parse(rawTheme)
+        const parsedTheme = JSON.parse(rawTheme)
+        if (!parsedTheme || typeof parsedTheme !== 'object' || Array.isArray(parsedTheme))
+          continue
+        parsed[themeId] = { ...parsedTheme, extraCSS }
       }
       catch {
         continue
@@ -174,7 +247,7 @@ const parsedThemesById = computed(() => {
       continue
     }
     if (typeof rawTheme === 'object' && !Array.isArray(rawTheme))
-      parsed[themeId] = rawTheme
+      parsed[themeId] = { ...rawTheme, extraCSS }
   }
   return parsed
 })
@@ -715,7 +788,7 @@ const handleBlockImport = async (event) => {
                       <Trash class="h-4 w-4" />
                     </edge-shad-button>
                   </div>
-                  <div v-if="item.content" class="block-preview">
+                  <div v-if="item.content" class="block-preview" :class="previewSurfaceClass(item.previewType)">
                     <div class="scale-wrapper">
                       <div class="scale-inner scale p-4">
                         <edge-cms-block-render
@@ -728,7 +801,7 @@ const handleBlockImport = async (event) => {
                     </div>
                     <div class="preview-overlay" />
                   </div>
-                  <div v-else class="block-preview-empty">
+                  <div v-else class="block-preview-empty" :class="previewSurfaceClass(item.previewType)">
                     Preview unavailable for this block.
                   </div>
                   <div class="flex flex-wrap items-center gap-1 text-[11px] text-slate-300 uppercase tracking-wide overflow-hidden">
@@ -872,6 +945,18 @@ const handleBlockImport = async (event) => {
   box-shadow: none;
 }
 
+.block-preview.preview-surface-light {
+  background: #ffffff;
+  color: #0f172a;
+  border-color: rgba(15, 23, 42, 0.15);
+}
+
+.block-preview.preview-surface-dark {
+  background: #020617;
+  color: #f8fafc;
+  border-color: rgba(248, 250, 252, 0.18);
+}
+
 .block-preview-empty {
   height: 220px;
   border-radius: 14px;
@@ -882,6 +967,18 @@ const handleBlockImport = async (event) => {
   place-items: center;
   font-size: 13px;
   letter-spacing: 0.01em;
+}
+
+.block-preview-empty.preview-surface-light {
+  border-color: rgba(15, 23, 42, 0.18);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(241, 245, 249, 0.95));
+  color: rgba(15, 23, 42, 0.72);
+}
+
+.block-preview-empty.preview-surface-dark {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: linear-gradient(135deg, rgba(10, 14, 26, 0.65), rgba(17, 24, 39, 0.5));
+  color: rgba(255, 255, 255, 0.6);
 }
 
 .preview-overlay {

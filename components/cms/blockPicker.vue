@@ -86,6 +86,29 @@ const activeSiteId = computed(() => activeProps.value.siteId || '')
 const pickerTheme = computed(() => activeProps.value.theme || null)
 const pickerViewport = computed(() => activeProps.value.viewportMode || 'auto')
 
+const normalizePreviewType = (value) => {
+  return value === 'dark' ? 'dark' : 'light'
+}
+
+const previewSurfaceClass = (value) => {
+  return normalizePreviewType(value) === 'light'
+    ? 'bg-white text-black'
+    : 'bg-neutral-950 text-neutral-50'
+}
+
+const blockOverridePreviewType = computed(() => {
+  const directPreviewType = normalizePreviewType(props.blockOverride?.previewType)
+  if (props.blockOverride?.previewType === 'light' || props.blockOverride?.previewType === 'dark')
+    return directPreviewType
+
+  const blockId = String(props.blockOverride?.blockId || '').trim()
+  if (!blockId)
+    return 'light'
+
+  const savedPreviewType = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[blockId]?.previewType
+  return normalizePreviewType(savedPreviewType)
+})
+
 const blocks = computed(() => {
   let blocks = []
   if (edgeFirebase?.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]) {
@@ -245,6 +268,7 @@ const chooseBlock = (block) => {
   }
   blockModelData.name = block.name
   blockModelData.blockId = block.docId
+  delete blockModelData.previewType
   console.log('Chosen block:', blockModelData)
   if (isSharedMode.value) {
     const handler = HANDLERS.get(SHARED_PICKER_STATE.activeInstance)
@@ -310,7 +334,7 @@ const clearTagFilters = () => {
 </script>
 
 <template>
-  <div v-if="props.blockOverride">
+  <div v-if="props.blockOverride" :class="previewSurfaceClass(blockOverridePreviewType)">
     <edge-cms-block-api
       :content="props.blockOverride.content"
       :values="props.blockOverride.values"
@@ -363,6 +387,7 @@ const clearTagFilters = () => {
               <div
                 :ref="el => setInnerRef(block.docId, el)"
                 class="scale-inner scale p-4"
+                :class="previewSurfaceClass(block.previewType)"
                 :data-block-id="block.docId"
               >
                 <div class="text-4xl relative text-inherit text-center">
@@ -439,6 +464,7 @@ const clearTagFilters = () => {
                       <div
                 :ref="el => setInnerRef(block.docId, el)"
                 class="scale-inner scale p-4"
+                :class="previewSurfaceClass(block.previewType)"
                 :data-block-id="block.docId"
               >
                 <div class="text-4xl relative text-inherit text-center">
