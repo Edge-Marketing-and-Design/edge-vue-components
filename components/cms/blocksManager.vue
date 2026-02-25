@@ -1,4 +1,5 @@
 <script setup>
+const emit = defineEmits(['head'])
 const edgeFirebase = inject('edgeFirebase')
 const { blocks: blockNewDocSchema } = useCmsNewDocs()
 const state = reactive({
@@ -169,15 +170,76 @@ const themesCollection = computed(() => {
   return edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`] || {}
 })
 
+const parseHeadJson = (raw) => {
+  if (!raw)
+    return {}
+  if (typeof raw === 'object' && !Array.isArray(raw))
+    return raw
+  if (typeof raw !== 'string')
+    return {}
+  try {
+    return JSON.parse(raw)
+  }
+  catch {
+    return {}
+  }
+}
+
+const dedupeHeadEntries = (entries) => {
+  const seen = new Set()
+  return entries.filter((entry) => {
+    const key = JSON.stringify(entry || {})
+    if (seen.has(key))
+      return false
+    seen.add(key)
+    return true
+  })
+}
+
+const mergedThemeHeadObject = computed(() => {
+  const themes = Object.values(themesCollection.value || {})
+  const link = []
+  const script = []
+  const style = []
+  const meta = []
+
+  themes.forEach((themeDoc) => {
+    const parsedHead = parseHeadJson(themeDoc?.headJSON)
+    if (Array.isArray(parsedHead?.link))
+      link.push(...parsedHead.link)
+    if (Array.isArray(parsedHead?.script))
+      script.push(...parsedHead.script)
+    if (Array.isArray(parsedHead?.style))
+      style.push(...parsedHead.style)
+    if (Array.isArray(parsedHead?.meta))
+      meta.push(...parsedHead.meta)
+  })
+
+  return {
+    link: dedupeHeadEntries(link),
+    script: dedupeHeadEntries(script),
+    style: dedupeHeadEntries(style),
+    meta: dedupeHeadEntries(meta),
+  }
+})
+
+watch(mergedThemeHeadObject, (newHeadElements) => {
+  emit('head', newHeadElements || {})
+}, { immediate: true, deep: true })
+
 const parsedThemesById = computed(() => {
   const parsed = {}
   for (const [themeId, themeDoc] of Object.entries(themesCollection.value || {})) {
     const rawTheme = themeDoc?.theme
     if (!rawTheme)
       continue
+    const extraCSS = typeof themeDoc?.extraCSS === 'string' ? themeDoc.extraCSS : ''
     if (typeof rawTheme === 'string') {
       try {
-        parsed[themeId] = JSON.parse(rawTheme)
+        const parsedTheme = JSON.parse(rawTheme)
+        if (!parsedTheme || typeof parsedTheme !== 'object' || Array.isArray(parsedTheme))
+          continue
+        parsed[themeId] = { ...parsedTheme, extraCSS }
       }
       catch {
         continue
@@ -185,7 +247,7 @@ const parsedThemesById = computed(() => {
       continue
     }
     if (typeof rawTheme === 'object' && !Array.isArray(rawTheme))
-      parsed[themeId] = rawTheme
+      parsed[themeId] = { ...rawTheme, extraCSS }
   }
   return parsed
 })

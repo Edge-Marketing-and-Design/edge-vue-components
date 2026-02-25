@@ -86,6 +86,16 @@ const state = reactive({
   validationErrors: [],
 })
 
+const INTERACTIVE_CLICK_SELECTOR = [
+  '[data-cms-interactive]',
+  '.cms-block-interactive',
+  '.cms-nav-toggle',
+  '.cms-nav-overlay',
+  '.cms-nav-panel',
+  '.cms-nav-close',
+  '.cms-nav-link',
+].join(', ')
+
 const hasFixedPositionInContent = computed(() => {
   const content = String(modelValue.value?.content || '')
   return /\bfixed\b/.test(content)
@@ -112,7 +122,7 @@ const inheritedPreviewType = computed(() => {
     return null
   const blockDoc = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[docId]
   const inherited = blockDoc?.previewType
-  return inherited === 'light' || inherited === 'dark' ? inherited : null
+  return (inherited === 'light' || inherited === 'dark') ? inherited : null
 })
 
 const effectivePreviewType = computed(() => {
@@ -129,12 +139,15 @@ const blockWrapperClass = computed(() => ({
   'z-30': shouldContainFixedPreview.value,
   'bg-white text-black': props.editMode && effectivePreviewType.value === 'light',
   'bg-neutral-950 text-neutral-50': props.editMode && effectivePreviewType.value === 'dark',
+  'cms-nav-edit-static': props.editMode,
 }))
 
 const blockWrapperStyle = computed(() => {
-  if (!shouldContainFixedPreview.value)
+  if (!shouldContainFixedPreview.value || !props.editMode)
     return null
-  return { transform: 'translateZ(0)' }
+  return {
+    transform: 'translateZ(0)',
+  }
 })
 
 const isLightName = (value) => {
@@ -213,8 +226,11 @@ const resetArrayItems = (field, metaSource = null) => {
   }
 }
 
-const openEditor = async () => {
+const openEditor = async (event) => {
   if (!props.editMode)
+    return
+  const target = event?.target
+  if (target?.closest?.(INTERACTIVE_CLICK_SELECTOR))
     return
   const blockData = edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[modelValue.value.blockId]
   const templateMeta = blockData?.meta || modelValue.value?.meta || {}
@@ -578,7 +594,7 @@ const getTagsFromPosts = computed(() => {
       :class="[{ 'cursor-pointer': props.editMode }, blockWrapperClass]"
       :style="blockWrapperStyle"
       class="relative group"
-      @click="openEditor"
+      @click="openEditor($event)"
     >
       <!-- Content -->
       <edge-cms-block-api :site-id="props.siteId" :theme="props.theme" :content="modelValue?.content" :values="modelValue?.values" :meta="modelValue?.meta" :viewport-mode="props.viewportMode" @pending="state.loading = $event" />
@@ -950,3 +966,17 @@ const getTagsFromPosts = computed(() => {
     </Sheet>
   </div>
 </template>
+
+<style scoped>
+.cms-nav-edit-static :deep([data-cms-nav-root] .cms-nav-toggle),
+.cms-nav-edit-static :deep([data-cms-nav-root] .cms-nav-close),
+.cms-nav-edit-static :deep([data-cms-nav-root] .cms-nav-link) {
+  pointer-events: none !important;
+}
+
+.cms-nav-edit-static :deep([data-cms-nav-root] .cms-nav-overlay),
+.cms-nav-edit-static :deep([data-cms-nav-root] .cms-nav-panel) {
+  display: none !important;
+  pointer-events: none !important;
+}
+</style>

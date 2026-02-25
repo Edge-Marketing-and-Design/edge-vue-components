@@ -88,6 +88,12 @@ const previewSurfaceClass = computed(() => {
     : 'bg-neutral-950 text-neutral-50'
 })
 
+const previewCanvasClass = computed(() => {
+  const content = String(state.previewBlock?.content || '')
+  const hasFixedContent = /\bfixed\b/.test(content)
+  return hasFixedContent ? 'min-h-[calc(100vh-360px)]' : 'min-h-[88px]'
+})
+
 onMounted(() => {
   // state.mounted = true
 })
@@ -480,13 +486,18 @@ const theme = computed(() => {
   const selectedThemeId = String(edgeGlobal.edgeState.blockEditorTheme || '').trim()
   if (!selectedThemeId)
     return null
-  const themeContents = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`]?.[selectedThemeId]?.theme || null
+  const themeDoc = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`]?.[selectedThemeId] || null
+  const themeContents = themeDoc?.theme || null
   if (!themeContents)
     return null
-  if (typeof themeContents === 'object')
-    return themeContents
+  const extraCSS = typeof themeDoc?.extraCSS === 'string' ? themeDoc.extraCSS : ''
+  if (typeof themeContents === 'object' && !Array.isArray(themeContents))
+    return { ...themeContents, extraCSS }
   try {
-    return JSON.parse(themeContents)
+    const parsedTheme = JSON.parse(themeContents)
+    if (!parsedTheme || typeof parsedTheme !== 'object' || Array.isArray(parsedTheme))
+      return null
+    return { ...parsedTheme, extraCSS }
   }
   catch {
     return null
@@ -878,7 +889,7 @@ const exportCurrentBlock = () => {
                 class="w-full mx-auto rounded-none overflow-visible"
                 :style="previewViewportStyle"
               >
-                <div class="relative overflow-visible min-h-[88px] rounded-none" :class="previewSurfaceClass" style="transform: translateZ(0);">
+                <div class="relative overflow-visible rounded-none" :class="[previewSurfaceClass, previewCanvasClass]" style="transform: translateZ(0);">
                   <edge-cms-block
                     v-if="state.previewBlock"
                     :key="previewThemeRenderKey"
@@ -911,12 +922,15 @@ const exportCurrentBlock = () => {
         </SheetHeader>
         <div class="px-6 pb-6">
           <Tabs class="w-full" default-value="guide">
-            <TabsList class="w-full mt-3 bg-secondary rounded-sm grid grid-cols-3">
+            <TabsList class="w-full mt-3 bg-secondary rounded-sm grid grid-cols-4">
               <TabsTrigger value="guide" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
                 Block Guide
               </TabsTrigger>
               <TabsTrigger value="carousel" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
                 Carousel Usage
+              </TabsTrigger>
+              <TabsTrigger value="nav-bar" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+                Nav Bar
               </TabsTrigger>
               <TabsTrigger value="scroll-reveals" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
                 Scroll Reveals
@@ -1443,6 +1457,129 @@ const exportCurrentBlock = () => {
 
 &lt;!-- Multi-up desktop paging by 3 --&gt;
 &lt;div data-carousel data-carousel-slides-to-scroll="1" data-carousel-slides-to-scroll-lg="3"&gt;...&lt;/div&gt;</code></pre>
+                  </section>
+                </div>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="nav-bar">
+              <div class="h-[calc(100vh-190px)] overflow-y-auto pr-1 pb-6">
+                <div class="space-y-6">
+                  <section class="space-y-2">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      What This Does
+                    </h3>
+                    <p class="text-sm text-foreground">
+                      Use helper classes to make a CMS nav block interactive: hamburger toggle, right slide-out menu, close actions, and contained preview behavior.
+                    </p>
+                    <p class="text-sm text-foreground">
+                      The runtime in <code>htmlContent.vue</code> auto-wires these helpers and marks them as interactive so they do not open the block editor when clicked.
+                    </p>
+                  </section>
+
+                  <section class="space-y-2">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Helper Class Contract
+                    </h3>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div><code>cms-nav-root</code>: nav behavior root (required).</div>
+                      <div><code>cms-nav-toggle</code>: button that toggles open/closed (required).</div>
+                      <div><code>cms-nav-panel</code>: right slide-out panel (required).</div>
+                      <div><code>cms-nav-overlay</code>: backdrop click-to-close (optional but recommended).</div>
+                      <div><code>cms-nav-close</code>: explicit close button in panel (optional).</div>
+                      <div><code>cms-nav-link</code>: links that should close panel on click (optional).</div>
+                    </div>
+                  </section>
+
+                  <section class="space-y-2">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Optional Root Attributes
+                    </h3>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div><code>data-cms-nav-open="true"</code> to start open.</div>
+                      <div><code>data-cms-nav-open-class="your-class"</code> to change the root open class (default <code>is-open</code>).</div>
+                      <div><code>data-cms-nav-close-on-link="false"</code> to keep panel open after link clicks.</div>
+                    </div>
+                  </section>
+
+                  <section class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Nav Block Template (Copy / Paste)
+                    </h3>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;div class="cms-nav-root" data-cms-nav-root data-cms-nav-close-on-link="true"&gt;
+  &lt;nav class="fixed inset-x-0 top-0 z-30 w-full bg-transparent text-navText"&gt;
+    {{{#array {"field":"siteDoc","as":"site","collection":{"path":"sites","query":[{"field":"docId","operator":"==","value":"{siteId}"}],"order":[]},"limit":1,"value":[]}}}}
+    &lt;div class="relative w-full px-6 md:px-12"&gt;
+      &lt;div class="flex h-[64px] md:h-[88px] items-center justify-between gap-6 py-6 md:py-8"&gt;
+        &lt;a href="/" class="cursor-pointer text-xl text-navText"&gt;
+          &lt;img src="{{site.logo}}" class="h-[56px] md:h-[72px] py-3" /&gt;
+        &lt;/a&gt;
+
+        &lt;div class="ml-auto flex items-center gap-2"&gt;
+          &lt;ul class="hidden lg:flex items-center space-x-[20px] pt-1 text-sm uppercase tracking-widest"&gt;
+            {{{#subarray:navItem {"field":"item.menus.Site Root","value":[]}}}}
+            &lt;li class="relative group"&gt;
+              {{{#if {"cond":"navItem.item.type == external"}}}}
+              &lt;a href="{{navItem.item.url}}" class="nav-item cursor-pointer"&gt;{{navItem.name}}&lt;/a&gt;
+              {{{#else}}}
+              {{{#if {"cond":"navItem.name == home"}}}}
+              &lt;a href="/" class="nav-item cursor-pointer"&gt;{{navItem.name}}&lt;/a&gt;
+              {{{#else}}}
+              &lt;a href="/{{navItem.name}}" class="nav-item cursor-pointer"&gt;{{navItem.name}}&lt;/a&gt;
+              {{{/if}}}
+              {{{/if}}}
+            &lt;/li&gt;
+            {{{/subarray}}}
+          &lt;/ul&gt;
+
+          &lt;button class="cms-nav-toggle flex h-12 w-12 items-center justify-center rounded-full text-navText" type="button" aria-label="Open Menu"&gt;
+            &lt;svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" xmlns="http://www.w3.org/2000/svg"&gt;
+              &lt;path d="M4 6h16M4 12h16M4 18h16" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /&gt;
+            &lt;/svg&gt;
+          &lt;/button&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+    {{{/array}}}
+  &lt;/nav&gt;
+
+  &lt;div class="cms-nav-overlay fixed inset-0 z-[110] bg-black/50 transition-opacity duration-300 opacity-0 pointer-events-none"&gt;&lt;/div&gt;
+
+  &lt;aside class="cms-nav-panel fixed inset-y-0 right-0 z-[120] w-full max-w-md bg-sideNavBg text-sideNavText transition-all duration-300 translate-x-full opacity-0 pointer-events-none"&gt;
+    &lt;div class="relative h-full overflow-y-auto px-8 py-10"&gt;
+      &lt;button type="button" class="cms-nav-close absolute right-6 top-6 text-4xl text-sideNavText"&gt;&amp;times;&lt;/button&gt;
+
+      &lt;ul class="mt-14 space-y-4 uppercase"&gt;
+        {{{#array {"field":"siteDoc","as":"site","collection":{"path":"sites","query":[{"field":"docId","operator":"==","value":"{siteId}"}],"order":[]},"limit":1,"value":[]}}}}
+        {{{#subarray:navItem {"field":"item.menus.Site Root","value":[]}}}}
+        &lt;li&gt;
+          {{{#if {"cond":"navItem.item.type == external"}}}}
+          &lt;a href="{{navItem.item.url}}" class="cms-nav-link block text-sideNavText"&gt;{{navItem.name}}&lt;/a&gt;
+          {{{#else}}}
+          {{{#if {"cond":"navItem.name == home"}}}}
+          &lt;a href="/" class="cms-nav-link block text-sideNavText"&gt;{{navItem.name}}&lt;/a&gt;
+          {{{#else}}}
+          &lt;a href="/{{navItem.name}}" class="cms-nav-link block text-sideNavText"&gt;{{navItem.name}}&lt;/a&gt;
+          {{{/if}}}
+          {{{/if}}}
+        &lt;/li&gt;
+        {{{/subarray}}}
+        {{{/array}}}
+      &lt;/ul&gt;
+    &lt;/div&gt;
+  &lt;/aside&gt;
+&lt;/div&gt;</code></pre>
+                  </section>
+
+                  <section class="space-y-2">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Preview + Edit Behavior
+                    </h3>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div>Clicking the nav button opens the slide-out in Block Editor preview and Page Preview mode.</div>
+                      <div>Interactive nav elements do not trigger “Edit Block”. Clicking outside them still opens the editor in edit mode.</div>
+                      <div>In CMS preview, fixed nav and panel are contained to the preview surface by the block wrapper.</div>
+                    </div>
                   </section>
                 </div>
               </div>
