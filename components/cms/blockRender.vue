@@ -4,15 +4,15 @@ import { renderTemplate } from '@edgedev/template-engine'
 const props = defineProps({
   content: {
     type: String,
-    required: true,
+    default: '',
   },
   values: {
     type: Object,
-    required: true,
+    default: () => ({}),
   },
   meta: {
     type: Object,
-    required: true,
+    default: () => ({}),
   },
   theme: {
     type: Object,

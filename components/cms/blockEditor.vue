@@ -32,6 +32,7 @@ const state = reactive({
   seedingInitialBlocks: false,
   previewViewport: 'full',
   previewBlock: null,
+  editorWorkingDoc: null,
   themeDefaultAppliedForBlockId: '',
 })
 
@@ -47,6 +48,14 @@ const previewViewportOptions = [
   { id: 'medium', label: 'Medium', width: '992px', icon: Tablet },
   { id: 'mobile', label: 'Mobile', width: '420px', icon: Smartphone },
 ]
+const previewTypeOptions = [
+  { name: 'light', title: 'Light Preview' },
+  { name: 'dark', title: 'Dark Preview' },
+]
+
+const normalizePreviewType = (value) => {
+  return value === 'dark' ? 'dark' : 'light'
+}
 
 const selectedPreviewViewport = computed(() => previewViewportOptions.find(option => option.id === state.previewViewport) || previewViewportOptions[0])
 
@@ -70,6 +79,13 @@ const previewViewportMode = computed(() => {
   if (state.previewViewport === 'full')
     return 'auto'
   return state.previewViewport
+})
+
+const previewSurfaceClass = computed(() => {
+  const previewType = normalizePreviewType(state.previewBlock?.previewType)
+  return previewType === 'light'
+    ? 'bg-white text-black'
+    : 'bg-neutral-950 text-neutral-50'
 })
 
 onMounted(() => {
@@ -163,6 +179,14 @@ function insertBlockContentSnippet(snippet) {
     return
   }
   editor.insertSnippet(snippet)
+}
+
+const updateWorkingPreviewType = (nextValue) => {
+  const normalized = normalizePreviewType(nextValue)
+  if (state.editorWorkingDoc)
+    state.editorWorkingDoc.previewType = normalized
+  if (state.previewBlock)
+    state.previewBlock.previewType = normalized
 }
 
 function normalizeConfigLiteral(str) {
@@ -444,6 +468,7 @@ const buildPreviewBlock = (workingDoc, parsed) => {
     id: state.previewBlock?.id || 'preview',
     blockId: props.blockId,
     name: workingDoc?.name || state.previewBlock?.name || '',
+    previewType: normalizePreviewType(workingDoc?.previewType),
     content,
     values: nextValues,
     meta: nextMeta,
@@ -471,7 +496,8 @@ const theme = computed(() => {
 const previewThemeRenderKey = computed(() => {
   const themeId = String(edgeGlobal.edgeState.blockEditorTheme || 'no-theme')
   const siteId = String(edgeGlobal.edgeState.blockEditorSite || 'no-site')
-  return `${themeId}:${siteId}:${state.previewViewport}`
+  const previewType = normalizePreviewType(state.previewBlock?.previewType)
+  return `${themeId}:${siteId}:${state.previewViewport}:${previewType}`
 })
 
 const headObject = computed(() => {
@@ -489,6 +515,7 @@ watch(headObject, (newHeadElements) => {
 }, { immediate: true, deep: true })
 
 const editorDocUpdates = (workingDoc) => {
+  state.editorWorkingDoc = workingDoc || null
   const parsed = blockModel(workingDoc.content)
   state.workingDoc = parsed
   state.previewBlock = buildPreviewBlock(workingDoc, parsed)
@@ -709,6 +736,17 @@ const exportCurrentBlock = () => {
               class="w-full"
             />
           </div>
+          <div class="flex-1">
+            <edge-shad-select
+              v-if="!state.loading"
+              :model-value="state.editorWorkingDoc?.previewType || 'light'"
+              name="previewType"
+              :items="previewTypeOptions"
+              placeholder="Preview Surface"
+              class="w-full"
+              @update:model-value="updateWorkingPreviewType($event)"
+            />
+          </div>
           <div class="flex items-center gap-2">
             <edge-shad-button
               type="button"
@@ -774,7 +812,7 @@ const exportCurrentBlock = () => {
                 ref="contentEditorRef"
                 v-model="slotProps.workingDoc.content"
                 title="Block Content"
-                language="html"
+                language="handlebars"
                 name="content"
                 :enable-formatting="false"
                 height="calc(100vh - 300px)"
@@ -837,20 +875,24 @@ const exportCurrentBlock = () => {
                 </div>
               </div>
               <div
-                class="w-full mx-auto bg-card border border-border rounded-lg shadow-sm md:shadow-md"
+                class="w-full mx-auto rounded-none overflow-visible"
                 :style="previewViewportStyle"
               >
-                <edge-cms-block
-                  v-if="state.previewBlock"
-                  :key="previewThemeRenderKey"
-                  v-model="state.previewBlock"
-                  :site-id="edgeGlobal.edgeState.blockEditorSite"
-                  :theme="theme"
-                  :edit-mode="true"
-                  :viewport-mode="previewViewportMode"
-                  :block-id="state.previewBlock.id"
-                  @delete="ignorePreviewDelete"
-                />
+                <div class="relative overflow-visible min-h-[88px] rounded-none" :class="previewSurfaceClass" style="transform: translateZ(0);">
+                  <edge-cms-block
+                    v-if="state.previewBlock"
+                    :key="previewThemeRenderKey"
+                    v-model="state.previewBlock"
+                    :site-id="edgeGlobal.edgeState.blockEditorSite"
+                    :theme="theme"
+                    :edit-mode="true"
+                    :contain-fixed="true"
+                    :allow-delete="false"
+                    :viewport-mode="previewViewportMode"
+                    :block-id="state.previewBlock.id"
+                    @delete="ignorePreviewDelete"
+                  />
+                </div>
               </div>
             </div>
           </div>

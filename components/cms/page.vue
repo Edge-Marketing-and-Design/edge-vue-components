@@ -1695,8 +1695,8 @@ const hasUnsavedChanges = (changes) => {
           <Separator class="my-4" />
           <div
             :key="selectedThemeId"
-            class="w-full mx-auto bg-card border border-border rounded-lg shadow-sm md:shadow-md p-0 space-y-6"
-            :class="{ 'transition-all duration-300': !state.editMode }"
+            class="w-full mx-auto bg-card border border-border shadow-sm md:shadow-md p-0 space-y-6"
+            :class="[{ 'transition-all duration-300': !state.editMode }, state.editMode ? 'rounded-lg' : 'rounded-none']"
             :style="previewViewportStyle"
           >
             <edge-button-divider v-if="state.editMode" class="my-2">
@@ -1840,6 +1840,7 @@ const hasUnsavedChanges = (changes) => {
                                   v-model="slotProps.workingDoc.content[blockIndex(slotProps.workingDoc, blockId, false)]"
                                   :site-id="props.site"
                                   :edit-mode="state.editMode"
+                                  :contain-fixed="true"
                                   :viewport-mode="previewViewportMode"
                                   :block-id="blockId"
                                   :theme="theme"
@@ -1946,8 +1947,8 @@ const hasUnsavedChanges = (changes) => {
           <Separator class="my-4" />
           <div
             :key="`${selectedThemeId}-post`"
-            class="w-full mx-auto bg-card border border-border rounded-lg shadow-sm md:shadow-md p-4 space-y-6"
-            :class="{ 'transition-all duration-300': !state.editMode }"
+            class="w-full mx-auto bg-card border border-border shadow-sm md:shadow-md p-4 space-y-6"
+            :class="[{ 'transition-all duration-300': !state.editMode }, state.editMode ? 'rounded-lg' : 'rounded-none']"
             :style="previewViewportStyle"
           >
             <edge-button-divider v-if="state.editMode" class="my-2">
@@ -2090,6 +2091,7 @@ const hasUnsavedChanges = (changes) => {
                                   v-if="blockIndex(slotProps.workingDoc, blockId, true) !== -1"
                                   v-model="slotProps.workingDoc.postContent[blockIndex(slotProps.workingDoc, blockId, true)]"
                                   :edit-mode="state.editMode"
+                                  :contain-fixed="true"
                                   :viewport-mode="previewViewportMode"
                                   :block-id="blockId"
                                   :theme="theme"
