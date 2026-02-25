@@ -29,19 +29,26 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:modelValue', 'delete'])
 const edgeFirebase = inject('edgeFirebase')
+
+function extractFieldNameFromTagConfig(configSource) {
+  if (!configSource || typeof configSource !== 'string')
+    return null
+  const match = configSource.match(/(?:["']field["']|field)\s*:\s*["']([^"']+)["']/)
+  return match?.[1] || null
+}
+
 function extractFieldsInOrder(template) {
   if (!template || typeof template !== 'string')
     return []
   const fields = []
   const seen = new Set()
-  const TAG_RE = /\{\{\{#[^\s]+\s+(\{[\s\S]*?\})\}\}\}/g
+  const TAG_RE = /\{\{\{#[^\s}]+\s+([\s\S]*?)\}\}\}/g
   let m = TAG_RE.exec(template)
   while (m) {
-    const cfg = m[1]
-    const fm = cfg.match(/"field"\s*:\s*"([^"]+)"/)
-    if (fm && !seen.has(fm[1])) {
-      fields.push(fm[1])
-      seen.add(fm[1])
+    const field = extractFieldNameFromTagConfig(m[1])
+    if (field && !seen.has(field)) {
+      fields.push(field)
+      seen.add(field)
     }
     m = TAG_RE.exec(template)
   }

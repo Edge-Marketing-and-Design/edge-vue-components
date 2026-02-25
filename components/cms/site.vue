@@ -175,6 +175,44 @@ const canCreateSite = computed(() => {
     return true
   return isOrgAdmin.value
 })
+const cmsMultiOrg = useState('cmsMultiOrg', () => false)
+const canEditSiteSettings = computed(() => {
+  if (!cmsMultiOrg.value)
+    return true
+  return currentOrgRoleName.value === 'admin' || currentOrgRoleName.value === 'site admin'
+})
+const useMenuPublishLabels = computed(() => {
+  return cmsMultiOrg.value && !canEditSiteSettings.value
+})
+const cmsSiteTabs = useState('cmsSiteTabs', () => ({
+  pages: true,
+  posts: true,
+  inbox: true,
+}))
+const cmsTabAccess = computed(() => {
+  const normalized = {
+    pages: cmsSiteTabs.value?.pages !== false,
+    posts: cmsSiteTabs.value?.posts !== false,
+    inbox: cmsSiteTabs.value?.inbox !== false,
+  }
+  if (!normalized.pages && !normalized.posts && !normalized.inbox) {
+    normalized.inbox = true
+  }
+  return normalized
+})
+const canViewPagesTab = computed(() => cmsTabAccess.value.pages)
+const canViewPostsTab = computed(() => cmsTabAccess.value.posts)
+const canViewInboxTab = computed(() => cmsTabAccess.value.inbox)
+const hidePublishStatusAndActions = computed(() => cmsMultiOrg.value && !canViewPagesTab.value)
+const defaultViewMode = computed(() => {
+  if (canViewPagesTab.value)
+    return 'pages'
+  if (canViewPostsTab.value)
+    return 'posts'
+  if (canViewInboxTab.value)
+    return 'submissions'
+  return 'pages'
+})
 
 const siteData = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site] || {}
@@ -1319,10 +1357,39 @@ const isPublishedPageDiff = (pageId) => {
 
 const pageStatusLabel = pageId => (isPublishedPageDiff(pageId) ? 'Draft' : 'Published')
 const hasSelection = computed(() => Boolean(props.page) || Boolean(state.selectedPostId))
-const showSplitView = computed(() => isTemplateSite.value || state.viewMode === 'pages' || hasSelection.value)
-const isEditingPost = computed(() => state.viewMode === 'posts' && Boolean(state.selectedPostId))
+const showSplitView = computed(() => isTemplateSite.value || (canViewPagesTab.value && (state.viewMode === 'pages' || hasSelection.value)))
+const isEditingPost = computed(() => canViewPostsTab.value && state.viewMode === 'posts' && Boolean(state.selectedPostId))
+
+const ensureValidViewMode = () => {
+  let nextMode = state.viewMode
+  if (nextMode === 'pages' && !canViewPagesTab.value)
+    nextMode = defaultViewMode.value
+  if (nextMode === 'posts' && !canViewPostsTab.value)
+    nextMode = defaultViewMode.value
+  if (nextMode === 'submissions' && !canViewInboxTab.value)
+    nextMode = defaultViewMode.value
+
+  if (state.viewMode !== nextMode)
+    state.viewMode = nextMode
+
+  if (state.viewMode !== 'posts') {
+    state.selectedPostId = ''
+  }
+  if (state.viewMode !== 'submissions') {
+    state.selectedSubmissionId = ''
+  }
+  if (props.page && state.viewMode !== 'pages') {
+    router.replace(pageRouteBase.value)
+  }
+}
 
 const setViewMode = (mode) => {
+  if (mode === 'pages' && !canViewPagesTab.value)
+    return
+  if (mode === 'posts' && !canViewPostsTab.value)
+    return
+  if (mode === 'submissions' && !canViewInboxTab.value)
+    return
   if (state.viewMode === mode)
     return
   state.viewMode = mode
@@ -1335,6 +1402,8 @@ const setViewMode = (mode) => {
 
 const handlePostSelect = (postId) => {
   if (!postId)
+    return
+  if (!canViewPostsTab.value)
     return
   state.selectedPostId = postId
   state.viewMode = 'posts'
@@ -1397,13 +1466,32 @@ watch(pages, (pagesCollection) => {
 watch(() => props.page, (next) => {
   if (next) {
     state.selectedPostId = ''
-    state.viewMode = 'pages'
+    if (canViewPagesTab.value) {
+      state.viewMode = 'pages'
+    }
+    else {
+      state.viewMode = defaultViewMode.value
+      if (props.page)
+        router.replace(pageRouteBase.value)
+    }
     return
   }
-  if (state.selectedPostId) {
+  if (state.selectedPostId && canViewPostsTab.value) {
     state.viewMode = 'posts'
+    return
   }
+  ensureValidViewMode()
 })
+
+watch(cmsTabAccess, () => {
+  ensureValidViewMode()
+}, { immediate: true, deep: true })
+
+watch(canEditSiteSettings, (allowed) => {
+  if (!allowed && state.siteSettings) {
+    state.siteSettings = false
+  }
+}, { immediate: true })
 
 watch([isViewingSubmissions, sortedSubmissionIds], () => {
   if (!isViewingSubmissions.value)
@@ -1650,7 +1738,7 @@ const pageSettingsUpdated = async (pageData) => {
             @update:model-value="value => (slotProps.workingDoc.theme = value || '')"
           />
           <edge-shad-select-tags
-            v-if="Object.keys(orgUsers).length > 0"
+            v-if="!cmsMultiOrg && Object.keys(orgUsers).length > 0"
             :model-value="getSiteUsersModel(slotProps.workingDoc)"
             :disabled="shouldForceCurrentUserForNewSite || !edgeGlobal.isAdminGlobal(edgeFirebase).value"
             :items="userOptions"
@@ -1681,6 +1769,7 @@ const pageSettingsUpdated = async (pageData) => {
             </div>
             <div class="space-y-3">
               <edge-shad-select
+                v-if="!cmsMultiOrg"
                 :model-value="slotProps.workingDoc.aiAgentUserId || ''"
                 name="aiAgentUserId"
                 label="User Data for AI to use to build initial site"
@@ -1718,8 +1807,9 @@ const pageSettingsUpdated = async (pageData) => {
           </span>
         </div>
         <div class="flex justify-center">
-          <div v-if="!isTemplateSite" class="flex items-center rounded-full border border-border bg-background p-1 shadow-sm">
+          <div v-if="!isTemplateSite && (canViewPagesTab || canViewPostsTab || canViewInboxTab)" class="flex items-center rounded-full border border-border bg-background p-1 shadow-sm">
             <edge-shad-button
+              v-if="canViewPagesTab"
               variant="ghost"
               size="sm"
               class="h-8 px-4 text-xs gap-2 rounded-full"
@@ -1730,6 +1820,7 @@ const pageSettingsUpdated = async (pageData) => {
               Pages
             </edge-shad-button>
             <edge-shad-button
+              v-if="canViewPostsTab"
               variant="ghost"
               size="sm"
               class="h-8 px-4 text-xs gap-2 rounded-full"
@@ -1740,6 +1831,7 @@ const pageSettingsUpdated = async (pageData) => {
               Posts
             </edge-shad-button>
             <edge-shad-button
+              v-if="canViewInboxTab"
               variant="ghost"
               size="sm"
               class="h-8 px-4 text-xs gap-2 rounded-full"
@@ -1779,13 +1871,13 @@ const pageSettingsUpdated = async (pageData) => {
             <Loader2 v-if="state.importingPages" class="h-3.5 w-3.5 animate-spin" />
             <Upload v-else class="h-3.5 w-3.5" />
           </edge-shad-button>
-          <template v-if="!isTemplateSite">
+          <template v-if="!isTemplateSite && !hidePublishStatusAndActions">
             <Transition name="fade" mode="out-in">
               <div v-if="isSiteDiff || isAnyPagesDiff" key="unpublished" class="flex gap-2 items-center">
                 <div class="flex gap-1 items-center bg-yellow-100 text-xs py-1 px-3 text-yellow-800 rounded">
                   <CircleAlert class="!text-yellow-800 w-3 h-6" />
                   <span class="font-medium text-[10px]">
-                    {{ isSiteDiff ? 'Unpublished Settings' : 'Unpublished Pages' }}
+                    {{ isSiteDiff ? (useMenuPublishLabels ? 'Unpublished Menu' : 'Unpublished Settings') : 'Unpublished Pages' }}
                   </span>
                 </div>
                 <edge-shad-button
@@ -1801,7 +1893,7 @@ const pageSettingsUpdated = async (pageData) => {
               <div v-else key="published" class="flex gap-1 items-center bg-green-100 text-xs py-1 px-3 text-green-800 rounded">
                 <FileCheck class="!text-green-800 w-3 h-6" />
                 <span class="font-medium text-[10px]">
-                  Settings Published
+                  {{ useMenuPublishLabels ? 'Menu Published' : 'Settings Published' }}
                 </span>
               </div>
             </Transition>
@@ -1839,7 +1931,7 @@ const pageSettingsUpdated = async (pageData) => {
                   Unpublish Site
                 </DropdownMenuItem>
 
-                <DropdownMenuItem @click="state.siteSettings = true">
+                <DropdownMenuItem v-if="canEditSiteSettings" @click="state.siteSettings = true">
                   <FolderCog />
                   <span>Settings</span>
                 </DropdownMenuItem>
@@ -2003,7 +2095,7 @@ const pageSettingsUpdated = async (pageData) => {
               <SidebarGroup class="mt-0 pt-0 h-full min-h-0">
                 <SidebarGroupContent class="h-full min-h-0 overflow-y-auto">
                   <SidebarMenu class="pb-4">
-                    <template v-if="isTemplateSite || state.viewMode === 'pages'">
+                    <template v-if="isTemplateSite || (canViewPagesTab && state.viewMode === 'pages')">
                       <edge-cms-menu
                         v-if="state.menus"
                         v-model="state.menus"
@@ -2120,7 +2212,7 @@ const pageSettingsUpdated = async (pageData) => {
         </DialogFooter>
       </DialogContent>
     </edge-shad-dialog>
-    <Sheet v-model:open="state.siteSettings">
+    <Sheet v-if="canEditSiteSettings" v-model:open="state.siteSettings">
       <SheetContent side="left" class="w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl">
         <SheetHeader>
           <SheetTitle>{{ siteData.name || 'Site' }}</SheetTitle>
@@ -2145,7 +2237,7 @@ const pageSettingsUpdated = async (pageData) => {
                 :theme-options="themeOptions"
                 :user-options="userOptions"
                 :has-users="Object.keys(orgUsers).length > 0"
-                :show-users="true"
+                :show-users="!cmsMultiOrg"
                 :show-theme-fields="true"
                 :is-admin="isAdmin"
                 :enable-media-picker="true"
