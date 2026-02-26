@@ -121,6 +121,11 @@ const BLOCK_CONTENT_SNIPPETS = [
     description: 'Simple text field placeholder',
   },
   {
+    label: 'Text with Options',
+    snippet: '{{{#text {"field":"fieldName","title":"Field Label","option":{"field":"fieldName","options":[{"title":"Option 1","name":"option1"},{"title":"Option 2","name":"option2"}],"optionsKey":"title","optionsValue":"name"},"value":"option1"}}}}',
+    description: 'Text field with selectable options',
+  },
+  {
     label: 'Text Area',
     snippet: '{{{#textarea {"field": "fieldName", "value": "" }}}}',
     description: 'Textarea field placeholder',
@@ -1489,8 +1494,11 @@ const exportCurrentBlock = () => {
                       <div><code>cms-nav-overlay</code>: backdrop click-to-close (optional but recommended).</div>
                       <div><code>cms-nav-close</code>: explicit close button in panel (optional).</div>
                       <div><code>cms-nav-link</code>: links that should close panel on click (optional).</div>
+                      <div><code>cms-nav-main</code>: optional hook for scroll/sticky/hide classes (defaults to first <code>&lt;nav&gt;</code>).</div>
                       <div><code>cms-nav-pos-right</code>, <code>cms-nav-pos-left</code>, <code>cms-nav-pos-center</code>: helper classes for menu position behavior.</div>
                       <div><code>cms-nav-layout</code>, <code>cms-nav-logo</code>, <code>cms-nav-desktop</code>: optional structure hooks for precise layout mapping.</div>
+                      <div><code>cms-nav-sticky</code>: force sticky top behavior even if your nav did not include fixed classes.</div>
+                      <div><code>cms-nav-hide-on-down</code>: hide nav on scroll down, show on scroll up.</div>
                     </div>
                   </section>
 
@@ -1503,6 +1511,11 @@ const exportCurrentBlock = () => {
                       <div><code>data-cms-nav-open-class="your-class"</code> to change the root open class (default <code>is-open</code>).</div>
                       <div><code>data-cms-nav-close-on-link="false"</code> to keep panel open after link clicks.</div>
                       <div><code>data-cms-nav-position="right|left|center"</code> as an alternative to helper classes.</div>
+                      <div><code>data-cms-nav-scrolled-class</code> / <code>data-cms-nav-top-class</code>: classes toggled on nav main target.</div>
+                      <div><code>data-cms-nav-scrolled-row-class</code> / <code>data-cms-nav-top-row-class</code>: classes toggled on <code>cms-nav-layout</code> for shrink/expand.</div>
+                      <div><code>data-cms-nav-scroll-threshold</code>: px before “scrolled” classes apply (default 10).</div>
+                      <div><code>data-cms-nav-hide-on-down="true"</code>, <code>data-cms-nav-hide-threshold</code> (default 80), <code>data-cms-nav-hide-delta</code> (default 6).</div>
+                      <div><code>data-cms-nav-hidden-class</code> / <code>data-cms-nav-visible-class</code> / <code>data-cms-nav-transition-class</code> for hide/show animation control.</div>
                     </div>
                   </section>
 
@@ -1510,9 +1523,9 @@ const exportCurrentBlock = () => {
                     <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                       Nav Block Template (Copy / Paste)
                     </h3>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;div class="cms-nav-root" data-cms-nav-root data-cms-nav-position="{{{#text {"field":"navPosition","title":"Menu Position","option":{"field":"navPosition","options":[{"title":"Right","name":"right"},{"title":"Left","name":"left"},{"title":"Center","name":"center"}],"optionsKey":"title","optionsValue":"name"},"value":"right"}}}}" data-cms-nav-close-on-link="true"&gt;
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;div class="cms-nav-root cms-nav-sticky" data-cms-nav-root data-cms-nav-position="{{{#text {"field":"navPosition","title":"Menu Position","option":{"field":"navPosition","options":[{"title":"Right","name":"right"},{"title":"Left","name":"left"},{"title":"Center","name":"center"}],"optionsKey":"title","optionsValue":"name"},"value":"right"}}}}" data-cms-nav-close-on-link="true" data-cms-nav-top-class="bg-transparent border-transparent" data-cms-nav-scrolled-class="bg-navBg/80 backdrop-blur-lg shadow-lg" data-cms-nav-top-row-class="h-[64px] md:h-[88px] py-6 md:py-8" data-cms-nav-scrolled-row-class="h-[56px] md:h-[68px] py-5 md:py-4"&gt;
   {{{#array {"field":"siteDoc","as":"site","collection":{"path":"sites","query":[{"field":"docId","operator":"==","value":"{siteId}"}],"order":[]},"limit":1,"value":[]}}}}
-  &lt;nav class="fixed inset-x-0 top-0 z-30 w-full bg-transparent text-navText"&gt;
+  &lt;nav class="cms-nav-main fixed inset-x-0 top-0 z-30 w-full bg-transparent text-navText"&gt;
     &lt;div class="relative w-full px-6 md:px-12"&gt;
       &lt;div class="cms-nav-layout flex h-[64px] md:h-[88px] items-center justify-between gap-6 py-6 md:py-8"&gt;
         &lt;a href="/" class="cms-nav-logo cursor-pointer text-xl text-navText"&gt;
@@ -1524,16 +1537,16 @@ const exportCurrentBlock = () => {
         &lt;/a&gt;
 
         &lt;div class="cms-nav-desktop ml-auto flex items-center gap-2"&gt;
-          &lt;ul class="hidden lg:flex items-center space-x-[20px] pt-1 text-sm uppercase tracking-widest"&gt;
+          &lt;ul class="hidden lg:flex items-center gap-x-[20px] pt-1 text-sm uppercase tracking-widest list-none m-0 p-0 [&amp;&gt;li]:m-0 [&amp;&gt;li&gt;a]:m-0"&gt;
             {{{#subarray:navItem {"field":"item.menus.Site Root","value":[]}}}}
             &lt;li class="relative group"&gt;
               {{{#if {"cond":"navItem.item.type == external"}}}}
-              &lt;a href="{{navItem.item.url}}" class="nav-item cursor-pointer"&gt;{{navItem.name}}&lt;/a&gt;
+              &lt;a href="{{navItem.item.url}}" class="cursor-pointer"&gt;{{navItem.name}}&lt;/a&gt;
               {{{#else}}}
               {{{#if {"cond":"navItem.name == home"}}}}
-              &lt;a href="/" class="nav-item cursor-pointer"&gt;{{navItem.name}}&lt;/a&gt;
+              &lt;a href="/" class="cursor-pointer"&gt;{{navItem.name}}&lt;/a&gt;
               {{{#else}}}
-              &lt;a href="/{{navItem.name}}" class="nav-item cursor-pointer"&gt;{{navItem.name}}&lt;/a&gt;
+              &lt;a href="/{{navItem.name}}" class="cursor-pointer"&gt;{{navItem.name}}&lt;/a&gt;
               {{{/if}}}
               {{{/if}}}
             &lt;/li&gt;
