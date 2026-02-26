@@ -1524,7 +1524,7 @@ const exportCurrentBlock = () => {
                       Nav Block Template (Copy / Paste)
                     </h3>
                     <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;div class="cms-nav-root cms-nav-sticky" data-cms-nav-root data-cms-nav-position="{{{#text {"field":"navPosition","title":"Menu Position","option":{"field":"navPosition","options":[{"title":"Right","name":"right"},{"title":"Left","name":"left"},{"title":"Center","name":"center"}],"optionsKey":"title","optionsValue":"name"},"value":"right"}}}}" data-cms-nav-close-on-link="true" data-cms-nav-top-class="bg-transparent border-transparent" data-cms-nav-scrolled-class="bg-navBg/80 backdrop-blur-lg shadow-lg" data-cms-nav-top-row-class="h-[64px] md:h-[88px] py-6 md:py-8" data-cms-nav-scrolled-row-class="h-[56px] md:h-[68px] py-5 md:py-4"&gt;
-  {{{#array {"field":"siteDoc","as":"site","collection":{"path":"sites","query":[{"field":"docId","operator":"==","value":"{siteId}"}],"order":[]},"limit":1,"value":[]}}}}
+  {{{#array {"field":"siteDoc","as":"site","collection":{"path":"sites","uniqueKey":"{orgId}","query":[{"field":"docId","operator":"==","value":"{siteId}"}],"order":[]},"limit":1,"value":[]}}}}
   &lt;nav class="cms-nav-main fixed inset-x-0 top-0 z-30 w-full bg-transparent text-navText"&gt;
     &lt;div class="relative w-full px-6 md:px-12"&gt;
       &lt;div class="cms-nav-layout flex h-[64px] md:h-[88px] items-center justify-between gap-6 py-6 md:py-8"&gt;
