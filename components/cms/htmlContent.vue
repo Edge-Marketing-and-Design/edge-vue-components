@@ -403,6 +403,18 @@ function initCmsNavHelpers(scope) {
       return
 
     root.dataset.cmsNavInit = 'true'
+    const resolvePosition = () => {
+      const attrValue = String(root.getAttribute('data-cms-nav-position') || '').trim().toLowerCase()
+      if (attrValue === 'left' || attrValue === 'center' || attrValue === 'right')
+        return attrValue
+      if (root.classList.contains('cms-nav-pos-left'))
+        return 'left'
+      if (root.classList.contains('cms-nav-pos-center'))
+        return 'center'
+      return 'right'
+    }
+
+    const position = resolvePosition()
     const openClass = root.getAttribute('data-cms-nav-open-class') || 'is-open'
     const panel = root.querySelector('.cms-nav-panel, [data-cms-nav-panel]')
     const overlay = root.querySelector('.cms-nav-overlay, [data-cms-nav-overlay]')
@@ -410,6 +422,47 @@ function initCmsNavHelpers(scope) {
     const closeButtons = Array.from(root.querySelectorAll('.cms-nav-close, [data-cms-nav-close]'))
     const links = Array.from(root.querySelectorAll('.cms-nav-link, [data-cms-nav-link]'))
     const closeOnLink = root.getAttribute('data-cms-nav-close-on-link') !== 'false'
+    const navRow = root.querySelector('.cms-nav-layout, [data-cms-nav-layout], nav > div > div')
+    const desktopWrap = root.querySelector('.cms-nav-desktop, [data-cms-nav-desktop]')
+      || navRow?.children?.[1]
+      || null
+    const logoLink = root.querySelector('.cms-nav-logo, [data-cms-nav-logo]')
+      || navRow?.querySelector('a')
+      || null
+    const panelHiddenClass = position === 'left' ? '-translate-x-full' : 'translate-x-full'
+
+    if (navRow) {
+      navRow.classList.remove('flex-row', 'flex-row-reverse', 'justify-between', 'justify-center')
+      navRow.classList.add('flex', 'items-center', 'gap-6')
+      if (position === 'left') {
+        navRow.classList.add('flex-row-reverse', 'justify-between')
+      }
+      else if (position === 'center') {
+        navRow.classList.add('flex-row', 'justify-center')
+      }
+      else {
+        navRow.classList.add('flex-row', 'justify-between')
+      }
+    }
+
+    if (logoLink) {
+      logoLink.classList.remove('mr-6')
+      if (position === 'center')
+        logoLink.classList.add('mr-6')
+    }
+
+    if (desktopWrap) {
+      desktopWrap.classList.remove('ml-auto', 'md:flex-1', 'md:pl-6', 'items-center', 'gap-6')
+      if (position === 'left') {
+        desktopWrap.classList.add('md:flex-1', 'md:pl-6')
+      }
+      else if (position === 'center') {
+        desktopWrap.classList.add('items-center', 'gap-6')
+      }
+      else {
+        desktopWrap.classList.add('ml-auto')
+      }
+    }
 
     const markInteractive = (el) => {
       if (!el)
@@ -434,10 +487,18 @@ function initCmsNavHelpers(scope) {
       })
 
       if (panel) {
+        panel.classList.remove('left-0', 'right-0', 'right-auto', 'left-auto', 'translate-x-full', '-translate-x-full')
+        if (position === 'left') {
+          panel.classList.add('left-0', 'right-auto')
+        }
+        else {
+          panel.classList.add('right-0', 'left-auto')
+        }
+
         panel.classList.toggle('translate-x-0', open)
         panel.classList.toggle('opacity-100', open)
         panel.classList.toggle('pointer-events-auto', open)
-        panel.classList.toggle('translate-x-full', !open)
+        panel.classList.toggle(panelHiddenClass, !open)
         panel.classList.toggle('opacity-0', !open)
         panel.classList.toggle('pointer-events-none', !open)
         panel.setAttribute('aria-hidden', open ? 'false' : 'true')

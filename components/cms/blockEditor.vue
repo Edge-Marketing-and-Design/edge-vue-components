@@ -898,6 +898,7 @@ const exportCurrentBlock = () => {
                     :theme="theme"
                     :edit-mode="true"
                     :contain-fixed="true"
+                    :disable-interactive-preview-in-edit="false"
                     :allow-delete="false"
                     :viewport-mode="previewViewportMode"
                     :block-id="state.previewBlock.id"
@@ -1488,6 +1489,8 @@ const exportCurrentBlock = () => {
                       <div><code>cms-nav-overlay</code>: backdrop click-to-close (optional but recommended).</div>
                       <div><code>cms-nav-close</code>: explicit close button in panel (optional).</div>
                       <div><code>cms-nav-link</code>: links that should close panel on click (optional).</div>
+                      <div><code>cms-nav-pos-right</code>, <code>cms-nav-pos-left</code>, <code>cms-nav-pos-center</code>: helper classes for menu position behavior.</div>
+                      <div><code>cms-nav-layout</code>, <code>cms-nav-logo</code>, <code>cms-nav-desktop</code>: optional structure hooks for precise layout mapping.</div>
                     </div>
                   </section>
 
@@ -1499,6 +1502,7 @@ const exportCurrentBlock = () => {
                       <div><code>data-cms-nav-open="true"</code> to start open.</div>
                       <div><code>data-cms-nav-open-class="your-class"</code> to change the root open class (default <code>is-open</code>).</div>
                       <div><code>data-cms-nav-close-on-link="false"</code> to keep panel open after link clicks.</div>
+                      <div><code>data-cms-nav-position="right|left|center"</code> as an alternative to helper classes.</div>
                     </div>
                   </section>
 
@@ -1506,16 +1510,20 @@ const exportCurrentBlock = () => {
                     <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                       Nav Block Template (Copy / Paste)
                     </h3>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;div class="cms-nav-root" data-cms-nav-root data-cms-nav-close-on-link="true"&gt;
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;div class="cms-nav-root" data-cms-nav-root data-cms-nav-position="{{{#text {"field":"navPosition","title":"Menu Position","option":{"field":"navPosition","options":[{"title":"Right","name":"right"},{"title":"Left","name":"left"},{"title":"Center","name":"center"}],"optionsKey":"title","optionsValue":"name"},"value":"right"}}}}" data-cms-nav-close-on-link="true"&gt;
+  {{{#array {"field":"siteDoc","as":"site","collection":{"path":"sites","query":[{"field":"docId","operator":"==","value":"{siteId}"}],"order":[]},"limit":1,"value":[]}}}}
   &lt;nav class="fixed inset-x-0 top-0 z-30 w-full bg-transparent text-navText"&gt;
-    {{{#array {"field":"siteDoc","as":"site","collection":{"path":"sites","query":[{"field":"docId","operator":"==","value":"{siteId}"}],"order":[]},"limit":1,"value":[]}}}}
     &lt;div class="relative w-full px-6 md:px-12"&gt;
-      &lt;div class="flex h-[64px] md:h-[88px] items-center justify-between gap-6 py-6 md:py-8"&gt;
-        &lt;a href="/" class="cursor-pointer text-xl text-navText"&gt;
+      &lt;div class="cms-nav-layout flex h-[64px] md:h-[88px] items-center justify-between gap-6 py-6 md:py-8"&gt;
+        &lt;a href="/" class="cms-nav-logo cursor-pointer text-xl text-navText"&gt;
+          {{{#if {"cond":"site.logoLight"}}}}
+          &lt;img src="{{site.logoLight}}" class="h-[56px] md:h-[72px] py-3" /&gt;
+          {{{#else}}}
           &lt;img src="{{site.logo}}" class="h-[56px] md:h-[72px] py-3" /&gt;
+          {{{/if}}}
         &lt;/a&gt;
 
-        &lt;div class="ml-auto flex items-center gap-2"&gt;
+        &lt;div class="cms-nav-desktop ml-auto flex items-center gap-2"&gt;
           &lt;ul class="hidden lg:flex items-center space-x-[20px] pt-1 text-sm uppercase tracking-widest"&gt;
             {{{#subarray:navItem {"field":"item.menus.Site Root","value":[]}}}}
             &lt;li class="relative group"&gt;
@@ -1540,34 +1548,50 @@ const exportCurrentBlock = () => {
         &lt;/div&gt;
       &lt;/div&gt;
     &lt;/div&gt;
-    {{{/array}}}
   &lt;/nav&gt;
 
   &lt;div class="cms-nav-overlay fixed inset-0 z-[110] bg-black/50 transition-opacity duration-300 opacity-0 pointer-events-none"&gt;&lt;/div&gt;
 
   &lt;aside class="cms-nav-panel fixed inset-y-0 right-0 z-[120] w-full max-w-md bg-sideNavBg text-sideNavText transition-all duration-300 translate-x-full opacity-0 pointer-events-none"&gt;
-    &lt;div class="relative h-full overflow-y-auto px-8 py-10"&gt;
+    &lt;div class="relative flex h-full flex-col overflow-y-auto px-8 py-10 text-center"&gt;
       &lt;button type="button" class="cms-nav-close absolute right-6 top-6 text-4xl text-sideNavText"&gt;&amp;times;&lt;/button&gt;
 
-      &lt;ul class="mt-14 space-y-4 uppercase"&gt;
-        {{{#array {"field":"siteDoc","as":"site","collection":{"path":"sites","query":[{"field":"docId","operator":"==","value":"{siteId}"}],"order":[]},"limit":1,"value":[]}}}}
+      &lt;div class="mb-8 mt-2 flex items-center justify-center gap-4"&gt;
+        &lt;a href="/" class="flex items-center gap-4 text-navText"&gt;
+          &lt;img src="{{site.logo}}" class="h-[30px] w-auto max-w-full object-contain" /&gt;
+          {{{#if {"cond":"site.brandLogoDark"}}}}
+          &lt;span class="h-10 w-px bg-black" aria-hidden="true"&gt;&lt;/span&gt;
+          &lt;img src="{{site.brandLogoDark}}" class="h-[30px] w-auto max-w-full object-contain" /&gt;
+          {{{/if}}}
+        &lt;/a&gt;
+      &lt;/div&gt;
+
+      &lt;ul class="w-full space-y-4 border-b border-black pb-4 uppercase"&gt;
         {{{#subarray:navItem {"field":"item.menus.Site Root","value":[]}}}}
-        &lt;li&gt;
+        &lt;li class="border-t border-black pt-4"&gt;
           {{{#if {"cond":"navItem.item.type == external"}}}}
-          &lt;a href="{{navItem.item.url}}" class="cms-nav-link block text-sideNavText"&gt;{{navItem.name}}&lt;/a&gt;
+          &lt;a href="{{navItem.item.url}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{navItem.name}}&lt;/a&gt;
           {{{#else}}}
           {{{#if {"cond":"navItem.name == home"}}}}
-          &lt;a href="/" class="cms-nav-link block text-sideNavText"&gt;{{navItem.name}}&lt;/a&gt;
+          &lt;a href="/" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{navItem.name}}&lt;/a&gt;
           {{{#else}}}
-          &lt;a href="/{{navItem.name}}" class="cms-nav-link block text-sideNavText"&gt;{{navItem.name}}&lt;/a&gt;
+          &lt;a href="/{{navItem.name}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{navItem.name}}&lt;/a&gt;
           {{{/if}}}
           {{{/if}}}
         &lt;/li&gt;
         {{{/subarray}}}
-        {{{/array}}}
       &lt;/ul&gt;
+
+      &lt;div class="mt-10 flex w-full items-center justify-center gap-4"&gt;
+        {{{#if {"cond":"site.socialFacebook"}}}}&lt;a href="{{site.socialFacebook}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText"&gt;F&lt;/a&gt;{{{/if}}}
+        {{{#if {"cond":"site.socialInstagram"}}}}&lt;a href="{{site.socialInstagram}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText"&gt;I&lt;/a&gt;{{{/if}}}
+        {{{#if {"cond":"site.socialLinkedIn"}}}}&lt;a href="{{site.socialLinkedIn}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText"&gt;in&lt;/a&gt;{{{/if}}}
+        {{{#if {"cond":"site.socialYouTube"}}}}&lt;a href="{{site.socialYouTube}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText"&gt;Y&lt;/a&gt;{{{/if}}}
+        {{{#if {"cond":"site.socialTikTok"}}}}&lt;a href="{{site.socialTikTok}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText"&gt;T&lt;/a&gt;{{{/if}}}
+      &lt;/div&gt;
     &lt;/div&gt;
   &lt;/aside&gt;
+  {{{/array}}}
 &lt;/div&gt;</code></pre>
                   </section>
 
@@ -1579,6 +1603,7 @@ const exportCurrentBlock = () => {
                       <div>Clicking the nav button opens the slide-out in Block Editor preview and Page Preview mode.</div>
                       <div>Interactive nav elements do not trigger “Edit Block”. Clicking outside them still opens the editor in edit mode.</div>
                       <div>In CMS preview, fixed nav and panel are contained to the preview surface by the block wrapper.</div>
+                      <div><code>cms-nav-pos-left</code> also switches the slide-out panel to the left side.</div>
                     </div>
                   </section>
                 </div>

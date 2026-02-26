@@ -34,6 +34,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  disableInteractivePreviewInEdit: {
+    type: Boolean,
+    default: true,
+  },
 })
 const emit = defineEmits(['update:modelValue', 'delete'])
 const edgeFirebase = inject('edgeFirebase')
@@ -211,13 +215,18 @@ const shouldContainFixedPreview = computed(() => {
   return (props.editMode || props.containFixed) && hasFixedPositionInContent.value
 })
 
+const shouldDisableInteractivePreview = computed(() => {
+  return props.editMode && props.disableInteractivePreviewInEdit
+})
+
 const blockWrapperClass = computed(() => ({
   'overflow-visible': shouldContainFixedPreview.value,
-  'min-h-[88px]': props.editMode && shouldContainFixedPreview.value,
+  'min-h-[88px]': props.editMode && shouldContainFixedPreview.value && shouldDisableInteractivePreview.value,
+  'min-h-[calc(100vh-360px)]': props.editMode && shouldContainFixedPreview.value && !shouldDisableInteractivePreview.value,
   'z-30': shouldContainFixedPreview.value,
   'bg-white text-black': props.editMode && effectivePreviewType.value === 'light',
   'bg-neutral-950 text-neutral-50': props.editMode && effectivePreviewType.value === 'dark',
-  'cms-nav-edit-static': props.editMode,
+  'cms-nav-edit-static': shouldDisableInteractivePreview.value,
 }))
 
 const blockWrapperStyle = computed(() => {
