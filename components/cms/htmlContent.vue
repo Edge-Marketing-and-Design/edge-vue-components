@@ -645,19 +645,24 @@ function initCmsNavHelpers(scope) {
     }
 
     const applyNavPinMode = () => {
-      if (!stickyEnabled || !navMain)
+      if (!navMain)
         return
       if (shouldPinInsidePreview()) {
         // Pin to viewport with explicit left/width so it stays within preview surface.
-        navMain.classList.remove('sticky', 'inset-x-0')
+        root.classList.remove('cms-nav-preview-relative')
+        navMain.classList.remove('sticky', 'absolute', 'inset-x-0')
         navMain.classList.add('fixed', 'top-0')
       }
+      else if (shouldContainFixedInPreview) {
+        // In preview but non-sticky: overlay within preview surface and scroll away naturally.
+        root.classList.add('cms-nav-preview-relative')
+        navMain.classList.remove('fixed', 'sticky')
+        navMain.classList.add('absolute', 'inset-x-0', 'top-0')
+      }
       else {
-        // In non-preview CMS modes (edit), let nav render in-flow.
-        if (shouldContainFixedInPreview) {
-          navMain.classList.remove('fixed', 'sticky', 'inset-x-0', 'top-0')
-        }
-        else {
+        root.classList.remove('cms-nav-preview-relative')
+        navMain.classList.remove('absolute')
+        if (stickyEnabled) {
           navMain.classList.remove('sticky')
           navMain.classList.add('fixed', 'inset-x-0', 'top-0')
         }
@@ -1383,5 +1388,9 @@ onBeforeUnmount(() => {
 <style>
 p {
   margin-bottom: 1em;
+}
+
+.cms-nav-preview-relative {
+  position: relative;
 }
 </style>

@@ -1538,7 +1538,7 @@ const exportCurrentBlock = () => {
 
         &lt;div class="cms-nav-desktop ml-auto flex items-center gap-2"&gt;
           &lt;ul class="hidden lg:flex items-center gap-x-[20px] pt-1 text-sm uppercase tracking-widest list-none m-0 p-0 [&amp;&gt;li]:m-0 [&amp;&gt;li&gt;a]:m-0"&gt;
-            {{{#subarray:navItem {"field":"item.menus.Site Root","value":[]}}}}
+            {{{#subarray:navItem {"field":"item.menus.Site Root","limit":5,"value":[]}}}}
             &lt;li class="relative group"&gt;
               {{{#if {"cond":"navItem.item.type == external"}}}}
               &lt;a href="{{navItem.item.url}}" class="cursor-pointer"&gt;{{navItem.name}}&lt;/a&gt;
