@@ -1524,20 +1524,32 @@ const exportCurrentBlock = () => {
                       Nav Block Template (Copy / Paste)
                     </h3>
                     <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;div class="cms-nav-root cms-nav-sticky" data-cms-nav-root data-cms-nav-position="{{{#text {"field":"navPosition","title":"Menu Position","option":{"field":"navPosition","options":[{"title":"Right","name":"right"},{"title":"Left","name":"left"},{"title":"Center","name":"center"}],"optionsKey":"title","optionsValue":"name"},"value":"right"}}}}" data-cms-nav-close-on-link="true" data-cms-nav-top-class="bg-transparent border-transparent" data-cms-nav-scrolled-class="bg-navBg/80 backdrop-blur-lg shadow-lg" data-cms-nav-top-row-class="h-[64px] md:h-[88px] py-6 md:py-8" data-cms-nav-scrolled-row-class="h-[56px] md:h-[68px] py-5 md:py-4"&gt;
+<<<<<<< HEAD
   {{{#array {"field":"siteDoc","as":"site","collection":{"path":"sites","uniqueKey":"{orgId}","query":[{"field":"docId","operator":"==","value":"{siteId}"}],"order":[]},"limit":1,"value":[]}}}}
+=======
+  {{{#array {"field":"siteDoc","collection":{"path":"sites","uniqueKey":"{orgId}","query":[{"field":"docId","operator":"==","value":"{siteId}"}],"order":[]},"limit":1,"value":[]}}}}
+>>>>>>> ee3a39df9bdd5f3ecaf9599c2f58db9cb522a014
   &lt;nav class="cms-nav-main fixed inset-x-0 top-0 z-30 w-full bg-transparent text-navText"&gt;
     &lt;div class="relative w-full px-6 md:px-12"&gt;
       &lt;div class="cms-nav-layout flex h-[64px] md:h-[88px] items-center justify-between gap-6 py-6 md:py-8"&gt;
         &lt;a href="/" class="cms-nav-logo cursor-pointer text-xl text-navText"&gt;
+<<<<<<< HEAD
           {{{#if {"cond":"site.logoLight"}}}}
           &lt;img src="{{site.logoLight}}" class="h-[56px] md:h-[72px] py-3" /&gt;
           {{{#else}}}
           &lt;img src="{{site.logo}}" class="h-[56px] md:h-[72px] py-3" /&gt;
+=======
+          {{{#if {"cond":"item.logoLight"}}}}
+          &lt;img src="{{item.logoLight}}" class="h-[56px] md:h-[72px] py-3" /&gt;
+          {{{#else}}}
+          &lt;img src="{{item.logo}}" class="h-[56px] md:h-[72px] py-3" /&gt;
+>>>>>>> ee3a39df9bdd5f3ecaf9599c2f58db9cb522a014
           {{{/if}}}
         &lt;/a&gt;
 
         &lt;div class="cms-nav-desktop ml-auto flex items-center gap-2"&gt;
           &lt;ul class="hidden lg:flex items-center gap-x-[20px] pt-1 text-sm uppercase tracking-widest list-none m-0 p-0 [&amp;&gt;li]:m-0 [&amp;&gt;li&gt;a]:m-0"&gt;
+<<<<<<< HEAD
             {{{#subarray:navItem {"field":"item.menus.Site Root","limit":5,"value":[]}}}}
             &lt;li class="relative group"&gt;
               {{{#if {"cond":"navItem.item.type == external"}}}}
@@ -1547,6 +1559,17 @@ const exportCurrentBlock = () => {
               &lt;a href="/" class="cursor-pointer"&gt;{{navItem.name}}&lt;/a&gt;
               {{{#else}}}
               &lt;a href="/{{navItem.name}}" class="cursor-pointer"&gt;{{navItem.name}}&lt;/a&gt;
+=======
+            {{{#subarray {"field":"item.menus.Site Root","limit":5,"value":[]}}}}
+            &lt;li class="relative group"&gt;
+              {{{#if {"cond":"item.item.type == external"}}}}
+              &lt;a href="{{item.item.url}}" class="cursor-pointer"&gt;{{item.name}}&lt;/a&gt;
+              {{{#else}}}
+              {{{#if {"cond":"item.name == home"}}}}
+              &lt;a href="/" class="cursor-pointer"&gt;{{item.name}}&lt;/a&gt;
+              {{{#else}}}
+              &lt;a href="/{{item.name}}" class="cursor-pointer"&gt;{{item.name}}&lt;/a&gt;
+>>>>>>> ee3a39df9bdd5f3ecaf9599c2f58db9cb522a014
               {{{/if}}}
               {{{/if}}}
             &lt;/li&gt;
@@ -1571,15 +1594,23 @@ const exportCurrentBlock = () => {
 
       &lt;div class="mb-8 mt-2 flex items-center justify-center gap-4"&gt;
         &lt;a href="/" class="flex items-center gap-4 text-navText"&gt;
+<<<<<<< HEAD
           &lt;img src="{{site.logo}}" class="h-[30px] w-auto max-w-full object-contain" /&gt;
           {{{#if {"cond":"site.brandLogoDark"}}}}
           &lt;span class="h-10 w-px bg-black" aria-hidden="true"&gt;&lt;/span&gt;
           &lt;img src="{{site.brandLogoDark}}" class="h-[30px] w-auto max-w-full object-contain" /&gt;
+=======
+          &lt;img src="{{item.logo}}" class="h-[30px] w-auto max-w-full object-contain" /&gt;
+          {{{#if {"cond":"item.brandLogoDark"}}}}
+          &lt;span class="h-10 w-px bg-black" aria-hidden="true"&gt;&lt;/span&gt;
+          &lt;img src="{{item.brandLogoDark}}" class="h-[30px] w-auto max-w-full object-contain" /&gt;
+>>>>>>> ee3a39df9bdd5f3ecaf9599c2f58db9cb522a014
           {{{/if}}}
         &lt;/a&gt;
       &lt;/div&gt;
 
       &lt;ul class="w-full space-y-4 border-b border-black pb-4 uppercase"&gt;
+<<<<<<< HEAD
         {{{#subarray:navItem {"field":"item.menus.Site Root","value":[]}}}}
         &lt;li class="border-t border-black pt-4"&gt;
           {{{#if {"cond":"navItem.item.type == external"}}}}
@@ -1589,6 +1620,17 @@ const exportCurrentBlock = () => {
           &lt;a href="/" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{navItem.name}}&lt;/a&gt;
           {{{#else}}}
           &lt;a href="/{{navItem.name}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{navItem.name}}&lt;/a&gt;
+=======
+        {{{#subarray {"field":"item.menus.Site Root","value":[]}}}}
+        &lt;li class="border-t border-black pt-4"&gt;
+          {{{#if {"cond":"item.item.type == external"}}}}
+          &lt;a href="{{item.item.url}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{item.name}}&lt;/a&gt;
+          {{{#else}}}
+          {{{#if {"cond":"item.name == home"}}}}
+          &lt;a href="/" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{item.name}}&lt;/a&gt;
+          {{{#else}}}
+          &lt;a href="/{{item.name}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{item.name}}&lt;/a&gt;
+>>>>>>> ee3a39df9bdd5f3ecaf9599c2f58db9cb522a014
           {{{/if}}}
           {{{/if}}}
         &lt;/li&gt;
@@ -1596,11 +1638,19 @@ const exportCurrentBlock = () => {
       &lt;/ul&gt;
 
       &lt;div class="mt-10 flex w-full items-center justify-center gap-4"&gt;
+<<<<<<< HEAD
         {{{#if {"cond":"site.socialFacebook"}}}}&lt;a href="{{site.socialFacebook}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText"&gt;F&lt;/a&gt;{{{/if}}}
         {{{#if {"cond":"site.socialInstagram"}}}}&lt;a href="{{site.socialInstagram}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText"&gt;I&lt;/a&gt;{{{/if}}}
         {{{#if {"cond":"site.socialLinkedIn"}}}}&lt;a href="{{site.socialLinkedIn}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText"&gt;in&lt;/a&gt;{{{/if}}}
         {{{#if {"cond":"site.socialYouTube"}}}}&lt;a href="{{site.socialYouTube}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText"&gt;Y&lt;/a&gt;{{{/if}}}
         {{{#if {"cond":"site.socialTikTok"}}}}&lt;a href="{{site.socialTikTok}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText"&gt;T&lt;/a&gt;{{{/if}}}
+=======
+        {{{#if {"cond":"item.socialFacebook"}}}}&lt;a href="{{item.socialFacebook}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText"&gt;F&lt;/a&gt;{{{/if}}}
+        {{{#if {"cond":"item.socialInstagram"}}}}&lt;a href="{{item.socialInstagram}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText"&gt;I&lt;/a&gt;{{{/if}}}
+        {{{#if {"cond":"item.socialLinkedIn"}}}}&lt;a href="{{item.socialLinkedIn}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText"&gt;in&lt;/a&gt;{{{/if}}}
+        {{{#if {"cond":"item.socialYouTube"}}}}&lt;a href="{{item.socialYouTube}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText"&gt;Y&lt;/a&gt;{{{/if}}}
+        {{{#if {"cond":"item.socialTikTok"}}}}&lt;a href="{{item.socialTikTok}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText"&gt;T&lt;/a&gt;{{{/if}}}
+>>>>>>> ee3a39df9bdd5f3ecaf9599c2f58db9cb522a014
       &lt;/div&gt;
     &lt;/div&gt;
   &lt;/aside&gt;
