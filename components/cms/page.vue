@@ -478,17 +478,51 @@ const blockPick = (block, index, slotProps, post = false) => {
 }
 
 const applyCollectionUniqueKeys = (workingDoc) => {
+  const hasTemplateToken = (value) => {
+    if (typeof value === 'string')
+      return value.includes('{orgId}') || value.includes('{siteId}')
+    if (Array.isArray(value))
+      return value.some(entry => hasTemplateToken(entry))
+    if (value && typeof value === 'object')
+      return Object.values(value).some(entry => hasTemplateToken(entry))
+    return false
+  }
+
+  const resolveTokens = (value) => {
+    if (typeof value === 'string') {
+      let resolved = value
+      const orgId = edgeGlobal.edgeState.currentOrganization || ''
+      const siteId = props.site || ''
+      if (resolved.includes('{orgId}') && orgId)
+        resolved = resolved.replaceAll('{orgId}', orgId)
+      if (resolved.includes('{siteId}') && siteId)
+        resolved = resolved.replaceAll('{siteId}', siteId)
+      return resolved
+    }
+    if (Array.isArray(value))
+      return value.map(entry => resolveTokens(entry))
+    if (value && typeof value === 'object') {
+      const out = {}
+      Object.keys(value).forEach((key) => {
+        out[key] = resolveTokens(value[key])
+      })
+      return out
+    }
+    return value
+  }
+
+  const isEmptyQueryItem = (value) => {
+    if (value === undefined || value === null || value === '')
+      return true
+    if (Array.isArray(value))
+      return value.length === 0
+    return false
+  }
+
   const resolveUniqueKey = (template) => {
     if (!template || typeof template !== 'string')
       return ''
-    let resolved = template
-    const orgId = edgeGlobal.edgeState.currentOrganization || ''
-    const siteId = props.site || ''
-    if (resolved.includes('{orgId}') && orgId)
-      resolved = resolved.replaceAll('{orgId}', orgId)
-    if (resolved.includes('{siteId}') && siteId)
-      resolved = resolved.replaceAll('{siteId}', siteId)
-    return resolved
+    return resolveTokens(template)
   }
 
   const applyToBlocks = (blocks) => {
@@ -500,6 +534,27 @@ const applyCollectionUniqueKeys = (workingDoc) => {
         return
       Object.keys(meta).forEach((fieldKey) => {
         const cfg = meta[fieldKey]
+        if (!cfg || typeof cfg !== 'object')
+          return
+
+        // Materialize tokenized collection.query filters (e.g. {siteId}) into queryItems
+        // so frontend hydration receives concrete runtime filter selections.
+        if (Array.isArray(cfg?.collection?.query)) {
+          if (!cfg.queryItems || typeof cfg.queryItems !== 'object')
+            cfg.queryItems = {}
+          for (const queryFilter of cfg.collection.query) {
+            const queryField = queryFilter?.field
+            if (!queryField || typeof queryField !== 'string')
+              continue
+            const rawValue = queryFilter?.value
+            if (!hasTemplateToken(rawValue))
+              continue
+            if (!isEmptyQueryItem(cfg.queryItems[queryField]))
+              continue
+            cfg.queryItems[queryField] = resolveTokens(rawValue)
+          }
+        }
+
         if (!cfg?.collection?.uniqueKey)
           return
         const resolved = resolveUniqueKey(cfg.collection.uniqueKey)
