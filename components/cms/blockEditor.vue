@@ -1524,42 +1524,20 @@ const exportCurrentBlock = () => {
                       Nav Block Template (Copy / Paste)
                     </h3>
                     <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;div class="cms-nav-root cms-nav-sticky" data-cms-nav-root data-cms-nav-position="{{{#text {"field":"navPosition","title":"Menu Position","option":{"field":"navPosition","options":[{"title":"Right","name":"right"},{"title":"Left","name":"left"},{"title":"Center","name":"center"}],"optionsKey":"title","optionsValue":"name"},"value":"right"}}}}" data-cms-nav-close-on-link="true" data-cms-nav-top-class="bg-transparent border-transparent" data-cms-nav-scrolled-class="bg-navBg/80 backdrop-blur-lg shadow-lg" data-cms-nav-top-row-class="h-[64px] md:h-[88px] py-6 md:py-8" data-cms-nav-scrolled-row-class="h-[56px] md:h-[68px] py-5 md:py-4"&gt;
-<<<<<<< HEAD
-  {{{#array {"field":"siteDoc","as":"site","collection":{"path":"sites","uniqueKey":"{orgId}","query":[{"field":"docId","operator":"==","value":"{siteId}"}],"order":[]},"limit":1,"value":[]}}}}
-=======
   {{{#array {"field":"siteDoc","collection":{"path":"sites","uniqueKey":"{orgId}","query":[{"field":"docId","operator":"==","value":"{siteId}"}],"order":[]},"limit":1,"value":[]}}}}
->>>>>>> ee3a39df9bdd5f3ecaf9599c2f58db9cb522a014
   &lt;nav class="cms-nav-main fixed inset-x-0 top-0 z-30 w-full bg-transparent text-navText"&gt;
     &lt;div class="relative w-full px-6 md:px-12"&gt;
       &lt;div class="cms-nav-layout flex h-[64px] md:h-[88px] items-center justify-between gap-6 py-6 md:py-8"&gt;
         &lt;a href="/" class="cms-nav-logo cursor-pointer text-xl text-navText"&gt;
-<<<<<<< HEAD
-          {{{#if {"cond":"site.logoLight"}}}}
-          &lt;img src="{{site.logoLight}}" class="h-[56px] md:h-[72px] py-3" /&gt;
-          {{{#else}}}
-          &lt;img src="{{site.logo}}" class="h-[56px] md:h-[72px] py-3" /&gt;
-=======
           {{{#if {"cond":"item.logoLight"}}}}
           &lt;img src="{{item.logoLight}}" class="h-[56px] md:h-[72px] py-3" /&gt;
           {{{#else}}}
           &lt;img src="{{item.logo}}" class="h-[56px] md:h-[72px] py-3" /&gt;
->>>>>>> ee3a39df9bdd5f3ecaf9599c2f58db9cb522a014
           {{{/if}}}
         &lt;/a&gt;
 
         &lt;div class="cms-nav-desktop ml-auto flex items-center gap-2"&gt;
           &lt;ul class="hidden lg:flex items-center gap-x-[20px] pt-1 text-sm uppercase tracking-widest list-none m-0 p-0 [&amp;&gt;li]:m-0 [&amp;&gt;li&gt;a]:m-0"&gt;
-<<<<<<< HEAD
-            {{{#subarray:navItem {"field":"item.menus.Site Root","limit":5,"value":[]}}}}
-            &lt;li class="relative group"&gt;
-              {{{#if {"cond":"navItem.item.type == external"}}}}
-              &lt;a href="{{navItem.item.url}}" class="cursor-pointer"&gt;{{navItem.name}}&lt;/a&gt;
-              {{{#else}}}
-              {{{#if {"cond":"navItem.name == home"}}}}
-              &lt;a href="/" class="cursor-pointer"&gt;{{navItem.name}}&lt;/a&gt;
-              {{{#else}}}
-              &lt;a href="/{{navItem.name}}" class="cursor-pointer"&gt;{{navItem.name}}&lt;/a&gt;
-=======
             {{{#subarray {"field":"item.menus.Site Root","limit":5,"value":[]}}}}
             &lt;li class="relative group"&gt;
               {{{#if {"cond":"item.item.type == external"}}}}
@@ -1569,7 +1547,6 @@ const exportCurrentBlock = () => {
               &lt;a href="/" class="cursor-pointer"&gt;{{item.name}}&lt;/a&gt;
               {{{#else}}}
               &lt;a href="/{{item.name}}" class="cursor-pointer"&gt;{{item.name}}&lt;/a&gt;
->>>>>>> ee3a39df9bdd5f3ecaf9599c2f58db9cb522a014
               {{{/if}}}
               {{{/if}}}
             &lt;/li&gt;
@@ -1594,33 +1571,15 @@ const exportCurrentBlock = () => {
 
       &lt;div class="mb-8 mt-2 flex items-center justify-center gap-4"&gt;
         &lt;a href="/" class="flex items-center gap-4 text-navText"&gt;
-<<<<<<< HEAD
-          &lt;img src="{{site.logo}}" class="h-[30px] w-auto max-w-full object-contain" /&gt;
-          {{{#if {"cond":"site.brandLogoDark"}}}}
-          &lt;span class="h-10 w-px bg-black" aria-hidden="true"&gt;&lt;/span&gt;
-          &lt;img src="{{site.brandLogoDark}}" class="h-[30px] w-auto max-w-full object-contain" /&gt;
-=======
           &lt;img src="{{item.logo}}" class="h-[30px] w-auto max-w-full object-contain" /&gt;
           {{{#if {"cond":"item.brandLogoDark"}}}}
           &lt;span class="h-10 w-px bg-black" aria-hidden="true"&gt;&lt;/span&gt;
           &lt;img src="{{item.brandLogoDark}}" class="h-[30px] w-auto max-w-full object-contain" /&gt;
->>>>>>> ee3a39df9bdd5f3ecaf9599c2f58db9cb522a014
           {{{/if}}}
         &lt;/a&gt;
       &lt;/div&gt;
 
       &lt;ul class="w-full space-y-4 border-b border-black pb-4 uppercase"&gt;
-<<<<<<< HEAD
-        {{{#subarray:navItem {"field":"item.menus.Site Root","value":[]}}}}
-        &lt;li class="border-t border-black pt-4"&gt;
-          {{{#if {"cond":"navItem.item.type == external"}}}}
-          &lt;a href="{{navItem.item.url}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{navItem.name}}&lt;/a&gt;
-          {{{#else}}}
-          {{{#if {"cond":"navItem.name == home"}}}}
-          &lt;a href="/" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{navItem.name}}&lt;/a&gt;
-          {{{#else}}}
-          &lt;a href="/{{navItem.name}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{navItem.name}}&lt;/a&gt;
-=======
         {{{#subarray {"field":"item.menus.Site Root","value":[]}}}}
         &lt;li class="border-t border-black pt-4"&gt;
           {{{#if {"cond":"item.item.type == external"}}}}
@@ -1630,7 +1589,6 @@ const exportCurrentBlock = () => {
           &lt;a href="/" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{item.name}}&lt;/a&gt;
           {{{#else}}}
           &lt;a href="/{{item.name}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{item.name}}&lt;/a&gt;
->>>>>>> ee3a39df9bdd5f3ecaf9599c2f58db9cb522a014
           {{{/if}}}
           {{{/if}}}
         &lt;/li&gt;
@@ -1638,19 +1596,46 @@ const exportCurrentBlock = () => {
       &lt;/ul&gt;
 
       &lt;div class="mt-10 flex w-full items-center justify-center gap-4"&gt;
-<<<<<<< HEAD
-        {{{#if {"cond":"site.socialFacebook"}}}}&lt;a href="{{site.socialFacebook}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText"&gt;F&lt;/a&gt;{{{/if}}}
-        {{{#if {"cond":"site.socialInstagram"}}}}&lt;a href="{{site.socialInstagram}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText"&gt;I&lt;/a&gt;{{{/if}}}
-        {{{#if {"cond":"site.socialLinkedIn"}}}}&lt;a href="{{site.socialLinkedIn}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText"&gt;in&lt;/a&gt;{{{/if}}}
-        {{{#if {"cond":"site.socialYouTube"}}}}&lt;a href="{{site.socialYouTube}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText"&gt;Y&lt;/a&gt;{{{/if}}}
-        {{{#if {"cond":"site.socialTikTok"}}}}&lt;a href="{{site.socialTikTok}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText"&gt;T&lt;/a&gt;{{{/if}}}
-=======
-        {{{#if {"cond":"item.socialFacebook"}}}}&lt;a href="{{item.socialFacebook}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText"&gt;F&lt;/a&gt;{{{/if}}}
-        {{{#if {"cond":"item.socialInstagram"}}}}&lt;a href="{{item.socialInstagram}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText"&gt;I&lt;/a&gt;{{{/if}}}
-        {{{#if {"cond":"item.socialLinkedIn"}}}}&lt;a href="{{item.socialLinkedIn}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText"&gt;in&lt;/a&gt;{{{/if}}}
-        {{{#if {"cond":"item.socialYouTube"}}}}&lt;a href="{{item.socialYouTube}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText"&gt;Y&lt;/a&gt;{{{/if}}}
-        {{{#if {"cond":"item.socialTikTok"}}}}&lt;a href="{{item.socialTikTok}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText"&gt;T&lt;/a&gt;{{{/if}}}
->>>>>>> ee3a39df9bdd5f3ecaf9599c2f58db9cb522a014
+        {{{#if {"cond":"item.socialFacebook"}}}}
+        &lt;a href="{{item.socialFacebook}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText transition-colors duration-200 hover:bg-sideNavText hover:text-sideNavBg"&gt;
+          &lt;span class="sr-only"&gt;Facebook&lt;/span&gt;
+          &lt;span class="h-5 w-5 [&amp;&gt;svg]:h-5 [&amp;&gt;svg]:w-5 [&amp;&gt;svg]:fill-current" aria-hidden="true"&gt;
+            &lt;svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"&gt;
+              &lt;path d="M80 299.3V512H196V299.3h86.5l18-97.8H196V166.9c0-51.7 20.3-71.5 72.7-71.5c16.3 0 29.4 .4 37 1.2V7.9C291.4 4 256.4 0 236.2 0C129.3 0 80 50.5 80 159.4v42.1H14v97.8H80z"&gt;&lt;/path&gt;
+            &lt;/svg&gt;
+          &lt;/span&gt;
+        &lt;/a&gt;
+        {{{/if}}}
+        {{{#if {"cond":"item.socialInstagram"}}}}
+        &lt;a href="{{item.socialInstagram}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText transition-colors duration-200 hover:bg-sideNavText hover:text-sideNavBg"&gt;
+          &lt;span class="sr-only"&gt;Instagram&lt;/span&gt;
+          &lt;span class="h-5 w-5 [&amp;&gt;svg]:h-5 [&amp;&gt;svg]:w-5 [&amp;&gt;svg]:fill-current" aria-hidden="true"&gt;
+            &lt;svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"&gt;
+              &lt;path d="M224.1 141c-63.6 0-114.9 51.3-114.9 114.9s51.3 114.9 114.9 114.9S339 319.5 339 255.9 287.7 141 224.1 141zm0 189.6c-41.1 0-74.7-33.5-74.7-74.7s33.5-74.7 74.7-74.7 74.7 33.5 74.7 74.7-33.6 74.7-74.7 74.7zm146.4-194.3c0 14.9-12 26.8-26.8 26.8-14.9 0-26.8-12-26.8-26.8s12-26.8 26.8-26.8 26.8 12 26.8 26.8zm76.1 27.2c-1.7-35.9-9.9-67.7-36.2-93.9-26.2-26.2-58-34.4-93.9-36.2-37-2.1-147.9-2.1-184.9 0-35.8 1.7-67.6 9.9-93.9 36.1s-34.4 58-36.2 93.9c-2.1 37-2.1 147.9 0 184.9 1.7 35.9 9.9 67.7 36.2 93.9s58 34.4 93.9 36.2c37 2.1 147.9 2.1 184.9 0 35.9-1.7 67.7-9.9 93.9-36.2 26.2-26.2 34.4-58 36.2-93.9 2.1-37 2.1-147.8 0-184.8zM398.8 388c-7.8 19.6-22.9 34.7-42.6 42.6-29.5 11.7-99.5 9-132.1 9s-102.7 2.6-132.1-9c-19.6-7.8-34.7-22.9-42.6-42.6-11.7-29.5-9-99.5-9-132.1s-2.6-102.7 9-132.1c7.8-19.6 22.9-34.7 42.6-42.6 29.5-11.7 99.5-9 132.1-9s102.7-2.6 132.1 9c19.6 7.8 34.7 22.9 42.6 42.6 11.7 29.5 9 99.5 9 132.1s2.7 102.7-9 132.1z"&gt;&lt;/path&gt;
+            &lt;/svg&gt;
+          &lt;/span&gt;
+        &lt;/a&gt;
+        {{{/if}}}
+        {{{#if {"cond":"item.socialLinkedIn"}}}}
+        &lt;a href="{{item.socialLinkedIn}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText transition-colors duration-200 hover:bg-sideNavText hover:text-sideNavBg"&gt;
+          &lt;span class="sr-only"&gt;LinkedIn&lt;/span&gt;
+          &lt;span class="h-5 w-5 [&amp;&gt;svg]:h-5 [&amp;&gt;svg]:w-5 [&amp;&gt;svg]:fill-current" aria-hidden="true"&gt;
+            &lt;svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"&gt;
+              &lt;path d="M100.28 448H7.4V148.9h92.88zM53.79 108.1C24.09 108.1 0 83.5 0 53.8a53.79 53.79 0 0 1 107.58 0c0 29.7-24.1 54.3-53.79 54.3zM447.9 448h-92.68V302.4c0-34.7-.7-79.2-48.29-79.2-48.29 0-55.69 37.7-55.69 76.7V448h-92.78V148.9h89.08v40.8h1.3c12.4-23.5 42.69-48.3 87.88-48.3 94 0 111.28 61.9 111.28 142.3V448z"&gt;&lt;/path&gt;
+            &lt;/svg&gt;
+          &lt;/span&gt;
+        &lt;/a&gt;
+        {{{/if}}}
+        {{{#if {"cond":"item.socialYouTube"}}}}
+        &lt;a href="{{item.socialYouTube}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText transition-colors duration-200 hover:bg-sideNavText hover:text-sideNavBg"&gt;
+          &lt;span class="sr-only"&gt;YouTube&lt;/span&gt;
+          &lt;span class="h-5 w-5 [&amp;&gt;svg]:h-5 [&amp;&gt;svg]:w-5 [&amp;&gt;svg]:fill-current" aria-hidden="true"&gt;
+            &lt;svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"&gt;
+              &lt;path d="M549.655 124.083c-6.281-23.65-24.787-42.276-48.284-48.597C458.781 64 288 64 288 64S117.22 64 74.629 75.486c-23.497 6.322-42.003 24.947-48.284 48.597-11.412 42.867-11.412 132.305-11.412 132.305s0 89.438 11.412 132.305c6.281 23.65 24.787 41.5 48.284 47.821C117.22 448 288 448 288 448s170.78 0 213.371-11.486c23.497-6.321 42.003-24.171 48.284-47.821 11.412-42.867 11.412-132.305 11.412-132.305s0-89.438-11.412-132.305zm-317.51 213.508V175.185l142.739 81.205-142.739 81.201z"&gt;&lt;/path&gt;
+            &lt;/svg&gt;
+          &lt;/span&gt;
+        &lt;/a&gt;
+        {{{/if}}}
       &lt;/div&gt;
     &lt;/div&gt;
   &lt;/aside&gt;
