@@ -1397,6 +1397,11 @@ const slugifyMenuPageName = (value) => {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)+/g, '') || 'page'
 }
+const titleFromSlug = (slug) => {
+  if (!slug)
+    return ''
+  return String(slug).replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+}
 
 const makeUniqueMenuPageName = (value, existingNames = new Set()) => {
   const base = slugifyMenuPageName(value)
@@ -1425,7 +1430,8 @@ const addImportedPageToSiteMenu = async (docId, pageName = '') => {
 
   const existingNames = collectMenuPageNames(menus)
   const menuName = makeUniqueMenuPageName(pageName || nextDocId, existingNames)
-  menus['Site Root'].push({ name: menuName, item: nextDocId })
+  const menuTitle = String(pageName || '').trim() || titleFromSlug(menuName)
+  menus['Site Root'].push({ name: menuName, menuTitle, item: nextDocId })
 
   const results = await edgeFirebase.changeDoc(sitesCollectionPath, siteId, { menus })
   if (results?.success === false)

@@ -60,6 +60,26 @@ const isDeleteDisabled = entry => isPageEntry(entry) && !!entry?.disableDelete
 const isLinkUrlSpecial = url => /^tel:|^mailto:/i.test(String(url || '').trim())
 const linkTarget = url => (isLinkUrlSpecial(url) ? null : '_blank')
 const linkRel = url => (isLinkUrlSpecial(url) ? null : 'noopener noreferrer')
+const titleFromSlug = (slug) => {
+  if (!slug)
+    return ''
+  return slug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+}
+const displayEntryName = (entry) => {
+  if (!entry)
+    return ''
+  if (entry?.name === 'Deleting...')
+    return 'Deleting...'
+  if (isExternalLinkEntry(entry))
+    return String(entry?.name || '').trim()
+  const menuTitle = String(entry?.menuTitle || '').trim()
+  if (menuTitle)
+    return menuTitle
+  const slug = String(entry?.name || '').trim()
+  if (!slug)
+    return ''
+  return slug
+}
 
 const normalizeForCompare = (value) => {
   if (Array.isArray(value))
@@ -466,6 +486,9 @@ const renameFolderOrPageShow = (item) => {
   // Work on a copy so edits in the dialog do not mutate the live menu entry.
   state.renameItem = edgeGlobal.dupObject(item || {})
   state.renameItem.previousName = item?.name
+  state.renameItem.previousMenuTitle = displayEntryName(item)
+  if (state.renameItem.item !== '' && !isExternalLinkEntry(state.renameItem))
+    state.renameItem.name = state.renameItem.previousMenuTitle
   state.renameFolderOrPageDialog = true
 }
 
@@ -558,10 +581,11 @@ const slugGenerator = (name, excludeName = '') => {
   console.log('Existing slugs:', existing)
 
   const base = name ? name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '') : ''
-  let unique = base
+  const baseSlug = base || 'page'
+  let unique = baseSlug
   let suffix = 1
   while (existing.has(unique)) {
-    unique = `${base}-${suffix}`
+    unique = `${baseSlug}-${suffix}`
     suffix += 1
   }
   return unique
@@ -686,17 +710,14 @@ const renameFolderOrPageAction = async () => {
     state.renameItem = {}
     return
   }
-  const newSlug = slugGenerator(state.renameItem.name, state.renameItem.previousName || '')
-
-  if (state.renameItem.name === state.renameItem.previousName) {
-    state.renameFolderOrPageDialog = false
-    state.renameItem = {}
-    return
-  }
-
   // If the item is an empty string, we are renaming a top-level folder (handled here)
   if (state.renameItem.item === '') {
-    const original = edgeGlobal.dupObject(modelValue.value)
+    const newSlug = slugGenerator(state.renameItem.name, state.renameItem.previousName || '')
+    if (state.renameItem.name === state.renameItem.previousName) {
+      state.renameFolderOrPageDialog = false
+      state.renameItem = {}
+      return
+    }
     const originalItem = edgeGlobal.dupObject(modelValue.value[state.renameItem.previousName])
     // Renaming a folder: if the new name is empty, abort and reset dialog state
     if (!state.renameItem.name) {
@@ -716,7 +737,14 @@ const renameFolderOrPageAction = async () => {
   // Renaming a page: the page is uniquely identified by its docId in `state.renameItem.item`.
   // Traverse all menus and submenus; update the `name` where the `item` matches that docId (strings only).
   const targetDocId = state.renameItem.item
-  // const newName = state.renameItem.name || ''
+  const nextMenuTitle = String(state.renameItem.name || '').trim()
+  const previousMenuTitle = String(state.renameItem.previousMenuTitle || '').trim()
+  const newSlug = slugGenerator(nextMenuTitle, state.renameItem.previousName || '')
+  if (nextMenuTitle === previousMenuTitle && newSlug === state.renameItem.previousName) {
+    state.renameFolderOrPageDialog = false
+    state.renameItem = {}
+    return
+  }
 
   let renamed = false
   for (const [menuName, items] of Object.entries(modelValue.value)) {
@@ -725,6 +753,7 @@ const renameFolderOrPageAction = async () => {
         const results = await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`, targetDocId, { name: newSlug })
         if (results.success) {
           item.name = newSlug
+          item.menuTitle = nextMenuTitle || titleFromSlug(newSlug)
           renamed = true
         }
         break
@@ -766,7 +795,7 @@ const addPageAction = async () => {
       const targetMenu = modelValue.value[state.menuName]
       const alreadyExists = Array.isArray(targetMenu) && targetMenu.some(entry => entry?.item === docId)
       if (!alreadyExists)
-        targetMenu.push({ name: slug, item: docId })
+        targetMenu.push({ name: slug, menuTitle: state.newPageName, item: docId })
     }
   }
 
@@ -936,12 +965,6 @@ const onSubmit = () => {
     state.pageSettings = false
   }
 }
-const titleFromSlug = (slug) => {
-  if (!slug)
-    return ''
-  return slug.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
-}
-
 const theme = computed(() => {
   const theme = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site]?.theme || ''
   console.log(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}`)
@@ -1041,7 +1064,7 @@ const theme = computed(() => {
                   <Loader2 v-if="element.item === '' || element.name === 'Deleting...'" :class="{ '!text-red-500': element.name === 'Deleting...' }" class="w-4 h-4 animate-spin" />
                   <FileWarning v-else-if="isPublishedPageDiff(element.item) && !props.isTemplateSite" class="!text-yellow-600" />
                   <FileCheck v-else class="text-xs !text-green-700 font-normal" />
-                  <span>{{ element.name }}</span>
+                  <span>{{ displayEntryName(element) }}</span>
                 </NuxtLink>
                 <a
                   v-else
@@ -1051,7 +1074,7 @@ const theme = computed(() => {
                   :rel="linkRel(element.item?.url)"
                 >
                   <Link class="w-4 h-4 text-muted-foreground" />
-                  <span>{{ element.name }}</span>
+                  <span>{{ displayEntryName(element) }}</span>
                 </a>
               </SidebarMenuSubButton>
               <div class="absolute right-0 -top-0.5">
@@ -1063,10 +1086,10 @@ const theme = computed(() => {
                   </DropdownMenuTrigger>
                   <DropdownMenuContent side="right" align="start">
                     <DropdownMenuLabel v-if="props.prevMenu" class="flex items-center gap-2">
-                      <File class="w-5 h-5" /> {{ ROOT_MENUS.includes(props.prevMenu) ? '' : props.prevMenu }}/{{ menuName }}/{{ element.name }}
+                      <File class="w-5 h-5" /> {{ ROOT_MENUS.includes(props.prevMenu) ? '' : props.prevMenu }}/{{ menuName }}/{{ displayEntryName(element) }}
                     </DropdownMenuLabel>
                     <DropdownMenuLabel v-else class="flex items-center gap-2">
-                      <File class="w-5 h-5" />  {{ ROOT_MENUS.includes(menuName) ? '' : menuName }}/{{ element.name }}
+                      <File class="w-5 h-5" />  {{ ROOT_MENUS.includes(menuName) ? '' : menuName }}/{{ displayEntryName(element) }}
                     </DropdownMenuLabel>
                     <DropdownMenuSeparator />
                     <template v-if="!isExternalLinkEntry(element)">
@@ -1130,13 +1153,13 @@ const theme = computed(() => {
       <DialogHeader>
         <DialogTitle class="text-left">
           <span v-if="state.deletePage.item === ''">Delete Folder "{{ state.deletePage.name }}"</span>
-          <span v-else-if="isExternalLinkEntry(state.deletePage)">Delete Link "{{ state.deletePage.name }}"</span>
-          <span v-else>Delete Page "{{ state.deletePage.name }}"</span>
+          <span v-else-if="isExternalLinkEntry(state.deletePage)">Delete Link "{{ displayEntryName(state.deletePage) }}"</span>
+          <span v-else>Delete Page "{{ displayEntryName(state.deletePage) }}"</span>
         </DialogTitle>
         <DialogDescription />
       </DialogHeader>
       <div class="text-left px-1">
-        Are you sure you want to delete "{{ state.deletePage.name }}"? This action cannot be undone.
+        Are you sure you want to delete "{{ state.deletePage.item === '' ? state.deletePage.name : displayEntryName(state.deletePage) }}"? This action cannot be undone.
       </div>
       <DialogFooter class="pt-2 flex justify-between">
         <edge-shad-button
@@ -1338,7 +1361,7 @@ const theme = computed(() => {
   <Sheet v-model:open="state.pageSettings">
     <SheetContent side="left" class="w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl">
       <SheetHeader>
-        <SheetTitle>{{ state.pageData.name || 'Site' }}</SheetTitle>
+        <SheetTitle>{{ displayEntryName(state.pageData) || 'Site' }}</SheetTitle>
         <SheetDescription />
       </SheetHeader>
       <edge-editor

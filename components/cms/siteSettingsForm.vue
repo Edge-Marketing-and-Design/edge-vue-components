@@ -480,13 +480,17 @@ watch(() => props.settings?.forwardApex, (value) => {
           </div>
           <div class="space-y-2 text-sm">
             <div class="grid grid-cols-[70px_1fr] gap-3">
-              <div class="text-muted-foreground">CNAME</div>
+              <div class="text-muted-foreground">
+                CNAME
+              </div>
               <div class="font-mono">
                 {{ entry?.dnsRecords?.www?.name || 'www' }} → {{ entry?.dnsRecords?.www?.value || pagesDomain }}
               </div>
             </div>
             <div class="grid grid-cols-[70px_1fr] gap-3">
-              <div class="text-muted-foreground">CNAME</div>
+              <div class="text-muted-foreground">
+                CNAME
+              </div>
               <div class="font-mono">
                 {{ entry?.dnsRecords?.apex?.name || '@' }} → {{ entry?.dnsRecords?.apex?.value || pagesDomain }}
               </div>
@@ -562,7 +566,7 @@ watch(() => props.settings?.forwardApex, (value) => {
             <img
               :src="props.settings.logo"
               alt="Logo preview"
-              :class="['max-h-16 max-w-[220px] h-auto w-auto rounded-md border border-border object-contain', previewBackgroundClass(props.settings.logo)]"
+              class="max-h-16 max-w-[220px] h-auto w-auto rounded-md border border-border object-contain" :class="[previewBackgroundClass(props.settings.logo)]"
             >
             <edge-shad-button
               type="button"
@@ -612,7 +616,7 @@ watch(() => props.settings?.forwardApex, (value) => {
             <img
               :src="props.settings.logoLight"
               alt="Light logo preview"
-              :class="['max-h-16 max-w-[220px] h-auto w-auto rounded-md border border-border object-contain', previewBackgroundClass(props.settings.logoLight)]"
+              class="max-h-16 max-w-[220px] h-auto w-auto rounded-md border border-border object-contain" :class="[previewBackgroundClass(props.settings.logoLight)]"
             >
             <edge-shad-button
               type="button"
@@ -666,7 +670,7 @@ watch(() => props.settings?.forwardApex, (value) => {
               <img
                 :src="props.settings.brandLogoDark"
                 alt="Brand dark logo preview"
-                :class="['max-h-16 max-w-[220px] h-auto w-auto rounded-md border border-border object-contain', previewBackgroundClass(props.settings.brandLogoDark)]"
+                class="max-h-16 max-w-[220px] h-auto w-auto rounded-md border border-border object-contain" :class="[previewBackgroundClass(props.settings.brandLogoDark)]"
               >
               <edge-shad-button
                 type="button"
@@ -716,7 +720,7 @@ watch(() => props.settings?.forwardApex, (value) => {
               <img
                 :src="props.settings.brandLogoLight"
                 alt="Brand light logo preview"
-                :class="['max-h-16 max-w-[220px] h-auto w-auto rounded-md border border-border object-contain', previewBackgroundClass(props.settings.brandLogoLight)]"
+                class="max-h-16 max-w-[220px] h-auto w-auto rounded-md border border-border object-contain" :class="[previewBackgroundClass(props.settings.brandLogoLight)]"
               >
               <edge-shad-button
                 type="button"
@@ -767,7 +771,7 @@ watch(() => props.settings?.forwardApex, (value) => {
             <img
               :src="props.settings.favicon"
               alt="Favicon preview"
-              :class="['max-h-12 max-w-12 h-auto w-auto rounded-md border border-border object-contain', previewBackgroundClass(props.settings.favicon)]"
+              class="max-h-12 max-w-12 h-auto w-auto rounded-md border border-border object-contain" :class="[previewBackgroundClass(props.settings.favicon)]"
             >
             <edge-shad-button
               type="button"
@@ -855,6 +859,12 @@ watch(() => props.settings?.forwardApex, (value) => {
           label="AdRoll ID"
           name="trackingAdroll"
           placeholder="ADROLL-ID"
+        />
+        <edge-shad-input
+          v-model="props.settings.sureFeedURL"
+          label="Sure Feedback"
+          name="sureFeedURL"
+          placeholder=""
         />
       </div>
     </TabsContent>

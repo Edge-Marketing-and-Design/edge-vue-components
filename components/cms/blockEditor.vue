@@ -1538,15 +1538,15 @@ const exportCurrentBlock = () => {
 
         &lt;div class="cms-nav-desktop ml-auto flex items-center gap-2"&gt;
           &lt;ul class="hidden lg:flex items-center gap-x-[20px] pt-1 text-sm uppercase tracking-widest list-none m-0 p-0 [&amp;&gt;li]:m-0 [&amp;&gt;li&gt;a]:m-0"&gt;
-            {{{#subarray {"field":"item.menus.Site Root","limit":5,"value":[]}}}}
+            {{{#subarray:menuItem {"field":"item.menus.Site Root","limit":5,"value":[]}}}}
             &lt;li class="relative group"&gt;
-              {{{#if {"cond":"item.item.type == external"}}}}
-              &lt;a href="{{item.item.url}}" class="cursor-pointer"&gt;{{item.name}}&lt;/a&gt;
+              {{{#if {"cond":"menuItem.item.type == 'external'"}}}}
+              &lt;a href="{{menuItem.item.url}}" class="cursor-pointer"&gt;{{menuItem.name}}&lt;/a&gt;
               {{{#else}}}
-              {{{#if {"cond":"item.name == home"}}}}
-              &lt;a href="/" class="cursor-pointer"&gt;{{item.name}}&lt;/a&gt;
+              {{{#if {"cond":"menuItem.name == 'home'"}}}}
+              &lt;a href="/" class="cursor-pointer"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
               {{{#else}}}
-              &lt;a href="/{{item.name}}" class="cursor-pointer"&gt;{{item.name}}&lt;/a&gt;
+              &lt;a href="/{{menuItem.name}}" class="cursor-pointer"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
               {{{/if}}}
               {{{/if}}}
             &lt;/li&gt;
@@ -1580,15 +1580,15 @@ const exportCurrentBlock = () => {
       &lt;/div&gt;
 
       &lt;ul class="w-full space-y-4 border-b border-black pb-4 uppercase"&gt;
-        {{{#subarray {"field":"item.menus.Site Root","value":[]}}}}
+        {{{#subarray:menuItem {"field":"item.menus.Site Root","value":[]}}}}
         &lt;li class="border-t border-black pt-4"&gt;
-          {{{#if {"cond":"item.item.type == external"}}}}
-          &lt;a href="{{item.item.url}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{item.name}}&lt;/a&gt;
+          {{{#if {"cond":"menuItem.item.type == 'external'"}}}}
+          &lt;a href="{{menuItem.item.url}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{menuItem.name}}&lt;/a&gt;
           {{{#else}}}
-          {{{#if {"cond":"item.name == home"}}}}
-          &lt;a href="/" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{item.name}}&lt;/a&gt;
+          {{{#if {"cond":"menuItem.name == 'home'"}}}}
+          &lt;a href="/" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
           {{{#else}}}
-          &lt;a href="/{{item.name}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{item.name}}&lt;/a&gt;
+          &lt;a href="/{{menuItem.name}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
           {{{/if}}}
           {{{/if}}}
         &lt;/li&gt;

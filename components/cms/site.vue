@@ -145,6 +145,7 @@ const schemas = {
     trackingFacebookPixel: z.string().optional(),
     trackingGoogleAnalytics: z.string().optional(),
     trackingAdroll: z.string().optional(),
+    sureFeedURL: z.string().optional(),
     socialFacebook: z.string().optional(),
     socialInstagram: z.string().optional(),
     socialTwitter: z.string().optional(),
@@ -639,8 +640,10 @@ const buildMenusFromDefaultPages = (defaultPages = []) => {
     if (!entry?.pageId)
       continue
     const slug = ensureUniqueSlug(entry?.name || '', null, usedSlugs)
+    const menuTitle = String(entry?.menuTitle || entry?.name || '').trim() || titleFromSlug(slug)
     menus['Site Root'].push({
       name: slug,
+      menuTitle,
       item: entry.pageId,
       disableRename: !!entry?.disableRename,
       disableDelete: !!entry?.disableDelete,
@@ -710,7 +713,9 @@ const duplicateEntriesWithPages = async (entries = [], options) => {
     }
     if (typeof entry.item === 'string' || entry.item === '') {
       const templateDoc = templatePages?.[entry.item] || null
-      const slug = ensureUniqueSlug(entry.name || '', templateDoc, usedSlugs)
+      const entryMenuTitle = String(entry?.menuTitle || '').trim()
+      const slugSource = entry.name || entryMenuTitle
+      const slug = ensureUniqueSlug(slugSource || '', templateDoc, usedSlugs)
       const payload = buildPagePayloadFromTemplateDoc(templateDoc, slug, entry.name || '')
       try {
         const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${siteId}/pages`, payload)
@@ -719,6 +724,7 @@ const duplicateEntriesWithPages = async (entries = [], options) => {
           next.push({
             ...entry,
             name: slug,
+            menuTitle: entryMenuTitle || titleFromSlug(slug),
             item: docId,
           })
         }
@@ -852,6 +858,7 @@ const isSiteDiff = computed(() => {
       trackingFacebookPixel: publishedSite.trackingFacebookPixel,
       trackingGoogleAnalytics: publishedSite.trackingGoogleAnalytics,
       trackingAdroll: publishedSite.trackingAdroll,
+      sureFeedURL: publishedSite.sureFeedURL,
       socialFacebook: publishedSite.socialFacebook,
       socialInstagram: publishedSite.socialInstagram,
       socialTwitter: publishedSite.socialTwitter,
@@ -880,6 +887,7 @@ const isSiteDiff = computed(() => {
       trackingFacebookPixel: siteData.value.trackingFacebookPixel,
       trackingGoogleAnalytics: siteData.value.trackingGoogleAnalytics,
       trackingAdroll: siteData.value.trackingAdroll,
+      sureFeedURL: siteData.value.sureFeedURL,
       socialFacebook: siteData.value.socialFacebook,
       socialInstagram: siteData.value.socialInstagram,
       socialTwitter: siteData.value.socialTwitter,
@@ -922,6 +930,7 @@ const discardSiteSettings = async () => {
       trackingFacebookPixel: publishedSite.trackingFacebookPixel || '',
       trackingGoogleAnalytics: publishedSite.trackingGoogleAnalytics || '',
       trackingAdroll: publishedSite.trackingAdroll || '',
+      sureFeedURL: publishedSite.sureFeedURL || '',
       socialFacebook: publishedSite.socialFacebook || '',
       socialInstagram: publishedSite.socialInstagram || '',
       socialTwitter: publishedSite.socialTwitter || '',
@@ -1154,7 +1163,8 @@ const addImportedPageToSiteMenu = (docId, pageName = '') => {
 
   const existingNames = collectMenuPageNames(menus)
   const menuName = makeUniqueMenuPageName(pageName || nextDocId, existingNames)
-  menus['Site Root'].push({ name: menuName, item: nextDocId })
+  const menuTitle = String(pageName || '').trim() || titleFromSlug(menuName)
+  menus['Site Root'].push({ name: menuName, menuTitle, item: nextDocId })
   state.menus = menus
 }
 
