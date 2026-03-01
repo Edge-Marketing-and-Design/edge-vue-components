@@ -80,6 +80,33 @@ const displayEntryName = (entry) => {
     return ''
   return slug
 }
+const folderEntryForMenu = (menuName) => {
+  if (!props.prevMenu || !Number.isInteger(props.prevIndex) || props.prevIndex < 0)
+    return null
+  const parentList = props.prevModelValue?.[props.prevMenu]
+  if (!Array.isArray(parentList))
+    return null
+  const parentEntry = parentList[props.prevIndex]
+  if (!parentEntry || typeof parentEntry !== 'object' || isExternalLinkEntry(parentEntry))
+    return null
+  if (!parentEntry.item || typeof parentEntry.item !== 'object')
+    return null
+  const folderSlug = Object.keys(parentEntry.item || {})[0]
+  if (!folderSlug || folderSlug !== menuName)
+    return null
+  return parentEntry
+}
+const displayMenuName = (menuName) => {
+  if (menuName === 'Site Root')
+    return 'Site Menu'
+  const folderEntry = folderEntryForMenu(menuName)
+  if (folderEntry) {
+    const title = String(folderEntry?.menuTitle || folderEntry?.folderTitle || '').trim()
+    if (title)
+      return title
+  }
+  return menuName
+}
 
 const normalizeForCompare = (value) => {
   if (Array.isArray(value))
@@ -487,6 +514,8 @@ const renameFolderOrPageShow = (item) => {
   state.renameItem = edgeGlobal.dupObject(item || {})
   state.renameItem.previousName = item?.name
   state.renameItem.previousMenuTitle = displayEntryName(item)
+  if (state.renameItem.item === '')
+    state.renameItem.name = String(item?.menuTitle || item?.folderTitle || item?.name || '').trim()
   if (state.renameItem.item !== '' && !isExternalLinkEntry(state.renameItem))
     state.renameItem.name = state.renameItem.previousMenuTitle
   state.renameFolderOrPageDialog = true
@@ -712,15 +741,19 @@ const renameFolderOrPageAction = async () => {
   }
   // If the item is an empty string, we are renaming a top-level folder (handled here)
   if (state.renameItem.item === '') {
-    const newSlug = slugGenerator(state.renameItem.name, state.renameItem.previousName || '')
-    if (state.renameItem.name === state.renameItem.previousName) {
+    const nextFolderTitle = String(state.renameItem.name || '').trim()
+    const newSlug = slugGenerator(nextFolderTitle, state.renameItem.previousName || '')
+    const folderEntry = folderEntryForMenu(state.renameItem.previousName || '')
+    const previousFolderTitle = String(folderEntry?.menuTitle || folderEntry?.folderTitle || '').trim()
+    const resolvedFolderTitle = nextFolderTitle || titleFromSlug(newSlug)
+    if (newSlug === state.renameItem.previousName && resolvedFolderTitle === previousFolderTitle) {
       state.renameFolderOrPageDialog = false
       state.renameItem = {}
       return
     }
     const originalItem = edgeGlobal.dupObject(modelValue.value[state.renameItem.previousName])
     // Renaming a folder: if the new name is empty, abort and reset dialog state
-    if (!state.renameItem.name) {
+    if (!nextFolderTitle) {
       state.renameFolderOrPageDialog = false
       state.renameItem = {}
       return
@@ -729,6 +762,11 @@ const renameFolderOrPageAction = async () => {
     modelValue.value[newSlug] = originalItem
     console.log('updated modelValue:', modelValue.value)
     delete modelValue.value[state.renameItem.previousName]
+    if (folderEntry) {
+      folderEntry.menuTitle = resolvedFolderTitle
+      if (Object.prototype.hasOwnProperty.call(folderEntry, 'folderTitle'))
+        delete folderEntry.folderTitle
+    }
     state.renameFolderOrPageDialog = false
     state.renameItem = {}
     return
@@ -784,7 +822,7 @@ const addPageAction = async () => {
     modelValue.value[state.menuName] = []
 
   if (state.addMenu) {
-    modelValue.value[state.menuName].push({ item: { [slug]: [] } })
+    modelValue.value[state.menuName].push({ menuTitle: state.newPageName, item: { [slug]: [] } })
   }
   else {
     const templateDoc = getTemplateDoc(state.selectedTemplateId)
@@ -985,7 +1023,7 @@ const theme = computed(() => {
       <FolderOpen
         class="mr-2 group-hover:text-foreground"
       />
-      <span v-if="!props.isTemplateSite" class="!text-foreground">{{ menuName === 'Site Root' ? 'Site Menu' : menuName }}</span>
+      <span v-if="!props.isTemplateSite" class="!text-foreground">{{ displayMenuName(menuName) }}</span>
       <SidebarGroupAction class="absolute right-2 top-0 hover:!bg-transparent">
         <DropdownMenu>
           <DropdownMenuTrigger as-child>
@@ -1013,7 +1051,7 @@ const theme = computed(() => {
               <FolderPlus />
               <span>New Folder</span>
             </DropdownMenuItem>
-            <DropdownMenuItem v-if="canRename(menuName)" @click="renameFolderOrPageShow({ name: menuName, item: '' })">
+            <DropdownMenuItem v-if="canRename(menuName)" @click="renameFolderOrPageShow({ name: menuName, menuTitle: displayMenuName(menuName), item: '' })">
               <FolderPen />
               <span>Rename Folder</span>
             </DropdownMenuItem>

@@ -536,7 +536,7 @@ watch(() => props.settings?.forwardApex, (value) => {
         item-value="value"
         @update:model-value="value => (props.settings.theme = value || '')"
       />
-      <edge-shad-select
+      <!-- <edge-shad-select
         :model-value="props.settings.menuPosition || ''"
         name="menuPosition"
         label="Menu Position"
@@ -546,7 +546,7 @@ watch(() => props.settings?.forwardApex, (value) => {
         item-title="label"
         item-value="value"
         @update:model-value="value => (props.settings.menuPosition = value || '')"
-      />
+      /> -->
     </TabsContent>
     <TabsContent value="branding" class="pt-4 space-y-4">
       <div v-if="props.enableMediaPicker && props.siteId" class="space-y-2">

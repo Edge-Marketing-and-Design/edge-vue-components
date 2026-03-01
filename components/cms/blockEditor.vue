@@ -965,6 +965,7 @@ const exportCurrentBlock = () => {
                       <a href="#arrays-filters" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Filters</a>
                       <a href="#conditionals" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Conditionals</a>
                       <a href="#subarrays" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Subarrays</a>
+                      <a href="#entries" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Entries</a>
                       <a href="#rendering-rules" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Rendering</a>
                       <a href="#loading-tokens" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Loading</a>
                       <a href="#validation" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Validation</a>
@@ -1247,6 +1248,29 @@ const exportCurrentBlock = () => {
                     <p class="text-sm text-foreground">
                       Use <code>as</code> to set an alias (like <code v-pre>{{card.title}}</code>). Use <code>subarray</code> to loop nested lists.
                     </p>
+                  </section>
+
+                  <section id="entries" class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Entries (Object Key/Value Loops)
+                    </h3>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#entries:pair {"field":"settings","value":{"theme":"dark","ctaText":"Contact Us"}}}}}
+  <div><strong>{{pair.key}}</strong>: {{pair.value}}</div>
+{{{/entries}}}
+
+{{{#entries:group {"field":"groupedItems","value":{"featured":["One","Two"],"archive":["Three"]}}}}}
+  <h4>{{group.key}}</h4>
+  {{{#subarray:child {"field":"item.value","value":[]}}}}
+    <div>{{child}}</div>
+  {{{/subarray}}}
+{{{/entries}}}</code></pre>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div><code>entries</code> loops object fields instead of arrays.</div>
+                      <div>Use it at the root or inside other loops; it does not need to be inside <code>subarray</code>.</div>
+                      <div>Each iteration exposes <code>item.key</code> and <code>item.value</code>, plus alias access like <code v-pre>{{pair.key}}</code>.</div>
+                      <div>If a value is an array, use nested <code>subarray</code> on <code>item.value</code>.</div>
+                      <div>If <code>field</code> is not an object, it renders nothing.</div>
+                    </div>
                   </section>
 
                   <section id="rendering-rules" class="space-y-2">
@@ -1543,10 +1567,45 @@ const exportCurrentBlock = () => {
               {{{#if {"cond":"menuItem.item.type == 'external'"}}}}
               &lt;a href="{{menuItem.item.url}}" class="cursor-pointer"&gt;{{menuItem.name}}&lt;/a&gt;
               {{{#else}}}
-              {{{#if {"cond":"menuItem.name == 'home'"}}}}
+              {{{#if {"cond":"menuItem.item == '[object Object]'"}}}}
+              {{{#entries:folderEntry {"field":"menuItem.item","value":{}}}}}
+              {{{#if {"cond":"folderEntry.key == 'home'"}}}}
               &lt;a href="/" class="cursor-pointer"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
               {{{#else}}}
+              &lt;a href="/{{folderEntry.key}}" class="cursor-pointer"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
+              {{{/if}}}
+              &lt;div class="absolute left-0 top-full z-40 hidden bg-sideNavBg  py-2 text-left px-12 normal-case tracking-normal shadow-xl group-hover:block group-focus-within:block"&gt;
+              &lt;ul&gt;
+                {{{#subarray:folderChild {"field":"item.value","value":[]}}}}
+                &lt;li class="py-1"&gt;
+                  {{{#if {"cond":"folderChild.item.type == 'external'"}}}}
+                  &lt;a href="{{folderChild.item.url}}" class="block cursor-pointer"&gt;{{folderChild.name}}&lt;/a&gt;
+                  {{{#else}}}
+                  {{{#if {"cond":"folderChild.menuTitle"}}}}
+                  &lt;a href="/{{folderEntry.key}}/{{folderChild.name}}" class="block cursor-pointer"&gt;{{folderChild.menuTitle}}&lt;/a&gt;
+                  {{{#else}}}
+                  &lt;a href="/{{folderEntry.key}}/{{folderChild.name}}" class="block cursor-pointer"&gt;{{folderChild.name}}&lt;/a&gt;
+                  {{{/if}}}
+                  {{{/if}}}
+                &lt;/li&gt;
+                {{{/subarray}}}
+              &lt;/ul&gt;
+              &lt;/div&gt;
+              {{{/entries}}}
+              {{{#else}}}
+              {{{#if {"cond":"menuItem.name == 'home'"}}}}
+              {{{#if {"cond":"menuItem.menuTitle"}}}}
+              &lt;a href="/" class="cursor-pointer"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
+              {{{#else}}}
+              &lt;a href="/" class="cursor-pointer"&gt;{{menuItem.name}}&lt;/a&gt;
+              {{{/if}}}
+              {{{#else}}}
+              {{{#if {"cond":"menuItem.menuTitle"}}}}
               &lt;a href="/{{menuItem.name}}" class="cursor-pointer"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
+              {{{#else}}}
+              &lt;a href="/{{menuItem.name}}" class="cursor-pointer"&gt;{{menuItem.name}}&lt;/a&gt;
+              {{{/if}}}
+              {{{/if}}}
               {{{/if}}}
               {{{/if}}}
             &lt;/li&gt;
@@ -1585,10 +1644,43 @@ const exportCurrentBlock = () => {
           {{{#if {"cond":"menuItem.item.type == 'external'"}}}}
           &lt;a href="{{menuItem.item.url}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{menuItem.name}}&lt;/a&gt;
           {{{#else}}}
-          {{{#if {"cond":"menuItem.name == 'home'"}}}}
+          {{{#if {"cond":"menuItem.item == '[object Object]'"}}}}
+          {{{#entries:folderEntry {"field":"menuItem.item","value":{}}}}}
+          {{{#if {"cond":"folderEntry.key == 'home'"}}}}
           &lt;a href="/" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
           {{{#else}}}
+          &lt;a href="/{{folderEntry.key}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
+          {{{/if}}}
+          &lt;ul class="mt-2 space-y-2 border-l border-black/40 pl-4"&gt;
+            {{{#subarray:folderChild {"field":"item.value","value":[]}}}}
+            &lt;li&gt;
+              {{{#if {"cond":"folderChild.item.type == 'external'"}}}}
+              &lt;a href="{{folderChild.item.url}}" class="cms-nav-link block text-sideNavText tracking-widest text-xs"&gt;{{folderChild.name}}&lt;/a&gt;
+              {{{#else}}}
+              {{{#if {"cond":"folderChild.menuTitle"}}}}
+              &lt;a href="/{{folderEntry.key}}/{{folderChild.name}}" class="cms-nav-link block text-sideNavText tracking-widest text-xs"&gt;{{folderChild.menuTitle}}&lt;/a&gt;
+              {{{#else}}}
+              &lt;a href="/{{folderEntry.key}}/{{folderChild.name}}" class="cms-nav-link block text-sideNavText tracking-widest text-xs"&gt;{{folderChild.name}}&lt;/a&gt;
+              {{{/if}}}
+              {{{/if}}}
+            &lt;/li&gt;
+            {{{/subarray}}}
+          &lt;/ul&gt;
+          {{{/entries}}}
+          {{{#else}}}
+          {{{#if {"cond":"menuItem.name == 'home'"}}}}
+          {{{#if {"cond":"menuItem.menuTitle"}}}}
+          &lt;a href="/" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
+          {{{#else}}}
+          &lt;a href="/" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{menuItem.name}}&lt;/a&gt;
+          {{{/if}}}
+          {{{#else}}}
+          {{{#if {"cond":"menuItem.menuTitle"}}}}
           &lt;a href="/{{menuItem.name}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
+          {{{#else}}}
+          &lt;a href="/{{menuItem.name}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{menuItem.name}}&lt;/a&gt;
+          {{{/if}}}
+          {{{/if}}}
           {{{/if}}}
           {{{/if}}}
         &lt;/li&gt;

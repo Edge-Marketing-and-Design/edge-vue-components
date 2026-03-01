@@ -118,6 +118,17 @@ const getFolderName = (entry) => {
     return ''
   return Object.keys(entry.item || {})[0] || ''
 }
+const getFolderTitle = (entry) => {
+  if (!isFolder(entry))
+    return ''
+  const title = String(entry?.menuTitle || entry?.folderTitle || '').trim()
+  if (title)
+    return title
+  const folderName = getFolderName(entry)
+  if (!folderName)
+    return ''
+  return folderName.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+}
 
 const getFolderList = (menuName, folderName) => {
   const targetMenu = modelValue.value[menuName] || []
@@ -228,6 +239,7 @@ const submitFolderDialog = () => {
     return
   const slug = uniqueFolderSlug(value, state.folderDialog.menu)
   modelValue.value[state.folderDialog.menu].push({
+    menuTitle: value,
     item: { [slug]: [] },
   })
   state.folderDialog.open = false
@@ -262,13 +274,16 @@ const openRenameDialogForPage = (menuName, index, folderName = null) => {
 }
 
 const openRenameDialogForFolder = (menuName, folderName, index) => {
+  const folderList = modelValue.value[menuName] || []
+  const target = folderList[index]
+  const currentTitle = String(target?.menuTitle || target?.folderTitle || '').trim()
   state.renameDialog = {
     open: true,
     type: 'folder',
     menu: menuName,
     folder: folderName,
     index,
-    value: folderName,
+    value: currentTitle || folderName,
   }
 }
 
@@ -347,6 +362,9 @@ const submitRenameDialog = () => {
       return
     const currentName = getFolderName(target)
     const slug = uniqueFolderSlug(value || currentName, state.renameDialog.menu, currentName)
+    target.menuTitle = value || target.menuTitle || target.folderTitle || currentName
+    if (Object.prototype.hasOwnProperty.call(target, 'folderTitle'))
+      delete target.folderTitle
     if (slug !== currentName) {
       target.item[slug] = target.item[currentName]
       delete target.item[currentName]
@@ -438,7 +456,7 @@ const hasEntries = computed(() => {
                 <div>
                   <div class="text-sm font-semibold flex items-center gap-1">
                     <Folder class="w-4 h-4" />
-                    {{ getFolderName(element) }}
+                    {{ getFolderTitle(element) }}
                   </div>
                   <div class="text-[11px] text-muted-foreground">
                     Folder
