@@ -190,6 +190,10 @@ const INTERACTIVE_CLICK_SELECTOR = [
   '.cms-nav-panel',
   '.cms-nav-close',
   '.cms-nav-link',
+  '.cms-nav-folder-toggle',
+  '.cms-nav-folder-menu',
+  '[data-cms-nav-folder-toggle]',
+  '[data-cms-nav-folder-menu]',
 ].join(', ')
 const EDITOR_CONTROL_CLICK_SELECTOR = [
   '[data-cms-block-control]',

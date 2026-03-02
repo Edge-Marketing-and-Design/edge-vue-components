@@ -709,6 +709,151 @@ function initCmsNavHelpers(scope) {
     markInteractive(panel)
     markInteractive(overlay)
 
+    const folderEntries = []
+    const helperFolders = Array.from(root.querySelectorAll('.cms-nav-folder, [data-cms-nav-folder]'))
+    helperFolders.forEach((folder) => {
+      folderEntries.push({
+        folder,
+        toggle: folder.querySelector('.cms-nav-folder-toggle, [data-cms-nav-folder-toggle]'),
+        menu: folder.querySelector('.cms-nav-folder-menu, [data-cms-nav-folder-menu]'),
+      })
+    })
+
+    const fallbackFolders = Array.from(root.querySelectorAll('.cms-nav-desktop li.group, [data-cms-nav-desktop] li.group'))
+    fallbackFolders.forEach((folder) => {
+      if (folderEntries.some(entry => entry.folder === folder))
+        return
+      const directChildren = Array.from(folder.children || [])
+      const toggle = directChildren.find(child => child?.matches?.('a, button, [role="button"]'))
+        || folder.querySelector('a, button, [role="button"]')
+      const menu = directChildren.find((child) => {
+        if (!child?.matches?.('div.hidden, ul.hidden, [hidden], div.absolute, ul.absolute'))
+          return false
+        const hasItemLinks = child.querySelectorAll('a, button, [role="button"]').length > 0
+        return hasItemLinks
+      })
+        || folder.querySelector('div.hidden, ul.hidden, [hidden]')
+      if (!toggle || !menu)
+        return
+      folderEntries.push({ folder, toggle, menu })
+    })
+
+    const folderCleanupFns = []
+    const setFolderOpenState = (folder, menu, open) => {
+      folder.classList.toggle('cms-nav-folder-open', open)
+      folder.setAttribute('data-cms-nav-folder-open', open ? 'true' : 'false')
+      menu.classList.toggle('hidden', !open)
+      menu.classList.toggle('block', open)
+      menu.classList.toggle('pointer-events-none', !open)
+      menu.classList.toggle('pointer-events-auto', open)
+    }
+
+    folderEntries.forEach(({ folder, toggle, menu }) => {
+      if (!toggle || !menu)
+        return
+
+      Array.from(menu.classList).forEach((token) => {
+        if (token.startsWith('group-hover:') || token.startsWith('group-focus-within:'))
+          menu.classList.remove(token)
+      })
+      folder.classList.add('cms-nav-folder')
+      toggle.classList.add('cms-nav-folder-toggle')
+      menu.classList.add('cms-nav-folder-menu')
+      markInteractive(toggle)
+      markInteractive(menu)
+      Array.from(menu.querySelectorAll('a, button, [role="button"]')).forEach(markInteractive)
+
+      let closeTimer = 0
+      const clearCloseTimer = () => {
+        if (closeTimer) {
+          clearTimeout(closeTimer)
+          closeTimer = 0
+        }
+      }
+
+      const openFolder = () => {
+        clearCloseTimer()
+        setFolderOpenState(folder, menu, true)
+      }
+
+      const closeFolder = () => {
+        clearCloseTimer()
+        setFolderOpenState(folder, menu, false)
+      }
+
+      const scheduleCloseFolder = () => {
+        clearCloseTimer()
+        closeTimer = window.setTimeout(() => {
+          closeTimer = 0
+          setFolderOpenState(folder, menu, false)
+        }, 120)
+      }
+
+      const onPointerEnter = () => {
+        openFolder()
+      }
+
+      const onPointerLeave = (event) => {
+        const nextTarget = event?.relatedTarget
+        if (nextTarget && folder.contains(nextTarget))
+          return
+        scheduleCloseFolder()
+      }
+
+      const onFocusIn = () => {
+        openFolder()
+      }
+
+      const onFocusOut = (event) => {
+        const nextTarget = event?.relatedTarget
+        if (nextTarget && folder.contains(nextTarget))
+          return
+        closeFolder()
+      }
+
+      const onToggleClick = (event) => {
+        if (event.defaultPrevented)
+          return
+        if (window.matchMedia('(hover: hover) and (pointer: fine)').matches)
+          return
+        const isOpenNow = folder.getAttribute('data-cms-nav-folder-open') === 'true'
+        if (!isOpenNow) {
+          event.preventDefault()
+          event.stopPropagation()
+          openFolder()
+          return
+        }
+        closeFolder()
+      }
+
+      const onDocumentClickCapture = (event) => {
+        const clickTarget = event?.target
+        if (clickTarget && folder.contains(clickTarget))
+          return
+        closeFolder()
+      }
+
+      folder.addEventListener('pointerenter', onPointerEnter)
+      folder.addEventListener('pointerleave', onPointerLeave)
+      folder.addEventListener('focusin', onFocusIn)
+      folder.addEventListener('focusout', onFocusOut)
+      toggle.addEventListener('click', onToggleClick)
+      document.addEventListener('click', onDocumentClickCapture, true)
+
+      setFolderOpenState(folder, menu, false)
+
+      folderCleanupFns.push(() => {
+        clearCloseTimer()
+        setFolderOpenState(folder, menu, false)
+        folder.removeEventListener('pointerenter', onPointerEnter)
+        folder.removeEventListener('pointerleave', onPointerLeave)
+        folder.removeEventListener('focusin', onFocusIn)
+        folder.removeEventListener('focusout', onFocusOut)
+        toggle.removeEventListener('click', onToggleClick)
+        document.removeEventListener('click', onDocumentClickCapture, true)
+      })
+    })
+
     const isOpen = () => root.classList.contains(openClass)
 
     const setScrolledState = (isScrolled) => {
@@ -889,6 +1034,12 @@ function initCmsNavHelpers(scope) {
     window.addEventListener('resize', handleResize, { passive: true })
 
     scope.__cmsNavCleanupFns.push(() => {
+      folderCleanupFns.forEach((cleanup) => {
+        try {
+          cleanup()
+        }
+        catch {}
+      })
       scrollListeners.forEach((target) => {
         target.removeEventListener('scroll', handleScroll)
       })
