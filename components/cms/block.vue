@@ -1037,7 +1037,11 @@ const getTagsFromPosts = computed(() => {
       <div v-if="props.editMode" class="pointer-events-none absolute inset-0 bg-black/50 opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-[10000]" />
 
       <!-- Hover controls -->
-      <div v-if="props.editMode" class="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-[10001] group-hover:pointer-events-auto">
+      <div
+        v-if="props.editMode"
+        :class="props.allowDelete ? 'group-hover:pointer-events-auto' : ''"
+        class="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-[10001]"
+      >
         <!-- Delete button top right -->
         <div v-if="props.allowDelete" data-cms-block-control class="pointer-events-auto absolute top-2 right-2">
           <edge-shad-button
