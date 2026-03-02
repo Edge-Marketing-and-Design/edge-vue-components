@@ -1517,6 +1517,9 @@ const exportCurrentBlock = () => {
                       <div><code>cms-nav-overlay</code>: backdrop click-to-close (optional but recommended).</div>
                       <div><code>cms-nav-close</code>: explicit close button in panel (optional).</div>
                       <div><code>cms-nav-link</code>: links that should close panel on click (optional).</div>
+                      <div><code>cms-nav-folder</code>: desktop folder wrapper for dropdown behavior (recommended).</div>
+                      <div><code>cms-nav-folder-toggle</code>: desktop folder trigger link/button (recommended).</div>
+                      <div><code>cms-nav-folder-menu</code>: desktop dropdown menu panel for folder items (recommended).</div>
                       <div><code>cms-nav-main</code>: optional hook for scroll/sticky/hide classes (defaults to first <code>&lt;nav&gt;</code>).</div>
                       <div><code>cms-nav-pos-right</code>, <code>cms-nav-pos-left</code>, <code>cms-nav-pos-center</code>: helper classes for menu position behavior.</div>
                       <div><code>cms-nav-layout</code>, <code>cms-nav-logo</code>, <code>cms-nav-desktop</code>: optional structure hooks for precise layout mapping.</div>
@@ -1562,28 +1565,28 @@ const exportCurrentBlock = () => {
         &lt;div class="cms-nav-desktop ml-auto flex items-center gap-2"&gt;
           &lt;ul class="hidden lg:flex items-center gap-x-[20px] pt-1 text-sm uppercase tracking-widest list-none m-0 p-0 [&amp;&gt;li]:m-0 [&amp;&gt;li&gt;a]:m-0"&gt;
             {{{#subarray:menuItem {"field":"item.menus.Site Root","limit":5,"value":[]}}}}
-            &lt;li class="relative group"&gt;
+            &lt;li class="relative group cms-nav-folder" data-cms-nav-folder&gt;
               {{{#if {"cond":"menuItem.item.type == 'external'"}}}}
               &lt;a href="{{menuItem.item.url}}" class="cursor-pointer"&gt;{{menuItem.name}}&lt;/a&gt;
               {{{#else}}}
               {{{#if {"cond":"menuItem.item == '[object Object]'"}}}}
               {{{#entries:folderEntry {"field":"menuItem.item","value":{}}}}}
               {{{#if {"cond":"folderEntry.key == 'home'"}}}}
-              &lt;a href="/" class="cursor-pointer"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
+              &lt;a href="/" class="cms-nav-folder-toggle cursor-pointer text-sideNavText" data-cms-nav-folder-toggle&gt;{{menuItem.menuTitle}}&lt;/a&gt;
               {{{#else}}}
-              &lt;a href="/{{folderEntry.key}}" class="cursor-pointer"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
+              &lt;a href="/{{folderEntry.key}}" class="cms-nav-folder-toggle cursor-pointer text-sideNavText" data-cms-nav-folder-toggle&gt;{{menuItem.menuTitle}}&lt;/a&gt;
               {{{/if}}}
-              &lt;div class="absolute left-0 top-full z-40 hidden bg-sideNavBg  py-2 text-left px-12 normal-case tracking-normal shadow-xl group-hover:block group-focus-within:block"&gt;
+              &lt;div class="cms-nav-folder-menu absolute left-0 top-full z-40 hidden min-w-max whitespace-nowrap bg-sideNavBg text-sideNavText py-2 text-left px-12 normal-case tracking-normal shadow-xl" data-cms-nav-folder-menu&gt;
               &lt;ul&gt;
                 {{{#subarray:folderChild {"field":"item.value","value":[]}}}}
                 &lt;li class="py-1"&gt;
                   {{{#if {"cond":"folderChild.item.type == 'external'"}}}}
-                  &lt;a href="{{folderChild.item.url}}" class="block cursor-pointer"&gt;{{folderChild.name}}&lt;/a&gt;
+                  &lt;a href="{{folderChild.item.url}}" class="block cursor-pointer whitespace-nowrap text-sideNavText"&gt;{{folderChild.name}}&lt;/a&gt;
                   {{{#else}}}
                   {{{#if {"cond":"folderChild.menuTitle"}}}}
-                  &lt;a href="/{{folderEntry.key}}/{{folderChild.name}}" class="block cursor-pointer"&gt;{{folderChild.menuTitle}}&lt;/a&gt;
+                  &lt;a href="/{{folderEntry.key}}/{{folderChild.name}}" class="block cursor-pointer whitespace-nowrap text-sideNavText"&gt;{{folderChild.menuTitle}}&lt;/a&gt;
                   {{{#else}}}
-                  &lt;a href="/{{folderEntry.key}}/{{folderChild.name}}" class="block cursor-pointer"&gt;{{folderChild.name}}&lt;/a&gt;
+                  &lt;a href="/{{folderEntry.key}}/{{folderChild.name}}" class="block cursor-pointer whitespace-nowrap text-sideNavText"&gt;{{folderChild.name}}&lt;/a&gt;
                   {{{/if}}}
                   {{{/if}}}
                 &lt;/li&gt;
