@@ -191,6 +191,10 @@ const INTERACTIVE_CLICK_SELECTOR = [
   '.cms-nav-close',
   '.cms-nav-link',
 ].join(', ')
+const EDITOR_CONTROL_CLICK_SELECTOR = [
+  '[data-cms-block-control]',
+  '[data-cms-block-ignore-editor-click]',
+].join(', ')
 
 const hasFixedPositionInContent = computed(() => {
   const content = String(modelValue.value?.content || '')
@@ -637,6 +641,8 @@ const openEditor = async (event) => {
   if (!canOpenEditor.value)
     return
   const target = event?.target
+  if (target?.closest?.(EDITOR_CONTROL_CLICK_SELECTOR))
+    return
   const shouldOverrideEditClicks = props.editMode && props.overrideClicksInEditMode
   if (shouldOverrideEditClicks) {
     event?.preventDefault?.()
@@ -1016,22 +1022,28 @@ const getTagsFromPosts = computed(() => {
       @click.capture="openEditor($event)"
     >
       <!-- Content -->
-      <edge-cms-block-api :site-id="props.siteId" :theme="props.theme" :content="modelValue?.content" :values="modelValue?.values" :meta="modelValue?.meta" :viewport-mode="props.viewportMode" @pending="state.loading = $event" />
-      <edge-cms-block-render
-        v-if="state.loading"
-        :content="loadingRender(modelValue?.content)"
-        :values="modelValue?.values"
-        :meta="modelValue?.meta"
-        :theme="props.theme"
-        :viewport-mode="props.viewportMode"
-      />
+      <div :class="props.editMode && props.overrideClicksInEditMode ? 'pointer-events-none' : ''">
+        <edge-cms-block-api :site-id="props.siteId" :theme="props.theme" :content="modelValue?.content" :values="modelValue?.values" :meta="modelValue?.meta" :viewport-mode="props.viewportMode" @pending="state.loading = $event" />
+        <edge-cms-block-render
+          v-if="state.loading"
+          :content="loadingRender(modelValue?.content)"
+          :values="modelValue?.values"
+          :meta="modelValue?.meta"
+          :theme="props.theme"
+          :viewport-mode="props.viewportMode"
+        />
+      </div>
       <!-- Darken overlay on hover -->
-      <div v-if="props.editMode" class="pointer-events-none absolute inset-0 bg-black/50 opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-10" />
+      <div v-if="props.editMode" class="pointer-events-none absolute inset-0 bg-black/50 opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-[10000]" />
 
       <!-- Hover controls -->
-      <div v-if="props.editMode" class="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-20">
+      <div
+        v-if="props.editMode"
+        :class="props.allowDelete ? 'group-hover:pointer-events-auto' : ''"
+        class="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-[10001]"
+      >
         <!-- Delete button top right -->
-        <div v-if="props.allowDelete" class="absolute top-2 right-2">
+        <div v-if="props.allowDelete" data-cms-block-control class="pointer-events-auto absolute top-2 right-2">
           <edge-shad-button
             variant="destructive"
             size="icon"
