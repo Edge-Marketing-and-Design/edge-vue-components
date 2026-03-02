@@ -1402,7 +1402,6 @@ const exportCurrentBlock = () => {
                     </h3>
                     <p class="text-sm text-foreground">
                       Add <code>data-carousel</code> markup to any CMS block and the runtime auto-initializes Embla on the client.
-                      This is initialized in <code>htmlContent.vue</code> and works inside raw block HTML.
                     </p>
                   </section>
 

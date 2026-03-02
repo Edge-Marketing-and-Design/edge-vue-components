@@ -22,6 +22,16 @@ const emit = defineEmits(['head'])
 const edgeFirebase = inject('edgeFirebase')
 const router = useRouter()
 const { buildPageStructuredData } = useStructuredDataTemplates()
+const cmsMultiOrg = useState('cmsMultiOrg', () => true)
+const isAdmin = computed(() => edgeGlobal.isAdminGlobal(edgeFirebase).value)
+const isDevModeEnabled = computed(() => process.dev || Boolean(edgeGlobal.edgeState.devOverride))
+const canOpenPreviewBlockContentEditor = computed(() => {
+  if (!isAdmin.value)
+    return false
+  if (cmsMultiOrg.value)
+    return true
+  return isDevModeEnabled.value
+})
 
 const state = reactive({
   newDocs: {
@@ -2174,6 +2184,8 @@ const hasUnsavedChanges = (changes) => {
                                   v-model="slotProps.workingDoc.content[blockIndex(slotProps.workingDoc, blockId, false)]"
                                   :site-id="props.site"
                                   :edit-mode="state.editMode"
+                                  :override-clicks-in-edit-mode="state.editMode"
+                                  :allow-preview-content-edit="!state.editMode && canOpenPreviewBlockContentEditor"
                                   :contain-fixed="state.editMode"
                                   :viewport-mode="previewViewportMode"
                                   :block-id="blockId"
@@ -2427,6 +2439,8 @@ const hasUnsavedChanges = (changes) => {
                                   :key="`${pagePreviewRenderKey}:${blockId}:${effectiveThemeId}:post`"
                                   v-model="slotProps.workingDoc.postContent[blockIndex(slotProps.workingDoc, blockId, true)]"
                                   :edit-mode="state.editMode"
+                                  :override-clicks-in-edit-mode="state.editMode"
+                                  :allow-preview-content-edit="!state.editMode && canOpenPreviewBlockContentEditor"
                                   :contain-fixed="state.editMode"
                                   :viewport-mode="previewViewportMode"
                                   :block-id="blockId"

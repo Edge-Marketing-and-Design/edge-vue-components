@@ -38,6 +38,14 @@ const props = defineProps({
     type: Boolean,
     default: true,
   },
+  overrideClicksInEditMode: {
+    type: Boolean,
+    default: false,
+  },
+  allowPreviewContentEdit: {
+    type: Boolean,
+    default: false,
+  },
 })
 const emit = defineEmits(['update:modelValue', 'delete'])
 const edgeFirebase = inject('edgeFirebase')
@@ -147,9 +155,11 @@ function extractFieldsInOrder(template) {
 
 const modelValue = useVModel(props, 'modelValue', emit)
 const blockFormRef = ref(null)
+const previewContentEditorRef = ref(null)
 
 const state = reactive({
   open: false,
+  editorMode: 'fields',
   draft: {},
   delete: false,
   meta: {},
@@ -166,6 +176,10 @@ const state = reactive({
   aiGenerating: false,
   aiError: '',
   validationErrors: [],
+  blockContentDraft: '',
+  blockContentDocId: '',
+  blockContentUpdating: false,
+  blockContentError: '',
 })
 
 const INTERACTIVE_CLICK_SELECTOR = [
@@ -211,6 +225,10 @@ const effectivePreviewType = computed(() => {
   return normalizePreviewType(inheritedPreviewType.value ?? resolvedPreviewType.value)
 })
 
+const canOpenFieldEditor = computed(() => props.editMode)
+const canOpenPreviewContentEditor = computed(() => !props.editMode && props.allowPreviewContentEdit)
+const canOpenEditor = computed(() => canOpenFieldEditor.value || canOpenPreviewContentEditor.value)
+
 const shouldContainFixedPreview = computed(() => {
   return (props.editMode || props.containFixed) && hasFixedPositionInContent.value
 })
@@ -244,6 +262,94 @@ const isLightName = (value) => {
 }
 
 const previewBackgroundClass = value => (isLightName(value) ? 'bg-neutral-900/90' : 'bg-neutral-100')
+
+const PLACEHOLDERS = {
+  text: 'Lorem ipsum dolor sit amet.',
+  textarea: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.',
+  richtext: '<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>',
+  arrayItem: [
+    'Lorem ipsum dolor sit amet.',
+    'Consectetur adipiscing elit.',
+    'Sed do eiusmod tempor incididunt.',
+  ],
+  image: 'https://imagedelivery.net/h7EjKG0X9kOxmLp41mxOng/f1f7f610-dfa9-4011-08a3-7a98d95e7500/thumbnail',
+}
+
+const BLOCK_CONTENT_SNIPPETS = [
+  {
+    label: 'Text Field',
+    snippet: '{{{#text {"field": "fieldName", "value": "" }}}}',
+    description: 'Simple text field placeholder',
+  },
+  {
+    label: 'Text with Options',
+    snippet: '{{{#text {"field":"fieldName","title":"Field Label","option":{"field":"fieldName","options":[{"title":"Option 1","name":"option1"},{"title":"Option 2","name":"option2"}],"optionsKey":"title","optionsValue":"name"},"value":"option1"}}}}',
+    description: 'Text field with selectable options',
+  },
+  {
+    label: 'Text Area',
+    snippet: '{{{#textarea {"field": "fieldName", "value": "" }}}}',
+    description: 'Textarea field placeholder',
+  },
+  {
+    label: 'Rich Text',
+    snippet: '{{{#richtext {"field": "content", "value": "" }}}}',
+    description: 'Rich text field placeholder',
+  },
+  {
+    label: 'Image',
+    snippet: '{{{#image {"field": "imageField", "value": "", "tags": ["Backgrounds"] }}}}',
+    description: 'Image field placeholder',
+  },
+  {
+    label: 'Array (Basic)',
+    snippet: `{{{#array {"field": "items", "value": [] }}}}
+  <!-- iterate with {{item}} -->
+{{{/array}}}`,
+    description: 'Basic repeating array block',
+  },
+  {
+    label: 'Subarray',
+    snippet: `{{{#subarray:child {"field": "item.children", "limit": 0 }}}}
+  {{child}}
+{{{/subarray}}}`,
+    description: 'Nested array inside an array item',
+  },
+  {
+    label: 'If / Else',
+    snippet: `{{{#if {"cond": "condition" }}}}
+  <!-- content when condition is true -->
+{{{#else}}}
+  <!-- content when condition is false -->
+{{{/if}}}`,
+    description: 'Conditional block with optional else',
+  },
+]
+
+const insertPreviewSnippet = (snippet) => {
+  if (!snippet)
+    return
+  const editor = previewContentEditorRef.value
+  if (!editor || typeof editor.insertSnippet !== 'function')
+    return
+  editor.insertSnippet(snippet)
+}
+
+const previewBlockDisplayName = computed(() => {
+  const blockDocId = String(state.blockContentDocId || sourceBlockDocId.value || '').trim()
+  const blockDoc = blockDocId
+    ? edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[blockDocId]
+    : null
+
+  const candidates = [
+    blockDoc?.name,
+    modelValue.value?.name,
+    state.blockContentDocId,
+    sourceBlockDocId.value,
+  ]
+  const found = candidates.find(value => String(value || '').trim())
+  return String(found || '').trim() || 'Block'
+})
 
 const ensureQueryItemsDefaults = (meta) => {
   Object.keys(meta || {}).forEach((key) => {
@@ -313,11 +419,236 @@ const resetArrayItems = (field, metaSource = null) => {
   }
 }
 
+const TAG_START_RE = /\{\{\{\#([A-Za-z0-9_-]+)\s*\{/g
+
+function* iterateTags(html) {
+  TAG_START_RE.lastIndex = 0
+  for (;;) {
+    const m = TAG_START_RE.exec(html)
+    if (!m)
+      break
+
+    const type = m[1]
+    const configStart = TAG_START_RE.lastIndex - 1
+    if (configStart < 0 || html[configStart] !== '{')
+      continue
+
+    const configEnd = findMatchingBrace(html, configStart)
+    if (configEnd === -1)
+      continue
+
+    const rawCfg = html.slice(configStart, configEnd + 1)
+    const closeTriple = html.indexOf('}}}', configEnd)
+    const tagEnd = closeTriple !== -1 ? closeTriple + 3 : configEnd + 1
+
+    yield { type, rawCfg, tagEnd }
+
+    TAG_START_RE.lastIndex = tagEnd
+  }
+}
+
+const parseBlockContentModel = (html) => {
+  const values = {}
+  const meta = {}
+  if (!html)
+    return { values, meta }
+
+  for (const { type, rawCfg } of iterateTags(html)) {
+    const cfg = safeParseTagConfig(rawCfg)
+    if (!cfg || !cfg.field)
+      continue
+
+    const field = String(cfg.field)
+    const title = cfg.title != null ? String(cfg.title) : ''
+    const { value: _omitValue, field: _omitField, ...rest } = cfg
+    meta[field] = { type, ...rest, title }
+
+    let val = cfg.value
+    if (type === 'image')
+      val = !val ? PLACEHOLDERS.image : String(val)
+    else if (type === 'text')
+      val = !val ? PLACEHOLDERS.text : String(val)
+    else if (type === 'array') {
+      if (meta[field]?.limit > 0) {
+        val = Array(meta[field].limit).fill('placeholder')
+      }
+      else {
+        if (Array.isArray(val)) {
+          if (val.length === 0)
+            val = PLACEHOLDERS.arrayItem
+        }
+        else {
+          val = PLACEHOLDERS.arrayItem
+        }
+      }
+    }
+    else if (type === 'textarea')
+      val = !val ? PLACEHOLDERS.textarea : String(val)
+    else if (type === 'richtext')
+      val = !val ? PLACEHOLDERS.richtext : String(val)
+
+    values[field] = val
+  }
+
+  return { values, meta }
+}
+
+const buildUpdatedBlockDocFromContent = (content, sourceDoc = {}) => {
+  const parsed = parseBlockContentModel(content)
+  const previousValues = sourceDoc?.values || {}
+  const previousMeta = sourceDoc?.meta || {}
+  const nextValues = {}
+  const nextMeta = {}
+
+  Object.keys(parsed.values || {}).forEach((field) => {
+    if (previousValues[field] !== undefined)
+      nextValues[field] = previousValues[field]
+    else
+      nextValues[field] = parsed.values[field]
+  })
+
+  Object.keys(parsed.meta || {}).forEach((field) => {
+    if (previousMeta[field]) {
+      nextMeta[field] = {
+        ...previousMeta[field],
+        ...parsed.meta[field],
+      }
+    }
+    else {
+      nextMeta[field] = parsed.meta[field]
+    }
+  })
+
+  return { values: nextValues, meta: nextMeta }
+}
+
+const blockContentSourceDoc = computed(() => {
+  const blockDocId = String(state.blockContentDocId || sourceBlockDocId.value || '').trim()
+  if (!blockDocId)
+    return null
+  return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[blockDocId] || null
+})
+
+const blockContentPreviewBlock = computed(() => {
+  const content = String(state.blockContentDraft ?? '')
+  const sourceDoc = modelValue.value || blockContentSourceDoc.value || {}
+  const { values, meta } = buildUpdatedBlockDocFromContent(content, sourceDoc)
+  const previewType = modelValue.value?.previewType ?? blockContentSourceDoc.value?.previewType
+  return {
+    id: modelValue.value?.id || 'preview-content',
+    blockId: String(state.blockContentDocId || sourceBlockDocId.value || '').trim(),
+    name: previewBlockDisplayName.value,
+    previewType: normalizePreviewType(previewType),
+    content,
+    values,
+    meta,
+    synced: !!sourceDoc?.synced,
+  }
+})
+
+const previewContentSurfaceClass = computed(() => {
+  const previewType = normalizePreviewType(blockContentPreviewBlock.value?.previewType)
+  return previewType === 'light'
+    ? 'bg-white text-black'
+    : 'bg-neutral-950 text-neutral-50'
+})
+
+const previewContentCanvasClass = computed(() => {
+  const content = String(blockContentPreviewBlock.value?.content || '')
+  const hasFixedContent = /\bfixed\b/.test(content)
+  return hasFixedContent ? 'min-h-[calc(100vh-380px)]' : 'min-h-[220px]'
+})
+
+const openPreviewContentEditor = async () => {
+  const blockDocId = sourceBlockDocId.value
+  if (!blockDocId)
+    return
+
+  const blocksPath = `${edgeGlobal.edgeState.organizationDocPath}/blocks`
+  if (!edgeFirebase.data?.[blocksPath])
+    await edgeFirebase.startSnapshot(blocksPath)
+
+  const blockData = edgeFirebase.data?.[blocksPath]?.[blockDocId]
+  if (!blockData) {
+    state.blockContentError = 'Unable to load block content.'
+    edgeFirebase?.toast?.error?.('Unable to load block content.')
+    return
+  }
+
+  state.editorMode = 'content'
+  state.blockContentDocId = blockDocId
+  state.blockContentDraft = String(modelValue.value?.content || blockData.content || '')
+  state.blockContentError = ''
+  state.blockContentUpdating = false
+  state.validationErrors = []
+  state.open = true
+  state.afterLoad = true
+}
+
+const updateBlockContent = async () => {
+  if (state.blockContentUpdating)
+    return
+  const blockDocId = String(state.blockContentDocId || sourceBlockDocId.value || '').trim()
+  if (!blockDocId)
+    return
+
+  const blocksPath = `${edgeGlobal.edgeState.organizationDocPath}/blocks`
+  const blockData = edgeFirebase.data?.[blocksPath]?.[blockDocId] || {}
+  const nextContent = String(state.blockContentDraft || '')
+  const { values, meta } = buildUpdatedBlockDocFromContent(nextContent, blockData)
+  const blockUpdatedAt = new Date().toISOString()
+
+  const previousModelValue = edgeGlobal.dupObject(modelValue.value || {})
+  modelValue.value = {
+    ...(modelValue.value || {}),
+    content: nextContent,
+    values,
+    meta,
+    blockUpdatedAt,
+    blockId: blockData?.docId || blockDocId,
+  }
+
+  state.blockContentError = ''
+  state.blockContentUpdating = true
+  try {
+    const results = await edgeFirebase.changeDoc(blocksPath, blockDocId, {
+      content: nextContent,
+      values,
+      meta,
+      blockUpdatedAt,
+    })
+    if (results?.success === false) {
+      throw new Error(results?.error || 'Failed to update block content.')
+    }
+    edgeFirebase?.toast?.success?.('Block content updated.')
+    state.open = false
+  }
+  catch (error) {
+    modelValue.value = previousModelValue
+    state.blockContentError = error?.message || 'Unable to save block content.'
+    edgeFirebase?.toast?.error?.(state.blockContentError)
+  }
+  finally {
+    state.blockContentUpdating = false
+  }
+}
+
 const openEditor = async (event) => {
-  if (!props.editMode)
+  if (!canOpenEditor.value)
     return
   const target = event?.target
-  if (target?.closest?.(INTERACTIVE_CLICK_SELECTOR))
+  const shouldOverrideEditClicks = props.editMode && props.overrideClicksInEditMode
+  if (shouldOverrideEditClicks) {
+    event?.preventDefault?.()
+    event?.stopPropagation?.()
+  }
+  if (canOpenPreviewContentEditor.value) {
+    event?.preventDefault?.()
+    event?.stopPropagation?.()
+    await openPreviewContentEditor()
+    return
+  }
+  if (!shouldOverrideEditClicks && target?.closest?.(INTERACTIVE_CLICK_SELECTOR))
     return
   const blockData = edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[modelValue.value.blockId]
   const templateMeta = blockData?.meta || modelValue.value?.meta || {}
@@ -357,6 +688,7 @@ const openEditor = async (event) => {
   }
   modelValue.value.blockUpdatedAt = new Date().toISOString()
   state.validationErrors = []
+  state.editorMode = 'fields'
   state.open = true
   state.afterLoad = true
 }
@@ -678,10 +1010,10 @@ const getTagsFromPosts = computed(() => {
 <template>
   <div>
     <div
-      :class="[{ 'cursor-pointer': props.editMode }, blockWrapperClass]"
+      :class="[{ 'cursor-pointer': canOpenEditor }, blockWrapperClass]"
       :style="blockWrapperStyle"
       class="relative group"
-      @click="openEditor($event)"
+      @click.capture="openEditor($event)"
     >
       <!-- Content -->
       <edge-cms-block-api :site-id="props.siteId" :theme="props.theme" :content="modelValue?.content" :values="modelValue?.values" :meta="modelValue?.meta" :viewport-mode="props.viewportMode" @pending="state.loading = $event" />
@@ -738,317 +1070,420 @@ const getTagsFromPosts = computed(() => {
     </edge-shad-dialog>
 
     <Sheet v-model:open="state.open">
-      <edge-cms-block-sheet-content v-if="state.afterLoad" class="w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl">
-        <SheetHeader>
-          <div class="flex flex-col gap-3 pr-10 md:flex-row md:items-start md:justify-between">
-            <div class="min-w-0">
-              <SheetTitle>Edit Block</SheetTitle>
-              <SheetDescription v-if="modelValue.synced" class="text-sm text-red-500">
-                This is a synced block. Changes made here will be reflected across all instances of this block on your site.
-              </SheetDescription>
+      <edge-cms-block-sheet-content
+        v-if="state.afterLoad"
+        :side="state.editorMode === 'content' ? 'left' : 'right'"
+        :class="state.editorMode === 'content'
+          ? 'w-full max-w-none sm:max-w-none md:max-w-none'
+          : 'w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl'"
+      >
+        <template v-if="state.editorMode === 'content'">
+          <SheetHeader>
+            <div class="flex flex-col gap-2 pr-10">
+              <div class="min-w-0">
+                <SheetTitle>Edit Block Content: {{ previewBlockDisplayName }}</SheetTitle>
+                <SheetDescription class="text-sm text-muted-foreground">
+                  Update this block template and save it globally. Changes will sync to every page using this block.
+                </SheetDescription>
+              </div>
             </div>
-            <edge-shad-button
-              type="button"
-              size="sm"
-              class="h-8 gap-2 md:self-start"
-              variant="outline"
-              :disabled="!aiFieldOptions.length"
-              @click="openAiDialog"
-            >
-              <Sparkles class="w-4 h-4" />
-              Generate with AI
-            </edge-shad-button>
-          </div>
-        </SheetHeader>
-
-        <edge-shad-form ref="blockFormRef">
-          <div v-if="editableMetaEntries.length === 0">
-            <Alert variant="info" class="mt-4 mb-4">
-              <AlertTitle>No editable fields found</AlertTitle>
+          </SheetHeader>
+          <div class="px-6 pb-1 pt-3 flex h-[calc(100vh-116px)] flex-col gap-2 overflow-hidden">
+            <div class="flex-1 min-h-0 grid grid-cols-1 xl:grid-cols-2 gap-3">
+              <div class="min-h-0">
+                <edge-cms-code-editor
+                  ref="previewContentEditorRef"
+                  v-model="state.blockContentDraft"
+                  title="Block Content"
+                  language="handlebars"
+                  name="preview-block-content"
+                  :enable-formatting="false"
+                  height="calc(100vh - 295px)"
+                  class="h-full min-h-0"
+                >
+                  <template #end-actions>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger as-child>
+                        <edge-shad-button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          class="h-8 px-2 text-[11px] uppercase tracking-wide"
+                        >
+                          Dynamic Content
+                        </edge-shad-button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" class="w-72">
+                        <DropdownMenuItem
+                          v-for="snippet in BLOCK_CONTENT_SNIPPETS"
+                          :key="snippet.label"
+                          class="cursor-pointer flex-col items-start gap-0.5"
+                          @click="insertPreviewSnippet(snippet.snippet)"
+                        >
+                          <span class="text-sm font-medium">{{ snippet.label }}</span>
+                          <span class="text-xs text-muted-foreground whitespace-normal">{{ snippet.description }}</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </template>
+                </edge-cms-code-editor>
+              </div>
+              <div class="min-h-0 rounded-md border border-border bg-card overflow-hidden flex flex-col">
+                <div class="px-3 py-2 border-b border-border text-xs font-semibold uppercase tracking-wide text-muted-foreground bg-muted/40">
+                  Live Preview
+                </div>
+                <div class="flex-1 min-h-0 overflow-y-auto p-3">
+                  <div class="relative overflow-visible rounded-none" :class="[previewContentSurfaceClass, previewContentCanvasClass]" style="transform: translateZ(0);">
+                    <edge-cms-block-api
+                      :site-id="props.siteId"
+                      :theme="props.theme"
+                      :content="blockContentPreviewBlock.content"
+                      :values="blockContentPreviewBlock.values"
+                      :meta="blockContentPreviewBlock.meta"
+                      :viewport-mode="props.viewportMode"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+            <Alert v-if="state.blockContentError" variant="destructive" class="mb-2">
+              <AlertTitle>Save failed</AlertTitle>
               <AlertDescription class="text-sm">
-                This block does not have any editable fields defined.
+                {{ state.blockContentError }}
               </AlertDescription>
             </Alert>
+            <SheetFooter class="flex justify-between pt-1 pb-0">
+              <edge-shad-button
+                variant="destructive"
+                class="text-white"
+                :disabled="state.blockContentUpdating"
+                @click="state.open = false"
+              >
+                Cancel
+              </edge-shad-button>
+              <edge-shad-button
+                class="bg-slate-800 hover:bg-slate-400 w-full"
+                :disabled="state.blockContentUpdating"
+                @click="updateBlockContent"
+              >
+                <Loader2 v-if="state.blockContentUpdating" class="w-4 h-4 mr-2 animate-spin" />
+                Update
+              </edge-shad-button>
+            </SheetFooter>
           </div>
-          <div :class="modelValue.synced ? 'h-[calc(100vh-160px)]' : 'h-[calc(100vh-130px)]'" class="p-6 space-y-4   overflow-y-auto">
-            <template v-for="entry in editableMetaEntries" :key="entry.field">
-              <div v-if="entry.meta.type === 'array'">
-                <div v-if="!entry.meta?.api && !entry.meta?.collection">
-                  <div v-if="entry.meta?.schema">
-                    <Card v-if="!state.reload" class="mb-4 bg-white shadow-sm border border-gray-200 p-4">
-                      <CardHeader class="p-0 mb-2">
-                        <div class="relative flex items-center bg-secondary p-2 justify-between sticky top-0 z-10 bg-primary rounded">
-                          <span class="text-lg font-semibold whitespace-nowrap pr-1"> {{ genTitleFromField(entry) }}</span>
-                          <div class="flex w-full items-center">
-                            <div class="w-full border-t border-gray-300 dark:border-white/15" aria-hidden="true" />
-                            <edge-shad-button variant="text" class="hover:text-primary/50 text-xs h-[26px] text-primary" @click="state.editMode = !state.editMode">
-                              <Popover>
-                                <PopoverTrigger as-child>
-                                  <edge-shad-button
-                                    variant="text"
-                                    type="submit"
-                                    class="bg-secondary hover:text-primary/50 text-xs h-[26px] text-primary"
-                                  >
-                                    <Plus class="w-4 h-4" />
-                                  </edge-shad-button>
-                                </PopoverTrigger>
-                                <PopoverContent class="!w-80 mr-20">
-                                  <Card class="border-none shadow-none p-4">
-                                    <template v-for="schemaItem in entry.meta.schema" :key="schemaItem.field">
-                                      <edge-cms-block-input
-                                        v-model="state.arrayItems[entry.field][schemaItem.field]"
-                                        :type="schemaItem.type"
-                                        :field="schemaItem.field"
-                                        :schema="schemaItem"
-                                        :label="genTitleFromField(schemaItem)"
-                                      />
-                                    </template>
-                                    <CardFooter class="mt-2 flex justify-end">
-                                      <edge-shad-button
-                                        class="bg-secondary hover:text-white text-xs h-[26px] text-primary"
-                                        @click="addToArray(entry.field)"
-                                      >
-                                        Add Entry
-                                      </edge-shad-button>
-                                    </CardFooter>
-                                  </Card>
-                                </PopoverContent>
-                              </Popover>
-                            </edge-shad-button>
-                          </div>
-                        </div>
-                      </CardHeader>
-                      <draggable
-                        v-if="state.draft?.[entry.field] && state.draft[entry.field].length > 0"
-                        v-model="state.draft[entry.field]"
-                        handle=".handle"
-                        item-key="index"
-                      >
-                        <template #item="{ element, index }">
-                          <div :key="index" class="">
-                            <div class="flex gap-2 w-full items-center w-full border-1 border-dotted py-1 mb-1">
-                              <div class="text-left px-2">
-                                <Grip class="handle pointer" />
-                              </div>
-                              <div class="px-2 py-2 w-[98%] flex gap-1">
-                                <template v-for="schemaItem in entry.meta.schema" :key="schemaItem.field">
-                                  <Popover>
-                                    <PopoverTrigger as-child>
-                                      <Alert class="w-[200px] text-xs py-1 px-2 cursor-pointer hover:bg-primary hover:text-white">
-                                        <AlertTitle> {{ genTitleFromField(schemaItem) }}</AlertTitle>
-                                        <AlertDescription class="text-sm truncate max-w-[200px]">
-                                          {{ element[schemaItem.field] }}
-                                        </AlertDescription>
-                                      </Alert>
-                                    </PopoverTrigger>
-                                    <PopoverContent class="!w-80 mr-20">
-                                      <Card class="border-none shadow-none p-4">
+        </template>
+        <template v-else>
+          <SheetHeader>
+            <div class="flex flex-col gap-3 pr-10 md:flex-row md:items-start md:justify-between">
+              <div class="min-w-0">
+                <SheetTitle>Edit Block</SheetTitle>
+                <SheetDescription v-if="modelValue.synced" class="text-sm text-red-500">
+                  This is a synced block. Changes made here will be reflected across all instances of this block on your site.
+                </SheetDescription>
+              </div>
+              <edge-shad-button
+                type="button"
+                size="sm"
+                class="h-8 gap-2 md:self-start"
+                variant="outline"
+                :disabled="!aiFieldOptions.length"
+                @click="openAiDialog"
+              >
+                <Sparkles class="w-4 h-4" />
+                Generate with AI
+              </edge-shad-button>
+            </div>
+          </SheetHeader>
+
+          <edge-shad-form ref="blockFormRef">
+            <div v-if="editableMetaEntries.length === 0">
+              <Alert variant="info" class="mt-4 mb-4">
+                <AlertTitle>No editable fields found</AlertTitle>
+                <AlertDescription class="text-sm">
+                  This block does not have any editable fields defined.
+                </AlertDescription>
+              </Alert>
+            </div>
+            <div :class="modelValue.synced ? 'h-[calc(100vh-160px)]' : 'h-[calc(100vh-130px)]'" class="p-6 space-y-4   overflow-y-auto">
+              <template v-for="entry in editableMetaEntries" :key="entry.field">
+                <div v-if="entry.meta.type === 'array'">
+                  <div v-if="!entry.meta?.api && !entry.meta?.collection">
+                    <div v-if="entry.meta?.schema">
+                      <Card v-if="!state.reload" class="mb-4 bg-white shadow-sm border border-gray-200 p-4">
+                        <CardHeader class="p-0 mb-2">
+                          <div class="relative flex items-center bg-secondary p-2 justify-between sticky top-0 z-10 bg-primary rounded">
+                            <span class="text-lg font-semibold whitespace-nowrap pr-1"> {{ genTitleFromField(entry) }}</span>
+                            <div class="flex w-full items-center">
+                              <div class="w-full border-t border-gray-300 dark:border-white/15" aria-hidden="true" />
+                              <edge-shad-button variant="text" class="hover:text-primary/50 text-xs h-[26px] text-primary" @click="state.editMode = !state.editMode">
+                                <Popover>
+                                  <PopoverTrigger as-child>
+                                    <edge-shad-button
+                                      variant="text"
+                                      type="submit"
+                                      class="bg-secondary hover:text-primary/50 text-xs h-[26px] text-primary"
+                                    >
+                                      <Plus class="w-4 h-4" />
+                                    </edge-shad-button>
+                                  </PopoverTrigger>
+                                  <PopoverContent class="!w-80 mr-20">
+                                    <Card class="border-none shadow-none p-4">
+                                      <template v-for="schemaItem in entry.meta.schema" :key="schemaItem.field">
                                         <edge-cms-block-input
-                                          v-model="element[schemaItem.field]"
+                                          v-model="state.arrayItems[entry.field][schemaItem.field]"
                                           :type="schemaItem.type"
+                                          :field="schemaItem.field"
                                           :schema="schemaItem"
-                                          :field="`${schemaItem.field}-${index}-entry`"
                                           :label="genTitleFromField(schemaItem)"
                                         />
-                                      </Card>
-                                    </PopoverContent>
-                                  </Popover>
-                                </template>
-                              </div>
-                              <div class="pr-2">
-                                <edge-shad-button
-                                  variant="destructive"
-                                  size="icon"
-                                  @click="state.draft[entry.field].splice(index, 1)"
-                                >
-                                  <Trash class="h-4 w-4" />
-                                </edge-shad-button>
-                              </div>
+                                      </template>
+                                      <CardFooter class="mt-2 flex justify-end">
+                                        <edge-shad-button
+                                          class="bg-secondary hover:text-white text-xs h-[26px] text-primary"
+                                          @click="addToArray(entry.field)"
+                                        >
+                                          Add Entry
+                                        </edge-shad-button>
+                                      </CardFooter>
+                                    </Card>
+                                  </PopoverContent>
+                                </Popover>
+                              </edge-shad-button>
                             </div>
                           </div>
-                        </template>
-                      </draggable>
-                    </Card>
+                        </CardHeader>
+                        <draggable
+                          v-if="state.draft?.[entry.field] && state.draft[entry.field].length > 0"
+                          v-model="state.draft[entry.field]"
+                          handle=".handle"
+                          item-key="index"
+                        >
+                          <template #item="{ element, index }">
+                            <div :key="index" class="">
+                              <div class="flex gap-2 w-full items-center w-full border-1 border-dotted py-1 mb-1">
+                                <div class="text-left px-2">
+                                  <Grip class="handle pointer" />
+                                </div>
+                                <div class="px-2 py-2 w-[98%] flex gap-1">
+                                  <template v-for="schemaItem in entry.meta.schema" :key="schemaItem.field">
+                                    <Popover>
+                                      <PopoverTrigger as-child>
+                                        <Alert class="w-[200px] text-xs py-1 px-2 cursor-pointer hover:bg-primary hover:text-white">
+                                          <AlertTitle> {{ genTitleFromField(schemaItem) }}</AlertTitle>
+                                          <AlertDescription class="text-sm truncate max-w-[200px]">
+                                            {{ element[schemaItem.field] }}
+                                          </AlertDescription>
+                                        </Alert>
+                                      </PopoverTrigger>
+                                      <PopoverContent class="!w-80 mr-20">
+                                        <Card class="border-none shadow-none p-4">
+                                          <edge-cms-block-input
+                                            v-model="element[schemaItem.field]"
+                                            :type="schemaItem.type"
+                                            :schema="schemaItem"
+                                            :field="`${schemaItem.field}-${index}-entry`"
+                                            :label="genTitleFromField(schemaItem)"
+                                          />
+                                        </Card>
+                                      </PopoverContent>
+                                    </Popover>
+                                  </template>
+                                </div>
+                                <div class="pr-2">
+                                  <edge-shad-button
+                                    variant="destructive"
+                                    size="icon"
+                                    @click="state.draft[entry.field].splice(index, 1)"
+                                  >
+                                    <Trash class="h-4 w-4" />
+                                  </edge-shad-button>
+                                </div>
+                              </div>
+                            </div>
+                          </template>
+                        </draggable>
+                      </Card>
+                    </div>
+                    <edge-cms-block-input
+                      v-else
+                      v-model="state.draft[entry.field]"
+                      :type="entry.meta.type"
+                      :field="entry.field"
+                      :label="genTitleFromField(entry)"
+                    />
                   </div>
+                  <div v-else>
+                    <template v-if="entry.meta?.queryOptions">
+                      <div v-for="option in entry.meta.queryOptions" :key="option.field" class="mb-2">
+                        <edge-shad-select-tags
+                          v-if="entry.meta?.collection?.path === 'posts' && option.field === 'tags'"
+                          v-model="state.meta[entry.field].queryItems[option.field]"
+                          :items="getTagsFromPosts"
+                          :label="`${genTitleFromField(option)}`"
+                          :name="option.field"
+                          :placeholder="`Select ${genTitleFromField(option)}`"
+                        />
+                        <edge-cms-options-select
+                          v-else-if="entry.meta?.collection?.path !== 'post'"
+                          v-model="state.meta[entry.field].queryItems[option.field]"
+                          :option="option"
+                          :label="genTitleFromField(option)"
+                          :multiple="option?.multiple || false"
+                        />
+                      </div>
+                    </template>
+                    <edge-shad-number
+                      v-if="entry.meta?.collection?.path !== 'post' && !isLimitOne(entry.field)"
+                      v-model="state.meta[entry.field].limit"
+                      name="limit"
+                      label="Limit"
+                    />
+                  </div>
+                </div>
+                <div v-else-if="entry.meta?.type === 'image'" class="w-full">
+                  <div class="mb-2 text-sm font-medium text-foreground">
+                    {{ genTitleFromField(entry) }}
+                  </div>
+                  <div class="relative py-2 rounded-md flex items-center justify-center" :class="previewBackgroundClass(state.draft[entry.field])">
+                    <div class="bg-black/80 absolute left-0 top-0 w-full h-full opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center z-10 cursor-pointer">
+                      <Dialog v-model:open="state.imageOpenByField[entry.field]">
+                        <DialogTrigger as-child>
+                          <edge-shad-button variant="outline" class="bg-white text-black hover:bg-gray-200">
+                            <ImagePlus class="h-5 w-5 mr-2" />
+                            Select Image
+                          </edge-shad-button>
+                        </DialogTrigger>
+                        <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-y-auto">
+                          <DialogHeader>
+                            <DialogTitle>Select Image</DialogTitle>
+                            <DialogDescription />
+                          </DialogHeader>
+                          <edge-cms-media-manager
+                            v-if="entry.meta?.tags && entry.meta.tags.length > 0"
+                            :site="props.siteId"
+                            :select-mode="true"
+                            :default-tags="entry.meta.tags"
+                            @select="(url) => { state.draft[entry.field] = url; state.imageOpenByField[entry.field] = false }"
+                          />
+                          <edge-cms-media-manager
+                            v-else
+                            :site="props.siteId"
+                            :select-mode="true"
+                            @select="(url) => { state.draft[entry.field] = url; state.imageOpenByField[entry.field] = false }"
+                          />
+                        </DialogContent>
+                      </Dialog>
+                    </div>
+                    <img
+                      v-if="state.draft[entry.field]"
+                      :src="state.draft[entry.field]"
+                      class="max-h-40 max-w-full h-auto w-auto object-contain"
+                    >
+                  </div>
+                </div>
+                <div v-else-if="entry.meta?.option">
+                  <edge-cms-options-select
+                    v-model="state.draft[entry.field]"
+                    :option="entry.meta.option"
+                    :label="genTitleFromField(entry)"
+                  />
+                </div>
+                <div v-else>
                   <edge-cms-block-input
-                    v-else
                     v-model="state.draft[entry.field]"
                     :type="entry.meta.type"
                     :field="entry.field"
                     :label="genTitleFromField(entry)"
                   />
                 </div>
-                <div v-else>
-                  <template v-if="entry.meta?.queryOptions">
-                    <div v-for="option in entry.meta.queryOptions" :key="option.field" class="mb-2">
-                      <edge-shad-select-tags
-                        v-if="entry.meta?.collection?.path === 'posts' && option.field === 'tags'"
-                        v-model="state.meta[entry.field].queryItems[option.field]"
-                        :items="getTagsFromPosts"
-                        :label="`${genTitleFromField(option)}`"
-                        :name="option.field"
-                        :placeholder="`Select ${genTitleFromField(option)}`"
-                      />
-                      <edge-cms-options-select
-                        v-else-if="entry.meta?.collection?.path !== 'post'"
-                        v-model="state.meta[entry.field].queryItems[option.field]"
-                        :option="option"
-                        :label="genTitleFromField(option)"
-                        :multiple="option?.multiple || false"
-                      />
-                    </div>
-                  </template>
-                  <edge-shad-number
-                    v-if="entry.meta?.collection?.path !== 'post' && !isLimitOne(entry.field)"
-                    v-model="state.meta[entry.field].limit"
-                    name="limit"
-                    label="Limit"
-                  />
-                </div>
-              </div>
-              <div v-else-if="entry.meta?.type === 'image'" class="w-full">
-                <div class="mb-2 text-sm font-medium text-foreground">
-                  {{ genTitleFromField(entry) }}
-                </div>
-                <div class="relative py-2 rounded-md flex items-center justify-center" :class="previewBackgroundClass(state.draft[entry.field])">
-                  <div class="bg-black/80 absolute left-0 top-0 w-full h-full opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center z-10 cursor-pointer">
-                    <Dialog v-model:open="state.imageOpenByField[entry.field]">
-                      <DialogTrigger as-child>
-                        <edge-shad-button variant="outline" class="bg-white text-black hover:bg-gray-200">
-                          <ImagePlus class="h-5 w-5 mr-2" />
-                          Select Image
-                        </edge-shad-button>
-                      </DialogTrigger>
-                      <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-y-auto">
-                        <DialogHeader>
-                          <DialogTitle>Select Image</DialogTitle>
-                          <DialogDescription />
-                        </DialogHeader>
-                        <edge-cms-media-manager
-                          v-if="entry.meta?.tags && entry.meta.tags.length > 0"
-                          :site="props.siteId"
-                          :select-mode="true"
-                          :default-tags="entry.meta.tags"
-                          @select="(url) => { state.draft[entry.field] = url; state.imageOpenByField[entry.field] = false }"
-                        />
-                        <edge-cms-media-manager
-                          v-else
-                          :site="props.siteId"
-                          :select-mode="true"
-                          @select="(url) => { state.draft[entry.field] = url; state.imageOpenByField[entry.field] = false }"
-                        />
-                      </DialogContent>
-                    </Dialog>
+              </template>
+            </div>
+
+            <div class="sticky bottom-0 bg-background px-6 pb-4 pt-2">
+              <Alert v-if="state.validationErrors.length" variant="destructive" class="mb-3">
+                <AlertTitle>Fix the highlighted fields</AlertTitle>
+                <AlertDescription class="text-sm">
+                  <div v-for="(error, index) in state.validationErrors" :key="`${error}-${index}`">
+                    {{ error }}
                   </div>
-                  <img
-                    v-if="state.draft[entry.field]"
-                    :src="state.draft[entry.field]"
-                    class="max-h-40 max-w-full h-auto w-auto object-contain"
-                  >
-                </div>
-              </div>
-              <div v-else-if="entry.meta?.option">
-                <edge-cms-options-select
-                  v-model="state.draft[entry.field]"
-                  :option="entry.meta.option"
-                  :label="genTitleFromField(entry)"
-                />
-              </div>
-              <div v-else>
-                <edge-cms-block-input
-                  v-model="state.draft[entry.field]"
-                  :type="entry.meta.type"
-                  :field="entry.field"
-                  :label="genTitleFromField(entry)"
-                />
-              </div>
-            </template>
-          </div>
+                </AlertDescription>
+              </Alert>
+              <SheetFooter class="flex justify-between">
+                <edge-shad-button variant="destructive" class="text-white" @click="state.open = false">
+                  Cancel
+                </edge-shad-button>
+                <edge-shad-button class=" bg-slate-800 hover:bg-slate-400 w-full" @click="save">
+                  Save changes
+                </edge-shad-button>
+              </SheetFooter>
+            </div>
+          </edge-shad-form>
 
-          <div class="sticky bottom-0 bg-background px-6 pb-4 pt-2">
-            <Alert v-if="state.validationErrors.length" variant="destructive" class="mb-3">
-              <AlertTitle>Fix the highlighted fields</AlertTitle>
-              <AlertDescription class="text-sm">
-                <div v-for="(error, index) in state.validationErrors" :key="`${error}-${index}`">
-                  {{ error }}
-                </div>
-              </AlertDescription>
-            </Alert>
-            <SheetFooter class="flex justify-between">
-              <edge-shad-button variant="destructive" class="text-white" @click="state.open = false">
-                Cancel
-              </edge-shad-button>
-              <edge-shad-button class=" bg-slate-800 hover:bg-slate-400 w-full" @click="save">
-                Save changes
-              </edge-shad-button>
-            </SheetFooter>
-          </div>
-        </edge-shad-form>
-
-        <edge-shad-dialog v-model="state.aiDialogOpen">
-          <DialogContent class="max-w-[640px]">
-            <DialogHeader>
-              <DialogTitle>Generate with AI</DialogTitle>
-              <DialogDescription>
-                Choose which fields the AI should fill and add any optional instructions.
-              </DialogDescription>
-            </DialogHeader>
-            <div class="space-y-4">
-              <edge-shad-textarea
-                v-model="state.aiInstructions"
-                name="aiInstructions"
-                label="Instructions (Optional)"
-                placeholder="Share tone, audience, and any details the AI should include."
-              />
-              <div class="space-y-2">
-                <div class="flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  <span>Fields</span>
-                  <span>{{ selectedAiFieldIds.length }} selected</span>
-                </div>
-                <edge-shad-checkbox v-model="allAiFieldsSelected" name="aiSelectAll">
-                  Select all fields
-                </edge-shad-checkbox>
-                <div v-if="aiFieldOptions.length" class="grid gap-2 md:grid-cols-2">
-                  <edge-shad-checkbox
-                    v-for="option in aiFieldOptions"
-                    :key="option.id"
-                    v-model="state.aiSelectedFields[option.id]"
-                    :name="`ai-field-${option.id}`"
-                  >
-                    {{ option.label }}
-                    <span class="ml-2 text-xs text-muted-foreground">({{ option.type }})</span>
+          <edge-shad-dialog v-model="state.aiDialogOpen">
+            <DialogContent class="max-w-[640px]">
+              <DialogHeader>
+                <DialogTitle>Generate with AI</DialogTitle>
+                <DialogDescription>
+                  Choose which fields the AI should fill and add any optional instructions.
+                </DialogDescription>
+              </DialogHeader>
+              <div class="space-y-4">
+                <edge-shad-textarea
+                  v-model="state.aiInstructions"
+                  name="aiInstructions"
+                  label="Instructions (Optional)"
+                  placeholder="Share tone, audience, and any details the AI should include."
+                />
+                <div class="space-y-2">
+                  <div class="flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    <span>Fields</span>
+                    <span>{{ selectedAiFieldIds.length }} selected</span>
+                  </div>
+                  <edge-shad-checkbox v-model="allAiFieldsSelected" name="aiSelectAll">
+                    Select all fields
                   </edge-shad-checkbox>
+                  <div v-if="aiFieldOptions.length" class="grid gap-2 md:grid-cols-2">
+                    <edge-shad-checkbox
+                      v-for="option in aiFieldOptions"
+                      :key="option.id"
+                      v-model="state.aiSelectedFields[option.id]"
+                      :name="`ai-field-${option.id}`"
+                    >
+                      {{ option.label }}
+                      <span class="ml-2 text-xs text-muted-foreground">({{ option.type }})</span>
+                    </edge-shad-checkbox>
+                  </div>
+                  <Alert v-else variant="info">
+                    <AlertTitle>No editable fields</AlertTitle>
+                    <AlertDescription class="text-sm">
+                      Add editable fields to this block to enable AI generation.
+                    </AlertDescription>
+                  </Alert>
                 </div>
-                <Alert v-else variant="info">
-                  <AlertTitle>No editable fields</AlertTitle>
+                <Alert v-if="state.aiError" variant="destructive">
+                  <AlertTitle>AI generation failed</AlertTitle>
                   <AlertDescription class="text-sm">
-                    Add editable fields to this block to enable AI generation.
+                    {{ state.aiError }}
                   </AlertDescription>
                 </Alert>
               </div>
-              <Alert v-if="state.aiError" variant="destructive">
-                <AlertTitle>AI generation failed</AlertTitle>
-                <AlertDescription class="text-sm">
-                  {{ state.aiError }}
-                </AlertDescription>
-              </Alert>
-            </div>
-            <DialogFooter class="pt-4 flex justify-between">
-              <edge-shad-button type="button" variant="destructive" class="text-white" @click="closeAiDialog">
-                Cancel
-              </edge-shad-button>
-              <edge-shad-button
-                type="button"
-                class="w-full"
-                :disabled="state.aiGenerating || !selectedAiFieldIds.length"
-                @click="generateWithAi"
-              >
-                <Loader2 v-if="state.aiGenerating" class="w-4 h-4 mr-2 animate-spin" />
-                Generate
-              </edge-shad-button>
-            </DialogFooter>
-          </DialogContent>
-        </edge-shad-dialog>
+              <DialogFooter class="pt-4 flex justify-between">
+                <edge-shad-button type="button" variant="destructive" class="text-white" @click="closeAiDialog">
+                  Cancel
+                </edge-shad-button>
+                <edge-shad-button
+                  type="button"
+                  class="w-full"
+                  :disabled="state.aiGenerating || !selectedAiFieldIds.length"
+                  @click="generateWithAi"
+                >
+                  <Loader2 v-if="state.aiGenerating" class="w-4 h-4 mr-2 animate-spin" />
+                  Generate
+                </edge-shad-button>
+              </DialogFooter>
+            </DialogContent>
+          </edge-shad-dialog>
+        </template>
       </edge-cms-block-sheet-content>
     </Sheet>
   </div>
