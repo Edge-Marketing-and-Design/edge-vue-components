@@ -2142,11 +2142,12 @@ const pageSettingsUpdated = async (pageData) => {
               </Transition>
             </ResizablePanel>
           </ResizablePanelGroup>
-          <div v-else class="flex-1 overflow-y-auto p-6">
-            <div class="mx-auto w-full max-w-5xl space-y-6">
+          <div v-else class="flex-1 min-h-0 overflow-hidden p-6">
+            <div class="mx-auto w-full max-w-5xl h-full min-h-0">
               <edge-cms-posts
                 mode="list"
                 list-variant="full"
+                class="h-full min-h-0"
                 :site="props.site"
                 @updating="isUpdating => state.updating = isUpdating"
                 @update:selected-post-id="handlePostSelect"
