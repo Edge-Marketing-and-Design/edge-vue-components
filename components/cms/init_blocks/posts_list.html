@@ -1,21 +1,28 @@
-<div class="p-8 bg-gray-50 font-sans">
-  <div class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-    {{{#array
-    {"field":"list","schema":[{"field":"name","value":"text"},{"field":"content","value":"richtext"}],"collection":{"path":"posts","uniqueKey":"{orgId}:{siteId}","query":[{"field":"doc_created_at","operator":">","value":0}],"order":[{"field":"doc_created_at","direction":"desc"}]},"queryOptions":[{"field":"tags","operator":"array-contains-any","options":[]}],"limit":10,"value":[]}}}}
-    <div
-      class="bg-white rounded-2xl shadow-sm hover:shadow-md transition-shadow duration-200 overflow-hidden flex flex-col">
-      <img src="{{item.featuredImage}}" alt="{{item.title}}" class="h-48 w-full object-cover" />
-      <div class="p-5 flex flex-col flex-1">
-        <h2 class="text-lg font-semibold text-gray-800 mb-2 line-clamp-2">{{ item.title }}</h2>
-        <div class="text-gray-600 text-sm flex-1 mb-4 line-clamp-3">
-          {{ item.blurb }}
+<section class="bg-surface py-8">
+  <div class="mx-auto max-w-7xl px-6 lg:px-10">
+    <div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+      {{{#array
+      {"field":"list","schema":[{"field":"name","value":"text"},{"field":"title","value":"text"},{"field":"subtitle","value":"text"},{"field":"blurb","value":"textarea"}],"collection":{"path":"posts","uniqueKey":"{orgId}:{siteId}","query":[{"field":"doc_created_at","operator":">","value":0}],"order":[{"field":"doc_created_at","direction":"desc"}]},"queryOptions":[{"field":"tags","title":"Tags","operator":"array-contains-any","options":[]}],"limit":12,"value":[]}}}}
+      <a
+        href="/library/{{item.name}}?id={{item.docId}}"
+        class="relative w-full min-h-[220px] max-h-[280px] overflow-hidden rounded-2xl border-b-[8px] border-b-[#53B9B8] bg-[#EAF1F3] p-6 md:p-8 shadow-xl transition-transform duration-300 hover:rotate-1 hover:scale-[1.06] hover:shadow-2xl active:scale-95 active:shadow-lg"
+      >
+        <div class="relative z-10 mt-10 flex flex-col items-center justify-center text-center">
+          <span class="mb-2 block min-h-[2.5rem] text-lg font-semibold leading-tight text-[#1683C6] md:text-xl md:leading-[1.2]">
+            {{{#if {"cond":"item.title"}}}}
+            {{item.title}}
+            {{{#else}}}
+            {{item.name}}
+            {{{/if}}}
+          </span>
+          {{{#if {"cond":"item.subtitle"}}}}
+          <p class="text-sm text-[#5B5959]">{{item.subtitle}}</p>
+          {{{#else}}}
+          <p class="text-sm text-[#5B5959]">{{item.blurb}}</p>
+          {{{/if}}}
         </div>
-        <a href="{{item.name}}"
-          class="inline-block mt-auto self-start text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors duration-150">
-          Read More →
-        </a>
-      </div>
+      </a>
+      {{{/array}}}
     </div>
-    {{{/array}}}
   </div>
-</div>
+</section>
