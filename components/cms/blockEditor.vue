@@ -928,12 +928,15 @@ const exportCurrentBlock = () => {
         </SheetHeader>
         <div class="px-6 pb-6">
           <Tabs class="w-full" default-value="guide">
-            <TabsList class="w-full mt-3 bg-secondary rounded-sm grid grid-cols-4">
+            <TabsList class="w-full mt-3 bg-secondary rounded-sm grid grid-cols-5">
               <TabsTrigger value="guide" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
                 Block Guide
               </TabsTrigger>
               <TabsTrigger value="carousel" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
                 Carousel Usage
+              </TabsTrigger>
+              <TabsTrigger value="form-helpers" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+                Form Helpers
               </TabsTrigger>
               <TabsTrigger value="nav-bar" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
                 Nav Bar
@@ -1747,6 +1750,149 @@ const exportCurrentBlock = () => {
                       <div>In CMS preview, fixed nav and panel are contained to the preview surface by the block wrapper.</div>
                       <div><code>cms-nav-pos-left</code> also switches the slide-out panel to the left side.</div>
                     </div>
+                  </section>
+                </div>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="form-helpers">
+              <div class="h-[calc(100vh-190px)] overflow-y-auto pr-1 pb-6">
+                <div class="space-y-6">
+                  <section class="space-y-2">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      What This Does
+                    </h3>
+                    <p class="text-sm text-foreground">
+                      Add helper classes or data attributes to a CMS block form, and the client runtime will submit to
+                      <code>/api/contact</code> with anti-bot checks and submit history tracking.
+                    </p>
+                  </section>
+
+                  <section class="space-y-2">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      CMS Preview Scope
+                    </h3>
+                    <p class="text-sm text-foreground">
+                      In Block Editor, this is for structure and messaging preview only. Use it to verify markup and required-state UX,
+                      not to validate end-to-end delivery.
+                    </p>
+                  </section>
+
+                  <section class="space-y-2">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Helper Contract
+                    </h3>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div><code>form.cms-form</code> or <code>form[data-cms-form]</code>: form root.</div>
+                      <div><code>.cms-form-required</code> or <code>[data-cms-required=&quot;true&quot;]</code>: required field markers.</div>
+                      <div><code>.cms-form-submit</code> or <code>[data-cms-form-submit]</code>: submit button.</div>
+                      <div><code>.cms-form-message</code> or <code>[data-cms-form-message]</code>: status/error message container.</div>
+                    </div>
+                  </section>
+
+                  <section class="space-y-2">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Defaults + Messages
+                    </h3>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div>Default endpoint: <code>/api/contact</code>.</div>
+                      <div><code>data-cms-success-message</code>: override success copy.</div>
+                      <div><code>data-cms-error-message</code>: override error copy.</div>
+                      <div><code>data-cms-required-message</code>: override required-field copy.</div>
+                    </div>
+                  </section>
+
+                  <section class="space-y-2">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Context IDs
+                    </h3>
+                    <p class="text-sm text-foreground">
+                      Block/Page/Site/Org IDs are inherited from the CMS HTML wrapper automatically, so forms in blocks
+                      do not need manual context wiring.
+                    </p>
+                  </section>
+
+                  <section class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Contact Form Example (Block HTML)
+                    </h3>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;section
+  class="relative cms-block cms-block-contact-form-placeholder rounded-2xl border border-dashed border-slate-300 bg-slate-50/70 px-4 py-6 sm:px-6 sm:py-8"
+  data-block-type="contact-form-placeholder"
+&gt;
+  &lt;div class="mx-auto max-w-3xl pt-6"&gt;
+    &lt;div class="mb-6 space-y-2 text-center sm:text-left"&gt;
+      &lt;h2 class="text-xl font-semibold text-slate-900"&gt;
+        {{{#text {"field":"formHeader","title":"Form Header","value":"Contact Us"}}}}
+      &lt;/h2&gt;
+      &lt;p class="text-sm text-slate-600"&gt;
+        {{{#text {"field":"formSubheader","title":"Form Subheader","value":"Subheader content"}}}}
+      &lt;/p&gt;
+    &lt;/div&gt;
+
+    &lt;form
+      class="cms-form space-y-4"
+      data-cms-form
+      data-cms-required-message="Please complete all required fields."
+      data-cms-success-message="Thanks! Your message has been sent."
+      data-cms-error-message="Sorry, we could not send your message. Please try again."
+      data-cms-success-class="cms-form-message cms-form-message-success"
+      data-cms-error-class="cms-form-message cms-form-message-error"
+      data-cms-invalid-class="cms-form-field-invalid"
+      data-cms-working-class="cms-form-submitting"
+    &gt;
+      &lt;!-- Honeypot (optional, used by helper if present) --&gt;
+      &lt;div class="pointer-events-none absolute -left-[9999px] top-auto h-px w-px overflow-hidden opacity-0" aria-hidden="true"&gt;
+        &lt;label for="cms-company"&gt;Company&lt;/label&gt;
+        &lt;input id="cms-company" name="company" type="text" tabindex="-1" autocomplete="off" /&gt;
+      &lt;/div&gt;
+
+      &lt;div class="space-y-4"&gt;
+        {{{#array {"field":"formFields","schema":[{"field":"fieldName","type":"text","title":"Field Label"},{"field":"fieldType","type":"option","title":"Field Type","option":{"optionsKey":"title","optionsValue":"value","options":[{"title":"Text","value":"text"},{"title":"Email","value":"email"},{"title":"Phone","value":"tel"},{"title":"Textarea","value":"textarea"}]},"value":"text"},{"field":"fieldRequired","type":"option","title":"Required","option":{"optionsKey":"title","optionsValue":"value","options":[{"title":"Yes","value":"true"},{"title":"No","value":"false"}]},"value":"true"}],"value":[{"fieldName":"Name","fieldType":"text","fieldRequired":"true"},{"fieldName":"Email","fieldType":"email","fieldRequired":"true"},{"fieldName":"Message","fieldType":"textarea","fieldRequired":"true"}]}}}}
+          &lt;div class="space-y-1"&gt;
+            &lt;label class="text-xs font-medium uppercase tracking-wide text-slate-600"&gt;
+              {{item.fieldName}}
+            &lt;/label&gt;
+
+            {{{#if {"cond":"item.fieldType == 'textarea'"}}}}
+              &lt;textarea
+                class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
+                data-cms-required="{{item.fieldRequired}}"
+                name="{{item.fieldName}}"
+                placeholder="{{item.fieldName}}"
+                rows="6"
+              &gt;&lt;/textarea&gt;
+            {{{#else}}}
+              &lt;input
+                class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
+                data-cms-required="{{item.fieldRequired}}"
+                type="{{item.fieldType}}"
+                name="{{item.fieldName}}"
+                placeholder="{{item.fieldName}}"
+              /&gt;
+            {{{/if}}}
+          &lt;/div&gt;
+        {{{/array}}}
+      &lt;/div&gt;
+
+      &lt;div class="mt-6"&gt;
+        &lt;button
+          type="submit"
+          class="cms-form-submit inline-flex w-full items-center justify-center rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+          data-cms-form-submit
+        &gt;
+          {{{#text {"field":"buttonText","title":"Button Text","value":"Send Message"}}}}
+        &lt;/button&gt;
+      &lt;/div&gt;
+
+      &lt;p class="cms-form-message hidden text-sm" data-cms-form-message&gt;&lt;/p&gt;
+    &lt;/form&gt;
+
+    &lt;div class="hidden"&gt;
+      {{{#text {"field":"emailTo","title":"Email To","value":"test@testing.com"}}}}
+    &lt;/div&gt;
+  &lt;/div&gt;
+&lt;/section&gt;</code></pre>
                   </section>
                 </div>
               </div>
