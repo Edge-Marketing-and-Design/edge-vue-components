@@ -43,7 +43,8 @@ const router = useRouter()
 const blockImportInputRef = ref(null)
 const blockImportDocIdResolver = ref(null)
 const blockImportConflictResolver = ref(null)
-const INVALID_BLOCK_IMPORT_MESSAGE = 'Invalid file. Please import a valid block file.'
+const DEFAULT_BLOCK_IMPORT_ERROR_MESSAGE = 'Failed to import block JSON.'
+const OPTIONAL_BLOCK_IMPORT_KEYS = new Set(['previewType'])
 
 const seedInitialBlocks = async () => {
   console.log('Seeding initial blocks...')
@@ -415,7 +416,7 @@ const readTextFile = file => new Promise((resolve, reject) => {
 
 const normalizeImportedDoc = (payload, fallbackDocId = '') => {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload))
-    throw new Error(INVALID_BLOCK_IMPORT_MESSAGE)
+    throw new Error('Invalid JSON payload. Expected an object.')
 
   if (payload.document && typeof payload.document === 'object' && !Array.isArray(payload.document)) {
     const normalized = { ...payload.document }
@@ -454,29 +455,47 @@ const getBlockDocDefaults = () => getDocDefaultsFromSchema(blockNewDocSchema.val
 
 const validateImportedBlockDoc = (doc) => {
   if (!isPlainObject(doc))
-    throw new Error(INVALID_BLOCK_IMPORT_MESSAGE)
+    throw new Error('Invalid block document. Expected an object.')
 
   const requiredKeys = Object.keys(blockNewDocSchema.value || {})
+    .filter(key => !OPTIONAL_BLOCK_IMPORT_KEYS.has(key))
   const missing = requiredKeys.filter(key => !Object.prototype.hasOwnProperty.call(doc, key))
   if (missing.length)
-    throw new Error(INVALID_BLOCK_IMPORT_MESSAGE)
+    throw new Error(`Missing required block key(s): ${missing.join(', ')}`)
 
   return doc
 }
 
 const validateImportedBlockThemes = (doc) => {
+  if (Object.prototype.hasOwnProperty.call(doc || {}, 'themes') && !Array.isArray(doc?.themes)) {
+    throw new Error('Invalid "themes" value. Expected an array of theme docIds.')
+  }
+
   const importedThemes = Array.isArray(doc?.themes) ? doc.themes : []
   if (!importedThemes.length)
     return doc
 
   const orgThemes = edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`] || {}
+  const missingThemeIds = []
+  let hasEmptyThemeId = false
   const normalizedThemes = []
   for (const themeId of importedThemes) {
     const normalizedThemeId = String(themeId || '').trim()
-    if (!normalizedThemeId || !orgThemes[normalizedThemeId])
-      throw new Error(INVALID_BLOCK_IMPORT_MESSAGE)
+    if (!normalizedThemeId) {
+      hasEmptyThemeId = true
+      continue
+    }
+    if (!orgThemes[normalizedThemeId]) {
+      missingThemeIds.push(normalizedThemeId)
+      continue
+    }
     normalizedThemes.push(normalizedThemeId)
   }
+
+  if (hasEmptyThemeId)
+    throw new Error('Themes include an empty theme id.')
+  if (missingThemeIds.length)
+    throw new Error(`Theme id(s) not found in this organization: ${[...new Set(missingThemeIds)].join(', ')}`)
 
   doc.themes = [...new Set(normalizedThemes)]
   return doc
@@ -553,8 +572,27 @@ const getImportDocId = async (incomingDoc, fallbackDocId = '') => {
 }
 
 const openImportErrorDialog = (message) => {
-  state.importErrorMessage = String(message || 'Failed to import block JSON.')
+  state.importErrorMessage = String(message || DEFAULT_BLOCK_IMPORT_ERROR_MESSAGE)
   state.importErrorDialogOpen = true
+}
+
+const getBlockImportFailureReason = (error, message) => {
+  if (error instanceof SyntaxError)
+    return `Invalid JSON syntax: ${String(error?.message || 'Unable to parse JSON.')}`
+  if (/^Import canceled\./i.test(message))
+    return message
+  return message
+}
+
+const logBlockImportFailure = (file, error, message) => {
+  const fileName = String(file?.name || 'unknown-file')
+  const reason = getBlockImportFailureReason(error, message)
+  console.error(`[BlocksManager] Block import failed for "${fileName}". Reason: ${reason}`, {
+    fileName,
+    reason,
+    errorMessage: message,
+    error,
+  })
 }
 
 const triggerBlockImport = () => {
@@ -614,14 +652,11 @@ const handleBlockImport = async (event) => {
         await importSingleBlockFile(file, existingBlocks)
       }
       catch (error) {
-        console.error('Failed to import block JSON', error)
-        const message = error?.message || 'Failed to import block JSON.'
+        const message = error?.message || DEFAULT_BLOCK_IMPORT_ERROR_MESSAGE
+        logBlockImportFailure(file, error, message)
         if (/^Import canceled\./i.test(message))
           continue
-        if (error instanceof SyntaxError || message === INVALID_BLOCK_IMPORT_MESSAGE)
-          openImportErrorDialog(INVALID_BLOCK_IMPORT_MESSAGE)
-        else
-          openImportErrorDialog(message)
+        openImportErrorDialog(getBlockImportFailureReason(error, message))
       }
     }
   }
