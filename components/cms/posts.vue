@@ -542,7 +542,10 @@ const unPublishPost = async (postId) => {
 </script>
 
 <template>
-  <div v-if="props.mode !== 'editor'" class="space-y-4 h-full min-h-0 overflow-y-auto">
+  <div
+    v-if="props.mode !== 'editor'"
+    :class="isFullList ? 'h-full min-h-0 flex flex-col gap-4 overflow-hidden' : 'space-y-4 h-full min-h-0 overflow-y-auto'"
+  >
     <edge-shad-button
       variant="outline"
       :class="isFullList ? 'h-8 px-3' : 'w-full mt-2 py-0 h-[28px]'"
@@ -552,7 +555,7 @@ const unPublishPost = async (postId) => {
       New Post
     </edge-shad-button>
 
-    <div v-if="isFullList" class="rounded-lg border bg-card overflow-hidden h-full min-h-0 flex flex-col">
+    <div v-if="isFullList" class="rounded-lg border bg-card overflow-hidden flex-1 min-h-0 flex flex-col">
       <div class="flex items-center justify-between px-4 py-3 border-b bg-muted/40">
         <div class="text-sm font-semibold">
           Posts
