@@ -603,15 +603,18 @@ const updateBlockContent = async () => {
   const blocksPath = `${edgeGlobal.edgeState.organizationDocPath}/blocks`
   const blockData = edgeFirebase.data?.[blocksPath]?.[blockDocId] || {}
   const nextContent = String(state.blockContentDraft || '')
-  const { values, meta } = buildUpdatedBlockDocFromContent(nextContent, blockData)
+  // Update shared block defaults from the source block doc.
+  const { values: blockValues, meta: blockMeta } = buildUpdatedBlockDocFromContent(nextContent, blockData)
+  // Preserve page/block-instance values when editing block content from preview mode.
+  const { values: instanceValues, meta: instanceMeta } = buildUpdatedBlockDocFromContent(nextContent, modelValue.value || {})
   const blockUpdatedAt = new Date().toISOString()
 
   const previousModelValue = edgeGlobal.dupObject(modelValue.value || {})
   modelValue.value = {
     ...(modelValue.value || {}),
     content: nextContent,
-    values,
-    meta,
+    values: instanceValues,
+    meta: instanceMeta,
     blockUpdatedAt,
     blockId: blockData?.docId || blockDocId,
   }
@@ -621,8 +624,8 @@ const updateBlockContent = async () => {
   try {
     const results = await edgeFirebase.changeDoc(blocksPath, blockDocId, {
       content: nextContent,
-      values,
-      meta,
+      values: blockValues,
+      meta: blockMeta,
       blockUpdatedAt,
     })
     if (results?.success === false) {
@@ -1043,7 +1046,6 @@ const getTagsFromPosts = computed(() => {
       <!-- Hover controls -->
       <div
         v-if="props.editMode"
-        :class="props.allowDelete ? 'group-hover:pointer-events-auto' : ''"
         class="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-[10001]"
       >
         <!-- Delete button top right -->

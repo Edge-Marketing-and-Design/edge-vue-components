@@ -183,6 +183,14 @@ const ROW_GAP_OPTIONS = [
   { name: '8', title: 'X-Large' },
 ]
 
+const ROW_GAP_CLASS_MAP = {
+  0: 'gap-0 sm:gap-0',
+  2: 'gap-0 sm:gap-2',
+  4: 'gap-0 sm:gap-4',
+  6: 'gap-0 sm:gap-6',
+  8: 'gap-0 sm:gap-8',
+}
+
 const ROW_MOBILE_STACK_OPTIONS = [
   { name: 'normal', title: 'Left first' },
   { name: 'reverse', title: 'Right first' },
@@ -937,11 +945,7 @@ const rowUsesSpans = row => (row?.columns || []).some(col => Number.isFinite(col
 
 const rowGapClass = (row) => {
   const gap = Number(row?.gap)
-  const allowed = new Set([0, 2, 4, 6, 8])
-  const safeGap = allowed.has(gap) ? gap : 4
-  if (safeGap === 0)
-    return 'gap-0'
-  return ['gap-0', `sm:gap-${safeGap}`].join(' ')
+  return ROW_GAP_CLASS_MAP[gap] || ROW_GAP_CLASS_MAP[4]
 }
 
 const rowGridClass = (row) => {
