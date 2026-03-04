@@ -28,6 +28,14 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue', 'delete'])
 
 const modelValue = useVModel(props, 'modelValue', emit)
+const edgeFirebase = inject('edgeFirebase')
+const isGlobalAdmin = computed(() => edgeGlobal.isAdminGlobal(edgeFirebase).value)
+const richtextEnabledToggles = computed(() => {
+  const baseToggles = ['bold', 'italic', 'strike', 'bulletlist', 'orderedlist', 'underline']
+  if (isGlobalAdmin.value)
+    return [...baseToggles, 'source']
+  return baseToggles
+})
 
 const state = reactive({
   mounted: false,
@@ -45,7 +53,7 @@ onBeforeMount(async () => {
 <template>
   <div v-if="state.mounted">
     <div v-if="props.type === 'richtext'">
-      <edge-shad-html v-model="modelValue" :enabled-toggles="['bold', 'italic', 'strike', 'bulletlist', 'orderedlist', 'underline']" :name="field" :label="label" />
+      <edge-shad-html v-model="modelValue" :enabled-toggles="richtextEnabledToggles" :name="field" :label="label" />
     </div>
     <div v-else-if="props.type === 'textarea'">
       <edge-shad-textarea v-model="modelValue" :name="field" :label="label" />
