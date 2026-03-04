@@ -1,6 +1,6 @@
 <script setup lang="js">
 import { useVModel } from '@vueuse/core'
-import { File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePlus2, FileUp, FileWarning, FileX, Folder, FolderMinus, FolderOpen, FolderPen, FolderPlus, Link } from 'lucide-vue-next'
+import { ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePlus2, FileUp, FileWarning, FileX, Folder, FolderMinus, FolderOpen, FolderPen, FolderPlus, Link } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
@@ -174,6 +174,64 @@ const orderedMenus = computed(() => {
   }
   return menuEntries.sort((a, b) => priority(a.name) - priority(b.name) || a.originalIndex - b.originalIndex)
 })
+
+const normalizeDomain = (value) => {
+  if (!value)
+    return ''
+  let normalized = String(value).trim().toLowerCase()
+  if (!normalized)
+    return ''
+  if (normalized.includes('://')) {
+    try {
+      normalized = new URL(normalized).host
+    }
+    catch {
+      normalized = normalized.split('://').pop() || normalized
+    }
+  }
+  normalized = normalized.split('/')[0] || ''
+  return normalized.replace(/\.+$/g, '')
+}
+
+const normalizePathSlug = value => String(value || '').trim().toLowerCase()
+
+const firstValidDomain = (domains) => {
+  if (!Array.isArray(domains))
+    return ''
+  for (const domain of domains) {
+    const normalized = normalizeDomain(domain)
+    if (normalized)
+      return normalized
+  }
+  return ''
+}
+
+const liveSiteOrigin = computed(() => {
+  if (props.isTemplateSite)
+    return ''
+  const publishedDomains = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`]?.[props.site]?.domains
+  const draftDomains = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site]?.domains
+  const host = firstValidDomain(publishedDomains) || firstValidDomain(draftDomains)
+  return host ? `https://${host}` : ''
+})
+
+const buildLivePageUrl = (menuName, pageEntry) => {
+  const origin = liveSiteOrigin.value
+  if (!origin)
+    return ''
+  const pageSlug = normalizePathSlug(pageEntry?.name)
+  if (!pageSlug)
+    return ''
+
+  const menuSlug = normalizePathSlug(menuName)
+  const folderSlug = ROOT_MENUS.includes(menuName) ? '' : menuSlug
+
+  if (!folderSlug && pageSlug === 'home')
+    return `${origin}/`
+
+  const segments = folderSlug ? [folderSlug, pageSlug] : [pageSlug]
+  return `${origin}/${segments.map(segment => encodeURIComponent(segment)).join('/')}`
+}
 
 const pageRouteBase = computed(() => {
   return props.site === 'templates'
@@ -1137,6 +1195,19 @@ const theme = computed(() => {
                           <span>Settings</span>
                           <span v-if="edgeGlobal.edgeState.cmsPageWithUnsavedChanges === element.item" class="text-xs text-red-500">(Unsaved Changes)</span>
                         </div>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        v-if="!props.isTemplateSite && buildLivePageUrl(menuName, element)"
+                        as-child
+                      >
+                        <a :href="buildLivePageUrl(menuName, element)" target="_blank" rel="noopener noreferrer">
+                          <ExternalLink />
+                          <span>View Live Page</span>
+                        </a>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem v-else-if="!props.isTemplateSite" disabled>
+                        <ExternalLink />
+                        <span>View Live Page</span>
                       </DropdownMenuItem>
                       <DropdownMenuItem v-if="!props.isTemplateSite && isPublishedPageDiff(element.item)" @click="publishPage(element.item)">
                         <FileUp />

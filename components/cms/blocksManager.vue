@@ -575,7 +575,6 @@ const validateImportedBlockThemes = (doc) => {
     doc.themes = []
     return doc
   }
-
   doc.themes = [...new Set(normalizedThemes)]
   return doc
 }
