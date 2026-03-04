@@ -6,6 +6,7 @@ export const useCmsNewDocs = () => {
     content: { value: '' },
     tags: { value: [] },
     themes: { value: [] },
+    type: { value: ['Page'] },
     previewType: { value: 'light' },
     synced: { value: false },
     version: 1,

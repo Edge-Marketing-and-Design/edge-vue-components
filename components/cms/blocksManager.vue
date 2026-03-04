@@ -5,6 +5,7 @@ const { blocks: blockNewDocSchema } = useCmsNewDocs()
 const state = reactive({
   filter: '',
   mounted: false,
+  blockTypeFilter: 'all',
   picksFilter: [],
   themesFilter: [],
   selectedBlockDocIds: [],
@@ -44,7 +45,7 @@ const blockImportInputRef = ref(null)
 const blockImportDocIdResolver = ref(null)
 const blockImportConflictResolver = ref(null)
 const DEFAULT_BLOCK_IMPORT_ERROR_MESSAGE = 'Failed to import block JSON.'
-const OPTIONAL_BLOCK_IMPORT_KEYS = new Set(['previewType'])
+const OPTIONAL_BLOCK_IMPORT_KEYS = new Set(['previewType', 'type'])
 
 const seedInitialBlocks = async () => {
   console.log('Seeding initial blocks...')
@@ -70,6 +71,7 @@ const seedInitialBlocks = async () => {
         previewType: 'light',
         tags: [],
         themes: [],
+        type: ['Page'],
         synced: false,
         version: 1,
       })
@@ -93,6 +95,38 @@ const normalizePreviewType = (value) => {
   return value === 'dark' ? 'dark' : 'light'
 }
 
+const normalizeBlockTypes = (value, { fallbackToPage = true } = {}) => {
+  const hasExplicitTypeValue = !(
+    value === undefined
+    || value === null
+    || value === ''
+    || (Array.isArray(value) && value.length === 0)
+  )
+  const rawTypes = Array.isArray(value) ? value : [value]
+  const normalized = rawTypes
+    .map((typeValue) => {
+      if (typeValue && typeof typeValue === 'object') {
+        const objectValue = typeValue.name ?? typeValue.value ?? typeValue.title ?? typeValue.label ?? ''
+        return String(objectValue || '')
+      }
+      return String(typeValue || '')
+    })
+    .map(typeValue => typeValue.trim().toLowerCase())
+    .map((typeValue) => {
+      if (typeValue === 'page')
+        return 'Page'
+      if (typeValue === 'post')
+        return 'Post'
+      return ''
+    })
+    .filter(Boolean)
+
+  const uniqueNormalized = [...new Set(normalized)]
+  if (!uniqueNormalized.length && fallbackToPage && !hasExplicitTypeValue)
+    return ['Page']
+  return uniqueNormalized
+}
+
 const previewSurfaceClass = (value) => {
   return normalizePreviewType(value) === 'dark'
     ? 'preview-surface-dark'
@@ -106,6 +140,11 @@ const loadingRender = (content) => {
 
 const FILTER_STORAGE_KEY = 'edge.blocks.filters'
 const NO_TAGS_FILTER_VALUE = '__no_tags__'
+const BLOCK_TYPE_FILTER_OPTIONS = [
+  { name: 'all', title: 'All Types' },
+  { name: 'Page', title: 'Page' },
+  { name: 'Post', title: 'Post' },
+]
 
 const restoreFilters = () => {
   if (typeof localStorage === 'undefined')
@@ -116,6 +155,10 @@ const restoreFilters = () => {
       return
     const parsed = JSON.parse(raw)
     state.filter = parsed.filter ?? ''
+    const savedTypeFilter = String(parsed.blockTypeFilter || 'all')
+    state.blockTypeFilter = BLOCK_TYPE_FILTER_OPTIONS.some(option => option.name === savedTypeFilter)
+      ? savedTypeFilter
+      : 'all'
     state.picksFilter = Array.isArray(parsed.picksFilter) ? parsed.picksFilter : []
     state.themesFilter = Array.isArray(parsed.themesFilter) ? parsed.themesFilter : []
   }
@@ -129,6 +172,7 @@ const persistFilters = () => {
     return
   const payload = {
     filter: state.filter,
+    blockTypeFilter: state.blockTypeFilter,
     picksFilter: state.picksFilter,
     themesFilter: state.themesFilter,
   }
@@ -136,7 +180,7 @@ const persistFilters = () => {
 }
 
 watch(
-  () => [state.filter, state.picksFilter, state.themesFilter],
+  () => [state.filter, state.blockTypeFilter, state.picksFilter, state.themesFilter],
   persistFilters,
   { deep: true },
 )
@@ -297,6 +341,21 @@ const applyTagSelectionFilter = (items = []) => {
       return hasNoTags
     return hasSelectedTag
   })
+}
+
+const applyTypeSelectionFilter = (items = []) => {
+  const selectedType = String(state.blockTypeFilter || 'all')
+  if (selectedType === 'all')
+    return items
+
+  return items.filter((item) => {
+    const blockTypes = normalizeBlockTypes(item?.type)
+    return blockTypes.includes(selectedType)
+  })
+}
+
+const applyListSelectionFilters = (items = []) => {
+  return applyTagSelectionFilter(applyTypeSelectionFilter(items))
 }
 
 const blockCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/blocks`)
@@ -466,6 +525,20 @@ const validateImportedBlockDoc = (doc) => {
   return doc
 }
 
+const validateImportedBlockTypes = (doc) => {
+  if (!Object.prototype.hasOwnProperty.call(doc || {}, 'type')) {
+    doc.type = ['Page']
+    return doc
+  }
+
+  const normalizedTypes = normalizeBlockTypes(doc.type, { fallbackToPage: false })
+  if (!normalizedTypes.length)
+    throw new Error('Invalid "type" value. Use "Page", "Post", or both.')
+
+  doc.type = normalizedTypes
+  return doc
+}
+
 const validateImportedBlockThemes = (doc) => {
   if (Object.prototype.hasOwnProperty.call(doc || {}, 'themes') && !Array.isArray(doc?.themes)) {
     throw new Error('Invalid "themes" value. Expected an array of theme docIds.')
@@ -492,10 +565,16 @@ const validateImportedBlockThemes = (doc) => {
     normalizedThemes.push(normalizedThemeId)
   }
 
-  if (hasEmptyThemeId)
-    throw new Error('Themes include an empty theme id.')
-  if (missingThemeIds.length)
-    throw new Error(`Theme id(s) not found in this organization: ${[...new Set(missingThemeIds)].join(', ')}`)
+  if (hasEmptyThemeId || missingThemeIds.length) {
+    const uniqueMissingThemeIds = [...new Set(missingThemeIds)]
+    console.warn('[BlocksManager] Imported block contains unavailable theme ids. Importing with no theme.', {
+      docId: String(doc?.docId || ''),
+      missingThemeIds: uniqueMissingThemeIds,
+      hasEmptyThemeId,
+    })
+    doc.themes = []
+    return doc
+  }
 
   doc.themes = [...new Set(normalizedThemes)]
   return doc
@@ -602,7 +681,7 @@ const triggerBlockImport = () => {
 const importSingleBlockFile = async (file, existingBlocks = {}) => {
   const fileText = await readTextFile(file)
   const parsed = JSON.parse(fileText)
-  const importedDoc = validateImportedBlockThemes(validateImportedBlockDoc(normalizeImportedDoc(parsed, '')))
+  const importedDoc = validateImportedBlockThemes(validateImportedBlockTypes(validateImportedBlockDoc(normalizeImportedDoc(parsed, ''))))
   const incomingDocId = await getImportDocId(importedDoc, '')
   let targetDocId = incomingDocId
   let importDecision = 'create'
@@ -702,6 +781,15 @@ const handleBlockImport = async (event) => {
               />
             </div>
             <div>
+              <edge-shad-select
+                v-model="state.blockTypeFilter"
+                name="blockTypeFilter"
+                :items="BLOCK_TYPE_FILTER_OPTIONS"
+                placeholder="Filter type"
+                class="w-[160px]"
+              />
+            </div>
+            <div>
               <edge-shad-select-tags
                 v-model="state.picksFilter"
                 :items="tagOptions"
@@ -753,14 +841,14 @@ const handleBlockImport = async (event) => {
           <div class="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/50 bg-background/60 px-3 py-2">
             <div class="flex items-center gap-2">
               <Checkbox
-                :model-value="getVisibleSelectionState(applyTagSelectionFilter(slotProps.filtered))"
+                :model-value="getVisibleSelectionState(applyListSelectionFilters(slotProps.filtered))"
                 aria-label="Select visible blocks"
                 class="border-border bg-background/90 shadow-sm data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground"
                 @click.stop
-                @update:model-value="toggleVisibleBlockSelection(applyTagSelectionFilter(slotProps.filtered), $event)"
+                @update:model-value="toggleVisibleBlockSelection(applyListSelectionFilters(slotProps.filtered), $event)"
               />
               <span class="text-xs text-muted-foreground">
-                Select visible ({{ applyTagSelectionFilter(slotProps.filtered).length }})
+                Select visible ({{ applyListSelectionFilters(slotProps.filtered).length }})
               </span>
             </div>
             <div class="flex items-center gap-2">
@@ -788,7 +876,7 @@ const handleBlockImport = async (event) => {
             style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));"
           >
             <div
-              v-for="item in applyTagSelectionFilter(slotProps.filtered)"
+              v-for="item in applyListSelectionFilters(slotProps.filtered)"
               :key="item.docId"
               role="button"
               tabindex="0"

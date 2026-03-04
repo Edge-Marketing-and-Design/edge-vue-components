@@ -209,6 +209,38 @@ const normalizePreviewType = (value) => {
   return value === 'dark' ? 'dark' : 'light'
 }
 
+const normalizeBlockTypes = (value, { fallbackToPage = true } = {}) => {
+  const hasExplicitTypeValue = !(
+    value === undefined
+    || value === null
+    || value === ''
+    || (Array.isArray(value) && value.length === 0)
+  )
+  const rawTypes = Array.isArray(value) ? value : [value]
+  const normalized = rawTypes
+    .map((typeValue) => {
+      if (typeValue && typeof typeValue === 'object') {
+        const objectValue = typeValue.name ?? typeValue.value ?? typeValue.title ?? typeValue.label ?? ''
+        return String(objectValue || '')
+      }
+      return String(typeValue || '')
+    })
+    .map(typeValue => typeValue.trim().toLowerCase())
+    .map((typeValue) => {
+      if (typeValue === 'page')
+        return 'Page'
+      if (typeValue === 'post')
+        return 'Post'
+      return ''
+    })
+    .filter(Boolean)
+
+  const uniqueNormalized = [...new Set(normalized)]
+  if (!uniqueNormalized.length && fallbackToPage && !hasExplicitTypeValue)
+    return ['Page']
+  return uniqueNormalized
+}
+
 const resolvedPreviewType = computed(() => normalizePreviewType(modelValue.value?.previewType))
 const sourceBlockDocId = computed(() => {
   const direct = String(modelValue.value?.blockId || '').trim()
@@ -608,6 +640,8 @@ const updateBlockContent = async () => {
   // Preserve page/block-instance values when editing block content from preview mode.
   const { values: instanceValues, meta: instanceMeta } = buildUpdatedBlockDocFromContent(nextContent, modelValue.value || {})
   const blockUpdatedAt = new Date().toISOString()
+  const nextType = normalizeBlockTypes(blockData?.type)
+  const normalizedNextType = nextType.length ? nextType : ['Page']
 
   const previousModelValue = edgeGlobal.dupObject(modelValue.value || {})
   modelValue.value = {
@@ -627,6 +661,7 @@ const updateBlockContent = async () => {
       values: blockValues,
       meta: blockMeta,
       blockUpdatedAt,
+      type: normalizedNextType,
     })
     if (results?.success === false) {
       throw new Error(results?.error || 'Failed to update block content.')
