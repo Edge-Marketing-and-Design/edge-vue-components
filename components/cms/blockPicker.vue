@@ -334,7 +334,7 @@ const clearTagFilters = () => {
 </script>
 
 <template>
-  <div v-if="props.blockOverride" :class="previewSurfaceClass(blockOverridePreviewType)">
+  <div v-if="props.blockOverride" class="pointer-events-none" :class="previewSurfaceClass(blockOverridePreviewType)">
     <edge-cms-block-api
       :content="props.blockOverride.content"
       :values="props.blockOverride.values"
@@ -386,7 +386,7 @@ const clearTagFilters = () => {
             <div class="scale-wrapper">
               <div
                 :ref="el => setInnerRef(block.docId, el)"
-                class="scale-inner scale p-4"
+                class="scale-inner scale p-4 pointer-events-none"
                 :class="previewSurfaceClass(block.previewType)"
                 :data-block-id="block.docId"
               >
@@ -463,7 +463,7 @@ const clearTagFilters = () => {
                     <div class="scale-wrapper">
                       <div
                 :ref="el => setInnerRef(block.docId, el)"
-                class="scale-inner scale p-4"
+                class="scale-inner scale p-4 pointer-events-none"
                 :class="previewSurfaceClass(block.previewType)"
                 :data-block-id="block.docId"
               >
