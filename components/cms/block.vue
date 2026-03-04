@@ -1287,6 +1287,7 @@ const getTagsFromPosts = computed(() => {
                                           :type="schemaItem.type"
                                           :field="schemaItem.field"
                                           :schema="schemaItem"
+                                          :site="props.siteId"
                                           :label="genTitleFromField(schemaItem)"
                                         />
                                       </template>
@@ -1335,6 +1336,7 @@ const getTagsFromPosts = computed(() => {
                                             :type="schemaItem.type"
                                             :schema="schemaItem"
                                             :field="`${schemaItem.field}-${index}-entry`"
+                                            :site="props.siteId"
                                             :label="genTitleFromField(schemaItem)"
                                           />
                                         </Card>
@@ -1362,6 +1364,7 @@ const getTagsFromPosts = computed(() => {
                       v-model="state.draft[entry.field]"
                       :type="entry.meta.type"
                       :field="entry.field"
+                      :site="props.siteId"
                       :label="genTitleFromField(entry)"
                     />
                   </div>
@@ -1446,6 +1449,7 @@ const getTagsFromPosts = computed(() => {
                     v-model="state.draft[entry.field]"
                     :type="entry.meta.type"
                     :field="entry.field"
+                    :site="props.siteId"
                     :label="genTitleFromField(entry)"
                   />
                 </div>

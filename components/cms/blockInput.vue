@@ -1,5 +1,6 @@
 <script setup>
 import { useVModel } from '@vueuse/core'
+import { ImagePlus } from 'lucide-vue-next'
 
 const props = defineProps({
   field: {
@@ -23,6 +24,11 @@ const props = defineProps({
     required: false,
     default: () => ({}),
   },
+  site: {
+    type: String,
+    required: false,
+    default: '',
+  },
 })
 
 const emit = defineEmits(['update:modelValue', 'delete'])
@@ -39,7 +45,17 @@ const richtextEnabledToggles = computed(() => {
 
 const state = reactive({
   mounted: false,
+  imageOpen: false,
 })
+
+const hasImageTags = computed(() => {
+  return Array.isArray(props.schema?.tags) && props.schema.tags.length > 0
+})
+
+const selectImage = (url) => {
+  modelValue.value = url || ''
+  state.imageOpen = false
+}
 
 onBeforeMount(async () => {
   if (props.type === 'option' && !modelValue.value) {
@@ -66,6 +82,48 @@ onBeforeMount(async () => {
     </div>
     <div v-else-if="props.type === 'option'">
       <edge-shad-select v-model="modelValue" :name="field" :label="label" :item-title="props.schema.option.optionsKey" :item-value="props.schema.option.optionsValue" :items="props.schema.option.options" />
+    </div>
+    <div v-else-if="props.type === 'image'" class="space-y-2">
+      <div class="mb-2 text-sm font-medium text-foreground">
+        {{ label }}
+      </div>
+      <div class="relative py-2 rounded-md flex items-center justify-center border border-border">
+        <div class="bg-black/80 absolute left-0 top-0 w-full h-full opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center z-10 cursor-pointer">
+          <Dialog v-model:open="state.imageOpen">
+            <DialogTrigger as-child>
+              <edge-shad-button type="button" variant="outline" class="bg-white text-black hover:bg-gray-200">
+                <ImagePlus class="h-5 w-5 mr-2" />
+                Select Image
+              </edge-shad-button>
+            </DialogTrigger>
+            <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Select Image</DialogTitle>
+                <DialogDescription />
+              </DialogHeader>
+              <edge-cms-media-manager
+                v-if="hasImageTags"
+                :site="props.site"
+                :select-mode="true"
+                :default-tags="props.schema.tags"
+                @select="selectImage"
+              />
+              <edge-cms-media-manager
+                v-else
+                :site="props.site"
+                :select-mode="true"
+                @select="selectImage"
+              />
+            </DialogContent>
+          </Dialog>
+        </div>
+        <img
+          v-if="modelValue"
+          :src="modelValue"
+          class="max-h-40 max-w-full h-auto w-auto object-contain"
+        >
+      </div>
+      <edge-shad-input v-model="modelValue" :name="field" :label="`${label} URL`" />
     </div>
     <div v-else>
       <edge-shad-input v-model="modelValue" :name="field" :label="label" />
