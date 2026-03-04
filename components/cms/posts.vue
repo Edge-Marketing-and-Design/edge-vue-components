@@ -1,8 +1,8 @@
 <script setup lang="js">
-import { computed, inject, onBeforeMount, reactive, ref, watch } from 'vue'
+import { computed, inject, onBeforeMount, reactive, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { File, FileCheck, FilePen, FileWarning, Image, ImagePlus, Loader2, MoreHorizontal, Plus, Save, Trash2, X } from 'lucide-vue-next'
+import { ArrowDown, ArrowUp, Eye, File, FileCheck, FilePen, FileWarning, GripVertical, Image, ImagePlus, Loader2, MoreHorizontal, Pencil, Plus, Save, Trash2, X } from 'lucide-vue-next'
 
 const props = defineProps({
   site: {
@@ -26,12 +26,48 @@ const props = defineProps({
 const emit = defineEmits(['updating', 'update:selectedPostId'])
 
 const edgeFirebase = inject('edgeFirebase')
+const cmsMultiOrg = useState('cmsMultiOrg', () => true)
+const isAdmin = computed(() => edgeGlobal.isAdminGlobal(edgeFirebase).value)
+const isDevModeEnabled = computed(() => process.dev || Boolean(edgeGlobal.edgeState.devOverride))
+const canOpenPreviewBlockContentEditor = computed(() => {
+  if (!isAdmin.value)
+    return false
+  if (cmsMultiOrg.value)
+    return true
+  return isDevModeEnabled.value
+})
 
 const collection = computed(() => `sites/${props.site}/posts`)
 const collectionKey = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/${collection.value}`)
 
 const publishedCollection = computed(() => `sites/${props.site}/published_posts`)
 const publishedCollectionKey = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/${publishedCollection.value}`)
+
+const normalizeForCompare = (value) => {
+  if (Array.isArray(value))
+    return value.map(normalizeForCompare)
+  if (value && typeof value === 'object') {
+    return Object.keys(value).sort().reduce((acc, key) => {
+      acc[key] = normalizeForCompare(value[key])
+      return acc
+    }, {})
+  }
+  return value
+}
+
+const stableSerialize = value => JSON.stringify(normalizeForCompare(value))
+
+const postDocComparable = (post) => {
+  return {
+    name: post?.name || '',
+    title: post?.title || '',
+    blurb: post?.blurb || '',
+    tags: Array.isArray(post?.tags) ? post.tags : [],
+    featuredImage: post?.featuredImage || '',
+    content: Array.isArray(post?.content) ? post.content : (typeof post?.content === 'string' ? post.content : ''),
+    structure: Array.isArray(post?.structure) ? post.structure : [],
+  }
+}
 
 const schemas = {
   posts: toTypedSchema(z.object({
@@ -45,9 +81,8 @@ const schemas = {
     blurb: z.string({
       required_error: 'Content blurb is required',
     }).min(1, { message: 'Content blurb is required' }).max(500, { message: 'Content blurb must be at most 500 characters' }),
-    content: z.string({
-      required_error: 'Content is required',
-    }).min(1, { message: 'Content is required' }),
+    content: z.union([z.array(z.any()), z.string()]).optional(),
+    structure: z.array(z.any()).optional(),
     featuredImages: z.array(z.string()).optional(),
   })),
 }
@@ -68,7 +103,7 @@ const isPublishedPostDiff = (postId) => {
     return true
   }
   if (publishedPost && draftPost) {
-    return JSON.stringify({ name: publishedPost.name, content: publishedPost.content, blurb: publishedPost.blurb, tags: publishedPost.tags, title: publishedPost.title, featuredImages: publishedPost.featuredImages }) !== JSON.stringify({ name: draftPost.name, content: draftPost.content, blurb: draftPost.blurb, tags: draftPost.tags, title: draftPost.title, featuredImages: draftPost.featuredImages })
+    return stableSerialize(postDocComparable(publishedPost)) !== stableSerialize(postDocComparable(draftPost))
   }
   return false
 }
@@ -82,6 +117,7 @@ const lastPublishedTime = (postId) => {
 }
 
 const state = reactive({
+  editMode: false,
   sheetOpen: false,
   activePostId: '',
   deleteDialog: false,
@@ -95,7 +131,7 @@ const state = reactive({
   renameValue: '',
   renameSubmitting: false,
   renameInternalUpdate: false,
-  contentImageDialog: false,
+  imageOpen: false,
   newDocs: {
     posts: {
       name: {
@@ -134,13 +170,10 @@ const state = reactive({
         },
       },
       content: {
-        value: '',
-        cols: '12',
-        bindings: {
-          'field-type': 'textarea',
-          'label': 'Content',
-          'rows': '8',
-        },
+        value: [],
+      },
+      structure: {
+        value: [],
       },
       featuredImage: {
         value: '',
@@ -155,8 +188,6 @@ const state = reactive({
     },
   },
 })
-
-const contentEditor = ref(null)
 
 onBeforeMount(async () => {
   if (!edgeFirebase.data?.[collectionKey.value]) {
@@ -330,7 +361,227 @@ const previewContent = (content) => {
   return normalized.length > 140 ? `${normalized.slice(0, 140)}…` : normalized
 }
 
+const notifiedLegacyMigrationIds = new Set()
+const LEGACY_POST_HTML_FIELD = 'legacyHtml'
+const LEGACY_POST_HTML_BLOCK_CONTENT = `<section class="cms-block cms-block-legacy-post-html">
+  {{{#richtext {"field":"legacyHtml","title":"Content","value":""}}}}
+</section>`
+
+const createPostRow = () => ({
+  id: edgeGlobal.generateShortId(),
+  width: 'full',
+  gap: '4',
+  verticalAlign: 'start',
+  background: 'transparent',
+  mobileStack: 'normal',
+  columns: [{
+    id: edgeGlobal.generateShortId(),
+    span: 12,
+    mobileOrder: 0,
+    blocks: [],
+  }],
+})
+
+const createLegacyHtmlLocalBlock = (legacyContent) => {
+  const normalizedLegacyContent = String(legacyContent || '')
+  return {
+    id: edgeGlobal.generateShortId(),
+    content: LEGACY_POST_HTML_BLOCK_CONTENT,
+    values: {
+      [LEGACY_POST_HTML_FIELD]: normalizedLegacyContent,
+    },
+    meta: {
+      [LEGACY_POST_HTML_FIELD]: {
+        type: 'richtext',
+        title: 'Content',
+      },
+    },
+  }
+}
+
+const normalizePostBuilderDoc = (doc = {}) => {
+  const normalized = edgeGlobal.dupObject(doc || {})
+  const previousComparable = {
+    content: normalized.content,
+    structure: normalized.structure,
+  }
+
+  let migratedFromLegacyHtml = false
+  let normalizedContent = []
+
+  if (Array.isArray(normalized.content)) {
+    normalizedContent = normalized.content
+      .filter(block => block && typeof block === 'object')
+      .map((block) => {
+        const nextBlock = edgeGlobal.dupObject(block)
+        if (!nextBlock.id)
+          nextBlock.id = edgeGlobal.generateShortId()
+        if (typeof nextBlock.content !== 'string')
+          nextBlock.content = String(nextBlock.content || '')
+        if (!nextBlock.values || typeof nextBlock.values !== 'object' || Array.isArray(nextBlock.values))
+          nextBlock.values = {}
+        if (!nextBlock.meta || typeof nextBlock.meta !== 'object' || Array.isArray(nextBlock.meta))
+          nextBlock.meta = {}
+        return nextBlock
+      })
+  }
+  else {
+    const legacyContent = typeof normalized.content === 'string' ? normalized.content : ''
+    if (legacyContent.trim().length > 0) {
+      normalizedContent = [createLegacyHtmlLocalBlock(legacyContent)]
+      migratedFromLegacyHtml = true
+    }
+  }
+
+  const contentIds = new Set(normalizedContent.map(block => block.id))
+  let normalizedStructure = Array.isArray(normalized.structure)
+    ? edgeGlobal.dupObject(normalized.structure)
+    : []
+
+  normalizedStructure = normalizedStructure
+    .filter(row => row && typeof row === 'object')
+    .map((row) => {
+      const sourceColumn = Array.isArray(row.columns) ? row.columns[0] : null
+      const sourceBlocks = Array.isArray(sourceColumn?.blocks) ? sourceColumn.blocks : []
+      return {
+        ...row,
+        id: row.id || edgeGlobal.generateShortId(),
+        width: 'full',
+        mobileStack: 'normal',
+        columns: [{
+          id: sourceColumn?.id || edgeGlobal.generateShortId(),
+          span: 12,
+          mobileOrder: 0,
+          blocks: sourceBlocks.filter(blockId => contentIds.has(blockId)),
+        }],
+      }
+    })
+
+  if (!normalizedStructure.length && normalizedContent.length) {
+    const firstRow = createPostRow()
+    firstRow.columns[0].blocks = normalizedContent.map(block => block.id)
+    normalizedStructure = [firstRow]
+  }
+
+  const referencedIds = new Set()
+  normalizedStructure.forEach((row) => {
+    row.columns[0].blocks.forEach(blockId => referencedIds.add(blockId))
+  })
+  const orphanIds = normalizedContent.map(block => block.id).filter(blockId => !referencedIds.has(blockId))
+  if (orphanIds.length) {
+    if (!normalizedStructure.length)
+      normalizedStructure = [createPostRow()]
+    normalizedStructure[normalizedStructure.length - 1].columns[0].blocks.push(...orphanIds)
+  }
+
+  normalized.content = normalizedContent
+  normalized.structure = normalizedStructure
+
+  const nextComparable = {
+    content: normalized.content,
+    structure: normalized.structure,
+  }
+
+  return {
+    normalized,
+    changed: stableSerialize(previousComparable) !== stableSerialize(nextComparable),
+    migratedFromLegacyHtml,
+  }
+}
+
+const ensurePostBuilderDefaults = (workingDoc) => {
+  if (!workingDoc || typeof workingDoc !== 'object')
+    return
+  const { normalized, changed } = normalizePostBuilderDoc(workingDoc)
+  if (changed || !Array.isArray(workingDoc.content) || !Array.isArray(workingDoc.structure)) {
+    workingDoc.content = normalized.content
+    workingDoc.structure = normalized.structure
+  }
+}
+
+const postBlockIndex = (workingDoc, blockId) => {
+  return Array.isArray(workingDoc?.content)
+    ? workingDoc.content.findIndex(block => block?.id === blockId)
+    : -1
+}
+
+const addPostRow = (workingDoc, insertIndex = null) => {
+  ensurePostBuilderDefaults(workingDoc)
+  if (!Array.isArray(workingDoc.structure))
+    workingDoc.structure = []
+  const row = createPostRow()
+  if (Number.isInteger(insertIndex) && insertIndex >= 0 && insertIndex <= workingDoc.structure.length)
+    workingDoc.structure.splice(insertIndex, 0, row)
+  else
+    workingDoc.structure.push(row)
+}
+
+const movePostRow = (workingDoc, rowIndex, direction) => {
+  ensurePostBuilderDefaults(workingDoc)
+  const rows = Array.isArray(workingDoc?.structure) ? workingDoc.structure : []
+  const targetIndex = rowIndex + direction
+  if (targetIndex < 0 || targetIndex >= rows.length)
+    return
+  const [row] = rows.splice(rowIndex, 1)
+  rows.splice(targetIndex, 0, row)
+}
+
+const cleanupOrphanPostBlocks = (workingDoc) => {
+  ensurePostBuilderDefaults(workingDoc)
+  const used = new Set()
+  for (const row of workingDoc.structure || []) {
+    for (const blockId of row?.columns?.[0]?.blocks || [])
+      used.add(blockId)
+  }
+  workingDoc.content = (workingDoc.content || []).filter(block => used.has(block.id))
+}
+
+const removePostRow = (workingDoc, rowIndex) => {
+  ensurePostBuilderDefaults(workingDoc)
+  if (!Array.isArray(workingDoc?.structure))
+    return
+  workingDoc.structure.splice(rowIndex, 1)
+  cleanupOrphanPostBlocks(workingDoc)
+}
+
+const addPostBlockToRow = (workingDoc, rowIndex, insertIndex, block) => {
+  ensurePostBuilderDefaults(workingDoc)
+  const row = workingDoc?.structure?.[rowIndex]
+  const col = row?.columns?.[0]
+  if (!col)
+    return
+  const preparedBlock = edgeGlobal.dupObject(block || {})
+  preparedBlock.id = edgeGlobal.generateShortId()
+  if (!preparedBlock.values || typeof preparedBlock.values !== 'object' || Array.isArray(preparedBlock.values))
+    preparedBlock.values = {}
+  if (!preparedBlock.meta || typeof preparedBlock.meta !== 'object' || Array.isArray(preparedBlock.meta))
+    preparedBlock.meta = {}
+  if (typeof preparedBlock.content !== 'string')
+    preparedBlock.content = String(preparedBlock.content || '')
+
+  workingDoc.content.push(preparedBlock)
+  col.blocks.splice(insertIndex, 0, preparedBlock.id)
+}
+
+const removePostBlockFromStructure = (workingDoc, blockId) => {
+  for (const row of workingDoc?.structure || []) {
+    if (row?.columns?.[0]?.blocks)
+      row.columns[0].blocks = row.columns[0].blocks.filter(id => id !== blockId)
+  }
+}
+
+const deletePostBlock = (workingDoc, blockId) => {
+  ensurePostBuilderDefaults(workingDoc)
+  if (Array.isArray(workingDoc.content)) {
+    const index = workingDoc.content.findIndex(block => block?.id === blockId)
+    if (index !== -1)
+      workingDoc.content.splice(index, 1)
+  }
+  removePostBlockFromStructure(workingDoc, blockId)
+}
+
 const resetEditorTracking = () => {
+  state.editMode = false
   state.editorDoc = null
   state.slugManuallyEdited = false
   state.internalSlugUpdate = false
@@ -352,6 +603,7 @@ const editPost = (postId) => {
     emit('update:selectedPostId', postId)
     return
   }
+  state.editMode = false
   state.activePostId = postId
   state.slugManuallyEdited = true
   state.internalSlugUpdate = false
@@ -371,18 +623,22 @@ const handlePostSaved = () => {
   console.log('Post saved')
 }
 
-const openContentImageDialog = () => {
-  state.contentImageDialog = true
-}
-
-const handleContentImageSelect = (url) => {
-  if (url && contentEditor.value?.insertImage) {
-    contentEditor.value.insertImage(url)
-  }
-  state.contentImageDialog = false
-}
-
 const onWorkingDocUpdate = (doc) => {
+  if (doc && typeof doc === 'object') {
+    const { normalized, changed, migratedFromLegacyHtml } = normalizePostBuilderDoc(doc)
+    if (changed) {
+      doc.content = normalized.content
+      doc.structure = normalized.structure
+    }
+    if (migratedFromLegacyHtml) {
+      const migrationId = String(state.activePostId || 'new')
+      if (!notifiedLegacyMigrationIds.has(migrationId)) {
+        notifiedLegacyMigrationIds.add(migrationId)
+        edgeFirebase?.toast?.success?.('Legacy post HTML migrated to a local rich text block.')
+      }
+    }
+  }
+
   state.editorDoc = doc
   if (!state.slugManuallyEdited && doc?.name)
     state.lastAutoSlug = doc.name
@@ -404,6 +660,7 @@ watch(
       return
     }
     state.activePostId = next
+    state.editMode = false
     state.slugManuallyEdited = true
     state.internalSlugUpdate = false
     state.lastAutoSlug = getPostSlug(posts.value?.[next]) || ''
@@ -838,6 +1095,21 @@ const unPublishPost = async (postId) => {
               <div class="w-full border-t border-gray-300 dark:border-white/15" aria-hidden="true" />
               <div class="flex items-center gap-1 pr-3">
                 <edge-shad-button
+                  type="button"
+                  variant="text"
+                  class="hover:text-primary/50 text-xs h-[26px] text-primary"
+                  @click="state.editMode = !state.editMode"
+                >
+                  <template v-if="state.editMode">
+                    <Eye class="w-4 h-4" />
+                    Preview Mode
+                  </template>
+                  <template v-else>
+                    <Pencil class="w-4 h-4" />
+                    Edit Mode
+                  </template>
+                </edge-shad-button>
+                <edge-shad-button
                   v-if="!slotProps.unsavedChanges"
                   variant="text"
                   class="hover:text-red-700/50 text-xs h-[26px] text-red-700"
@@ -943,29 +1215,157 @@ const unPublishPost = async (postId) => {
                     :disabled="slotProps.submitting"
                     rows="6"
                   />
-                  <edge-shad-html
-                    ref="contentEditor"
-                    v-model="slotProps.workingDoc.content"
-                    height-class="h-[calc(100vh-490px)]"
-                    :enabled-toggles="['bold', 'italic', 'strike', 'bulletlist', 'orderedlist', 'underline', 'image']"
-                    name="content"
-                    label="Content"
-                    :disabled="slotProps.submitting"
-                    @request-image="openContentImageDialog"
-                  />
-                  <Dialog v-model:open="state.contentImageDialog">
-                    <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-y-auto">
-                      <DialogHeader>
-                        <DialogTitle>Select Image</DialogTitle>
-                        <DialogDescription />
-                      </DialogHeader>
-                      <edge-cms-media-manager
-                        :site="props.site"
-                        :select-mode="true"
-                        @select="handleContentImageSelect"
-                      />
-                    </DialogContent>
-                  </Dialog>
+                  <div class="space-y-3">
+                    <div class="flex items-center justify-between">
+                      <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Content
+                      </div>
+                      <edge-shad-button
+                        v-if="state.editMode"
+                        type="button"
+                        size="sm"
+                        class="h-8 text-xs bg-secondary text-primary"
+                        @click="addPostRow(slotProps.workingDoc)"
+                      >
+                        Add Row
+                      </edge-shad-button>
+                    </div>
+
+                    <div
+                      v-if="!slotProps.workingDoc?.structure || slotProps.workingDoc.structure.length === 0"
+                      :class="state.editMode ? 'flex items-center justify-between border border-dashed border-gray-300 rounded-md px-4 py-3 bg-gray-50' : 'flex items-center justify-between rounded-md px-4 py-3 bg-gray-50/60'"
+                    >
+                      <div class="text-sm text-gray-700">
+                        {{ state.editMode ? 'No rows yet. Add your first full-width row.' : 'No rows to preview yet.' }}
+                      </div>
+                      <edge-shad-button
+                        v-if="state.editMode"
+                        type="button"
+                        size="sm"
+                        class="h-8 text-xs bg-secondary text-primary"
+                        @click="addPostRow(slotProps.workingDoc)"
+                      >
+                        Add Row
+                      </edge-shad-button>
+                    </div>
+
+                    <div v-for="(row, rowIndex) in slotProps.workingDoc.structure || []" :key="row.id || rowIndex" class="space-y-2">
+                      <div v-if="state.editMode" class="flex items-center justify-between gap-2">
+                        <div class="flex items-center gap-2">
+                          <edge-shad-button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            class="h-8 w-8"
+                            :disabled="rowIndex === 0"
+                            @click="movePostRow(slotProps.workingDoc, rowIndex, -1)"
+                          >
+                            <ArrowUp class="h-4 w-4" />
+                          </edge-shad-button>
+                          <edge-shad-button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            class="h-8 w-8"
+                            :disabled="rowIndex === (slotProps.workingDoc?.structure?.length || 0) - 1"
+                            @click="movePostRow(slotProps.workingDoc, rowIndex, 1)"
+                          >
+                            <ArrowDown class="h-4 w-4" />
+                          </edge-shad-button>
+                        </div>
+                        <edge-shad-button
+                          type="button"
+                          variant="destructive"
+                          size="icon"
+                          class="h-8 w-8 text-white"
+                          @click="removePostRow(slotProps.workingDoc, rowIndex)"
+                        >
+                          <Trash2 class="h-4 w-4" />
+                        </edge-shad-button>
+                      </div>
+
+                      <div :class="state.editMode ? 'rounded-md border border-dashed border-gray-200 bg-white/90 p-3 space-y-2' : 'rounded-md bg-white/90 p-3 space-y-2'">
+                        <edge-button-divider v-if="state.editMode" class="my-1">
+                          <edge-cms-block-picker
+                            :site-id="props.site"
+                            :allowed-types="['Post']"
+                            @pick="(block) => addPostBlockToRow(slotProps.workingDoc, rowIndex, 0, block)"
+                          />
+                        </edge-button-divider>
+                        <draggable
+                          v-model="row.columns[0].blocks"
+                          :disabled="!state.editMode"
+                          :group="{ name: 'post-doc-blocks', pull: true, put: true }"
+                          :item-key="blockId => blockId"
+                          handle=".block-drag-handle"
+                          ghost-class="block-ghost"
+                          chosen-class="block-dragging"
+                          drag-class="block-dragging"
+                        >
+                          <template #item="{ element: blockId, index: blockPosition }">
+                            <div class="space-y-2">
+                              <div class="relative group">
+                                <edge-cms-block
+                                  v-if="postBlockIndex(slotProps.workingDoc, blockId) !== -1"
+                                  v-model="slotProps.workingDoc.content[postBlockIndex(slotProps.workingDoc, blockId)]"
+                                  :site-id="props.site"
+                                  :edit-mode="state.editMode"
+                                  :allow-preview-content-edit="!state.editMode && canOpenPreviewBlockContentEditor"
+                                  :override-clicks-in-edit-mode="state.editMode"
+                                  :contain-fixed="true"
+                                  :block-id="blockId"
+                                  @delete="() => deletePostBlock(slotProps.workingDoc, blockId)"
+                                />
+                                <div v-if="state.editMode" class="block-drag-handle pointer-events-none absolute inset-x-0 top-2 flex justify-center opacity-0 transition group-hover:opacity-100 z-30">
+                                  <div class="pointer-events-auto inline-flex items-center justify-center rounded-full bg-white/90 shadow px-2 py-1 text-gray-700 cursor-grab">
+                                    <GripVertical class="w-4 h-4" />
+                                  </div>
+                                </div>
+                              </div>
+                              <div v-if="state.editMode && row.columns[0].blocks.length > blockPosition + 1" class="w-full">
+                                <edge-button-divider class="my-2">
+                                  <edge-cms-block-picker
+                                    :site-id="props.site"
+                                    :allowed-types="['Post']"
+                                    @pick="(block) => addPostBlockToRow(slotProps.workingDoc, rowIndex, blockPosition + 1, block)"
+                                  />
+                                </edge-button-divider>
+                              </div>
+                            </div>
+                          </template>
+                        </draggable>
+                        <edge-button-divider v-if="state.editMode && row.columns[0].blocks.length > 0" class="my-1">
+                          <edge-cms-block-picker
+                            :site-id="props.site"
+                            :allowed-types="['Post']"
+                            @pick="(block) => addPostBlockToRow(slotProps.workingDoc, rowIndex, row.columns[0].blocks.length, block)"
+                          />
+                        </edge-button-divider>
+                      </div>
+
+                      <edge-button-divider v-if="state.editMode && rowIndex < (slotProps.workingDoc?.structure?.length || 0) - 1" class="my-2">
+                        <edge-shad-button
+                          type="button"
+                          size="sm"
+                          class="h-8 text-xs bg-secondary text-primary"
+                          @click="addPostRow(slotProps.workingDoc, rowIndex + 1)"
+                        >
+                          Add Row
+                        </edge-shad-button>
+                      </edge-button-divider>
+                    </div>
+
+                    <edge-button-divider v-if="state.editMode && slotProps.workingDoc?.structure && slotProps.workingDoc.structure.length > 0" class="my-2">
+                      <edge-shad-button
+                        type="button"
+                        size="sm"
+                        class="h-8 text-xs bg-secondary text-primary"
+                        @click="addPostRow(slotProps.workingDoc, slotProps.workingDoc.structure.length)"
+                      >
+                        Add Row
+                      </edge-shad-button>
+                    </edge-button-divider>
+                  </div>
                 </div>
               </div>
             </div>
@@ -997,6 +1397,23 @@ const unPublishPost = async (postId) => {
       >
         <template #main="slotProps">
           <div class="p-6 space-y-4  h-[calc(100vh-122px)] overflow-y-auto">
+            <div class="flex justify-end">
+              <edge-shad-button
+                type="button"
+                variant="text"
+                class="hover:text-primary/50 text-xs h-[26px] text-primary"
+                @click="state.editMode = !state.editMode"
+              >
+                <template v-if="state.editMode">
+                  <Eye class="w-4 h-4" />
+                  Preview Mode
+                </template>
+                <template v-else>
+                  <Pencil class="w-4 h-4" />
+                  Edit Mode
+                </template>
+              </edge-shad-button>
+            </div>
             <edge-shad-input
               v-model="slotProps.workingDoc.name"
               name="name"
@@ -1050,28 +1467,157 @@ const unPublishPost = async (postId) => {
               :disabled="slotProps.submitting"
               rows="8"
             />
-            <edge-shad-html
-              ref="contentEditor"
-              v-model="slotProps.workingDoc.content"
-              :enabled-toggles="['bold', 'italic', 'strike', 'bulletlist', 'orderedlist', 'underline', 'image']"
-              name="content"
-              label="Content"
-              :disabled="slotProps.submitting"
-              @request-image="openContentImageDialog"
-            />
-            <Dialog v-model:open="state.contentImageDialog">
-              <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-y-auto">
-                <DialogHeader>
-                  <DialogTitle>Select Image</DialogTitle>
-                  <DialogDescription />
-                </DialogHeader>
-                <edge-cms-media-manager
-                  :site="props.site"
-                  :select-mode="true"
-                  @select="handleContentImageSelect"
-                />
-              </DialogContent>
-            </Dialog>
+            <div class="space-y-3">
+              <div class="flex items-center justify-between">
+                <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Content
+                </div>
+                <edge-shad-button
+                  v-if="state.editMode"
+                  type="button"
+                  size="sm"
+                  class="h-8 text-xs bg-secondary text-primary"
+                  @click="addPostRow(slotProps.workingDoc)"
+                >
+                  Add Row
+                </edge-shad-button>
+              </div>
+
+              <div
+                v-if="!slotProps.workingDoc?.structure || slotProps.workingDoc.structure.length === 0"
+                :class="state.editMode ? 'flex items-center justify-between border border-dashed border-gray-300 rounded-md px-4 py-3 bg-gray-50' : 'flex items-center justify-between rounded-md px-4 py-3 bg-gray-50/60'"
+              >
+                <div class="text-sm text-gray-700">
+                  {{ state.editMode ? 'No rows yet. Add your first full-width row.' : 'No rows to preview yet.' }}
+                </div>
+                <edge-shad-button
+                  v-if="state.editMode"
+                  type="button"
+                  size="sm"
+                  class="h-8 text-xs bg-secondary text-primary"
+                  @click="addPostRow(slotProps.workingDoc)"
+                >
+                  Add Row
+                </edge-shad-button>
+              </div>
+
+              <div v-for="(row, rowIndex) in slotProps.workingDoc.structure || []" :key="row.id || rowIndex" class="space-y-2">
+                <div v-if="state.editMode" class="flex items-center justify-between gap-2">
+                  <div class="flex items-center gap-2">
+                    <edge-shad-button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      class="h-8 w-8"
+                      :disabled="rowIndex === 0"
+                      @click="movePostRow(slotProps.workingDoc, rowIndex, -1)"
+                    >
+                      <ArrowUp class="h-4 w-4" />
+                    </edge-shad-button>
+                    <edge-shad-button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      class="h-8 w-8"
+                      :disabled="rowIndex === (slotProps.workingDoc?.structure?.length || 0) - 1"
+                      @click="movePostRow(slotProps.workingDoc, rowIndex, 1)"
+                    >
+                      <ArrowDown class="h-4 w-4" />
+                    </edge-shad-button>
+                  </div>
+                  <edge-shad-button
+                    type="button"
+                    variant="destructive"
+                    size="icon"
+                    class="h-8 w-8 text-white"
+                    @click="removePostRow(slotProps.workingDoc, rowIndex)"
+                  >
+                    <Trash2 class="h-4 w-4" />
+                  </edge-shad-button>
+                </div>
+
+                <div :class="state.editMode ? 'rounded-md border border-dashed border-gray-200 bg-white/90 p-3 space-y-2' : 'rounded-md bg-white/90 p-3 space-y-2'">
+                  <edge-button-divider v-if="state.editMode" class="my-1">
+                    <edge-cms-block-picker
+                      :site-id="props.site"
+                      :allowed-types="['Post']"
+                      @pick="(block) => addPostBlockToRow(slotProps.workingDoc, rowIndex, 0, block)"
+                    />
+                  </edge-button-divider>
+                  <draggable
+                    v-model="row.columns[0].blocks"
+                    :disabled="!state.editMode"
+                    :group="{ name: 'post-doc-blocks', pull: true, put: true }"
+                    :item-key="blockId => blockId"
+                    handle=".block-drag-handle"
+                    ghost-class="block-ghost"
+                    chosen-class="block-dragging"
+                    drag-class="block-dragging"
+                  >
+                    <template #item="{ element: blockId, index: blockPosition }">
+                      <div class="space-y-2">
+                        <div class="relative group">
+                          <edge-cms-block
+                            v-if="postBlockIndex(slotProps.workingDoc, blockId) !== -1"
+                            v-model="slotProps.workingDoc.content[postBlockIndex(slotProps.workingDoc, blockId)]"
+                            :site-id="props.site"
+                            :edit-mode="state.editMode"
+                            :allow-preview-content-edit="!state.editMode && canOpenPreviewBlockContentEditor"
+                            :override-clicks-in-edit-mode="state.editMode"
+                            :contain-fixed="true"
+                            :block-id="blockId"
+                            @delete="() => deletePostBlock(slotProps.workingDoc, blockId)"
+                          />
+                          <div v-if="state.editMode" class="block-drag-handle pointer-events-none absolute inset-x-0 top-2 flex justify-center opacity-0 transition group-hover:opacity-100 z-30">
+                            <div class="pointer-events-auto inline-flex items-center justify-center rounded-full bg-white/90 shadow px-2 py-1 text-gray-700 cursor-grab">
+                              <GripVertical class="w-4 h-4" />
+                            </div>
+                          </div>
+                        </div>
+                        <div v-if="state.editMode && row.columns[0].blocks.length > blockPosition + 1" class="w-full">
+                          <edge-button-divider class="my-2">
+                            <edge-cms-block-picker
+                              :site-id="props.site"
+                              :allowed-types="['Post']"
+                              @pick="(block) => addPostBlockToRow(slotProps.workingDoc, rowIndex, blockPosition + 1, block)"
+                            />
+                          </edge-button-divider>
+                        </div>
+                      </div>
+                    </template>
+                  </draggable>
+                  <edge-button-divider v-if="state.editMode && row.columns[0].blocks.length > 0" class="my-1">
+                    <edge-cms-block-picker
+                      :site-id="props.site"
+                      :allowed-types="['Post']"
+                      @pick="(block) => addPostBlockToRow(slotProps.workingDoc, rowIndex, row.columns[0].blocks.length, block)"
+                    />
+                  </edge-button-divider>
+                </div>
+
+                <edge-button-divider v-if="state.editMode && rowIndex < (slotProps.workingDoc?.structure?.length || 0) - 1" class="my-2">
+                  <edge-shad-button
+                    type="button"
+                    size="sm"
+                    class="h-8 text-xs bg-secondary text-primary"
+                    @click="addPostRow(slotProps.workingDoc, rowIndex + 1)"
+                  >
+                    Add Row
+                  </edge-shad-button>
+                </edge-button-divider>
+              </div>
+
+              <edge-button-divider v-if="state.editMode && slotProps.workingDoc?.structure && slotProps.workingDoc.structure.length > 0" class="my-2">
+                <edge-shad-button
+                  type="button"
+                  size="sm"
+                  class="h-8 text-xs bg-secondary text-primary"
+                  @click="addPostRow(slotProps.workingDoc, slotProps.workingDoc.structure.length)"
+                >
+                  Add Row
+                </edge-shad-button>
+              </edge-button-divider>
+            </div>
           </div>
           <SheetFooter class="pt-2 flex justify-between">
             <edge-shad-button variant="destructive" class="text-white" @click="state.sheetOpen = false">

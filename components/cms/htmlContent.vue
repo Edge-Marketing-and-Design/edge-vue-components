@@ -563,17 +563,41 @@ function initCmsNavHelpers(scope) {
       const scrollingCandidate = candidates.find(el => (el.scrollHeight - el.clientHeight) > 1)
       return scrollingCandidate || candidates[0] || previewSurface
     }
-    const previewPinAnchor = resolvePreviewPinAnchor()
-    const previewScrollTarget = resolvePreviewScrollTarget()
+    let previewPinAnchor = resolvePreviewPinAnchor()
+    let previewScrollTarget = resolvePreviewScrollTarget()
+    const refreshPreviewTargets = () => {
+      if (!shouldContainFixedInPreview)
+        return
+      const nextPinAnchor = resolvePreviewPinAnchor()
+      const nextScrollTarget = resolvePreviewScrollTarget()
+      if (nextPinAnchor)
+        previewPinAnchor = nextPinAnchor
+      if (nextScrollTarget)
+        previewScrollTarget = nextScrollTarget
+    }
+    const previewScrollAncestors = previewSurface
+      ? getAncestorElements(previewSurface).filter(isScrollableElement)
+      : []
     const scrollTargets = shouldContainFixedInPreview
-      ? Array.from(new Set([previewScrollTarget, previewPinAnchor, previewSurface].filter(Boolean)))
+      ? Array.from(new Set([previewSurface, previewScrollTarget, previewPinAnchor, ...previewScrollAncestors].filter(Boolean)))
       : collectScrollTargets(root)
     const windowScrollY = () => window.scrollY || document.documentElement.scrollTop || 0
     const readScrollY = () => {
       if (shouldContainFixedInPreview) {
-        const scopedTarget = previewScrollTarget || previewSurface
-        if (scopedTarget && typeof scopedTarget.scrollTop === 'number')
-          return Number(scopedTarget.scrollTop || 0)
+        refreshPreviewTargets()
+        const scopedTargets = Array.from(new Set([previewSurface, previewScrollTarget, previewPinAnchor, ...previewScrollAncestors].filter(Boolean)))
+        let scopedMaxScrollY = 0
+        let hasScopedTarget = false
+        scopedTargets.forEach((target) => {
+          if (!target || target === window || target === document)
+            return
+          if (typeof target.scrollTop !== 'number')
+            return
+          hasScopedTarget = true
+          scopedMaxScrollY = Math.max(scopedMaxScrollY, Number(target.scrollTop || 0))
+        })
+        if (hasScopedTarget)
+          return scopedMaxScrollY
       }
       let maxScrollY = windowScrollY()
       scrollTargets.forEach((target) => {
@@ -587,6 +611,7 @@ function initCmsNavHelpers(scope) {
     }
 
     const readPinAnchorTop = () => {
+      refreshPreviewTargets()
       if (!previewPinAnchor || typeof previewPinAnchor.getBoundingClientRect !== 'function')
         return 0
       return Math.round(previewPinAnchor.getBoundingClientRect().top)

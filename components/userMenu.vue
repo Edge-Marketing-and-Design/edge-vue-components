@@ -31,17 +31,28 @@ const currentOrg = computed(() => organizations.value.find(org => org.docId === 
 const currentOrgName = computed(() => currentOrg.value?.name || 'Organization')
 const hasMultipleOrgs = computed(() => organizations.value.length > 1)
 const orgDialogOpen = ref(false)
+const route = useRoute()
+const router = useRouter()
+
 const openOrgDialog = () => {
   if (hasMultipleOrgs.value) {
     orgDialogOpen.value = true
   }
 }
-const selectOrg = (orgId) => {
-  edgeGlobal.setOrganization(orgId, edgeFirebase)
+
+const selectOrg = async (orgId) => {
+  if (!orgId || orgId === edgeGlobal.edgeState.currentOrganization) {
+    orgDialogOpen.value = false
+    return
+  }
+
+  const preLoginRoute = useState('preLoginRoute')
+  preLoginRoute.value = '/app'
+  await edgeGlobal.setOrganization(orgId, edgeFirebase)
   orgDialogOpen.value = false
+  await router.push('/app/dashboard')
 }
-const route = useRoute()
-const router = useRouter()
+
 const goTo = (path) => {
   router.push(path)
 }

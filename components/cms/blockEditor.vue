@@ -52,9 +52,52 @@ const previewTypeOptions = [
   { name: 'light', title: 'Light Preview' },
   { name: 'dark', title: 'Dark Preview' },
 ]
+const blockTypeOptions = [
+  { name: 'Page', title: 'Page' },
+  { name: 'Post', title: 'Post' },
+]
 
 const normalizePreviewType = (value) => {
   return value === 'dark' ? 'dark' : 'light'
+}
+
+const normalizeBlockTypes = (value, { fallbackToPage = true } = {}) => {
+  const hasExplicitTypeValue = !(
+    value === undefined
+    || value === null
+    || value === ''
+    || (Array.isArray(value) && value.length === 0)
+  )
+  const rawTypes = Array.isArray(value) ? value : [value]
+  const normalized = rawTypes
+    .map((typeValue) => {
+      if (typeValue && typeof typeValue === 'object') {
+        const objectValue = typeValue.name ?? typeValue.value ?? typeValue.title ?? typeValue.label ?? ''
+        return String(objectValue || '')
+      }
+      return String(typeValue || '')
+    })
+    .map(typeValue => typeValue.trim().toLowerCase())
+    .map((typeValue) => {
+      if (typeValue === 'page')
+        return 'Page'
+      if (typeValue === 'post')
+        return 'Post'
+      return ''
+    })
+    .filter(Boolean)
+  const uniqueNormalized = [...new Set(normalized)]
+  if (!uniqueNormalized.length && fallbackToPage && !hasExplicitTypeValue)
+    return ['Page']
+  return uniqueNormalized
+}
+
+const areTypeArraysEqual = (left, right) => {
+  const a = normalizeBlockTypes(left, { fallbackToPage: false })
+  const b = normalizeBlockTypes(right, { fallbackToPage: false })
+  if (a.length !== b.length)
+    return false
+  return a.every(type => b.includes(type))
 }
 
 const selectedPreviewViewport = computed(() => previewViewportOptions.find(option => option.id === state.previewViewport) || previewViewportOptions[0])
@@ -531,9 +574,17 @@ watch(headObject, (newHeadElements) => {
 }, { immediate: true, deep: true })
 
 const editorDocUpdates = (workingDoc) => {
+  let normalizedTypes = normalizeBlockTypes(workingDoc?.type)
+  if (!normalizedTypes.length)
+    normalizedTypes = ['Page']
+  if (workingDoc && !areTypeArraysEqual(workingDoc.type, normalizedTypes))
+    workingDoc.type = normalizedTypes
   state.editorWorkingDoc = workingDoc || null
-  const parsed = blockModel(workingDoc.content)
-  state.workingDoc = parsed
+  const parsed = blockModel(workingDoc?.content || '')
+  state.workingDoc = {
+    ...parsed,
+    type: normalizedTypes,
+  }
   state.previewBlock = buildPreviewBlock(workingDoc, parsed)
   console.log('Editor workingDoc update:', state.workingDoc)
 }
@@ -798,6 +849,19 @@ const exportCurrentBlock = () => {
                 placeholder="Select tags"
                 label="Tags"
                 :allow-additions="true"
+                class="w-full max-w-[800px] mx-auto mb-5 text-black"
+              />
+            </div>
+            <div class="flex-auto">
+              <edge-shad-select-tags
+                v-model="slotProps.workingDoc.type"
+                label="Block Type"
+                name="type"
+                :items="blockTypeOptions"
+                item-title="title"
+                item-value="name"
+                :allow-additions="false"
+                placeholder="Block Type"
                 class="w-full max-w-[800px] mx-auto mb-5 text-black"
               />
             </div>

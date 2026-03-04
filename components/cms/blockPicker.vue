@@ -1,22 +1,6 @@
 <script setup>
 import { Plus } from 'lucide-vue-next'
 
-const SHARED_PICKER_STATE = reactive({
-  hostId: null,
-  open: false,
-  activeInstance: null,
-  activeProps: {
-    siteId: '',
-    theme: null,
-    viewportMode: 'auto',
-  },
-  blocksLoaded: [],
-  selectedTags: ['Quick Picks'],
-})
-
-const HANDLERS = new Map()
-let blocksSnapshotStarted = false
-
 const props = defineProps({
   blockOverride: {
     type: Object,
@@ -38,9 +22,30 @@ const props = defineProps({
     type: String,
     default: 'auto',
   },
+  allowedTypes: {
+    type: [String, Array],
+    default: () => [],
+  },
 })
 
 const emit = defineEmits(['pick'])
+
+const SHARED_PICKER_STATE = reactive({
+  hostId: null,
+  open: false,
+  activeInstance: null,
+  activeProps: {
+    siteId: '',
+    theme: null,
+    viewportMode: 'auto',
+    allowedTypes: [],
+  },
+  blocksLoaded: [],
+  selectedTags: ['Quick Picks'],
+})
+
+const HANDLERS = new Map()
+let blocksSnapshotStarted = false
 
 const localState = reactive({
   open: false,
@@ -53,7 +58,9 @@ const instanceId = Symbol('blockPicker')
 
 const edgeFirebase = inject('edgeFirebase')
 
-const activeState = computed(() => isSharedMode.value ? SHARED_PICKER_STATE : localState)
+const activeState = computed(() => {
+  return isSharedMode.value ? SHARED_PICKER_STATE : localState
+})
 const pickerState = activeState
 
 const sheetOpen = computed({
@@ -68,10 +75,15 @@ const sheetOpen = computed({
 
 const isSharedHost = computed(() => isSharedMode.value && SHARED_PICKER_STATE.hostId === instanceId)
 
-const activeProps = computed(() => isSharedMode.value ? SHARED_PICKER_STATE.activeProps : {
-  siteId: props.siteId,
-  theme: props.theme,
-  viewportMode: props.viewportMode,
+const activeProps = computed(() => {
+  if (isSharedMode.value)
+    return SHARED_PICKER_STATE.activeProps
+  return {
+    siteId: props.siteId,
+    theme: props.theme,
+    viewportMode: props.viewportMode,
+    allowedTypes: props.allowedTypes,
+  }
 })
 
 const themeId = computed(() => {
@@ -96,6 +108,38 @@ const previewSurfaceClass = (value) => {
     : 'bg-neutral-950 text-neutral-50'
 }
 
+const normalizeBlockTypes = (value, { fallbackToPage = true } = {}) => {
+  const hasExplicitTypeValue = !(
+    value === undefined
+    || value === null
+    || value === ''
+    || (Array.isArray(value) && value.length === 0)
+  )
+  const rawTypes = Array.isArray(value) ? value : [value]
+  const normalized = rawTypes
+    .map((typeValue) => {
+      if (typeValue && typeof typeValue === 'object') {
+        const objectValue = typeValue.name ?? typeValue.value ?? typeValue.title ?? typeValue.label ?? ''
+        return String(objectValue || '')
+      }
+      return String(typeValue || '')
+    })
+    .map(typeValue => typeValue.trim().toLowerCase())
+    .map((typeValue) => {
+      if (typeValue === 'page')
+        return 'Page'
+      if (typeValue === 'post')
+        return 'Post'
+      return ''
+    })
+    .filter(Boolean)
+
+  const uniqueNormalized = [...new Set(normalized)]
+  if (!uniqueNormalized.length && fallbackToPage && !hasExplicitTypeValue)
+    return ['Page']
+  return uniqueNormalized
+}
+
 const blockOverridePreviewType = computed(() => {
   const directPreviewType = normalizePreviewType(props.blockOverride?.previewType)
   if (props.blockOverride?.previewType === 'light' || props.blockOverride?.previewType === 'dark')
@@ -116,6 +160,13 @@ const blocks = computed(() => {
   }
   if (themeId.value) {
     blocks = blocks.filter(block => block.themes && block.themes.includes(themeId.value))
+  }
+  const allowedTypes = normalizeBlockTypes(activeProps.value.allowedTypes, { fallbackToPage: false })
+  if (allowedTypes.length) {
+    blocks = blocks.filter((block) => {
+      const blockTypes = normalizeBlockTypes(block?.type)
+      return blockTypes.some(type => allowedTypes.includes(type))
+    })
   }
   return blocks
 })
@@ -229,6 +280,7 @@ const openPicker = () => {
       siteId: props.siteId,
       theme: props.theme,
       viewportMode: props.viewportMode,
+      allowedTypes: props.allowedTypes,
     }
     if (!SHARED_PICKER_STATE.hostId)
       SHARED_PICKER_STATE.hostId = instanceId

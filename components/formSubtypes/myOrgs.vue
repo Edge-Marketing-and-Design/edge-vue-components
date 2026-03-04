@@ -18,6 +18,7 @@ const props = defineProps({
 })
 
 const edgeFirebase = inject('edgeFirebase')
+const router = useRouter()
 
 const state = reactive({
   workingItem: {},
@@ -187,6 +188,16 @@ const onSubmit = async () => {
   state.dialog = false
   state.loading = false
 }
+
+const switchOrganization = async (orgId) => {
+  if (!orgId || orgId === edgeGlobal.edgeState.currentOrganization)
+    return
+
+  const preLoginRoute = useState('preLoginRoute')
+  preLoginRoute.value = '/app'
+  await edgeGlobal.setOrganization(orgId, edgeFirebase)
+  await router.push('/app/dashboard')
+}
 const schema = toTypedSchema(z.object({
   name: z.string({
     required_error: 'Required',
@@ -212,7 +223,7 @@ const schema = toTypedSchema(z.object({
       <edge-chip v-if="edgeGlobal.edgeState.currentOrganization === props.item.docId" size="small" color="primary">
         Current
       </edge-chip>
-      <edge-shad-button v-else class="bg-slate-500 h-6 text-xs" @click.stop.prevent="edgeGlobal.setOrganization(props.item.docId, edgeFirebase)">
+      <edge-shad-button v-else class="bg-slate-500 h-6 text-xs" @click.stop.prevent="switchOrganization(props.item.docId)">
         Switch
       </edge-shad-button>
     </div>

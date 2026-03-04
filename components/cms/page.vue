@@ -2168,7 +2168,7 @@ const hasUnsavedChanges = (changes) => {
                         :style="{ ...columnSpanStyle(column), ...columnMobileOrderStyle(row, colIndex) }"
                       >
                         <edge-button-divider v-if="state.editMode" class="my-1">
-                          <edge-cms-block-picker :site-id="props.site" :theme="theme" @pick="(block) => addBlockToColumn(rowIndex, colIndex, 0, block, slotProps, false)" />
+                          <edge-cms-block-picker :site-id="props.site" :theme="theme" :allowed-types="['Page']" @pick="(block) => addBlockToColumn(rowIndex, colIndex, 0, block, slotProps, false)" />
                         </edge-button-divider>
                         <draggable
                           v-model="column.blocks"
@@ -2207,14 +2207,14 @@ const hasUnsavedChanges = (changes) => {
                               </div>
                               <div v-if="state.editMode && column.blocks.length > blockPosition + 1" class="w-full">
                                 <edge-button-divider class="my-2">
-                                  <edge-cms-block-picker :site-id="props.site" :theme="theme" @pick="(block) => addBlockToColumn(rowIndex, colIndex, blockPosition + 1, block, slotProps, false)" />
+                                  <edge-cms-block-picker :site-id="props.site" :theme="theme" :allowed-types="['Page']" @pick="(block) => addBlockToColumn(rowIndex, colIndex, blockPosition + 1, block, slotProps, false)" />
                                 </edge-button-divider>
                               </div>
                             </div>
                           </template>
                         </draggable>
                         <edge-button-divider v-if="state.editMode && column.blocks.length > 0" class="my-1">
-                          <edge-cms-block-picker :site-id="props.site" :theme="theme" @pick="(block) => addBlockToColumn(rowIndex, colIndex, column.blocks.length, block, slotProps, false)" />
+                          <edge-cms-block-picker :site-id="props.site" :theme="theme" :allowed-types="['Page']" @pick="(block) => addBlockToColumn(rowIndex, colIndex, column.blocks.length, block, slotProps, false)" />
                         </edge-button-divider>
                       </div>
                     </div>
@@ -2424,7 +2424,7 @@ const hasUnsavedChanges = (changes) => {
                         :style="{ ...columnSpanStyle(column), ...columnMobileOrderStyle(row, colIndex) }"
                       >
                         <edge-button-divider v-if="state.editMode" class="my-1">
-                          <edge-cms-block-picker :site-id="props.site" :theme="theme" @pick="(block) => addBlockToColumn(rowIndex, colIndex, 0, block, slotProps, true)" />
+                          <edge-cms-block-picker :site-id="props.site" :theme="theme" :allowed-types="['Page']" @pick="(block) => addBlockToColumn(rowIndex, colIndex, 0, block, slotProps, true)" />
                         </edge-button-divider>
                         <draggable
                           v-model="column.blocks"
@@ -2463,14 +2463,14 @@ const hasUnsavedChanges = (changes) => {
                               </div>
                               <div v-if="state.editMode && column.blocks.length > blockPosition + 1" class="w-full">
                                 <edge-button-divider class="my-2">
-                                  <edge-cms-block-picker :site-id="props.site" :theme="theme" @pick="(block) => addBlockToColumn(rowIndex, colIndex, blockPosition + 1, block, slotProps, true)" />
+                                  <edge-cms-block-picker :site-id="props.site" :theme="theme" :allowed-types="['Page']" @pick="(block) => addBlockToColumn(rowIndex, colIndex, blockPosition + 1, block, slotProps, true)" />
                                 </edge-button-divider>
                               </div>
                             </div>
                           </template>
                         </draggable>
                         <edge-button-divider v-if="state.editMode && column.blocks.length > 0" class="my-1">
-                          <edge-cms-block-picker :site-id="props.site" :theme="theme" @pick="(block) => addBlockToColumn(rowIndex, colIndex, column.blocks.length, block, slotProps, true)" />
+                          <edge-cms-block-picker :site-id="props.site" :theme="theme" :allowed-types="['Page']" @pick="(block) => addBlockToColumn(rowIndex, colIndex, column.blocks.length, block, slotProps, true)" />
                         </edge-button-divider>
                       </div>
                     </div>
