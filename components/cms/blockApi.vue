@@ -38,19 +38,6 @@ const emit = defineEmits(['pending'])
 const edgeFirebase = inject('edgeFirebase')
 /* ---------------- helpers ---------------- */
 
-const resolveRuntimeTokens = (input, context = {}) => {
-  const orgId = String(context.orgId || '').trim()
-  const siteId = String(context.siteId || '').trim()
-  if (typeof input !== 'string')
-    return input
-  let resolved = input
-  if (orgId)
-    resolved = resolved.replaceAll('{orgId}', orgId)
-  if (siteId)
-    resolved = resolved.replaceAll('{siteId}', siteId)
-  return resolved
-}
-
 // Safe dot-path getter
 const getByPath = (obj, path) => {
   if (!path || typeof path !== 'string')
@@ -209,19 +196,12 @@ const finalValues = computed(() => {
     ...(collectionValues.value || {}),
   }
 })
-
-const resolvedContent = computed(() => {
-  return resolveRuntimeTokens(props.content, {
-    orgId: edgeGlobal.edgeState.currentOrganization,
-    siteId: props.siteId,
-  })
-})
 </script>
 
 <template>
   <edge-cms-block-render
     :theme="props.theme"
-    :content="loadingRender(resolvedContent)"
+    :content="loadingRender(props.content)"
     :values="finalValues"
     :meta="props.meta"
     :viewport-mode="props.viewportMode"
