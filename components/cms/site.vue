@@ -1823,7 +1823,9 @@ const pageSettingsUpdated = async (pageData) => {
               variant="ghost"
               size="sm"
               class="h-8 px-4 text-xs gap-2 rounded-full"
-              :class="state.viewMode === 'pages' ? 'bg-slate-700 text-white shadow-sm dark:bg-slate-200 dark:text-slate-900' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100'"
+              :class="state.viewMode === 'pages'
+                ? 'bg-gradient-to-r from-slate-900 to-slate-700 text-white shadow-sm dark:bg-gradient-to-r dark:from-slate-200 dark:to-slate-400 dark:text-slate-900'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100'"
               @click="setViewMode('pages')"
             >
               <FileStack class="h-4 w-4" />
@@ -1834,7 +1836,9 @@ const pageSettingsUpdated = async (pageData) => {
               variant="ghost"
               size="sm"
               class="h-8 px-4 text-xs gap-2 rounded-full"
-              :class="state.viewMode === 'posts' ? 'bg-slate-700 text-white shadow-sm dark:bg-slate-200 dark:text-slate-900' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100'"
+              :class="state.viewMode === 'posts'
+                ? 'bg-gradient-to-r from-slate-900 to-slate-700 text-white shadow-sm dark:bg-gradient-to-r dark:from-slate-200 dark:to-slate-400 dark:text-slate-900'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100'"
               @click="setViewMode('posts')"
             >
               <FilePenLine class="h-4 w-4" />
@@ -1845,7 +1849,9 @@ const pageSettingsUpdated = async (pageData) => {
               variant="ghost"
               size="sm"
               class="h-8 px-4 text-xs gap-2 rounded-full"
-              :class="state.viewMode === 'submissions' ? 'bg-slate-700 text-white shadow-sm dark:bg-slate-200 dark:text-slate-900' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100'"
+              :class="state.viewMode === 'submissions'
+                ? 'bg-gradient-to-r from-slate-900 to-slate-700 text-white shadow-sm dark:bg-gradient-to-r dark:from-slate-200 dark:to-slate-400 dark:text-slate-900'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100'"
               @click="setViewMode('submissions')"
             >
               <Inbox class="h-4 w-4" />
@@ -2009,7 +2015,7 @@ const pageSettingsUpdated = async (pageData) => {
                           </div>
                         </div>
                         <div class="flex items-center gap-2 text-[11px] text-muted-foreground">
-                          <span v-if="isSubmissionUnread(item)" class="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-primary">
+                          <span v-if="isSubmissionUnread(item)" class="rounded-full bg-slate-900/10 px-2 py-0.5 text-[10px] font-semibold uppercase text-slate-900 dark:bg-slate-100/80 dark:text-slate-900">
                             Unread
                           </span>
                           <span>{{ formatSubmissionTimestamp(item.timestamp) }}</span>
@@ -2101,10 +2107,10 @@ const pageSettingsUpdated = async (pageData) => {
             />
           </div>
           <ResizablePanelGroup v-else-if="showSplitView" direction="horizontal" class="w-full h-full flex-1 min-h-0">
-            <ResizablePanel class="bg-primary-foreground text-black min-h-0 overflow-hidden" :default-size="16">
+            <ResizablePanel class="bg-slate-100 text-slate-900 min-h-0 overflow-hidden dark:bg-slate-900 dark:text-slate-100" :default-size="16">
               <SidebarGroup class="mt-0 pt-0 h-full min-h-0">
                 <SidebarGroupContent class="h-full min-h-0 overflow-y-auto">
-                  <SidebarMenu class="pb-4">
+                  <SidebarMenu class="pb-4 edge-cms-site-menu">
                     <template v-if="isTemplateSite || (canViewPagesTab && state.viewMode === 'pages')">
                       <edge-cms-menu
                         v-if="state.menus"
@@ -2274,6 +2280,46 @@ const pageSettingsUpdated = async (pageData) => {
 </template>
 
 <style scoped>
+:global(.edge-cms-site-menu) {
+  --cms-menu-item-bg: transparent;
+  --cms-menu-item-foreground: #0f172a;
+  --cms-menu-item-hover-bg: rgba(15, 23, 42, 0.08);
+  --cms-menu-item-hover-foreground: #0f172a;
+  --cms-menu-item-active-bg: #0f172a;
+  --cms-menu-item-active-foreground: #ffffff;
+  --cms-menu-item-border: rgba(15, 23, 42, 0.08);
+}
+:global(.dark .edge-cms-site-menu) {
+  --cms-menu-item-foreground: #e2e8f0;
+  --cms-menu-item-hover-bg: rgba(255, 255, 255, 0.08);
+  --cms-menu-item-hover-foreground: #e2e8f0;
+  --cms-menu-item-active-bg: #374151;
+  --cms-menu-item-active-foreground: #ffffff;
+  --cms-menu-item-border: rgba(255, 255, 255, 0.08);
+}
+:global(.edge-cms-site-menu [data-sidebar="menu-sub-button"]) {
+  background-color: var(--cms-menu-item-bg) !important;
+  color: var(--cms-menu-item-foreground) !important;
+  border-color: var(--cms-menu-item-border) !important;
+  box-shadow: none !important;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+:global(.edge-cms-site-menu [data-sidebar="menu-sub-button"][data-active="true"]) {
+  background-color: var(--cms-menu-item-active-bg) !important;
+  color: var(--cms-menu-item-active-foreground) !important;
+  outline: none !important;
+}
+:global(.edge-cms-site-menu [data-sidebar="menu-sub-button"]:not([data-active="true"]):hover),
+:global(.edge-cms-site-menu [data-sidebar="menu-sub-button"]:not([data-active="true"]):focus-visible) {
+  background-color: var(--cms-menu-item-hover-bg) !important;
+  color: var(--cms-menu-item-hover-foreground) !important;
+}
+
+:global(.edge-cms-site-menu [data-sidebar="menu-sub-button"][data-active="true"]) span,
+:global(.edge-cms-site-menu [data-sidebar="menu-sub-button"][data-active="true"]) svg {
+  color: var(--cms-menu-item-active-foreground) !important;
+}
+
 .fade-enter-active,
 .fade-leave-active {
   transition: opacity 0.2s ease;

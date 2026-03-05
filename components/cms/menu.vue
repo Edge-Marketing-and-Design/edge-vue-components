@@ -1085,7 +1085,7 @@ const theme = computed(() => {
       <SidebarGroupAction class="absolute right-2 top-0 hover:!bg-transparent">
         <DropdownMenu>
           <DropdownMenuTrigger as-child>
-            <SidebarMenuAction class="hover:bg-primary text-foreground hover:text-primary-foreground">
+            <SidebarMenuAction class="hover:bg-slate-100 text-slate-900 hover:text-slate-900 dark:text-slate-100 dark:hover:bg-slate-800 dark:hover:text-slate-100">
               <PlusIcon />
             </SidebarMenuAction>
           </DropdownMenuTrigger>
@@ -1148,7 +1148,7 @@ const theme = computed(() => {
                 :class="{ 'text-gray-400': element.item === '' }"
                 as-child
                 :is-active="!isExternalLinkEntry(element) && element.item === props.page"
-                class="text-foreground hover:bg-primary hover:text-primary-foreground"
+                class="text-slate-900 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-100 dark:hover:bg-slate-800 dark:hover:text-slate-100"
               >
                 <NuxtLink
                   v-if="!isExternalLinkEntry(element)"
@@ -1176,7 +1176,7 @@ const theme = computed(() => {
               <div class="absolute right-0 -top-0.5">
                 <DropdownMenu>
                   <DropdownMenuTrigger as-child>
-                    <SidebarMenuAction class="hover:bg-primary text-foreground hover:text-primary-foreground">
+                    <SidebarMenuAction class="hover:bg-slate-100 text-slate-900 hover:text-slate-900 dark:text-slate-100 dark:hover:bg-slate-800 dark:hover:text-slate-100">
                       <MoreHorizontal />
                     </SidebarMenuAction>
                   </DropdownMenuTrigger>

@@ -211,11 +211,11 @@ const siteQueryValue = computed(() => {
             :r2="true"
             :disabled="state.tags.length === 0"
             disabled-text="Tags are required"
-            class="w-full mx-auto border-dashed border-primary/60 bg-gradient-to-br from-primary/90 via-primary to-primary/90 dark:from-muted dark:via-muted/90 dark:to-muted border text-primary-foreground dark:text-foreground py-10 rounded-[20px] my-3 shadow-lg shadow-primary/20 dark:shadow-black/30"
+            class="w-full mx-auto border-dashed border-slate-300/70 bg-gradient-to-br from-slate-900/90 via-slate-800/70 to-slate-700/50 dark:from-slate-900/70 dark:via-slate-800/70 dark:to-slate-700/70 border text-white dark:text-white/90 py-10 rounded-[20px] my-3 shadow-lg shadow-slate-900/30"
             :extra-meta="{ tags: state.tags, cmsmedia: true, cmssite: [props.site] }"
           >
             <template #title>
-              <div class="flex items-center gap-2 justify-center gap-5 text-primary-foreground dark:text-foreground drop-shadow">
+              <div class="flex items-center gap-2 justify-center gap-5 text-white dark:text-slate-100 drop-shadow">
                 <div>
                   <ImagePlus class="h-10 w-10" />
                 </div>
@@ -238,12 +238,12 @@ const siteQueryValue = computed(() => {
           </edge-auto-file-upload>
           <div
             v-if="state.tags.length === 0"
-            class="pointer-events-auto absolute inset-0 z-20 rounded-[20px] border border-dashed border-border/70 bg-background/85 dark:bg-background/80 backdrop-blur-sm flex flex-col items-center justify-center text-center px-6 text-foreground"
+            class="pointer-events-auto absolute inset-0 z-20 space-y-2 rounded-[20px] border border-dashed border-border/70 bg-background/85 dark:bg-background/80 backdrop-blur-sm flex flex-col items-center justify-center text-center px-6 text-foreground"
           >
-            <div class="text-lg font-semibold">
+            <div class="text-lg font-semibold text-slate-900 dark:text-slate-100">
               Tags are required
             </div>
-            <div class="text-sm text-muted-foreground">
+            <div class="text-sm text-slate-600 dark:text-slate-300">
               Add tags above to enable upload
             </div>
           </div>
@@ -269,9 +269,12 @@ const siteQueryValue = computed(() => {
           <template #center>
             <div class="w-full px-0">
               <edge-shad-form>
-                <div class="flex justify-between items-center gap-2 w-full">
+                <div class="flex flex-wrap justify-between items-center gap-2 w-full">
                   <div>
-                    <edge-shad-button @click="state.showUpload = true">
+                    <edge-shad-button
+                      class="bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
+                      @click="state.showUpload = true"
+                    >
                       <ImagePlus class="h-5 w-5 mr-2" />
                       Upload Media
                     </edge-shad-button>
@@ -310,7 +313,7 @@ const siteQueryValue = computed(() => {
         </edge-menu>
         <div v-if="!selectMode" class="flex justify-end gap-2 mt-2 px-3">
           <edge-shad-button
-            class="w-[140px] h-[30px]"
+            class="w-[140px] h-[30px] rounded bg-slate-900 text-white hover:bg-slate-800 focus-visible:ring-2 focus-visible:ring-slate-500 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
             @click="state.selectAll = !state.selectAll"
           >
             <Square v-if="!state.selectAll" class="h-5 w-5" />
@@ -391,11 +394,15 @@ const siteQueryValue = computed(() => {
                 class="w-full max-w-[800px] mx-auto mb-5 text-foreground"
               />
             </div>
-            <SheetFooter class="pt-2 flex justify-between">
+            <SheetFooter class="pt-2 flex justify-between gap-3">
               <edge-shad-button variant="destructive" class="text-white" @click="state.editMedia = false">
                 Cancel
               </edge-shad-button>
-              <edge-shad-button :disabled="slotProps.submitting" type="submit" class="w-full">
+              <edge-shad-button
+                :disabled="slotProps.submitting"
+                type="submit"
+                class="w-full bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
+              >
                 <Loader2 v-if="slotProps.submitting" class=" h-4 w-4 animate-spin" />
                 Update
               </edge-shad-button>
@@ -409,8 +416,7 @@ const siteQueryValue = computed(() => {
 
 <style>
 .data-\[state\=on\]\:bg-accent[data-state="on"] {
-    background-color: #D9D9D9;
-    box-shadow: 0px 4px 4px 0px #202C3E52 inset;
-
+  background-color: #0f172a;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
 }
 </style>

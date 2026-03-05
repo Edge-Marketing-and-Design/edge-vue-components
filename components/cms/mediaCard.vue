@@ -77,7 +77,7 @@ const previewBackgroundClass = computed(() => {
         <edge-shad-button
           v-if="!props.selectMode"
           size="icon"
-          class="bg-primary/80 text-primary-foreground hover:bg-primary shadow-sm"
+          class="bg-slate-900 text-white hover:bg-slate-800 shadow-sm dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
           @click.stop="emits('select', !props.selected, item.docId)"
         >
           <Square v-if="!props.selected" class="!w-5 !h-5" />
