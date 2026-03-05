@@ -2768,4 +2768,8 @@ const hasUnsavedChanges = (changes) => {
 .cms-page-preview-mode :deep(.border-emerald-200.bg-emerald-50) {
   display: none !important;
 }
+
+.cms-page-preview-mode :deep([data-cms-preview-surface]) {
+  color: initial !important;
+}
 </style>

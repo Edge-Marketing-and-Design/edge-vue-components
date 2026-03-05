@@ -106,6 +106,26 @@ function findMatchingBrace(str, startIdx) {
   return -1
 }
 
+const BLOCK_EDITOR_IGNORED_TAG_TYPES = new Set(['renderblocks'])
+const shouldIgnoreTagType = (type) => {
+  if (!type)
+    return false
+  return BLOCK_EDITOR_IGNORED_TAG_TYPES.has(String(type).toLowerCase())
+}
+const shouldIgnoreMeta = (meta) => {
+  if (!meta)
+    return false
+  return shouldIgnoreTagType(meta.type)
+}
+const removeIgnoredMetaEntries = (obj) => {
+  if (!obj)
+    return
+  for (const key of Object.keys(obj)) {
+    if (shouldIgnoreMeta(obj[key]))
+      delete obj[key]
+  }
+}
+
 function extractFieldsInOrder(template) {
   if (!template || typeof template !== 'string')
     return []
@@ -121,6 +141,9 @@ function extractFieldsInOrder(template) {
     if (!m)
       break
 
+    const type = m[1]
+    if (shouldIgnoreTagType(type))
+      continue
     const configStart = TAG_START_RE.lastIndex - 1
     if (configStart < 0 || template[configStart] !== '{')
       continue
@@ -486,6 +509,8 @@ function* iterateTags(html) {
       break
 
     const type = m[1]
+    if (BLOCK_EDITOR_IGNORED_TAG_TYPES.has(type.toLowerCase()))
+      continue
     const configStart = TAG_START_RE.lastIndex - 1
     if (configStart < 0 || html[configStart] !== '{')
       continue
@@ -733,7 +758,9 @@ const openEditor = async (event) => {
   state.draft = JSON.parse(JSON.stringify(modelValue.value?.values || {}))
   state.meta = JSON.parse(JSON.stringify(mergedMeta || {}))
   ensureQueryItemsDefaults(state.meta)
+  removeIgnoredMetaEntries(state.meta)
   state.metaUpdate = edgeGlobal.dupObject(mergedMeta) || {}
+  removeIgnoredMetaEntries(state.metaUpdate)
   if (blockData?.values) {
     for (const key of Object.keys(blockData.values)) {
       if (!(key in state.draft)) {
@@ -810,14 +837,14 @@ const orderedMeta = computed(() => {
   const picked = new Set()
 
   for (const f of orderedFields) {
-    if (f in metaObj) {
+    if (f in metaObj && !shouldIgnoreMeta(metaObj[f])) {
       out.push({ field: f, meta: metaObj[f] })
       picked.add(f)
     }
   }
 
   for (const f of Object.keys(metaObj)) {
-    if (!picked.has(f)) {
+    if (!picked.has(f) && !shouldIgnoreMeta(metaObj[f])) {
       out.push({ field: f, meta: metaObj[f] })
     }
   }
@@ -1151,6 +1178,7 @@ const getTagsFromPosts = computed(() => {
       <edge-cms-block-sheet-content
         v-if="state.afterLoad"
         :side="state.editorMode === 'content' ? 'left' : 'right'"
+        class="bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-50"
         :class="state.editorMode === 'content'
           ? 'w-full max-w-none sm:max-w-none md:max-w-none'
           : 'w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl'"

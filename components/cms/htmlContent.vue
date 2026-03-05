@@ -1562,10 +1562,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style>
-p {
-  margin-bottom: 1em;
-}
-
 .cms-nav-preview-relative {
   position: relative;
 }

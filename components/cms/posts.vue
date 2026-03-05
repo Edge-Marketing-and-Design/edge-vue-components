@@ -1082,6 +1082,7 @@ const unPublishPost = async (postId) => {
         :schema="schemas.posts"
         :new-doc-schema="state.newDocs.posts"
         class="w-full mx-auto flex-1 bg-transparent flex flex-col border-none shadow-none pt-0 px-0"
+        :class="!state.editMode ? 'cms-post-preview-mode' : ''"
         card-content-class="px-0"
         :show-header="true"
         :no-close-after-save="true"
@@ -1284,7 +1285,10 @@ const unPublishPost = async (postId) => {
                         </edge-shad-button>
                       </div>
 
-                      <div :class="state.editMode ? 'rounded-md border border-dashed border-gray-200 bg-white/90 p-3 space-y-2' : 'rounded-md bg-white/90 p-3 space-y-2'">
+                      <div
+                        :class="state.editMode ? 'rounded-md border border-dashed border-gray-200 bg-white/90 p-3 space-y-2' : 'rounded-md bg-white/90 p-3 space-y-2'"
+                        :data-cms-preview-surface="!state.editMode ? 'post' : null"
+                      >
                         <edge-button-divider v-if="state.editMode" class="my-1">
                           <edge-cms-block-picker
                             :site-id="props.site"
@@ -1637,3 +1641,13 @@ const unPublishPost = async (postId) => {
     </SheetContent>
   </Sheet>
 </template>
+
+<style scoped>
+.cms-post-preview-mode :deep([data-cms-preview-surface]) {
+  color: initial !important;
+}
+.cms-post-preview-mode :deep([data-cms-preview-surface]) .block-content,
+.cms-post-preview-mode :deep([data-cms-preview-surface]) .block-content [class*='text-'] {
+  color: inherit !important;
+}
+</style>
