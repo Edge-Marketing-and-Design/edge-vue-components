@@ -1760,8 +1760,19 @@ const unPublishPost = async (postId) => {
                   <div class="text-xs text-muted-foreground">
                     Last published: {{ lastPublishedTime(state.activePostId) }}
                   </div>
-                  <div v-if="activePost?.publishAt" class="text-xs text-muted-foreground">
-                    Scheduled publish: {{ formatTimestamp(activePost.publishAt) }}
+                  <div v-if="activePost?.publishAt" class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                    <span class="truncate">Scheduled publish: {{ formatTimestamp(activePost.publishAt) }}</span>
+                    <edge-shad-button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      class="h-6 px-2 text-[10px] text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                      :disabled="slotProps.submitting || slotProps.unsavedChanges || !state.activePostId || state.activePostId === 'new'"
+                      @click="clearScheduledPublish(state.activePostId)"
+                    >
+                      <X class="h-3 w-3" />
+                      Clear
+                    </edge-shad-button>
                   </div>
                   <div v-if="slotProps.unsavedChanges" class="text-xs text-amber-700 dark:text-amber-300">
                     Save changes before publishing.
@@ -1822,18 +1833,6 @@ const unPublishPost = async (postId) => {
                     >
                       <FileWarning class="h-4 w-4" />
                       Unpublish
-                    </edge-shad-button>
-                    <edge-shad-button
-                      v-if="activePost?.publishAt"
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      class="border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
-                      :disabled="slotProps.submitting || slotProps.unsavedChanges || !state.activePostId || state.activePostId === 'new'"
-                      @click="clearScheduledPublish(state.activePostId)"
-                    >
-                      <X class="h-4 w-4" />
-                      Clear Schedule
                     </edge-shad-button>
                   </div>
                 </div>
