@@ -2,7 +2,7 @@
 import { computed, inject, onBeforeMount, reactive, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { ArrowDown, ArrowUp, Eye, File, FileCheck, FilePen, FileWarning, FileX, GripVertical, Image, ImagePlus, Loader2, MoreHorizontal, Pencil, Plus, Save, Trash2, X } from 'lucide-vue-next'
+import { ArrowDown, ArrowUp, Clock3, Eye, File, FileCheck, FilePen, FileWarning, FileX, GripVertical, Image, ImagePlus, Loader2, MoreHorizontal, Pencil, Plus, Save, Trash2, X } from 'lucide-vue-next'
 
 const props = defineProps({
   site: {
@@ -475,7 +475,7 @@ const getPublishStatus = (postId, draftPostOverride = null) => {
 
 const lastPublishedTime = (postId) => {
   const publishedPost = publishedPosts.value?.[postId]
-  const timestamp = publishedPost?.last_updated || publishedPost?.publishedAt || publishedPost?.doc_created_at || publishedPost?.createdAt
+  const timestamp = publishedPost?.publishedAt || publishedPost?.last_updated || publishedPost?.doc_created_at || publishedPost?.createdAt
   if (!timestamp)
     return 'Never'
   const date = new Date(timestamp)
@@ -811,6 +811,16 @@ const formatTimestamp = (input) => {
   catch {
     return 'Not yet saved'
   }
+}
+
+const formatEventDateTime = (input) => {
+  const value = String(input || '').trim()
+  if (!value)
+    return 'Not set'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime()))
+    return value
+  return date.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })
 }
 
 const postKey = post => post?.docId || post?.id || ''
@@ -1262,17 +1272,20 @@ const publishPost = async (postId) => {
   }
   emit('updating', true)
   try {
+    const publishedAtIso = new Date().toISOString()
     const publishedPost = edgeGlobal.dupObject(post || {})
     delete publishedPost.publishAt
-    publishedPost.publishedAt = new Date().toISOString()
+    publishedPost.publishedAt = publishedAtIso
     await edgeFirebase.storeDoc(publishedCollectionKey.value, publishedPost)
+    const draftPublishUpdate = {
+      publishedAt: publishedAtIso,
+    }
     if (typeof post?.publishAt === 'string' && post.publishAt.trim()) {
-      await edgeFirebase.changeDoc(collectionKey.value, postId, {
-        publishAt: '',
-        publishAtTimezone: '',
-      })
+      draftPublishUpdate.publishAt = ''
+      draftPublishUpdate.publishAtTimezone = ''
       state.publishAtInput = ''
     }
+    await edgeFirebase.changeDoc(collectionKey.value, postId, draftPublishUpdate)
   }
   catch (error) {
     console.error('Failed to publish post:', error)
@@ -1447,6 +1460,10 @@ const unPublishPost = async (postId) => {
                       <FileCheck class="h-4 w-4" />
                       Publish
                     </DropdownMenuItem>
+                    <DropdownMenuItem v-if="post.publishAt" @click="clearScheduledPublish(postKey(post))">
+                      <X class="h-4 w-4" />
+                      Cancel Schedule
+                    </DropdownMenuItem>
                     <DropdownMenuItem
                       v-if="getPublishStatus(postKey(post), post).publishBlockedReason"
                       disabled
@@ -1467,13 +1484,28 @@ const unPublishPost = async (postId) => {
                 </DropdownMenu>
               </div>
               <div class="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                <span
+                  class="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px]"
+                  :class="normalizePostType(post.type) === 'event'
+                    ? 'border-amber-300 bg-amber-100 text-amber-800 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-200'
+                    : 'border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'"
+                >
+                  {{ normalizePostType(post.type) === 'event' ? 'Event' : 'Post' }}
+                </span>
                 <div class="flex items-center gap-1">
                   <FileWarning v-if="getPublishStatus(postKey(post), post).icon === 'changes'" class="h-3.5 w-3.5 text-yellow-600" />
                   <FileCheck v-else-if="getPublishStatus(postKey(post), post).icon === 'published'" class="h-3.5 w-3.5 text-green-700" />
                   <FileX v-else class="h-3.5 w-3.5 text-slate-500 dark:text-slate-300" />
                   <span :class="getPublishStatus(postKey(post), post).badgeClass">{{ getPublishStatus(postKey(post), post).label }}</span>
                 </div>
-                <span>{{ formatTimestamp(post.last_updated || post.doc_created_at) }}</span>
+                <span>{{ formatTimestamp(post.publishedAt || post.last_updated || post.doc_created_at) }}</span>
+                <span v-if="normalizePostType(post.type) === 'event'" class="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[10px] text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                  {{ formatEventDateTime(post?.event?.startAt) }} - {{ formatEventDateTime(post?.event?.endAt) }}
+                </span>
+                <span v-if="post.publishAt" class="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[10px] text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                  <Clock3 class="h-3 w-3" />
+                  Scheduled {{ formatTimestamp(post.publishAt) }}
+                </span>
                 <div v-if="Array.isArray(post.tags) && post.tags.length" class="flex flex-wrap items-center gap-1">
                   <span
                     v-for="tag in tagPreview(post.tags).visible"
@@ -1557,6 +1589,10 @@ const unPublishPost = async (postId) => {
                   <FileCheck class="h-4 w-4" />
                   Publish
                 </DropdownMenuItem>
+                <DropdownMenuItem v-if="post.publishAt" @click="clearScheduledPublish(postKey(post))">
+                  <X class="h-4 w-4" />
+                  Cancel Schedule
+                </DropdownMenuItem>
                 <DropdownMenuItem
                   v-if="getPublishStatus(postKey(post), post).publishBlockedReason"
                   disabled
@@ -1578,7 +1614,22 @@ const unPublishPost = async (postId) => {
             </DropdownMenu>
           </SidebarGroupAction>
           <div class="w-full pl-7 pb-2 text-xs text-muted-foreground cursor-pointer" @click="editPost(post.id)">
-            <div>{{ formatTimestamp(post.last_updated || post.doc_created_at) }}</div>
+            <div
+              class="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px]"
+              :class="normalizePostType(post.type) === 'event'
+                ? 'border-amber-300 bg-amber-100 text-amber-800 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-200'
+                : 'border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'"
+            >
+              {{ normalizePostType(post.type) === 'event' ? 'Event' : 'Post' }}
+            </div>
+            <div>{{ formatTimestamp(post.publishedAt || post.last_updated || post.doc_created_at) }}</div>
+            <div v-if="normalizePostType(post.type) === 'event'" class="mt-1 inline-flex items-center gap-1 rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[10px] text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              {{ formatEventDateTime(post?.event?.startAt) }} - {{ formatEventDateTime(post?.event?.endAt) }}
+            </div>
+            <div v-if="post.publishAt" class="mt-1 inline-flex items-center gap-1 rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[10px] text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              <Clock3 class="h-3 w-3" />
+              Scheduled {{ formatTimestamp(post.publishAt) }}
+            </div>
             <div v-if="Array.isArray(post.tags) && post.tags.length" class="mt-1 flex flex-wrap gap-1">
               <span
                 v-for="tag in tagPreview(post.tags).visible"
@@ -1760,8 +1811,8 @@ const unPublishPost = async (postId) => {
                   <div class="text-xs text-muted-foreground">
                     Last published: {{ lastPublishedTime(state.activePostId) }}
                   </div>
-                  <div v-if="activePost?.publishAt" class="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                    <span class="truncate">Scheduled publish: {{ formatTimestamp(activePost.publishAt) }}</span>
+                  <div v-if="activePost?.publishAt" class="space-y-1 text-xs text-muted-foreground">
+                    <div>Scheduled publish: {{ formatTimestamp(activePost.publishAt) }}</div>
                     <edge-shad-button
                       type="button"
                       size="sm"
@@ -1798,12 +1849,12 @@ const unPublishPost = async (postId) => {
                   <div v-if="scheduledPublishBlockedReason" class="text-xs text-amber-700 dark:text-amber-300">
                     {{ scheduledPublishBlockedReason }}
                   </div>
-                  <div class="flex gap-2">
+                  <div class="flex flex-wrap gap-2">
                     <edge-shad-button
                       v-if="activePostPublishStatus.canPublish || activePostPublishStatus.publishBlockedReason"
                       type="button"
                       size="sm"
-                      class="bg-slate-700 text-slate-100 hover:bg-slate-600 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
+                      class="w-full bg-slate-700 text-slate-100 hover:bg-slate-600 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
                       :disabled="slotProps.submitting || slotProps.unsavedChanges || !state.activePostId || state.activePostId === 'new' || Boolean(activePostPublishStatus.publishBlockedReason)"
                       @click="publishPost(state.activePostId)"
                     >
@@ -1815,7 +1866,7 @@ const unPublishPost = async (postId) => {
                       type="button"
                       size="sm"
                       variant="outline"
-                      class="border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+                      class="w-full border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
                       :disabled="slotProps.submitting || slotProps.unsavedChanges || !state.activePostId || state.activePostId === 'new' || Boolean(activePostPublishStatus.publishBlockedReason) || Boolean(scheduledPublishBlockedReason)"
                       @click="schedulePostPublish(state.activePostId)"
                     >
@@ -1827,7 +1878,7 @@ const unPublishPost = async (postId) => {
                       type="button"
                       size="sm"
                       variant="outline"
-                      class="border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+                      class="w-full border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
                       :disabled="slotProps.submitting || !state.activePostId || state.activePostId === 'new'"
                       @click="unPublishPost(state.activePostId)"
                     >
