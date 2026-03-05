@@ -912,7 +912,7 @@ const handleBlockImport = async (event) => {
                   </div>
                   <div v-if="item.content" class="block-preview" :class="previewSurfaceClass(item.previewType)">
                     <div class="scale-wrapper">
-                      <div class="scale-inner scale p-4">
+                      <div class="scale-inner scale p-4 block-list-preview-content">
                         <edge-cms-block-render
                           :content="loadingRender(item.content)"
                           :values="item.values"
@@ -1118,6 +1118,10 @@ const handleBlockImport = async (event) => {
   transform-origin: top left;
   display: inline-block;
   min-width: 100%;
+}
+
+.block-list-preview-content {
+  pointer-events: none;
 }
 
 .scale {

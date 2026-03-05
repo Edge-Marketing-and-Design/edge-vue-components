@@ -96,7 +96,7 @@ const firstPart = computed(() => {
       </DropdownMenuLabel>
       <DropdownMenuItem
         v-if="!props.singleOrg"
-        class="cursor-pointer"
+        class="cursor-pointer text-foreground"
         :disabled="!hasMultipleOrgs"
         @click="openOrgDialog"
       >
@@ -182,7 +182,7 @@ const firstPart = computed(() => {
             v-for="org in organizations"
             :key="org.docId"
             variant="ghost"
-            class="w-full justify-between"
+            class="w-full justify-between text-foreground hover:text-accent-foreground"
             @click="selectOrg(org.docId)"
           >
             <span class="truncate text-left">{{ org.name }}</span>

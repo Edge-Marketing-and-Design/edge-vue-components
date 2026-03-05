@@ -46,6 +46,14 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  suppressInteractiveClicksExceptAllowed: {
+    type: Boolean,
+    default: false,
+  },
+  interactivePreviewAllowSelector: {
+    type: String,
+    default: '',
+  },
 })
 const emit = defineEmits(['update:modelValue', 'delete'])
 const edgeFirebase = inject('edgeFirebase')
@@ -220,10 +228,23 @@ const INTERACTIVE_CLICK_SELECTOR = [
   '[data-cms-nav-folder-toggle]',
   '[data-cms-nav-folder-menu]',
 ].join(', ')
+const DEFAULT_INTERACTIVE_PREVIEW_ALLOW_SELECTOR = [
+  '.cms-nav-toggle',
+  '.cms-nav-close',
+  '.cms-nav-overlay',
+  '[data-cms-nav-toggle]',
+  '[data-cms-nav-close]',
+  '[data-cms-nav-overlay]',
+].join(', ')
 const EDITOR_CONTROL_CLICK_SELECTOR = [
   '[data-cms-block-control]',
   '[data-cms-block-ignore-editor-click]',
 ].join(', ')
+
+const shouldAllowSuppressedInteractiveClick = (target) => {
+  const selector = String(props.interactivePreviewAllowSelector || '').trim() || DEFAULT_INTERACTIVE_PREVIEW_ALLOW_SELECTOR
+  return Boolean(selector && target?.closest?.(selector))
+}
 
 const hasFixedPositionInContent = computed(() => {
   const content = String(modelValue.value?.content || '')
@@ -715,9 +736,14 @@ const openEditor = async (event) => {
   if (!canOpenEditor.value)
     return
   const target = event?.target
+  const shouldSuppressClick = props.suppressInteractiveClicksExceptAllowed && !shouldAllowSuppressedInteractiveClick(target)
   if (target?.closest?.(EDITOR_CONTROL_CLICK_SELECTOR))
     return
   const shouldOverrideEditClicks = props.editMode && props.overrideClicksInEditMode
+  if (shouldSuppressClick) {
+    event?.preventDefault?.()
+    event?.stopPropagation?.()
+  }
   if (shouldOverrideEditClicks) {
     event?.preventDefault?.()
     event?.stopPropagation?.()
@@ -728,8 +754,11 @@ const openEditor = async (event) => {
     await openPreviewContentEditor()
     return
   }
-  if (!shouldOverrideEditClicks && target?.closest?.(INTERACTIVE_CLICK_SELECTOR))
-    return
+  if (!shouldOverrideEditClicks && target?.closest?.(INTERACTIVE_CLICK_SELECTOR)) {
+    if (!shouldSuppressClick) {
+      return
+    }
+  }
   const blockData = edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[modelValue.value.blockId]
   const templateMeta = blockData?.meta || modelValue.value?.meta || {}
   const storedMeta = modelValue.value?.meta || {}

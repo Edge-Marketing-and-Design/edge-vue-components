@@ -985,6 +985,7 @@ const exportCurrentBlock = () => {
                     :edit-mode="true"
                     :contain-fixed="true"
                     :disable-interactive-preview-in-edit="false"
+                    :suppress-interactive-clicks-except-allowed="true"
                     :allow-delete="false"
                     :viewport-mode="previewViewportMode"
                     :block-id="state.previewBlock.id"

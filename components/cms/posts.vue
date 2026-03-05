@@ -57,6 +57,11 @@ const normalizeForCompare = (value) => {
 
 const stableSerialize = value => JSON.stringify(normalizeForCompare(value))
 
+const normalizePostType = (value) => {
+  const type = String(value || '').trim().toLowerCase()
+  return type === 'event' ? 'event' : 'post'
+}
+
 const postDocComparable = (post) => {
   return {
     name: post?.name || '',
@@ -66,7 +71,191 @@ const postDocComparable = (post) => {
     featuredImage: post?.featuredImage || '',
     content: Array.isArray(post?.content) ? post.content : (typeof post?.content === 'string' ? post.content : ''),
     structure: Array.isArray(post?.structure) ? post.structure : [],
+    type: normalizePostType(post?.type),
+    event: eventComparable(post?.event),
   }
+}
+
+const POST_TYPE_OPTIONS = [
+  { label: 'Post', value: 'post' },
+  { label: 'Event', value: 'event' },
+]
+
+const EVENT_STATUS_OPTIONS = [
+  { label: 'Scheduled', value: 'scheduled' },
+  { label: 'Cancelled', value: 'cancelled' },
+  { label: 'Completed', value: 'completed' },
+]
+
+const EVENT_STATUS_VALUES = new Set(EVENT_STATUS_OPTIONS.map(option => option.value))
+
+const DEFAULT_TIMEZONE = (() => {
+  if (typeof Intl !== 'undefined') {
+    const resolved = Intl.DateTimeFormat().resolvedOptions().timeZone
+    if (resolved)
+      return resolved
+  }
+  return 'UTC'
+})()
+
+const TIMEZONE_OPTIONS = (() => {
+  if (typeof Intl !== 'undefined' && typeof Intl.supportedValuesOf === 'function') {
+    return Intl.supportedValuesOf('timeZone').map(id => ({ label: id, value: id }))
+  }
+  return [{ label: 'UTC', value: 'UTC' }]
+})()
+
+const normalizeEventData = (event = {}) => {
+  const normalized = { ...event }
+  normalized.startAt = typeof normalized.startAt === 'string' ? normalized.startAt : ''
+  normalized.endAt = typeof normalized.endAt === 'string' ? normalized.endAt : ''
+  normalized.startAtUtc = typeof normalized.startAtUtc === 'string' ? normalized.startAtUtc : ''
+  normalized.endAtUtc = typeof normalized.endAtUtc === 'string' ? normalized.endAtUtc : ''
+  normalized.timezone = typeof normalized.timezone === 'string' ? normalized.timezone : ''
+  normalized.timezone = normalized.timezone || DEFAULT_TIMEZONE
+  normalized.locationName = typeof normalized.locationName === 'string' ? normalized.locationName : ''
+  normalized.locationAddress = typeof normalized.locationAddress === 'string' ? normalized.locationAddress : ''
+  normalized.isVirtual = typeof normalized.isVirtual === 'boolean' ? normalized.isVirtual : false
+  normalized.meetingUrl = typeof normalized.meetingUrl === 'string' ? normalized.meetingUrl : ''
+  normalized.registrationUrl = typeof normalized.registrationUrl === 'string' ? normalized.registrationUrl : ''
+  normalized.capacity = typeof normalized.capacity === 'number' ? normalized.capacity : null
+  normalized.status = EVENT_STATUS_VALUES.has(normalized.status) ? normalized.status : 'scheduled'
+  return normalized
+}
+
+const ensurePostTypeAndEventDefaults = (doc) => {
+  if (!doc || typeof doc !== 'object')
+    return
+  const desiredType = normalizePostType(doc.type)
+  if (!doc.type || doc.type !== desiredType)
+    doc.type = desiredType || 'post'
+
+  let eventTarget = doc.event
+  if (!eventTarget || typeof eventTarget !== 'object') {
+    eventTarget = {}
+    doc.event = eventTarget
+  }
+
+  if (typeof eventTarget.startAt !== 'string')
+    eventTarget.startAt = ''
+  if (typeof eventTarget.endAt !== 'string')
+    eventTarget.endAt = ''
+  if (typeof eventTarget.startAtUtc !== 'string')
+    eventTarget.startAtUtc = ''
+  if (typeof eventTarget.endAtUtc !== 'string')
+    eventTarget.endAtUtc = ''
+  eventTarget.timezone = eventTarget.timezone || DEFAULT_TIMEZONE
+  if (typeof eventTarget.locationName !== 'string')
+    eventTarget.locationName = ''
+  if (typeof eventTarget.locationAddress !== 'string')
+    eventTarget.locationAddress = ''
+  if (typeof eventTarget.isVirtual !== 'boolean')
+    eventTarget.isVirtual = false
+  if (typeof eventTarget.meetingUrl !== 'string')
+    eventTarget.meetingUrl = ''
+  if (typeof eventTarget.registrationUrl !== 'string')
+    eventTarget.registrationUrl = ''
+  const parsedCapacity = Number(eventTarget.capacity)
+  eventTarget.capacity = Number.isFinite(parsedCapacity) ? parsedCapacity : null
+  eventTarget.status = EVENT_STATUS_VALUES.has(eventTarget.status) ? eventTarget.status : 'scheduled'
+}
+
+const eventComparable = (event) => {
+  const normalized = normalizeEventData(event)
+  return {
+    startAt: normalized.startAt,
+    endAt: normalized.endAt,
+    startAtUtc: normalized.startAtUtc,
+    endAtUtc: normalized.endAtUtc,
+    timezone: normalized.timezone,
+    locationName: normalized.locationName,
+    locationAddress: normalized.locationAddress,
+    isVirtual: normalized.isVirtual,
+    meetingUrl: normalized.meetingUrl,
+    registrationUrl: normalized.registrationUrl,
+    capacity: normalized.capacity,
+    status: normalized.status,
+  }
+}
+
+const parseDateTimeLocal = (value) => {
+  const match = String(value || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/)
+  if (!match)
+    return null
+
+  const [, year, month, day, hour, minute, second] = match
+  return {
+    year: Number(year),
+    month: Number(month),
+    day: Number(day),
+    hour: Number(hour),
+    minute: Number(minute),
+    second: Number(second || 0),
+  }
+}
+
+const getTimeZoneOffsetMinutes = (date, timeZone) => {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+  const parts = dtf.formatToParts(date)
+  const map = Object.fromEntries(parts.map(part => [part.type, part.value]))
+  const asIfUtc = Date.UTC(
+    Number(map.year),
+    Number(map.month) - 1,
+    Number(map.day),
+    Number(map.hour),
+    Number(map.minute),
+    Number(map.second),
+  )
+  return (asIfUtc - date.getTime()) / 60000
+}
+
+const localDateTimeInTimeZoneToUtcIso = (localValue, timeZone) => {
+  const parsed = parseDateTimeLocal(localValue)
+  if (!parsed || !timeZone)
+    return ''
+
+  try {
+    const localAsUtcMs = Date.UTC(parsed.year, parsed.month - 1, parsed.day, parsed.hour, parsed.minute, parsed.second)
+    let utcMs = localAsUtcMs
+
+    for (let i = 0; i < 3; i++) {
+      const offsetMinutes = getTimeZoneOffsetMinutes(new Date(utcMs), timeZone)
+      const candidateUtcMs = localAsUtcMs - offsetMinutes * 60 * 1000
+      if (candidateUtcMs === utcMs)
+        break
+      utcMs = candidateUtcMs
+    }
+
+    return new Date(utcMs).toISOString()
+  }
+  catch {
+    return ''
+  }
+}
+
+const syncEventUtcFields = (doc) => {
+  if (!doc || typeof doc !== 'object')
+    return
+
+  ensurePostTypeAndEventDefaults(doc)
+  if (normalizePostType(doc.type) !== 'event')
+    return
+
+  const startAtUtc = localDateTimeInTimeZoneToUtcIso(doc.event.startAt, doc.event.timezone)
+  const endAtUtc = localDateTimeInTimeZoneToUtcIso(doc.event.endAt, doc.event.timezone)
+  if (doc.event.startAtUtc !== startAtUtc)
+    doc.event.startAtUtc = startAtUtc
+  if (doc.event.endAtUtc !== endAtUtc)
+    doc.event.endAtUtc = endAtUtc
 }
 
 const schemas = {
@@ -84,6 +273,60 @@ const schemas = {
     content: z.union([z.array(z.any()), z.string()]).optional(),
     structure: z.array(z.any()).optional(),
     featuredImages: z.array(z.string()).optional(),
+    type: z.enum(['post', 'event']).optional(),
+    event: z.object({
+      startAt: z.string().optional(),
+      endAt: z.string().optional(),
+      timezone: z.string().optional(),
+      locationName: z.string().optional(),
+      locationAddress: z.string().optional(),
+      isVirtual: z.boolean().optional(),
+      meetingUrl: z.string().optional(),
+      registrationUrl: z.string().optional(),
+      capacity: z.number().optional(),
+      status: z.enum(['scheduled', 'cancelled', 'completed']).optional(),
+    }).optional(),
+  }).superRefine((doc, ctx) => {
+    if (normalizePostType(doc.type) !== 'event')
+      return
+
+    const startAt = String(doc.event?.startAt || '').trim()
+    const endAt = String(doc.event?.endAt || '').trim()
+    const isVirtual = Boolean(doc.event?.isVirtual)
+    const locationName = String(doc.event?.locationName || '').trim()
+    const locationAddress = String(doc.event?.locationAddress || '').trim()
+
+    if (!startAt) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Start At is required for events',
+        path: ['event', 'startAt'],
+      })
+    }
+
+    if (!endAt) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'End At is required for events',
+        path: ['event', 'endAt'],
+      })
+    }
+
+    if (!isVirtual && !locationName) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Location Name is required for in-person events',
+        path: ['event', 'locationName'],
+      })
+    }
+
+    if (!isVirtual && !locationAddress) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Location Address is required for in-person events',
+        path: ['event', 'locationAddress'],
+      })
+    }
   })),
 }
 
@@ -184,6 +427,12 @@ const state = reactive({
           'label': 'Featured Images',
           'description': 'Enter image URLs or storage paths',
         },
+      },
+      type: {
+        value: 'post',
+      },
+      event: {
+        value: normalizeEventData(),
       },
     },
   },
@@ -400,7 +649,9 @@ const createLegacyHtmlLocalBlock = (legacyContent) => {
 }
 
 const normalizePostBuilderDoc = (doc = {}) => {
+  ensurePostTypeAndEventDefaults(doc)
   const normalized = edgeGlobal.dupObject(doc || {})
+  ensurePostTypeAndEventDefaults(normalized)
   const previousComparable = {
     content: normalized.content,
     structure: normalized.structure,
@@ -625,6 +876,7 @@ const handlePostSaved = () => {
 
 const onWorkingDocUpdate = (doc) => {
   if (doc && typeof doc === 'object') {
+    syncEventUtcFields(doc)
     const { normalized, changed, migratedFromLegacyHtml } = normalizePostBuilderDoc(doc)
     if (changed) {
       doc.content = normalized.content
@@ -1172,6 +1424,115 @@ const unPublishPost = async (postId) => {
                     :allow-additions="true"
                     @add="addTag"
                   />
+                  <edge-shad-select
+                    v-model="slotProps.workingDoc.type"
+                    :items="POST_TYPE_OPTIONS"
+                    item-title="label"
+                    item-value="value"
+                    name="type"
+                    label="Post Type"
+                    :disabled="slotProps.submitting"
+                  />
+                </div>
+                <div
+                  v-if="slotProps.workingDoc.type === 'event'"
+                  class="rounded-xl border bg-card p-4 space-y-4 shadow-sm"
+                >
+                  <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Event Details
+                  </div>
+                  <edge-shad-datetime
+                    v-model="slotProps.workingDoc.event.startAt"
+                    name="event.startAt"
+                    label="Start At"
+                    trigger-class="border-slate-300 bg-white text-slate-900 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+                    meridiem-active-class="bg-slate-700 text-slate-100 hover:bg-slate-600 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
+                    meridiem-inactive-class="border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                    now-button-class="text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                    done-button-class="border-slate-300 bg-slate-200 text-slate-900 hover:bg-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
+                    calendar-class="edge-cms-calendar-slate"
+                    :disabled="slotProps.submitting"
+                  />
+                  <edge-shad-datetime
+                    v-model="slotProps.workingDoc.event.endAt"
+                    name="event.endAt"
+                    label="End At"
+                    trigger-class="border-slate-300 bg-white text-slate-900 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+                    meridiem-active-class="bg-slate-700 text-slate-100 hover:bg-slate-600 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
+                    meridiem-inactive-class="border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                    now-button-class="text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                    done-button-class="border-slate-300 bg-slate-200 text-slate-900 hover:bg-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
+                    calendar-class="edge-cms-calendar-slate"
+                    :disabled="slotProps.submitting"
+                  />
+                  <edge-shad-select
+                    v-model="slotProps.workingDoc.event.timezone"
+                    :items="TIMEZONE_OPTIONS"
+                    item-title="label"
+                    item-value="value"
+                    name="event-timezone"
+                    label="Timezone"
+                    placeholder="Select timezone"
+                    :disabled="slotProps.submitting"
+                  />
+                  <edge-shad-checkbox
+                    v-model="slotProps.workingDoc.event.isVirtual"
+                    name="event.isVirtual"
+                    label="Virtual Event"
+                    class="!bg-slate-200 !border-slate-400 data-[state=checked]:!bg-slate-700 data-[state=checked]:!text-slate-100 dark:!bg-slate-700 dark:!border-slate-500 dark:data-[state=checked]:!bg-slate-200 dark:data-[state=checked]:!text-slate-900"
+                    :disabled="slotProps.submitting"
+                  >
+                    This event is virtual (no physical location required).
+                  </edge-shad-checkbox>
+                  <edge-shad-input
+                    v-if="!slotProps.workingDoc.event.isVirtual"
+                    v-model="slotProps.workingDoc.event.locationName"
+                    name="event.locationName"
+                    label="Location Name"
+                    :disabled="slotProps.submitting"
+                  />
+                  <edge-shad-textarea
+                    v-if="!slotProps.workingDoc.event.isVirtual"
+                    v-model="slotProps.workingDoc.event.locationAddress"
+                    name="event.locationAddress"
+                    label="Location Address"
+                    :disabled="slotProps.submitting"
+                    rows="3"
+                  />
+                  <div class="grid gap-4 md:grid-cols-2">
+                    <edge-shad-input
+                      v-model="slotProps.workingDoc.event.meetingUrl"
+                      name="event-meeting-url"
+                      label="Meeting URL"
+                      type="url"
+                      :disabled="slotProps.submitting"
+                    />
+                    <edge-shad-input
+                      v-model="slotProps.workingDoc.event.registrationUrl"
+                      name="event-registration-url"
+                      label="Registration URL"
+                      type="url"
+                      :disabled="slotProps.submitting"
+                    />
+                  </div>
+                  <div class="grid gap-4 md:grid-cols-2 items-center">
+                    <edge-shad-input
+                      v-model.number="slotProps.workingDoc.event.capacity"
+                      name="event-capacity"
+                      label="Capacity"
+                      type="number"
+                      :disabled="slotProps.submitting"
+                    />
+                    <edge-shad-select
+                      v-model="slotProps.workingDoc.event.status"
+                      :items="EVENT_STATUS_OPTIONS"
+                      item-title="label"
+                      item-value="value"
+                      name="event-status"
+                      label="Event Status"
+                      :disabled="slotProps.submitting"
+                    />
+                  </div>
                 </div>
                 <div class="rounded-xl border bg-card p-4 space-y-4 shadow-sm">
                   <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
