@@ -32,6 +32,7 @@ const state = reactive({
   seedingInitialBlocks: false,
   previewViewport: 'full',
   previewBlock: null,
+  previewSourceValues: {},
   editorWorkingDoc: null,
   themeDefaultAppliedForBlockId: '',
 })
@@ -145,11 +146,6 @@ const PLACEHOLDERS = {
   text: 'Lorem ipsum dolor sit amet.',
   textarea: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.',
   richtext: '<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>',
-  arrayItem: [
-    'Lorem ipsum dolor sit amet.',
-    'Consectetur adipiscing elit.',
-    'Sed do eiusmod tempor incididunt.',
-  ],
   image: 'https://imagedelivery.net/h7EjKG0X9kOxmLp41mxOng/f1f7f610-dfa9-4011-08a3-7a98d95e7500/thumbnail',
 }
 
@@ -365,20 +361,8 @@ const blockModel = (html) => {
       val = !val ? PLACEHOLDERS.text : String(val)
     }
     else if (type === 'array') {
-      if (meta[field]?.limit > 0) {
-        val = Array(meta[field].limit).fill('placeholder')
-      }
-      else {
-        if (Array.isArray(val)) {
-          console.log('Array value detected for field:', field, 'with value:', val)
-          if (val.length === 0) {
-            val = PLACEHOLDERS.arrayItem
-          }
-        }
-        else {
-          val = PLACEHOLDERS.arrayItem
-        }
-      }
+      // Keep array fields empty by default instead of injecting placeholder items.
+      val = Array.isArray(val) ? JSON.parse(JSON.stringify(val)) : []
     }
     else if (type === 'textarea') {
       val = !val ? PLACEHOLDERS.textarea : String(val)
@@ -495,13 +479,44 @@ function handleJsonEditorSave() {
 
 const buildPreviewBlock = (workingDoc, parsed) => {
   const content = workingDoc?.content || ''
+  const clonePreviewValue = (value) => {
+    if (Array.isArray(value) || (value && typeof value === 'object'))
+      return edgeGlobal.dupObject(value)
+    return value
+  }
+  const valuesMatch = (a, b) => {
+    if (a === b)
+      return true
+    if ((a && typeof a === 'object') || (b && typeof b === 'object')) {
+      try {
+        return JSON.stringify(a) === JSON.stringify(b)
+      }
+      catch {
+        return false
+      }
+    }
+    return false
+  }
+  const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key)
+  const isSameBlockContext = state.previewBlock?.blockId === props.blockId
   const nextValues = {}
-  const previousValues = state.previewBlock?.values || {}
+  const previousValues = isSameBlockContext ? (state.previewBlock?.values || {}) : {}
+  const previousSourceValues = isSameBlockContext ? (state.previewSourceValues || {}) : {}
   Object.keys(parsed.values || {}).forEach((field) => {
-    if (previousValues[field] !== undefined)
-      nextValues[field] = previousValues[field]
+    const hasPreviousValue = hasOwn(previousValues, field)
+    const hadSourceValue = hasOwn(previousSourceValues, field)
+    if (!hasPreviousValue) {
+      nextValues[field] = clonePreviewValue(parsed.values[field])
+      return
+    }
+
+    const previousValue = previousValues[field]
+    const previousSourceValue = previousSourceValues[field]
+    const followsSource = hadSourceValue && valuesMatch(previousValue, previousSourceValue)
+    if (followsSource)
+      nextValues[field] = clonePreviewValue(parsed.values[field])
     else
-      nextValues[field] = parsed.values[field]
+      nextValues[field] = clonePreviewValue(previousValues[field])
   })
 
   const previousMeta = state.previewBlock?.meta || {}
@@ -509,12 +524,12 @@ const buildPreviewBlock = (workingDoc, parsed) => {
   Object.keys(parsed.meta || {}).forEach((field) => {
     if (previousMeta[field]) {
       nextMeta[field] = {
-        ...previousMeta[field],
-        ...parsed.meta[field],
+        ...clonePreviewValue(previousMeta[field]),
+        ...clonePreviewValue(parsed.meta[field]),
       }
     }
     else {
-      nextMeta[field] = parsed.meta[field]
+      nextMeta[field] = clonePreviewValue(parsed.meta[field])
     }
   })
 
@@ -586,6 +601,7 @@ const editorDocUpdates = (workingDoc) => {
     type: normalizedTypes,
   }
   state.previewBlock = buildPreviewBlock(workingDoc, parsed)
+  state.previewSourceValues = edgeGlobal.dupObject(parsed.values || {})
   console.log('Editor workingDoc update:', state.workingDoc)
 }
 

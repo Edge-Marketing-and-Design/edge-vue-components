@@ -1,6 +1,6 @@
 <script setup>
 import { useVModel } from '@vueuse/core'
-import { ImagePlus, Loader2, Plus, Sparkles } from 'lucide-vue-next'
+import { ImagePlus, Loader2, Plus, Sparkles, X } from 'lucide-vue-next'
 const props = defineProps({
   modelValue: {
     type: Object,
@@ -164,6 +164,8 @@ const state = reactive({
   delete: false,
   meta: {},
   arrayItems: {},
+  arrayAddPopoverOpenByField: {},
+  arrayAddPopoverAllowCloseByField: {},
   reload: false,
   metaUpdate: {},
   loading: true,
@@ -302,16 +304,31 @@ const isLightName = (value) => {
 }
 
 const previewBackgroundClass = value => (isLightName(value) ? 'bg-neutral-900/90' : 'bg-neutral-100')
+const arrayImageDialogKey = (entryField, index, schemaField) => `${entryField}::${index}::${schemaField}`
+const normalizeSelectedImageUrl = (url) => {
+  if (typeof url === 'string')
+    return url
+  if (url && typeof url === 'object') {
+    if (typeof url.url === 'string')
+      return url.url
+    const publicUrl = edgeGlobal.getImage(url, 'public')
+    if (typeof publicUrl === 'string')
+      return publicUrl
+  }
+  return ''
+}
+const setArrayImageValue = (entryField, index, schemaField, url) => {
+  const list = state.draft?.[entryField]
+  if (!Array.isArray(list) || !list[index] || typeof list[index] !== 'object')
+    return
+  list[index][schemaField] = normalizeSelectedImageUrl(url)
+  state.imageOpenByField[arrayImageDialogKey(entryField, index, schemaField)] = false
+}
 
 const PLACEHOLDERS = {
   text: 'Lorem ipsum dolor sit amet.',
   textarea: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.',
   richtext: '<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>',
-  arrayItem: [
-    'Lorem ipsum dolor sit amet.',
-    'Consectetur adipiscing elit.',
-    'Sed do eiusmod tempor incididunt.',
-  ],
   image: 'https://imagedelivery.net/h7EjKG0X9kOxmLp41mxOng/f1f7f610-dfa9-4011-08a3-7a98d95e7500/thumbnail',
 }
 
@@ -509,18 +526,8 @@ const parseBlockContentModel = (html) => {
     else if (type === 'text')
       val = !val ? PLACEHOLDERS.text : String(val)
     else if (type === 'array') {
-      if (meta[field]?.limit > 0) {
-        val = Array(meta[field].limit).fill('placeholder')
-      }
-      else {
-        if (Array.isArray(val)) {
-          if (val.length === 0)
-            val = PLACEHOLDERS.arrayItem
-        }
-        else {
-          val = PLACEHOLDERS.arrayItem
-        }
-      }
+      // Keep array fields empty by default instead of injecting placeholder content.
+      val = Array.isArray(val) ? JSON.parse(JSON.stringify(val)) : []
     }
     else if (type === 'textarea')
       val = !val ? PLACEHOLDERS.textarea : String(val)
@@ -1011,10 +1018,28 @@ const generateWithAi = async () => {
     state.aiGenerating = false
   }
 }
+const setArrayAddPopoverOpen = (field, nextOpen) => {
+  if (nextOpen) {
+    state.arrayAddPopoverOpenByField[field] = true
+    return
+  }
+
+  if (state.arrayAddPopoverAllowCloseByField[field]) {
+    state.arrayAddPopoverOpenByField[field] = false
+    state.arrayAddPopoverAllowCloseByField[field] = false
+  }
+}
+
+const closeArrayAddPopover = (field) => {
+  state.arrayAddPopoverAllowCloseByField[field] = true
+  state.arrayAddPopoverOpenByField[field] = false
+}
+
 const addToArray = async (field) => {
   state.reload = true
   state.draft[field].push(JSON.parse(JSON.stringify(state.arrayItems[field])))
   resetArrayItems(field)
+  closeArrayAddPopover(field)
   await nextTick()
   state.reload = false
 }
@@ -1269,7 +1294,10 @@ const getTagsFromPosts = computed(() => {
                             <div class="flex w-full items-center">
                               <div class="w-full border-t border-gray-300 dark:border-white/15" aria-hidden="true" />
                               <edge-shad-button variant="text" class="hover:text-primary/50 text-xs h-[26px] text-primary" @click="state.editMode = !state.editMode">
-                                <Popover>
+                                <Popover
+                                  :open="!!state.arrayAddPopoverOpenByField[entry.field]"
+                                  @update:open="(open) => setArrayAddPopoverOpen(entry.field, open)"
+                                >
                                   <PopoverTrigger as-child>
                                     <edge-shad-button
                                       variant="text"
@@ -1279,8 +1307,19 @@ const getTagsFromPosts = computed(() => {
                                       <Plus class="w-4 h-4" />
                                     </edge-shad-button>
                                   </PopoverTrigger>
-                                  <PopoverContent class="!w-80 mr-20">
-                                    <Card class="border-none shadow-none p-4">
+                                  <PopoverContent align="start" class="!w-[calc(100vw-3rem)] md:!w-[calc(50vw-3rem)] max-w-none bg-slate-200 border-slate-300">
+                                    <Card class="border-none shadow-none p-4 bg-transparent">
+                                      <div class="mb-2 flex justify-end">
+                                        <edge-shad-button
+                                          type="button"
+                                          variant="ghost"
+                                          size="icon"
+                                          class="h-7 w-7"
+                                          @click="closeArrayAddPopover(entry.field)"
+                                        >
+                                          <X class="h-4 w-4" />
+                                        </edge-shad-button>
+                                      </div>
                                       <template v-for="schemaItem in entry.meta.schema" :key="schemaItem.field">
                                         <edge-cms-block-input
                                           v-model="state.arrayItems[entry.field][schemaItem.field]"
@@ -1291,8 +1330,17 @@ const getTagsFromPosts = computed(() => {
                                           :label="genTitleFromField(schemaItem)"
                                         />
                                       </template>
-                                      <CardFooter class="mt-2 flex justify-end">
+                                      <CardFooter class="mt-2 flex justify-end gap-2">
                                         <edge-shad-button
+                                          type="button"
+                                          variant="outline"
+                                          class="text-xs h-[26px]"
+                                          @click="closeArrayAddPopover(entry.field)"
+                                        >
+                                          Cancel
+                                        </edge-shad-button>
+                                        <edge-shad-button
+                                          type="button"
                                           class="bg-secondary hover:text-white text-xs h-[26px] text-primary"
                                           @click="addToArray(entry.field)"
                                         >
@@ -1314,13 +1362,57 @@ const getTagsFromPosts = computed(() => {
                         >
                           <template #item="{ element, index }">
                             <div :key="index" class="">
-                              <div class="flex gap-2 w-full items-center w-full border-1 border-dotted py-1 mb-1">
-                                <div class="text-left px-2">
+                              <div class="flex w-full items-start gap-2 border-1 border-dotted py-1 mb-1">
+                                <div class="text-left px-2 shrink-0 pt-1">
                                   <Grip class="handle pointer" />
                                 </div>
-                                <div class="px-2 py-2 w-[98%] flex gap-1">
+                                <div class="px-2 py-2 flex-1 min-w-0 flex flex-wrap gap-1">
                                   <template v-for="schemaItem in entry.meta.schema" :key="schemaItem.field">
-                                    <Popover>
+                                    <Dialog v-if="schemaItem.type === 'image'" v-model:open="state.imageOpenByField[arrayImageDialogKey(entry.field, index, schemaItem.field)]">
+                                      <DialogTrigger as-child>
+                                        <Alert class="w-[200px] text-xs py-1 px-2 cursor-pointer hover:bg-primary hover:text-white">
+                                          <AlertTitle>{{ genTitleFromField(schemaItem) }}</AlertTitle>
+                                          <AlertDescription class="text-sm truncate max-w-[200px]">
+                                            <div class="w-full flex justify-center">
+                                              <div
+                                                v-if="element[schemaItem.field]"
+                                                class="inline-flex h-8 min-w-8 max-w-[72px] items-center justify-center rounded border border-border px-1"
+                                                :class="previewBackgroundClass(element[schemaItem.field])"
+                                              >
+                                                <img
+                                                  :src="element[schemaItem.field]"
+                                                  class="max-h-7 w-auto max-w-full object-contain"
+                                                >
+                                              </div>
+                                              <span v-else class="inline-flex items-center gap-1 justify-center">
+                                                <ImagePlus class="h-3.5 w-3.5" />
+                                                Select Image
+                                              </span>
+                                            </div>
+                                          </AlertDescription>
+                                        </Alert>
+                                      </DialogTrigger>
+                                      <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-y-auto">
+                                        <DialogHeader>
+                                          <DialogTitle>Select Image</DialogTitle>
+                                          <DialogDescription />
+                                        </DialogHeader>
+                                        <edge-cms-media-manager
+                                          v-if="schemaItem?.tags && schemaItem.tags.length > 0"
+                                          :site="props.siteId"
+                                          :select-mode="true"
+                                          :default-tags="schemaItem.tags"
+                                          @select="(url) => setArrayImageValue(entry.field, index, schemaItem.field, url)"
+                                        />
+                                        <edge-cms-media-manager
+                                          v-else
+                                          :site="props.siteId"
+                                          :select-mode="true"
+                                          @select="(url) => setArrayImageValue(entry.field, index, schemaItem.field, url)"
+                                        />
+                                      </DialogContent>
+                                    </Dialog>
+                                    <Popover v-else>
                                       <PopoverTrigger as-child>
                                         <Alert class="w-[200px] text-xs py-1 px-2 cursor-pointer hover:bg-primary hover:text-white">
                                           <AlertTitle> {{ genTitleFromField(schemaItem) }}</AlertTitle>
@@ -1329,7 +1421,7 @@ const getTagsFromPosts = computed(() => {
                                           </AlertDescription>
                                         </Alert>
                                       </PopoverTrigger>
-                                      <PopoverContent class="!w-80 mr-20">
+                                      <PopoverContent align="start" class="!w-[calc(100vw-3rem)] md:!w-[calc(50vw-3rem)] max-w-none">
                                         <Card class="border-none shadow-none p-4">
                                           <edge-cms-block-input
                                             v-model="element[schemaItem.field]"
@@ -1344,13 +1436,14 @@ const getTagsFromPosts = computed(() => {
                                     </Popover>
                                   </template>
                                 </div>
-                                <div class="pr-2">
+                                <div class="text-left px-2 shrink-0 pt-1">
                                   <edge-shad-button
                                     variant="destructive"
                                     size="icon"
+                                    class="h-6 w-6"
                                     @click="state.draft[entry.field].splice(index, 1)"
                                   >
-                                    <Trash class="h-4 w-4" />
+                                    <Trash class="h-3.5 w-3.5" />
                                   </edge-shad-button>
                                 </div>
                               </div>

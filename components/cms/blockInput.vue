@@ -52,8 +52,30 @@ const hasImageTags = computed(() => {
   return Array.isArray(props.schema?.tags) && props.schema.tags.length > 0
 })
 
-const selectImage = (url) => {
-  modelValue.value = url || ''
+const resolvedImageUrl = computed(() => {
+  if (typeof modelValue.value === 'string')
+    return modelValue.value
+  return ''
+})
+
+const hasImageValue = computed(() => String(resolvedImageUrl.value || '').trim().length > 0)
+
+const normalizeSelectedImageUrl = (url) => {
+  if (typeof url === 'string')
+    return url
+  if (url && typeof url === 'object') {
+    if (typeof url.url === 'string')
+      return url.url
+    const publicUrl = edgeGlobal.getImage(url, 'public')
+    if (typeof publicUrl === 'string')
+      return publicUrl
+  }
+  return ''
+}
+
+const selectImage = async (url) => {
+  modelValue.value = normalizeSelectedImageUrl(url)
+  await nextTick()
   state.imageOpen = false
 }
 
@@ -88,42 +110,52 @@ onBeforeMount(async () => {
         {{ label }}
       </div>
       <div class="relative py-2 rounded-md flex items-center justify-center border border-border">
-        <div class="bg-black/80 absolute left-0 top-0 w-full h-full opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center z-10 cursor-pointer">
-          <Dialog v-model:open="state.imageOpen">
-            <DialogTrigger as-child>
+        <Dialog v-model:open="state.imageOpen">
+          <DialogTrigger as-child>
+            <edge-shad-button
+              v-if="!hasImageValue"
+              type="button"
+              variant="outline"
+              class="h-20 w-full border-dashed text-muted-foreground hover:text-foreground"
+            >
+              <ImagePlus class="h-5 w-5 mr-2" />
+              Select Image
+            </edge-shad-button>
+          </DialogTrigger>
+          <DialogTrigger v-if="hasImageValue" as-child>
+            <div class="bg-black/80 absolute left-0 top-0 w-full h-full opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center z-10 cursor-pointer">
               <edge-shad-button type="button" variant="outline" class="bg-white text-black hover:bg-gray-200">
                 <ImagePlus class="h-5 w-5 mr-2" />
-                Select Image
+                Replace Image
               </edge-shad-button>
-            </DialogTrigger>
-            <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>Select Image</DialogTitle>
-                <DialogDescription />
-              </DialogHeader>
-              <edge-cms-media-manager
-                v-if="hasImageTags"
-                :site="props.site"
-                :select-mode="true"
-                :default-tags="props.schema.tags"
-                @select="selectImage"
-              />
-              <edge-cms-media-manager
-                v-else
-                :site="props.site"
-                :select-mode="true"
-                @select="selectImage"
-              />
-            </DialogContent>
-          </Dialog>
-        </div>
+            </div>
+          </DialogTrigger>
+          <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Select Image</DialogTitle>
+              <DialogDescription />
+            </DialogHeader>
+            <edge-cms-media-manager
+              v-if="hasImageTags"
+              :site="props.site"
+              :select-mode="true"
+              :default-tags="props.schema.tags"
+              @select="selectImage"
+            />
+            <edge-cms-media-manager
+              v-else
+              :site="props.site"
+              :select-mode="true"
+              @select="selectImage"
+            />
+          </DialogContent>
+        </Dialog>
         <img
-          v-if="modelValue"
-          :src="modelValue"
+          v-if="hasImageValue"
+          :src="resolvedImageUrl"
           class="max-h-40 max-w-full h-auto w-auto object-contain"
         >
       </div>
-      <edge-shad-input v-model="modelValue" :name="field" :label="`${label} URL`" />
     </div>
     <div v-else>
       <edge-shad-input v-model="modelValue" :name="field" :label="label" />
