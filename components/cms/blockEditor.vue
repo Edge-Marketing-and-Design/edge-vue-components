@@ -210,6 +210,21 @@ const BLOCK_CONTENT_SNIPPETS = [
     description: 'Nested array inside an array item',
   },
   {
+    label: 'Render Blocks',
+    snippet: `{{{#renderBlocks {"field":"item"}}}}`,
+    description: 'Render block content from an object field',
+  },
+  {
+    label: 'Post Content Example',
+    snippet: `{{{#array {"field":"list","schema":[{"field":"name","value":"text"},{"field":"content","value":"richtext"}],"collection":{"path":"posts","uniqueKey":"{orgId}:{siteId}","query":[],"order":[]},"queryOptions":[],"limit":3,"value":[]}}}}
+  <article>
+    <h2>{{item.name}}</h2>
+    {{{#renderBlocks {"field":"item"}}}}
+  </article>
+{{{/array}}}`,
+    description: 'Example loop for posts with rendered post blocks',
+  },
+  {
     label: 'If / Else',
     snippet: `{{{#if {"cond": "condition" }}}}
   <!-- content when condition is true -->
@@ -1050,6 +1065,7 @@ const exportCurrentBlock = () => {
                       <a href="#arrays-filters" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Filters</a>
                       <a href="#conditionals" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Conditionals</a>
                       <a href="#subarrays" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Subarrays</a>
+                      <a href="#render-blocks" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Render Blocks</a>
                       <a href="#entries" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Entries</a>
                       <a href="#rendering-rules" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Rendering</a>
                       <a href="#loading-tokens" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Loading</a>
@@ -1333,6 +1349,25 @@ const exportCurrentBlock = () => {
                     <p class="text-sm text-foreground">
                       Use <code>as</code> to set an alias (like <code v-pre>{{card.title}}</code>). Use <code>subarray</code> to loop nested lists.
                     </p>
+                  </section>
+
+                  <section id="render-blocks" class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Render Blocks (Post/Page Block Content)
+                    </h3>
+                    <p class="text-sm text-foreground">
+                      Use <code>renderBlocks</code> when an object contains CMS block content (for example post content).
+                    </p>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#renderBlocks {"field":"item"}}}}</code></pre>
+                    <p class="text-sm text-foreground">
+                      This renders the current object's block array. Inside an array loop, <code>item</code> is the current record.
+                    </p>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {"field":"list","schema":[{"field":"name","value":"text"},{"field":"content","value":"richtext"}],"collection":{"path":"posts","uniqueKey":"{orgId}:{siteId}","query":[],"order":[]},"queryOptions":[],"limit":3,"value":[]}}}}
+  <article>
+    <h2>{{item.name}}</h2>
+    {{{#renderBlocks {"field":"item"}}}}
+  </article>
+{{{/array}}}</code></pre>
                   </section>
 
                   <section id="entries" class="space-y-3">

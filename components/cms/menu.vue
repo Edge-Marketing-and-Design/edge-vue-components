@@ -1158,6 +1158,7 @@ const theme = computed(() => {
                   :to="`${pageRouteBase}/${element.item}`"
                 >
                   <Loader2 v-if="element.item === '' || element.name === 'Deleting...'" :class="{ '!text-red-500': element.name === 'Deleting...' }" class="w-4 h-4 animate-spin" />
+                  <FileX v-else-if="!props.isTemplateSite && !isPublished(element.item)" class="!text-slate-500 dark:!text-slate-300" />
                   <FileWarning v-else-if="isPublishedPageDiff(element.item) && !props.isTemplateSite" class="!text-yellow-600" />
                   <FileCheck v-else class="text-xs !text-green-700 font-normal" />
                   <span>{{ displayEntryName(element) }}</span>

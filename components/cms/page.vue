@@ -1,5 +1,5 @@
 <script setup>
-import { AlertTriangle, ArrowDown, ArrowUp, Download, Maximize2, Monitor, Smartphone, Sparkles, Tablet, UploadCloud } from 'lucide-vue-next'
+import { AlertTriangle, ArrowDown, ArrowUp, Download, FileCheck, FileX, Maximize2, Monitor, Smartphone, Sparkles, Tablet, UploadCloud } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 const props = defineProps({
@@ -1237,6 +1237,39 @@ const isPublishedPageDiff = (pageId) => {
   return false
 }
 
+const isPagePublished = (pageId) => {
+  const publishedDoc = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`]?.[pageId]
+  return !!publishedDoc
+}
+
+const getPagePublishStatus = (pageId) => {
+  const published = isPagePublished(pageId)
+  if (!published) {
+    return {
+      key: 'unpublished',
+      label: 'Unpublished',
+      canPublish: true,
+      canUnpublish: false,
+    }
+  }
+
+  if (isPublishedPageDiff(pageId)) {
+    return {
+      key: 'publishedWithChanges',
+      label: 'Published (Unpublished Changes)',
+      canPublish: true,
+      canUnpublish: true,
+    }
+  }
+
+  return {
+    key: 'published',
+    label: 'Published',
+    canPublish: false,
+    canUnpublish: true,
+  }
+}
+
 const lastPublishedTime = (pageId) => {
   const timestamp = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`]?.[pageId]?.last_updated
   if (!timestamp)
@@ -1252,6 +1285,8 @@ const publishedPage = computed(() => {
 const currentPage = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`]?.[props.page] || null
 })
+
+const pagePublishStatus = computed(() => getPagePublishStatus(props.page))
 
 const pagesCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`)
 const pagesCollection = computed(() => edgeFirebase.data?.[pagesCollectionPath.value] || {})
@@ -1879,7 +1914,7 @@ const hasUnsavedChanges = (changes) => {
         <div class="flex w-full items-center">
           <div class="w-full border-t border-gray-300 dark:border-white/15" aria-hidden="true" />
           <div v-if="!props.isTemplateSite" class="px-4 text-gray-600 dark:text-gray-300 whitespace-nowrap text-center flex flex-col items-center gap-1">
-            <template v-if="isPublishedPageDiff(page)">
+            <template v-if="pagePublishStatus.key === 'publishedWithChanges'">
               <div class="flex items-center gap-2">
                 <edge-shad-button
                   variant="outline"
@@ -1900,9 +1935,29 @@ const hasUnsavedChanges = (changes) => {
                 </edge-shad-button>
               </div>
             </template>
+            <template v-else-if="pagePublishStatus.key === 'unpublished'">
+              <div class="flex items-center gap-2">
+                <edge-chip class="bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100 h-[32px]">
+                  <div class="w-full inline-flex items-center gap-1">
+                    <FileX class="w-3.5 h-3.5" />
+                    Unpublished
+                  </div>
+                </edge-chip>
+                <edge-shad-button
+                  class="text-xs h-[32px] gap-1 shadow-sm bg-slate-700 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
+                  :disabled="state.publishLoading"
+                  @click="publishPage(page)"
+                >
+                  <Loader2 v-if="state.publishLoading" class="w-4 h-4 animate-spin" />
+                  <UploadCloud v-else class="w-4 h-4" />
+                  Publish
+                </edge-shad-button>
+              </div>
+            </template>
             <template v-else>
-              <edge-chip class="bg-green-100 text-green-800">
-                <div class="w-full">
+              <edge-chip class="bg-green-100 text-green-800 h-[32px]">
+                <div class="w-full inline-flex items-center gap-1">
+                  <FileCheck class="w-3.5 h-3.5" />
                   Published
                 </div>
               </edge-chip>

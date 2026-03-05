@@ -417,6 +417,21 @@ const BLOCK_CONTENT_SNIPPETS = [
     description: 'Nested array inside an array item',
   },
   {
+    label: 'Render Blocks',
+    snippet: `{{{#renderBlocks {"field":"item"}}}}`,
+    description: 'Render block content from an object field',
+  },
+  {
+    label: 'Post Content Example',
+    snippet: `{{{#array {"field":"list","schema":[{"field":"name","value":"text"},{"field":"content","value":"richtext"}],"collection":{"path":"posts","uniqueKey":"{orgId}:{siteId}","query":[],"order":[]},"queryOptions":[],"limit":3,"value":[]}}}}
+  <article>
+    <h2>{{item.name}}</h2>
+    {{{#renderBlocks {"field":"item"}}}}
+  </article>
+{{{/array}}}`,
+    description: 'Example loop for posts with rendered post blocks',
+  },
+  {
     label: 'If / Else',
     snippet: `{{{#if {"cond": "condition" }}}}
   <!-- content when condition is true -->
