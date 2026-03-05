@@ -412,8 +412,10 @@ const clearTagFilters = () => {
         v-for="tagOption in getTagsFromBlocks"
         :key="tagOption.name"
         type="button"
-        class="px-3 py-1 rounded-full border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-        :class="pickerState.selectedTags.includes(tagOption.name) ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'bg-background text-muted-foreground hover:bg-muted border-border'"
+        class="px-3 py-1 rounded-full border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-slate-300/70 dark:focus-visible:ring-offset-slate-950"
+        :class="pickerState.selectedTags.includes(tagOption.name)
+          ? 'border-slate-700 bg-slate-800 text-white shadow-sm dark:border-slate-200 dark:bg-slate-100 dark:text-slate-900'
+          : 'border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300 dark:hover:bg-slate-800'"
         @click="toggleTag(tagOption.name)"
       >
         {{ tagOption.title }}
@@ -421,7 +423,7 @@ const clearTagFilters = () => {
       <button
         v-if="hasActiveFilters"
         type="button"
-        class="ml-auto px-3 py-1 text-xs font-medium uppercase tracking-wide text-muted-foreground border border-transparent hover:text-primary hover:border-primary/30 rounded-full transition-colors"
+        class="ml-auto rounded-full border border-transparent px-3 py-1 text-xs font-medium uppercase tracking-wide text-slate-500 transition-colors hover:border-slate-400/60 hover:text-slate-700 dark:text-slate-400 dark:hover:border-slate-500/60 dark:hover:text-slate-200"
         @click="clearTagFilters"
       >
         Clear filters
@@ -488,8 +490,10 @@ const clearTagFilters = () => {
                 v-for="tagOption in getTagsFromBlocks"
                 :key="tagOption.name"
                 type="button"
-                class="px-3 py-1 rounded-full border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                :class="pickerState.selectedTags.includes(tagOption.name) ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'bg-background text-muted-foreground hover:bg-muted border-border'"
+                class="px-3 py-1 rounded-full border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-slate-300/70 dark:focus-visible:ring-offset-slate-950"
+                :class="pickerState.selectedTags.includes(tagOption.name)
+                  ? 'border-slate-700 bg-slate-800 text-white shadow-sm dark:border-slate-200 dark:bg-slate-100 dark:text-slate-900'
+                  : 'border-slate-300 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300 dark:hover:bg-slate-800'"
                 @click="toggleTag(tagOption.name)"
               >
                 {{ tagOption.title }}
@@ -497,7 +501,7 @@ const clearTagFilters = () => {
               <button
                 v-if="hasActiveFilters"
                 type="button"
-                class="ml-auto px-3 py-1 text-xs font-medium uppercase tracking-wide text-muted-foreground border border-transparent hover:text-primary hover:border-primary/30 rounded-full transition-colors"
+                class="ml-auto rounded-full border border-transparent px-3 py-1 text-xs font-medium uppercase tracking-wide text-slate-500 transition-colors hover:border-slate-400/60 hover:text-slate-700 dark:text-slate-400 dark:hover:border-slate-500/60 dark:hover:text-slate-200"
                 @click="clearTagFilters"
               >
                 Clear filters

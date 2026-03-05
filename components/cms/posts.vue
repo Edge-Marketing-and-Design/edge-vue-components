@@ -814,13 +814,13 @@ const unPublishPost = async (postId) => {
 
     <div
       v-if="isFullList"
-      class="rounded-lg border bg-card overflow-hidden flex flex-col h-[calc(100vh-180px)] max-h-[calc(100vh-180px)]"
+      class="rounded-lg border border-slate-300 bg-white/90 overflow-hidden flex flex-col h-[calc(100vh-180px)] max-h-[calc(100vh-180px)] dark:border-slate-700 dark:bg-slate-900/70"
     >
-      <div class="flex items-center justify-between px-4 py-3 border-b bg-muted/40">
-        <div class="text-sm font-semibold">
+      <div class="flex items-center justify-between border-b border-slate-300 bg-slate-100 px-4 py-3 dark:border-slate-700 dark:bg-slate-800">
+        <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">
           Posts
         </div>
-        <div class="text-xs text-muted-foreground">
+        <div class="text-xs text-slate-600 dark:text-slate-300">
           {{ postsList.length }} total
         </div>
       </div>
@@ -1089,15 +1089,15 @@ const unPublishPost = async (postId) => {
         @working-doc="onWorkingDocUpdate"
       >
         <template #header="slotProps">
-          <div class="relative flex items-center bg-secondary p-2 justify-between sticky top-0 z-50 bg-primary rounded h-[50px]">
+          <div class="relative flex items-center p-2 justify-between sticky top-0 z-50 rounded h-[50px] border border-stone-300 bg-stone-100 text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100">
             <span class="text-lg font-semibold whitespace-nowrap pr-1">{{ sheetTitle }}</span>
             <div class="flex w-full items-center">
-              <div class="w-full border-t border-gray-300 dark:border-white/15" aria-hidden="true" />
+              <div class="w-full border-t border-stone-300 dark:border-stone-700" aria-hidden="true" />
               <div class="flex items-center gap-1 pr-3">
                 <edge-shad-button
                   type="button"
                   variant="text"
-                  class="hover:text-primary/50 text-xs h-[26px] text-primary"
+                  class="text-xs h-[26px] text-slate-700 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white"
                   @click="state.editMode = !state.editMode"
                 >
                   <template v-if="state.editMode">
@@ -1131,7 +1131,7 @@ const unPublishPost = async (postId) => {
                   v-if="isCreating || slotProps.unsavedChanges"
                   variant="text"
                   type="submit"
-                  class="bg-secondary hover:text-primary/50 text-xs h-[26px] text-primary"
+                  class="text-xs h-[26px] bg-slate-300 text-slate-900 hover:bg-slate-400 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
                   :disabled="slotProps.submitting"
                 >
                   <Loader2 v-if="slotProps.submitting" class="w-4 h-4 animate-spin" />
@@ -1379,9 +1379,10 @@ const unPublishPost = async (postId) => {
   </template>
   <Sheet v-else v-model:open="state.sheetOpen">
     <SheetContent side="left" class="w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl">
-      <SheetHeader>
-        <SheetTitle>{{ sheetTitle }}</SheetTitle>
-      </SheetHeader>
+      <div class="relative flex items-center p-2 justify-between top-0 z-50 rounded h-[50px] border border-stone-300 bg-stone-100 text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100">
+        <span class="text-lg font-semibold whitespace-nowrap pr-1">{{ sheetTitle }}</span>
+        <div class="w-full border-t border-stone-300 dark:border-stone-700" aria-hidden="true" />
+      </div>
       <edge-editor
         v-if="editorOpen"
         :collection="collection"

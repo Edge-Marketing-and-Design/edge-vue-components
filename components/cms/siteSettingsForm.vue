@@ -345,7 +345,7 @@ watch(() => props.settings?.forwardApex, (value) => {
 
 <template>
   <Tabs class="w-full" default-value="general">
-    <TabsList class="w-full mt-3 bg-secondary rounded-sm grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-1">
+    <TabsList class="w-full mt-3 rounded-sm grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-1 border border-slate-300 bg-slate-200 dark:border-slate-700 dark:bg-slate-800">
       <TabsTrigger value="general" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
         General
       </TabsTrigger>

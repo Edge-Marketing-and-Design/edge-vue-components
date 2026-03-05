@@ -1761,13 +1761,13 @@ const pageSettingsUpdated = async (pageData) => {
             :multiple="true"
             @update:model-value="value => updateSiteUsersModel(slotProps.workingDoc, value)"
           />
-          <div class="rounded-lg border border-dashed border-slate-200 p-4 ">
+          <div class="rounded-lg border border-dashed border-slate-300 p-4 dark:border-slate-700">
             <div class="flex items-start justify-between gap-3">
               <div>
-                <div class="text-sm font-semibold text-foreground">
+                <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">
                   AI (optional)
                 </div>
-                <p class="text-xs text-muted-foreground">
+                <p class="text-xs text-slate-600 dark:text-slate-300">
                   Include user data and instructions for the first AI-generated version of the site.
                 </p>
               </div>
@@ -1807,7 +1807,7 @@ const pageSettingsUpdated = async (pageData) => {
     </div>
     <div v-else class="flex flex-col h-[calc(100vh-58px)] overflow-hidden">
       <div
-        class="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-2 border bg-secondary"
+        class="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-2 border border-slate-300 bg-slate-100 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
         :class="isTemplateSite ? 'min-h-[68px]' : ''"
       >
         <div class="flex items-center gap-3">
@@ -1817,13 +1817,13 @@ const pageSettingsUpdated = async (pageData) => {
           </span>
         </div>
         <div class="flex justify-center">
-          <div v-if="!isTemplateSite && (canViewPagesTab || canViewPostsTab || canViewInboxTab)" class="flex items-center rounded-full border border-border bg-background p-1 shadow-sm">
+          <div v-if="!isTemplateSite && (canViewPagesTab || canViewPostsTab || canViewInboxTab)" class="flex items-center rounded-full border border-slate-300 bg-white p-1 shadow-sm dark:border-slate-600 dark:bg-slate-950">
             <edge-shad-button
               v-if="canViewPagesTab"
               variant="ghost"
               size="sm"
               class="h-8 px-4 text-xs gap-2 rounded-full"
-              :class="state.viewMode === 'pages' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+              :class="state.viewMode === 'pages' ? 'bg-slate-700 text-white shadow-sm dark:bg-slate-200 dark:text-slate-900' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100'"
               @click="setViewMode('pages')"
             >
               <FileStack class="h-4 w-4" />
@@ -1834,7 +1834,7 @@ const pageSettingsUpdated = async (pageData) => {
               variant="ghost"
               size="sm"
               class="h-8 px-4 text-xs gap-2 rounded-full"
-              :class="state.viewMode === 'posts' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+              :class="state.viewMode === 'posts' ? 'bg-slate-700 text-white shadow-sm dark:bg-slate-200 dark:text-slate-900' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100'"
               @click="setViewMode('posts')"
             >
               <FilePenLine class="h-4 w-4" />
@@ -1845,14 +1845,14 @@ const pageSettingsUpdated = async (pageData) => {
               variant="ghost"
               size="sm"
               class="h-8 px-4 text-xs gap-2 rounded-full"
-              :class="state.viewMode === 'submissions' ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+              :class="state.viewMode === 'submissions' ? 'bg-slate-700 text-white shadow-sm dark:bg-slate-200 dark:text-slate-900' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100'"
               @click="setViewMode('submissions')"
             >
               <Inbox class="h-4 w-4" />
               Inbox
               <span
                 v-if="unreadSubmissionsCount"
-                class="ml-1 rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold text-primary-foreground"
+                class="ml-1 rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-semibold text-white dark:bg-slate-100 dark:text-slate-900"
               >
                 {{ unreadSubmissionsCount }}
               </span>
@@ -1891,7 +1891,7 @@ const pageSettingsUpdated = async (pageData) => {
                   </span>
                 </div>
                 <edge-shad-button
-                  class="h-8 px-4 text-xs gap-2 bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm"
+                  class="h-8 px-4 text-xs gap-2 bg-slate-700 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300 shadow-sm"
                   :disabled="state.publishSiteLoading"
                   @click="publishSiteAndSettings"
                 >

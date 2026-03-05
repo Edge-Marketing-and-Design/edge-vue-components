@@ -369,7 +369,7 @@ onBeforeMount(async () => {
       :doc-id="props.themeId"
       :schema="blockSchema"
       :new-doc-schema="state.newDocs.themes"
-      header-class="py-2 bg-secondary text-foreground rounded-none sticky top-0 border"
+      header-class="py-2 rounded-none sticky top-0 border-b border-slate-300 bg-slate-100 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
       class="w-full mx-auto flex-1 bg-transparent flex flex-col border-none shadow-none pt-0 px-0"
       card-content-class="px-0"
       :show-footer="false"
@@ -419,20 +419,20 @@ onBeforeMount(async () => {
           <div class="flex flex-col gap-4 xl:flex-row">
             <div class="w-full xl:w-1/2">
               <Tabs class="w-full" default-value="theme-json">
-                <TabsList class="w-full mt-3 bg-secondary rounded-sm grid grid-cols-2 xl:grid-cols-5">
-                  <TabsTrigger value="theme-json" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+                <TabsList class="w-full mt-3 rounded-sm grid grid-cols-2 xl:grid-cols-5 border border-slate-300 bg-slate-200 dark:border-slate-700 dark:bg-slate-800">
+                  <TabsTrigger value="theme-json" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
                     Theme JSON
                   </TabsTrigger>
-                  <TabsTrigger value="head-json" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+                  <TabsTrigger value="head-json" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
                     Head JSON
                   </TabsTrigger>
-                  <TabsTrigger value="custom-fonts" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+                  <TabsTrigger value="custom-fonts" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
                     Custom Fonts
                   </TabsTrigger>
-                  <TabsTrigger value="extra-css" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+                  <TabsTrigger value="extra-css" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
                     Extra CSS
                   </TabsTrigger>
-                  <TabsTrigger value="default-templates" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+                  <TabsTrigger value="default-templates" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
                     Default Templates
                   </TabsTrigger>
                 </TabsList>

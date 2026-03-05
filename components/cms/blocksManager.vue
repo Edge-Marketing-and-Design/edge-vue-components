@@ -830,28 +830,28 @@ const handleBlockImport = async (event) => {
             <Loader2 v-if="state.importingJson" class="h-4 w-4 animate-spin" />
             <Upload v-else class="h-4 w-4" />
           </edge-shad-button>
-          <edge-shad-button class="uppercase bg-primary" to="/app/dashboard/blocks/new">
+          <edge-shad-button class="uppercase bg-slate-700 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300" to="/app/dashboard/blocks/new">
             Add Block
           </edge-shad-button>
         </div>
       </template>
       <template #list="slotProps">
         <div class="w-full pt-4 space-y-3">
-          <div class="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/50 bg-background/60 px-3 py-2">
+          <div class="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-300/70 bg-slate-100/80 dark:border-slate-700 dark:bg-slate-900/60 px-3 py-2">
             <div class="flex items-center gap-2">
               <Checkbox
                 :model-value="getVisibleSelectionState(applyListSelectionFilters(slotProps.filtered))"
                 aria-label="Select visible blocks"
-                class="border-border bg-background/90 shadow-sm data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground"
+                class="border-slate-400 bg-white shadow-sm dark:border-slate-600 dark:bg-slate-950 data-[state=checked]:bg-slate-700 data-[state=checked]:text-white dark:data-[state=checked]:bg-slate-200 dark:data-[state=checked]:text-slate-900"
                 @click.stop
                 @update:model-value="toggleVisibleBlockSelection(applyListSelectionFilters(slotProps.filtered), $event)"
               />
-              <span class="text-xs text-muted-foreground">
+              <span class="text-xs text-slate-600 dark:text-slate-300">
                 Select visible ({{ applyListSelectionFilters(slotProps.filtered).length }})
               </span>
             </div>
             <div class="flex items-center gap-2">
-              <span class="text-xs text-muted-foreground">{{ selectedBlockCount }} selected</span>
+              <span class="text-xs text-slate-600 dark:text-slate-300">{{ selectedBlockCount }} selected</span>
               <edge-shad-button
                 variant="outline"
                 class="h-8 text-xs"
@@ -884,8 +884,8 @@ const handleBlockImport = async (event) => {
               @keyup.enter="router.push(`/app/dashboard/blocks/${item.docId}`)"
             >
               <Card
-                class="h-full cursor-pointer border border-border/60 bg-card/40 hover:border-primary/50 hover:shadow-[0_22px_55px_-24px_rgba(0,0,0,0.4)] transition"
-                :class="isBlockSelected(item.docId) ? 'border-primary/70 ring-2 ring-primary/50' : 'border-white/5'"
+                class="h-full cursor-pointer border border-slate-300/70 bg-white/70 dark:border-slate-700 dark:bg-slate-900/50 hover:border-slate-500 hover:shadow-[0_22px_55px_-24px_rgba(0,0,0,0.4)] transition"
+                :class="isBlockSelected(item.docId) ? 'border-slate-700 ring-2 ring-slate-500/60 dark:border-slate-200 dark:ring-slate-300/50' : 'border-slate-200/60 dark:border-slate-800'"
               >
                 <CardContent class="flex flex-col gap-1 p-4 sm:p-5">
                   <div class="flex items-start gap-3">
@@ -893,18 +893,18 @@ const handleBlockImport = async (event) => {
                       <Checkbox
                         :model-value="isBlockSelected(item.docId)"
                         :aria-label="`Select block ${item.name || item.docId}`"
-                        class="border-border bg-background/90 shadow-sm data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground"
+                        class="border-slate-400 bg-white shadow-sm dark:border-slate-600 dark:bg-slate-950 data-[state=checked]:bg-slate-700 data-[state=checked]:text-white dark:data-[state=checked]:bg-slate-200 dark:data-[state=checked]:text-slate-900"
                         @click.stop
                         @update:model-value="setBlockSelection(item.docId, $event)"
                       />
                     </div>
-                    <p class="text-lg font-semibold leading-snug line-clamp-2 text-foreground flex-1">
+                    <p class="text-lg font-semibold leading-snug line-clamp-2 text-slate-900 dark:text-slate-100 flex-1">
                       {{ item.name }}
                     </p>
                     <edge-shad-button
                       size="icon"
                       variant="ghost"
-                      class="h-8 w-8 text-foreground/75 hover:text-foreground hover:bg-muted/80"
+                      class="h-8 w-8 text-slate-600 hover:text-slate-900 hover:bg-slate-200 dark:text-slate-300 dark:hover:text-slate-100 dark:hover:bg-slate-800"
                       @click.stop="slotProps.deleteItem(item.docId)"
                     >
                       <Trash class="h-4 w-4" />
@@ -930,7 +930,7 @@ const handleBlockImport = async (event) => {
                     <edge-chip
                       v-for="tag in item.tags?.slice(0, 3) ?? []"
                       :key="tag"
-                      class="bg-primary/40 text-white px-2 py-0.5 text-[10px]"
+                      class="bg-slate-700 text-white px-2 py-0.5 text-[10px] dark:bg-slate-200 dark:text-slate-900"
                     >
                       {{ tag }}
                     </edge-chip>

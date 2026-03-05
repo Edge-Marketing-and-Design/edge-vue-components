@@ -1289,11 +1289,11 @@ const getTagsFromPosts = computed(() => {
                     <div v-if="entry.meta?.schema">
                       <Card v-if="!state.reload" class="mb-4 bg-white shadow-sm border border-gray-200 p-4">
                         <CardHeader class="p-0 mb-2">
-                          <div class="relative flex items-center bg-secondary p-2 justify-between sticky top-0 z-10 bg-primary rounded">
+                          <div class="relative flex items-center p-2 justify-between sticky top-0 z-10 rounded border border-slate-300 bg-slate-200 text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
                             <span class="text-lg font-semibold whitespace-nowrap pr-1"> {{ genTitleFromField(entry) }}</span>
                             <div class="flex w-full items-center">
                               <div class="w-full border-t border-gray-300 dark:border-white/15" aria-hidden="true" />
-                              <edge-shad-button variant="text" class="hover:text-primary/50 text-xs h-[26px] text-primary" @click="state.editMode = !state.editMode">
+                              <edge-shad-button variant="text" class="text-xs h-[26px] text-slate-700 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white" @click="state.editMode = !state.editMode">
                                 <Popover
                                   :open="!!state.arrayAddPopoverOpenByField[entry.field]"
                                   @update:open="(open) => setArrayAddPopoverOpen(entry.field, open)"
@@ -1302,7 +1302,7 @@ const getTagsFromPosts = computed(() => {
                                     <edge-shad-button
                                       variant="text"
                                       type="submit"
-                                      class="bg-secondary hover:text-primary/50 text-xs h-[26px] text-primary"
+                                      class="bg-slate-300 text-slate-900 hover:bg-slate-400 text-xs h-[26px] dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
                                     >
                                       <Plus class="w-4 h-4" />
                                     </edge-shad-button>
@@ -1341,7 +1341,7 @@ const getTagsFromPosts = computed(() => {
                                         </edge-shad-button>
                                         <edge-shad-button
                                           type="button"
-                                          class="bg-secondary hover:text-white text-xs h-[26px] text-primary"
+                                          class="bg-slate-700 text-white hover:bg-slate-800 text-xs h-[26px] dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
                                           @click="addToArray(entry.field)"
                                         >
                                           Add Entry
@@ -1562,7 +1562,7 @@ const getTagsFromPosts = computed(() => {
                 <edge-shad-button variant="destructive" class="text-white" @click="state.open = false">
                   Cancel
                 </edge-shad-button>
-                <edge-shad-button class=" bg-slate-800 hover:bg-slate-400 w-full" @click="save">
+                <edge-shad-button class="w-full bg-slate-700 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300" @click="save">
                   Save changes
                 </edge-shad-button>
               </SheetFooter>

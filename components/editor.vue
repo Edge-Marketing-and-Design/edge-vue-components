@@ -29,7 +29,7 @@ const props = defineProps({
   },
   headerClass: {
     type: String,
-    default: 'py-4 bg-secondary text-foreground rounded-none sticky top-0',
+    default: 'py-3 rounded-none sticky top-0 border-b border-slate-300 bg-slate-100 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100',
   },
   class: {
     type: String,
@@ -615,7 +615,7 @@ const onError = async () => {
               </edge-shad-button>
               <edge-shad-button
                 type="submit"
-                class="bg-primary uppercase h-8 hover:bg-slate-400 px-8"
+                class="uppercase h-8 px-8 bg-slate-700 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
                 :disabled="state.submitting"
               >
                 <Loader2 v-if="state.submitting" class="w-4 h-4 mr-2 animate-spin" />
@@ -627,19 +627,20 @@ const onError = async () => {
         </edge-menu>
       </slot>
       <CardContent :class="cn('flex-1 flex flex-col px-4', props.cardContentClass)">
-        <Alert
-          v-if="state.successMessage"
-          class="mb-4 border border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-900/30 mt-2"
-        >
-          <CheckCircle2 class="h-5 w-5" />
-          <AlertTitle>
-            Changes saved
-          </AlertTitle>
-          <AlertDescription>
-            {{ state.successMessage }}
-          </AlertDescription>
-          <slot name="success-alert" :message="state.successMessage" :working-doc="state.workingDoc" />
-        </Alert>
+        <div v-if="state.successMessage" class="px-6">
+          <Alert
+            class="mt-2 mb-4 border border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-500/60 dark:bg-emerald-900/50 dark:text-emerald-100"
+          >
+            <CheckCircle2 class="h-5 w-5 text-emerald-700 dark:text-emerald-200" />
+            <AlertTitle class="text-emerald-900 dark:text-emerald-100">
+              Changes saved
+            </AlertTitle>
+            <AlertDescription class="text-emerald-800 dark:text-emerald-200">
+              {{ state.successMessage }}
+            </AlertDescription>
+            <slot name="success-alert" :message="state.successMessage" :working-doc="state.workingDoc" />
+          </Alert>
+        </div>
         <slot name="main" :title="title" :on-cancel="onCancel" :submitting="state.submitting" :unsaved-changes="unsavedChanges" :on-submit="triggerSubmit" :working-doc="state.workingDoc">
           <div class="flex flex-wrap justify-between">
             <div v-for="(field, name, index) in props.newDocSchema" :key="index" class="w-full" :class="numColsToTailwind(field.cols)">
@@ -723,7 +724,7 @@ const onError = async () => {
 
           <edge-shad-button
             type="submit"
-            class="bg-primary uppercase h-8 hover:bg-slate-400 px-8"
+            class="uppercase h-8 px-8 bg-slate-700 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
             :disabled="state.submitting"
           >
             <Loader2 v-if="state.submitting" class="w-4 h-4 mr-2 animate-spin" />

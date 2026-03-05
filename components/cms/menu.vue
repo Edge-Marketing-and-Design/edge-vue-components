@@ -1079,9 +1079,9 @@ const theme = computed(() => {
   <SidebarMenuItem v-for="({ menu, name: menuName }) in orderedMenus" :key="menuName">
     <SidebarMenuButton class="group !px-0 hover:!bg-transparent">
       <FolderOpen
-        class="mr-2 group-hover:text-foreground"
+        class="mr-2 text-slate-700 dark:text-slate-200 group-hover:text-slate-900 dark:group-hover:text-white"
       />
-      <span v-if="!props.isTemplateSite" class="!text-foreground">{{ displayMenuName(menuName) }}</span>
+      <span v-if="!props.isTemplateSite" class="text-slate-900 dark:text-slate-100">{{ displayMenuName(menuName) }}</span>
       <SidebarGroupAction class="absolute right-2 top-0 hover:!bg-transparent">
         <DropdownMenu>
           <DropdownMenuTrigger as-child>
@@ -1091,10 +1091,10 @@ const theme = computed(() => {
           </DropdownMenuTrigger>
           <DropdownMenuContent side="right" align="start">
             <DropdownMenuLabel v-if="props.prevMenu" class="flex items-center gap-2">
-              <Folder class="w-5 h-5" /> {{ ROOT_MENUS.includes(props.prevMenu) ? '' : props.prevMenu }}/{{ menuName }}/
+              <Folder class="w-5 h-5 text-slate-700 dark:text-slate-200" /> {{ ROOT_MENUS.includes(props.prevMenu) ? '' : props.prevMenu }}/{{ menuName }}/
             </DropdownMenuLabel>
             <DropdownMenuLabel v-else class="flex items-center gap-2">
-              <Folder class="w-5 h-5" /> {{ ROOT_MENUS.includes(menuName) ? '' : menuName }}/
+              <Folder class="w-5 h-5 text-slate-700 dark:text-slate-200" /> {{ ROOT_MENUS.includes(menuName) ? '' : menuName }}/
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem @click="addPageShow(menuName, false)">

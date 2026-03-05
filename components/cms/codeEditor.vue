@@ -363,7 +363,7 @@ onBeforeUnmount(() => {
 
 <template>
   <Card class="border-0 px-0 shadow-none">
-    <edge-menu class="border-0 shadow-none py-2 px-0">
+    <edge-menu class="border-0 shadow-none py-3 px-4 bg-white/90 dark:bg-slate-900/80 border-b border-slate-200 dark:border-slate-800 rounded-t-[10px]">
       <template #start>
         <Popover v-if="props.chatgpt">
           <PopoverTrigger as-child>
@@ -403,7 +403,7 @@ onBeforeUnmount(() => {
             </Card>
           </PopoverContent>
         </Popover>
-        <span>
+        <span class="text-base font-semibold text-slate-900 dark:text-slate-50">
           {{ props.title }}
         </span>
       </template>

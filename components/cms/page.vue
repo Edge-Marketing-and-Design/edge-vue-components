@@ -1873,7 +1873,7 @@ const hasUnsavedChanges = (changes) => {
     @unsaved-changes="hasUnsavedChanges"
   >
     <template #header="slotProps">
-      <div class="relative flex items-center p-2 justify-between  top-0 z-50 bg-gray-100 rounded h-[50px]">
+      <div class="relative flex items-center p-2 justify-between top-0 z-50 rounded h-[50px] border border-stone-300 bg-stone-100 text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100">
         <span class="text-lg font-semibold whitespace-nowrap pr-1">{{ pageName }}</span>
 
         <div class="flex w-full items-center">
@@ -1890,7 +1890,7 @@ const hasUnsavedChanges = (changes) => {
                   Unpublished Changes
                 </edge-shad-button>
                 <edge-shad-button
-                  class="bg-primary text-primary-foreground hover:bg-primary/90 text-xs h-[32px] gap-1 shadow-sm"
+                  class="text-xs h-[32px] gap-1 shadow-sm bg-slate-700 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
                   :disabled="state.publishLoading"
                   @click="publishPage(page)"
                 >
@@ -1944,13 +1944,13 @@ const hasUnsavedChanges = (changes) => {
                 variant="ghost"
                 size="icon"
                 class="h-[26px] w-[26px] text-xs gap-1 border transition-colors"
-                :class="state.previewViewport === option.id ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'bg-muted text-foreground border-border hover:bg-muted/80'"
+                :class="state.previewViewport === option.id ? 'bg-slate-700 text-white border-slate-700 shadow-sm dark:bg-slate-200 dark:text-slate-900 dark:border-slate-200' : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700 dark:hover:bg-slate-800'"
                 @click="setPreviewViewport(option.id)"
               >
                 <component :is="option.icon" class="w-3.5 h-3.5" />
               </edge-shad-button>
             </div>
-            <span class="text-[10px] leading-tight text-muted-foreground">Viewport</span>
+            <span class="text-[10px] leading-tight text-slate-600 dark:text-slate-300">Viewport</span>
           </div>
           <div v-if="hasPostView(slotProps.workingDoc)" class="flex flex-col items-center gap-1 px-2">
             <div class="flex items-center gap-1">
@@ -1958,7 +1958,7 @@ const hasUnsavedChanges = (changes) => {
                 type="button"
                 variant="ghost"
                 class="h-[26px] px-2 text-xs border transition-colors"
-                :class="state.previewPageView === 'list' ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'bg-muted text-foreground border-border hover:bg-muted/80'"
+                :class="state.previewPageView === 'list' ? 'bg-slate-700 text-white border-slate-700 shadow-sm dark:bg-slate-200 dark:text-slate-900 dark:border-slate-200' : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700 dark:hover:bg-slate-800'"
                 @click="setPreviewPageView('list')"
               >
                 Index
@@ -1967,16 +1967,16 @@ const hasUnsavedChanges = (changes) => {
                 type="button"
                 variant="ghost"
                 class="h-[26px] px-2 text-xs border transition-colors"
-                :class="state.previewPageView === 'post' ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'bg-muted text-foreground border-border hover:bg-muted/80'"
+                :class="state.previewPageView === 'post' ? 'bg-slate-700 text-white border-slate-700 shadow-sm dark:bg-slate-200 dark:text-slate-900 dark:border-slate-200' : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700 dark:hover:bg-slate-800'"
                 @click="setPreviewPageView('post')"
               >
                 Detail
               </edge-shad-button>
             </div>
-            <span class="text-[10px] leading-tight text-muted-foreground">View</span>
+            <span class="text-[10px] leading-tight text-slate-600 dark:text-slate-300">View</span>
           </div>
 
-          <edge-shad-button variant="text" class="hover:text-primary/50 text-xs h-[26px] text-primary" @click="state.editMode = !state.editMode">
+          <edge-shad-button variant="text" class="text-xs h-[26px] text-slate-700 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white" @click="state.editMode = !state.editMode">
             <template v-if="state.editMode">
               <Eye class="w-4 h-4" />
               Preview Mode
@@ -2008,7 +2008,7 @@ const hasUnsavedChanges = (changes) => {
             v-if="state.editMode || slotProps.unsavedChanges"
             variant="text"
             type="submit"
-            class="bg-secondary hover:text-primary/50 text-xs h-[26px] text-primary"
+            class="text-xs h-[26px] bg-slate-300 text-slate-900 hover:bg-slate-400 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
             :disabled="slotProps.submitting"
           >
             <Loader2 v-if="slotProps.submitting" class="w-4 h-4 animate-spin" />
@@ -2049,7 +2049,7 @@ const hasUnsavedChanges = (changes) => {
             <edge-button-divider v-if="state.editMode" class="my-2">
               <Popover v-model:open="state.addRowPopoverOpen.listTop">
                 <PopoverTrigger as-child>
-                  <edge-shad-button class="bg-secondary text-primary hover:bg-primary/10 hover:text-primary text-xs h-[32px]">
+                  <edge-shad-button class="bg-slate-300 text-slate-900 hover:bg-slate-400 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600 text-xs h-[32px]">
                     Add Row
                   </edge-shad-button>
                 </PopoverTrigger>
@@ -2088,7 +2088,7 @@ const hasUnsavedChanges = (changes) => {
               </div>
               <Popover v-if="state.editMode" v-model:open="state.addRowPopoverOpen.listEmpty">
                 <PopoverTrigger as-child>
-                  <edge-shad-button class="bg-secondary text-primary hover:bg-primary/10 hover:text-primary text-xs h-[32px]">
+                  <edge-shad-button class="bg-slate-300 text-slate-900 hover:bg-slate-400 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600 text-xs h-[32px]">
                     Add Row
                   </edge-shad-button>
                 </PopoverTrigger>
@@ -2225,7 +2225,7 @@ const hasUnsavedChanges = (changes) => {
                   >
                     <Popover v-model:open="state.addRowPopoverOpen.listBetween[row.id]">
                       <PopoverTrigger as-child>
-                        <edge-shad-button class="bg-secondary text-primary hover:bg-primary/10 hover:text-primary text-xs h-[32px]">
+                        <edge-shad-button class="bg-slate-300 text-slate-900 hover:bg-slate-400 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600 text-xs h-[32px]">
                           Add Row
                         </edge-shad-button>
                       </PopoverTrigger>
@@ -2261,7 +2261,7 @@ const hasUnsavedChanges = (changes) => {
             <edge-button-divider v-if="state.editMode && slotProps.workingDoc?.structure && slotProps.workingDoc.structure.length > 0" class="my-2">
               <Popover v-model:open="state.addRowPopoverOpen.listBottom">
                 <PopoverTrigger as-child>
-                  <edge-shad-button class="bg-secondary text-primary hover:bg-primary/10 hover:text-primary text-xs h-[32px]">
+                  <edge-shad-button class="bg-slate-300 text-slate-900 hover:bg-slate-400 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600 text-xs h-[32px]">
                     Add Row
                   </edge-shad-button>
                 </PopoverTrigger>
@@ -2305,7 +2305,7 @@ const hasUnsavedChanges = (changes) => {
             <edge-button-divider v-if="state.editMode" class="my-2">
               <Popover v-model:open="state.addRowPopoverOpen.postTop">
                 <PopoverTrigger as-child>
-                  <edge-shad-button class="bg-secondary hover:text-primary/50 text-xs h-[32px] text-primary">
+                  <edge-shad-button class="bg-slate-300 text-slate-900 hover:bg-slate-400 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600 text-xs h-[32px]">
                     Add Row
                   </edge-shad-button>
                 </PopoverTrigger>
@@ -2344,7 +2344,7 @@ const hasUnsavedChanges = (changes) => {
               </div>
               <Popover v-if="state.editMode" v-model:open="state.addRowPopoverOpen.postEmpty">
                 <PopoverTrigger as-child>
-                  <edge-shad-button class="bg-secondary hover:text-primary/50 text-xs h-[32px] text-primary">
+                  <edge-shad-button class="bg-slate-300 text-slate-900 hover:bg-slate-400 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600 text-xs h-[32px]">
                     Add Row
                   </edge-shad-button>
                 </PopoverTrigger>
@@ -2481,7 +2481,7 @@ const hasUnsavedChanges = (changes) => {
                   >
                     <Popover v-model:open="state.addRowPopoverOpen.postBetween[row.id]">
                       <PopoverTrigger as-child>
-                        <edge-shad-button class="bg-secondary hover:text-primary/50 text-xs h-[32px] text-primary">
+                        <edge-shad-button class="bg-slate-300 text-slate-900 hover:bg-slate-400 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600 text-xs h-[32px]">
                           Add Row
                         </edge-shad-button>
                       </PopoverTrigger>
@@ -2517,7 +2517,7 @@ const hasUnsavedChanges = (changes) => {
             <edge-button-divider v-if="state.editMode && slotProps.workingDoc?.postStructure && slotProps.workingDoc.postStructure.length > 0" class="my-2">
               <Popover v-model:open="state.addRowPopoverOpen.postBottom">
                 <PopoverTrigger as-child>
-                  <edge-shad-button class="bg-secondary text-primary hover:bg-primary/10 hover:text-primary text-xs h-[32px]">
+                  <edge-shad-button class="bg-slate-300 text-slate-900 hover:bg-slate-400 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600 text-xs h-[32px]">
                     Add Row
                   </edge-shad-button>
                 </PopoverTrigger>
@@ -2700,9 +2700,9 @@ const hasUnsavedChanges = (changes) => {
         <div
           v-for="change in unpublishedChangeDetails"
           :key="change.key"
-          class="rounded-md border border-gray-200 dark:border-white/10 bg-secondary p-3 text-left"
+          class="rounded-md border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800 p-3 text-left"
         >
-          <div class="text-sm font-semibold text-primary mb-2">
+          <div class="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-2">
             {{ change.label }}
           </div>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">

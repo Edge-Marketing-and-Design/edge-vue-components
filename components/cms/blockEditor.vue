@@ -785,7 +785,7 @@ const exportCurrentBlock = () => {
       :doc-id="props.blockId"
       :schema="blockSchema"
       :new-doc-schema="state.newDocs.blocks"
-      header-class="py-2 bg-secondary text-foreground rounded-none sticky top-0 border"
+      header-class="py-2 rounded-none sticky top-0 border-b border-slate-300 bg-slate-100 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
       class="w-full mx-auto flex-1 bg-transparent flex flex-col border-none shadow-none pt-0 px-0"
       card-content-class="px-0"
       :show-footer="false"
@@ -892,13 +892,14 @@ const exportCurrentBlock = () => {
                 class="flex-auto"
               />
             </div>
-            <div class="flex-auto pt-2">
+            <div class="flex-auto pt-2 text-slate-900 dark:text-slate-100">
               <edge-shad-checkbox
                 v-model="slotProps.workingDoc.synced"
                 name="synced"
                 label="Synced Block"
+                class="border-slate-400 bg-white text-slate-900 data-[state=checked]:bg-slate-700 data-[state=checked]:text-white dark:border-slate-500 dark:bg-slate-800 dark:text-slate-100 dark:data-[state=checked]:bg-slate-200 dark:data-[state=checked]:text-slate-900"
               >
-                Synced Block
+                <span class="text-slate-900">Synced Block</span>
               </edge-shad-checkbox>
             </div>
           </div>
@@ -921,8 +922,8 @@ const exportCurrentBlock = () => {
                       <edge-shad-button
                         type="button"
                         size="sm"
-                        variant="outline"
-                        class="h-8 px-2 text-[11px] uppercase tracking-wide"
+                        variant="ghost"
+                        class="h-8 px-3 text-[11px] uppercase tracking-wide rounded border border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100"
                       >
                         Dynamic Content
                       </edge-shad-button>
@@ -942,8 +943,8 @@ const exportCurrentBlock = () => {
                   <edge-shad-button
                     type="button"
                     size="sm"
-                    variant="secondary"
-                    class="h-8 px-2 text-[11px] uppercase tracking-wide gap-2"
+                    variant="ghost"
+                    class="h-8 px-3 text-[11px] uppercase tracking-wide rounded border border-slate-300 bg-slate-900 text-white dark:border-slate-700 dark:bg-slate-200 dark:text-slate-900 gap-2"
                     @click="state.helpOpen = true"
                   >
                     <HelpCircle class="w-4 h-4" />
@@ -963,7 +964,7 @@ const exportCurrentBlock = () => {
                     size="icon"
                     variant="ghost"
                     class="h-[28px] w-[28px] text-xs border transition-colors"
-                    :class="state.previewViewport === option.id ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'bg-muted text-foreground border-border hover:bg-muted/80'"
+                    :class="state.previewViewport === option.id ? 'bg-slate-700 text-white border-slate-700 shadow-sm dark:bg-slate-200 dark:text-slate-900 dark:border-slate-200' : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700 dark:hover:bg-slate-800'"
                     @click="setPreviewViewport(option.id)"
                   >
                     <component :is="option.icon" class="w-3.5 h-3.5" />
@@ -1008,20 +1009,20 @@ const exportCurrentBlock = () => {
         </SheetHeader>
         <div class="px-6 pb-6">
           <Tabs class="w-full" default-value="guide">
-            <TabsList class="w-full mt-3 bg-secondary rounded-sm grid grid-cols-5">
-              <TabsTrigger value="guide" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+            <TabsList class="w-full mt-3 rounded-sm grid grid-cols-5 border border-slate-300 bg-slate-200 dark:border-slate-700 dark:bg-slate-800">
+              <TabsTrigger value="guide" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
                 Block Guide
               </TabsTrigger>
-              <TabsTrigger value="carousel" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+              <TabsTrigger value="carousel" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
                 Carousel Usage
               </TabsTrigger>
-              <TabsTrigger value="form-helpers" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+              <TabsTrigger value="form-helpers" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
                 Form Helpers
               </TabsTrigger>
-              <TabsTrigger value="nav-bar" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+              <TabsTrigger value="nav-bar" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
                 Nav Bar
               </TabsTrigger>
-              <TabsTrigger value="scroll-reveals" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+              <TabsTrigger value="scroll-reveals" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
                 Scroll Reveals
               </TabsTrigger>
             </TabsList>

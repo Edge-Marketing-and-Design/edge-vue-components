@@ -246,7 +246,7 @@ const handleThemeImport = async (event) => {
       :filter="state.filter"
       collection="themes"
       class="pt-0 flex-1"
-      header-class="bg-secondary py-2 border"
+      header-class="py-2 border-b border-slate-300 bg-slate-100 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
     >
       <template #header-end>
         <div class="flex items-center gap-2">
@@ -271,7 +271,7 @@ const handleThemeImport = async (event) => {
             <Loader2 v-if="state.importingJson" class="h-4 w-4 animate-spin" />
             <Upload v-else class="h-4 w-4" />
           </edge-shad-button>
-          <edge-shad-button class="uppercase bg-primary" to="/app/dashboard/themes/new">
+          <edge-shad-button class="uppercase bg-slate-700 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300" to="/app/dashboard/themes/new">
             Add Theme
           </edge-shad-button>
         </div>
@@ -280,8 +280,8 @@ const handleThemeImport = async (event) => {
         <template v-for="item in slotProps.filtered" :key="item.docId">
           <edge-shad-button variant="text" class="cursor-pointer w-full flex justify-between items-center py-2 gap-3" :to="`/app/dashboard/themes/${item.docId}`">
             <div>
-              <Avatar class="cursor-pointer p-0 h-8 w-8 mr-2">
-                <FilePenLine class="h-5 w-5" />
+              <Avatar class="cursor-pointer p-0 h-8 w-8 mr-2 border border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200">
+                <FilePenLine class="h-4 w-4" />
               </Avatar>
             </div>
             <div class="grow text-left">

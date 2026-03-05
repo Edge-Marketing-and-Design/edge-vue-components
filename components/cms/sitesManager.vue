@@ -59,7 +59,7 @@ const queryOperator = computed(() => {
     <template #header-end>
       <edge-shad-button
         v-if="canAddSite"
-        class="uppercase bg-primary"
+        class="uppercase bg-slate-700 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
         to="/app/dashboard/sites/new"
       >
         Add Site
@@ -75,8 +75,8 @@ const queryOperator = computed(() => {
           :disabled="isAiBusy(item.aiBootstrapStatus)"
         >
           <div>
-            <Avatar class="cursor-pointer p-0 h-8 w-8 mr-2">
-              <FilePenLine class="h-5 w-5" />
+            <Avatar class="cursor-pointer p-0 h-8 w-8 mr-2 border border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200">
+              <FilePenLine class="h-4 w-4" />
             </Avatar>
           </div>
           <div class="grow text-left">
