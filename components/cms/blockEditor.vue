@@ -135,7 +135,7 @@ const previewSurfaceClass = computed(() => {
 const previewCanvasClass = computed(() => {
   const content = String(state.previewBlock?.content || '')
   const hasFixedContent = /\bfixed\b/.test(content)
-  return hasFixedContent ? 'min-h-[calc(100vh-360px)]' : 'min-h-[88px]'
+  return hasFixedContent ? 'h-[calc(100vh-370px)]' : 'h-[calc(100vh-370px)] overflow-y-auto'
 })
 
 onMounted(() => {
@@ -211,7 +211,7 @@ const BLOCK_CONTENT_SNIPPETS = [
   },
   {
     label: 'Render Blocks',
-    snippet: `{{{#renderBlocks {"field":"item"}}}}`,
+    snippet: '{{{#renderBlocks {"field":"item"}}}}',
     description: 'Render block content from an object field',
   },
   {
@@ -802,7 +802,7 @@ const exportCurrentBlock = () => {
       :new-doc-schema="state.newDocs.blocks"
       header-class="py-2 rounded-none sticky top-0 border-b border-slate-300 bg-slate-100 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
       class="w-full mx-auto flex-1 bg-transparent flex flex-col border-none shadow-none pt-0 px-0"
-      card-content-class="px-0"
+      card-content-class="px-0 pb-0"
       :show-footer="false"
       :no-close-after-save="true"
       :working-doc-overrides="state.workingDoc"
@@ -927,8 +927,8 @@ const exportCurrentBlock = () => {
                 language="handlebars"
                 name="content"
                 :enable-formatting="false"
-                height="calc(100vh - 300px)"
-                class="mb-4 flex-1"
+                height="calc(100vh - 316px)"
+                class="mb-0 flex-1"
                 @line-click="payload => handleEditorLineClick(payload, slotProps.workingDoc)"
               >
                 <template #end-actions>
@@ -990,11 +990,12 @@ const exportCurrentBlock = () => {
                 class="w-full mx-auto rounded-none overflow-visible"
                 :style="previewViewportStyle"
               >
-                <div class="relative overflow-visible rounded-none" :class="[previewSurfaceClass, previewCanvasClass]" style="transform: translateZ(0);">
+                <div class="w-full mx-auto bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30" :class="previewSurfaceClass" style="transform: translateZ(0);">
                   <edge-cms-block
                     v-if="state.previewBlock"
                     :key="previewThemeRenderKey"
                     v-model="state.previewBlock"
+                    class="!h-[calc(100vh-300px)] overflow-y-auto"
                     :site-id="edgeGlobal.edgeState.blockEditorSite"
                     :theme="theme"
                     :edit-mode="true"
@@ -1963,6 +1964,7 @@ const exportCurrentBlock = () => {
         &lt;label for="cms-company"&gt;Company&lt;/label&gt;
         &lt;input id="cms-company" name="company" type="text" tabindex="-1" autocomplete="off" /&gt;
       &lt;/div&gt;
+      &lt;input type="hidden" name="subject" value="New Website Contact Form Submission" /&gt;
 
       &lt;div class="space-y-4"&gt;
         {{{#array {"field":"formFields","schema":[{"field":"fieldName","type":"text","title":"Field Label"},{"field":"fieldType","type":"option","title":"Field Type","option":{"optionsKey":"title","optionsValue":"value","options":[{"title":"Text","value":"text"},{"title":"Email","value":"email"},{"title":"Phone","value":"tel"},{"title":"Textarea","value":"textarea"}]},"value":"text"},{"field":"fieldRequired","type":"option","title":"Required","option":{"optionsKey":"title","optionsValue":"value","options":[{"title":"Yes","value":"true"},{"title":"No","value":"false"}]},"value":"true"}],"value":[{"fieldName":"Name","fieldType":"text","fieldRequired":"true"},{"fieldName":"Email","fieldType":"email","fieldRequired":"true"},{"fieldName":"Message","fieldType":"textarea","fieldRequired":"true"}]}}}}
@@ -2006,7 +2008,9 @@ const exportCurrentBlock = () => {
     &lt;/form&gt;
 
     &lt;div class="hidden"&gt;
-      {{{#text {"field":"emailTo","title":"Email To","value":"test@testing.com"}}}}
+      {{{#array {"field":"emailTo","value":["test@testing.com"]}}}}
+       <!-- nothing here ! -->
+      {{{/array}}}
     &lt;/div&gt;
   &lt;/div&gt;
 &lt;/section&gt;</code></pre>

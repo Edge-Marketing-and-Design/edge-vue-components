@@ -1908,7 +1908,7 @@ const hasUnsavedChanges = (changes) => {
     @unsaved-changes="hasUnsavedChanges"
   >
     <template #header="slotProps">
-      <div class="relative flex items-center p-2 justify-between top-0 z-50 rounded h-[50px] border border-stone-300 bg-stone-100 text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100">
+      <div class="rounded-none relative flex items-center p-2 justify-between top-0 z-50 rounded h-[50px] border border-stone-300 bg-stone-100 text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100">
         <span class="text-lg font-semibold whitespace-nowrap pr-1">{{ pageName }}</span>
 
         <div class="flex w-full items-center">
@@ -2097,7 +2097,7 @@ const hasUnsavedChanges = (changes) => {
             :key="`${pagePreviewRenderKey}:list`"
             data-cms-preview-surface="page"
             :data-cms-preview-mode="state.editMode ? 'edit' : 'preview'"
-            class="w-full h-[calc(100vh-180px)]  mt-2 overflow-y-auto mx-auto bg-card border border-border shadow-sm md:shadow-md p-0 space-y-6"
+            class="w-full h-[calc(100vh-200px)]  mt-2 overflow-y-auto mx-auto bg-card border border-border shadow-sm md:shadow-md p-0 space-y-6"
             :class="[{ 'transition-all duration-300': !state.editMode }, state.editMode ? 'rounded-lg' : 'rounded-none']"
             :style="previewViewportContainStyle"
           >
@@ -2821,6 +2821,10 @@ const hasUnsavedChanges = (changes) => {
 }
 
 .cms-page-preview-mode :deep(.border-emerald-200.bg-emerald-50) {
+  display: none !important;
+}
+
+.cms-page-preview-mode :deep(.border-emerald-300.bg-emerald-50) {
   display: none !important;
 }
 

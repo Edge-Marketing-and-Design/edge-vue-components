@@ -1115,11 +1115,20 @@ const handlePostSaved = () => {
 const onWorkingDocUpdate = (doc) => {
   if (doc && typeof doc === 'object') {
     syncEventUtcFields(doc)
+    const savedDocId = String(doc.docId || '').trim()
+    if (savedDocId && state.activePostId === 'new')
+      state.activePostId = savedDocId
     const { normalized, changed, migratedFromLegacyHtml } = normalizePostBuilderDoc(doc)
     if (changed) {
       doc.content = normalized.content
       doc.structure = normalized.structure
     }
+    const blockIds = [...new Set((doc.content || []).map(block => block?.blockId).filter(id => id))]
+    const currentBlockIds = Array.isArray(doc.blockIds) ? doc.blockIds : []
+    const blockIdsChanged = blockIds.length !== currentBlockIds.length
+      || blockIds.some((id, index) => id !== currentBlockIds[index])
+    if (blockIdsChanged)
+      doc.blockIds = blockIds
     if (migratedFromLegacyHtml) {
       const migrationId = String(state.activePostId || 'new')
       if (!notifiedLegacyMigrationIds.has(migrationId)) {
@@ -1385,7 +1394,7 @@ const unPublishPost = async (postId) => {
 
     <div
       v-if="isFullList"
-      class="rounded-lg border border-slate-300 bg-white/90 overflow-hidden flex flex-col h-[calc(100vh-180px)] max-h-[calc(100vh-180px)] dark:border-slate-700 dark:bg-slate-900/70"
+      class="rounded-lg border border-slate-300 bg-white/90 overflow-hidden flex flex-col h-[calc(100vh-220px)] dark:border-slate-700 dark:bg-slate-900/70"
     >
       <div class="flex items-center justify-between border-b border-slate-300 bg-slate-100 px-4 py-3 dark:border-slate-700 dark:bg-slate-800">
         <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">
@@ -1795,7 +1804,7 @@ const unPublishPost = async (postId) => {
           </div>
         </template>
         <template #main="slotProps">
-          <div class="p-6 h-[calc(100vh-122px)] overflow-y-auto">
+          <div class="p-6 h-[calc(100vh-190px)] overflow-y-auto">
             <div class="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
               <div class="space-y-6">
                 <div class="rounded-xl border bg-card p-4 space-y-3 shadow-sm">
