@@ -1115,11 +1115,20 @@ const handlePostSaved = () => {
 const onWorkingDocUpdate = (doc) => {
   if (doc && typeof doc === 'object') {
     syncEventUtcFields(doc)
+    const savedDocId = String(doc.docId || '').trim()
+    if (savedDocId && state.activePostId === 'new')
+      state.activePostId = savedDocId
     const { normalized, changed, migratedFromLegacyHtml } = normalizePostBuilderDoc(doc)
     if (changed) {
       doc.content = normalized.content
       doc.structure = normalized.structure
     }
+    const blockIds = [...new Set((doc.content || []).map(block => block?.blockId).filter(id => id))]
+    const currentBlockIds = Array.isArray(doc.blockIds) ? doc.blockIds : []
+    const blockIdsChanged = blockIds.length !== currentBlockIds.length
+      || blockIds.some((id, index) => id !== currentBlockIds[index])
+    if (blockIdsChanged)
+      doc.blockIds = blockIds
     if (migratedFromLegacyHtml) {
       const migrationId = String(state.activePostId || 'new')
       if (!notifiedLegacyMigrationIds.has(migrationId)) {
