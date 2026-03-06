@@ -1603,7 +1603,14 @@ const getTagsFromPosts = computed(() => {
                   </div>
                 </div>
                 <div v-else-if="entry.meta?.option">
+                  <cms-publication-picker-field
+                    v-if="entry.meta.option?.picker === 'publication'"
+                    v-model="state.draft[entry.field]"
+                    :option="entry.meta.option"
+                    :label="genTitleFromField(entry)"
+                  />
                   <edge-cms-options-select
+                    v-else
                     v-model="state.draft[entry.field]"
                     :option="entry.meta.option"
                     :label="genTitleFromField(entry)"
