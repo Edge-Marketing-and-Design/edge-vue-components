@@ -1120,6 +1120,12 @@ const onWorkingDocUpdate = (doc) => {
       doc.content = normalized.content
       doc.structure = normalized.structure
     }
+    const blockIds = [...new Set((doc.content || []).map(block => block?.blockId).filter(id => id))]
+    const currentBlockIds = Array.isArray(doc.blockIds) ? doc.blockIds : []
+    const blockIdsChanged = blockIds.length !== currentBlockIds.length
+      || blockIds.some((id, index) => id !== currentBlockIds[index])
+    if (blockIdsChanged)
+      doc.blockIds = blockIds
     if (migratedFromLegacyHtml) {
       const migrationId = String(state.activePostId || 'new')
       if (!notifiedLegacyMigrationIds.has(migrationId)) {
