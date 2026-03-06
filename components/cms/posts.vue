@@ -1115,6 +1115,9 @@ const handlePostSaved = () => {
 const onWorkingDocUpdate = (doc) => {
   if (doc && typeof doc === 'object') {
     syncEventUtcFields(doc)
+    const savedDocId = String(doc.docId || '').trim()
+    if (savedDocId && state.activePostId === 'new')
+      state.activePostId = savedDocId
     const { normalized, changed, migratedFromLegacyHtml } = normalizePostBuilderDoc(doc)
     if (changed) {
       doc.content = normalized.content
