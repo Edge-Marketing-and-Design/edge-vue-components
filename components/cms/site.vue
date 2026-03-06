@@ -1805,7 +1805,7 @@ const pageSettingsUpdated = async (pageData) => {
     <div v-else-if="!props.page && props.site === 'new' && !canCreateSite" class="p-6 text-sm text-red-600">
       Only organization admins can create sites.
     </div>
-    <div v-else class="flex flex-col h-[calc(100vh-58px)] overflow-hidden">
+    <div v-else class="flex flex-col h-[calc(100vh-78px)] overflow-hidden">
       <div
         class="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-2 border border-slate-300 bg-slate-100 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
         :class="isTemplateSite ? 'min-h-[68px]' : ''"
@@ -1994,13 +1994,13 @@ const pageSettingsUpdated = async (pageData) => {
               </template>
               <template #list="slotProps">
                 <div class="grid gap-4 pt-4 w-full md:grid-cols-[320px_minmax(0,1fr)]">
-                  <div class="space-y-2">
+                  <div class="space-y-2  !h-[calc(100vh-270px)] overflow-y-auto">
                     <div
                       v-for="item in slotProps.filtered"
                       :key="item.docId"
                       role="button"
                       tabindex="0"
-                      class="group rounded-lg border p-3 text-left transition hover:border-primary/60 hover:bg-muted/60"
+                      class="group rounded-lg border p-3 text-left transition hover:border-primary/60 hover:bg-muted/60 "
                       :class="state.selectedSubmissionId === item.docId ? 'border-primary/70 bg-muted/70 shadow-sm' : 'border-border/60 bg-card'"
                       @click="state.selectedSubmissionId = item.docId; markSubmissionRead(item.docId)"
                       @keyup.enter="state.selectedSubmissionId = item.docId; markSubmissionRead(item.docId)"
@@ -2026,7 +2026,7 @@ const pageSettingsUpdated = async (pageData) => {
                       </div>
                     </div>
                   </div>
-                  <div>
+                  <div class="!h-[calc(100vh-270px)] overflow-y-auto">
                     <Card v-if="selectedSubmission" class="border border-border/70 bg-card/95 shadow-sm">
                       <CardHeader class="flex flex-col gap-2">
                         <div class="flex flex-wrap items-start justify-between gap-2">

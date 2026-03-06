@@ -514,7 +514,7 @@ onBeforeMount(async () => {
               <div class="w-full mx-auto bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30">
                 <edge-cms-block-picker
                   :site-id="edgeGlobal.edgeState.blockEditorSite"
-                  class="!h-[calc(100vh-220px)] overflow-y-auto"
+                  class="!h-[calc(100vh-270px)] overflow-y-auto"
                   list-only
                   :theme="previewTheme"
                 />

@@ -440,7 +440,7 @@ onBeforeUnmount(() => {
         </insert-menu>
       </template>
     </edge-menu>
-    <CardContent class="px-0">
+    <CardContent class="px-0 pb-0">
       <edge-shad-dialog
         v-model="state.diffDialog"
       >
