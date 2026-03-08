@@ -98,6 +98,7 @@ const state = reactive({
   importPageConflictDocId: '',
   importPageErrorDialogOpen: false,
   importPageErrorMessage: '',
+  siteSettingsWorkingDoc: {},
 })
 
 const pageImportInputRef = ref(null)
@@ -951,8 +952,34 @@ const unPublishSite = async () => {
 }
 
 const publishSite = async () => {
-  for (const [pageId, pageData] of Object.entries(edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`] || {})) {
-    await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`, pageData)
+  const pagesData = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`] || {}
+  const pageVersions = {}
+
+  for (const [pageId, pageData] of Object.entries(pagesData)) {
+    const normalizedVersion = Number(pageData?.version)
+    const pageVersion = Number.isFinite(normalizedVersion) ? Math.max(0, Math.trunc(normalizedVersion)) : 1
+    pageVersions[pageId] = pageVersion
+    await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`, {
+      ...pageData,
+      version: pageVersion,
+    })
+  }
+
+  await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, {
+    pageVersions,
+  })
+
+  try {
+    await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`, props.site, {
+      pageVersions,
+    })
+  }
+  catch {
+    await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`, {
+      ...siteData.value,
+      docId: props.site,
+      pageVersions,
+    })
   }
 }
 
@@ -1660,6 +1687,21 @@ const pageSettingsUpdated = async (pageData) => {
   await nextTick()
   state.updating = false
 }
+
+const getNextVersion = (value) => {
+  const numericVersion = Number(value)
+  if (!Number.isFinite(numericVersion))
+    return 1
+  return Math.max(0, Math.trunc(numericVersion)) + 1
+}
+
+const siteSettingsWorkingDocUpdates = (workingDoc) => {
+  if (!workingDoc || typeof workingDoc !== 'object')
+    return
+  const nextVersion = getNextVersion(siteData.value?.version)
+  if (state.siteSettingsWorkingDoc.version !== nextVersion)
+    state.siteSettingsWorkingDoc.version = nextVersion
+}
 </script>
 
 <template>
@@ -2244,7 +2286,9 @@ const pageSettingsUpdated = async (pageData) => {
           :show-footer="false"
           :show-header="false"
           :save-function-override="onSubmit"
+          :working-doc-overrides="state.siteSettingsWorkingDoc"
           card-content-class="px-0"
+          @working-doc="siteSettingsWorkingDocUpdates"
           @error="formErrors"
         >
           <template #main="slotProps">
