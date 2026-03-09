@@ -1179,6 +1179,12 @@ const getTagsFromPosts = computed(() => {
         v-if="props.editMode"
         class="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-[10001]"
       >
+        <div class="absolute top-2 left-2">
+          <span class="inline-flex items-center rounded bg-black px-2 py-1 text-[11px] font-medium leading-none text-white">
+            {{ previewBlockDisplayName }}
+          </span>
+        </div>
+
         <!-- Delete button top right -->
         <div v-if="props.allowDelete" data-cms-block-control class="pointer-events-auto absolute top-2 right-2">
           <edge-shad-button

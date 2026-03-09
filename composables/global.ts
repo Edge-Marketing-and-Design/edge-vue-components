@@ -469,6 +469,150 @@ const resolveCmsCollectionTokens = (input: any, currentSite: any = '') => {
   return walk(input)
 }
 
+const MONTH_NAMES = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+]
+
+const parseLocalDateTimeParts = (value: any) => {
+  const match = String(value || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/)
+  if (!match)
+    return null
+
+  const [, year, month, day, hour, minute, second = '00'] = match
+  return {
+    year: Number(year),
+    month: Number(month),
+    day: Number(day),
+    hour: Number(hour),
+    minute: Number(minute),
+    second: Number(second),
+  }
+}
+
+const formatCmsDateTime = (value: any) => {
+  const raw = String(value || '').trim()
+  if (!raw)
+    return ''
+
+  const localParts = parseLocalDateTimeParts(raw)
+  if (localParts) {
+    const monthName = MONTH_NAMES[localParts.month - 1]
+    if (!monthName)
+      return raw
+
+    const hour12 = localParts.hour % 12 || 12
+    const meridiem = localParts.hour >= 12 ? 'PM' : 'AM'
+    return `${monthName} ${String(localParts.day).padStart(2, '0')}, ${localParts.year}, ${String(hour12).padStart(2, '0')}:${String(localParts.minute).padStart(2, '0')}${meridiem}`
+  }
+
+  const date = new Date(raw)
+  if (Number.isNaN(date.getTime()))
+    return raw
+
+  const monthName = MONTH_NAMES[date.getMonth()]
+  const hour12 = date.getHours() % 12 || 12
+  const meridiem = date.getHours() >= 12 ? 'PM' : 'AM'
+  return `${monthName} ${String(date.getDate()).padStart(2, '0')}, ${date.getFullYear()}, ${String(hour12).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}${meridiem}`
+}
+
+const collectCmsSearchFragments = (value: any, bag: string[], depth = 0) => {
+  if (bag.length >= 800)
+    return
+  if (depth > 6)
+    return
+
+  if (typeof value === 'string') {
+    const text = value
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (text)
+      bag.push(text)
+    return
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    bag.push(String(value))
+    return
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((item) => {
+      collectCmsSearchFragments(item, bag, depth + 1)
+    })
+    return
+  }
+
+  if (!value || typeof value !== 'object')
+    return
+
+  const ignoredKeys = new Set([
+    'featuredImage',
+    'featuredImages',
+    'cloudflareImageVariants',
+    'image',
+    'images',
+  ])
+
+  Object.entries(value).forEach(([key, child]) => {
+    if (ignoredKeys.has(key))
+      return
+    collectCmsSearchFragments(child, bag, depth + 1)
+  })
+}
+
+const buildCmsSearchText = (item: any) => {
+  const fragments: string[] = []
+
+  ;[
+    item?.title,
+    item?.subtitle,
+    item?.blurb,
+    item?.description,
+    item?.name,
+    item?.tags,
+    item?.content,
+    item?.postContent,
+    item?.body,
+    item?.event,
+  ].forEach((value) => {
+    collectCmsSearchFragments(value, fragments, 0)
+  })
+
+  return fragments
+    .join(' ')
+    .toLowerCase()
+    .slice(0, 12000)
+}
+
+const normalizeCmsCollectionItem = (item: any) => {
+  if (!item || typeof item !== 'object' || Array.isArray(item))
+    return item
+
+  const normalized = dupObject(item)
+  const normalizedType = String(normalized.type || normalized.postType || 'post').trim().toLowerCase()
+  normalized.__normalizedType = normalizedType === 'event' ? 'event' : 'post'
+  normalized.__searchText = buildCmsSearchText(normalized)
+
+  if (!normalized.event || typeof normalized.event !== 'object' || Array.isArray(normalized.event))
+    return normalized
+
+  normalized.event.startAtFormatted = formatCmsDateTime(normalized.event.startAt)
+  normalized.event.endAtFormatted = formatCmsDateTime(normalized.event.endAt)
+  return normalized
+}
+
 const cmsCollectionData = async (edgeFirebase: any, value: any, meta: any, currentSite: any = '') => {
   for (const key in meta) {
     if (meta[key]?.collection) {
@@ -507,7 +651,7 @@ const cmsCollectionData = async (edgeFirebase: any, value: any, meta: any, curre
       }
       await staticSearch.getData(collectionPath, currentQuery, meta[key].collection.order, meta[key].limit)
 
-      value[key] = Object.values(staticSearch.results.data)
+      value[key] = Object.values(staticSearch.results.data).map(item => normalizeCmsCollectionItem(item))
     }
   }
   return value
