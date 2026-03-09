@@ -639,6 +639,13 @@ onBeforeMount(() => {
   ensurePreviewSnapshots()
 })
 
+const getNextVersion = (value) => {
+  const numericVersion = Number(value)
+  if (!Number.isFinite(numericVersion))
+    return 1
+  return Math.max(0, Math.trunc(numericVersion)) + 1
+}
+
 const editorDocUpdates = (workingDoc) => {
   ensureStructureDefaults(workingDoc, false)
   if (workingDoc?.post || (Array.isArray(workingDoc?.postContent) && workingDoc.postContent.length > 0) || Array.isArray(workingDoc?.postStructure))
@@ -651,6 +658,10 @@ const editorDocUpdates = (workingDoc) => {
   blockIds.push(...postBlockIds)
   const uniqueBlockIds = [...new Set(blockIds)]
   state.workingDoc.blockIds = uniqueBlockIds
+  const storedVersion = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`]?.[props.page]?.version
+  const nextVersion = getNextVersion(storedVersion)
+  if (state.workingDoc.version !== nextVersion)
+    state.workingDoc.version = nextVersion
 }
 
 const pageName = computed(() => {
@@ -1871,11 +1882,34 @@ const publishPage = async (pageId) => {
   if (state.publishLoading)
     return
   const pageData = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`] || {}
-  if (!pageData[pageId])
+  const pageDoc = pageData[pageId]
+  if (!pageDoc)
     return
   state.publishLoading = true
   try {
-    await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`, pageData[pageId])
+    await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`, pageDoc)
+
+    const normalizedVersion = Number(pageDoc?.version)
+    const pageVersion = Number.isFinite(normalizedVersion) ? Math.max(0, Math.trunc(normalizedVersion)) : 1
+    const publishedSettingsPath = `${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`
+    try {
+      await edgeFirebase.changeDoc(publishedSettingsPath, props.site, {
+        [`pageVersions.${pageId}`]: pageVersion,
+      })
+    }
+    catch {
+      await edgeFirebase.storeDoc(publishedSettingsPath, {
+        docId: props.site,
+        pageVersions: {
+          [pageId]: pageVersion,
+        },
+      })
+    }
+
+    const siteSettingsPath = `${edgeGlobal.edgeState.organizationDocPath}/sites`
+    await edgeFirebase.changeDoc(siteSettingsPath, props.site, {
+      [`pageVersions.${pageId}`]: pageVersion,
+    })
   }
   finally {
     state.publishLoading = false
