@@ -1767,11 +1767,12 @@ const exportCurrentBlock = () => {
                     </h3>
                     <div class="text-sm text-foreground space-y-1">
                       <div><code>cms-nav-root</code>: nav behavior root (required).</div>
+                      <div><code>cms-nav-item</code>: nav entry wrapper used for current-route detection (recommended for every route item).</div>
                       <div><code>cms-nav-toggle</code>: button that toggles open/closed (required).</div>
                       <div><code>cms-nav-panel</code>: right slide-out panel (required).</div>
                       <div><code>cms-nav-overlay</code>: backdrop click-to-close (optional but recommended).</div>
                       <div><code>cms-nav-close</code>: explicit close button in panel (optional).</div>
-                      <div><code>cms-nav-link</code>: links that should close panel on click (optional).</div>
+                      <div><code>cms-nav-link</code>: clickable route link; also closes panel on click and participates in current-route detection.</div>
                       <div><code>cms-nav-folder</code>: desktop folder wrapper for dropdown behavior (recommended).</div>
                       <div><code>cms-nav-folder-toggle</code>: desktop folder trigger link/button (recommended).</div>
                       <div><code>cms-nav-folder-menu</code>: desktop dropdown menu panel for folder items (recommended).</div>
@@ -1800,6 +1801,67 @@ const exportCurrentBlock = () => {
                     </div>
                   </section>
 
+                  <section class="space-y-2">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Current Route Styling
+                    </h3>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div>Mark each nav entry wrapper with <code>.cms-nav-item</code> or <code>data-cms-nav-item</code>.</div>
+                      <div>Mark the actual clickable route link with <code>.cms-nav-link</code> or <code>data-cms-nav-link</code>.</div>
+                      <div>Add <code>data-cms-nav-current-class="..."</code> to any element inside that item that should receive active-route classes.</div>
+                      <div>Exact matches are current, and parent paths are also current. For example, <code>/services</code> matches both <code>/services</code> and <code>/services/estate-planning</code>.</div>
+                      <div>External links and hash links are ignored by the current-route helper.</div>
+                      <div>The runtime sets <code>data-cms-nav-current="true"</code> on the active item, the matching link, and any element using <code>data-cms-nav-current-class</code>.</div>
+                      <div>Exact matches get <code>aria-current="page"</code>; parent-path matches get <code>aria-current="true"</code>.</div>
+                      <div>Keep hover styles in your normal classes like <code>hover:text-navActive</code>; <code>data-cms-nav-current-class</code> is only for current-route styling.</div>
+                    </div>
+                  </section>
+
+                  <section class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Current Route Example
+                    </h3>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;nav class="cms-nav-root" data-cms-nav-root&gt;
+  &lt;div class="cms-nav-item"&gt;
+    &lt;a
+      href="/about"
+      class="cms-nav-link hover:text-navActive"
+      data-cms-nav-current-class="!text-navActive"
+    &gt;
+      About
+    &lt;/a&gt;
+  &lt;/div&gt;
+
+  &lt;div
+    class="cms-nav-item"
+    data-cms-nav-current-class="border-b-2 border-navActive"
+  &gt;
+    &lt;a
+      href="/services"
+      class="cms-nav-link hover:text-navActive"
+      data-cms-nav-current-class="!text-navActive"
+    &gt;
+      Services
+    &lt;/a&gt;
+  &lt;/div&gt;
+
+  &lt;div class="cms-nav-item"&gt;
+    &lt;div
+      class="rounded-full px-4 py-2 transition"
+      data-cms-nav-current-class="bg-navActive/10"
+    &gt;
+      &lt;a
+        href="/services/estate-planning"
+        class="cms-nav-link uppercase tracking-widest hover:text-navActive"
+        data-cms-nav-current-class="!text-navActive"
+      &gt;
+        Estate Planning
+      &lt;/a&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+&lt;/nav&gt;</code></pre>
+                  </section>
+
                   <section class="space-y-3">
                     <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                       Nav Block Template (Copy / Paste)
@@ -1820,28 +1882,28 @@ const exportCurrentBlock = () => {
         &lt;div class="cms-nav-desktop ml-auto flex items-center gap-2"&gt;
           &lt;ul class="hidden lg:flex items-center gap-x-[20px] pt-1 text-sm uppercase tracking-widest list-none m-0 p-0 [&amp;&gt;li]:m-0 [&amp;&gt;li&gt;a]:m-0"&gt;
             {{{#subarray:menuItem {"field":"item.menus.Site Root","limit":5,"value":[]}}}}
-            &lt;li class="relative group cms-nav-folder" data-cms-nav-folder&gt;
+            &lt;li class="relative group cms-nav-folder cms-nav-item" data-cms-nav-folder&gt;
               {{{#if {"cond":"menuItem.item.type == 'external'"}}}}
               &lt;a href="{{menuItem.item.url}}" class="cursor-pointer"&gt;{{menuItem.name}}&lt;/a&gt;
               {{{#else}}}
               {{{#if {"cond":"menuItem.item == '[object Object]'"}}}}
               {{{#entries:folderEntry {"field":"menuItem.item","value":{}}}}}
               {{{#if {"cond":"folderEntry.key == 'home'"}}}}
-              &lt;a href="/" class="cms-nav-folder-toggle cursor-pointer text-sideNavText" data-cms-nav-folder-toggle&gt;{{menuItem.menuTitle}}&lt;/a&gt;
+              &lt;a href="/" class="cms-nav-link cms-nav-folder-toggle cursor-pointer text-sideNavText hover:text-navActive" data-cms-nav-folder-toggle data-cms-nav-current-class="!text-navActive"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
               {{{#else}}}
-              &lt;a href="/{{folderEntry.key}}" class="cms-nav-folder-toggle cursor-pointer text-sideNavText" data-cms-nav-folder-toggle&gt;{{menuItem.menuTitle}}&lt;/a&gt;
+              &lt;a href="/{{folderEntry.key}}" class="cms-nav-link cms-nav-folder-toggle cursor-pointer text-sideNavText hover:text-navActive" data-cms-nav-folder-toggle data-cms-nav-current-class="!text-navActive"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
               {{{/if}}}
               &lt;div class="cms-nav-folder-menu absolute left-0 top-full z-40 hidden min-w-max whitespace-nowrap bg-sideNavBg text-sideNavText py-2 text-left px-12 normal-case tracking-normal shadow-xl" data-cms-nav-folder-menu&gt;
               &lt;ul&gt;
                 {{{#subarray:folderChild {"field":"item.value","value":[]}}}}
-                &lt;li class="py-1"&gt;
+                &lt;li class="py-1 cms-nav-item"&gt;
                   {{{#if {"cond":"folderChild.item.type == 'external'"}}}}
                   &lt;a href="{{folderChild.item.url}}" class="block cursor-pointer whitespace-nowrap text-sideNavText"&gt;{{folderChild.name}}&lt;/a&gt;
                   {{{#else}}}
                   {{{#if {"cond":"folderChild.menuTitle"}}}}
-                  &lt;a href="/{{folderEntry.key}}/{{folderChild.name}}" class="block cursor-pointer whitespace-nowrap text-sideNavText"&gt;{{folderChild.menuTitle}}&lt;/a&gt;
+                  &lt;a href="/{{folderEntry.key}}/{{folderChild.name}}" class="cms-nav-link block cursor-pointer whitespace-nowrap text-sideNavText hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{folderChild.menuTitle}}&lt;/a&gt;
                   {{{#else}}}
-                  &lt;a href="/{{folderEntry.key}}/{{folderChild.name}}" class="block cursor-pointer whitespace-nowrap text-sideNavText"&gt;{{folderChild.name}}&lt;/a&gt;
+                  &lt;a href="/{{folderEntry.key}}/{{folderChild.name}}" class="cms-nav-link block cursor-pointer whitespace-nowrap text-sideNavText hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{folderChild.name}}&lt;/a&gt;
                   {{{/if}}}
                   {{{/if}}}
                 &lt;/li&gt;
@@ -1852,15 +1914,15 @@ const exportCurrentBlock = () => {
               {{{#else}}}
               {{{#if {"cond":"menuItem.name == 'home'"}}}}
               {{{#if {"cond":"menuItem.menuTitle"}}}}
-              &lt;a href="/" class="cursor-pointer"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
+              &lt;a href="/" class="cms-nav-link cursor-pointer hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
               {{{#else}}}
-              &lt;a href="/" class="cursor-pointer"&gt;{{menuItem.name}}&lt;/a&gt;
+              &lt;a href="/" class="cms-nav-link cursor-pointer hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{menuItem.name}}&lt;/a&gt;
               {{{/if}}}
               {{{#else}}}
               {{{#if {"cond":"menuItem.menuTitle"}}}}
-              &lt;a href="/{{menuItem.name}}" class="cursor-pointer"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
+              &lt;a href="/{{menuItem.name}}" class="cms-nav-link cursor-pointer hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
               {{{#else}}}
-              &lt;a href="/{{menuItem.name}}" class="cursor-pointer"&gt;{{menuItem.name}}&lt;/a&gt;
+              &lt;a href="/{{menuItem.name}}" class="cms-nav-link cursor-pointer hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{menuItem.name}}&lt;/a&gt;
               {{{/if}}}
               {{{/if}}}
               {{{/if}}}
@@ -1897,27 +1959,27 @@ const exportCurrentBlock = () => {
 
       &lt;ul class="w-full space-y-4 border-b border-black pb-4 uppercase"&gt;
         {{{#subarray:menuItem {"field":"item.menus.Site Root","value":[]}}}}
-        &lt;li class="border-t border-black pt-4"&gt;
+        &lt;li class="border-t border-black pt-4 cms-nav-item"&gt;
           {{{#if {"cond":"menuItem.item.type == 'external'"}}}}
-          &lt;a href="{{menuItem.item.url}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{menuItem.name}}&lt;/a&gt;
+          &lt;a href="{{menuItem.item.url}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm hover:text-navActive"&gt;{{menuItem.name}}&lt;/a&gt;
           {{{#else}}}
           {{{#if {"cond":"menuItem.item == '[object Object]'"}}}}
           {{{#entries:folderEntry {"field":"menuItem.item","value":{}}}}}
           {{{#if {"cond":"folderEntry.key == 'home'"}}}}
-          &lt;a href="/" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
+          &lt;a href="/" class="cms-nav-link block text-sideNavText tracking-widest text-sm hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
           {{{#else}}}
-          &lt;a href="/{{folderEntry.key}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
+          &lt;a href="/{{folderEntry.key}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
           {{{/if}}}
           &lt;ul class="mt-2 space-y-2 border-l border-black/40 pl-4"&gt;
             {{{#subarray:folderChild {"field":"item.value","value":[]}}}}
-            &lt;li&gt;
+            &lt;li class="cms-nav-item"&gt;
               {{{#if {"cond":"folderChild.item.type == 'external'"}}}}
-              &lt;a href="{{folderChild.item.url}}" class="cms-nav-link block text-sideNavText tracking-widest text-xs"&gt;{{folderChild.name}}&lt;/a&gt;
+              &lt;a href="{{folderChild.item.url}}" class="cms-nav-link block text-sideNavText tracking-widest text-xs hover:text-navActive"&gt;{{folderChild.name}}&lt;/a&gt;
               {{{#else}}}
               {{{#if {"cond":"folderChild.menuTitle"}}}}
-              &lt;a href="/{{folderEntry.key}}/{{folderChild.name}}" class="cms-nav-link block text-sideNavText tracking-widest text-xs"&gt;{{folderChild.menuTitle}}&lt;/a&gt;
+              &lt;a href="/{{folderEntry.key}}/{{folderChild.name}}" class="cms-nav-link block text-sideNavText tracking-widest text-xs hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{folderChild.menuTitle}}&lt;/a&gt;
               {{{#else}}}
-              &lt;a href="/{{folderEntry.key}}/{{folderChild.name}}" class="cms-nav-link block text-sideNavText tracking-widest text-xs"&gt;{{folderChild.name}}&lt;/a&gt;
+              &lt;a href="/{{folderEntry.key}}/{{folderChild.name}}" class="cms-nav-link block text-sideNavText tracking-widest text-xs hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{folderChild.name}}&lt;/a&gt;
               {{{/if}}}
               {{{/if}}}
             &lt;/li&gt;
@@ -1927,15 +1989,15 @@ const exportCurrentBlock = () => {
           {{{#else}}}
           {{{#if {"cond":"menuItem.name == 'home'"}}}}
           {{{#if {"cond":"menuItem.menuTitle"}}}}
-          &lt;a href="/" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
+          &lt;a href="/" class="cms-nav-link block text-sideNavText tracking-widest text-sm hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
           {{{#else}}}
-          &lt;a href="/" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{menuItem.name}}&lt;/a&gt;
+          &lt;a href="/" class="cms-nav-link block text-sideNavText tracking-widest text-sm hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{menuItem.name}}&lt;/a&gt;
           {{{/if}}}
           {{{#else}}}
           {{{#if {"cond":"menuItem.menuTitle"}}}}
-          &lt;a href="/{{menuItem.name}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
+          &lt;a href="/{{menuItem.name}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
           {{{#else}}}
-          &lt;a href="/{{menuItem.name}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm"&gt;{{menuItem.name}}&lt;/a&gt;
+          &lt;a href="/{{menuItem.name}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{menuItem.name}}&lt;/a&gt;
           {{{/if}}}
           {{{/if}}}
           {{{/if}}}
