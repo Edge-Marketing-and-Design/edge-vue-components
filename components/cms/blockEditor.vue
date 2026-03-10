@@ -1031,7 +1031,7 @@ const exportCurrentBlock = () => {
                 Block Guide
               </TabsTrigger>
               <TabsTrigger value="arrays" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
-                Working with Arrays
+                Arrays
               </TabsTrigger>
               <TabsTrigger value="carousel" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
                 Carousel Usage
@@ -1522,14 +1522,22 @@ const exportCurrentBlock = () => {
                     <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                       How Array Queries Work
                     </h3>
-                    <div class="text-sm text-foreground space-y-1">
-                      <div>Each entry in <code>queryItems</code> makes its own indexed lookup through <code>kvClient.queryIndex</code>.</div>
-                      <div>If you have more than one <code>queryItems</code> field, the runtime combines all matches into one big candidate list.</div>
-                      <div>Duplicate records are removed by <code>canonical</code>, so the same item only shows up once.</div>
-                      <div>After that, <code>collection.query</code> filters the candidate list in JavaScript, and <code>collection.order</code> sorts the final result.</div>
-                      <div>The finished array is written to <code>values[field]</code>.</div>
-                      <div>If the collection cannot be loaded, the block falls back to the inline <code>value</code> you provided, or to an empty array if there is no fallback value.</div>
-                    </div>
+                    <ol class="list-decimal pl-5 text-sm text-foreground space-y-1">
+                      <li>Each entry in <code>queryItems</code> makes its own indexed lookup through <code>kvClient.queryIndex</code>.</li>
+                      <li>For a query key to work, that field must be included in your KV mirror config (in <code>indexKeys</code> and in <code>metadataKeys</code> for list rendering).</li>
+                      <li>If you have more than one <code>queryItems</code> field, the runtime unions those matches into one candidate list (OR behavior at this stage).</li>
+                      <li>Duplicate records are removed by <code>canonical</code>, so the same item only shows up once.</li>
+                      <li>After that, <code>collection.query</code> filters candidates in JavaScript; all query clauses must pass for a record to survive (AND behavior across <code>collection.query</code> rules).</li>
+                      <li>Finally, <code>collection.order</code> sorts the remaining records.</li>
+                      <li>The finished array is written to <code>values[field]</code>.</li>
+                      <li>If the collection cannot be loaded, the block falls back to the inline <code>value</code> you provided, or to an empty array if there is no fallback value.</li>
+                    </ol>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>exports.onListingWritten = createKvMirrorHandlerFromFields({
+  documentPath: 'organizations/{orgId}/listings',
+  uniqueKey: '{orgId}',
+  indexKeys: ['name', 'city', 'state', 'status'],
+  metadataKeys: ['name', 'city', 'state', 'status', 'price', 'doc_created_at'],
+})</code></pre>
                   </section>
 
                   <section class="space-y-3">

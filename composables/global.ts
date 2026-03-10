@@ -469,6 +469,79 @@ const resolveCmsCollectionTokens = (input: any, currentSite: any = '') => {
   return walk(input)
 }
 
+const getValueAtPath = (source: any, path: string) => {
+  if (!path || typeof path !== 'string')
+    return source
+  return path.split('.').reduce((acc, key) => {
+    if (acc == null || typeof acc !== 'object')
+      return undefined
+    return acc[key]
+  }, source)
+}
+
+const compareCollectionOrderValues = (aValue: any, bValue: any) => {
+  if (aValue == null && bValue == null)
+    return 0
+  if (aValue == null)
+    return 1
+  if (bValue == null)
+    return -1
+
+  if (typeof aValue === 'boolean' || typeof bValue === 'boolean') {
+    const aBool = aValue ? 1 : 0
+    const bBool = bValue ? 1 : 0
+    if (aBool === bBool)
+      return 0
+    return aBool > bBool ? 1 : -1
+  }
+
+  const aNum = Number(aValue)
+  const bNum = Number(bValue)
+  const aNumValid = Number.isFinite(aNum)
+  const bNumValid = Number.isFinite(bNum)
+  if (aNumValid && bNumValid) {
+    if (aNum === bNum)
+      return 0
+    return aNum > bNum ? 1 : -1
+  }
+
+  const aDate = Date.parse(String(aValue))
+  const bDate = Date.parse(String(bValue))
+  const aDateValid = Number.isFinite(aDate)
+  const bDateValid = Number.isFinite(bDate)
+  if (aDateValid && bDateValid) {
+    if (aDate === bDate)
+      return 0
+    return aDate > bDate ? 1 : -1
+  }
+
+  return String(aValue).localeCompare(String(bValue), undefined, { numeric: true, sensitivity: 'base' })
+}
+
+const applyCmsCollectionOrder = (records: any[], orderList: any[] = []) => {
+  if (!Array.isArray(records))
+    return []
+  if (!Array.isArray(orderList) || orderList.length === 0)
+    return records
+
+  const validOrders = orderList.filter(order => order && typeof order.field === 'string' && order.field.trim())
+  if (!validOrders.length)
+    return records
+
+  return [...records].sort((a, b) => {
+    for (const order of validOrders) {
+      const direction = String(order.direction || 'asc').toLowerCase() === 'desc' ? -1 : 1
+      const compared = compareCollectionOrderValues(
+        getValueAtPath(a, order.field),
+        getValueAtPath(b, order.field),
+      )
+      if (compared !== 0)
+        return compared * direction
+    }
+    return 0
+  })
+}
+
 const cmsCollectionData = async (edgeFirebase: any, value: any, meta: any, currentSite: any = '') => {
   for (const key in meta) {
     if (meta[key]?.collection) {
@@ -507,7 +580,8 @@ const cmsCollectionData = async (edgeFirebase: any, value: any, meta: any, curre
       }
       await staticSearch.getData(collectionPath, currentQuery, meta[key].collection.order, meta[key].limit)
 
-      value[key] = Object.values(staticSearch.results.data)
+      const records = Object.values(staticSearch.results.data || {})
+      value[key] = applyCmsCollectionOrder(records, meta[key].collection.order)
     }
   }
   return value
