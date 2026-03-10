@@ -1026,9 +1026,12 @@ const exportCurrentBlock = () => {
         </SheetHeader>
         <div class="px-6 pb-6">
           <Tabs class="w-full" default-value="guide">
-            <TabsList class="w-full mt-3 rounded-sm grid grid-cols-5 border border-slate-300 bg-slate-200 dark:border-slate-700 dark:bg-slate-800">
+            <TabsList class="w-full mt-3 rounded-sm grid grid-cols-6 border border-slate-300 bg-slate-200 dark:border-slate-700 dark:bg-slate-800">
               <TabsTrigger value="guide" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
                 Block Guide
+              </TabsTrigger>
+              <TabsTrigger value="arrays" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
+                Working with Arrays
               </TabsTrigger>
               <TabsTrigger value="carousel" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
                 Carousel Usage
@@ -1060,14 +1063,6 @@ const exportCurrentBlock = () => {
                       <a href="#input-types" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Inputs</a>
                       <a href="#image-fields" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Images</a>
                       <a href="#select-options" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Selects</a>
-                      <a href="#arrays-manual" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Arrays</a>
-                      <a href="#arrays-firestore" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Firestore</a>
-                      <a href="#arrays-api" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">API</a>
-                      <a href="#arrays-filters" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Filters</a>
-                      <a href="#conditionals" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Conditionals</a>
-                      <a href="#subarrays" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Subarrays</a>
-                      <a href="#render-blocks" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Render Blocks</a>
-                      <a href="#entries" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Entries</a>
                       <a href="#rendering-rules" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Rendering</a>
                       <a href="#loading-tokens" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Loading</a>
                       <a href="#validation" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Validation</a>
@@ -1207,193 +1202,6 @@ const exportCurrentBlock = () => {
                     </div>
                   </section>
 
-                  <section id="arrays-manual" class="space-y-3">
-                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                      Arrays (Manual Lists)
-                    </h3>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {"field":"list","value":[]}}}}
-  {{item}}
-{{{/array}}}</code></pre>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {
-  "field":"cards",
-  "schema":[
-    {"field":"title","type":"text"},
-    {"field":"body","type":"richtext"},
-    {"field":"image","type":"image"}
-  ],
-  "value":[]
-}}}}
-  <h3>{{item.title}}</h3>
-  <div>{{item.body}}</div>
-  <img :src="item.image">
-{{{/array}}}</code></pre>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {
-  "field":"statics",
-  "value":[
-    "First item",
-    "Second item",
-    "Third item"
-  ]
-}}}}
-  <li>{{item}}</li>
-{{{/array}}}</code></pre>
-                    <p class="text-sm text-foreground">
-                      Use <code>schema</code> to define fields on each array item.
-                      Supported item UI types: <code>text</code>, <code>textarea</code>, <code>richtext</code>, <code>image</code>, <code>number</code>, <code>option</code>.
-                    </p>
-                    <div class="text-sm text-foreground space-y-1">
-                      <div>Manual arrays show an “Add Entry” form, drag handles to reorder, and delete buttons.</div>
-                      <div>Use <code>number</code> for numeric input. <code>integer</code>/<code>money</code> only affect display formatting.</div>
-                      <div><code>limit</code> trims output to the first N items when rendering.</div>
-                    </div>
-                    <p class="text-sm text-foreground">
-                      Inside an array block you render <code v-pre>{{item}}</code> or <code v-pre>{{item.fieldName}}</code>.
-                    </p>
-                    <p class="text-sm text-foreground">
-                      For schema formatting only, you can also use <code>integer</code> or <code>money</code> types.
-                    </p>
-                  </section>
-
-                  <section id="arrays-firestore" class="space-y-3">
-                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                      Arrays from Firestore
-                    </h3>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {
-  "field":"list",
-  "schema":[{"field":"name","type":"text"},{"field":"role","type":"text"}],
-  "collection":{
-    "path":"team",
-    "uniqueKey":"{orgId}",
-    "query":[{"field":"active","operator":"==","value":true}],
-    "order":[{"field":"name","direction":"asc"}]
-  },
-  "limit":6,
-  "value":[]
-}}}}</code></pre>
-                    <div class="text-sm text-foreground space-y-1">
-                      <div><code>path</code> is under <code>organizations/{orgId}</code>.</div>
-                      <div><code>uniqueKey</code> supports <code>{orgId}</code> and <code>{siteId}</code>.</div>
-                      <div><code>query</code> and <code>order</code> map to Firestore filters and sort.</div>
-                      <div><code>limit</code> caps the results.</div>
-                    </div>
-                  </section>
-
-                  <section id="arrays-api" class="space-y-3">
-                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                      Arrays from an API
-                    </h3>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {
-  "field":"list",
-  "api":"https://api.example.com/items",
-  "apiField":"data",
-  "apiQuery":"?limit=4",
-  "limit":4,
-  "value":[]
-}}}}</code></pre>
-                    <div class="text-sm text-foreground space-y-1">
-                      <div><code>api</code> is the base URL without query string.</div>
-                      <div><code>apiQuery</code> is appended to the URL.</div>
-                      <div><code>apiField</code> is the array field in the response.</div>
-                    </div>
-                    <p class="text-sm text-foreground">
-                      Filters from <code>queryOptions</code> become query string parameters at runtime.
-                    </p>
-                  </section>
-
-                  <section id="arrays-filters" class="space-y-3">
-                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                      Filters for Arrays (queryOptions)
-                    </h3>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>"queryOptions":[
-  {
-    "field":"users",
-    "operator":"array-contains-any",
-    "options":"users",
-    "optionsKey":"name",
-    "optionsValue":"userId",
-    "multiple":true
-  }
-]</code></pre>
-                    <div class="text-sm text-foreground space-y-1">
-                      <div><code>queryOptions</code> creates filter inputs for CMS users.</div>
-                      <div>Selections are stored in <code>meta.queryItems</code> and used in the API/collection query.</div>
-                      <div><code>options</code> can be a collection name or static array.</div>
-                      <div><code>multiple: true</code> saves an array.</div>
-                    </div>
-                  </section>
-
-                  <section id="conditionals" class="space-y-3">
-                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                      Conditionals (Inside Arrays)
-                    </h3>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#if {"cond":"item.price > 0"} }}}
-  <div>Price: {{item.price}}</div>
-{{{#else}}}
-  <div>Contact for pricing</div>
-{{{/if}}}</code></pre>
-                    <div class="text-sm text-foreground space-y-1">
-                      <div><code>cond</code> works on <code>item.*</code> inside array/subarray templates.</div>
-                      <div>Supported operators: <code>==</code>, <code>!=</code>, <code>&gt;</code>, <code>&lt;</code>, <code>&gt;=</code>, <code>&lt;=</code>.</div>
-                    </div>
-                  </section>
-
-                  <section id="subarrays" class="space-y-3">
-                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                      Subarrays (Nested Lists)
-                    </h3>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {"field":"items","value":[],"as":"card"}}}}
-  <h3>{{card.title}}</h3>
-  {{{#subarray:child {"field":"item.children","limit":0 }}}}
-    <div>{{child}}</div>
-  {{{/subarray}}}
-{{{/array}}}</code></pre>
-                    <p class="text-sm text-foreground">
-                      Use <code>as</code> to set an alias (like <code v-pre>{{card.title}}</code>). Use <code>subarray</code> to loop nested lists.
-                    </p>
-                  </section>
-
-                  <section id="render-blocks" class="space-y-3">
-                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                      Render Blocks (Post/Page Block Content)
-                    </h3>
-                    <p class="text-sm text-foreground">
-                      Use <code>renderBlocks</code> when an object contains CMS block content (for example post content).
-                    </p>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#renderBlocks {"field":"item"}}}}</code></pre>
-                    <p class="text-sm text-foreground">
-                      This renders the current object's block array. Inside an array loop, <code>item</code> is the current record.
-                    </p>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {"field":"list","schema":[{"field":"name","value":"text"},{"field":"content","value":"richtext"}],"collection":{"path":"posts","uniqueKey":"{orgId}:{siteId}","query":[],"order":[]},"queryOptions":[],"limit":3,"value":[]}}}}
-  <article>
-    <h2>{{item.name}}</h2>
-    {{{#renderBlocks {"field":"item"}}}}
-  </article>
-{{{/array}}}</code></pre>
-                  </section>
-
-                  <section id="entries" class="space-y-3">
-                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                      Entries (Object Key/Value Loops)
-                    </h3>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#entries:pair {"field":"settings","value":{"theme":"dark","ctaText":"Contact Us"}}}}}
-  <div><strong>{{pair.key}}</strong>: {{pair.value}}</div>
-{{{/entries}}}
-
-{{{#entries:group {"field":"groupedItems","value":{"featured":["One","Two"],"archive":["Three"]}}}}}
-  <h4>{{group.key}}</h4>
-  {{{#subarray:child {"field":"item.value","value":[]}}}}
-    <div>{{child}}</div>
-  {{{/subarray}}}
-{{{/entries}}}</code></pre>
-                    <div class="text-sm text-foreground space-y-1">
-                      <div><code>entries</code> loops object fields instead of arrays.</div>
-                      <div>Use it at the root or inside other loops; it does not need to be inside <code>subarray</code>.</div>
-                      <div>Each iteration exposes <code>item.key</code> and <code>item.value</code>, plus alias access like <code v-pre>{{pair.key}}</code>.</div>
-                      <div>If a value is an array, use nested <code>subarray</code> on <code>item.value</code>.</div>
-                      <div>If <code>field</code> is not an object, it renders nothing.</div>
-                    </div>
-                  </section>
-
                   <section id="rendering-rules" class="space-y-2">
                     <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                       Rendering Rules
@@ -1401,8 +1209,71 @@ const exportCurrentBlock = () => {
                     <div class="text-sm text-foreground space-y-1">
                       <div><code>text</code> and <code>textarea</code> output is HTML‑escaped.</div>
                       <div><code>richtext</code> output is inserted as HTML.</div>
-                      <div>Array schema types format output (e.g. <code>money</code> formats USD, <code>integer</code> truncates).</div>
+                      <div>Inline formatter output is HTML‑escaped by default (same safety behavior as normal text placeholders).</div>
                     </div>
+                  </section>
+
+                  <section id="inline-formatters" class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Inline Formatters
+                    </h3>
+                    <p class="text-sm text-foreground">
+                      You can now format values directly where they are used:
+                    </p>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{ date(post.publishDate) }}
+{{ datetime(post.publishDate, "short") }}
+{{ money(post.budget) }}
+{{ lower(menuItem.menuTitle) }}
+{{ trim(site.tagline) }}
+{{ slug(post.title) }}
+{{ title(post.slug) }}
+{{ default(post.summary, "Summary coming soon") }}</code></pre>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div>Supported formatter names: <code>date(value, options?)</code>, <code>datetime(value, options?)</code>, <code>money(value, options?)</code>, <code>lower(value)</code>, <code>upper(value)</code>, <code>trim(value)</code>, <code>slug(value)</code>, <code>title(value)</code>, <code>deslug(value)</code>, <code>default(value, fallback)</code>.</div>
+                      <div>Existing schema/meta formatting (<code>number</code>, <code>money</code>, <code>richtext</code>, etc.) still works unchanged.</div>
+                      <div>Inline formatter output is HTML-escaped by default (same safety behavior as normal text placeholders).</div>
+                    </div>
+
+                    <h4 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Basic Examples
+                    </h4>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;h2&gt;{{ upper(post.title) }}&lt;/h2&gt;
+&lt;p&gt;Published {{ date(post.publishDate, "long") }}&lt;/p&gt;
+&lt;p&gt;Author handle: {{ slug(post.authorName) }}&lt;/p&gt;
+&lt;p&gt;Slug label: {{ title(post.slug) }}&lt;/p&gt;
+&lt;p&gt;Budget: {{ money(post.budget) }}&lt;/p&gt;
+&lt;p&gt;{{ default(post.summary, "No summary available.") }}&lt;/p&gt;</code></pre>
+
+                    <h4 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Complex Examples
+                    </h4>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;time datetime="{{ post.publishDate }}"&gt;
+  {{ datetime(post.publishDate, {
+    locale: "en-US",
+    dateStyle: "full",
+    timeStyle: "short"
+  }) }}
+&lt;/time&gt;
+
+&lt;p&gt;
+  {{ money(post.budget, {
+    locale: "en-US",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }) }}
+&lt;/p&gt;</code></pre>
+
+                    <h4 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Arrays / Subarrays Example
+                    </h4>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {"field":"events","as":"event"} }}}
+  &lt;article&gt;
+    &lt;h3&gt;{{ trim(event.title) }}&lt;/h3&gt;
+    &lt;p&gt;{{ date(event.startAt, { locale: "en-US", month: "long", day: "numeric", year: "numeric" }) }}&lt;/p&gt;
+    &lt;a href="/events/{{ slug(event.title) }}"&gt;Read more&lt;/a&gt;
+  &lt;/article&gt;
+{{{/array}}}</code></pre>
                   </section>
 
                   <section id="loading-tokens" class="space-y-2">
@@ -1509,6 +1380,261 @@ const exportCurrentBlock = () => {
   indexKeys: ['name', 'city', 'state', 'status'],
   metadataKeys: ['name', 'city', 'state', 'status', 'price', 'doc_created_at'],
 })</code></pre>
+                  </section>
+                </div>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="arrays">
+              <div class="h-[calc(100vh-190px)] overflow-y-auto pr-1 pb-6">
+                <div class="space-y-8">
+                  <div class="rounded-md border border-border/60 bg-muted/30 p-3">
+                    <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Quick Menu
+                    </div>
+                    <div class="mt-2 flex flex-wrap gap-2 text-xs">
+                      <a href="#arrays-manual" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Manual Arrays</a>
+                      <a href="#arrays-firestore" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Firestore Arrays</a>
+                      <a href="#arrays-api" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">API Arrays</a>
+                      <a href="#arrays-filters" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Filters</a>
+                      <a href="#arrays-query-flow" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Query Strategy</a>
+                      <a href="#conditionals" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Conditionals</a>
+                      <a href="#subarrays" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Subarrays</a>
+                      <a href="#render-blocks" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Render Blocks</a>
+                      <a href="#entries" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Entries</a>
+                    </div>
+                  </div>
+
+                  <section id="arrays-manual" class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Arrays (Manual Lists)
+                    </h3>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {"field":"list","value":[]}}}}
+  {{item}}
+{{{/array}}}</code></pre>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {
+  "field":"cards",
+  "schema":[
+    {"field":"title","type":"text"},
+    {"field":"body","type":"richtext"},
+    {"field":"image","type":"image"}
+  ],
+  "value":[]
+}}}}
+  <h3>{{item.title}}</h3>
+  <div>{{item.body}}</div>
+  <img :src="item.image">
+{{{/array}}}</code></pre>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {
+  "field":"statics",
+  "value":[
+    "First item",
+    "Second item",
+    "Third item"
+  ]
+}}}}
+  <li>{{item}}</li>
+{{{/array}}}</code></pre>
+                    <p class="text-sm text-foreground">
+                      Use <code>schema</code> when each item needs its own fields.
+                      Supported item inputs are <code>text</code>, <code>textarea</code>, <code>richtext</code>, <code>image</code>, <code>number</code>, and <code>option</code>.
+                    </p>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div>Manual arrays show an Add Entry form, drag handles for sorting, and delete buttons.</div>
+                      <div>Use <code>number</code> for numeric item fields.</div>
+                      <div><code>limit</code> shows only the first N items when the block renders.</div>
+                    </div>
+                    <p class="text-sm text-foreground">
+                      Inside the loop, render <code v-pre>{{item}}</code> for simple values or <code v-pre>{{item.fieldName}}</code> for object fields.
+                    </p>
+                  </section>
+
+                  <section id="arrays-firestore" class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Arrays from Firestore
+                    </h3>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {
+  "field":"list",
+  "schema":[{"field":"name","type":"text"},{"field":"role","type":"text"}],
+  "collection":{
+    "path":"team",
+    "uniqueKey":"{orgId}",
+    "query":[{"field":"active","operator":"==","value":true}],
+    "order":[{"field":"name","direction":"asc"}]
+  },
+  "limit":6,
+  "value":[]
+}}}}</code></pre>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div><code>path</code> is under <code>organizations/{orgId}</code>.</div>
+                      <div><code>uniqueKey</code> supports <code>{orgId}</code> and <code>{siteId}</code>.</div>
+                      <div><code>query</code> handles the final required filters.</div>
+                      <div><code>order</code> controls the final sort order.</div>
+                      <div><code>limit</code> caps the results.</div>
+                    </div>
+                  </section>
+
+                  <section id="arrays-api" class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Arrays from an API
+                    </h3>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {
+  "field":"list",
+  "api":"https://api.example.com/items",
+  "apiField":"data",
+  "apiQuery":"?limit=4",
+  "limit":4,
+  "value":[]
+}}}}</code></pre>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div><code>api</code> is the base URL without the query string.</div>
+                      <div><code>apiQuery</code> is appended to the URL.</div>
+                      <div><code>apiField</code> tells the block which array to read from the response.</div>
+                    </div>
+                    <p class="text-sm text-foreground">
+                      Filters from <code>queryOptions</code> become query string parameters at runtime.
+                    </p>
+                  </section>
+
+                  <section id="arrays-filters" class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Filters for Arrays (queryOptions)
+                    </h3>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>"queryOptions":[
+  {
+    "field":"users",
+    "operator":"array-contains-any",
+    "options":"users",
+    "optionsKey":"name",
+    "optionsValue":"userId",
+    "multiple":true
+  }
+]</code></pre>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div><code>queryOptions</code> adds filter controls for CMS users.</div>
+                      <div>The selected values are stored in <code>meta.queryItems</code>.</div>
+                      <div><code>options</code> can be a collection name or a static array.</div>
+                      <div><code>multiple: true</code> saves an array of selected values.</div>
+                    </div>
+                  </section>
+
+                  <section id="arrays-query-flow" class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      How Array Queries Work
+                    </h3>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div>Each entry in <code>queryItems</code> makes its own indexed lookup through <code>kvClient.queryIndex</code>.</div>
+                      <div>If you have more than one <code>queryItems</code> field, the runtime combines all matches into one big candidate list.</div>
+                      <div>Duplicate records are removed by <code>canonical</code>, so the same item only shows up once.</div>
+                      <div>After that, <code>collection.query</code> filters the candidate list in JavaScript, and <code>collection.order</code> sorts the final result.</div>
+                      <div>The finished array is written to <code>values[field]</code>.</div>
+                      <div>If the collection cannot be loaded, the block falls back to the inline <code>value</code> you provided, or to an empty array if there is no fallback value.</div>
+                    </div>
+                  </section>
+
+                  <section class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Query Strategy
+                    </h3>
+                    <p class="text-sm text-foreground">
+                      Use this setup when you want array queries to stay fast and predictable.
+                    </p>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div>1. Put the most selective indexed filters in <code>queryItems</code>. These should cut the candidate list down as early as possible.</div>
+                      <div>2. Put must-match rules in <code>collection.query</code>. Think of this as the final narrowing step.</div>
+                      <div>3. Put final sorting in <code>collection.order</code>.</div>
+                      <div>4. Treat <code>queryOptions</code> as the editor UI for choosing filters. At runtime, the actual filtering is driven by <code>collection.query</code>.</div>
+                    </div>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{
+  "field": "eventsList",
+  "collection": {
+    "path": "posts",
+    "query": [
+      { "field": "type", "operator": "==", "value": "event" },
+      { "field": "event.isPast", "operator": "==", "value": true }
+    ],
+    "order": [{ "field": "event.startAt", "direction": "asc" }]
+  },
+  "queryItems": {
+    "tags": ["program-spotlight"]
+  }
+}</code></pre>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div><code>queryItems.tags</code> does the indexed lookup first.</div>
+                      <div><code>collection.query</code> then keeps only records that are actually events and already in the past.</div>
+                      <div><code>collection.order</code> sorts those remaining records by start date.</div>
+                    </div>
+                  </section>
+
+                  <section id="conditionals" class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Conditionals (Inside Arrays)
+                    </h3>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#if {"cond":"item.price > 0"} }}}
+  <div>Price: {{item.price}}</div>
+{{{#else}}}
+  <div>Contact for pricing</div>
+{{{/if}}}</code></pre>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div><code>cond</code> works with <code>item.*</code> inside array and subarray templates.</div>
+                      <div>Supported operators are <code>==</code>, <code>!=</code>, <code>&gt;</code>, <code>&lt;</code>, <code>&gt;=</code>, and <code>&lt;=</code>.</div>
+                    </div>
+                  </section>
+
+                  <section id="subarrays" class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Subarrays (Nested Lists)
+                    </h3>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {"field":"items","value":[],"as":"card"}}}}
+  <h3>{{card.title}}</h3>
+  {{{#subarray:child {"field":"item.children","limit":0 }}}}
+    <div>{{child}}</div>
+  {{{/subarray}}}
+{{{/array}}}</code></pre>
+                    <p class="text-sm text-foreground">
+                      Use <code>as</code> to create a clearer alias like <code v-pre>{{card.title}}</code>. Use <code>subarray</code> to loop over nested arrays.
+                    </p>
+                  </section>
+
+                  <section id="render-blocks" class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Render Blocks (Post/Page Block Content)
+                    </h3>
+                    <p class="text-sm text-foreground">
+                      Use <code>renderBlocks</code> when an object inside the array contains CMS block content, such as a post body.
+                    </p>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#renderBlocks {"field":"item"}}}}</code></pre>
+                    <p class="text-sm text-foreground">
+                      Inside an array loop, <code>item</code> is the current record.
+                    </p>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {"field":"list","schema":[{"field":"name","value":"text"},{"field":"content","value":"richtext"}],"collection":{"path":"posts","uniqueKey":"{orgId}:{siteId}","query":[],"order":[]},"queryOptions":[],"limit":3,"value":[]}}}}
+  <article>
+    <h2>{{item.name}}</h2>
+    {{{#renderBlocks {"field":"item"}}}}
+  </article>
+{{{/array}}}</code></pre>
+                  </section>
+
+                  <section id="entries" class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Entries (Object Key/Value Loops)
+                    </h3>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#entries:pair {"field":"settings","value":{"theme":"dark","ctaText":"Contact Us"}}}}}
+  <div><strong>{{pair.key}}</strong>: {{pair.value}}</div>
+{{{/entries}}}
+
+{{{#entries:group {"field":"groupedItems","value":{"featured":["One","Two"],"archive":["Three"]}}}}}
+  <h4>{{group.key}}</h4>
+  {{{#subarray:child {"field":"item.value","value":[]}}}}
+    <div>{{child}}</div>
+  {{{/subarray}}}
+{{{/entries}}}</code></pre>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div><code>entries</code> loops over object fields instead of arrays.</div>
+                      <div>Each loop gives you <code>item.key</code> and <code>item.value</code>, plus alias access like <code v-pre>{{pair.key}}</code>.</div>
+                      <div>If one of those values is an array, use a nested <code>subarray</code> on <code>item.value</code>.</div>
+                      <div>If <code>field</code> is not an object, nothing is rendered.</div>
+                    </div>
                   </section>
                 </div>
               </div>

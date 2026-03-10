@@ -29,6 +29,7 @@ const edgeFirebase = inject('edgeFirebase')
 const cmsMultiOrg = useState('cmsMultiOrg', () => true)
 const isAdmin = computed(() => edgeGlobal.isAdminGlobal(edgeFirebase).value)
 const isDevModeEnabled = computed(() => process.dev || Boolean(edgeGlobal.edgeState.devOverride))
+const showDevOnlyActions = computed(() => edgeGlobal.allowMenuItem({ devOnly: true }, isAdmin.value))
 const canOpenPreviewBlockContentEditor = computed(() => {
   if (!isAdmin.value)
     return false
@@ -502,6 +503,7 @@ const state = reactive({
   imageOpen: false,
   listSearch: '',
   listTypeFilter: 'all',
+  reindexPublishedPostsLoading: false,
   publishAtInput: '',
   newDocs: {
     posts: {
@@ -1376,6 +1378,28 @@ const unPublishPost = async (postId) => {
     console.error('Failed to unpublish post:', error)
   }
 }
+
+const reindexPublishedPostsToKv = async () => {
+  if (state.reindexPublishedPostsLoading || !edgeFirebase?.user?.uid)
+    return
+
+  state.reindexPublishedPostsLoading = true
+  try {
+    const response = await edgeFirebase.runFunction('cms-reindexPublishedPostsToKv', {
+      uid: edgeFirebase.user.uid,
+    })
+    const scanned = Number(response?.data?.scanned || 0)
+    const rewritten = Number(response?.data?.rewritten || 0)
+    edgeFirebase?.toast?.success?.(`Reindexed ${rewritten} published posts to KV${scanned ? ` (${scanned} scanned)` : ''}.`)
+  }
+  catch (error) {
+    console.error('Failed to reindex published posts to KV:', error)
+    edgeFirebase?.toast?.error?.('Failed to reindex published posts to KV.')
+  }
+  finally {
+    state.reindexPublishedPostsLoading = false
+  }
+}
 </script>
 
 <template>
@@ -1390,6 +1414,18 @@ const unPublishPost = async (postId) => {
     >
       <Plus class="h-4 w-4" />
       New Post
+    </edge-shad-button>
+
+    <edge-shad-button
+      v-if="showDevOnlyActions"
+      variant="outline"
+      :class="isFullList ? 'h-8 px-3' : 'w-full py-0 h-[28px]'"
+      :disabled="state.reindexPublishedPostsLoading"
+      @click="reindexPublishedPostsToKv"
+    >
+      <Loader2 v-if="state.reindexPublishedPostsLoading" class="h-4 w-4 animate-spin" />
+      <FileWarning v-else class="h-4 w-4" />
+      Reindex Published Posts KV
     </edge-shad-button>
 
     <div
@@ -1681,6 +1717,7 @@ const unPublishPost = async (postId) => {
         </edge-shad-button>
       </div>
     </div>
+
   </div>
 
   <edge-shad-dialog v-model="state.deleteDialog">

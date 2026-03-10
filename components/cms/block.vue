@@ -418,7 +418,7 @@ const BLOCK_CONTENT_SNIPPETS = [
   },
   {
     label: 'Render Blocks',
-    snippet: `{{{#renderBlocks {"field":"item"}}}}`,
+    snippet: '{{{#renderBlocks {"field":"item"}}}}',
     description: 'Render block content from an object field',
   },
   {
@@ -636,6 +636,36 @@ const blockContentSourceDoc = computed(() => {
     return null
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[blockDocId] || null
 })
+
+const sitePostsCollectionPath = computed(() => {
+  const siteId = String(props.siteId || '').trim()
+  if (!siteId)
+    return ''
+  return `${edgeGlobal.edgeState.organizationDocPath}/sites/${siteId}/posts`
+})
+
+const sitePublishedPostsCollectionPath = computed(() => {
+  const siteId = String(props.siteId || '').trim()
+  if (!siteId)
+    return ''
+  return `${edgeGlobal.edgeState.organizationDocPath}/sites/${siteId}/published_posts`
+})
+
+const ensureSitePostSnapshots = async () => {
+  const postsPath = sitePostsCollectionPath.value
+  const publishedPostsPath = sitePublishedPostsCollectionPath.value
+  if (!postsPath || !publishedPostsPath)
+    return
+
+  if (!edgeFirebase.data?.[postsPath])
+    await edgeFirebase.startSnapshot(postsPath)
+  if (!edgeFirebase.data?.[publishedPostsPath])
+    await edgeFirebase.startSnapshot(publishedPostsPath)
+}
+
+watch(() => [edgeGlobal.edgeState.currentOrganization, props.siteId], async () => {
+  await ensureSitePostSnapshots()
+}, { immediate: true })
 
 const blockContentPreviewBlock = computed(() => {
   const content = String(state.blockContentDraft ?? '')
@@ -1128,7 +1158,7 @@ const loadingRender = (content) => {
 }
 
 const postsList = computed(() => {
-  const postsCollectionPath = `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.siteId}/posts`
+  const postsCollectionPath = sitePostsCollectionPath.value
   return Object.values(edgeFirebase.data[postsCollectionPath] || {}).sort((a, b) => {
     if (a.publishDate && b.publishDate) {
       return new Date(b.publishDate).getTime() - new Date(a.publishDate).getTime()
