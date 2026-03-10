@@ -1034,13 +1034,13 @@ const exportCurrentBlock = () => {
                 Arrays
               </TabsTrigger>
               <TabsTrigger value="carousel" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
-                Carousel Usage
+                Carousels
               </TabsTrigger>
               <TabsTrigger value="form-helpers" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
-                Form Helpers
+                Forms
               </TabsTrigger>
               <TabsTrigger value="nav-bar" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
-                Nav Bar
+                Nav
               </TabsTrigger>
               <TabsTrigger value="scroll-reveals" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
                 Scroll Reveals
