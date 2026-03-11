@@ -13,6 +13,7 @@ const emit = defineEmits(['head'])
 
 const edgeFirebase = inject('edgeFirebase')
 const { blocks: blockNewDocSchema } = useCmsNewDocs()
+const blockEditorPostPreviewCache = useState('edge-cms-block-editor-post-preview-cache', () => ({}))
 
 const state = reactive({
   filter: '',
@@ -33,6 +34,7 @@ const state = reactive({
   previewViewport: 'full',
   previewBlock: null,
   previewSourceValues: {},
+  previewRenderContext: null,
   editorWorkingDoc: null,
   themeDefaultAppliedForBlockId: '',
 })
@@ -137,6 +139,46 @@ const previewCanvasClass = computed(() => {
   const hasFixedContent = /\bfixed\b/.test(content)
   return hasFixedContent ? 'h-[calc(100vh-370px)]' : 'h-[calc(100vh-370px)] overflow-y-auto'
 })
+
+const previewBlockTypes = computed(() => normalizeBlockTypes(state.editorWorkingDoc?.type))
+const previewNeedsPostContext = computed(() => previewBlockTypes.value.includes('Post'))
+
+const loadPreviewRenderContext = async () => {
+  if (!previewNeedsPostContext.value) {
+    state.previewRenderContext = null
+    return
+  }
+
+  const siteId = String(edgeGlobal.edgeState.blockEditorSite || '').trim()
+  if (!siteId) {
+    state.previewRenderContext = null
+    return
+  }
+
+  const cacheKey = `${edgeGlobal.edgeState.currentOrganization}:${siteId}`
+  const cached = blockEditorPostPreviewCache.value?.[cacheKey]
+  if (cached && typeof cached === 'object') {
+    state.previewRenderContext = edgeGlobal.dupObject(cached)
+    return
+  }
+
+  try {
+    const staticSearch = new edgeFirebase.SearchStaticData()
+    const collectionPath = `${edgeGlobal.edgeState.organizationDocPath}/sites/${siteId}/published_posts`
+    await staticSearch.getData(collectionPath, [], [], 1)
+    const firstPost = Object.values(staticSearch.results?.data || {})[0] || null
+    if (firstPost && typeof firstPost === 'object') {
+      blockEditorPostPreviewCache.value[cacheKey] = edgeGlobal.dupObject(firstPost)
+      state.previewRenderContext = edgeGlobal.dupObject(firstPost)
+      return
+    }
+  }
+  catch (error) {
+    console.error('Failed to load block editor post preview context', error)
+  }
+
+  state.previewRenderContext = null
+}
 
 onMounted(() => {
   // state.mounted = true
@@ -688,6 +730,14 @@ watch([availableThemeIds, currentBlockAllowedThemeIds, () => props.blockId], asy
   state.loading = false
 }, { immediate: true, deep: true })
 
+watch(
+  [previewNeedsPostContext, () => edgeGlobal.edgeState.blockEditorSite, () => edgeGlobal.edgeState.currentOrganization],
+  async () => {
+    await loadPreviewRenderContext()
+  },
+  { immediate: true },
+)
+
 watch(() => state.jsonEditorOpen, (open) => {
   if (!open)
     resetJsonEditorState()
@@ -997,6 +1047,7 @@ const exportCurrentBlock = () => {
                     v-model="state.previewBlock"
                     class="!h-[calc(100vh-300px)] overflow-y-auto"
                     :site-id="edgeGlobal.edgeState.blockEditorSite"
+                    :render-context="state.previewRenderContext"
                     :theme="theme"
                     :edit-mode="true"
                     :contain-fixed="true"

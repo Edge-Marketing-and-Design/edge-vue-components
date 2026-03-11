@@ -37,6 +37,10 @@ const props = defineProps({
     type: String,
     default: 'auto',
   },
+  renderContext: {
+    type: Object,
+    default: null,
+  },
 })
 const emit = defineEmits(['pending'])
 const edgeFirebase = inject('edgeFirebase')
@@ -284,6 +288,7 @@ const finalValues = computed(() => {
     :values="finalValues"
     :meta="runtimeMeta"
     :viewport-mode="props.viewportMode"
+    :render-context="props.renderContext"
   />
 </template>
 

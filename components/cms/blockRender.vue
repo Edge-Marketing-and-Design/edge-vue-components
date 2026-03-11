@@ -26,6 +26,10 @@ const props = defineProps({
     type: String,
     default: 'auto',
   },
+  renderContext: {
+    type: Object,
+    default: null,
+  },
 })
 
 const emit = defineEmits(['loaded'])
@@ -58,9 +62,21 @@ const defaultTheme = {
 }
 
 const theme = computed(() => props.theme ?? defaultTheme)
+const renderValues = computed(() => {
+  const baseValues = props.values || {}
+  if (!props.renderContext || typeof props.renderContext !== 'object' || Array.isArray(props.renderContext))
+    return baseValues
+
+  return {
+    ...props.renderContext,
+    renderBlocks: props.renderContext,
+    renderItem: props.renderContext,
+    ...baseValues,
+  }
+})
 
 const rendered = computed(() => {
-  return renderTemplate(props.content, props.values, props.meta)
+  return renderTemplate(props.content, renderValues.value, props.meta)
 })
 </script>
 

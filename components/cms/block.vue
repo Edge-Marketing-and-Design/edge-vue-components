@@ -30,6 +30,10 @@ const props = defineProps({
     type: String,
     default: 'auto',
   },
+  renderContext: {
+    type: Object,
+    default: null,
+  },
   allowDelete: {
     type: Boolean,
     default: true,
@@ -1195,7 +1199,7 @@ const getTagsFromPosts = computed(() => {
     >
       <!-- Content -->
       <div :class="props.editMode && props.overrideClicksInEditMode ? 'pointer-events-none' : ''">
-        <edge-cms-block-api :site-id="props.siteId" :route-last-segment="props.routeLastSegment" :theme="props.theme" :content="modelValue?.content" :values="modelValue?.values" :meta="modelValue?.meta" :viewport-mode="props.viewportMode" @pending="state.loading = $event" />
+        <edge-cms-block-api :site-id="props.siteId" :route-last-segment="props.routeLastSegment" :theme="props.theme" :content="modelValue?.content" :values="modelValue?.values" :meta="modelValue?.meta" :viewport-mode="props.viewportMode" :render-context="props.renderContext" @pending="state.loading = $event" />
         <edge-cms-block-render
           v-if="state.loading"
           :content="loadingRender(modelValue?.content)"
@@ -1203,6 +1207,7 @@ const getTagsFromPosts = computed(() => {
           :meta="modelValue?.meta"
           :theme="props.theme"
           :viewport-mode="props.viewportMode"
+          :render-context="props.renderContext"
         />
       </div>
       <!-- Darken overlay on hover -->
@@ -1332,6 +1337,7 @@ const getTagsFromPosts = computed(() => {
                       :values="blockContentPreviewBlock.values"
                       :meta="blockContentPreviewBlock.meta"
                       :viewport-mode="props.viewportMode"
+                      :render-context="props.renderContext"
                     />
                   </div>
                 </div>
