@@ -29,6 +29,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  routeLastSegment: {
+    type: String,
+    default: '',
+  },
   viewportMode: {
     type: String,
     default: 'auto',
@@ -36,6 +40,8 @@ const props = defineProps({
 })
 const emit = defineEmits(['pending'])
 const edgeFirebase = inject('edgeFirebase')
+const previewRouteSegmentCache = useState('edge-cms-preview-route-segment-cache', () => ({}))
+const fallbackRouteLastSegment = ref('')
 /* ---------------- helpers ---------------- */
 
 // Safe dot-path getter
@@ -128,23 +134,96 @@ const fetchAllArrays = async (meta, baseValues) => {
   return out
 }
 
+const metaUsesRouteLastSegment = computed(() => {
+  const metaEntries = Object.values(props.meta || {})
+  return metaEntries.some((cfg) => {
+    if (!cfg || typeof cfg !== 'object')
+      return false
+    const collectionPath = String(cfg?.collection?.path || '').trim().toLowerCase()
+    if (collectionPath !== 'posts' && collectionPath !== 'post')
+      return false
+    try {
+      return JSON.stringify(cfg).includes('{routeLastSegment}')
+    }
+    catch {
+      return false
+    }
+  })
+})
+
+watch(
+  [() => props.routeLastSegment, metaUsesRouteLastSegment, () => props.siteId],
+  async () => {
+    const manualValue = String(props.routeLastSegment || '').trim()
+    if (manualValue) {
+      fallbackRouteLastSegment.value = ''
+      return
+    }
+    if (!metaUsesRouteLastSegment.value || !props.siteId) {
+      fallbackRouteLastSegment.value = ''
+      return
+    }
+
+    const cacheKey = `${edgeGlobal.edgeState.currentOrganization}:${props.siteId}`
+    const cached = String(previewRouteSegmentCache.value?.[cacheKey] || '').trim()
+    if (cached) {
+      fallbackRouteLastSegment.value = cached
+      return
+    }
+
+    try {
+      const staticSearch = new edgeFirebase.SearchStaticData()
+      const collectionPath = `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.siteId}/published_posts`
+      await staticSearch.getData(collectionPath, [], [], 1)
+      const firstPost = Object.values(staticSearch.results?.data || {})[0]
+      const firstName = String(firstPost?.name || '').trim()
+      if (firstName)
+        previewRouteSegmentCache.value[cacheKey] = firstName
+      fallbackRouteLastSegment.value = firstName
+    }
+    catch {
+      fallbackRouteLastSegment.value = ''
+    }
+  },
+  { immediate: true },
+)
+
+const effectiveRouteLastSegment = computed(() => {
+  return String(props.routeLastSegment || '').trim() || String(fallbackRouteLastSegment.value || '').trim()
+})
+
+const runtimeMeta = computed(() => {
+  const prepared = edgeGlobal.prepareCmsMetaForRuntime(props.meta, props.siteId, {
+    routeLastSegment: effectiveRouteLastSegment.value,
+  })
+  if (import.meta.client && metaUsesRouteLastSegment.value) {
+    console.log('[cms routeLastSegment] blockApi runtimeMeta', {
+      routeLastSegmentProp: props.routeLastSegment,
+      effectiveRouteLastSegment: effectiveRouteLastSegment.value,
+      siteId: props.siteId,
+      preparedMeta: prepared,
+    })
+  }
+  return prepared
+})
+
 /* ---------------- async data (SSR + client) ---------------- */
 
 // Stable, SSR-safe cache key so multiple block instances don't collide
 const route = useRoute()
-const asyncKey = computed(() => `blockApi:${route.fullPath}:${JSON.stringify(props.meta ?? {})}`)
+const asyncKey = computed(() => `blockApi:${route.fullPath}:${String(props.routeLastSegment || '')}:${JSON.stringify(runtimeMeta.value ?? {})}`)
 
 const { data: apiResolved, pending } = await useAsyncData(
   asyncKey.value,
   () => {
     // Always compute from latest props
-    return fetchAllArrays(props.meta, props.values)
+    return fetchAllArrays(runtimeMeta.value, props.values)
   },
   {
     server: true,
     default: () => ({}),
     // Re-run when inputs change on client side
-    watch: [() => props.meta, () => props.values],
+    watch: [runtimeMeta, () => props.values],
   },
 )
 
@@ -182,7 +261,7 @@ const collectionValues = computedAsync(
     const collectionData = await edgeGlobal.cmsCollectionData(
       edgeFirebase,
       mergedValues.value,
-      props.meta,
+      runtimeMeta.value,
       props.siteId,
     )
     return collectionData
@@ -203,7 +282,7 @@ const finalValues = computed(() => {
     :theme="props.theme"
     :content="loadingRender(props.content)"
     :values="finalValues"
-    :meta="props.meta"
+    :meta="runtimeMeta"
     :viewport-mode="props.viewportMode"
   />
 </template>

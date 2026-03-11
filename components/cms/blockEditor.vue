@@ -1467,7 +1467,10 @@ const exportCurrentBlock = () => {
 }}}}</code></pre>
                     <div class="text-sm text-foreground space-y-1">
                       <div><code>path</code> is under <code>organizations/{orgId}</code>.</div>
-                      <div><code>uniqueKey</code> supports <code>{orgId}</code> and <code>{siteId}</code>.</div>
+                      <div><code>query</code> stays exactly as authored in the saved block. Supported runtime tokens include <code>{orgId}</code>, <code>{siteId}</code>, and <code>{routeLastSegment}</code>.</div>
+                      <div><code>queryItems</code> also stays saved as authored. The same runtime tokens can be used there and are resolved in memory only.</div>
+                      <div><code>uniqueKey</code> supports runtime tokens such as <code>{orgId}</code> and <code>{siteId}</code>. It is resolved in memory for runtime fetches and does not need to be persisted as a concrete value in the saved block.</div>
+                      <div><code>collection.canonicalLookup.key</code> is optional. It also supports runtime tokens and CMS preview resolves them in memory before fetching the matching document directly.</div>
                       <div><code>query</code> handles the final required filters.</div>
                       <div><code>order</code> controls the final sort order.</div>
                       <div><code>limit</code> caps the results.</div>
@@ -1513,6 +1516,8 @@ const exportCurrentBlock = () => {
                     <div class="text-sm text-foreground space-y-1">
                       <div><code>queryOptions</code> adds filter controls for CMS users.</div>
                       <div>The selected values are stored in <code>meta.queryItems</code>.</div>
+                      <div>If you manually author a key in <code>queryItems</code>, that value takes priority over a <code>queryOption</code> on the same key.</div>
+                      <div>In practice, you generally should not manually set a <code>queryItems</code> key if you want that same key to stay editable by CMS users.</div>
                       <div><code>options</code> can be a collection name or a static array.</div>
                       <div><code>multiple: true</code> saves an array of selected values.</div>
                     </div>
@@ -1523,6 +1528,7 @@ const exportCurrentBlock = () => {
                       How Array Queries Work
                     </h3>
                     <ol class="list-decimal pl-5 text-sm text-foreground space-y-1">
+                      <li>Before runtime fetches, tokens in <code>collection.query</code>, <code>queryItems</code>, <code>uniqueKey</code>, and <code>collection.canonicalLookup.key</code> are resolved in memory only. Supported tokens include <code>{orgId}</code>, <code>{siteId}</code>, and <code>{routeLastSegment}</code>. The saved block keeps the original tokens.</li>
                       <li>Each entry in <code>queryItems</code> makes its own indexed lookup through <code>kvClient.queryIndex</code>.</li>
                       <li>For a query key to work, that field must be included in your KV mirror config (in <code>indexKeys</code> and in <code>metadataKeys</code> for list rendering).</li>
                       <li>If you have more than one <code>queryItems</code> field, the runtime unions those matches into one candidate list (OR behavior at this stage).</li>
@@ -1550,8 +1556,9 @@ const exportCurrentBlock = () => {
                     <div class="text-sm text-foreground space-y-1">
                       <div>1. Put the most selective indexed filters in <code>queryItems</code>. These should cut the candidate list down as early as possible.</div>
                       <div>2. Put must-match rules in <code>collection.query</code>. Think of this as the final narrowing step.</div>
-                      <div>3. Put final sorting in <code>collection.order</code>.</div>
-                      <div>4. Treat <code>queryOptions</code> as the editor UI for choosing filters. At runtime, the actual filtering is driven by <code>collection.query</code>.</div>
+                      <div>3. Use <code>collection.canonicalLookup.key</code> when you already know the exact document to fetch.</div>
+                      <div>4. Put final sorting in <code>collection.order</code>.</div>
+                      <div>5. Treat <code>queryOptions</code> as the editor UI for choosing filters. At runtime, the actual filtering is driven by <code>collection.query</code> and <code>queryItems</code>.</div>
                     </div>
                     <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{
   "field": "eventsList",
@@ -1571,6 +1578,11 @@ const exportCurrentBlock = () => {
                       <div><code>queryItems.tags</code> does the indexed lookup first.</div>
                       <div><code>collection.query</code> then keeps only records that are actually events and already in the past.</div>
                       <div><code>collection.order</code> sorts those remaining records by start date.</div>
+                    </div>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {"field":"siteDoc","collection":{"path":"sites","canonicalLookup":{"key":"{orgId}:{siteId}"},"order":[]},"value":[]}}}}</code></pre>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div>Use <code>collection.canonicalLookup.key</code> when the exact document key is already known.</div>
+                      <div>For canonical-only fetches, <code>uniqueKey</code> and <code>limit</code> are not required.</div>
                     </div>
                   </section>
 
@@ -1615,12 +1627,22 @@ const exportCurrentBlock = () => {
                     <p class="text-sm text-foreground">
                       Inside an array loop, <code>item</code> is the current record.
                     </p>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {"field":"list","schema":[{"field":"name","value":"text"},{"field":"content","value":"richtext"}],"collection":{"path":"posts","uniqueKey":"{orgId}:{siteId}","query":[],"order":[]},"queryOptions":[],"limit":3,"value":[]}}}}
+                    <p class="text-sm text-foreground">
+                      Inside that block render, use <code v-pre>{{renderItem.someField}}</code> to output values directly from the current item passed into <code>renderBlocks</code>.
+                    </p>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {"field":"list","schema":[{"field":"name","value":"text"},{"field":"content","value":"richtext"}],"collection":{"path":"posts","queryItems":{"name":"{routeLastSegment}"},"order":[]},"queryOptions":[],"limit":1,"value":[]}}}}
   <article>
     <h2>{{item.name}}</h2>
     {{{#renderBlocks {"field":"item"}}}}
   </article>
 {{{/array}}}</code></pre>
+                    <p class="text-sm text-foreground">
+                      Example block content rendered by <code>renderBlocks</code>:
+                    </p>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;article&gt;
+  &lt;h2&gt;{{renderItem.name}}&lt;/h2&gt;
+  {{{content}}}
+&lt;/article&gt;</code></pre>
                   </section>
 
                   <section id="entries" class="space-y-3">
@@ -1867,7 +1889,7 @@ const exportCurrentBlock = () => {
                       Nav Block Template (Copy / Paste)
                     </h3>
                     <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;div class="cms-nav-root cms-nav-sticky" data-cms-nav-root data-cms-nav-position="{{{#text {"field":"navPosition","title":"Menu Position","option":{"field":"navPosition","options":[{"title":"Right","name":"right"},{"title":"Left","name":"left"},{"title":"Center","name":"center"}],"optionsKey":"title","optionsValue":"name"},"value":"right"}}}}" data-cms-nav-close-on-link="true" data-cms-nav-top-class="bg-transparent border-transparent" data-cms-nav-scrolled-class="bg-navBg/80 backdrop-blur-lg shadow-lg" data-cms-nav-top-row-class="h-[64px] md:h-[88px] py-6 md:py-8" data-cms-nav-scrolled-row-class="h-[56px] md:h-[68px] py-5 md:py-4"&gt;
-  {{{#array {"field":"siteDoc","collection":{"path":"sites","uniqueKey":"{orgId}","query":[{"field":"docId","operator":"==","value":"{siteId}"}],"order":[]},"limit":1,"value":[]}}}}
+  {{{#array {"field":"siteDoc","collection":{"path":"sites","canonicalLookup":{"key":"{orgId}:{siteId}"},"order":[]},"value":[]}}}}
   &lt;nav class="cms-nav-main fixed inset-x-0 top-0 z-30 w-full bg-transparent text-navText"&gt;
     &lt;div class="relative w-full px-6 md:px-12"&gt;
       &lt;div class="cms-nav-layout flex h-[64px] md:h-[88px] items-center justify-between gap-6 py-6 md:py-8"&gt;

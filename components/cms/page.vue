@@ -85,6 +85,9 @@ const state = reactive({
     postBottom: false,
     postBetween: {},
   },
+  routeLastSegmentDialogOpen: false,
+  routeLastSegmentDraft: '',
+  routeLastSegment: '',
 })
 
 const pageImportInputRef = ref(null)
@@ -495,109 +498,6 @@ const blockPick = (block, index, slotProps, post = false) => {
   }
 }
 
-const applyCollectionUniqueKeys = (workingDoc) => {
-  const hasTemplateToken = (value) => {
-    if (typeof value === 'string')
-      return value.includes('{orgId}') || value.includes('{siteId}')
-    if (Array.isArray(value))
-      return value.some(entry => hasTemplateToken(entry))
-    if (value && typeof value === 'object')
-      return Object.values(value).some(entry => hasTemplateToken(entry))
-    return false
-  }
-
-  const resolveTokens = (value) => {
-    if (typeof value === 'string') {
-      let resolved = value
-      const orgId = edgeGlobal.edgeState.currentOrganization || ''
-      const siteId = props.site || ''
-      if (resolved.includes('{orgId}') && orgId)
-        resolved = resolved.replaceAll('{orgId}', orgId)
-      if (resolved.includes('{siteId}') && siteId)
-        resolved = resolved.replaceAll('{siteId}', siteId)
-      return resolved
-    }
-    if (Array.isArray(value))
-      return value.map(entry => resolveTokens(entry))
-    if (value && typeof value === 'object') {
-      const out = {}
-      Object.keys(value).forEach((key) => {
-        out[key] = resolveTokens(value[key])
-      })
-      return out
-    }
-    return value
-  }
-
-  const isEmptyQueryItem = (value) => {
-    if (value === undefined || value === null || value === '')
-      return true
-    if (Array.isArray(value))
-      return value.length === 0
-    return false
-  }
-
-  const resolveUniqueKey = (template) => {
-    if (!template || typeof template !== 'string')
-      return ''
-    return resolveTokens(template)
-  }
-
-  const applyToBlocks = (blocks) => {
-    if (!Array.isArray(blocks))
-      return
-    blocks.forEach((block) => {
-      const meta = block?.meta
-      if (!meta || typeof meta !== 'object')
-        return
-      Object.keys(meta).forEach((fieldKey) => {
-        const cfg = meta[fieldKey]
-        if (!cfg || typeof cfg !== 'object')
-          return
-
-        // Materialize tokenized collection.query filters (e.g. {siteId}) into queryItems
-        // so frontend hydration receives concrete runtime filter selections.
-        if (Array.isArray(cfg?.collection?.query)) {
-          if (!cfg.queryItems || typeof cfg.queryItems !== 'object')
-            cfg.queryItems = {}
-          for (const queryFilter of cfg.collection.query) {
-            const queryField = queryFilter?.field
-            if (!queryField || typeof queryField !== 'string')
-              continue
-            const rawValue = queryFilter?.value
-            if (!hasTemplateToken(rawValue))
-              continue
-            if (!isEmptyQueryItem(cfg.queryItems[queryField]))
-              continue
-            cfg.queryItems[queryField] = resolveTokens(rawValue)
-          }
-        }
-
-        if (!cfg?.collection?.uniqueKey)
-          return
-        const resolved = resolveUniqueKey(cfg.collection.uniqueKey)
-        if (!resolved)
-          return
-        if (cfg.queryItems && !Object.prototype.hasOwnProperty.call(cfg, 'uniqueKey')) {
-          const reordered = {}
-          Object.keys(cfg).forEach((key) => {
-            reordered[key] = cfg[key]
-            if (key === 'queryItems')
-              reordered.uniqueKey = resolved
-          })
-          block.meta[fieldKey] = reordered
-        }
-        else {
-          cfg.uniqueKey = resolved
-        }
-      })
-    })
-  }
-
-  applyToBlocks(workingDoc?.content)
-  applyToBlocks(workingDoc?.postContent)
-}
-
 onMounted(() => {
   if (props.page === 'new') {
     state.editMode = true
@@ -650,7 +550,6 @@ const editorDocUpdates = (workingDoc) => {
   ensureStructureDefaults(workingDoc, false)
   if (workingDoc?.post || (Array.isArray(workingDoc?.postContent) && workingDoc.postContent.length > 0) || Array.isArray(workingDoc?.postStructure))
     ensureStructureDefaults(workingDoc, true)
-  applyCollectionUniqueKeys(workingDoc)
   if (!hasPostView(workingDoc) && state.previewPageView === 'post')
     state.previewPageView = 'list'
   const blockIds = (workingDoc.content || []).map(block => block.blockId).filter(id => id)
@@ -662,6 +561,24 @@ const editorDocUpdates = (workingDoc) => {
   const nextVersion = getNextVersion(storedVersion)
   if (state.workingDoc.version !== nextVersion)
     state.workingDoc.version = nextVersion
+}
+
+const previewRouteLastSegment = computed(() => String(state.routeLastSegment || '').trim())
+
+const openRouteLastSegmentDialog = () => {
+  state.routeLastSegmentDraft = previewRouteLastSegment.value
+  state.routeLastSegmentDialogOpen = true
+}
+
+const applyRouteLastSegment = () => {
+  state.routeLastSegment = String(state.routeLastSegmentDraft || '').trim()
+  state.routeLastSegmentDialogOpen = false
+}
+
+const clearRouteLastSegment = () => {
+  state.routeLastSegment = ''
+  state.routeLastSegmentDraft = ''
+  state.routeLastSegmentDialogOpen = false
 }
 
 const pageName = computed(() => {
@@ -2064,6 +1981,19 @@ const hasUnsavedChanges = (changes) => {
             </div>
             <span class="text-[10px] leading-tight text-slate-600 dark:text-slate-300">View</span>
           </div>
+          <div v-if="hasPostView(slotProps.workingDoc) && state.previewPageView === 'post'" class="flex flex-col items-center gap-1 px-2">
+            <edge-shad-button
+              type="button"
+              variant="outline"
+              class="h-[26px] px-2 text-xs"
+              @click="openRouteLastSegmentDialog"
+            >
+              Test URL
+            </edge-shad-button>
+            <span class="max-w-[120px] truncate text-[10px] leading-tight text-slate-600 dark:text-slate-300">
+              {{ previewRouteLastSegment || 'Auto' }}
+            </span>
+          </div>
 
           <edge-shad-button variant="text" class="text-xs h-[26px] text-slate-700 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white" @click="state.editMode = !state.editMode">
             <template v-if="state.editMode">
@@ -2529,7 +2459,7 @@ const hasUnsavedChanges = (changes) => {
                               <div :key="blockId" class="relative group">
                                 <edge-cms-block
                                   v-if="blockIndex(slotProps.workingDoc, blockId, true) !== -1"
-                                  :key="`${pagePreviewRenderKey}:${blockId}:${effectiveThemeId}:post`"
+                                  :key="`${pagePreviewRenderKey}:${blockId}:${effectiveThemeId}:post:${previewRouteLastSegment || 'auto'}`"
                                   v-model="slotProps.workingDoc.postContent[blockIndex(slotProps.workingDoc, blockId, true)]"
                                   :edit-mode="state.editMode"
                                   :override-clicks-in-edit-mode="state.editMode"
@@ -2539,6 +2469,7 @@ const hasUnsavedChanges = (changes) => {
                                   :block-id="blockId"
                                   :theme="theme"
                                   :site-id="props.site"
+                                  :route-last-segment="previewRouteLastSegment"
                                   @delete="(block) => deleteBlock(block, slotProps, true)"
                                 />
                                 <div
@@ -2756,6 +2687,39 @@ const hasUnsavedChanges = (changes) => {
           Overwrite
         </edge-shad-button>
       </DialogFooter>
+    </DialogContent>
+  </edge-shad-dialog>
+  <edge-shad-dialog v-model="state.routeLastSegmentDialogOpen">
+    <DialogContent class="sm:max-w-md">
+      <DialogHeader>
+        <DialogTitle>Test URL</DialogTitle>
+        <DialogDescription>
+          Set the preview value used for <code>{routeLastSegment}</code> on the detail page.
+        </DialogDescription>
+      </DialogHeader>
+      <div class="space-y-3">
+        <div class="space-y-2">
+          <label for="route-last-segment-preview" class="text-sm font-medium text-foreground">
+            Route Last Segment
+          </label>
+          <Input
+            id="route-last-segment-preview"
+            v-model="state.routeLastSegmentDraft"
+            placeholder="example-post-name"
+          />
+        </div>
+        <div class="flex items-center justify-end gap-2">
+          <edge-shad-button type="button" variant="outline" @click="clearRouteLastSegment">
+            Auto
+          </edge-shad-button>
+          <edge-shad-button type="button" variant="outline" @click="state.routeLastSegmentDialogOpen = false">
+            Cancel
+          </edge-shad-button>
+          <edge-shad-button type="button" @click="applyRouteLastSegment">
+            Go
+          </edge-shad-button>
+        </div>
+      </div>
     </DialogContent>
   </edge-shad-dialog>
   <edge-shad-dialog v-model="state.importErrorDialogOpen">

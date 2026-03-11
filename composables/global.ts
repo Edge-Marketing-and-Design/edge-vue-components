@@ -439,9 +439,12 @@ const allowMenuItem = (item: any, isAdmin: boolean) => {
   return true
 }
 
-const resolveCmsCollectionTokens = (input: any, currentSite: any = '') => {
+const resolveCmsCollectionTokens = (input: any, currentSite: any = '', tokenContext: any = {}) => {
   const orgId = String(edgeState.currentOrganization || '')
   const siteId = String(currentSite || '')
+  const routeLastSegment = String(tokenContext?.routeLastSegment || '')
+  const pageId = String(tokenContext?.pageId || '')
+  const postId = String(tokenContext?.postId || '')
 
   const replaceTokens = (raw: string) => {
     let resolved = raw
@@ -449,6 +452,12 @@ const resolveCmsCollectionTokens = (input: any, currentSite: any = '') => {
       resolved = resolved.replaceAll('{orgId}', orgId)
     if (siteId && resolved.includes('{siteId}'))
       resolved = resolved.replaceAll('{siteId}', siteId)
+    if (routeLastSegment && resolved.includes('{routeLastSegment}'))
+      resolved = resolved.replaceAll('{routeLastSegment}', routeLastSegment)
+    if (pageId && resolved.includes('{pageId}'))
+      resolved = resolved.replaceAll('{pageId}', pageId)
+    if (postId && resolved.includes('{postId}'))
+      resolved = resolved.replaceAll('{postId}', postId)
     return resolved
   }
 
@@ -467,6 +476,37 @@ const resolveCmsCollectionTokens = (input: any, currentSite: any = '') => {
   }
 
   return walk(input)
+}
+
+const prepareCmsMetaForRuntime = (meta: any, currentSite: any = '', tokenContext: any = {}) => {
+  const cloned = dupObject(meta || {})
+  for (const field in cloned) {
+    const cfg = cloned[field]
+    if (!cfg || typeof cfg !== 'object')
+      continue
+
+    delete cfg.canonicalLookup
+
+    if (!cfg.collection || typeof cfg.collection !== 'object')
+      continue
+
+    if (Array.isArray(cfg.collection.query))
+      cfg.collection.query = resolveCmsCollectionTokens(cfg.collection.query, currentSite, tokenContext)
+
+    if (cfg.queryItems && typeof cfg.queryItems === 'object')
+      cfg.queryItems = resolveCmsCollectionTokens(cfg.queryItems, currentSite, tokenContext)
+
+    if (typeof cfg.collection.uniqueKey === 'string')
+      cfg.collection.uniqueKey = resolveCmsCollectionTokens(cfg.collection.uniqueKey, currentSite, tokenContext)
+
+    if (cfg.collection.canonicalLookup && typeof cfg.collection.canonicalLookup === 'object' && typeof cfg.collection.canonicalLookup.key === 'string') {
+      cfg.collection.canonicalLookup = {
+        ...cfg.collection.canonicalLookup,
+        key: resolveCmsCollectionTokens(cfg.collection.canonicalLookup.key, currentSite, tokenContext),
+      }
+    }
+  }
+  return cloned
 }
 
 const getValueAtPath = (source: any, path: string) => {
@@ -546,12 +586,12 @@ const cmsCollectionData = async (edgeFirebase: any, value: any, meta: any, curre
   for (const key in meta) {
     if (meta[key]?.collection) {
       const staticSearch = new edgeFirebase.SearchStaticData()
+      const canonicalLookupKey = String(meta[key]?.collection?.canonicalLookup?.key || '').trim()
 
       const currentQuery = Array.isArray(meta[key].collection.query)
         ? resolveCmsCollectionTokens(dupObject(meta[key].collection.query), currentSite)
         : []
       for (const queryKey in meta[key].queryItems || {}) {
-        console.log('key', queryKey)
         if (meta[key].queryItems[queryKey]) {
           const findIndex = currentQuery.findIndex((q: any) => q.field === queryKey)
           const queryOption = meta[key]?.queryOptions?.find((o: any) => o.field === queryKey)
@@ -578,9 +618,48 @@ const cmsCollectionData = async (edgeFirebase: any, value: any, meta: any, curre
       if (meta[key].collection.path === 'posts' || meta[key].collection.path === 'post') {
         collectionPath = `${edgeState.organizationDocPath}/sites/${currentSite}/published_posts`
       }
+
+      if (import.meta.client) {
+        console.log('[cms routeLastSegment] pre-fetch', {
+          field: key,
+          collectionPath,
+          queryItems: meta[key].queryItems || {},
+          currentQuery,
+          canonicalLookupKey,
+        })
+      }
+
+      if (canonicalLookupKey) {
+        const canonicalSegments = canonicalLookupKey.split(':').filter(Boolean)
+        const docId = canonicalSegments[canonicalSegments.length - 1]
+        if (docId) {
+          const record = await edgeFirebase.getDocData(collectionPath, docId)
+          const records = record ? [record] : []
+          if (import.meta.client) {
+            console.log('[cms routeLastSegment] cmsCollectionData canonical result', {
+              field: key,
+              docId,
+              records,
+            })
+          }
+          value[key] = applyCmsCollectionOrder(records, meta[key].collection.order)
+          continue
+        }
+      }
+
       await staticSearch.getData(collectionPath, currentQuery, meta[key].collection.order, meta[key].limit)
 
       const records = Object.values(staticSearch.results.data || {})
+      if (import.meta.client) {
+        console.log('[cms routeLastSegment] cmsCollectionData results', {
+          field: key,
+          queryItems: meta[key].queryItems || {},
+          currentQuery,
+          count: records.length,
+          firstRecord: records[0] || null,
+          records,
+        })
+      }
       value[key] = applyCmsCollectionOrder(records, meta[key].collection.order)
     }
   }
@@ -621,6 +700,7 @@ export const edgeGlobal = {
   getRoleName,
   isAdminGlobal,
   iconFromMenu,
+  prepareCmsMetaForRuntime,
   cmsCollectionData,
   allowMenuItem,
   syncDevOverride,

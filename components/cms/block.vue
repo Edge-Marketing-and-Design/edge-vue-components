@@ -22,6 +22,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  routeLastSegment: {
+    type: String,
+    default: '',
+  },
   viewportMode: {
     type: String,
     default: 'auto',
@@ -1191,7 +1195,7 @@ const getTagsFromPosts = computed(() => {
     >
       <!-- Content -->
       <div :class="props.editMode && props.overrideClicksInEditMode ? 'pointer-events-none' : ''">
-        <edge-cms-block-api :site-id="props.siteId" :theme="props.theme" :content="modelValue?.content" :values="modelValue?.values" :meta="modelValue?.meta" :viewport-mode="props.viewportMode" @pending="state.loading = $event" />
+        <edge-cms-block-api :site-id="props.siteId" :route-last-segment="props.routeLastSegment" :theme="props.theme" :content="modelValue?.content" :values="modelValue?.values" :meta="modelValue?.meta" :viewport-mode="props.viewportMode" @pending="state.loading = $event" />
         <edge-cms-block-render
           v-if="state.loading"
           :content="loadingRender(modelValue?.content)"
@@ -1322,6 +1326,7 @@ const getTagsFromPosts = computed(() => {
                   <div class="relative overflow-visible rounded-none" :class="[previewContentSurfaceClass, previewContentCanvasClass]" style="transform: translateZ(0);">
                     <edge-cms-block-api
                       :site-id="props.siteId"
+                      :route-last-segment="props.routeLastSegment"
                       :theme="props.theme"
                       :content="blockContentPreviewBlock.content"
                       :values="blockContentPreviewBlock.values"
@@ -1639,14 +1644,13 @@ const getTagsFromPosts = computed(() => {
                   </div>
                 </div>
                 <div v-else-if="entry.meta?.option">
-                  <cms-publication-picker-field
+                  <!-- <cms-publication-picker-field
                     v-if="entry.meta.option?.picker === 'publication'"
                     v-model="state.draft[entry.field]"
                     :option="entry.meta.option"
                     :label="genTitleFromField(entry)"
-                  />
+                  /> -->
                   <edge-cms-options-select
-                    v-else
                     v-model="state.draft[entry.field]"
                     :option="entry.meta.option"
                     :label="genTitleFromField(entry)"
