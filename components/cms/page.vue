@@ -544,8 +544,7 @@ const editorDocUpdates = (workingDoc) => {
   if (workingDoc?.post || (Array.isArray(workingDoc?.postContent) && workingDoc.postContent.length > 0) || Array.isArray(workingDoc?.postStructure))
     ensureStructureDefaults(workingDoc, true)
   if (props.isTemplateSite) {
-    const fallbackTypes = workingDoc?.post ? ['Post'] : ['Page']
-    const normalizedTypes = normalizeTemplatePageTypeSelections(workingDoc?.type, { fallback: fallbackTypes })
+    const normalizedTypes = normalizeTemplatePageTypeSelections(workingDoc?.type, { fallback: ['Page'], excludePost: Boolean(workingDoc?.post) })
     if (JSON.stringify(workingDoc?.type || []) !== JSON.stringify(normalizedTypes))
       workingDoc.type = normalizedTypes
     if (JSON.stringify(state.workingDoc?.type || []) !== JSON.stringify(normalizedTypes))
@@ -1234,7 +1233,7 @@ const TEMPLATE_PAGE_TYPE_ITEMS = [
   { name: 'Post', title: 'Post' },
 ]
 
-function normalizeTemplatePageTypeSelections(value, { fallback = ['Page'] } = {}) {
+function coerceTemplatePageTypes(value) {
   const rawValues = Array.isArray(value) ? value : [value]
   const normalized = rawValues
     .map((typeValue) => {
@@ -1255,15 +1254,32 @@ function normalizeTemplatePageTypeSelections(value, { fallback = ['Page'] } = {}
       return []
     })
 
-  const uniqueNormalized = [...new Set(normalized)]
-  return uniqueNormalized.length ? uniqueNormalized : [...fallback]
+  return [...new Set(normalized)]
+}
+
+function normalizeTemplatePageTypeSelections(value, { fallback = ['Page'], excludePost = false } = {}) {
+  const filtered = coerceTemplatePageTypes(value).filter(typeValue => !(excludePost && typeValue === 'Post'))
+  if (filtered.length)
+    return filtered
+
+  const fallbackTypes = coerceTemplatePageTypes(fallback).filter(typeValue => !(excludePost && typeValue === 'Post'))
+  return fallbackTypes.length ? fallbackTypes : ['Page']
+}
+
+const templateTypeItems = (workingDoc) => {
+  if (workingDoc?.post)
+    return TEMPLATE_PAGE_TYPE_ITEMS.filter(item => item.name === 'Page')
+  return TEMPLATE_PAGE_TYPE_ITEMS
+}
+
+const templateTypeIncludesPost = (workingDoc) => {
+  return normalizeTemplatePageTypeSelections(workingDoc?.type, { fallback: ['Page'] }).includes('Post')
 }
 
 const templateAllowedBlockTypes = (workingDoc) => {
   if (!props.isTemplateSite)
     return ['Page']
-  const fallbackTypes = workingDoc?.post ? ['Post'] : ['Page']
-  return normalizeTemplatePageTypeSelections(workingDoc?.type, { fallback: fallbackTypes })
+  return normalizeTemplatePageTypeSelections(workingDoc?.type, { fallback: ['Page'], excludePost: Boolean(workingDoc?.post) })
 }
 
 const templateTagItems = computed(() => {
@@ -2164,6 +2180,7 @@ const hasUnsavedChanges = (changes) => {
               placeholder="Enter page name"
             />
             <edge-shad-checkbox
+              v-if="!templateTypeIncludesPost(slotProps.workingDoc)"
               v-model="slotProps.workingDoc.post"
               label="Is a Post Template"
               name="post"
@@ -2172,16 +2189,16 @@ const hasUnsavedChanges = (changes) => {
               The Index Page lists all items (e.g., /{{ slotProps.workingDoc.name }}), while the Detail Page displays a single item (e.g., /{{ slotProps.workingDoc.name }}/:slug).
             </edge-shad-checkbox>
             <edge-shad-select-tags
-              :model-value="normalizeTemplatePageTypeSelections(slotProps.workingDoc.type, { fallback: slotProps.workingDoc.post ? ['Post'] : ['Page'] })"
+              :model-value="normalizeTemplatePageTypeSelections(slotProps.workingDoc.type, { fallback: ['Page'], excludePost: Boolean(slotProps.workingDoc.post) })"
               name="type"
               label="Type"
               placeholder="Select types"
-              :items="TEMPLATE_PAGE_TYPE_ITEMS"
+              :items="templateTypeItems(slotProps.workingDoc)"
               item-title="title"
               item-value="name"
               :allow-additions="false"
               @update:model-value="(value) => {
-                slotProps.workingDoc.type = normalizeTemplatePageTypeSelections(value, { fallback: slotProps.workingDoc.post ? ['Post'] : ['Page'] })
+                slotProps.workingDoc.type = normalizeTemplatePageTypeSelections(value, { fallback: ['Page'], excludePost: Boolean(slotProps.workingDoc.post) })
               }"
             />
             <edge-shad-select-tags

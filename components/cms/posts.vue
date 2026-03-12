@@ -683,10 +683,11 @@ const postTemplateCardItems = computed(() => {
         description: String(doc?.metaDescription || doc?.description || '').trim(),
         content: normalizedTemplateDoc.content,
         structure: normalizedTemplateDoc.structure,
+        post: Boolean(doc?.post),
         type: normalizeTemplatePageTypes(doc?.type),
       }
     })
-    .filter(template => template.type.includes('Post'))
+    .filter(template => template.type.includes('Post') && !template.post)
     .sort((left, right) => left.name.localeCompare(right.name))
 
   return [blankPostTemplateTile, ...templates]

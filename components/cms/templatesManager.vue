@@ -821,7 +821,7 @@ watch(themeCollection, () => {
             @click="openNewTemplatePage"
           >
             <Plus class="mr-2 h-4 w-4" />
-            Add Page
+            Add Template
           </edge-shad-button>
         </div>
       </template>
