@@ -331,6 +331,7 @@ const state = reactive({
   selectedTemplateId: 'blank',
   selectedExistingPageId: '',
   showTemplatePicker: false,
+  templateManualTags: [],
 })
 
 const templateTagItems = computed(() => {
@@ -348,9 +349,22 @@ const templateTagItems = computed(() => {
       }
     }
   }
+  for (const tag of state.templateManualTags) {
+    const normalized = typeof tag === 'string' ? tag.trim() : ''
+    if (normalized && normalized.toLowerCase() !== 'quick picks')
+      tags.add(normalized)
+  }
   const tagList = Array.from(tags).sort((a, b) => a.localeCompare(b)).map(tag => ({ name: tag, title: tag }))
   return [{ name: 'Quick Picks', title: 'Quick Picks' }, ...tagList]
 })
+
+const addTemplateTagOption = (value) => {
+  const normalized = String(value || '').trim()
+  if (!normalized)
+    return
+  if (!state.templateManualTags.includes(normalized))
+    state.templateManualTags.push(normalized)
+}
 
 const BLANK_TEMPLATE_ID = 'blank'
 
@@ -395,15 +409,47 @@ const templatePagesCollection = computed(() => {
   return edgeFirebase.data?.[TEMPLATE_COLLECTION_PATH.value] || {}
 })
 
+const normalizeTemplatePageTypes = (value) => {
+  const rawTypes = Array.isArray(value) ? value : [value]
+  const normalized = rawTypes
+    .map((typeValue) => {
+      if (typeValue && typeof typeValue === 'object') {
+        const objectValue = typeValue.name ?? typeValue.value ?? typeValue.title ?? typeValue.label ?? ''
+        return String(objectValue || '')
+      }
+      return String(typeValue || '')
+    })
+    .map(typeValue => typeValue.trim().toLowerCase())
+    .flatMap((typeValue) => {
+      if (typeValue === 'page')
+        return ['Page']
+      if (typeValue === 'post')
+        return ['Post']
+      if (typeValue === 'both')
+        return ['Page', 'Post']
+      return []
+    })
+
+  const uniqueNormalized = [...new Set(normalized)]
+  return uniqueNormalized.length ? uniqueNormalized : ['Page']
+}
+
 const templatePagesList = computed(() => {
-  return Object.entries(templatePagesCollection.value).map(([docId, doc]) => ({
-    docId,
-    ...(doc || {}),
-    name: doc?.name || 'Untitled Template',
-    tags: Array.isArray(doc?.tags) ? doc.tags : [],
-    description: doc?.metaDescription || doc?.description || '',
-    content: Array.isArray(doc?.content) ? doc.content : [],
-  }))
+  return Object.entries(templatePagesCollection.value)
+    .map(([docId, doc]) => ({
+      docId,
+      ...(doc || {}),
+      name: doc?.name || 'Untitled Template',
+      tags: Array.isArray(doc?.tags) ? doc.tags : [],
+      description: doc?.metaDescription || doc?.description || '',
+      content: Array.isArray(doc?.content) ? doc.content : [],
+      type: normalizeTemplatePageTypes(doc?.type),
+    }))
+    .filter((template) => {
+      if (props.isTemplateSite)
+        return true
+      return template.type.includes('Page')
+    })
 })
 
 const templateFilterOptions = computed(() => {
@@ -1645,6 +1691,7 @@ const theme = computed(() => {
               placeholder="Add tags"
               :items="templateTagItems"
               :allow-additions="true"
+              @add="addTemplateTagOption"
             />
             <edge-shad-select-tags
               v-if="props.isTemplateSite && props.themeOptions.length"

@@ -35,13 +35,11 @@ export const cmsRoutes = [
     name: 'cms-dashboard-templates-index',
     path: '/app/dashboard/templates',
     file: './edge/routes/cms/dashboard/templates/index.vue',
-    children: [
-      {
-        name: 'cms-dashboard-templates-page',
-        path: ':page',
-        file: './edge/routes/cms/dashboard/templates/[page].vue',
-      },
-    ],
+  },
+  {
+    name: 'cms-dashboard-templates-page',
+    path: '/app/dashboard/templates/:page',
+    file: './edge/routes/cms/dashboard/templates/[page].vue',
   },
   {
     name: 'cms-dashboard-themes-index',

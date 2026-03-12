@@ -1192,77 +1192,7 @@ const handleBlockImport = async (event) => {
         </div>
       </template>
       <template #list="slotProps">
-        <div class="w-full pt-2 space-y-3 h-[calc(100vh-400px)]">
-          <!-- <div class="rounded-md border border-slate-300/70 bg-slate-100/95 dark:border-slate-700 dark:bg-slate-900/95 px-3 py-2 space-y-2 backdrop-blur-sm shadow-sm">
-            <div class="flex flex-wrap items-center justify-between gap-2">
-              <div class="flex items-center gap-2">
-                <Checkbox
-                  :model-value="getVisibleSelectionState(applyListSelectionFilters(slotProps.filtered))"
-                  aria-label="Select visible blocks"
-                  class="border-slate-400 bg-white shadow-sm dark:border-slate-600 dark:bg-slate-950 data-[state=checked]:bg-slate-700 data-[state=checked]:text-white dark:data-[state=checked]:bg-slate-200 dark:data-[state=checked]:text-slate-900"
-                  @click.stop
-                  @update:model-value="toggleVisibleBlockSelection(applyListSelectionFilters(slotProps.filtered), $event)"
-                />
-                <span class="text-xs text-slate-600 dark:text-slate-300">
-                  Select visible ({{ applyListSelectionFilters(slotProps.filtered).length }})
-                </span>
-              </div>
-              <div class="flex items-center gap-2">
-                <span class="text-xs text-slate-600 dark:text-slate-300">{{ selectedBlockCount }} selected</span>
-                <edge-shad-button
-                  variant="outline"
-                  class="h-8 text-xs"
-                  :disabled="selectedBlockCount === 0"
-                  @click="clearSelectedBlocks"
-                >
-                  Clear
-                </edge-shad-button>
-                <edge-shad-button
-                  variant="destructive"
-                  class="h-8 text-xs text-white"
-                  :disabled="selectedBlockCount === 0"
-                  @click="openBulkDeleteDialog"
-                >
-                  Delete selected
-                </edge-shad-button>
-              </div>
-            </div>
-            <div class="flex flex-col gap-2 md:flex-row md:items-center">
-              <div class="grow">
-                <edge-shad-input
-                  v-model="state.filter"
-                  name="filter"
-                  placeholder="Search blocks..."
-                  class="w-full"
-                />
-              </div>
-              <div class="md:w-[150px]">
-                <edge-shad-select
-                  v-model="state.blockTypeFilter"
-                  name="blockTypeFilter"
-                  :items="BLOCK_TYPE_FILTER_OPTIONS"
-                  placeholder="Type"
-                  class="w-full"
-                />
-              </div>
-              <div class="md:min-w-[170px]">
-                <edge-shad-select-tags
-                  v-model="state.picksFilter"
-                  :items="tagOptions"
-                  name="tags"
-                  placeholder="Filter tags"
-                />
-              </div>
-              <div class="md:min-w-[170px]">
-                <edge-shad-select-tags
-                  v-model="state.themesFilter"
-                  :items="themeOptions"
-                  name="themes"
-                  placeholder="Filter themes"
-                />
-              </div>
-            </div>
-          </div> -->
+        <div class="w-full pt-2 space-y-3 h-[calc(100vh-310px)]">
           <div
             class="grid gap-4 w-full"
             style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));"

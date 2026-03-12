@@ -1,7 +1,7 @@
 <script setup lang="js">
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { ArrowLeft, CircleAlert, FileCheck, FilePenLine, FileStack, FolderCog, FolderDown, FolderUp, FolderX, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Upload } from 'lucide-vue-next'
+import { ArrowLeft, CircleAlert, FileCheck, FilePenLine, FileStack, FolderCog, FolderDown, FolderUp, FolderX, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload } from 'lucide-vue-next'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
 
 const props = defineProps({
@@ -99,6 +99,10 @@ const state = reactive({
   importPageErrorDialogOpen: false,
   importPageErrorMessage: '',
   siteSettingsWorkingDoc: {},
+  templatePageFilter: '',
+  templatePageSearchType: 'all',
+  templatePageTags: [],
+  templatePageRenderContext: null,
 })
 
 const pageImportInputRef = ref(null)
@@ -336,7 +340,7 @@ const formatSubmissionKey = (key) => {
     .replace(/^./, str => str.toUpperCase())
 }
 
-const getSubmissionEntriesPreview = (data, limit = 6) => {
+const _getSubmissionEntriesPreview = (data, limit = 6) => {
   return collectSubmissionEntries(data).slice(0, limit)
 }
 
@@ -422,6 +426,21 @@ const themeOptions = computed(() => {
     .sort((a, b) => a.label.localeCompare(b.label))
 })
 
+const parseThemeDoc = (themeDoc) => {
+  const rawTheme = themeDoc?.theme
+  if (!rawTheme)
+    return null
+  try {
+    const parsed = typeof rawTheme === 'string' ? JSON.parse(rawTheme) : rawTheme
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+      return null
+    return parsed
+  }
+  catch {
+    return null
+  }
+}
+
 const themeOptionsMap = computed(() => {
   const map = new Map()
   for (const option of themeOptions.value) {
@@ -429,6 +448,51 @@ const themeOptionsMap = computed(() => {
   }
   return map
 })
+
+const previewSiteOptions = computed(() => {
+  return Object.entries(edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`] || {})
+    .filter(([siteId]) => String(siteId || '').trim() && siteId !== 'templates')
+    .map(([siteId, siteDoc]) => ({
+      name: siteId,
+      title: siteDoc?.name || siteId,
+    }))
+    .sort((a, b) => a.title.localeCompare(b.title))
+})
+
+const selectedTemplatePreviewSiteId = computed(() => {
+  const selectedSiteId = String(edgeGlobal.edgeState.blockEditorSite || '').trim()
+  if (selectedSiteId)
+    return selectedSiteId
+  return String(previewSiteOptions.value?.[0]?.name || '').trim()
+})
+
+const selectedTemplatePreviewThemeId = computed(() => {
+  const selectedThemeId = String(edgeGlobal.edgeState.blockEditorTheme || '').trim()
+  if (selectedThemeId)
+    return selectedThemeId
+  return String(themeOptions.value?.[0]?.value || '').trim()
+})
+
+const selectedTemplatePreviewTheme = computed(() => {
+  const themeId = selectedTemplatePreviewThemeId.value
+  if (!themeId)
+    return null
+  return parseThemeDoc(themeCollection.value?.[themeId]) || null
+})
+
+watch(previewSiteOptions, (options) => {
+  const selectedSiteId = String(edgeGlobal.edgeState.blockEditorSite || '').trim()
+  const hasSelectedSite = options.some(option => option.name === selectedSiteId)
+  if (!selectedSiteId || !hasSelectedSite)
+    edgeGlobal.edgeState.blockEditorSite = options?.[0]?.name || ''
+}, { immediate: true, deep: true })
+
+watch(themeOptions, (options) => {
+  const selectedThemeId = String(edgeGlobal.edgeState.blockEditorTheme || '').trim()
+  const hasSelectedTheme = options.some(option => option.value === selectedThemeId)
+  if (!selectedThemeId || !hasSelectedTheme)
+    edgeGlobal.edgeState.blockEditorTheme = options?.[0]?.value || ''
+}, { immediate: true, deep: true })
 
 const orgUsers = computed(() => edgeFirebase.state?.users || {})
 const userOptions = computed(() => {
@@ -522,7 +586,49 @@ const themeItemsForAllowed = (allowed, current) => {
   return []
 }
 
-const menuPositionOptions = [
+const templatePagePreviewContextCache = useState('edge-cms-template-page-preview-context-cache', () => ({}))
+
+const loadTemplatePagePreviewContext = async () => {
+  const siteId = selectedTemplatePreviewSiteId.value
+  if (!siteId) {
+    state.templatePageRenderContext = null
+    return
+  }
+
+  const cacheKey = `${edgeGlobal.edgeState.currentOrganization}:${siteId}`
+  const cached = templatePagePreviewContextCache.value?.[cacheKey]
+  if (cached && typeof cached === 'object') {
+    state.templatePageRenderContext = edgeGlobal.dupObject(cached)
+    return
+  }
+
+  try {
+    const staticSearch = new edgeFirebase.SearchStaticData()
+    const collectionPath = `${edgeGlobal.edgeState.organizationDocPath}/sites/${siteId}/published_posts`
+    await staticSearch.getData(collectionPath, [], [], 1)
+    const firstPost = Object.values(staticSearch.results?.data || {})[0] || null
+    if (firstPost && typeof firstPost === 'object') {
+      templatePagePreviewContextCache.value[cacheKey] = edgeGlobal.dupObject(firstPost)
+      state.templatePageRenderContext = edgeGlobal.dupObject(firstPost)
+      return
+    }
+  }
+  catch (error) {
+    console.error('Failed to load template page preview context', error)
+  }
+
+  state.templatePageRenderContext = null
+}
+
+watch(
+  [() => edgeGlobal.edgeState.currentOrganization, selectedTemplatePreviewSiteId],
+  async () => {
+    await loadTemplatePagePreviewContext()
+  },
+  { immediate: true },
+)
+
+const _menuPositionOptions = [
   { value: 'left', label: 'Left' },
   { value: 'center', label: 'Center' },
   { value: 'right', label: 'Right' },
@@ -807,6 +913,9 @@ onBeforeMount(async () => {
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`]) {
     await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`)
   }
+  if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/blocks`]) {
+    await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/blocks`)
+  }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published`]) {
     await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published`)
   }
@@ -1000,6 +1109,10 @@ const pages = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`] || {}
 })
 
+const blocksCollection = computed(() => {
+  return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`] || {}
+})
+
 const publishedPages = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`] || {}
 })
@@ -1010,7 +1123,7 @@ const pageRouteBase = computed(() => {
     : `/app/dashboard/sites/${props.site}`
 })
 
-const pageList = computed(() => {
+const _pageList = computed(() => {
   return Object.entries(pages.value || {})
     .map(([id, data]) => ({
       id,
@@ -1019,6 +1132,166 @@ const pageList = computed(() => {
     }))
     .sort((a, b) => (b.lastUpdated ?? 0) - (a.lastUpdated ?? 0))
 })
+
+const TEMPLATE_PAGE_SEARCH_TYPE_OPTIONS = [
+  { value: 'all', label: 'Name + Doc ID' },
+  { value: 'name', label: 'Name' },
+  { value: 'docId', label: 'Doc ID' },
+]
+
+const templatePageSearchFields = computed(() => {
+  if (state.templatePageSearchType === 'name')
+    return ['name']
+  if (state.templatePageSearchType === 'docId')
+    return ['docId']
+  return ['name', 'docId']
+})
+
+const templatePageTagFilterOptions = computed(() => [])
+
+const normalizePreviewColumns = (row) => {
+  if (!Array.isArray(row?.columns) || !row.columns.length)
+    return []
+  return row.columns.map((column, idx) => ({
+    id: column?.id || `${row?.id || 'row'}-col-${idx}`,
+    span: Number(column?.span) || null,
+    blocks: Array.isArray(column?.blocks) ? column.blocks.filter(Boolean) : [],
+  }))
+}
+
+const templatePreviewRows = (pageDoc) => {
+  const structureRows = Array.isArray(pageDoc?.structure) ? pageDoc.structure : []
+  if (structureRows.length) {
+    return structureRows
+      .map((row, rowIndex) => ({
+        id: row?.id || `${pageDoc?.docId || 'template-page'}-row-${rowIndex}`,
+        columns: normalizePreviewColumns(row),
+      }))
+      .filter(row => row.columns.length > 0)
+  }
+
+  const legacyBlocks = Array.isArray(pageDoc?.content) ? pageDoc.content.filter(Boolean) : []
+  if (!legacyBlocks.length)
+    return []
+  return [{
+    id: `${pageDoc?.docId || 'template-page'}-legacy-row`,
+    columns: [{
+      id: `${pageDoc?.docId || 'template-page'}-legacy-col`,
+      span: null,
+      blocks: legacyBlocks,
+    }],
+  }]
+}
+
+const templatePageHasPreview = pageDoc => templatePreviewRows(pageDoc).length > 0
+
+const resolveTemplateBlockSource = (pageDoc, blockRef) => {
+  if (!blockRef)
+    return null
+  if (typeof blockRef === 'object')
+    return blockRef
+  const lookupId = String(blockRef).trim()
+  if (!lookupId)
+    return null
+  const templateBlocks = Array.isArray(pageDoc?.content) ? pageDoc.content : []
+  return templateBlocks.find(block => block?.id === lookupId || block?.blockId === lookupId) || null
+}
+
+const resolveBlockForPreview = (block) => {
+  if (!block)
+    return null
+  if (block.content) {
+    return {
+      content: block.content,
+      values: block.values || {},
+      meta: block.meta || {},
+    }
+  }
+  if (block.blockId && blocksCollection.value?.[block.blockId]) {
+    const libraryBlock = blocksCollection.value[block.blockId]
+    return {
+      content: libraryBlock.content,
+      values: block.values || libraryBlock.values || {},
+      meta: block.meta || libraryBlock.meta || {},
+    }
+  }
+  return null
+}
+
+const resolveTemplateBlockForPreview = (pageDoc, blockRef) => {
+  const source = resolveTemplateBlockSource(pageDoc, blockRef)
+  return resolveBlockForPreview(source)
+}
+
+const hasPreviewSpans = row => (row?.columns || []).some(column => Number.isFinite(Number(column?.span)))
+
+const previewGridClass = (row) => {
+  if (hasPreviewSpans(row))
+    return 'grid grid-cols-1 sm:grid-cols-6 gap-4'
+  const count = row?.columns?.length || 1
+  const map = {
+    1: 'grid grid-cols-1 gap-4',
+    2: 'grid grid-cols-1 sm:grid-cols-2 gap-4',
+    3: 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4',
+    4: 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4',
+    5: 'grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-4',
+    6: 'grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-4',
+  }
+  return map[count] || map[1]
+}
+
+const previewColumnStyle = (column) => {
+  const span = Number(column?.span)
+  if (!Number.isFinite(span))
+    return {}
+  const safeSpan = Math.min(Math.max(span, 1), 6)
+  return { gridColumn: `span ${safeSpan} / span ${safeSpan}` }
+}
+
+const getTemplatePagePreviewKey = (docId) => {
+  const themeId = String(selectedTemplatePreviewThemeId.value || 'no-theme')
+  const siteId = String(selectedTemplatePreviewSiteId.value || 'no-site')
+  return `${String(docId || 'template-page')}:${siteId}:${themeId}`
+}
+
+const _templatePageItems = computed(() => {
+  return Object.entries(pages.value || {})
+    .map(([docId, doc]) => ({
+      docId,
+      ...(doc || {}),
+      name: doc?.name || 'Untitled Template',
+      tags: Array.isArray(doc?.tags) ? doc.tags : [],
+      allowedThemes: Array.isArray(doc?.allowedThemes) ? doc.allowedThemes : [],
+      description: doc?.metaDescription || '',
+      lastUpdated: doc?.last_updated || doc?.doc_created_at || 0,
+    }))
+    .sort((left, right) => (right.lastUpdated || 0) - (left.lastUpdated || 0))
+})
+
+const getTemplatePageAllowedThemes = item => (Array.isArray(item?.allowedThemes) ? item.allowedThemes : [])
+const getTemplatePageDescription = item => String(item?.description || item?.metaDescription || '').trim()
+const getTemplatePageName = item => String(item?.name || 'Untitled Template').trim() || 'Untitled Template'
+const getTemplatePageLastUpdated = item => item?.lastUpdated || item?.last_updated || item?.doc_created_at || 0
+
+const formatTemplatePageDate = (value) => {
+  if (!value)
+    return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime()))
+    return ''
+  return date.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+const openTemplatePage = (docId) => {
+  const nextDocId = String(docId || '').trim()
+  if (!nextDocId)
+    return
+  router.push(`/app/dashboard/templates/${nextDocId}`)
+}
+
+const openNewTemplatePage = () => {
+  router.push('/app/dashboard/templates/new')
+}
 
 const INVALID_PAGE_IMPORT_MESSAGE = 'Invalid file. Please import a valid page file.'
 const pageImportCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`)
@@ -1341,7 +1614,7 @@ const handlePageImport = async (event) => {
   }
 }
 
-const formatTimestamp = (input) => {
+const _formatTimestamp = (input) => {
   if (!input)
     return 'Not yet saved'
   try {
@@ -1392,7 +1665,7 @@ const isPublishedPageDiff = (pageId) => {
   return false
 }
 
-const pageStatusLabel = pageId => (isPublishedPageDiff(pageId) ? 'Draft' : 'Published')
+const _pageStatusLabel = pageId => (isPublishedPageDiff(pageId) ? 'Draft' : 'Published')
 const hasSelection = computed(() => Boolean(props.page) || Boolean(state.selectedPostId))
 const showSplitView = computed(() => isTemplateSite.value || (canViewPagesTab.value && (state.viewMode === 'pages' || hasSelection.value)))
 const isEditingPost = computed(() => canViewPostsTab.value && state.viewMode === 'posts' && Boolean(state.selectedPostId))
@@ -1625,7 +1898,7 @@ const onSubmit = () => {
   }
 }
 
-const isAllPagesPublished = computed(() => {
+const _isAllPagesPublished = computed(() => {
   const pagesData = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`] || {}
   const publishedData = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`] || {}
   return Object.keys(pagesData).length === Object.keys(publishedData).length
@@ -1847,6 +2120,266 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
     <div v-else-if="!props.page && props.site === 'new' && !canCreateSite" class="p-6 text-sm text-red-600">
       Only organization admins can create sites.
     </div>
+    <edge-dashboard
+      v-else-if="!props.page && isTemplateSite"
+      :filter="state.templatePageFilter"
+      :filter-fields="templatePageSearchFields"
+      collection="sites/templates/pages"
+      sort-field="last_updated"
+      sort-direction="desc"
+      class="pt-0 flex-1"
+    >
+      <template #header-start="slotProps">
+        <component :is="slotProps.icon" class="mr-2" />
+        Page Templates
+      </template>
+      <template #header-center>
+        <edge-shad-form class="w-full">
+          <div class="w-full px-4 md:px-6 flex flex-col gap-2 md:flex-row md:items-center">
+            <div class="md:flex-1 md:min-w-0">
+              <edge-shad-select
+                v-model="edgeGlobal.edgeState.blockEditorTheme"
+                name="templatePreviewTheme"
+                :items="themeOptions.map(option => ({ name: option.value, title: option.label }))"
+                placeholder="Preview theme"
+                class="w-full"
+              />
+            </div>
+            <div class="md:flex-1 md:min-w-0">
+              <edge-shad-select
+                v-model="edgeGlobal.edgeState.blockEditorSite"
+                name="templatePreviewSite"
+                :items="previewSiteOptions"
+                placeholder="Preview site"
+                class="w-full"
+              />
+            </div>
+          </div>
+        </edge-shad-form>
+      </template>
+      <template #header-end>
+        <div class="flex items-center gap-2">
+          <input
+            ref="pageImportInputRef"
+            type="file"
+            multiple
+            accept=".json,application/json"
+            class="hidden"
+            @change="handlePageImport"
+          >
+          <edge-shad-button
+            type="button"
+            size="icon"
+            variant="outline"
+            class="h-9 w-9"
+            :disabled="state.importingPages"
+            title="Import Templates"
+            aria-label="Import Templates"
+            @click="triggerPageImport"
+          >
+            <Loader2 v-if="state.importingPages" class="h-4 w-4 animate-spin" />
+            <Upload v-else class="h-4 w-4" />
+          </edge-shad-button>
+          <edge-shad-button
+            class="uppercase bg-slate-700 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
+            @click="openNewTemplatePage"
+          >
+            <Plus class="mr-2 h-4 w-4" />
+            Add Page
+          </edge-shad-button>
+        </div>
+      </template>
+      <template #list-header>
+        <div class="w-full mt-4 mx-0 rounded-md border border-slate-300/70 bg-slate-100/95 dark:border-slate-700 dark:bg-slate-900/95 px-3 py-2 space-y-2 backdrop-blur-sm shadow-sm">
+          <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div class="grow">
+              <edge-shad-input
+                v-model="state.templatePageFilter"
+                name="templatePageFilter"
+                placeholder="Search templates..."
+                class="w-full"
+              />
+            </div>
+            <Popover>
+              <PopoverTrigger as-child>
+                <edge-shad-button variant="outline" class="h-10 gap-2 md:w-auto">
+                  <SlidersHorizontal class="h-4 w-4" />
+                  Filter
+                </edge-shad-button>
+              </PopoverTrigger>
+              <PopoverContent align="end" class="w-[320px] space-y-4">
+                <edge-shad-select
+                  v-model="state.templatePageSearchType"
+                  name="templatePageSearchType"
+                  label="Search Type"
+                  :items="TEMPLATE_PAGE_SEARCH_TYPE_OPTIONS"
+                  item-title="label"
+                  item-value="value"
+                  placeholder="Select search type"
+                />
+                <edge-shad-select-tags
+                  v-model="state.templatePageTags"
+                  :items="templatePageTagFilterOptions"
+                  :disabled="true"
+                  name="templatePageTags"
+                  label="Tags"
+                  placeholder="Coming soon"
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
+        </div>
+      </template>
+      <template #list="slotProps">
+        <div class="w-full pt-2 h-[calc(100vh-290px)] overflow-y-auto">
+          <div
+            v-if="slotProps.filtered.length"
+            class="grid gap-4 w-full pb-2"
+            style="grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));"
+          >
+            <div
+              v-for="item in slotProps.filtered"
+              :key="item.docId"
+              role="button"
+              tabindex="0"
+              class="w-full h-full"
+              @click="openTemplatePage(item.docId)"
+              @keyup.enter="openTemplatePage(item.docId)"
+            >
+              <Card class="h-full cursor-pointer border border-slate-300/70 bg-white/70 transition hover:border-slate-500 hover:shadow-[0_22px_55px_-24px_rgba(0,0,0,0.4)] dark:border-slate-700 dark:bg-slate-900/50">
+                <CardContent class="flex h-full flex-col gap-4 p-4 sm:p-5">
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0 flex-1">
+                      <p class="text-lg font-semibold leading-snug line-clamp-2 text-slate-900 dark:text-slate-100">
+                        {{ getTemplatePageName(item) }}
+                      </p>
+                      <div class="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                        <span class="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 dark:border-slate-700 dark:bg-slate-800">
+                          {{ item.docId }}
+                        </span>
+                        <span
+                          v-if="item.post"
+                          class="rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-amber-800 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-200"
+                        >
+                          Post Template
+                        </span>
+                      </div>
+                    </div>
+                    <div class="flex items-center gap-1">
+                      <edge-shad-button
+                        size="icon"
+                        variant="ghost"
+                        class="h-8 w-8 text-slate-600 hover:bg-slate-200 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                        @click.stop="openTemplatePage(item.docId)"
+                      >
+                        <FilePenLine class="h-4 w-4" />
+                      </edge-shad-button>
+                      <edge-shad-button
+                        size="icon"
+                        variant="ghost"
+                        class="h-8 w-8 text-slate-600 hover:bg-slate-200 hover:text-red-700 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-red-300"
+                        @click.stop="slotProps.deleteItem(item.docId)"
+                      >
+                        <Trash2 class="h-4 w-4" />
+                      </edge-shad-button>
+                    </div>
+                  </div>
+                  <div class="template-page-preview-surface">
+                    <div class="template-page-preview-scale-wrapper">
+                      <div class="template-page-preview-scale-inner">
+                        <div class="template-page-preview-content space-y-4">
+                          <template v-if="templatePageHasPreview(item)">
+                            <div
+                              v-for="(row, rowIndex) in templatePreviewRows(item)"
+                              :key="`${item.docId}-row-${row.id || rowIndex}`"
+                              class="w-full"
+                            >
+                              <div :class="previewGridClass(row)">
+                                <div
+                                  v-for="(column, colIndex) in row.columns"
+                                  :key="`${item.docId}-row-${row.id || rowIndex}-col-${column.id || colIndex}`"
+                                  class="min-w-0"
+                                  :style="previewColumnStyle(column)"
+                                >
+                                  <div
+                                    v-for="(blockRef, blockIdx) in column.blocks || []"
+                                    :key="`${item.docId}-row-${row.id || rowIndex}-col-${column.id || colIndex}-block-${blockIdx}`"
+                                  >
+                                    <edge-cms-block-api
+                                      v-if="resolveTemplateBlockForPreview(item, blockRef)"
+                                      :key="`${getTemplatePagePreviewKey(item.docId)}:${blockIdx}`"
+                                      :site-id="selectedTemplatePreviewSiteId"
+                                      :content="resolveTemplateBlockForPreview(item, blockRef).content"
+                                      :values="resolveTemplateBlockForPreview(item, blockRef).values"
+                                      :meta="resolveTemplateBlockForPreview(item, blockRef).meta"
+                                      :theme="selectedTemplatePreviewTheme"
+                                      :render-context="state.templatePageRenderContext"
+                                      :isolated="true"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </template>
+                          <template v-else>
+                            <div class="flex h-32 items-center justify-center text-[100px] mt-[100px] text-muted-foreground">
+                              No blocks yet
+                            </div>
+                          </template>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="mt-auto space-y-2 text-xs text-slate-500 dark:text-slate-400">
+                    <div v-if="getTemplatePageDescription(item)" class="line-clamp-2">
+                      {{ getTemplatePageDescription(item) }}
+                    </div>
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <span
+                          v-for="themeId in getTemplatePageAllowedThemes(item).slice(0, 2)"
+                          :key="themeId"
+                          class="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 dark:border-slate-700 dark:bg-slate-800"
+                        >
+                          {{ themeOptionsMap.get(themeId)?.label || themeId }}
+                        </span>
+                        <span
+                          v-if="getTemplatePageAllowedThemes(item).length > 2"
+                          class="rounded-full bg-muted px-2 py-0.5 text-muted-foreground"
+                        >
+                          +{{ getTemplatePageAllowedThemes(item).length - 2 }} themes
+                        </span>
+                      </div>
+                      <span v-if="getTemplatePageLastUpdated(item)">
+                        {{ formatTemplatePageDate(getTemplatePageLastUpdated(item)) }}
+                      </span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+          <div
+            v-else
+            class="flex h-full flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-muted-foreground/40 px-6 py-10 text-center"
+          >
+            <FileStack class="h-8 w-8 text-muted-foreground/60" />
+            <div class="space-y-1">
+              <h3 class="text-base font-medium">
+                No templates found
+              </h3>
+              <p class="text-sm text-muted-foreground">
+                Adjust search or create a new page template.
+              </p>
+            </div>
+            <edge-shad-button variant="outline" class="gap-2" @click="openNewTemplatePage">
+              <Plus class="h-4 w-4" />
+              Add Page
+            </edge-shad-button>
+          </div>
+        </div>
+      </template>
+    </edge-dashboard>
     <div v-else class="flex flex-col h-[calc(100vh-78px)] overflow-hidden">
       <div
         class="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-2 border border-slate-300 bg-slate-100 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
@@ -2362,6 +2895,31 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
 :global(.edge-cms-site-menu [data-sidebar="menu-sub-button"][data-active="true"]) span,
 :global(.edge-cms-site-menu [data-sidebar="menu-sub-button"][data-active="true"]) svg {
   color: var(--cms-menu-item-active-foreground) !important;
+}
+
+.template-page-preview-surface {
+  border: 1px dashed hsl(var(--border) / 0.6);
+  border-radius: 0.5rem;
+  background: hsl(var(--background) / 0.8);
+  overflow: hidden;
+}
+
+.template-page-preview-scale-wrapper {
+  width: 100%;
+  overflow: hidden;
+}
+
+.template-page-preview-scale-inner {
+  transform-origin: top left;
+  width: 1600px;
+  transform: scale(0.18);
+  margin-bottom: -1312px;
+}
+
+.template-page-preview-content {
+  width: 1600px;
+  min-height: 820px;
+  padding: 1.5rem;
 }
 
 .fade-enter-active,

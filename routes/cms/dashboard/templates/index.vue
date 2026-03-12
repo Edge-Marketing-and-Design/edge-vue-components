@@ -1,39 +1,31 @@
 <script setup>
 import { useEdgeCmsDialogPositionFix } from '~/edge/composables/useEdgeCmsDialogPositionFix'
-
-const route = useRoute()
-
-// const edgeGlobal = inject('edgeGlobal')
-
 const state = reactive({
   mounted: false,
+  head: null,
 })
 
 useEdgeCmsDialogPositionFix()
-
-const page = computed(() => {
-  if (route.params?.page) {
-    return route.params.page
-  }
-  return ''
-})
 
 definePageMeta({
   middleware: 'auth',
 })
 
+useHead(() => (state.head || {}))
+
 onMounted(() => {
   state.mounted = true
 })
+
+const setHead = (newHead) => {
+  state.head = newHead
+}
 </script>
 
 <template>
   <div
     v-if="edgeGlobal.edgeState.organizationDocPath && state.mounted"
   >
-    <edge-cms-site
-      site="templates"
-      :page="page"
-    />
+    <edge-cms-templates-manager @head="setHead" />
   </div>
 </template>

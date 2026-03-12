@@ -1,5 +1,5 @@
 <script setup lang="js">
-import { computed, inject, onBeforeMount, reactive, watch } from 'vue'
+import { computed, inject, onBeforeMount, reactive, ref, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { ArrowDown, ArrowUp, Clock3, Eye, File, FileCheck, FilePen, FileWarning, FileX, GripVertical, Image, ImagePlus, Loader2, MoreHorizontal, Pencil, Plus, Save, Trash2, X } from 'lucide-vue-next'
@@ -61,6 +61,31 @@ const stableSerialize = value => JSON.stringify(normalizeForCompare(value))
 const normalizePostType = (value) => {
   const type = String(value || '').trim().toLowerCase()
   return type === 'event' ? 'event' : 'post'
+}
+
+const normalizeTemplatePageTypes = (value) => {
+  const rawTypes = Array.isArray(value) ? value : [value]
+  const normalized = rawTypes
+    .map((typeValue) => {
+      if (typeValue && typeof typeValue === 'object') {
+        const objectValue = typeValue.name ?? typeValue.value ?? typeValue.title ?? typeValue.label ?? ''
+        return String(objectValue || '')
+      }
+      return String(typeValue || '')
+    })
+    .map(typeValue => typeValue.trim().toLowerCase())
+    .flatMap((typeValue) => {
+      if (typeValue === 'page')
+        return ['Page']
+      if (typeValue === 'post')
+        return ['Post']
+      if (typeValue === 'both')
+        return ['Page', 'Post']
+      return []
+    })
+
+  const uniqueNormalized = [...new Set(normalized)]
+  return uniqueNormalized.length ? uniqueNormalized : ['Page']
 }
 
 const POST_TYPE_OPTIONS = [
@@ -489,6 +514,9 @@ const state = reactive({
   editMode: false,
   sheetOpen: false,
   activePostId: '',
+  newPostDialogOpen: false,
+  postTemplateFilter: 'quick-picks',
+  selectedPostTemplateId: '__blank__',
   deleteDialog: false,
   postToDelete: null,
   editorDoc: null,
@@ -587,9 +615,17 @@ onBeforeMount(async () => {
   if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`]) {
     await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/themes`)
   }
+  if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/templates/pages`]) {
+    await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/sites/templates/pages`)
+  }
 })
 
 const posts = computed(() => edgeFirebase.data?.[collectionKey.value] || {})
+const postTemplateCollectionKey = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/templates/pages`)
+const postTemplatesCollection = computed(() => edgeFirebase.data?.[postTemplateCollectionKey.value] || {})
+const pendingNewPostTemplateState = useState('edge-cms-pending-new-post-template', () => ({}))
+const postTemplatePreviewContextCache = useState('edge-cms-post-template-preview-context-cache', () => ({}))
+const postTemplatePreviewContext = ref(null)
 const selectedThemeId = computed(() => String(
   edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site]?.theme || '',
 ).trim())
@@ -612,6 +648,98 @@ const theme = computed(() => {
     return null
   }
 })
+
+const postTemplateStateKey = computed(() => {
+  const orgId = String(edgeGlobal.edgeState.currentOrganization || 'no-org').trim() || 'no-org'
+  const siteId = String(props.site || 'no-site').trim() || 'no-site'
+  return `${orgId}:${siteId}`
+})
+
+const blankPostTemplateTile = {
+  docId: '__blank__',
+  name: 'Blank',
+  description: 'Start a post from scratch.',
+  content: [],
+  structure: [],
+  type: ['Post'],
+}
+
+const postTemplateCardItems = computed(() => {
+  const templates = Object.entries(postTemplatesCollection.value)
+    .map(([docId, doc]) => {
+      const postContent = Array.isArray(doc?.postContent) ? edgeGlobal.dupObject(doc.postContent) : []
+      const fallbackContent = Array.isArray(doc?.content) ? edgeGlobal.dupObject(doc.content) : []
+      const postStructure = Array.isArray(doc?.postStructure) ? edgeGlobal.dupObject(doc.postStructure) : []
+      const fallbackStructure = Array.isArray(doc?.structure) ? edgeGlobal.dupObject(doc.structure) : []
+      const normalizedTemplateDoc = normalizePostBuilderDoc({
+        content: postContent.length ? postContent : fallbackContent,
+        structure: postStructure.length ? postStructure : fallbackStructure,
+      }).normalized
+
+      return {
+        docId,
+        ...(doc || {}),
+        name: String(doc?.name || 'Untitled Template').trim() || 'Untitled Template',
+        description: String(doc?.metaDescription || doc?.description || '').trim(),
+        content: normalizedTemplateDoc.content,
+        structure: normalizedTemplateDoc.structure,
+        type: normalizeTemplatePageTypes(doc?.type),
+      }
+    })
+    .filter(template => template.type.includes('Post'))
+    .sort((left, right) => left.name.localeCompare(right.name))
+
+  return [blankPostTemplateTile, ...templates]
+})
+
+const postTemplateFilterOptions = computed(() => {
+  const tagSet = new Set()
+  for (const template of postTemplateCardItems.value) {
+    if (template.docId === blankPostTemplateTile.docId)
+      continue
+    for (const tag of template.tags || []) {
+      const normalized = typeof tag === 'string' ? tag.trim() : ''
+      if (!normalized || normalized.toLowerCase() === 'quick picks')
+        continue
+      tagSet.add(normalized)
+    }
+  }
+  const tagOptions = Array.from(tagSet)
+    .sort((a, b) => a.localeCompare(b))
+    .map(tag => ({ label: tag, value: tag }))
+
+  return [
+    { label: 'Quick Picks', value: 'quick-picks' },
+    ...tagOptions,
+  ]
+})
+
+const postTemplateFilterMatches = (template, filterValue) => {
+  if (template.docId === blankPostTemplateTile.docId)
+    return true
+  if (filterValue === 'all')
+    return true
+  if (filterValue === 'quick-picks')
+    return Array.isArray(template.tags) && template.tags.map(tag => String(tag || '').toLowerCase()).includes('quick picks')
+  return Array.isArray(template.tags) && template.tags.includes(filterValue)
+}
+
+const filteredPostTemplateCardItems = computed(() => {
+  const templates = postTemplateCardItems.value
+  const filterValue = state.postTemplateFilter
+  const filtered = templates.filter(template => postTemplateFilterMatches(template, filterValue))
+
+  if (filtered.length <= 1 && filterValue === 'quick-picks')
+    return templates
+  if (filtered.length <= 1 && filterValue !== 'all')
+    return templates
+  return filtered
+})
+
+const selectedPostTemplate = computed(() => {
+  return postTemplateCardItems.value.find(template => template.docId === state.selectedPostTemplateId) || blankPostTemplateTile
+})
+const isPostTemplateSelected = templateId => state.selectedPostTemplateId === templateId
 const postsList = computed(() =>
   Object.entries(posts.value)
     .map(([id, data]) => ({ id, ...data }))
@@ -916,7 +1044,7 @@ const createLegacyHtmlLocalBlock = (legacyContent) => {
   }
 }
 
-const normalizePostBuilderDoc = (doc = {}) => {
+function normalizePostBuilderDoc(doc = {}) {
   ensurePostTypeAndEventDefaults(doc)
   const normalized = edgeGlobal.dupObject(doc || {})
   ensurePostTypeAndEventDefaults(normalized)
@@ -1018,6 +1146,193 @@ const ensurePostBuilderDefaults = (workingDoc) => {
   }
 }
 
+const createNewPostDocSchema = (postDoc = {}) => {
+  const normalizedTemplateDoc = normalizePostBuilderDoc({
+    content: Array.isArray(postDoc?.content) ? edgeGlobal.dupObject(postDoc.content) : [],
+    structure: Array.isArray(postDoc?.structure) ? edgeGlobal.dupObject(postDoc.structure) : [],
+    type: normalizePostType(postDoc?.type),
+    event: normalizeEventData(postDoc?.event),
+  }).normalized
+
+  return {
+    name: {
+      value: String(postDoc?.name || '').trim(),
+      cols: '12',
+      bindings: {
+        'field-type': 'text',
+        'label': 'Name',
+      },
+    },
+    title: {
+      value: String(postDoc?.title || '').trim(),
+      cols: '12',
+      bindings: {
+        'field-type': 'text',
+        'label': 'Title',
+      },
+    },
+    tags: {
+      value: Array.isArray(postDoc?.tags) ? edgeGlobal.dupObject(postDoc.tags) : [],
+      cols: '12',
+      bindings: {
+        'field-type': 'tags',
+        'value-as': 'array',
+        'label': 'Tags',
+        'placeholder': 'Add a tag',
+      },
+    },
+    blurb: {
+      value: String(postDoc?.blurb || '').trim(),
+      cols: '12',
+      bindings: {
+        'field-type': 'textarea',
+        'label': 'Content Blurb / Preview',
+        'rows': '8',
+      },
+    },
+    content: {
+      value: normalizedTemplateDoc.content,
+    },
+    structure: {
+      value: normalizedTemplateDoc.structure,
+    },
+    featuredImage: {
+      value: String(postDoc?.featuredImage || '').trim(),
+      cols: '12',
+      bindings: {
+        'field-type': 'tags',
+        'value-as': 'array',
+        'label': 'Featured Images',
+        'description': 'Enter image URLs or storage paths',
+      },
+    },
+    publishAt: {
+      value: String(postDoc?.publishAt || '').trim(),
+    },
+    publishAtTimezone: {
+      value: String(postDoc?.publishAtTimezone || '').trim(),
+    },
+    type: {
+      value: normalizePostType(postDoc?.type),
+    },
+    event: {
+      value: normalizeEventData(postDoc?.event),
+    },
+  }
+}
+
+const buildNewPostDocFromTemplate = (templateDoc) => {
+  if (!templateDoc || templateDoc.docId === blankPostTemplateTile.docId)
+    return {}
+
+  const templateContent = Array.isArray(templateDoc?.content) ? edgeGlobal.dupObject(templateDoc.content) : []
+  const templateStructure = Array.isArray(templateDoc?.structure) ? edgeGlobal.dupObject(templateDoc.structure) : []
+  return {
+    content: templateContent,
+    structure: templateStructure,
+    type: 'post',
+    event: normalizeEventData(),
+  }
+}
+
+const queuePendingNewPostTemplate = (templateDoc) => {
+  pendingNewPostTemplateState.value[postTemplateStateKey.value] = edgeGlobal.dupObject(buildNewPostDocFromTemplate(templateDoc))
+}
+
+const consumePendingNewPostTemplate = () => {
+  const queued = pendingNewPostTemplateState.value?.[postTemplateStateKey.value]
+  if (pendingNewPostTemplateState.value && Object.prototype.hasOwnProperty.call(pendingNewPostTemplateState.value, postTemplateStateKey.value))
+    delete pendingNewPostTemplateState.value[postTemplateStateKey.value]
+  return queued ? edgeGlobal.dupObject(queued) : null
+}
+
+const applyNewPostTemplate = (templateDoc = null) => {
+  state.newDocs.posts = createNewPostDocSchema(buildNewPostDocFromTemplate(templateDoc))
+}
+
+const preparePendingNewPostTemplate = () => {
+  const queuedTemplate = consumePendingNewPostTemplate()
+  state.newDocs.posts = createNewPostDocSchema(queuedTemplate || {})
+}
+
+const resetNewPostDialog = () => {
+  state.postTemplateFilter = 'quick-picks'
+  state.selectedPostTemplateId = blankPostTemplateTile.docId
+}
+
+const openNewPostDialog = () => {
+  resetNewPostDialog()
+  state.newPostDialogOpen = true
+}
+
+const closeNewPostDialog = () => {
+  state.newPostDialogOpen = false
+  resetNewPostDialog()
+}
+
+const templateHasPreview = template => Array.isArray(template?.content) && template.content.length > 0
+
+const postTemplatePreviewRows = (template) => {
+  const structureRows = Array.isArray(template?.structure) ? template.structure : []
+  if (structureRows.length)
+    return structureRows
+
+  const legacyBlocks = Array.isArray(template?.content) ? template.content.filter(Boolean) : []
+  if (!legacyBlocks.length)
+    return []
+
+  return [{
+    id: `${template?.docId || 'template'}-legacy-row`,
+    columns: [{
+      id: `${template?.docId || 'template'}-legacy-col`,
+      span: 12,
+      blocks: legacyBlocks.map(block => block.id).filter(Boolean),
+    }],
+  }]
+}
+
+const resolveTemplateBlockForPreview = (template, blockRef) => {
+  const lookupId = typeof blockRef === 'string' ? blockRef : (blockRef?.id || blockRef?.blockId || '')
+  if (!lookupId)
+    return null
+  const templateBlocks = Array.isArray(template?.content) ? template.content : []
+  return templateBlocks.find(block => block?.id === lookupId || block?.blockId === lookupId) || null
+}
+
+const previewGridClass = () => 'grid grid-cols-1 gap-4'
+const previewColumnStyle = () => ({})
+
+const loadPostTemplatePreviewContext = async () => {
+  const siteId = String(props.site || '').trim()
+  if (!siteId) {
+    postTemplatePreviewContext.value = null
+    return
+  }
+
+  const cacheKey = `${edgeGlobal.edgeState.currentOrganization}:${siteId}`
+  const cached = postTemplatePreviewContextCache.value?.[cacheKey]
+  if (cached && typeof cached === 'object') {
+    postTemplatePreviewContext.value = edgeGlobal.dupObject(cached)
+    return
+  }
+
+  try {
+    const staticSearch = new edgeFirebase.SearchStaticData()
+    await staticSearch.getData(`${edgeGlobal.edgeState.organizationDocPath}/sites/${siteId}/published_posts`, [], [], 1)
+    const firstPost = Object.values(staticSearch.results?.data || {})[0] || null
+    if (firstPost && typeof firstPost === 'object') {
+      postTemplatePreviewContextCache.value[cacheKey] = edgeGlobal.dupObject(firstPost)
+      postTemplatePreviewContext.value = edgeGlobal.dupObject(firstPost)
+      return
+    }
+  }
+  catch (error) {
+    console.error('Failed to load post template preview context', error)
+  }
+
+  postTemplatePreviewContext.value = null
+}
+
 const postBlockIndex = (workingDoc, blockId) => {
   return Array.isArray(workingDoc?.content)
     ? workingDoc.content.findIndex(block => block?.id === blockId)
@@ -1108,13 +1423,23 @@ const resetEditorTracking = () => {
 }
 
 const openNewPost = () => {
+  openNewPostDialog()
+}
+
+const startNewPostFromTemplate = () => {
+  const templateDoc = selectedPostTemplate.value
   if (props.mode === 'list') {
+    queuePendingNewPostTemplate(templateDoc)
     emit('update:selectedPostId', 'new')
+    closeNewPostDialog()
     return
   }
+
+  applyNewPostTemplate(templateDoc)
   state.activePostId = 'new'
   resetEditorTracking()
   state.sheetOpen = true
+  closeNewPostDialog()
 }
 
 const editPost = (postId) => {
@@ -1133,6 +1458,7 @@ const editPost = (postId) => {
 const closeSheet = () => {
   state.sheetOpen = false
   state.activePostId = ''
+  state.newDocs.posts = createNewPostDocSchema()
   resetEditorTracking()
   if (props.mode === 'editor')
     emit('update:selectedPostId', '')
@@ -1183,6 +1509,7 @@ watch(
       return
     }
     if (next === 'new') {
+      preparePendingNewPostTemplate()
       state.activePostId = 'new'
       resetEditorTracking()
       state.sheetOpen = true
@@ -1197,6 +1524,19 @@ watch(
   },
   { immediate: true },
 )
+
+watch(
+  [() => edgeGlobal.edgeState.currentOrganization, () => props.site],
+  async () => {
+    await loadPostTemplatePreviewContext()
+  },
+  { immediate: true },
+)
+
+watch(filteredPostTemplateCardItems, (templates) => {
+  if (!templates.some(template => template.docId === state.selectedPostTemplateId))
+    state.selectedPostTemplateId = blankPostTemplateTile.docId
+})
 
 const openRenameDialog = (post) => {
   const slug = getPostSlug(post)
@@ -1745,7 +2085,6 @@ const reindexPublishedPostsToKv = async () => {
         </edge-shad-button>
       </div>
     </div>
-
   </div>
 
   <edge-shad-dialog v-model="state.deleteDialog">
@@ -1795,6 +2134,112 @@ const reindexPublishedPostsToKv = async () => {
           </edge-shad-button>
         </DialogFooter>
       </edge-shad-form>
+    </DialogContent>
+  </edge-shad-dialog>
+
+  <edge-shad-dialog v-model="state.newPostDialogOpen">
+    <DialogContent class="pt-6 w-full max-w-6xl h-[90vh] flex flex-col">
+      <DialogHeader class="pb-2">
+        <DialogTitle class="text-left">
+          Create New Post
+        </DialogTitle>
+        <DialogDescription>
+          Choose a post template or start from a blank post. Only post templates are shown here.
+        </DialogDescription>
+      </DialogHeader>
+      <div class="w-full space-y-4">
+        <edge-shad-select
+          v-model="state.postTemplateFilter"
+          label="Template Tags"
+          :items="postTemplateFilterOptions"
+          item-title="label"
+          item-value="value"
+          placeholder="Select tag"
+        />
+        <p class="text-xs text-muted-foreground">
+          Filter templates by tag or choose Quick Picks for the most commonly used layouts.
+        </p>
+      </div>
+      <div class="min-h-0 flex-1 overflow-y-auto pr-1">
+        <div class="grid grid-cols-1 gap-3 auto-rows-fr pb-2 sm:grid-cols-2 lg:grid-cols-4">
+          <button
+            v-for="template in filteredPostTemplateCardItems"
+            :key="template.docId"
+            type="button"
+            class="rounded-lg border bg-card p-3 text-left transition focus:outline-none focus-visible:ring-2 flex flex-col gap-3"
+            :class="isPostTemplateSelected(template.docId) ? 'border-primary ring-2 ring-primary/50 shadow-lg' : 'border-border hover:border-primary/40'"
+            :aria-pressed="isPostTemplateSelected(template.docId)"
+            @click="state.selectedPostTemplateId = template.docId"
+          >
+            <div class="flex items-center justify-between gap-2">
+              <span class="truncate font-semibold">{{ template.name }}</span>
+              <File class="h-4 w-4 text-muted-foreground" />
+            </div>
+            <div class="template-scale-wrapper rounded-md border border-dashed border-border/60 bg-background/80">
+              <div class="template-scale-inner">
+                <div class="template-scale-content space-y-4">
+                  <template v-if="template.docId === blankPostTemplateTile.docId">
+                    <div class="mt-[100px] flex h-32 items-center justify-center text-[100px] text-muted-foreground">
+                      Blank post
+                    </div>
+                  </template>
+                  <template v-else-if="templateHasPreview(template)">
+                    <div
+                      v-for="(row, rowIndex) in postTemplatePreviewRows(template)"
+                      :key="`${template.docId}-row-${row.id || rowIndex}`"
+                      class="w-full"
+                    >
+                      <div :class="previewGridClass(row)">
+                        <div
+                          v-for="(column, colIndex) in row.columns"
+                          :key="`${template.docId}-row-${row.id || rowIndex}-col-${column.id || colIndex}`"
+                          class="min-w-0"
+                          :style="previewColumnStyle(column)"
+                        >
+                          <div
+                            v-for="(blockRef, blockIdx) in column.blocks || []"
+                            :key="`${template.docId}-row-${row.id || rowIndex}-col-${column.id || colIndex}-block-${blockIdx}`"
+                          >
+                            <edge-cms-block-api
+                              v-if="resolveTemplateBlockForPreview(template, blockRef)"
+                              :content="resolveTemplateBlockForPreview(template, blockRef).content"
+                              :values="resolveTemplateBlockForPreview(template, blockRef).values"
+                              :meta="resolveTemplateBlockForPreview(template, blockRef).meta"
+                              :theme="theme"
+                              :site-id="props.site"
+                              :render-context="postTemplatePreviewContext"
+                              :isolated="true"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+                  <template v-else>
+                    <div class="mt-[100px] flex h-32 items-center justify-center text-[100px] text-muted-foreground">
+                      No blocks yet
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </div>
+            <p v-if="template.description" class="line-clamp-2 text-xs text-muted-foreground">
+              {{ template.description }}
+            </p>
+          </button>
+        </div>
+      </div>
+      <DialogFooter class="flex justify-between pt-2">
+        <edge-shad-button variant="outline" @click="closeNewPostDialog">
+          Cancel
+        </edge-shad-button>
+        <edge-shad-button
+          class="w-full bg-slate-800 text-white hover:bg-slate-400"
+          @click="startNewPostFromTemplate"
+        >
+          Continue
+        </edge-shad-button>
+      </DialogFooter>
     </DialogContent>
   </edge-shad-dialog>
 
@@ -2593,5 +3038,27 @@ const reindexPublishedPostsToKv = async () => {
 <style scoped>
 .cms-post-preview-mode :deep([data-cms-preview-surface]) {
   color: initial !important;
+}
+
+.template-scale-wrapper {
+  width: 100%;
+  overflow: hidden;
+  position: relative;
+  border-radius: 0.5rem;
+  height: 400px;
+}
+
+.template-scale-inner {
+  transform-origin: top left;
+  display: inline-block;
+  width: 100%;
+  height: 400px;
+  overflow: hidden;
+}
+
+.template-scale-content {
+  transform: scale(0.2);
+  transform-origin: top left;
+  width: 500%;
 }
 </style>

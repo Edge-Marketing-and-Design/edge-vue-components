@@ -10,6 +10,7 @@ const props = defineProps({
   modelValue: {
     type: Array,
     required: false,
+    default: () => [],
   },
   class: {
     type: null,
@@ -73,6 +74,10 @@ const modelValue = useVModel(props, 'modelValue', emits, {
   passive: false,
   prop: 'modelValue',
 })
+const selectedValues = computed({
+  get: () => (Array.isArray(modelValue.value) ? modelValue.value : []),
+  set: value => (modelValue.value = Array.isArray(value) ? value : []),
+})
 const open = ref(false)
 const searchTerm = ref('')
 
@@ -84,7 +89,7 @@ const forceOpen = () => {
 }
 
 const filteredItems = computed(() => {
-  const options = computedItems.value.filter(i => !modelValue.value.includes(i[props.itemValue]))
+  const options = computedItems.value.filter(i => !selectedValues.value.includes(i[props.itemValue]))
   return searchTerm.value ? options.filter(option => contains(option[props.itemTitle], searchTerm.value)) : options
 })
 
@@ -111,8 +116,8 @@ const addValueToModel = (value) => {
   const normalized = normalize(value)
   if (!normalized)
     return
-  if (!modelValue.value.includes(normalized))
-    modelValue.value = [...modelValue.value, normalized]
+  if (!selectedValues.value.includes(normalized))
+    selectedValues.value = [...selectedValues.value, normalized]
 }
 
 const addFromSearch = () => {
@@ -165,17 +170,17 @@ const onSelectItem = (ev) => {
         </FormLabel>
         <div class="relative w-full items-center">
           <FormControl>
-            <Combobox v-model="modelValue" v-model:open="open" :ignore-filter="true" :disabled="props.disabled">
+            <Combobox v-model="selectedValues" v-model:open="open" :ignore-filter="true" :disabled="props.disabled">
               <ComboboxAnchor as-child>
                 <TagsInput
-                  v-model="modelValue"
+                  v-model="selectedValues"
                   :class="cn('relative flex items-center gap-1 flex-nowrap pl-2 pr-1 pt-[7px] pb-[7px] w-80 rounded-md border border-slate-300 bg-white text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100', props.class)"
                   :disabled="props.disabled"
                   @click="forceOpen"
                 >
                   <!-- Wrapping area for tags + input -->
                   <div class="flex flex-wrap items-center gap-2 flex-1 min-w-0">
-                    <TagsInputItem v-for="val in modelValue" :key="val" class="h-6 border border-slate-300 bg-slate-100 text-slate-800 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-100" :value="val">
+                    <TagsInputItem v-for="val in selectedValues" :key="val" class="h-6 border border-slate-300 bg-slate-100 text-slate-800 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-100" :value="val">
                       <span class="px-1">{{ valueToTitle[val] ?? val }}</span>
                       <TagsInputItemDelete v-if="!props.disabled" />
                     </TagsInputItem>
