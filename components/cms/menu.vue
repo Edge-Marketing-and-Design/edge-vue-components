@@ -1156,6 +1156,12 @@ const onSubmit = () => {
     state.pageSettings = false
   }
 }
+
+defineExpose({
+  openPageSettings: showPageSettings,
+  openDeletePageDialog: deletePageShow,
+})
+
 const theme = computed(() => {
   const theme = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site]?.theme || ''
   console.log(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}`)

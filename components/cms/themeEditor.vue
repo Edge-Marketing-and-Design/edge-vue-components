@@ -79,6 +79,31 @@ const templatePageName = (pageId, fallback) => {
   return templatePages.value?.[pageId]?.name || fallback || 'Untitled Page'
 }
 
+const normalizeTemplatePageTypes = (value) => {
+  const rawTypes = Array.isArray(value) ? value : [value]
+  const normalized = rawTypes
+    .map((typeValue) => {
+      if (typeValue && typeof typeValue === 'object') {
+        const objectValue = typeValue.name ?? typeValue.value ?? typeValue.title ?? typeValue.label ?? ''
+        return String(objectValue || '')
+      }
+      return String(typeValue || '')
+    })
+    .map(typeValue => typeValue.trim().toLowerCase())
+    .flatMap((typeValue) => {
+      if (typeValue === 'page')
+        return ['Page']
+      if (typeValue === 'post')
+        return ['Post']
+      if (typeValue === 'both')
+        return ['Page', 'Post']
+      return []
+    })
+
+  const uniqueNormalized = [...new Set(normalized)]
+  return uniqueNormalized.length ? uniqueNormalized : ['Page']
+}
+
 const DEFAULT_MENU_KEYS = ['Site Root', 'Not In Menu']
 
 const ensureDefaultPagesArray = (doc = state.workingDoc) => {
@@ -114,7 +139,7 @@ const ensureDefaultSiteSettings = (doc = state.workingDoc) => {
   return doc.defaultSiteSettings
 }
 
-const collectTemplateIdsFromMenus = (menus = {}) => {
+const _collectTemplateIdsFromMenus = (menus = {}) => {
   const ids = new Set()
   const traverse = (items = []) => {
     if (!Array.isArray(items))
@@ -251,6 +276,7 @@ const editorDocUpdates = (workingDoc) => {
 
 const templatePageOptions = computed(() => {
   return Object.entries(templatePages.value)
+    .filter(([, doc]) => normalizeTemplatePageTypes(doc?.type).includes('Page'))
     .map(([value, doc]) => ({
       value,
       label: doc?.name || 'Untitled Page',

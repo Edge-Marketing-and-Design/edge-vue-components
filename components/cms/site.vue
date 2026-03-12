@@ -1,7 +1,7 @@
 <script setup lang="js">
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { ArrowLeft, CircleAlert, FileCheck, FilePenLine, FileStack, FolderCog, FolderDown, FolderUp, FolderX, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload } from 'lucide-vue-next'
+import { CircleAlert, FileCheck, FilePenLine, FileStack, FolderCog, FolderDown, FolderUp, FolderX, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload } from 'lucide-vue-next'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
 
 const props = defineProps({
@@ -103,11 +103,13 @@ const state = reactive({
   templatePageSearchType: 'all',
   templatePageTags: [],
   templatePageRenderContext: null,
+  sitePageRenderContext: null,
 })
 
 const pageImportInputRef = ref(null)
 const pageImportDocIdResolver = ref(null)
 const pageImportConflictResolver = ref(null)
+const pageMenuRef = ref(null)
 
 const pageInit = {
   name: '',
@@ -586,44 +588,59 @@ const themeItemsForAllowed = (allowed, current) => {
   return []
 }
 
-const templatePagePreviewContextCache = useState('edge-cms-template-page-preview-context-cache', () => ({}))
+const previewContextCache = useState('edge-cms-template-page-preview-context-cache', () => ({}))
 
-const loadTemplatePagePreviewContext = async () => {
-  const siteId = selectedTemplatePreviewSiteId.value
-  if (!siteId) {
-    state.templatePageRenderContext = null
-    return
-  }
+const fetchPreviewContextForSite = async (siteId) => {
+  const normalizedSiteId = String(siteId || '').trim()
+  if (!normalizedSiteId)
+    return null
 
-  const cacheKey = `${edgeGlobal.edgeState.currentOrganization}:${siteId}`
-  const cached = templatePagePreviewContextCache.value?.[cacheKey]
-  if (cached && typeof cached === 'object') {
-    state.templatePageRenderContext = edgeGlobal.dupObject(cached)
-    return
-  }
+  const cacheKey = `${edgeGlobal.edgeState.currentOrganization}:${normalizedSiteId}`
+  const cached = previewContextCache.value?.[cacheKey]
+  if (cached && typeof cached === 'object')
+    return edgeGlobal.dupObject(cached)
 
   try {
     const staticSearch = new edgeFirebase.SearchStaticData()
-    const collectionPath = `${edgeGlobal.edgeState.organizationDocPath}/sites/${siteId}/published_posts`
+    const collectionPath = `${edgeGlobal.edgeState.organizationDocPath}/sites/${normalizedSiteId}/published_posts`
     await staticSearch.getData(collectionPath, [], [], 1)
     const firstPost = Object.values(staticSearch.results?.data || {})[0] || null
     if (firstPost && typeof firstPost === 'object') {
-      templatePagePreviewContextCache.value[cacheKey] = edgeGlobal.dupObject(firstPost)
-      state.templatePageRenderContext = edgeGlobal.dupObject(firstPost)
-      return
+      previewContextCache.value[cacheKey] = edgeGlobal.dupObject(firstPost)
+      return edgeGlobal.dupObject(firstPost)
     }
   }
   catch (error) {
-    console.error('Failed to load template page preview context', error)
+    console.error('Failed to load page preview context', error)
   }
 
-  state.templatePageRenderContext = null
+  return null
+}
+
+const loadTemplatePagePreviewContext = async () => {
+  state.templatePageRenderContext = await fetchPreviewContextForSite(selectedTemplatePreviewSiteId.value)
+}
+
+const loadSitePagePreviewContext = async () => {
+  if (isTemplateSite.value) {
+    state.sitePageRenderContext = null
+    return
+  }
+  state.sitePageRenderContext = await fetchPreviewContextForSite(props.site)
 }
 
 watch(
   [() => edgeGlobal.edgeState.currentOrganization, selectedTemplatePreviewSiteId],
   async () => {
     await loadTemplatePagePreviewContext()
+  },
+  { immediate: true },
+)
+
+watch(
+  [() => edgeGlobal.edgeState.currentOrganization, () => props.site],
+  async () => {
+    await loadSitePagePreviewContext()
   },
   { immediate: true },
 )
@@ -1252,6 +1269,146 @@ const getTemplatePagePreviewKey = (docId) => {
   const themeId = String(selectedTemplatePreviewThemeId.value || 'no-theme')
   const siteId = String(selectedTemplatePreviewSiteId.value || 'no-site')
   return `${String(docId || 'template-page')}:${siteId}:${themeId}`
+}
+
+const sitePreviewTheme = computed(() => {
+  const themeId = String(siteData.value?.theme || '').trim()
+  if (!themeId)
+    return null
+  return parseThemeDoc(themeCollection.value?.[themeId]) || null
+})
+
+const getSitePagePreviewKey = (docId) => {
+  const themeId = String(siteData.value?.theme || 'no-theme')
+  return `${String(docId || 'page')}:${props.site}:${themeId}`
+}
+
+const orderedSiteMenus = computed(() => {
+  return Object.entries(state.menus || {})
+    .map(([name, menu], originalIndex) => ({
+      name,
+      menu: Array.isArray(menu) ? menu : [],
+      originalIndex,
+    }))
+    .sort((a, b) => {
+      const priority = (menuName) => {
+        if (menuName === 'Site Root')
+          return 0
+        if (menuName === 'Not In Menu')
+          return 2
+        return 1
+      }
+      return priority(a.name) - priority(b.name) || a.originalIndex - b.originalIndex
+    })
+})
+
+const displaySiteMenuName = (menuName) => {
+  if (menuName === 'Site Root')
+    return 'Site Menu'
+  return String(menuName || '').trim() || 'Not In Menu'
+}
+
+const displaySiteFolderName = (entry, fallbackName = '') => {
+  return String(entry?.menuTitle || entry?.folderTitle || entry?.name || fallbackName || '').trim() || String(fallbackName || '').trim() || 'Folder'
+}
+
+const displaySitePageName = (entry, pageDoc, docId = '') => {
+  return String(entry?.menuTitle || pageDoc?.name || entry?.name || docId || '').trim() || 'Untitled Page'
+}
+
+const buildOrderedSitePages = (items, context, seenDocIds) => {
+  const orderedPages = []
+  for (const [index, entry] of (Array.isArray(items) ? items : []).entries()) {
+    if (isExternalLinkEntry(entry))
+      continue
+    if (typeof entry?.item === 'string') {
+      const docId = String(entry.item || '').trim()
+      if (!docId || seenDocIds.has(docId))
+        continue
+      seenDocIds.add(docId)
+      const pageDoc = pages.value?.[docId] || {}
+      orderedPages.push({
+        docId,
+        ...pageDoc,
+        name: displaySitePageName(entry, pageDoc, docId),
+        menuPath: context.path.join(' / '),
+        menuEntry: { ...entry, menuName: context.menuName, index },
+        lastUpdated: pageDoc?.last_updated || pageDoc?.doc_created_at || 0,
+        description: String(pageDoc?.metaDescription || '').trim(),
+      })
+      continue
+    }
+
+    if (!entry?.item || typeof entry.item !== 'object')
+      continue
+
+    const folderSlug = Object.keys(entry.item || {})[0]
+    if (!folderSlug)
+      continue
+
+    orderedPages.push(...buildOrderedSitePages(
+      entry.item[folderSlug],
+      {
+        menuName: folderSlug,
+        path: [...context.path, displaySiteFolderName(entry, folderSlug)],
+      },
+      seenDocIds,
+    ))
+  }
+  return orderedPages
+}
+
+const sitePageGridItems = computed(() => {
+  const seenDocIds = new Set()
+  const orderedPages = []
+
+  for (const { name, menu } of orderedSiteMenus.value) {
+    orderedPages.push(...buildOrderedSitePages(menu, {
+      menuName: name,
+      path: [displaySiteMenuName(name)],
+    }, seenDocIds))
+  }
+
+  for (const [docId, pageDoc] of Object.entries(pages.value || {})) {
+    const normalizedDocId = String(docId || '').trim()
+    if (!normalizedDocId || seenDocIds.has(normalizedDocId))
+      continue
+    seenDocIds.add(normalizedDocId)
+    orderedPages.push({
+      docId: normalizedDocId,
+      ...pageDoc,
+      name: displaySitePageName({}, pageDoc, normalizedDocId),
+      menuPath: 'Not In Menu',
+      menuEntry: {
+        name: pageDoc?.name || normalizedDocId,
+        item: normalizedDocId,
+      },
+      lastUpdated: pageDoc?.last_updated || pageDoc?.doc_created_at || 0,
+      description: String(pageDoc?.metaDescription || '').trim(),
+    })
+  }
+
+  return orderedPages
+})
+
+const openSitePage = (docId) => {
+  const nextDocId = String(docId || '').trim()
+  if (!nextDocId)
+    return
+  router.push(`${pageRouteBase.value}/${nextDocId}`)
+}
+
+const openSitePageSettings = (item) => {
+  const docId = String(item?.docId || '').trim()
+  if (!docId || edgeGlobal.edgeState.cmsPageWithUnsavedChanges === docId)
+    return
+  pageMenuRef.value?.openPageSettings?.(item.menuEntry)
+}
+
+const openSitePageDelete = (item) => {
+  if (!item?.menuEntry)
+    return
+  pageMenuRef.value?.openDeletePageDialog?.(item.menuEntry)
 }
 
 const _templatePageItems = computed(() => {
@@ -2689,6 +2846,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                     <template v-if="isTemplateSite || (canViewPagesTab && state.viewMode === 'pages')">
                       <edge-cms-menu
                         v-if="state.menus"
+                        ref="pageMenuRef"
                         v-model="state.menus"
                         :site="props.site"
                         :page="props.page"
@@ -2715,9 +2873,141 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                 <div v-if="props.page && !state.updating" :key="props.page" class="max-h-[calc(100vh-100px)] overflow-y-auto w-full">
                   <NuxtPage class="flex flex-col flex-1 px-0 mx-0 pt-0" />
                 </div>
+                <div
+                  v-else-if="!state.updating && !props.page && !isTemplateSite && canViewPagesTab && state.viewMode === 'pages'"
+                  class="w-full h-[calc(100vh-100px)] overflow-y-auto p-4"
+                >
+                  <div
+                    v-if="sitePageGridItems.length"
+                    class="grid gap-4 w-full pb-2"
+                    style="grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));"
+                  >
+                    <div
+                      v-for="item in sitePageGridItems"
+                      :key="item.docId"
+                      role="button"
+                      tabindex="0"
+                      class="w-full h-full"
+                      @click="openSitePage(item.docId)"
+                      @keyup.enter="openSitePage(item.docId)"
+                    >
+                      <Card class="h-full cursor-pointer border border-slate-300/70 bg-white/70 transition hover:border-slate-500 hover:shadow-[0_22px_55px_-24px_rgba(0,0,0,0.4)] dark:border-slate-700 dark:bg-slate-900/50">
+                        <CardContent class="flex h-full flex-col gap-4 p-4 sm:p-5">
+                          <div class="flex items-start justify-between gap-3">
+                            <div class="min-w-0 flex-1">
+                              <p class="text-lg font-semibold leading-snug line-clamp-2 text-slate-900 dark:text-slate-100">
+                                {{ item.name }}
+                              </p>
+                              <div class="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                                <span class="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 dark:border-slate-700 dark:bg-slate-800">
+                                  {{ item.menuPath }}
+                                </span>
+                                <span
+                                  v-if="item.post"
+                                  class="rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-amber-800 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-200"
+                                >
+                                  Post Page
+                                </span>
+                              </div>
+                            </div>
+                            <div class="flex items-center gap-1">
+                              <edge-shad-button
+                                size="icon"
+                                variant="ghost"
+                                class="h-8 w-8 text-slate-600 hover:bg-slate-200 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                                :disabled="edgeGlobal.edgeState.cmsPageWithUnsavedChanges === item.docId"
+                                @click.stop="openSitePageSettings(item)"
+                              >
+                                <FolderCog class="h-4 w-4" />
+                              </edge-shad-button>
+                              <edge-shad-button
+                                size="icon"
+                                variant="ghost"
+                                class="h-8 w-8 text-slate-600 hover:bg-slate-200 hover:text-red-700 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-red-300"
+                                :disabled="item.menuEntry?.disableDelete"
+                                @click.stop="openSitePageDelete(item)"
+                              >
+                                <Trash2 class="h-4 w-4" />
+                              </edge-shad-button>
+                            </div>
+                          </div>
+                          <div class="template-scale-wrapper border border-dashed border-border/60 rounded-md bg-background/80">
+                            <div class="template-scale-inner">
+                              <div class="template-scale-content space-y-4">
+                                <template v-if="templatePageHasPreview(item)">
+                                  <div
+                                    v-for="(row, rowIndex) in templatePreviewRows(item)"
+                                    :key="`${item.docId}-row-${row.id || rowIndex}`"
+                                    class="w-full"
+                                  >
+                                    <div :class="previewGridClass(row)">
+                                      <div
+                                        v-for="(column, colIndex) in row.columns"
+                                        :key="`${item.docId}-row-${row.id || rowIndex}-col-${column.id || colIndex}`"
+                                        class="min-w-0"
+                                        :style="previewColumnStyle(column)"
+                                      >
+                                        <div
+                                          v-for="(blockRef, blockIdx) in column.blocks || []"
+                                          :key="`${item.docId}-row-${row.id || rowIndex}-col-${column.id || colIndex}-block-${blockIdx}`"
+                                        >
+                                          <edge-cms-block-api
+                                            v-if="resolveTemplateBlockForPreview(item, blockRef)"
+                                            :key="`${getSitePagePreviewKey(item.docId)}:${blockIdx}`"
+                                            :site-id="props.site"
+                                            :content="resolveTemplateBlockForPreview(item, blockRef).content"
+                                            :values="resolveTemplateBlockForPreview(item, blockRef).values"
+                                            :meta="resolveTemplateBlockForPreview(item, blockRef).meta"
+                                            :theme="sitePreviewTheme"
+                                            :render-context="state.sitePageRenderContext"
+                                            :isolated="true"
+                                          />
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </template>
+                                <template v-else>
+                                  <div class="flex h-32 items-center justify-center text-[100px] mt-[100px] text-muted-foreground">
+                                    No blocks yet
+                                  </div>
+                                </template>
+                              </div>
+                            </div>
+                          </div>
+                          <div class="mt-auto space-y-2 text-xs text-slate-500 dark:text-slate-400">
+                            <div v-if="item.description" class="line-clamp-2">
+                              {{ item.description }}
+                            </div>
+                            <div class="flex flex-wrap items-center justify-between gap-2">
+                              <span>{{ item.docId }}</span>
+                              <span v-if="item.lastUpdated">
+                                {{ formatTemplatePageDate(item.lastUpdated) }}
+                              </span>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </div>
+                  </div>
+                  <div
+                    v-else
+                    class="flex h-full flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-muted-foreground/40 px-6 py-10 text-center"
+                  >
+                    <FileStack class="h-8 w-8 text-muted-foreground/60" />
+                    <div class="space-y-1">
+                      <h3 class="text-base font-medium">
+                        No pages found
+                      </h3>
+                      <p class="text-sm text-muted-foreground">
+                        Add a page from the menu to get started.
+                      </p>
+                    </div>
+                  </div>
+                </div>
                 <div v-else class="p-4 text-center flex text-slate-500 h-[calc(100vh-4rem)] justify-center items-center overflow-y-auto">
                   <div class="text-4xl">
-                    <ArrowLeft class="inline-block w-12 h-12 mr-2" /> Select a page to get started.
+                    Select a page to get started.
                   </div>
                 </div>
               </Transition>
@@ -2897,29 +3187,38 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
   color: var(--cms-menu-item-active-foreground) !important;
 }
 
-.template-page-preview-surface {
-  border: 1px dashed hsl(var(--border) / 0.6);
-  border-radius: 0.5rem;
-  background: hsl(var(--background) / 0.8);
-  overflow: hidden;
-}
-
+.template-scale-wrapper,
+.template-page-preview-surface,
 .template-page-preview-scale-wrapper {
   width: 100%;
   overflow: hidden;
+  position: relative;
+  border-radius: 0.5rem;
+  height: 400px;
 }
 
+.template-page-preview-surface {
+  border: 1px dashed hsl(var(--border) / 0.6);
+  background: hsl(var(--background) / 0.8);
+}
+
+.template-scale-inner,
 .template-page-preview-scale-inner {
   transform-origin: top left;
-  width: 1600px;
-  transform: scale(0.18);
-  margin-bottom: -1312px;
+  display: inline-block;
+  width: 100%;
+  height: 400px;
+  overflow: hidden;
 }
 
+.template-scale-content,
 .template-page-preview-content {
   width: 1600px;
   min-height: 820px;
   padding: 1.5rem;
+  transform: scale(0.18);
+  transform-origin: top left;
+  margin-bottom: -1312px;
 }
 
 .fade-enter-active,
