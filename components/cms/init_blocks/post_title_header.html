@@ -1,22 +1,22 @@
 <div class="relative h-[20dvh] md:h-[30dvh] w-full bg-cover bg-center {{{#text {"
   field":"backgroundColor","option":{"optionsKey":"title","optionsValue":"value","options":[{"title":"Brand","value":"bg-brand"},{"title":"Primary","value":"bg-primary"},{"title":"Secondary","value":"bg-secondary"},{"title":"White","value":"bg-white"},{"title":"Transparent","value":"bg-transparent"}]},"value":"bg-primary"}}}}">
   {{{#array {"field":"list","collection":{"path":"posts","uniqueKey":"{orgId}:{siteId}","order":[]},"queryOptions":[],"queryItems":{"name":"{routeLastSegment}"},"limit":1,"value":[]}}}}
-  <section class="relativeh-[20dvh] md:h-[30dvh] w-full bg-cover bg-center"
-    style="background-image: url('{{item.featuredImage}}')">
-    <!-- Dark overlay -->
-    <div class="absolute inset-0 bg-black/40"></div>
+    <section class="relativeh-[20dvh] md:h-[30dvh] w-full bg-cover bg-center"
+      style="background-image: url('{{item.featuredImage}}')">
+      <!-- Dark overlay -->
+      <div class="absolute inset-0 bg-black/40"></div>
 
-    <!-- Centered content -->
-    <div class="relative z-10 flex h-full items-center justify-center">
-      <div class="px-6 text-center text-white">
-        <h1 class="mt-4 !text-3xl md:!text-4xl font-brand font-semibold tracking-[0.35em]">
-          {{item.title}}
-        </h1>
+      <!-- Centered content -->
+      <div class="relative z-10 flex h-full items-center justify-center">
+        <div class="px-6 text-center text-white">
+          <h1 class="mt-4 !text-3xl md:!text-4xl font-brand font-semibold tracking-[0.35em]">
+            {{item.title}}
+          </h1>
+        </div>
       </div>
-    </div>
 
-    <!-- Optional vignette -->
-    <div class="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/30"></div>
-  </section>
+      <!-- Optional vignette -->
+      <div class="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/30"></div>
+    </section>
   {{{/array}}}
 </div>

@@ -1,17 +1,17 @@
 <div class="w-full bg-transparent">
-    <div class="p-8 max-w-screen-lg mx-auto">
-        <ul class="list-inside">
-        {{{#array {"field":"list", "api": "https://api.clearwaterproperties.com/api/front/offices", "apiField": "data", "apiQuery": "", "limit": 4, "value": [] }}}}
+  <div class="p-8 max-w-screen-lg mx-auto">
+    <ul class="list-inside">
+      {{{#array {"field":"list", "api": "https://api.clearwaterproperties.com/api/front/offices", "apiField": "data", "apiQuery": "", "limit": 4, "value": [] }}}}
         <li class="list-disc">
-            {{item.name}} - {{item.geo.lat}} : {{item.geo.lng}}
+          {{item.name}} - {{item.geo.lat}} : {{item.geo.lng}}
 
-            <ul class="ml-[50px] list-disc">
+          <ul class="ml-[50px] list-disc">
             {{{#subarray:agent {"field":"item.agents", "limit": 0}}}}
-                <li>{{agent.name}} (email: {{agent.email}})</li>
+              <li>{{agent.name}} (email: {{agent.email}})</li>
             {{{/subarray}}}
-            </ul>
+          </ul>
         </li>
-        {{{/array}}}
-        </ul>
-    </div>
+      {{{/array}}}
+    </ul>
+  </div>
 </div>

@@ -34,6 +34,23 @@ const props = defineProps({
 const emit = defineEmits(['loaded'])
 
 const scopeId = `hc-${Math.random().toString(36).slice(2)}`
+const SANITIZE_OPTIONS = {
+  ADD_TAGS: ['iframe'],
+  ADD_ATTR: [
+    'class',
+    'style',
+    'src',
+    'title',
+    'width',
+    'height',
+    'allow',
+    'allowfullscreen',
+    'loading',
+    'referrerpolicy',
+    'sandbox',
+    'frameborder',
+  ],
+}
 
 const themeExtraCSS = computed(() => {
   const value = props.theme?.extraCSS
@@ -210,7 +227,7 @@ const safeHtml = computed(() => {
   const c = props.html || ''
   if (typeof window === 'undefined')
     return c
-  return DOMPurify.sanitize(c, { ADD_ATTR: ['class'] })
+  return DOMPurify.sanitize(c, SANITIZE_OPTIONS)
 })
 
 // Inject theme CSS variables into <head> for SSR + client

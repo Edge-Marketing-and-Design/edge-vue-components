@@ -9,51 +9,61 @@
 >
   <div data-carousel-track class="flex">
     {{{#array {"field":"List","schema":{"listing_price":"money","square_feet":"number","acres":"number"},"api":"https://api.clearwaterproperties.com/api/front/properties","apiField":"data","apiQuery":"?limit=20&filter_scope[agent][]=mt_nmar-mt.545000478","queryOptions":[{"field":"sort","optionsKey":"label","optionsValue":"value","options":[{"label":"Highest Price","value":"listing_price"},{"label":"Lowest Price","value":"-listing_price"},{"label":"Newest","value":"-list_date"}]},{"field":"filter_scope[agent][]","title":"Agent","optionsKey":"name","optionsValue":"mls.primary","options":"users"}],"limit":10,"value":[]}}}}
-      <div class="shrink-0 min-w-0 flex-[0_0_100%] lg:flex-[0_0_25%] p-4">
-          <div class="{{loading}}">
-            <div class="block bg-white shadow-md rounded-lg overflow-hidden animate-pulse">
-              <div class="relative w-full h-64 bg-gray-300">
-                <div class="absolute top-2 left-2 w-16 h-5 bg-gray-300 rounded"></div>
-                <div class="absolute bottom-2 right-2 w-20 h-5 bg-gray-300 rounded"></div>
-              </div>
-              <div class="p-4 space-y-3">
-                <div class="w-32 h-6 bg-gray-300 rounded"></div>
-                <div class="w-48 h-4 bg-gray-200 rounded"></div>
-                <div class="flex gap-4 mt-2">
-                  <div class="w-12 h-4 bg-gray-200 rounded"></div>
-                  <div class="w-12 h-4 bg-gray-200 rounded"></div>
-                  <div class="w-16 h-4 bg-gray-200 rounded"></div>
-                </div>
+      <div class="shrink-0 min-w-0 flex-[0_0_100%] p-4 lg:flex-[0_0_25%]">
+        <div class="{{loading}}">
+          <div class="block overflow-hidden rounded-lg bg-white shadow-md animate-pulse">
+            <div class="relative h-64 w-full bg-gray-300">
+              <div class="absolute left-2 top-2 h-5 w-16 rounded bg-gray-300"></div>
+              <div class="absolute bottom-2 right-2 h-5 w-20 rounded bg-gray-300"></div>
+            </div>
+            <div class="space-y-3 p-4">
+              <div class="h-6 w-32 rounded bg-gray-300"></div>
+              <div class="h-4 w-48 rounded bg-gray-200"></div>
+              <div class="mt-2 flex gap-4">
+                <div class="h-4 w-12 rounded bg-gray-200"></div>
+                <div class="h-4 w-12 rounded bg-gray-200"></div>
+                <div class="h-4 w-16 rounded bg-gray-200"></div>
               </div>
             </div>
           </div>
+        </div>
 
-          <a class="block bg-white shadow-md rounded-lg overflow-hidden {{loaded}}">
-            <div class="relative w-full h-64 bg-gray-200 bg-[url('/images/placeholder.jpg')] bg-cover bg-center">
-              <img src="{{item.thumbnail_url}}" alt="For Sale" loading="lazy" class="w-full h-full object-cover">
-              <div class="absolute top-2 left-2 bg-black/70 text-white px-2 py-1 rounded text-xs">{{item.listing_status}}</div>
-              <div class="absolute bottom-2 right-2 bg-white/80 text-gray-800 px-2 py-1 rounded text-xs">MLS® {{item.display_mlsnumber}}</div>
-            </div>
+        <a class="block overflow-hidden rounded-lg bg-white shadow-md {{loaded}}">
+          <div class="relative h-64 w-full bg-[url('/images/placeholder.jpg')] bg-cover bg-center bg-gray-200">
+            <img src="{{item.thumbnail_url}}" alt="For Sale" loading="lazy" class="h-full w-full object-cover" />
+            <div class="absolute left-2 top-2 rounded bg-black/70 px-2 py-1 text-xs text-white">{{item.listing_status}}</div>
+            <div class="absolute bottom-2 right-2 rounded bg-white/80 px-2 py-1 text-xs text-gray-800">MLS® {{item.display_mlsnumber}}</div>
+          </div>
 
-            <div class="p-4">
-              <h4 class="text-xl font-bold text-gray-800">{{item.listing_price}}</h4>
-              <div class="text-gray-600 mt-1 truncate">{{item.display_address}}</div>
-              <div class="flex gap-4 mt-2 text-sm text-gray-700">
-                {{{#if {"cond": "item.total_bedrooms > 0"}}}}<span>{{item.total_bedrooms}} Beds</span>{{{/if}}}
-                {{{#if {"cond": "item.total_bathrooms > 0"}}}}<span>{{item.total_bathrooms}} Baths</span>{{{/if}}}
-                {{{#if {"cond": "item.property_type == 'ranch'"}}}}<span>{{item.acres}} Acres</span>
-                {{{#else}}}{{{#if {"cond": "item.square_feet > 0"}}}}<span>{{item.square_feet}} Sq.Ft.</span>{{{/if}}}{{{/else}}}
-              </div>
+          <div class="p-4">
+            <h4 class="text-xl font-bold text-gray-800">{{item.listing_price}}</h4>
+            <div class="mt-1 truncate text-gray-600">{{item.display_address}}</div>
+            <div class="mt-2 flex gap-4 text-sm text-gray-700">
+              {{{#if {"cond": "item.total_bedrooms > 0"}}}}<span>{{item.total_bedrooms}} Beds</span>{{{/if}}}
+              {{{#if {"cond": "item.total_bathrooms > 0"}}}}<span>{{item.total_bathrooms}} Baths</span>{{{/if}}}
+              {{{#if {"cond": "item.property_type == 'ranch'"}}}}<span>{{item.acres}} Acres</span>{{{/if}}}
+              {{{#if {"cond": "item.property_type != 'ranch'"}}}} {{{#if {"cond": "item.square_feet > 0"}}}}<span>{{item.square_feet}} Sq.Ft.</span>{{{/if}}} {{{/if}}}
             </div>
-          </a>
+          </div>
+        </a>
       </div>
     {{{/array}}}
   </div>
 
-  <button type="button" data-carousel-prev
-    class="absolute left-2 top-1/2 -translate-y-1/2 p-2 bg-black/60 text-white rounded-full">‹</button>
-  <button type="button" data-carousel-next
-    class="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-black/60 text-white rounded-full">›</button>
+  <button
+    type="button"
+    data-carousel-prev
+    class="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-black/60 p-2 text-white"
+  >
+    ‹
+  </button>
+  <button
+    type="button"
+    data-carousel-next
+    class="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-black/60 p-2 text-white"
+  >
+    ›
+  </button>
 
   <div data-carousel-dots class="mt-3 flex justify-center gap-2"></div>
 </div>

@@ -2,6 +2,7 @@
 const emit = defineEmits(['head'])
 const edgeFirebase = inject('edgeFirebase')
 const { blocks: blockNewDocSchema } = useCmsNewDocs()
+const BLANK_BLOCK_TEMPLATE_ID = '__blank__'
 const state = reactive({
   filter: '',
   mounted: false,
@@ -18,7 +19,14 @@ const state = reactive({
   importConflictDocId: '',
   importErrorDialogOpen: false,
   importErrorMessage: '',
+  addBlockDialogOpen: false,
+  addBlockTab: 'templates',
+  selectedInitBlockDocId: BLANK_BLOCK_TEMPLATE_ID,
+  selectedExistingBlockDocId: '',
+  newBlockName: '',
+  creatingBlock: false,
   previewRenderContext: null,
+  blocksLoaded: [],
 })
 
 const rawInitBlockFiles = import.meta.glob('./init_blocks/*.html', {
@@ -26,19 +34,166 @@ const rawInitBlockFiles = import.meta.glob('./init_blocks/*.html', {
   eager: true,
 })
 
-const INITIAL_BLOCKS = Object.entries(rawInitBlockFiles).map(([path, content]) => {
-  const fileName = path.split('/').pop() || ''
-  const baseName = fileName.replace(/\.html$/i, '')
-  const formattedName = baseName
-    .split('_')
-    .filter(Boolean)
-    .map(segment => segment.charAt(0).toUpperCase() + segment.slice(1))
-    .join(' ')
-  return {
-    docId: baseName,
-    name: formattedName,
-    content,
+const TEMPLATE_PREVIEW_PLACEHOLDERS = {
+  text: 'Lorem ipsum dolor sit amet.',
+  textarea: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.',
+  richtext: '<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>',
+  image: 'https://imagedelivery.net/h7EjKG0X9kOxmLp41mxOng/f1f7f610-dfa9-4011-08a3-7a98d95e7500/thumbnail',
+}
+
+function normalizeConfigLiteral(str) {
+  return str
+    .replace(/(\{|,)\s*([A-Za-z_][\w-]*)\s*:/g, '$1"$2":')
+    .replace(/'/g, '"')
+}
+
+function safeParseConfig(raw) {
+  try {
+    return JSON.parse(normalizeConfigLiteral(raw))
   }
+  catch {
+    return null
+  }
+}
+
+const TAG_START_RE = /\{\{\{\#([A-Za-z0-9_-]+)\s*\{/g
+
+function findMatchingBrace(str, startIdx) {
+  let depth = 0
+  let inString = false
+  let quote = null
+  let escape = false
+  for (let i = startIdx; i < str.length; i++) {
+    const ch = str[i]
+    if (inString) {
+      if (escape) {
+        escape = false
+        continue
+      }
+      if (ch === '\\') {
+        escape = true
+        continue
+      }
+      if (ch === quote) {
+        inString = false
+        quote = null
+      }
+      continue
+    }
+    if (ch === '"' || ch === '\'') {
+      inString = true
+      quote = ch
+      continue
+    }
+    if (ch === '{')
+      depth++
+    else if (ch === '}') {
+      depth--
+      if (depth === 0)
+        return i
+    }
+  }
+  return -1
+}
+
+function* iterateTags(html) {
+  TAG_START_RE.lastIndex = 0
+  for (;;) {
+    const match = TAG_START_RE.exec(html)
+    if (!match)
+      break
+
+    const type = match[1]
+    const configStart = TAG_START_RE.lastIndex - 1
+    if (configStart < 0 || html[configStart] !== '{')
+      continue
+
+    const configEnd = findMatchingBrace(html, configStart)
+    if (configEnd === -1)
+      continue
+
+    const rawCfg = html.slice(configStart, configEnd + 1)
+    const closeTriple = html.indexOf('}}}', configEnd)
+    TAG_START_RE.lastIndex = closeTriple !== -1 ? closeTriple + 3 : configEnd + 1
+
+    yield { type, rawCfg }
+  }
+}
+
+const parseBlockTemplateModel = (html) => {
+  const values = {}
+  const meta = {}
+
+  if (!html)
+    return { values, meta }
+
+  for (const { type, rawCfg } of iterateTags(html)) {
+    const cfg = safeParseConfig(rawCfg)
+    if (!cfg || !cfg.field)
+      continue
+
+    const field = String(cfg.field)
+    const title = cfg.title != null ? String(cfg.title) : ''
+    const { value: _omitValue, field: _omitField, ...rest } = cfg
+    meta[field] = { type, ...rest, title }
+
+    let value = cfg.value
+    if (type === 'image')
+      value = !value ? TEMPLATE_PREVIEW_PLACEHOLDERS.image : String(value)
+    else if (type === 'text')
+      value = !value ? TEMPLATE_PREVIEW_PLACEHOLDERS.text : String(value)
+    else if (type === 'array')
+      value = Array.isArray(value) ? edgeGlobal.dupObject(value) : []
+    else if (type === 'textarea')
+      value = !value ? TEMPLATE_PREVIEW_PLACEHOLDERS.textarea : String(value)
+    else if (type === 'richtext')
+      value = !value ? TEMPLATE_PREVIEW_PLACEHOLDERS.richtext : String(value)
+
+    values[field] = value
+  }
+
+  return { values, meta }
+}
+
+const INITIAL_BLOCK_TEMPLATES = Object.entries(rawInitBlockFiles)
+  .map(([path, content]) => {
+    const fileName = path.split('/').pop() || ''
+    const baseName = fileName.replace(/\.html$/i, '')
+    const formattedName = baseName
+      .split('_')
+      .filter(Boolean)
+      .map(segment => segment.charAt(0).toUpperCase() + segment.slice(1))
+      .join(' ')
+    const parsed = parseBlockTemplateModel(content)
+    return {
+      docId: baseName,
+      name: formattedName,
+      content,
+      values: parsed.values,
+      meta: parsed.meta,
+      previewType: 'light',
+    }
+  })
+  .sort((left, right) => left.name.localeCompare(right.name))
+
+const blankBlockTemplate = {
+  docId: BLANK_BLOCK_TEMPLATE_ID,
+  name: 'Blank',
+  content: '',
+  previewType: 'light',
+}
+
+const resetAddBlockDialogState = () => {
+  state.addBlockTab = 'templates'
+  state.selectedInitBlockDocId = BLANK_BLOCK_TEMPLATE_ID
+  state.selectedExistingBlockDocId = ''
+  state.newBlockName = ''
+  state.creatingBlock = false
+}
+
+watch(() => state.addBlockDialogOpen, (open) => {
+  if (!open)
+    resetAddBlockDialogState()
 })
 
 const router = useRouter()
@@ -48,43 +203,9 @@ const blockImportConflictResolver = ref(null)
 const DEFAULT_BLOCK_IMPORT_ERROR_MESSAGE = 'Failed to import block JSON.'
 const OPTIONAL_BLOCK_IMPORT_KEYS = new Set(['previewType', 'type'])
 
-const seedInitialBlocks = async () => {
-  console.log('Seeding initial blocks...')
-  console.log(`Found ${INITIAL_BLOCKS.length} initial blocks to seed.`)
-  if (!INITIAL_BLOCKS.length)
-    return 0
-
-  const organizationPath = edgeGlobal.edgeState.organizationDocPath
-  if (!organizationPath)
-    return 0
-
-  const collectionPath = `${organizationPath}/blocks`
-  let created = 0
-
-  for (const block of INITIAL_BLOCKS) {
-    if (!block.docId)
-      continue
-    try {
-      await edgeFirebase.storeDoc(collectionPath, {
-        docId: block.docId,
-        name: block.name,
-        content: block.content,
-        previewType: 'light',
-        tags: [],
-        themes: [],
-        type: ['Page'],
-        synced: false,
-        version: 1,
-      })
-      created++
-      console.log(`Seeded block "${block.docId}"`)
-    }
-    catch (error) {
-      console.error(`Failed to seed block "${block.docId}"`, error)
-    }
-  }
-
-  return created
+const openAddBlockDialog = () => {
+  resetAddBlockDialogState()
+  state.addBlockDialogOpen = true
 }
 
 const getThemeFromId = (themeId) => {
@@ -137,6 +258,13 @@ const previewSurfaceClass = (value) => {
 const loadingRender = (content) => {
   const safeContent = typeof content === 'string' ? content : ''
   return safeContent.replaceAll('{{loading}}', '').replaceAll('{{loaded}}', 'hidden')
+}
+
+const getTemplatePreviewKey = docId => `template:${String(docId || '')}`
+
+const blockLoaded = (isLoading, docId) => {
+  if (!isLoading && !state.blocksLoaded.includes(docId))
+    state.blocksLoaded.push(docId)
 }
 
 const FILTER_STORAGE_KEY = 'edge.blocks.filters'
@@ -253,6 +381,7 @@ const loadPreviewRenderContext = async () => {
 watch(
   [() => edgeGlobal.edgeState.currentOrganization, blockPreviewSiteId],
   async () => {
+    state.blocksLoaded = []
     await loadPreviewRenderContext()
   },
   { immediate: true },
@@ -380,23 +509,14 @@ const firstThemeId = computed(() => themeOptions.value?.[0]?.name || '')
 const selectedPreviewThemeId = computed(() => String(
   edgeGlobal.edgeState.blockEditorTheme || firstThemeId.value || '',
 ).trim())
-
-const getPreviewThemeForBlock = (block) => {
-  const allowedThemeIds = Array.isArray(block?.themes)
-    ? block.themes.map(themeId => String(themeId || '').trim()).filter(Boolean)
-    : []
-
-  let preferredThemeId = selectedPreviewThemeId.value
-  if (preferredThemeId && !parsedThemesById.value?.[preferredThemeId])
-    preferredThemeId = ''
-  if (!preferredThemeId)
-    preferredThemeId = allowedThemeIds.find(themeId => !!parsedThemesById.value?.[themeId]) || ''
-  if (!preferredThemeId)
-    preferredThemeId = firstThemeId.value
-  if (!preferredThemeId)
-    return null
-
-  return parsedThemesById.value?.[preferredThemeId] || null
+const selectedPreviewTheme = computed(() => {
+  const selectedThemeId = selectedPreviewThemeId.value
+  return parsedThemesById.value?.[selectedThemeId] || parsedThemesById.value?.[firstThemeId.value] || null
+})
+const getPreviewSelectionKey = (docId) => {
+  const themeId = String(selectedPreviewThemeId.value || 'no-theme')
+  const siteId = String(blockPreviewSiteId.value || 'no-site')
+  return `${String(docId || 'preview')}:${siteId}:${themeId}`
 }
 
 const listFilters = computed(() => {
@@ -444,16 +564,50 @@ const applyListSelectionFilters = (items = []) => {
   return applyTagSelectionFilter(applyTypeSelectionFilter(items))
 }
 
-const blockNeedsPostContext = block => normalizeBlockTypes(block?.type).includes('Post')
-
 const blockCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/blocks`)
 const blocksCollection = computed(() => edgeFirebase.data?.[blockCollectionPath.value] || {})
 const selectedBlockSet = computed(() => new Set(state.selectedBlockDocIds))
 const selectedBlockCount = computed(() => state.selectedBlockDocIds.length)
+const addBlockTemplateItems = computed(() => [blankBlockTemplate, ...INITIAL_BLOCK_TEMPLATES])
+const addExistingBlockItems = computed(() => {
+  return Object.entries(blocksCollection.value || {})
+    .map(([docId, doc]) => ({ docId, ...(doc || {}) }))
+    .sort((left, right) => {
+      const leftName = String(left?.name || left?.docId || '').trim()
+      const rightName = String(right?.name || right?.docId || '').trim()
+      return leftName.localeCompare(rightName)
+    })
+})
+const selectedInitBlockTemplate = computed(() => {
+  return addBlockTemplateItems.value.find(template => template.docId === state.selectedInitBlockDocId) || blankBlockTemplate
+})
+const selectedExistingBlock = computed(() => {
+  return addExistingBlockItems.value.find(block => block.docId === state.selectedExistingBlockDocId) || null
+})
+const normalizedNewBlockName = computed(() => String(state.newBlockName || '').trim())
+const canCreateBlock = computed(() => {
+  if (!normalizedNewBlockName.value || state.creatingBlock)
+    return false
+  if (state.addBlockTab === 'existing')
+    return !!selectedExistingBlock.value
+  return true
+})
 
 const normalizeDocId = value => String(value || '').trim()
 
 const isBlockSelected = docId => selectedBlockSet.value.has(normalizeDocId(docId))
+
+const isAddBlockTemplateSelected = docId => state.selectedInitBlockDocId === docId
+
+const selectAddBlockTemplate = (docId) => {
+  state.selectedInitBlockDocId = String(docId || BLANK_BLOCK_TEMPLATE_ID)
+}
+
+const isAddExistingBlockSelected = docId => state.selectedExistingBlockDocId === docId
+
+const selectAddExistingBlock = (docId) => {
+  state.selectedExistingBlockDocId = String(docId || '')
+}
 
 const setBlockSelection = (docId, checked) => {
   const normalizedDocId = normalizeDocId(docId)
@@ -599,6 +753,68 @@ const getDocDefaultsFromSchema = (schema = {}) => {
 }
 
 const getBlockDocDefaults = () => getDocDefaultsFromSchema(blockNewDocSchema.value || {})
+
+const slugifyBlockDocId = (value) => {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)+/g, '')
+}
+
+const makeUniqueBlockDocIdFromName = (name, docsMap = {}) => {
+  const baseDocId = slugifyBlockDocId(name) || 'block'
+  let nextDocId = baseDocId
+  let suffix = 2
+  while (docsMap[nextDocId]) {
+    nextDocId = `${baseDocId}-${suffix}`
+    suffix += 1
+  }
+  return nextDocId
+}
+
+watch(addExistingBlockItems, (items) => {
+  const selectedDocId = String(state.selectedExistingBlockDocId || '').trim()
+  const hasSelectedDocId = items.some(item => item.docId === selectedDocId)
+  if (!selectedDocId || !hasSelectedDocId)
+    state.selectedExistingBlockDocId = items?.[0]?.docId || ''
+}, { immediate: true, deep: true })
+
+const createBlockFromTemplate = async () => {
+  if (!canCreateBlock.value)
+    return
+
+  state.creatingBlock = true
+  const nextBlockName = normalizedNewBlockName.value
+  const nextDocId = makeUniqueBlockDocIdFromName(nextBlockName, blocksCollection.value || {})
+  const shouldDuplicateExistingBlock = state.addBlockTab === 'existing' && !!selectedExistingBlock.value
+  const payload = shouldDuplicateExistingBlock
+    ? {
+        ...getBlockDocDefaults(),
+        ...edgeGlobal.dupObject(selectedExistingBlock.value),
+        docId: nextDocId,
+        name: nextBlockName,
+      }
+    : {
+        ...getBlockDocDefaults(),
+        docId: nextDocId,
+        name: nextBlockName,
+        content: typeof selectedInitBlockTemplate.value?.content === 'string' ? selectedInitBlockTemplate.value.content : '',
+      }
+
+  try {
+    await edgeFirebase.storeDoc(blockCollectionPath.value, payload, nextDocId)
+    state.addBlockDialogOpen = false
+    await router.push(`/app/dashboard/blocks/${nextDocId}`)
+  }
+  catch (error) {
+    console.error(`Failed to create block "${nextDocId}"`, error)
+    edgeFirebase?.toast?.error?.('Failed to create block.')
+  }
+  finally {
+    state.creatingBlock = false
+  }
+}
 
 const validateImportedBlockDoc = (doc) => {
   if (!isPlainObject(doc))
@@ -847,14 +1063,6 @@ const handleBlockImport = async (event) => {
       <template #header-start="slotProps">
         <component :is="slotProps.icon" class="mr-2" />
         Blocks
-        <edge-shad-button
-          v-if="slotProps.recordCount === 0"
-          variant="outline"
-          class="ml-4 h-8 text-xs"
-          @click="seedInitialBlocks"
-        >
-          Seed Blocks
-        </edge-shad-button>
       </template>
       <template #header-center>
         <edge-shad-form class="w-full">
@@ -903,7 +1111,10 @@ const handleBlockImport = async (event) => {
             <Loader2 v-if="state.importingJson" class="h-4 w-4 animate-spin" />
             <Upload v-else class="h-4 w-4" />
           </edge-shad-button>
-          <edge-shad-button class="uppercase bg-slate-700 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300" to="/app/dashboard/blocks/new">
+          <edge-shad-button
+            class="uppercase bg-slate-700 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
+            @click="openAddBlockDialog"
+          >
             Add Block
           </edge-shad-button>
         </div>
@@ -1095,12 +1306,24 @@ const handleBlockImport = async (event) => {
                   <div v-if="item.content" class="block-preview" :class="previewSurfaceClass(item.previewType)">
                     <div class="scale-wrapper">
                       <div class="scale-inner scale p-4 block-list-preview-content">
+                        <edge-cms-block-api
+                          :key="getPreviewSelectionKey(item.docId)"
+                          :site-id="blockPreviewSiteId"
+                          :content="item.content"
+                          :values="item.values"
+                          :meta="item.meta"
+                          :theme="selectedPreviewTheme"
+                          :render-context="state.previewRenderContext"
+                          @pending="blockLoaded($event, item.docId)"
+                        />
                         <edge-cms-block-render
+                          v-if="!state.blocksLoaded.includes(item.docId)"
+                          :key="`${getPreviewSelectionKey(item.docId)}:fallback`"
                           :content="loadingRender(item.content)"
                           :values="item.values"
                           :meta="item.meta"
-                          :theme="getPreviewThemeForBlock(item)"
-                          :render-context="blockNeedsPostContext(item) ? state.previewRenderContext : null"
+                          :theme="selectedPreviewTheme"
+                          :render-context="state.previewRenderContext"
                         />
                       </div>
                     </div>
@@ -1204,6 +1427,160 @@ const handleBlockImport = async (event) => {
             Close
           </edge-shad-button>
         </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
+    <edge-shad-dialog v-model="state.addBlockDialogOpen">
+      <DialogContent class="pt-6 w-full max-w-6xl h-[90vh] flex flex-col">
+        <form class="flex h-full flex-col" @submit.prevent="createBlockFromTemplate">
+          <DialogHeader class="pb-2">
+            <DialogTitle class="text-left">
+              Add Block
+            </DialogTitle>
+            <DialogDescription>
+              Choose a starter block or begin blank, then give it a name to create it.
+            </DialogDescription>
+          </DialogHeader>
+          <div class="flex flex-1 flex-col overflow-hidden">
+            <div class="space-y-4">
+              <edge-shad-input
+                v-model="state.newBlockName"
+                name="name"
+                label="Block Name"
+                placeholder="Enter block name"
+              />
+            </div>
+            <Tabs v-model="state.addBlockTab" class="mt-4 flex min-h-0 flex-1 flex-col">
+              <TabsList class="grid w-full grid-cols-2 rounded-sm border border-slate-300 bg-slate-200 dark:border-slate-700 dark:bg-slate-800">
+                <TabsTrigger value="templates" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
+                  Templates
+                </TabsTrigger>
+                <TabsTrigger value="existing" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
+                  Existing
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="templates" class="mt-4 flex min-h-0 flex-1 flex-col">
+                <edge-button-divider class="mb-4">
+                  <span class="text-xs text-muted-foreground !nowrap text-center">Select Template</span>
+                </edge-button-divider>
+                <div class="min-h-0 flex-1 overflow-y-auto pr-1">
+                  <div class="grid grid-cols-1 gap-3 pb-2 sm:grid-cols-2 lg:grid-cols-4 auto-rows-fr">
+                    <button
+                      v-for="template in addBlockTemplateItems"
+                      :key="template.docId"
+                      type="button"
+                      class="rounded-lg border bg-card p-3 text-left transition focus:outline-none focus-visible:ring-2"
+                      :class="isAddBlockTemplateSelected(template.docId) ? 'border-primary ring-2 ring-primary/50 shadow-lg' : 'border-border hover:border-primary/40'"
+                      :aria-pressed="isAddBlockTemplateSelected(template.docId)"
+                      @click="selectAddBlockTemplate(template.docId)"
+                    >
+                      <div class="flex items-center justify-between gap-2 pb-3">
+                        <span class="truncate font-semibold">{{ template.name }}</span>
+                        <span class="text-[10px] uppercase tracking-wide text-muted-foreground">
+                          {{ template.docId === BLANK_BLOCK_TEMPLATE_ID ? 'Blank' : 'Template' }}
+                        </span>
+                      </div>
+                      <div v-if="template.content" class="block-preview" :class="previewSurfaceClass(template.previewType)">
+                        <div class="scale-wrapper">
+                          <div class="scale-inner scale p-4 block-list-preview-content">
+                            <edge-cms-block-api
+                              :key="getPreviewSelectionKey(getTemplatePreviewKey(template.docId))"
+                              :site-id="blockPreviewSiteId"
+                              :content="template.content"
+                              :values="template.values"
+                              :meta="template.meta"
+                              :theme="selectedPreviewTheme"
+                              :render-context="state.previewRenderContext"
+                              @pending="blockLoaded($event, getTemplatePreviewKey(template.docId))"
+                            />
+                            <edge-cms-block-render
+                              v-if="!state.blocksLoaded.includes(getTemplatePreviewKey(template.docId))"
+                              :key="`${getPreviewSelectionKey(getTemplatePreviewKey(template.docId))}:fallback`"
+                              :content="loadingRender(template.content)"
+                              :values="template.values"
+                              :meta="template.meta"
+                              :theme="selectedPreviewTheme"
+                              :render-context="state.previewRenderContext"
+                            />
+                          </div>
+                        </div>
+                        <div class="preview-overlay" />
+                      </div>
+                      <div v-else class="block-preview-empty" :class="previewSurfaceClass(template.previewType)">
+                        Start from scratch.
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="existing" class="mt-4 flex min-h-0 flex-1 flex-col">
+                <edge-button-divider class="mb-4">
+                  <span class="text-xs text-muted-foreground !nowrap text-center">Duplicate Existing Block</span>
+                </edge-button-divider>
+                <div v-if="addExistingBlockItems.length" class="min-h-0 flex-1 overflow-y-auto pr-1">
+                  <div class="grid grid-cols-1 gap-3 pb-2 sm:grid-cols-2 lg:grid-cols-4 auto-rows-fr">
+                    <button
+                      v-for="block in addExistingBlockItems"
+                      :key="`existing-${block.docId}`"
+                      type="button"
+                      class="rounded-lg border bg-card p-3 text-left transition focus:outline-none focus-visible:ring-2"
+                      :class="isAddExistingBlockSelected(block.docId) ? 'border-primary ring-2 ring-primary/50 shadow-lg' : 'border-border hover:border-primary/40'"
+                      :aria-pressed="isAddExistingBlockSelected(block.docId)"
+                      @click="selectAddExistingBlock(block.docId)"
+                    >
+                      <div class="flex items-center justify-between gap-2 pb-3">
+                        <span class="truncate font-semibold">{{ block.name || block.docId }}</span>
+                        <span class="text-[10px] uppercase tracking-wide text-muted-foreground">Duplicate</span>
+                      </div>
+                      <div v-if="block.content" class="block-preview" :class="previewSurfaceClass(block.previewType)">
+                        <div class="scale-wrapper">
+                          <div class="scale-inner scale p-4 block-list-preview-content">
+                            <edge-cms-block-api
+                              :key="`${getPreviewSelectionKey(block.docId)}:existing-picker`"
+                              :site-id="blockPreviewSiteId"
+                              :content="block.content"
+                              :values="block.values"
+                              :meta="block.meta"
+                              :theme="selectedPreviewTheme"
+                              :render-context="state.previewRenderContext"
+                              @pending="blockLoaded($event, `existing:${block.docId}`)"
+                            />
+                            <edge-cms-block-render
+                              v-if="!state.blocksLoaded.includes(`existing:${block.docId}`)"
+                              :key="`${getPreviewSelectionKey(block.docId)}:existing-picker:fallback`"
+                              :content="loadingRender(block.content)"
+                              :values="block.values"
+                              :meta="block.meta"
+                              :theme="selectedPreviewTheme"
+                              :render-context="state.previewRenderContext"
+                            />
+                          </div>
+                        </div>
+                        <div class="preview-overlay" />
+                      </div>
+                      <div v-else class="block-preview-empty" :class="previewSurfaceClass(block.previewType)">
+                        Preview unavailable for this block.
+                      </div>
+                    </button>
+                  </div>
+                </div>
+                <div v-else class="flex flex-1 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50/70 p-8 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
+                  No existing blocks yet. Create one from Templates first.
+                </div>
+              </TabsContent>
+            </Tabs>
+          </div>
+          <DialogFooter class="pt-4">
+            <edge-shad-button type="button" variant="destructive" @click="state.addBlockDialogOpen = false">
+              Cancel
+            </edge-shad-button>
+            <edge-shad-button type="submit" class="bg-slate-800 text-white hover:bg-slate-400" :disabled="!canCreateBlock">
+              <Loader2 v-if="state.creatingBlock" class="mr-2 h-4 w-4 animate-spin" />
+              Create Block
+            </edge-shad-button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </edge-shad-dialog>
     <edge-shad-dialog v-model="state.bulkDeleteDialogOpen">
