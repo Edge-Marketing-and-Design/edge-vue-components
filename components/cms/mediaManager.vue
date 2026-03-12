@@ -269,8 +269,8 @@ const siteQueryValue = computed(() => {
           <template #center>
             <div class="w-full px-0">
               <edge-shad-form>
-                <div class="flex flex-wrap justify-between items-center gap-2 w-full">
-                  <div>
+                <div class="flex flex-col md:flex-row md:items-center gap-2 w-full">
+                  <div class="shrink-0">
                     <edge-shad-button
                       class="bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
                       @click="state.showUpload = true"
@@ -279,7 +279,7 @@ const siteQueryValue = computed(() => {
                       Upload Media
                     </edge-shad-button>
                   </div>
-                  <div class="w-1/2">
+                  <div class="md:flex-1 md:min-w-[220px]">
                     <edge-shad-select
                       v-if="!state.clearingTags"
                       v-model="state.filterTags"
@@ -294,7 +294,7 @@ const siteQueryValue = computed(() => {
                       </template>
                     </edge-shad-select>
                   </div>
-                  <div class="w-1/2">
+                  <div class="md:flex-1 md:min-w-[220px]">
                     <edge-shad-input
                       v-model="state.filter"
                       label=""
@@ -311,7 +311,11 @@ const siteQueryValue = computed(() => {
             <div />
           </template>
         </edge-menu>
-        <div v-if="!selectMode" class="flex justify-end gap-2 mt-2 px-3">
+        <div v-if="!selectMode" class="flex flex-wrap items-center justify-between gap-2 mt-2 px-3">
+          <div class="text-xs text-slate-600 dark:text-slate-300">
+            {{ state.selected.length }} selected
+          </div>
+          <div class="flex items-center gap-2">
           <edge-shad-button
             class="w-[140px] h-[30px] rounded bg-slate-900 text-white hover:bg-slate-800 focus-visible:ring-2 focus-visible:ring-slate-500 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
             @click="state.selectAll = !state.selectAll"
@@ -329,6 +333,7 @@ const siteQueryValue = computed(() => {
             <Loader2 v-if="state.deleting" class="animate-spin h-5 w-5 mr-2" />
             Delete Selected
           </edge-shad-button>
+          </div>
         </div>
       </template>
       <template #list="slotProps">

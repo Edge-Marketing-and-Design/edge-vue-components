@@ -719,7 +719,7 @@ const addFilter = (field, value) => {
         </template>
       </edge-menu>
     </slot>
-    <div v-if="$slots['list-header']" class="flex flex-wrap items-center py-0 mx-8 text-sm">
+    <div v-if="$slots['list-header']" class="flex flex-wrap items-center py-0 mx-1 text-sm">
       <slot name="list-header" />
     </div>
     <CardContent

@@ -18,6 +18,7 @@ const state = reactive({
   importConflictDocId: '',
   importErrorDialogOpen: false,
   importErrorMessage: '',
+  previewRenderContext: null,
 })
 
 const rawInitBlockFiles = import.meta.glob('./init_blocks/*.html', {
@@ -187,11 +188,75 @@ watch(
 
 onBeforeMount(async () => {
   restoreFilters()
+  if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]) {
+    await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/sites`)
+  }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`]) {
     await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`)
   }
   state.mounted = true
 })
+
+const blockListPreviewCache = useState('edge-cms-block-list-post-preview-cache', () => ({}))
+
+const sitesCollection = computed(() => {
+  return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`] || {}
+})
+
+const siteOptions = computed(() => {
+  return Object.entries(sitesCollection.value)
+    .filter(([siteId]) => String(siteId || '').trim() && siteId !== 'templates')
+    .map(([siteId, siteDoc]) => ({ name: siteId, title: siteDoc?.name || siteId }))
+    .sort((a, b) => a.title.localeCompare(b.title))
+})
+
+const blockPreviewSiteId = computed(() => {
+  const selectedSite = String(edgeGlobal.edgeState.blockEditorSite || '').trim()
+  if (selectedSite)
+    return selectedSite
+
+  return String(siteOptions.value?.[0]?.name || '').trim()
+})
+
+const loadPreviewRenderContext = async () => {
+  const siteId = blockPreviewSiteId.value
+  if (!siteId) {
+    state.previewRenderContext = null
+    return
+  }
+
+  const cacheKey = `${edgeGlobal.edgeState.currentOrganization}:${siteId}`
+  const cached = blockListPreviewCache.value?.[cacheKey]
+  if (cached && typeof cached === 'object') {
+    state.previewRenderContext = edgeGlobal.dupObject(cached)
+    return
+  }
+
+  try {
+    const staticSearch = new edgeFirebase.SearchStaticData()
+    const collectionPath = `${edgeGlobal.edgeState.organizationDocPath}/sites/${siteId}/published_posts`
+    await staticSearch.getData(collectionPath, [], [], 1)
+    const firstPost = Object.values(staticSearch.results?.data || {})[0] || null
+    if (firstPost && typeof firstPost === 'object') {
+      blockListPreviewCache.value[cacheKey] = edgeGlobal.dupObject(firstPost)
+      state.previewRenderContext = edgeGlobal.dupObject(firstPost)
+      return
+    }
+  }
+  catch (error) {
+    console.error('Failed to load block list post preview context', error)
+  }
+
+  state.previewRenderContext = null
+}
+
+watch(
+  [() => edgeGlobal.edgeState.currentOrganization, blockPreviewSiteId],
+  async () => {
+    await loadPreviewRenderContext()
+  },
+  { immediate: true },
+)
 
 const tagOptions = computed(() => {
   const tagsSet = new Set()
@@ -210,6 +275,20 @@ const themeOptions = computed(() => {
     .map(([id, theme]) => ({ name: id, title: theme.name || id }))
     .sort((a, b) => a.title.localeCompare(b.title))
 })
+
+watch(siteOptions, (options) => {
+  const selectedSite = String(edgeGlobal.edgeState.blockEditorSite || '').trim()
+  const hasSelectedSite = options.some(option => option.name === selectedSite)
+  if (!selectedSite || !hasSelectedSite)
+    edgeGlobal.edgeState.blockEditorSite = options?.[0]?.name || ''
+}, { immediate: true, deep: true })
+
+watch(themeOptions, (options) => {
+  const selectedTheme = String(edgeGlobal.edgeState.blockEditorTheme || '').trim()
+  const hasSelectedTheme = options.some(option => option.name === selectedTheme)
+  if (!selectedTheme || !hasSelectedTheme)
+    edgeGlobal.edgeState.blockEditorTheme = options?.[0]?.name || ''
+}, { immediate: true, deep: true })
 
 const themesCollection = computed(() => {
   return edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`] || {}
@@ -298,13 +377,20 @@ const parsedThemesById = computed(() => {
 })
 
 const firstThemeId = computed(() => themeOptions.value?.[0]?.name || '')
+const selectedPreviewThemeId = computed(() => String(
+  edgeGlobal.edgeState.blockEditorTheme || firstThemeId.value || '',
+).trim())
 
 const getPreviewThemeForBlock = (block) => {
   const allowedThemeIds = Array.isArray(block?.themes)
     ? block.themes.map(themeId => String(themeId || '').trim()).filter(Boolean)
     : []
 
-  let preferredThemeId = allowedThemeIds.find(themeId => !!parsedThemesById.value?.[themeId]) || ''
+  let preferredThemeId = selectedPreviewThemeId.value
+  if (preferredThemeId && !parsedThemesById.value?.[preferredThemeId])
+    preferredThemeId = ''
+  if (!preferredThemeId)
+    preferredThemeId = allowedThemeIds.find(themeId => !!parsedThemesById.value?.[themeId]) || ''
   if (!preferredThemeId)
     preferredThemeId = firstThemeId.value
   if (!preferredThemeId)
@@ -357,6 +443,8 @@ const applyTypeSelectionFilter = (items = []) => {
 const applyListSelectionFilters = (items = []) => {
   return applyTagSelectionFilter(applyTypeSelectionFilter(items))
 }
+
+const blockNeedsPostContext = block => normalizeBlockTypes(block?.type).includes('Post')
 
 const blockCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/blocks`)
 const blocksCollection = computed(() => edgeFirebase.data?.[blockCollectionPath.value] || {})
@@ -771,37 +859,22 @@ const handleBlockImport = async (event) => {
       <template #header-center>
         <edge-shad-form class="w-full">
           <div class="w-full px-4 md:px-6 flex flex-col gap-2 md:flex-row md:items-center">
-            <div class="grow">
-              <edge-shad-input
-                v-model="state.filter"
-                name="filter"
-                placeholder="Search blocks..."
+            <div class="md:flex-1 md:min-w-0">
+              <edge-shad-select
+                v-model="edgeGlobal.edgeState.blockEditorTheme"
+                name="previewTheme"
+                :items="themeOptions"
+                placeholder="Preview theme"
                 class="w-full"
               />
             </div>
-            <div>
+            <div class="md:flex-1 md:min-w-0">
               <edge-shad-select
-                v-model="state.blockTypeFilter"
-                name="blockTypeFilter"
-                :items="BLOCK_TYPE_FILTER_OPTIONS"
-                placeholder="Filter type"
-                class="w-[160px]"
-              />
-            </div>
-            <div>
-              <edge-shad-select-tags
-                v-model="state.picksFilter"
-                :items="tagOptions"
-                name="tags"
-                placeholder="Filter tags"
-              />
-            </div>
-            <div>
-              <edge-shad-select-tags
-                v-model="state.themesFilter"
-                :items="themeOptions"
-                name="themes"
-                placeholder="Filter themes"
+                v-model="edgeGlobal.edgeState.blockEditorSite"
+                name="previewSite"
+                :items="siteOptions"
+                placeholder="Preview site"
+                class="w-full"
               />
             </div>
           </div>
@@ -835,9 +908,9 @@ const handleBlockImport = async (event) => {
           </edge-shad-button>
         </div>
       </template>
-      <template #list="slotProps">
-        <div class="w-full pt-4 space-y-3">
-          <div class="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-300/70 bg-slate-100/80 dark:border-slate-700 dark:bg-slate-900/60 px-3 py-2">
+      <template #list-header="slotProps">
+        <div class="w-full mt-4 mx-0 rounded-md border border-slate-300/70 bg-slate-100/95 dark:border-slate-700 dark:bg-slate-900/95 px-3 py-2 space-y-2 backdrop-blur-sm shadow-sm">
+          <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="flex items-center gap-2">
               <Checkbox
                 :model-value="getVisibleSelectionState(applyListSelectionFilters(slotProps.filtered))"
@@ -870,6 +943,115 @@ const handleBlockImport = async (event) => {
               </edge-shad-button>
             </div>
           </div>
+          <div class="flex flex-col gap-2 md:flex-row md:items-center">
+            <div class="grow">
+              <edge-shad-input
+                v-model="state.filter"
+                name="filter"
+                placeholder="Search blocks..."
+                class="w-full"
+              />
+            </div>
+            <div class="md:w-[150px]">
+              <edge-shad-select
+                v-model="state.blockTypeFilter"
+                name="blockTypeFilter"
+                :items="BLOCK_TYPE_FILTER_OPTIONS"
+                placeholder="Type"
+                class="w-full"
+              />
+            </div>
+            <div class="md:min-w-[170px]">
+              <edge-shad-select-tags
+                v-model="state.picksFilter"
+                :items="tagOptions"
+                name="tags"
+                placeholder="Filter tags"
+              />
+            </div>
+            <div class="md:min-w-[170px]">
+              <edge-shad-select-tags
+                v-model="state.themesFilter"
+                :items="themeOptions"
+                name="themes"
+                placeholder="Filter themes"
+              />
+            </div>
+          </div>
+        </div>
+      </template>
+      <template #list="slotProps">
+        <div class="w-full pt-2 space-y-3 h-[calc(100vh-400px)]">
+          <!-- <div class="rounded-md border border-slate-300/70 bg-slate-100/95 dark:border-slate-700 dark:bg-slate-900/95 px-3 py-2 space-y-2 backdrop-blur-sm shadow-sm">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="flex items-center gap-2">
+                <Checkbox
+                  :model-value="getVisibleSelectionState(applyListSelectionFilters(slotProps.filtered))"
+                  aria-label="Select visible blocks"
+                  class="border-slate-400 bg-white shadow-sm dark:border-slate-600 dark:bg-slate-950 data-[state=checked]:bg-slate-700 data-[state=checked]:text-white dark:data-[state=checked]:bg-slate-200 dark:data-[state=checked]:text-slate-900"
+                  @click.stop
+                  @update:model-value="toggleVisibleBlockSelection(applyListSelectionFilters(slotProps.filtered), $event)"
+                />
+                <span class="text-xs text-slate-600 dark:text-slate-300">
+                  Select visible ({{ applyListSelectionFilters(slotProps.filtered).length }})
+                </span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-slate-600 dark:text-slate-300">{{ selectedBlockCount }} selected</span>
+                <edge-shad-button
+                  variant="outline"
+                  class="h-8 text-xs"
+                  :disabled="selectedBlockCount === 0"
+                  @click="clearSelectedBlocks"
+                >
+                  Clear
+                </edge-shad-button>
+                <edge-shad-button
+                  variant="destructive"
+                  class="h-8 text-xs text-white"
+                  :disabled="selectedBlockCount === 0"
+                  @click="openBulkDeleteDialog"
+                >
+                  Delete selected
+                </edge-shad-button>
+              </div>
+            </div>
+            <div class="flex flex-col gap-2 md:flex-row md:items-center">
+              <div class="grow">
+                <edge-shad-input
+                  v-model="state.filter"
+                  name="filter"
+                  placeholder="Search blocks..."
+                  class="w-full"
+                />
+              </div>
+              <div class="md:w-[150px]">
+                <edge-shad-select
+                  v-model="state.blockTypeFilter"
+                  name="blockTypeFilter"
+                  :items="BLOCK_TYPE_FILTER_OPTIONS"
+                  placeholder="Type"
+                  class="w-full"
+                />
+              </div>
+              <div class="md:min-w-[170px]">
+                <edge-shad-select-tags
+                  v-model="state.picksFilter"
+                  :items="tagOptions"
+                  name="tags"
+                  placeholder="Filter tags"
+                />
+              </div>
+              <div class="md:min-w-[170px]">
+                <edge-shad-select-tags
+                  v-model="state.themesFilter"
+                  :items="themeOptions"
+                  name="themes"
+                  placeholder="Filter themes"
+                />
+              </div>
+            </div>
+          </div> -->
           <div
             class="grid gap-4 w-full"
             style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));"
@@ -918,6 +1100,7 @@ const handleBlockImport = async (event) => {
                           :values="item.values"
                           :meta="item.meta"
                           :theme="getPreviewThemeForBlock(item)"
+                          :render-context="blockNeedsPostContext(item) ? state.previewRenderContext : null"
                         />
                       </div>
                     </div>

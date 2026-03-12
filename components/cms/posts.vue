@@ -581,9 +581,37 @@ onBeforeMount(async () => {
   if (!edgeFirebase.data?.[publishedCollectionKey.value]) {
     await edgeFirebase.startSnapshot(publishedCollectionKey.value)
   }
+  if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]) {
+    await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/sites`)
+  }
+  if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`]) {
+    await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/themes`)
+  }
 })
 
 const posts = computed(() => edgeFirebase.data?.[collectionKey.value] || {})
+const selectedThemeId = computed(() => String(
+  edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site]?.theme || '',
+).trim())
+const theme = computed(() => {
+  const themeId = selectedThemeId.value
+  if (!themeId)
+    return null
+  const themeDoc = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`]?.[themeId] || null
+  const themeContents = themeDoc?.theme || null
+  if (!themeContents)
+    return null
+  const extraCSS = typeof themeDoc?.extraCSS === 'string' ? themeDoc.extraCSS : ''
+  try {
+    const parsedTheme = typeof themeContents === 'string' ? JSON.parse(themeContents) : themeContents
+    if (!parsedTheme || typeof parsedTheme !== 'object' || Array.isArray(parsedTheme))
+      return null
+    return { ...parsedTheme, extraCSS }
+  }
+  catch {
+    return null
+  }
+})
 const postsList = computed(() =>
   Object.entries(posts.value)
     .map(([id, data]) => ({ id, ...data }))
@@ -2202,6 +2230,7 @@ const reindexPublishedPostsToKv = async () => {
                         <edge-button-divider v-if="state.editMode" class="my-1">
                           <edge-cms-block-picker
                             :site-id="props.site"
+                            :theme="theme"
                             :allowed-types="['Post']"
                             @pick="(block) => addPostBlockToRow(slotProps.workingDoc, rowIndex, 0, block)"
                           />
@@ -2229,6 +2258,7 @@ const reindexPublishedPostsToKv = async () => {
                                   :override-clicks-in-edit-mode="state.editMode"
                                   :contain-fixed="true"
                                   :block-id="blockId"
+                                  :theme="theme"
                                   @delete="() => deletePostBlock(slotProps.workingDoc, blockId)"
                                 />
                                 <div v-if="state.editMode" class="block-drag-handle pointer-events-none absolute inset-x-0 top-2 flex justify-center opacity-0 transition group-hover:opacity-100 z-30">
@@ -2241,6 +2271,7 @@ const reindexPublishedPostsToKv = async () => {
                                 <edge-button-divider class="my-2">
                                   <edge-cms-block-picker
                                     :site-id="props.site"
+                                    :theme="theme"
                                     :allowed-types="['Post']"
                                     @pick="(block) => addPostBlockToRow(slotProps.workingDoc, rowIndex, blockPosition + 1, block)"
                                   />
@@ -2252,6 +2283,7 @@ const reindexPublishedPostsToKv = async () => {
                         <edge-button-divider v-if="state.editMode && row.columns[0].blocks.length > 0" class="my-1">
                           <edge-cms-block-picker
                             :site-id="props.site"
+                            :theme="theme"
                             :allowed-types="['Post']"
                             @pick="(block) => addPostBlockToRow(slotProps.workingDoc, rowIndex, row.columns[0].blocks.length, block)"
                           />
@@ -2456,6 +2488,7 @@ const reindexPublishedPostsToKv = async () => {
                   <edge-button-divider v-if="state.editMode" class="my-1">
                     <edge-cms-block-picker
                       :site-id="props.site"
+                      :theme="theme"
                       :allowed-types="['Post']"
                       @pick="(block) => addPostBlockToRow(slotProps.workingDoc, rowIndex, 0, block)"
                     />
@@ -2483,6 +2516,7 @@ const reindexPublishedPostsToKv = async () => {
                             :override-clicks-in-edit-mode="state.editMode"
                             :contain-fixed="true"
                             :block-id="blockId"
+                            :theme="theme"
                             @delete="() => deletePostBlock(slotProps.workingDoc, blockId)"
                           />
                           <div v-if="state.editMode" class="block-drag-handle pointer-events-none absolute inset-x-0 top-2 flex justify-center opacity-0 transition group-hover:opacity-100 z-30">
@@ -2495,6 +2529,7 @@ const reindexPublishedPostsToKv = async () => {
                           <edge-button-divider class="my-2">
                             <edge-cms-block-picker
                               :site-id="props.site"
+                              :theme="theme"
                               :allowed-types="['Post']"
                               @pick="(block) => addPostBlockToRow(slotProps.workingDoc, rowIndex, blockPosition + 1, block)"
                             />
@@ -2506,6 +2541,7 @@ const reindexPublishedPostsToKv = async () => {
                   <edge-button-divider v-if="state.editMode && row.columns[0].blocks.length > 0" class="my-1">
                     <edge-cms-block-picker
                       :site-id="props.site"
+                      :theme="theme"
                       :allowed-types="['Post']"
                       @pick="(block) => addPostBlockToRow(slotProps.workingDoc, rowIndex, row.columns[0].blocks.length, block)"
                     />
@@ -2557,9 +2593,5 @@ const reindexPublishedPostsToKv = async () => {
 <style scoped>
 .cms-post-preview-mode :deep([data-cms-preview-surface]) {
   color: initial !important;
-}
-.cms-post-preview-mode :deep([data-cms-preview-surface]) .block-content,
-.cms-post-preview-mode :deep([data-cms-preview-surface]) .block-content [class*='text-'] {
-  color: inherit !important;
 }
 </style>
