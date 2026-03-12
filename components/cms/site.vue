@@ -3197,6 +3197,12 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
   height: 400px;
 }
 
+.template-scale-wrapper :deep(*),
+.template-page-preview-surface :deep(*) {
+  pointer-events: none !important;
+  user-select: none;
+}
+
 .template-page-preview-surface {
   border: 1px dashed hsl(var(--border) / 0.6);
   background: hsl(var(--background) / 0.8);

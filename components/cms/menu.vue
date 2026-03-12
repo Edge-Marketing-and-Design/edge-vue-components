@@ -1822,6 +1822,11 @@ const theme = computed(() => {
   height: 400px;
 }
 
+.template-scale-wrapper :deep(*) {
+  pointer-events: none !important;
+  user-select: none;
+}
+
 .template-scale-inner {
   transform-origin: top left;
   display: inline-block;
