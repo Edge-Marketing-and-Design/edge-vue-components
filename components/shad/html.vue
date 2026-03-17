@@ -463,10 +463,12 @@ defineExpose({
                   <ToggleGroupItem
                     value="source"
                     :data-state="sourceMode ? 'on' : 'off'"
+                    class="edge-html-source-toggle"
                     title="Toggle HTML source"
                     @click.prevent="toggleSourceMode"
                   >
                     <Code :size="16" />
+                    <span>HTML</span>
                   </ToggleGroupItem>
                 </ToggleGroup>
                 <Button
@@ -1021,5 +1023,18 @@ defineExpose({
   outline: none;
   overflow: auto;
   white-space: pre;
+}
+
+.edge-html-source-toggle {
+  color: hsl(var(--foreground));
+}
+
+.edge-html-source-toggle[data-state='on'] {
+  background-color: hsl(var(--accent));
+  color: hsl(var(--foreground));
+}
+
+.edge-html-source-toggle svg {
+  stroke: currentColor;
 }
 </style>

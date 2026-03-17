@@ -1,0 +1,44 @@
+{
+  "enabled": true,
+  "historyCollection": "history",
+  "defaults": {
+    "retainDays": 90,
+    "listLimit": 50,
+    "maxListLimit": 200,
+    "restoreTarget": "beforeData",
+    "storeBeforeData": true,
+    "storeAfterData": true
+  },
+  "cleanup": {
+    "enabled": true,
+    "batchSize": 200,
+    "maxDeletesPerRun": 1000
+  },
+  "rules": [
+    {
+      "match": "blocks/*",
+      "label": "block",
+      "retainDays": 365
+    },
+    {
+      "match": "themes/*",
+      "label": "theme",
+      "retainDays": 365
+    },
+    {
+      "match": "sites/templates/pages/*",
+      "label": "template",
+      "retainDays": 365
+    },
+    {
+      "match": "sites/*/pages/*",
+      "label": "page",
+      "retainDays": 180
+    },
+    {
+      "match": "sites/*/posts/*",
+      "label": "post",
+      "retainDays": 180
+    }
+  ]
+}

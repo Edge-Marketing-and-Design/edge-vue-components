@@ -213,6 +213,25 @@ function setGlobalThemeVars(theme) {
   window.__htmlcontentGlobalTheme = true
 }
 
+function setScopedExtraCss(scopeEl, cssText) {
+  if (!scopeEl || typeof document === 'undefined')
+    return
+
+  const scopeId = scopeEl.getAttribute('data-theme-scope')
+  if (!scopeId)
+    return
+
+  const sheetId = `htmlcontent-theme-extra-inline-${scopeId}`
+  let styleEl = scopeEl.querySelector(`#${sheetId}`)
+  if (!styleEl) {
+    styleEl = document.createElement('style')
+    styleEl.id = sheetId
+    scopeEl.prepend(styleEl)
+  }
+
+  styleEl.textContent = String(cssText || '')
+}
+
 const hostEl = ref(null)
 let hasMounted = false
 
@@ -1501,6 +1520,7 @@ onMounted(async () => {
   // Apply global theme once (keeps one style tag for vars; blocks can still override locally if needed)
   // setGlobalThemeVars(props.theme)
   setScopedThemeVars(hostEl.value, props.theme)
+  setScopedExtraCss(hostEl.value, themeExtraCSS.value)
   // If you later need per-block overrides, keep the next line; otherwise, it can be omitted.
   // setScopedThemeVars(hostEl.value, normalizeTheme(props.theme))
   applyThemeClasses(hostEl.value, props.theme, (props.theme && props.theme.variant) || 'light')
@@ -1535,6 +1555,7 @@ watch(
   async (val) => {
     // 1) Write scoped CSS variables from the raw theme object
     setScopedThemeVars(hostEl.value, val)
+    setScopedExtraCss(hostEl.value, typeof val?.extraCSS === 'string' ? val.extraCSS : '')
     // 2) Apply classes based on `apply`, `slots`, and optional variants
     applyThemeClasses(hostEl.value, val, (val && val.variant) || 'light')
     rewriteAllClasses(hostEl.value, val, props.isolated, props.viewportMode)

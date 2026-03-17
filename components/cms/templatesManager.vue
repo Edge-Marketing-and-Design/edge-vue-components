@@ -63,15 +63,26 @@ const parseThemeDoc = (themeDoc) => {
   const rawTheme = themeDoc?.theme
   if (!rawTheme)
     return null
+  const extraCSS = typeof themeDoc?.extraCSS === 'string' ? themeDoc.extraCSS : ''
   try {
     const parsed = typeof rawTheme === 'string' ? JSON.parse(rawTheme) : rawTheme
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
       return null
-    return parsed
+    return { ...parsed, extraCSS }
   }
   catch {
     return null
   }
+}
+
+const getThemePreviewVersion = (themeDoc) => {
+  if (!themeDoc)
+    return 'no-theme-data'
+  const rawTheme = typeof themeDoc?.theme === 'string'
+    ? themeDoc.theme
+    : JSON.stringify(themeDoc?.theme || {})
+  const extraCSS = typeof themeDoc?.extraCSS === 'string' ? themeDoc.extraCSS : ''
+  return `${rawTheme.length}:${extraCSS.length}`
 }
 
 const themeOptions = computed(() => {
@@ -119,6 +130,9 @@ const selectedTemplatePreviewTheme = computed(() => {
   if (!themeId)
     return null
   return parseThemeDoc(themeCollection.value?.[themeId]) || null
+})
+const selectedTemplatePreviewThemeReady = computed(() => {
+  return !selectedTemplatePreviewThemeId.value || !!selectedTemplatePreviewTheme.value
 })
 
 const templatePagesCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/templates/pages`)
@@ -261,7 +275,8 @@ const previewColumnStyle = (column) => {
 const getTemplatePagePreviewKey = (docId) => {
   const themeId = String(selectedTemplatePreviewThemeId.value || 'no-theme')
   const siteId = String(selectedTemplatePreviewSiteId.value || 'no-site')
-  return `${String(docId || 'template-page')}:${siteId}:${themeId}`
+  const themeVersion = getThemePreviewVersion(themeCollection.value?.[themeId] || null)
+  return `${String(docId || 'template-page')}:${siteId}:${themeId}:${themeVersion}`
 }
 
 const getTemplatePageAllowedThemes = item => (Array.isArray(item?.allowedThemes) ? item.allowedThemes : [])
@@ -962,7 +977,7 @@ watch(themeCollection, () => {
                   <div class="template-scale-wrapper border border-dashed border-border/60 rounded-md bg-background/80">
                     <div class="template-scale-inner">
                       <div class="template-scale-content space-y-4">
-                        <template v-if="templatePageHasPreview(item)">
+                        <template v-if="templatePageHasPreview(item) && selectedTemplatePreviewThemeReady">
                           <div
                             v-for="(row, rowIndex) in templatePreviewRows(item)"
                             :key="`${item.docId}-row-${row.id || rowIndex}`"
