@@ -432,15 +432,26 @@ const parseThemeDoc = (themeDoc) => {
   const rawTheme = themeDoc?.theme
   if (!rawTheme)
     return null
+  const extraCSS = typeof themeDoc?.extraCSS === 'string' ? themeDoc.extraCSS : ''
   try {
     const parsed = typeof rawTheme === 'string' ? JSON.parse(rawTheme) : rawTheme
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
       return null
-    return parsed
+    return { ...parsed, extraCSS }
   }
   catch {
     return null
   }
+}
+
+const getThemePreviewVersion = (themeDoc) => {
+  if (!themeDoc)
+    return 'no-theme-data'
+  const rawTheme = typeof themeDoc?.theme === 'string'
+    ? themeDoc.theme
+    : JSON.stringify(themeDoc?.theme || {})
+  const extraCSS = typeof themeDoc?.extraCSS === 'string' ? themeDoc.extraCSS : ''
+  return `${rawTheme.length}:${extraCSS.length}`
 }
 
 const themeOptionsMap = computed(() => {
@@ -480,6 +491,9 @@ const selectedTemplatePreviewTheme = computed(() => {
   if (!themeId)
     return null
   return parseThemeDoc(themeCollection.value?.[themeId]) || null
+})
+const selectedTemplatePreviewThemeReady = computed(() => {
+  return !selectedTemplatePreviewThemeId.value || !!selectedTemplatePreviewTheme.value
 })
 
 watch(previewSiteOptions, (options) => {
@@ -1268,7 +1282,8 @@ const previewColumnStyle = (column) => {
 const getTemplatePagePreviewKey = (docId) => {
   const themeId = String(selectedTemplatePreviewThemeId.value || 'no-theme')
   const siteId = String(selectedTemplatePreviewSiteId.value || 'no-site')
-  return `${String(docId || 'template-page')}:${siteId}:${themeId}`
+  const themeVersion = getThemePreviewVersion(themeCollection.value?.[themeId] || null)
+  return `${String(docId || 'template-page')}:${siteId}:${themeId}:${themeVersion}`
 }
 
 const sitePreviewTheme = computed(() => {
@@ -1277,10 +1292,14 @@ const sitePreviewTheme = computed(() => {
     return null
   return parseThemeDoc(themeCollection.value?.[themeId]) || null
 })
+const sitePreviewThemeReady = computed(() => {
+  return !String(siteData.value?.theme || '').trim() || !!sitePreviewTheme.value
+})
 
 const getSitePagePreviewKey = (docId) => {
   const themeId = String(siteData.value?.theme || 'no-theme')
-  return `${String(docId || 'page')}:${props.site}:${themeId}`
+  const themeVersion = getThemePreviewVersion(themeCollection.value?.[themeId] || null)
+  return `${String(docId || 'page')}:${props.site}:${themeId}:${themeVersion}`
 }
 
 const orderedSiteMenus = computed(() => {
@@ -2445,7 +2464,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                     <div class="template-page-preview-scale-wrapper">
                       <div class="template-page-preview-scale-inner">
                         <div class="template-page-preview-content space-y-4">
-                          <template v-if="templatePageHasPreview(item)">
+                          <template v-if="templatePageHasPreview(item) && selectedTemplatePreviewThemeReady">
                             <div
                               v-for="(row, rowIndex) in templatePreviewRows(item)"
                               :key="`${item.docId}-row-${row.id || rowIndex}`"
@@ -2934,7 +2953,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                           <div class="template-scale-wrapper border border-dashed border-border/60 rounded-md bg-background/80">
                             <div class="template-scale-inner">
                               <div class="template-scale-content space-y-4">
-                                <template v-if="templatePageHasPreview(item)">
+                                <template v-if="templatePageHasPreview(item) && sitePreviewThemeReady">
                                   <div
                                     v-for="(row, rowIndex) in templatePreviewRows(item)"
                                     :key="`${item.docId}-row-${row.id || rowIndex}`"

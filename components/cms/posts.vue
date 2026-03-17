@@ -1653,11 +1653,14 @@ const publishPost = async (postId) => {
   emit('updating', true)
   try {
     const publishedAtIso = new Date().toISOString()
+    const publishedAtMillis = Date.parse(publishedAtIso)
     const publishedPost = edgeGlobal.dupObject(post || {})
     delete publishedPost.publishAt
+    publishedPost.doc_created_at = Number.isFinite(publishedAtMillis) ? publishedAtMillis : Date.now()
     publishedPost.publishedAt = publishedAtIso
     await edgeFirebase.storeDoc(publishedCollectionKey.value, publishedPost)
     const draftPublishUpdate = {
+      doc_created_at: Number.isFinite(publishedAtMillis) ? publishedAtMillis : Date.now(),
       publishedAt: publishedAtIso,
     }
     if (typeof post?.publishAt === 'string' && post.publishAt.trim()) {
@@ -1666,6 +1669,50 @@ const publishPost = async (postId) => {
       state.publishAtInput = ''
     }
     await edgeFirebase.changeDoc(collectionKey.value, postId, draftPublishUpdate)
+  }
+  catch (error) {
+    console.error('Failed to publish post:', error)
+  }
+  finally {
+    emit('updating', false)
+  }
+}
+
+const publishPostAt = async (postId, publishedAtIso) => {
+  if (!postId)
+    return
+
+  const post = posts.value?.[postId]
+  if (!post)
+    return
+
+  const publishBlockedReason = getPublishBlockedReason(postId, post)
+  if (publishBlockedReason) {
+    edgeFirebase?.toast?.error?.(publishBlockedReason)
+    return
+  }
+
+  const publishedAtMillis = Date.parse(publishedAtIso)
+  if (!Number.isFinite(publishedAtMillis)) {
+    edgeFirebase?.toast?.error?.('Publish At must be a valid date/time.')
+    return
+  }
+
+  emit('updating', true)
+  try {
+    const publishedPost = edgeGlobal.dupObject(post || {})
+    delete publishedPost.publishAt
+    publishedPost.doc_created_at = publishedAtMillis
+    publishedPost.publishedAt = publishedAtIso
+    await edgeFirebase.storeDoc(publishedCollectionKey.value, publishedPost)
+    await edgeFirebase.changeDoc(collectionKey.value, postId, {
+      doc_created_at: publishedAtMillis,
+      publishedAt: publishedAtIso,
+      publishAt: '',
+      publishAtTimezone: '',
+      publishAtError: '',
+    })
+    state.publishAtInput = ''
   }
   catch (error) {
     console.error('Failed to publish post:', error)
@@ -1694,6 +1741,11 @@ const schedulePostPublish = async (postId) => {
   }
   if (scheduledPublishBlockedReason.value) {
     edgeFirebase?.toast?.error?.(scheduledPublishBlockedReason.value)
+    return
+  }
+
+  if (publishAtMs <= Date.now()) {
+    await publishPostAt(postId, publishAtIso)
     return
   }
 
