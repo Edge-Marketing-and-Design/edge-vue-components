@@ -4,6 +4,7 @@ const {
   logger,
   db,
   admin,
+  Firestore,
   onSchedule,
   onDocumentWritten,
   permissionCheck,
@@ -136,14 +137,14 @@ const buildExpireAt = (retainDays) => {
   const safeRetainDays = normalizePositiveInt(retainDays, DEFAULTS.retainDays)
   const nowMs = Date.now()
   const expireMs = nowMs + (safeRetainDays * 24 * 60 * 60 * 1000)
-  return admin.firestore.Timestamp.fromMillis(expireMs)
+  return Firestore.Timestamp.fromMillis(expireMs)
 }
 
 const serializeForResponse = (value) => {
   if (value === null || value === undefined)
     return value
 
-  if (value instanceof admin.firestore.Timestamp) {
+  if (value instanceof Firestore.Timestamp) {
     return {
       millis: value.toMillis(),
       iso: value.toDate().toISOString(),
@@ -194,7 +195,7 @@ const buildHistoryEntry = ({
     action,
     beforeData: storeBeforeData ? beforeData : null,
     afterData: storeAfterData ? afterData : null,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    createdAt: Firestore.FieldValue.serverTimestamp(),
     expireAt: buildExpireAt(retainDays),
   }
 }
@@ -272,7 +273,7 @@ exports.listHistory = onCall(async (request) => {
   }
 
   if (cursorCreatedAtMs && Number.isFinite(cursorCreatedAtMs))
-    query = query.where('createdAt', '<', admin.firestore.Timestamp.fromMillis(cursorCreatedAtMs))
+    query = query.where('createdAt', '<', Firestore.Timestamp.fromMillis(cursorCreatedAtMs))
 
   const snapshot = await query
     .orderBy('createdAt', 'desc')
@@ -289,7 +290,7 @@ exports.listHistory = onCall(async (request) => {
         ...serializeForResponse(doc.data() || {}),
       }
     }),
-    nextCursorCreatedAtMs: lastCreatedAt instanceof admin.firestore.Timestamp
+    nextCursorCreatedAtMs: lastCreatedAt instanceof Firestore.Timestamp
       ? lastCreatedAt.toMillis()
       : null,
   }
@@ -349,7 +350,7 @@ exports.cleanupHistory = onSchedule(
       return
 
     const collectionRef = db.collection(config.historyCollection)
-    const now = admin.firestore.Timestamp.now()
+    const now = Firestore.Timestamp.now()
     let deleted = 0
 
     while (deleted < config.cleanup.maxDeletesPerRun) {

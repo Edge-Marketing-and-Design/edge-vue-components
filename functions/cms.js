@@ -1477,15 +1477,18 @@ exports.publishScheduledPosts = onSchedule(
             .collection('sites').doc(siteId)
             .collection('published_posts').doc(postId)
 
-          const publishedAtIso = new Date().toISOString()
+          const publishedAtMillis = Number.isFinite(effectivePublishMs) ? effectivePublishMs : nowMs
+          const publishedAtIso = new Date(publishedAtMillis).toISOString()
           const publishPayload = { ...draftData }
           delete publishPayload.publishAt
           delete publishPayload.publishAtTimezone
+          publishPayload.doc_created_at = Number.isFinite(publishedAtMillis) ? publishedAtMillis : nowMs
           publishPayload.publishAtError = ''
           publishPayload.publishedAt = publishedAtIso
 
           batch.set(publishedRef, publishPayload, { merge: false })
           batch.update(draftSnap.ref, {
+            doc_created_at: Number.isFinite(publishedAtMillis) ? publishedAtMillis : nowMs,
             publishedAt: publishedAtIso,
             publishAt: Firestore.FieldValue.delete(),
             publishAtTimezone: Firestore.FieldValue.delete(),
