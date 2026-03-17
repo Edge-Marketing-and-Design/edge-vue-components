@@ -174,14 +174,14 @@ const onSelectItem = (ev) => {
               <ComboboxAnchor as-child>
                 <TagsInput
                   v-model="selectedValues"
-                  :class="cn('relative flex items-center gap-1 flex-nowrap pl-2 pr-1 pt-[7px] pb-[7px] w-80 rounded-md border border-slate-300 bg-white text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100', props.class)"
+                  :class="cn('relative flex w-80 max-w-full min-w-0 items-center gap-1 overflow-hidden pl-2 pr-1 pt-[7px] pb-[7px] rounded-md border border-slate-300 bg-white text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100', props.class)"
                   :disabled="props.disabled"
                   @click="forceOpen"
                 >
                   <!-- Wrapping area for tags + input -->
-                  <div class="flex flex-wrap items-center gap-2 flex-1 min-w-0">
-                    <TagsInputItem v-for="val in selectedValues" :key="val" class="h-6 border border-slate-300 bg-slate-100 text-slate-800 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-100" :value="val">
-                      <span class="px-1">{{ valueToTitle[val] ?? val }}</span>
+                  <div class="flex min-w-0 flex-1 flex-wrap items-center gap-2 overflow-hidden">
+                    <TagsInputItem v-for="val in selectedValues" :key="val" class="h-6 max-w-full min-w-0 border border-slate-300 bg-slate-100 text-slate-800 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-100" :value="val">
+                      <span class="block max-w-[12rem] truncate px-1" :title="valueToTitle[val] ?? val">{{ valueToTitle[val] ?? val }}</span>
                       <TagsInputItemDelete v-if="!props.disabled" />
                     </TagsInputItem>
 
@@ -189,7 +189,7 @@ const onSelectItem = (ev) => {
                       <TagsInputInput
                         :disabled="props.disabled"
                         :placeholder="props.placeholder"
-                        class="p-0 border-none shadow-none focus-visible:ring-0 h-auto grow min-w-[6rem] w-auto"
+                        class="h-auto min-w-[5rem] max-w-full grow border-none p-0 shadow-none focus-visible:ring-0"
                         @input="forceOpen"
                         @keydown.enter.prevent="onEnter"
                       />
