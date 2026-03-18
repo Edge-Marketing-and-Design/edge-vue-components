@@ -285,6 +285,18 @@ const applySeoAiResults = (payload) => {
     state.workingDoc.structuredData = payload.structuredData
 }
 
+const buildPageWorkingDocOverrides = (doc) => {
+  return {
+    last_updated: doc?.last_updated,
+    metaTitle: doc?.metaTitle,
+    metaDescription: doc?.metaDescription,
+    structuredData: doc?.structuredData,
+    postMetaTitle: doc?.postMetaTitle,
+    postMetaDescription: doc?.postMetaDescription,
+    postStructuredData: doc?.postStructuredData,
+  }
+}
+
 const updateSeoWithAi = async () => {
   if (!edgeFirebase?.user?.uid)
     return
@@ -523,6 +535,7 @@ const ensurePreviewSnapshots = async () => {
 
   const themesPath = `organizations/${orgId}/themes`
   const sitesPath = `organizations/${orgId}/sites`
+  const blocksPath = `organizations/${orgId}/blocks`
 
   // Non-blocking bootstrap: never hold page render on snapshot latency.
   try {
@@ -531,6 +544,9 @@ const ensurePreviewSnapshots = async () => {
     }
     if (!edgeFirebase.data?.[sitesPath]) {
       await edgeFirebase.startSnapshot(sitesPath)
+    }
+    if (!edgeFirebase.data?.[blocksPath]) {
+      await edgeFirebase.startSnapshot(blocksPath)
     }
   }
   catch (error) {
@@ -1379,15 +1395,106 @@ const currentPage = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`]?.[props.page] || null
 })
 
-const currentHistoryCompareDoc = computed(() => currentPage.value)
+const blocksCollection = computed(() => edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`] || {})
+
+function isObjectRecord(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function mergeSyncedBlockMeta(currentMeta, existingMeta) {
+  const nextMeta = edgeGlobal.dupObject(currentMeta || {})
+  if (!isObjectRecord(existingMeta))
+    return nextMeta
+
+  Object.entries(existingMeta).forEach(([key, value]) => {
+    if (!isObjectRecord(value) || !isObjectRecord(value.queryItems))
+      return
+    if (!isObjectRecord(nextMeta[key]))
+      nextMeta[key] = {}
+    nextMeta[key].queryItems = edgeGlobal.dupObject(value.queryItems)
+  })
+
+  return nextMeta
+}
+
+function resolveSyncedPageBlock(block) {
+  if (!isObjectRecord(block))
+    return block
+
+  const resolvedBlock = edgeGlobal.dupObject(block)
+  const blockId = String(resolvedBlock.blockId || '').trim()
+  if (!blockId)
+    return resolvedBlock
+
+  const currentBlockDoc = blocksCollection.value?.[blockId]
+  if (!isObjectRecord(currentBlockDoc))
+    return resolvedBlock
+
+  return {
+    ...edgeGlobal.dupObject(currentBlockDoc),
+    id: resolvedBlock.id,
+    blockId,
+    synced: resolvedBlock.synced ?? currentBlockDoc.synced ?? false,
+    values: edgeGlobal.dupObject(resolvedBlock.values || {}),
+    meta: mergeSyncedBlockMeta(currentBlockDoc.meta, resolvedBlock.meta),
+  }
+}
+
+function resolveSyncedBlocks(blocks = []) {
+  if (!Array.isArray(blocks))
+    return []
+  return blocks.map(block => resolveSyncedPageBlock(block))
+}
+
+function resolveSyncedPageDoc(doc) {
+  if (!isObjectRecord(doc))
+    return doc
+
+  const nextDoc = edgeGlobal.dupObject(doc)
+  nextDoc.content = resolveSyncedBlocks(nextDoc.content)
+  nextDoc.postContent = resolveSyncedBlocks(nextDoc.postContent)
+
+  const blockIds = [
+    ...(Array.isArray(nextDoc.content) ? nextDoc.content.map(block => block?.blockId).filter(Boolean) : []),
+    ...(Array.isArray(nextDoc.postContent) ? nextDoc.postContent.map(block => block?.blockId).filter(Boolean) : []),
+  ]
+  nextDoc.blockIds = [...new Set(blockIds)]
+  return nextDoc
+}
+
+function buildComparablePageBlock(block) {
+  if (!isObjectRecord(block))
+    return block
+
+  const blockId = String(block.blockId || '').trim()
+  const currentBlockDoc = blockId ? blocksCollection.value?.[blockId] : null
+  if (blockId && isObjectRecord(currentBlockDoc)) {
+    const comparableMeta = {}
+    Object.entries(block.meta || {}).forEach(([key, value]) => {
+      if (isObjectRecord(value) && isObjectRecord(value.queryItems))
+        comparableMeta[key] = { queryItems: edgeGlobal.dupObject(value.queryItems) }
+    })
+    return {
+      id: String(block.id || ''),
+      blockId,
+      synced: block.synced ?? currentBlockDoc.synced ?? false,
+      values: edgeGlobal.dupObject(block.values || {}),
+      meta: comparableMeta,
+    }
+  }
+
+  return edgeGlobal.dupObject(block)
+}
+
+const currentHistoryCompareDoc = computed(() => resolveSyncedPageDoc(currentPage.value))
 
 const buildComparablePageDiffDoc = (doc) => {
   if (!doc || typeof doc !== 'object')
     return null
 
   return {
-    content: Array.isArray(doc.content) ? doc.content : [],
-    postContent: Array.isArray(doc.postContent) ? doc.postContent : [],
+    content: Array.isArray(doc.content) ? doc.content.map(buildComparablePageBlock) : [],
+    postContent: Array.isArray(doc.postContent) ? doc.postContent.map(buildComparablePageBlock) : [],
     structure: Array.isArray(doc.structure) ? doc.structure : [],
     postStructure: Array.isArray(doc.postStructure) ? doc.postStructure : [],
     metaTitle: doc.metaTitle ?? '',
@@ -1416,13 +1523,23 @@ const getHistorySnapshotState = (item) => {
 
 const getHistorySnapshotDoc = item => item?.[getHistorySnapshotState(item)] || null
 
-const historyPreviewItems = computed(() => {
+const rawHistoryPreviewItems = computed(() => {
   return (state.historyItems || []).filter((item) => {
-    const historyDoc = getHistorySnapshotDoc(item)
-    if (!historyDoc)
-      return false
-    return !pageDocsMatchForDiff(historyDoc, currentPage.value)
+    return !!getHistorySnapshotDoc(item)
   })
+})
+
+const historyPreviewItems = computed(() => {
+  const items = rawHistoryPreviewItems.value
+  if (!items.length)
+    return []
+
+  const [firstItem, ...restItems] = items
+  const firstHistoryDoc = getHistorySnapshotDoc(firstItem)
+  if (firstHistoryDoc && pageDocsMatchForDiff(firstHistoryDoc, currentPage.value))
+    return restItems
+
+  return items
 })
 
 const selectedHistoryEntry = computed(() => {
@@ -1430,7 +1547,7 @@ const selectedHistoryEntry = computed(() => {
 })
 
 const historyPreviewHasPostView = computed(() => {
-  return hasPostView(state.historyPreviewDoc)
+  return hasPostView(renderedHistoryPreviewDoc.value)
 })
 
 const historyPreviewRenderKey = computed(() => {
@@ -1446,6 +1563,8 @@ const historyVersionItems = computed(() => {
     title: formatHistoryEntryLabel(item, index),
   }))
 })
+
+const renderedHistoryPreviewDoc = computed(() => resolveSyncedPageDoc(state.historyPreviewDoc))
 
 const pagePublishStatus = computed(() => getPagePublishStatus(props.page))
 
@@ -1675,8 +1794,15 @@ const restoreHistoryVersion = async () => {
       targetState,
     })
     const restoredDoc = cloneHistoryPreviewDoc(getHistorySnapshotDoc(historyEntry))
-    state.workingDoc = restoredDoc || {}
-    state.previewPageView = hasPostView(restoredDoc) ? state.historyPreviewView : 'list'
+    const syncedRestoredDoc = resolveSyncedPageDoc(restoredDoc)
+    if (syncedRestoredDoc && props.page && props.page !== 'new')
+      await edgeFirebase.storeDoc(pagesCollectionPath.value, syncedRestoredDoc, props.page)
+    if (syncedRestoredDoc && pagesCollection.value)
+      pagesCollection.value[props.page] = edgeGlobal.dupObject(syncedRestoredDoc)
+    state.workingDoc = buildPageWorkingDocOverrides(syncedRestoredDoc)
+    state.editorWorkingDoc = syncedRestoredDoc ? edgeGlobal.dupObject(syncedRestoredDoc) : null
+    state.editorHasUnsavedChanges = false
+    state.previewPageView = hasPostView(syncedRestoredDoc) ? state.historyPreviewView : 'list'
     state.editMode = false
     state.showHistoryDiffDialog = false
     state.historyDialogOpen = false
@@ -2279,6 +2405,10 @@ const buildBlockChangeDetails = (baseBlocks = [], compareBlocks = [], baseStruct
     const compareBlock = compareMap.get(blockId) || null
     const basePosition = basePositions.get(blockId) || null
     const comparePosition = comparePositions.get(blockId) || null
+    const baseComparableBlock = buildComparablePageBlock(baseBlock)
+    const compareComparableBlock = buildComparablePageBlock(compareBlock)
+    const baseRenderBlock = resolveSyncedPageBlock(baseBlock)
+    const compareRenderBlock = resolveSyncedPageBlock(compareBlock)
 
     if (!baseBlock && compareBlock) {
       details.push({
@@ -2287,7 +2417,7 @@ const buildBlockChangeDetails = (baseBlocks = [], compareBlocks = [], baseStruct
         label: getBlockChangeTypeLabel('added'),
         blockLabel: describeBlock(compareBlock),
         baseBlock: null,
-        compareBlock,
+        compareBlock: compareRenderBlock,
         basePositionLabel: 'Not present',
         comparePositionLabel: getBlockPositionLabel(comparePosition),
         showPreview: true,
@@ -2302,7 +2432,7 @@ const buildBlockChangeDetails = (baseBlocks = [], compareBlocks = [], baseStruct
         changeType: 'removed',
         label: getBlockChangeTypeLabel('removed'),
         blockLabel: describeBlock(baseBlock),
-        baseBlock,
+        baseBlock: baseRenderBlock,
         compareBlock: null,
         basePositionLabel: getBlockPositionLabel(basePosition),
         comparePositionLabel: 'Not present',
@@ -2316,7 +2446,7 @@ const buildBlockChangeDetails = (baseBlocks = [], compareBlocks = [], baseStruct
       normalizeBlockPositionForDiff(basePosition),
       normalizeBlockPositionForDiff(comparePosition),
     )
-    const changed = !areEqualNormalized(baseBlock, compareBlock)
+    const changed = !areEqualNormalized(baseComparableBlock, compareComparableBlock)
     if (!moved && !changed)
       continue
 
@@ -2326,8 +2456,8 @@ const buildBlockChangeDetails = (baseBlocks = [], compareBlocks = [], baseStruct
       changeType,
       label: getBlockChangeTypeLabel(changeType),
       blockLabel: describeBlock(compareBlock || baseBlock),
-      baseBlock,
-      compareBlock,
+      baseBlock: baseRenderBlock,
+      compareBlock: compareRenderBlock,
       basePositionLabel: getBlockPositionLabel(basePosition),
       comparePositionLabel: getBlockPositionLabel(comparePosition),
       showPreview: changeType !== 'moved',
@@ -3467,24 +3597,17 @@ const hasUnsavedChanges = (changes) => {
           </div>
           <div class="flex min-w-0 flex-col justify-end">
             <edge-shad-button
-              v-if="hasHistoryDiff"
               type="button"
               variant="outline"
               class="h-10 justify-between gap-3 px-3 text-left mb-1"
-              :disabled="!selectedHistoryEntry || state.historyLoading"
+              :disabled="!selectedHistoryEntry || state.historyLoading || !hasHistoryDiff"
               @click="state.showHistoryDiffDialog = true"
             >
-              <span class="truncate">View Diff</span>
+              <span class="truncate">{{ hasHistoryDiff ? 'View Diff' : 'No Differences' }}</span>
               <span class="shrink-0 text-xs text-slate-500 dark:text-slate-400">
                 {{ historyDiffCountLabel }}
               </span>
             </edge-shad-button>
-            <div
-              v-else-if="!selectedHistoryEntry && !state.historyLoading"
-              class="rounded-md border border-slate-300/70 bg-slate-50 mb-1  px-3 py-2 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300"
-            >
-              No older saved versions differ from the current {{ props.isTemplateSite ? 'template' : 'page' }}.
-            </div>
           </div>
         </div>
 
@@ -3543,14 +3666,14 @@ const hasUnsavedChanges = (changes) => {
             :style="previewViewportContainStyle"
           >
             <div
-              v-if="!state.historyPreviewDoc?.structure?.length"
+              v-if="!renderedHistoryPreviewDoc?.structure?.length"
               class="flex min-h-[50vh] items-center justify-center px-6 text-center text-sm text-slate-500 dark:text-slate-400"
             >
               No rows in this version.
             </div>
             <div v-else>
               <div
-                v-for="(row, rowIndex) in state.historyPreviewDoc.structure"
+                v-for="(row, rowIndex) in renderedHistoryPreviewDoc.structure"
                 :key="row.id || `history-list-row-${rowIndex}`"
               >
                 <div
@@ -3570,11 +3693,11 @@ const hasUnsavedChanges = (changes) => {
                         :key="`${historyPreviewRenderKey}:list:${blockId}:${blockPosition}`"
                       >
                         <edge-cms-block-api
-                          v-if="blockIndex(state.historyPreviewDoc, blockId, false) !== -1"
+                          v-if="blockIndex(renderedHistoryPreviewDoc, blockId, false) !== -1"
                           :site-id="props.site"
-                          :content="state.historyPreviewDoc.content[blockIndex(state.historyPreviewDoc, blockId, false)]?.content"
-                          :values="state.historyPreviewDoc.content[blockIndex(state.historyPreviewDoc, blockId, false)]?.values"
-                          :meta="state.historyPreviewDoc.content[blockIndex(state.historyPreviewDoc, blockId, false)]?.meta"
+                          :content="renderedHistoryPreviewDoc.content[blockIndex(renderedHistoryPreviewDoc, blockId, false)]?.content"
+                          :values="renderedHistoryPreviewDoc.content[blockIndex(renderedHistoryPreviewDoc, blockId, false)]?.values"
+                          :meta="renderedHistoryPreviewDoc.content[blockIndex(renderedHistoryPreviewDoc, blockId, false)]?.meta"
                           :viewport-mode="previewViewportMode"
                           :theme="theme"
                         />
@@ -3594,14 +3717,14 @@ const hasUnsavedChanges = (changes) => {
             :style="previewViewportContainStyle"
           >
             <div
-              v-if="!state.historyPreviewDoc?.postStructure?.length"
+              v-if="!renderedHistoryPreviewDoc?.postStructure?.length"
               class="flex min-h-[50vh] items-center justify-center px-6 text-center text-sm text-slate-500 dark:text-slate-400"
             >
               No detail rows in this version.
             </div>
             <div v-else>
               <div
-                v-for="(row, rowIndex) in state.historyPreviewDoc.postStructure"
+                v-for="(row, rowIndex) in renderedHistoryPreviewDoc.postStructure"
                 :key="row.id || `history-post-row-${rowIndex}`"
               >
                 <div
@@ -3621,11 +3744,11 @@ const hasUnsavedChanges = (changes) => {
                         :key="`${historyPreviewRenderKey}:post:${blockId}:${blockPosition}`"
                       >
                         <edge-cms-block-api
-                          v-if="blockIndex(state.historyPreviewDoc, blockId, true) !== -1"
+                          v-if="blockIndex(renderedHistoryPreviewDoc, blockId, true) !== -1"
                           :site-id="props.site"
-                          :content="state.historyPreviewDoc.postContent[blockIndex(state.historyPreviewDoc, blockId, true)]?.content"
-                          :values="state.historyPreviewDoc.postContent[blockIndex(state.historyPreviewDoc, blockId, true)]?.values"
-                          :meta="state.historyPreviewDoc.postContent[blockIndex(state.historyPreviewDoc, blockId, true)]?.meta"
+                          :content="renderedHistoryPreviewDoc.postContent[blockIndex(renderedHistoryPreviewDoc, blockId, true)]?.content"
+                          :values="renderedHistoryPreviewDoc.postContent[blockIndex(renderedHistoryPreviewDoc, blockId, true)]?.values"
+                          :meta="renderedHistoryPreviewDoc.postContent[blockIndex(renderedHistoryPreviewDoc, blockId, true)]?.meta"
                           :viewport-mode="previewViewportMode"
                           :theme="theme"
                           :route-last-segment="previewRouteLastSegment"
@@ -3754,7 +3877,7 @@ const hasUnsavedChanges = (changes) => {
     </DialogContent>
   </edge-shad-dialog>
   <edge-shad-dialog v-model="state.showUnpublishedChangesDialog">
-    <DialogContent class="max-w-[96vw] max-h-[92vh] overflow-hidden flex flex-col">
+    <DialogContent class="max-w-[96vw] max-h-[97vh] overflow-hidden flex flex-col">
       <DialogHeader>
         <DialogTitle class="text-left">
           {{ pageChangesDialogTitle }}
@@ -3849,7 +3972,7 @@ const hasUnsavedChanges = (changes) => {
                       data-cms-preview-mode="history"
                       class="relative isolate overflow-hidden rounded border border-gray-200 dark:border-white/15 bg-white dark:bg-gray-900"
                     >
-                      <div v-if="blockChange.baseBlock" class="max-h-64 overflow-auto p-3">
+                      <div v-if="blockChange.baseBlock" class="p-3">
                         <edge-cms-block-api
                           :key="`${blockChange.key}:base`"
                           :content="blockChange.baseBlock?.content"
@@ -3875,7 +3998,7 @@ const hasUnsavedChanges = (changes) => {
                       data-cms-preview-mode="history"
                       class="relative isolate overflow-hidden rounded border border-gray-200 dark:border-white/15 bg-white dark:bg-gray-900"
                     >
-                      <div v-if="blockChange.compareBlock" class="max-h-64 overflow-auto p-3">
+                      <div v-if="blockChange.compareBlock" class="p-3">
                         <edge-cms-block-api
                           :key="`${blockChange.key}:compare`"
                           :content="blockChange.compareBlock?.content"
@@ -3916,7 +4039,7 @@ const hasUnsavedChanges = (changes) => {
     </DialogContent>
   </edge-shad-dialog>
   <edge-shad-dialog v-model="state.showHistoryDiffDialog">
-    <DialogContent class="max-w-[96vw] max-h-[92vh] overflow-hidden flex flex-col">
+    <DialogContent class="max-w-[96vw] max-h-[97vh] overflow-hidden flex flex-col">
       <DialogHeader>
         <DialogTitle class="text-left">
           History Diff
@@ -4011,7 +4134,7 @@ const hasUnsavedChanges = (changes) => {
                       data-cms-preview-mode="history"
                       class="relative isolate overflow-hidden rounded border border-gray-200 dark:border-white/15 bg-white dark:bg-gray-900"
                     >
-                      <div v-if="blockChange.baseBlock" class="max-h-64 overflow-auto p-3">
+                      <div v-if="blockChange.baseBlock" class="p-3">
                         <edge-cms-block-api
                           :key="`${blockChange.key}:base`"
                           :content="blockChange.baseBlock?.content"
@@ -4037,7 +4160,7 @@ const hasUnsavedChanges = (changes) => {
                       data-cms-preview-mode="history"
                       class="relative isolate overflow-hidden rounded border border-gray-200 dark:border-white/15 bg-white dark:bg-gray-900"
                     >
-                      <div v-if="blockChange.compareBlock" class="max-h-64 overflow-auto p-3">
+                      <div v-if="blockChange.compareBlock" class="p-3">
                         <edge-cms-block-api
                           :key="`${blockChange.key}:compare`"
                           :content="blockChange.compareBlock?.content"
