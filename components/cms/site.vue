@@ -1,7 +1,7 @@
 <script setup lang="js">
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { CircleAlert, FileCheck, FilePenLine, FileStack, FolderCog, FolderDown, FolderUp, FolderX, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload } from 'lucide-vue-next'
+import { CircleAlert, Download, FileCheck, FilePenLine, FileStack, FolderCog, FolderDown, FolderUp, FolderX, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload } from 'lucide-vue-next'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
 
 const props = defineProps({
@@ -21,6 +21,7 @@ const props = defineProps({
   },
 })
 const edgeFirebase = inject('edgeFirebase')
+const { saveJsonFiles } = useJsonFileSave()
 const { createDefaults: createSiteSettingsDefaults, createNewDocSchema: createSiteSettingsNewDocSchema } = useSiteSettingsTemplate()
 const { buildPageStructuredData } = useStructuredDataTemplates()
 
@@ -92,12 +93,20 @@ const state = reactive({
   selectedSubmissionId: '',
   publishSiteLoading: false,
   importingPages: false,
+  exportingPages: false,
+  exportDialogOpen: false,
+  exportDialogStatus: 'idle',
+  exportDialogProcessed: 0,
+  exportDialogTotal: 0,
+  exportDialogCurrentItem: '',
+  exportCancelRequested: false,
   importPageDocIdDialogOpen: false,
   importPageDocIdValue: '',
   importPageConflictDialogOpen: false,
   importPageConflictDocId: '',
   importPageErrorDialogOpen: false,
   importPageErrorMessage: '',
+  showSiteSettingsDiffDialog: false,
   siteSettingsWorkingDoc: {},
   templatePageFilter: '',
   templatePageSearchType: 'all',
@@ -1040,6 +1049,100 @@ const isSiteDiff = computed(() => {
   return false
 })
 
+const SITE_SETTINGS_DIFF_FIELDS = [
+  { key: 'domains', label: 'Domains' },
+  { key: 'menus', label: 'Menus', format: 'menus' },
+  { key: 'theme', label: 'Theme' },
+  { key: 'allowedThemes', label: 'Allowed Themes' },
+  { key: 'logo', label: 'Logo' },
+  { key: 'logoLight', label: 'Logo Light' },
+  { key: 'logoText', label: 'Logo Text' },
+  { key: 'logoType', label: 'Logo Type' },
+  { key: 'brandLogoDark', label: 'Brand Logo Dark' },
+  { key: 'brandLogoLight', label: 'Brand Logo Light' },
+  { key: 'favicon', label: 'Favicon' },
+  { key: 'menuPosition', label: 'Menu Position' },
+  { key: 'forwardApex', label: 'Forward Apex', format: 'boolean' },
+  { key: 'contactEmail', label: 'Contact Email' },
+  { key: 'contactPhone', label: 'Contact Phone' },
+  { key: 'metaTitle', label: 'Meta Title' },
+  { key: 'metaDescription', label: 'Meta Description' },
+  { key: 'structuredData', label: 'Structured Data', format: 'json' },
+  { key: 'trackingFacebookPixel', label: 'Facebook Pixel' },
+  { key: 'trackingGoogleAnalytics', label: 'Google Analytics' },
+  { key: 'trackingAdroll', label: 'Adroll' },
+  { key: 'sureFeedURL', label: 'SureFeed URL' },
+  { key: 'socialFacebook', label: 'Facebook' },
+  { key: 'socialInstagram', label: 'Instagram' },
+  { key: 'socialTwitter', label: 'Twitter' },
+  { key: 'socialLinkedIn', label: 'LinkedIn' },
+  { key: 'socialYouTube', label: 'YouTube' },
+  { key: 'socialTikTok', label: 'TikTok' },
+]
+
+const summarizeSiteSettingsValue = (value, format = '') => {
+  if (format === 'boolean')
+    return value === true ? 'Yes' : value === false ? 'No' : '—'
+
+  if (format === 'menus') {
+    if (!value || typeof value !== 'object')
+      return '—'
+    const parts = Object.entries(value)
+      .map(([menuName, items]) => `${menuName} (${Array.isArray(items) ? items.length : 0})`)
+      .filter(Boolean)
+    return parts.length ? parts.join(', ') : '—'
+  }
+
+  if (format === 'json') {
+    if (value == null || value === '')
+      return '—'
+    try {
+      const stringValue = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+      return stringValue.length > 500 ? `${stringValue.slice(0, 500)}...` : stringValue
+    }
+    catch {
+      return String(value)
+    }
+  }
+
+  if (Array.isArray(value))
+    return value.length ? value.map(item => String(item || '').trim()).filter(Boolean).join(', ') : '—'
+
+  if (value && typeof value === 'object') {
+    try {
+      const stringValue = JSON.stringify(value, null, 2)
+      return stringValue.length > 500 ? `${stringValue.slice(0, 500)}...` : stringValue
+    }
+    catch {
+      return '—'
+    }
+  }
+
+  const normalized = String(value ?? '').trim()
+  return normalized || '—'
+}
+
+const siteSettingsDiffDetails = computed(() => {
+  const base = publishedSiteSettings.value || {}
+  const compare = siteData.value || {}
+  const details = []
+
+  SITE_SETTINGS_DIFF_FIELDS.forEach((field) => {
+    const baseValue = base?.[field.key]
+    const compareValue = compare?.[field.key]
+    if (areEqualNormalized(baseValue, compareValue))
+      return
+    details.push({
+      key: field.key,
+      label: field.label,
+      published: summarizeSiteSettingsValue(baseValue, field.format),
+      current: summarizeSiteSettingsValue(compareValue, field.format),
+    })
+  })
+
+  return details
+})
+
 const publishSiteSettings = async () => {
   console.log('Publishing site settings for site:', props.site)
   await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`, siteData.value)
@@ -1139,6 +1242,80 @@ const publishSiteAndSettings = async () => {
 const pages = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`] || {}
 })
+
+const openPagesExportDialog = (total) => {
+  state.exportDialogOpen = true
+  state.exportDialogStatus = 'running'
+  state.exportDialogProcessed = 0
+  state.exportDialogTotal = total
+  state.exportDialogCurrentItem = ''
+  state.exportCancelRequested = false
+}
+
+const syncPagesExportProgress = ({ completed = 0, total = 0, suggestedName = '' } = {}) => {
+  state.exportDialogOpen = true
+  state.exportDialogProcessed = completed
+  state.exportDialogTotal = total || state.exportDialogTotal
+  state.exportDialogCurrentItem = suggestedName || ''
+}
+
+const finishPagesExportDialog = (savedCount) => {
+  state.exportDialogProcessed = savedCount
+  state.exportDialogStatus = savedCount === state.exportDialogTotal ? 'complete' : 'canceled'
+  state.exportCancelRequested = false
+}
+
+const cancelPagesExport = () => {
+  if (!state.exportingPages)
+    return
+  state.exportCancelRequested = true
+}
+
+const closePagesExportDialog = () => {
+  if (state.exportingPages)
+    return
+  state.exportDialogOpen = false
+}
+
+const exportAllPages = async () => {
+  if (state.exportingPages)
+    return
+  const files = Object.entries(pages.value || {})
+    .sort(([leftId], [rightId]) => String(leftId).localeCompare(String(rightId)))
+    .map(([docId, doc]) => ({
+      suggestedName: `page-${docId}.json`,
+      payload: {
+        ...edgeGlobal.dupObject(doc || {}),
+        docId,
+      },
+    }))
+
+  if (!files.length) {
+    edgeFirebase?.toast?.error?.('No pages available to export.')
+    return
+  }
+
+  openPagesExportDialog(files.length)
+  state.exportingPages = true
+  try {
+    const savedCount = await saveJsonFiles(files, {
+      onProgress: syncPagesExportProgress,
+      shouldCancel: () => state.exportCancelRequested,
+    })
+    finishPagesExportDialog(savedCount)
+    if (savedCount === files.length)
+      edgeFirebase?.toast?.success?.(`Exported ${files.length} page${files.length === 1 ? '' : 's'}.`)
+    else if (savedCount > 0)
+      edgeFirebase?.toast?.success?.(`Exported ${savedCount} of ${files.length} pages.`)
+  }
+  finally {
+    state.exportingPages = false
+    if (state.exportDialogStatus === 'running') {
+      state.exportDialogStatus = 'canceled'
+      state.exportCancelRequested = false
+    }
+  }
+}
 
 const blocksCollection = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`] || {}
@@ -2625,26 +2802,24 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
             class="hidden"
             @change="handlePageImport"
           >
-          <edge-shad-button
-            type="button"
-            size="icon"
-            variant="outline"
-            class="h-9 w-9"
-            :disabled="state.importingPages"
-            title="Import Page"
-            aria-label="Import Page"
-            @click="triggerPageImport"
-          >
-            <Loader2 v-if="state.importingPages" class="h-3.5 w-3.5 animate-spin" />
-            <Upload v-else class="h-3.5 w-3.5" />
-          </edge-shad-button>
           <template v-if="!isTemplateSite && !hidePublishStatusAndActions">
             <Transition name="fade" mode="out-in">
               <div v-if="isSiteDiff || isAnyPagesDiff" key="unpublished" class="flex gap-2 items-center">
-                <div class="flex gap-1 items-center bg-yellow-100 text-xs py-1 px-3 text-yellow-800 rounded">
+                <edge-shad-button
+                  v-if="isSiteDiff"
+                  variant="outline"
+                  class="flex gap-1 items-center border-yellow-300 bg-yellow-100 px-3 py-1 text-xs text-yellow-800 hover:bg-yellow-100 hover:text-yellow-900"
+                  @click="state.showSiteSettingsDiffDialog = true"
+                >
                   <CircleAlert class="!text-yellow-800 w-3 h-6" />
                   <span class="font-medium text-[10px]">
-                    {{ isSiteDiff ? (useMenuPublishLabels ? 'Unpublished Menu' : 'Unpublished Settings') : 'Unpublished Pages' }}
+                    {{ useMenuPublishLabels ? 'Unpublished Menu' : 'Unpublished Settings' }}
+                  </span>
+                </edge-shad-button>
+                <div v-else class="flex gap-1 items-center bg-yellow-100 text-xs py-1 px-3 text-yellow-800 rounded">
+                  <CircleAlert class="!text-yellow-800 w-3 h-6" />
+                  <span class="font-medium text-[10px]">
+                    Unpublished Pages
                   </span>
                 </div>
                 <edge-shad-button
@@ -2697,10 +2872,19 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                   <FolderDown />
                   Unpublish Site
                 </DropdownMenuItem>
-
                 <DropdownMenuItem v-if="canEditSiteSettings" @click="state.siteSettings = true">
                   <FolderCog />
                   <span>Settings</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem :disabled="state.importingPages" @click="triggerPageImport">
+                  <Loader2 v-if="state.importingPages" class="animate-spin" />
+                  <Upload v-else />
+                  <span>Import Pages</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem :disabled="state.exportingPages || !Object.keys(pages || {}).length" @click="exportAllPages">
+                  <Loader2 v-if="state.exportingPages" class="animate-spin" />
+                  <Download v-else />
+                  <span>{{ state.exportingPages ? 'Exporting Pages...' : 'Export All Pages' }}</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -3047,6 +3231,67 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
         </Transition>
       </div>
     </div>
+    <edge-cms-json-export-progress-dialog
+      v-model="state.exportDialogOpen"
+      title="Exporting Pages"
+      :status="state.exportDialogStatus"
+      :processed="state.exportDialogProcessed"
+      :total="state.exportDialogTotal"
+      :current-item="state.exportDialogCurrentItem"
+      @cancel="cancelPagesExport"
+      @update:model-value="closePagesExportDialog"
+    />
+    <edge-shad-dialog v-model="state.showSiteSettingsDiffDialog">
+      <DialogContent class="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle class="text-left">
+            {{ useMenuPublishLabels ? 'Unpublished Menu' : 'Unpublished Settings' }}
+          </DialogTitle>
+          <DialogDescription class="text-left">
+            Review what changed between the published site settings and the current site settings.
+          </DialogDescription>
+        </DialogHeader>
+        <div class="mt-2 flex-1 overflow-y-auto pr-1">
+          <div v-if="siteSettingsDiffDetails.length" class="space-y-3">
+            <div
+              v-for="change in siteSettingsDiffDetails"
+              :key="change.key"
+              class="rounded-md border border-slate-300 bg-slate-200 p-3 text-left dark:border-slate-700 dark:bg-slate-800"
+            >
+              <div class="mb-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
+                {{ change.label }}
+              </div>
+              <div class="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+                <div class="rounded border border-gray-200 bg-white/80 p-2 dark:border-white/15 dark:bg-gray-800">
+                  <div class="mb-1 text-[11px] uppercase tracking-wide text-gray-500">
+                    Published
+                  </div>
+                  <div class="whitespace-pre-wrap break-words text-gray-900 dark:text-gray-100">
+                    {{ change.published }}
+                  </div>
+                </div>
+                <div class="rounded border border-gray-200 bg-white/80 p-2 dark:border-white/15 dark:bg-gray-800">
+                  <div class="mb-1 text-[11px] uppercase tracking-wide text-gray-500">
+                    Current
+                  </div>
+                  <div class="whitespace-pre-wrap break-words text-gray-900 dark:text-gray-100">
+                    {{ change.current }}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-else class="text-sm text-gray-600 dark:text-gray-300 text-left">
+            No unpublished site settings differences detected.
+          </div>
+        </div>
+        <DialogFooter class="pt-4">
+          <edge-shad-button class="w-full" variant="outline" @click="state.showSiteSettingsDiffDialog = false">
+            Close
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
     <edge-shad-dialog v-model="state.importPageDocIdDialogOpen">
       <DialogContent class="pt-8">
         <DialogHeader>

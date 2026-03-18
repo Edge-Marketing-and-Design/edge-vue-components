@@ -213,6 +213,163 @@ function setGlobalThemeVars(theme) {
   window.__htmlcontentGlobalTheme = true
 }
 
+function splitTopLevelSelectors(selectorText) {
+  const parts = []
+  let current = ''
+  let parenDepth = 0
+  let bracketDepth = 0
+  let inString = ''
+
+  for (let i = 0; i < selectorText.length; i++) {
+    const char = selectorText[i]
+    const prevChar = selectorText[i - 1]
+
+    if (inString) {
+      current += char
+      if (char === inString && prevChar !== '\\')
+        inString = ''
+      continue
+    }
+
+    if (char === '"' || char === '\'') {
+      inString = char
+      current += char
+      continue
+    }
+
+    if (char === '(') {
+      parenDepth++
+      current += char
+      continue
+    }
+
+    if (char === ')') {
+      parenDepth = Math.max(0, parenDepth - 1)
+      current += char
+      continue
+    }
+
+    if (char === '[') {
+      bracketDepth++
+      current += char
+      continue
+    }
+
+    if (char === ']') {
+      bracketDepth = Math.max(0, bracketDepth - 1)
+      current += char
+      continue
+    }
+
+    if (char === ',' && parenDepth === 0 && bracketDepth === 0) {
+      if (current.trim())
+        parts.push(current.trim())
+      current = ''
+      continue
+    }
+
+    current += char
+  }
+
+  if (current.trim())
+    parts.push(current.trim())
+
+  return parts
+}
+
+function prefixScopedSelector(selector, scopeSelector) {
+  const trimmed = String(selector || '').trim()
+  if (!trimmed)
+    return ''
+  if (trimmed.includes(scopeSelector))
+    return trimmed
+  if (trimmed === ':root' || trimmed === 'html' || trimmed === 'body')
+    return scopeSelector
+
+  const normalized = trimmed
+    .replace(/\b:root\b/g, scopeSelector)
+    .replace(/\bhtml\b/g, scopeSelector)
+    .replace(/\bbody\b/g, scopeSelector)
+
+  if (normalized !== trimmed)
+    return normalized
+
+  return `${scopeSelector} ${trimmed}`
+}
+
+function scopeCssText(cssText, scopeId) {
+  const source = String(cssText || '')
+  const scopeSelector = `[data-theme-scope="${scopeId}"].block-content`
+  if (!source.trim() || !scopeId)
+    return source
+
+  const recurse = (input) => {
+    let output = ''
+    let index = 0
+
+    while (index < input.length) {
+      const openIndex = input.indexOf('{', index)
+      if (openIndex === -1) {
+        output += input.slice(index)
+        break
+      }
+
+      const prelude = input.slice(index, openIndex)
+      let depth = 1
+      let cursor = openIndex + 1
+      let inString = ''
+
+      while (cursor < input.length && depth > 0) {
+        const char = input[cursor]
+        const prevChar = input[cursor - 1]
+        if (inString) {
+          if (char === inString && prevChar !== '\\')
+            inString = ''
+          cursor++
+          continue
+        }
+        if (char === '"' || char === '\'') {
+          inString = char
+          cursor++
+          continue
+        }
+        if (char === '{')
+          depth++
+        else if (char === '}')
+          depth--
+        cursor++
+      }
+
+      if (depth !== 0) {
+        output += input.slice(index)
+        break
+      }
+
+      const inner = input.slice(openIndex + 1, cursor - 1)
+      const trimmedPrelude = prelude.trim()
+
+      if (trimmedPrelude.startsWith('@')) {
+        const atRuleName = trimmedPrelude.match(/^@([a-zA-Z-]+)/)?.[1]?.toLowerCase() || ''
+        const shouldRecurse = ['media', 'supports', 'layer', 'container', 'scope', 'document'].includes(atRuleName)
+        output += `${prelude}{${shouldRecurse ? recurse(inner) : inner}}`
+      }
+      else {
+        const scopedPrelude = splitTopLevelSelectors(prelude)
+          .map(selector => prefixScopedSelector(selector, scopeSelector))
+          .filter(Boolean)
+          .join(', ')
+        output += `${scopedPrelude}{${inner}}`
+      }
+
+      index = cursor
+    }
+
+    return output
+  }
+
+  return recurse(source)
+}
+
 function setScopedExtraCss(scopeEl, cssText) {
   if (!scopeEl || typeof document === 'undefined')
     return
@@ -229,7 +386,7 @@ function setScopedExtraCss(scopeEl, cssText) {
     scopeEl.prepend(styleEl)
   }
 
-  styleEl.textContent = String(cssText || '')
+  styleEl.textContent = scopeCssText(cssText, scopeId)
 }
 
 const hostEl = ref(null)
@@ -257,7 +414,7 @@ useHead(() => {
   if (themeExtraCSS.value.trim()) {
     style.push({
       id: `htmlcontent-theme-extra-${scopeId}`,
-      children: themeExtraCSS.value,
+      children: scopeCssText(themeExtraCSS.value, scopeId),
     })
   }
   return { style }

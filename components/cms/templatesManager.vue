@@ -1,8 +1,9 @@
 <script setup>
-import { FilePenLine, FileStack, Loader2, Plus, Trash2, Upload } from 'lucide-vue-next'
+import { Download, FilePenLine, FileStack, Loader2, MoreHorizontal, Plus, Trash2, Upload } from 'lucide-vue-next'
 
 const emit = defineEmits(['head'])
 const edgeFirebase = inject('edgeFirebase')
+const { saveJsonFiles } = useJsonFileSave()
 const router = useRouter()
 const { buildPageStructuredData } = useStructuredDataTemplates()
 
@@ -15,6 +16,13 @@ const state = reactive({
   selectedTemplateDocIds: [],
   bulkDeleteDialogOpen: false,
   bulkDeleting: false,
+  exportingTemplates: false,
+  exportDialogOpen: false,
+  exportDialogStatus: 'idle',
+  exportDialogProcessed: 0,
+  exportDialogTotal: 0,
+  exportDialogCurrentItem: '',
+  exportCancelRequested: false,
   templatePageRenderContext: null,
   importingPages: false,
   importPageDocIdDialogOpen: false,
@@ -138,6 +146,81 @@ const selectedTemplatePreviewThemeReady = computed(() => {
 const templatePagesCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/templates/pages`)
 const templatePagesCollection = computed(() => edgeFirebase.data?.[templatePagesCollectionPath.value] || {})
 const blocksCollection = computed(() => edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`] || {})
+
+const openTemplatesExportDialog = (total) => {
+  state.exportDialogOpen = true
+  state.exportDialogStatus = 'running'
+  state.exportDialogProcessed = 0
+  state.exportDialogTotal = total
+  state.exportDialogCurrentItem = ''
+  state.exportCancelRequested = false
+}
+
+const syncTemplatesExportProgress = ({ completed = 0, total = 0, suggestedName = '' } = {}) => {
+  state.exportDialogOpen = true
+  state.exportDialogProcessed = completed
+  state.exportDialogTotal = total || state.exportDialogTotal
+  state.exportDialogCurrentItem = suggestedName || ''
+}
+
+const finishTemplatesExportDialog = (savedCount) => {
+  state.exportDialogProcessed = savedCount
+  state.exportDialogStatus = savedCount === state.exportDialogTotal ? 'complete' : 'canceled'
+  state.exportCancelRequested = false
+}
+
+const cancelTemplatesExport = () => {
+  if (!state.exportingTemplates)
+    return
+  state.exportCancelRequested = true
+}
+
+const closeTemplatesExportDialog = () => {
+  if (state.exportingTemplates)
+    return
+  state.exportDialogOpen = false
+}
+
+const exportAllTemplates = async () => {
+  if (state.exportingTemplates)
+    return
+  const selectedDocIds = [...state.selectedTemplateDocIds].filter(docId => templatePagesCollection.value?.[docId])
+  const files = selectedDocIds
+    .sort((leftId, rightId) => String(leftId).localeCompare(String(rightId)))
+    .map((docId) => ({
+      suggestedName: `template-${docId}.json`,
+      payload: {
+        ...edgeGlobal.dupObject(templatePagesCollection.value?.[docId] || {}),
+        docId,
+      },
+    }))
+
+  if (!files.length) {
+    edgeFirebase?.toast?.error?.('Select at least one template to export.')
+    return
+  }
+
+  openTemplatesExportDialog(files.length)
+  state.exportingTemplates = true
+  try {
+    const savedCount = await saveJsonFiles(files, {
+      onProgress: syncTemplatesExportProgress,
+      shouldCancel: () => state.exportCancelRequested,
+    })
+    finishTemplatesExportDialog(savedCount)
+    if (savedCount === files.length)
+      edgeFirebase?.toast?.success?.(`Exported ${files.length} template${files.length === 1 ? '' : 's'}.`)
+    else if (savedCount > 0)
+      edgeFirebase?.toast?.success?.(`Exported ${savedCount} of ${files.length} templates.`)
+  }
+  finally {
+    state.exportingTemplates = false
+    if (state.exportDialogStatus === 'running') {
+      state.exportDialogStatus = 'canceled'
+      state.exportCancelRequested = false
+    }
+  }
+}
 
 const templatePagePreviewContextCache = useState('edge-cms-template-page-preview-context-cache', () => ({}))
 
@@ -371,6 +454,18 @@ const applyTemplateTypeSelectionFilter = (items = []) => {
 const applyTemplateSelectionFilters = (items = []) => {
   return applyTemplateTagSelectionFilter(applyTemplateTypeSelectionFilter(items))
 }
+
+const visibleTemplateItems = computed(() => {
+  const query = String(state.templatePageFilter || '').trim().toLowerCase()
+  const items = Object.entries(templatePagesCollection.value || {}).map(([docId, doc]) => ({
+    docId,
+    ...(doc || {}),
+  }))
+  const filteredByQuery = !query
+    ? items
+    : items.filter(item => [item?.name, item?.docId].some(value => String(value || '').toLowerCase().includes(query)))
+  return applyTemplateSelectionFilters(filteredByQuery)
+})
 
 const selectedTemplateSet = computed(() => new Set(state.selectedTemplateDocIds))
 const selectedTemplateCount = computed(() => state.selectedTemplateDocIds.length)
@@ -818,19 +913,32 @@ watch(themeCollection, () => {
             class="hidden"
             @change="handlePageImport"
           >
-          <edge-shad-button
-            type="button"
-            size="icon"
-            variant="outline"
-            class="h-9 w-9"
-            :disabled="state.importingPages"
-            title="Import Templates"
-            aria-label="Import Templates"
-            @click="triggerPageImport"
-          >
-            <Loader2 v-if="state.importingPages" class="h-4 w-4 animate-spin" />
-            <Upload v-else class="h-4 w-4" />
-          </edge-shad-button>
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <edge-shad-button
+                type="button"
+                size="icon"
+                variant="outline"
+                class="h-9 w-9"
+                title="Template Actions"
+                aria-label="Template Actions"
+              >
+                <MoreHorizontal class="h-4 w-4" />
+              </edge-shad-button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem :disabled="state.importingPages" @click="triggerPageImport">
+                <Loader2 v-if="state.importingPages" class="h-4 w-4 animate-spin" />
+                <Upload v-else class="h-4 w-4" />
+                <span>Import Templates</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem :disabled="state.exportingTemplates || selectedTemplateCount === 0" @click="exportAllTemplates">
+                <Loader2 v-if="state.exportingTemplates" class="h-4 w-4 animate-spin" />
+                <Download v-else class="h-4 w-4" />
+                <span>{{ state.exportingTemplates ? 'Exporting Selected...' : 'Export Selected' }}</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <edge-shad-button
             class="uppercase bg-slate-700 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
             @click="openNewTemplatePage"
@@ -840,19 +948,19 @@ watch(themeCollection, () => {
           </edge-shad-button>
         </div>
       </template>
-      <template #list-header="slotProps">
+      <template #list-header>
         <div class="w-full mt-4 mx-0 rounded-md border border-slate-300/70 bg-slate-100/95 dark:border-slate-700 dark:bg-slate-900/95 px-3 py-2 space-y-2 backdrop-blur-sm shadow-sm">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="flex items-center gap-2">
               <Checkbox
-                :model-value="getVisibleSelectionState(applyTemplateSelectionFilters(slotProps.filtered))"
+                :model-value="getVisibleSelectionState(visibleTemplateItems)"
                 aria-label="Select visible templates"
                 class="border-slate-400 bg-white shadow-sm dark:border-slate-600 dark:bg-slate-950 data-[state=checked]:bg-slate-700 data-[state=checked]:text-white dark:data-[state=checked]:bg-slate-200 dark:data-[state=checked]:text-slate-900"
                 @click.stop
-                @update:model-value="toggleVisibleTemplateSelection(applyTemplateSelectionFilters(slotProps.filtered), $event)"
+                @update:model-value="toggleVisibleTemplateSelection(visibleTemplateItems, $event)"
               />
               <span class="text-xs text-slate-600 dark:text-slate-300">
-                Select visible ({{ applyTemplateSelectionFilters(slotProps.filtered).length }})
+                Select visible ({{ visibleTemplateItems.length }})
               </span>
             </div>
             <div class="flex items-center gap-2">
@@ -914,15 +1022,15 @@ watch(themeCollection, () => {
           </edge-shad-form>
         </div>
       </template>
-      <template #list="slotProps">
+      <template #list>
         <div class="w-full pt-2 space-y-3 h-[calc(100vh-310px)]">
           <div
-            v-if="applyTemplateSelectionFilters(slotProps.filtered).length"
+            v-if="visibleTemplateItems.length"
             class="grid gap-4 w-full pb-2"
             style="grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));"
           >
             <div
-              v-for="item in applyTemplateSelectionFilters(slotProps.filtered)"
+              v-for="item in visibleTemplateItems"
               :key="item.docId"
               role="button"
               tabindex="0"
@@ -1069,6 +1177,16 @@ watch(themeCollection, () => {
       </template>
     </edge-dashboard>
 
+    <edge-cms-json-export-progress-dialog
+      v-model="state.exportDialogOpen"
+      title="Exporting Templates"
+      :status="state.exportDialogStatus"
+      :processed="state.exportDialogProcessed"
+      :total="state.exportDialogTotal"
+      :current-item="state.exportDialogCurrentItem"
+      @cancel="cancelTemplatesExport"
+      @update:model-value="closeTemplatesExportDialog"
+    />
     <edge-shad-dialog v-model="state.importPageDocIdDialogOpen">
       <DialogContent class="max-w-md">
         <DialogHeader>

@@ -1,5 +1,5 @@
 <script setup>
-import { Download, HelpCircle, Maximize2, Monitor, Smartphone, Tablet } from 'lucide-vue-next'
+import { Download, HelpCircle, History, Loader2, Maximize2, Monitor, RotateCcw, Smartphone, Tablet } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 const props = defineProps({
@@ -12,6 +12,7 @@ const props = defineProps({
 const emit = defineEmits(['head'])
 
 const edgeFirebase = inject('edgeFirebase')
+const { saveJsonFile } = useJsonFileSave()
 const { blocks: blockNewDocSchema } = useCmsNewDocs()
 const blockEditorPostPreviewCache = useState('edge-cms-block-editor-post-preview-cache', () => ({}))
 
@@ -37,6 +38,16 @@ const state = reactive({
   previewRenderContext: null,
   editorWorkingDoc: null,
   themeDefaultAppliedForBlockId: '',
+  editorKey: 0,
+  editorHasUnsavedChanges: false,
+  historyDialogOpen: false,
+  historyLoading: false,
+  historyRestoring: false,
+  historyError: '',
+  historyItems: [],
+  historySelectedId: '',
+  historyPreviewBlock: null,
+  showHistoryDiffDialog: false,
 })
 
 const blockSchema = toTypedSchema(z.object({
@@ -62,6 +73,26 @@ const blockTypeOptions = [
 
 const normalizePreviewType = (value) => {
   return value === 'dark' ? 'dark' : 'light'
+}
+
+function normalizeForCompare(value) {
+  if (Array.isArray(value))
+    return value.map(normalizeForCompare)
+  if (value && typeof value === 'object') {
+    return Object.keys(value).sort().reduce((acc, key) => {
+      acc[key] = normalizeForCompare(value[key])
+      return acc
+    }, {})
+  }
+  return value
+}
+
+function stableSerialize(value) {
+  return JSON.stringify(normalizeForCompare(value))
+}
+
+function areEqualNormalized(a, b) {
+  return stableSerialize(a) === stableSerialize(b)
 }
 
 const normalizeBlockTypes = (value, { fallbackToPage = true } = {}) => {
@@ -127,12 +158,14 @@ const previewViewportMode = computed(() => {
   return state.previewViewport
 })
 
-const previewSurfaceClass = computed(() => {
-  const previewType = normalizePreviewType(state.previewBlock?.previewType)
+const getPreviewSurfaceClass = (block) => {
+  const previewType = normalizePreviewType(block?.previewType)
   return previewType === 'light'
     ? 'bg-white text-black'
     : 'bg-neutral-950 text-neutral-50'
-})
+}
+
+const previewSurfaceClass = computed(() => getPreviewSurfaceClass(state.previewBlock))
 
 const previewCanvasClass = computed(() => {
   const content = String(state.previewBlock?.content || '')
@@ -662,6 +695,34 @@ const editorDocUpdates = (workingDoc) => {
   console.log('Editor workingDoc update:', state.workingDoc)
 }
 
+const syncEditorStateFromBlockDoc = (doc) => {
+  if (!isPlainObject(doc))
+    return
+
+  const restoredDoc = edgeGlobal.dupObject(doc)
+  let normalizedTypes = normalizeBlockTypes(restoredDoc.type)
+  if (!normalizedTypes.length)
+    normalizedTypes = ['Page']
+  restoredDoc.type = normalizedTypes
+  if (!restoredDoc.docId)
+    restoredDoc.docId = props.blockId
+
+  state.editorWorkingDoc = restoredDoc
+  const parsed = blockModel(restoredDoc.content || '')
+  state.workingDoc = {
+    ...parsed,
+    type: normalizedTypes,
+  }
+  state.previewBlock = buildPreviewBlock(restoredDoc, parsed)
+  state.previewSourceValues = edgeGlobal.dupObject(parsed.values || {})
+  state.editorHasUnsavedChanges = false
+
+  const collectionPath = `${edgeGlobal.edgeState.organizationDocPath}/blocks`
+  if (!edgeFirebase.data?.[collectionPath])
+    edgeFirebase.data[collectionPath] = {}
+  edgeFirebase.data[collectionPath][props.blockId] = edgeGlobal.dupObject(restoredDoc)
+}
+
 onBeforeMount(async () => {
   console.log('Block Editor mounting - starting snapshots if needed')
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`]) {
@@ -765,6 +826,16 @@ const blocks = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`] || null
 })
 
+const currentBlock = computed(() => blocks.value?.[props.blockId] || null)
+
+const currentBlockPath = computed(() => {
+  const orgPath = String(edgeGlobal.edgeState.organizationDocPath || '').trim()
+  const blockId = String(props.blockId || '').trim()
+  if (!orgPath || !blockId || blockId === 'new')
+    return ''
+  return `${orgPath}/blocks/${blockId}`
+})
+
 const getTagsFromBlocks = computed(() => {
   const tagsSet = new Set()
 
@@ -786,20 +857,6 @@ const getTagsFromBlocks = computed(() => {
   // Always prepend it
   return [{ name: 'Quick Picks', title: 'Quick Picks' }, ...filtered]
 })
-
-const downloadJsonFile = (payload, filename) => {
-  if (typeof window === 'undefined')
-    return
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
-  const objectUrl = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = objectUrl
-  anchor.download = filename
-  document.body.appendChild(anchor)
-  anchor.click()
-  anchor.remove()
-  URL.revokeObjectURL(objectUrl)
-}
 
 const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value)
 
@@ -829,15 +886,424 @@ const notifyError = (message) => {
   edgeFirebase?.toast?.error?.(message)
 }
 
-const exportCurrentBlock = () => {
+const getHistoryTimestampMs = (value) => {
+  if (typeof value === 'number' && Number.isFinite(value))
+    return value
+  if (typeof value?.millis === 'number' && Number.isFinite(value.millis))
+    return value.millis
+  const isoValue = String(value?.iso || value || '').trim()
+  if (!isoValue)
+    return null
+  const parsed = Date.parse(isoValue)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+const formatHistoryDate = (value) => {
+  const millis = getHistoryTimestampMs(value)
+  if (!millis)
+    return 'Unknown date'
+  return new Date(millis).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+function formatHistoryEntryLabel(item, index = 0) {
+  const dateLabel = formatHistoryDate(item?.createdAt)
+  const fallbackLabel = `Entry ${index + 1}`
+  if (dateLabel)
+    return dateLabel
+  return fallbackLabel
+}
+
+const getHistorySnapshotState = (item) => {
+  if (isPlainObject(item?.afterData))
+    return 'afterData'
+  if (isPlainObject(item?.beforeData))
+    return 'beforeData'
+  return ''
+}
+
+const getHistorySnapshotDoc = item => item?.[getHistorySnapshotState(item)] || null
+
+const buildComparableBlockDiffDoc = (doc) => {
+  if (!doc || typeof doc !== 'object')
+    return null
+  return {
+    name: doc.name ?? '',
+    content: doc.content ?? '',
+    tags: Array.isArray(doc.tags) ? doc.tags : [],
+    type: normalizeBlockTypes(doc.type, { fallbackToPage: false }),
+    themes: Array.isArray(doc.themes) ? doc.themes : [],
+    synced: !!doc.synced,
+    previewType: normalizePreviewType(doc.previewType),
+  }
+}
+
+const blockDocsMatchForDiff = (baseDoc, compareDoc) => {
+  return areTypeArraysEqual(baseDoc?.type, compareDoc?.type) && areEqualNormalized(
+    buildComparableBlockDiffDoc(baseDoc),
+    buildComparableBlockDiffDoc(compareDoc),
+  )
+}
+
+const buildHistoryPreviewBlock = (doc) => {
+  if (!isPlainObject(doc))
+    return null
+  const parsed = blockModel(doc.content || '')
+  return {
+    id: 'history-preview',
+    blockId: props.blockId,
+    name: doc.name || '',
+    previewType: normalizePreviewType(doc.previewType),
+    content: doc.content || '',
+    values: edgeGlobal.dupObject(parsed.values || {}),
+    meta: edgeGlobal.dupObject(parsed.meta || {}),
+    synced: !!doc.synced,
+  }
+}
+
+const isHistoryItemArray = (value) => {
+  if (!Array.isArray(value) || !value.length)
+    return false
+  return value.every((item) => {
+    return item && typeof item === 'object' && (
+      typeof item.historyId === 'string'
+      || typeof item.path === 'string'
+      || typeof item.relativePath === 'string'
+    )
+  })
+}
+
+const extractHistoryItemsFromResponse = (value, visited = new Set()) => {
+  if (!value || typeof value !== 'object')
+    return []
+  if (visited.has(value))
+    return []
+  visited.add(value)
+
+  if (isHistoryItemArray(value))
+    return value
+
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const nestedItems = extractHistoryItemsFromResponse(entry, visited)
+      if (nestedItems.length)
+        return nestedItems
+    }
+    return []
+  }
+
+  const priorityKeys = ['items', 'data', 'result']
+  for (const key of priorityKeys) {
+    if (!Object.prototype.hasOwnProperty.call(value, key))
+      continue
+    const nestedItems = extractHistoryItemsFromResponse(value[key], visited)
+    if (nestedItems.length)
+      return nestedItems
+  }
+
+  for (const nestedValue of Object.values(value)) {
+    const nestedItems = extractHistoryItemsFromResponse(nestedValue, visited)
+    if (nestedItems.length)
+      return nestedItems
+  }
+
+  return []
+}
+
+const historyPreviewItems = computed(() => {
+  return (state.historyItems || []).filter((item) => {
+    const historyDoc = getHistorySnapshotDoc(item)
+    if (!historyDoc)
+      return false
+    return !blockDocsMatchForDiff(historyDoc, currentBlock.value)
+  })
+})
+
+const selectedHistoryEntry = computed(() => {
+  return historyPreviewItems.value.find(item => item.historyId === state.historySelectedId) || null
+})
+
+const historyVersionItems = computed(() => {
+  return historyPreviewItems.value.map((item, index) => ({
+    name: item.historyId,
+    title: formatHistoryEntryLabel(item, index),
+  }))
+})
+
+const syncHistoryPreviewBlock = (entry) => {
+  state.historyPreviewBlock = buildHistoryPreviewBlock(getHistorySnapshotDoc(entry))
+}
+
+watch(selectedHistoryEntry, (entry) => {
+  syncHistoryPreviewBlock(entry)
+}, { immediate: false })
+
+const summarizeBlockChangeValue = (value) => {
+  if (value == null || value === '')
+    return '—'
+  if (typeof value === 'boolean')
+    return value ? 'Yes' : 'No'
+  if (Array.isArray(value))
+    return value.length ? value.map(item => String(item || '').trim()).filter(Boolean).join(', ') : '—'
+  if (typeof value === 'object') {
+    try {
+      const stringValue = JSON.stringify(value, null, 2)
+      return stringValue.length > 600 ? `${stringValue.slice(0, 600)}...` : stringValue
+    }
+    catch {
+      return '—'
+    }
+  }
+  const stringValue = String(value).trim()
+  return stringValue.length > 600 ? `${stringValue.slice(0, 600)}...` : stringValue
+}
+
+const escapeDiffHtml = (value) => {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+const tokenizeDiffValue = (value) => {
+  return String(value ?? '').match(/([A-Za-z0-9._:-]+|\s+|.)/g) || []
+}
+
+const buildHighlightedDiffHtml = (sourceValue, compareValue) => {
+  const sourceTokens = tokenizeDiffValue(sourceValue)
+  const compareTokens = tokenizeDiffValue(compareValue)
+  const sourceCount = sourceTokens.length
+  const compareCount = compareTokens.length
+
+  if (!sourceCount)
+    return ''
+
+  if ((sourceCount * compareCount) > 120000) {
+    const escaped = escapeDiffHtml(sourceValue)
+    return escaped
+      ? `<span class="rounded bg-yellow-200 px-0.5 text-slate-950 dark:bg-yellow-400/40 dark:text-yellow-50">${escaped}</span>`
+      : '—'
+  }
+
+  const lcs = Array.from({ length: sourceCount + 1 }, () => Array(compareCount + 1).fill(0))
+
+  for (let i = sourceCount - 1; i >= 0; i--) {
+    for (let j = compareCount - 1; j >= 0; j--) {
+      if (sourceTokens[i] === compareTokens[j])
+        lcs[i][j] = lcs[i + 1][j + 1] + 1
+      else
+        lcs[i][j] = Math.max(lcs[i + 1][j], lcs[i][j + 1])
+    }
+  }
+
+  const changedIndexes = new Set()
+  let i = 0
+  let j = 0
+
+  while (i < sourceCount && j < compareCount) {
+    if (sourceTokens[i] === compareTokens[j]) {
+      i++
+      j++
+      continue
+    }
+
+    if (lcs[i + 1][j] >= lcs[i][j + 1]) {
+      changedIndexes.add(i)
+      i++
+      continue
+    }
+
+    j++
+  }
+
+  while (i < sourceCount) {
+    changedIndexes.add(i)
+    i++
+  }
+
+  let html = ''
+  let pendingChanged = ''
+
+  const flushPendingChanged = () => {
+    if (!pendingChanged)
+      return
+    html += `<span class="rounded bg-yellow-200 px-0.5 text-slate-950 dark:bg-yellow-400/40 dark:text-yellow-50">${pendingChanged}</span>`
+    pendingChanged = ''
+  }
+
+  sourceTokens.forEach((token, index) => {
+    const escapedToken = escapeDiffHtml(token)
+    if (changedIndexes.has(index)) {
+      pendingChanged += escapedToken
+      return
+    }
+    flushPendingChanged()
+    html += escapedToken
+  })
+
+  flushPendingChanged()
+  return html || '—'
+}
+
+const buildBlockChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel } = {}) => {
+  const changes = []
+  const base = baseDoc || {}
+  const compare = compareDoc || {}
+  const fields = [
+    { key: 'name', label: 'Block Name' },
+    { key: 'tags', label: 'Tags' },
+    { key: 'type', label: 'Block Type', transform: value => normalizeBlockTypes(value, { fallbackToPage: false }) },
+    { key: 'themes', label: 'Allowed Themes' },
+    { key: 'synced', label: 'Synced Block' },
+    { key: 'previewType', label: 'Preview Surface', transform: value => normalizePreviewType(value) },
+    { key: 'content', label: 'Block Content' },
+  ]
+
+  fields.forEach((field) => {
+    const baseValue = field.transform ? field.transform(base?.[field.key]) : base?.[field.key]
+    const compareValue = field.transform ? field.transform(compare?.[field.key]) : compare?.[field.key]
+    if (areEqualNormalized(baseValue, compareValue))
+      return
+    changes.push({
+      key: field.key,
+      label: field.label,
+      baseLabel,
+      compareLabel,
+      base: summarizeBlockChangeValue(baseValue),
+      compare: summarizeBlockChangeValue(compareValue),
+      baseHtml: buildHighlightedDiffHtml(baseValue, compareValue),
+      compareHtml: buildHighlightedDiffHtml(compareValue, baseValue),
+    })
+  })
+
+  return changes
+}
+
+const historyDiffDetails = computed(() => {
+  return buildBlockChangeDetails(getHistorySnapshotDoc(selectedHistoryEntry.value), currentBlock.value, {
+    baseLabel: 'Selected History',
+    compareLabel: 'Current',
+  })
+})
+
+const historyDiffBasePreviewBlock = computed(() => {
+  return buildHistoryPreviewBlock(getHistorySnapshotDoc(selectedHistoryEntry.value))
+})
+
+const historyDiffComparePreviewBlock = computed(() => {
+  return buildHistoryPreviewBlock(currentBlock.value)
+})
+
+const historyDiffCountLabel = computed(() => {
+  if (!selectedHistoryEntry.value)
+    return 'Select an entry'
+  const count = historyDiffDetails.value.length
+  if (count === 0)
+    return 'No differences'
+  if (count === 1)
+    return '1 difference'
+  return `${count} differences`
+})
+
+const hasHistoryDiff = computed(() => historyDiffDetails.value.length > 0)
+
+watch(hasHistoryDiff, (nextValue) => {
+  if (!nextValue)
+    state.showHistoryDiffDialog = false
+})
+
+const loadBlockHistory = async () => {
+  if (!edgeFirebase?.user?.uid || !currentBlockPath.value)
+    return
+
+  state.historyLoading = true
+  state.historyError = ''
+  try {
+    const response = await edgeFirebase.runFunction('history-listHistory', {
+      uid: edgeFirebase.user.uid,
+      path: currentBlockPath.value,
+      limit: 50,
+    })
+
+    state.historyItems = extractHistoryItemsFromResponse(response)
+    const nextSelectedId = historyPreviewItems.value.find(item => item.historyId === state.historySelectedId)?.historyId
+      || historyPreviewItems.value[0]?.historyId
+      || ''
+    state.historySelectedId = nextSelectedId
+    syncHistoryPreviewBlock(selectedHistoryEntry.value)
+  }
+  catch (error) {
+    console.error('Failed to load block history', error)
+    state.historyItems = []
+    state.historySelectedId = ''
+    state.historyPreviewBlock = null
+    state.historyError = 'Failed to load block history.'
+  }
+  finally {
+    state.historyLoading = false
+  }
+}
+
+const openHistoryDialog = async () => {
+  if (!currentBlock.value || !currentBlockPath.value || !edgeFirebase?.user?.uid)
+    return
+  state.historySelectedId = ''
+  state.historyDialogOpen = true
+  await loadBlockHistory()
+}
+
+const closeHistoryDialog = () => {
+  if (state.historyRestoring)
+    return
+  state.showHistoryDiffDialog = false
+  state.historyDialogOpen = false
+}
+
+const restoreHistoryVersion = async () => {
+  const historyEntry = selectedHistoryEntry.value
+  if (!historyEntry?.historyId || !edgeFirebase?.user?.uid)
+    return
+
+  state.historyRestoring = true
+  state.historyError = ''
+  try {
+    const targetState = getHistorySnapshotState(historyEntry)
+    await edgeFirebase.runFunction('history-restoreHistory', {
+      uid: edgeFirebase.user.uid,
+      historyId: historyEntry.historyId,
+      targetState,
+    })
+    syncEditorStateFromBlockDoc(getHistorySnapshotDoc(historyEntry))
+    state.showHistoryDiffDialog = false
+    state.historyDialogOpen = false
+    state.editorKey += 1
+    notifySuccess(`Restored block from ${formatHistoryEntryLabel(historyEntry)}.`)
+  }
+  catch (error) {
+    console.error('Failed to restore block history', error)
+    state.historyError = 'Failed to restore this version.'
+    notifyError('Failed to restore block history.')
+  }
+  finally {
+    state.historyRestoring = false
+  }
+}
+
+const handleUnsavedChanges = (changes) => {
+  state.editorHasUnsavedChanges = changes === true
+}
+
+const exportCurrentBlock = async () => {
   const doc = blocks.value?.[props.blockId]
   if (!doc || !doc.docId) {
     notifyError('Save this block before exporting.')
     return
   }
   const exportPayload = { ...getBlockDocDefaults(), ...doc }
-  downloadJsonFile(exportPayload, `block-${doc.docId}.json`)
-  notifySuccess(`Exported block "${doc.docId}".`)
+  const saved = await saveJsonFile(exportPayload, `block-${doc.docId}.json`)
+  if (saved)
+    notifySuccess(`Exported block "${doc.docId}".`)
 }
 </script>
 
@@ -846,6 +1312,7 @@ const exportCurrentBlock = () => {
     v-if="edgeGlobal.edgeState.organizationDocPath && state.mounted"
   >
     <edge-editor
+      :key="state.editorKey"
       collection="blocks"
       :doc-id="props.blockId"
       :schema="blockSchema"
@@ -857,6 +1324,7 @@ const exportCurrentBlock = () => {
       :no-close-after-save="true"
       :working-doc-overrides="state.workingDoc"
       @working-doc="editorDocUpdates"
+      @unsaved-changes="handleUnsavedChanges"
     >
       <template #header-start="slotProps">
         <FilePenLine class="mr-2" />
@@ -896,6 +1364,18 @@ const exportCurrentBlock = () => {
             />
           </div>
           <div class="flex items-center gap-2">
+            <edge-shad-button
+              type="button"
+              size="icon"
+              variant="outline"
+              class="h-9 w-9"
+              :disabled="props.blockId === 'new' || !currentBlock"
+              title="View Block History"
+              aria-label="View Block History"
+              @click="openHistoryDialog"
+            >
+              <History class="h-4 w-4" />
+            </edge-shad-button>
             <edge-shad-button
               type="button"
               size="icon"
@@ -1065,6 +1545,221 @@ const exportCurrentBlock = () => {
         </div>
       </template>
     </edge-editor>
+    <edge-shad-dialog v-model="state.historyDialogOpen">
+      <DialogContent class="max-w-[96vw] max-h-[92vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle class="text-left">
+            Block History
+          </DialogTitle>
+          <DialogDescription class="text-left">
+            Select a saved version, preview it, and restore it if needed.
+          </DialogDescription>
+        </DialogHeader>
+        <div class="min-w-0 space-y-4">
+          <div class="grid gap-4 md:grid-cols-[minmax(0,320px)_1fr] md:items-end">
+            <div class="flex min-w-0 flex-col justify-end">
+              <edge-shad-combobox
+                v-model="state.historySelectedId"
+                name="blockHistoryVersion"
+                label="History Entry"
+                :items="historyVersionItems"
+                placeholder="Select a history entry"
+                class="w-full"
+                :disabled="state.historyLoading || state.historyRestoring || historyVersionItems.length === 0"
+              />
+            </div>
+            <div class="mb-2 flex min-w-0 flex-col justify-end">
+              <edge-shad-button
+                v-if="hasHistoryDiff"
+                type="button"
+                variant="outline"
+                class="h-10 justify-between gap-3 px-3 text-left"
+                :disabled="!selectedHistoryEntry || state.historyLoading"
+                @click="state.showHistoryDiffDialog = true"
+              >
+                <span class="truncate">View Diff</span>
+                <span class="shrink-0 text-xs text-slate-500 dark:text-slate-400">
+                  {{ historyDiffCountLabel }}
+                </span>
+              </edge-shad-button>
+              <div
+                v-else-if="!selectedHistoryEntry && !state.historyLoading"
+                class="rounded-md border border-slate-300/70 bg-slate-50 mb-1 px-3 py-2 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300"
+              >
+                No older saved versions differ from the current block.
+              </div>
+            </div>
+          </div>
+
+          <div v-if="state.historyError" class="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
+            {{ state.historyError }}
+          </div>
+
+          <div
+            v-if="state.editorHasUnsavedChanges"
+            class="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200"
+          >
+            There are unsaved changes. History compares saved versions of this block.
+          </div>
+
+          <div class="min-w-0 rounded-md border border-slate-300 bg-card dark:border-slate-700">
+            <div
+              v-if="state.historyLoading"
+              class="flex h-[70vh] items-center justify-center gap-2 text-sm text-slate-500 dark:text-slate-400"
+            >
+              <Loader2 class="h-4 w-4 animate-spin" />
+              Loading history preview...
+            </div>
+            <div
+              v-else-if="!state.historyPreviewBlock"
+              class="flex h-[70vh] items-center justify-center px-6 text-center text-sm text-slate-500 dark:text-slate-400"
+            >
+              No older saved versions are available to preview.
+            </div>
+            <div
+              v-else
+              class="w-full mx-auto rounded-none overflow-visible"
+              :style="previewViewportStyle"
+            >
+              <div class="w-full mx-auto bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30" :class="previewSurfaceClass" style="transform: translateZ(0);">
+                <edge-cms-block
+                  v-model="state.historyPreviewBlock"
+                  class="!h-[70vh] overflow-y-auto"
+                  :site-id="edgeGlobal.edgeState.blockEditorSite"
+                  :render-context="state.previewRenderContext"
+                  :theme="theme"
+                  :edit-mode="false"
+                  :contain-fixed="true"
+                  :disable-interactive-preview-in-edit="false"
+                  :suppress-interactive-clicks-except-allowed="true"
+                  :allow-delete="false"
+                  :viewport-mode="previewViewportMode"
+                  :block-id="state.historyPreviewBlock.id"
+                  @delete="ignorePreviewDelete"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+        <DialogFooter class="pt-2 flex justify-between">
+          <edge-shad-button variant="outline" :disabled="state.historyRestoring" @click="closeHistoryDialog">
+            Cancel
+          </edge-shad-button>
+          <edge-shad-button
+            :disabled="state.historyLoading || state.historyRestoring || !selectedHistoryEntry"
+            @click="restoreHistoryVersion"
+          >
+            <Loader2 v-if="state.historyRestoring" class="mr-2 h-4 w-4 animate-spin" />
+            <RotateCcw v-else class="mr-2 h-4 w-4" />
+            Restore
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
+    <edge-shad-dialog v-model="state.showHistoryDiffDialog">
+      <DialogContent class="max-w-[96vw] max-h-[92vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle class="text-left">
+            History Diff
+          </DialogTitle>
+          <DialogDescription class="text-left">
+            Review differences between the selected history entry and the current block.
+          </DialogDescription>
+        </DialogHeader>
+        <div class="mt-2 flex-1 overflow-y-auto pr-1">
+          <div v-if="historyDiffDetails.length" class="space-y-3">
+            <div
+              v-for="change in historyDiffDetails"
+              :key="change.key"
+              class="rounded-md border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800 p-3 text-left"
+            >
+              <div class="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-2">
+                {{ change.label }}
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
+                  <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
+                    {{ change.baseLabel || 'Selected History' }}
+                  </div>
+                  <div
+                    class="whitespace-pre-wrap break-words text-gray-900 dark:text-gray-100"
+                    :class="change.key === 'content' ? 'font-mono text-xs leading-5' : ''"
+                    v-html="change.baseHtml || change.base"
+                  />
+                  <div
+                    v-if="change.key === 'content' && historyDiffBasePreviewBlock"
+                    class="mt-3 rounded-md border border-slate-300 bg-slate-100 p-2 dark:border-slate-700 dark:bg-slate-900/60"
+                  >
+                    <div
+                      class="w-full mx-auto overflow-hidden drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30"
+                      :class="getPreviewSurfaceClass(historyDiffBasePreviewBlock)"
+                      :style="previewViewportStyle"
+                    >
+                      <edge-cms-block
+                        :model-value="historyDiffBasePreviewBlock"
+                        class="max-h-[32vh] overflow-y-auto"
+                        :site-id="edgeGlobal.edgeState.blockEditorSite"
+                        :render-context="state.previewRenderContext"
+                        :theme="theme"
+                        :edit-mode="false"
+                        :contain-fixed="true"
+                        :disable-interactive-preview-in-edit="false"
+                        :suppress-interactive-clicks-except-allowed="true"
+                        :allow-delete="false"
+                        :viewport-mode="previewViewportMode"
+                        :block-id="historyDiffBasePreviewBlock.id"
+                        @delete="ignorePreviewDelete"
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
+                  <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
+                    {{ change.compareLabel || 'Current' }}
+                  </div>
+                  <div
+                    class="whitespace-pre-wrap break-words text-gray-900 dark:text-gray-100"
+                    :class="change.key === 'content' ? 'font-mono text-xs leading-5' : ''"
+                    v-html="change.compareHtml || change.compare"
+                  />
+                  <div
+                    v-if="change.key === 'content' && historyDiffComparePreviewBlock"
+                    class="mt-3 rounded-md border border-slate-300 bg-slate-100 p-2 dark:border-slate-700 dark:bg-slate-900/60"
+                  >
+                    <div
+                      class="w-full mx-auto overflow-hidden drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30"
+                      :class="getPreviewSurfaceClass(historyDiffComparePreviewBlock)"
+                      :style="previewViewportStyle"
+                    >
+                      <edge-cms-block
+                        :model-value="historyDiffComparePreviewBlock"
+                        class="max-h-[32vh] overflow-y-auto"
+                        :site-id="edgeGlobal.edgeState.blockEditorSite"
+                        :render-context="state.previewRenderContext"
+                        :theme="theme"
+                        :edit-mode="false"
+                        :contain-fixed="true"
+                        :disable-interactive-preview-in-edit="false"
+                        :suppress-interactive-clicks-except-allowed="true"
+                        :allow-delete="false"
+                        :viewport-mode="previewViewportMode"
+                        :block-id="historyDiffComparePreviewBlock.id"
+                        @delete="ignorePreviewDelete"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <DialogFooter class="pt-4">
+          <edge-shad-button class="w-full" variant="outline" @click="state.showHistoryDiffDialog = false">
+            Close
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
     <Sheet v-model:open="state.helpOpen">
       <SheetContent side="right" class="w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl">
         <SheetHeader>

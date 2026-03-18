@@ -478,6 +478,45 @@ const removeCloudflarePagesDomain = async (domain, context = {}) => {
   }
 }
 
+const cleanupOwnedPublishedSiteDomains = async (sitePath, { orgId, siteId } = {}) => {
+  const normalizedSitePath = String(sitePath || '').trim()
+  if (!normalizedSitePath)
+    return
+
+  const registrySnap = await db.collection(DOMAIN_REGISTRY_COLLECTION)
+    .where('sitePath', '==', normalizedSitePath)
+    .get()
+
+  if (registrySnap.empty)
+    return
+
+  const removeDomains = Array.from(new Set(
+    registrySnap.docs
+      .flatMap((doc) => {
+        const data = doc.data() || {}
+        const normalizedDomain = normalizeDomain(data.domain || doc.id)
+        const apexDomain = normalizeDomain(data.apexDomain || getCloudflareApexDomain(normalizedDomain))
+        const wwwDomain = normalizeDomain(data.wwwDomain || getCloudflarePagesDomain(apexDomain))
+        return [wwwDomain, apexDomain]
+      })
+      .filter(domain => shouldSyncCloudflareDomain(domain)),
+  ))
+
+  if (removeDomains.length) {
+    await Promise.all(removeDomains.map(domain => removeCloudflarePagesDomain(domain, {
+      orgId,
+      siteId,
+      trigger: 'published-site-settings-delete',
+    })))
+  }
+
+  const batch = db.batch()
+  registrySnap.docs.forEach((doc) => {
+    batch.delete(doc.ref)
+  })
+  await batch.commit()
+}
+
 const collectFormEntries = (data) => {
   if (!data || typeof data !== 'object')
     return []
@@ -2715,8 +2754,13 @@ exports.ensurePublishedSiteDomains = onDocumentWritten(
   { document: 'organizations/{orgId}/published-site-settings/{siteId}', timeoutSeconds: 180 },
   async (event) => {
     const change = event.data
-    if (!change?.after?.exists)
+    if (!change?.after?.exists) {
+      await cleanupOwnedPublishedSiteDomains(change?.before?.ref?.path, {
+        orgId: event.params.orgId,
+        siteId: event.params.siteId,
+      })
       return
+    }
 
     const orgId = event.params.orgId
     const siteId = event.params.siteId

@@ -106,7 +106,7 @@ function onInputBlur(e) {
         <TagsInput
           :id="props.name"
           v-model="arrayModel"
-          class="mt-0"
+          class="mt-0 w-full max-w-full min-w-0 overflow-hidden"
           :class="props.class"
           :disabled="props.disabled"
         >
@@ -114,15 +114,16 @@ function onInputBlur(e) {
             v-for="item in arrayModel"
             :key="item"
             :value="item"
-            class="bg-secondary"
+            class="max-w-full min-w-0 bg-secondary"
           >
-            <TagsInputItemText />
+            <TagsInputItemText class="block max-w-[12rem] truncate" :title="item" />
             <TagsInputItemDelete />
           </TagsInputItem>
 
           <!-- Let Enter be handled by the component; commit on blur -->
           <TagsInputInput
             :placeholder="props.placeholder || 'Add…'"
+            class="min-w-[5rem] max-w-full"
             @blur="onInputBlur"
           />
         </TagsInput>
