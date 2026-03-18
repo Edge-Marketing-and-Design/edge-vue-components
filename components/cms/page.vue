@@ -1,5 +1,5 @@
 <script setup>
-import { AlertTriangle, ArrowDown, ArrowUp, Download, FileCheck, FileX, Maximize2, Monitor, Smartphone, Sparkles, Tablet, UploadCloud } from 'lucide-vue-next'
+import { AlertTriangle, ArrowDown, ArrowUp, Download, FileCheck, FileX, History, Loader2, Maximize2, Monitor, RotateCcw, Smartphone, Sparkles, Tablet, UploadCloud } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 const props = defineProps({
@@ -52,6 +52,8 @@ const state = reactive({
   showUnpublishedChangesDialog: false,
   publishLoading: false,
   workingDoc: {},
+  editorWorkingDoc: null,
+  editorHasUnsavedChanges: false,
   seoAiLoading: false,
   seoAiError: '',
   importingJson: false,
@@ -91,6 +93,16 @@ const state = reactive({
   routeLastSegmentDraft: '',
   routeLastSegment: '',
   templateManualTags: [],
+  editorKey: 0,
+  historyDialogOpen: false,
+  historyLoading: false,
+  historyRestoring: false,
+  historyError: '',
+  historyItems: [],
+  historySelectedId: '',
+  historyPreviewDoc: null,
+  historyPreviewView: 'list',
+  showHistoryDiffDialog: false,
 })
 
 const pageImportInputRef = ref(null)
@@ -562,6 +574,7 @@ const editorDocUpdates = (workingDoc) => {
   const nextVersion = getNextVersion(storedVersion)
   if (state.workingDoc.version !== nextVersion)
     state.workingDoc.version = nextVersion
+  state.editorWorkingDoc = edgeGlobal.dupObject(workingDoc)
 }
 
 const previewRouteLastSegment = computed(() => String(state.routeLastSegment || '').trim())
@@ -584,6 +597,23 @@ const clearRouteLastSegment = () => {
 
 const pageName = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`]?.[props.page]?.name || ''
+})
+
+const currentPagePath = computed(() => {
+  const orgPath = String(edgeGlobal.edgeState.organizationDocPath || '').trim()
+  const siteId = String(props.site || '').trim()
+  const pageId = String(props.page || '').trim()
+  if (!orgPath || !siteId || !pageId || pageId === 'new')
+    return ''
+  return `${orgPath}/sites/${siteId}/pages/${pageId}`
+})
+
+const currentPageRelativePath = computed(() => {
+  const siteId = String(props.site || '').trim()
+  const pageId = String(props.page || '').trim()
+  if (!siteId || !pageId || pageId === 'new')
+    return ''
+  return `sites/${siteId}/pages/${pageId}`
 })
 
 const themes = computed(() => {
@@ -831,6 +861,132 @@ const themeColorOptions = computed(() => {
   const options = Object.keys(colors || {}).map(color => ({ name: color, title: color.charAt(0).toUpperCase() + color.slice(1) }))
   return [{ name: 'transparent', title: 'Transparent' }, ...options]
 })
+
+const getOptionTitle = (options = [], value, fallback = '—') => {
+  const normalizedValue = String(value ?? '').trim()
+  if (!normalizedValue)
+    return fallback
+  return options.find(option => option.name === normalizedValue)?.title || normalizedValue
+}
+
+const getRowLayoutValueLabel = (field, value) => {
+  if (field === 'width')
+    return getOptionTitle(ROW_WIDTH_OPTIONS, value, 'Full width (100%)')
+  if (field === 'gap')
+    return getOptionTitle(ROW_GAP_OPTIONS, value, 'Medium')
+  if (field === 'verticalAlign')
+    return getOptionTitle(ROW_VERTICAL_ALIGN_OPTIONS, value, 'Top')
+  if (field === 'mobileOrder')
+    return getOptionTitle(ROW_MOBILE_STACK_OPTIONS, value, 'Left first')
+  if (field === 'background')
+    return getOptionTitle(themeColorOptions.value, value || 'transparent', 'Transparent')
+  return String(value ?? '—')
+}
+
+const getRowColumnLayoutLabel = (row) => {
+  const spans = (row?.columns || [])
+    .map(col => Number.isFinite(col?.span) ? col.span : null)
+    .filter(Number.isFinite)
+  if (spans.length)
+    return layoutLabel(spans)
+  const count = row?.columns?.length || 0
+  if (!count)
+    return 'No columns'
+  return `${count} column${count === 1 ? '' : 's'}`
+}
+
+const buildLayoutRowMap = (rows = []) => {
+  const rowMap = new Map()
+  if (!Array.isArray(rows))
+    return rowMap
+
+  rows.forEach((row, index) => {
+    const rowId = String(row?.id || `row-${index}`)
+    rowMap.set(rowId, {
+      id: rowId,
+      index,
+      row,
+    })
+  })
+
+  return rowMap
+}
+
+const buildLayoutChangeDetails = (baseRows = [], compareRows = []) => {
+  const details = []
+  const baseMap = buildLayoutRowMap(baseRows)
+  const compareMap = buildLayoutRowMap(compareRows)
+  const allRowIds = new Set([...baseMap.keys(), ...compareMap.keys()])
+
+  for (const rowId of allRowIds) {
+    const baseEntry = baseMap.get(rowId) || null
+    const compareEntry = compareMap.get(rowId) || null
+
+    if (!baseEntry && compareEntry) {
+      details.push({
+        key: `${rowId}:added`,
+        label: `Row ${compareEntry.index + 1}`,
+        base: 'Not present',
+        compare: `Added (${getRowColumnLayoutLabel(compareEntry.row)})`,
+      })
+      continue
+    }
+
+    if (baseEntry && !compareEntry) {
+      details.push({
+        key: `${rowId}:removed`,
+        label: `Row ${baseEntry.index + 1}`,
+        base: `Removed (${getRowColumnLayoutLabel(baseEntry.row)})`,
+        compare: 'Not present',
+      })
+      continue
+    }
+
+    if (baseEntry.index !== compareEntry.index) {
+      details.push({
+        key: `${rowId}:moved`,
+        label: 'Row Order',
+        base: `Row ${baseEntry.index + 1}`,
+        compare: `Row ${compareEntry.index + 1}`,
+      })
+    }
+
+    const rowLabel = `Row ${compareEntry.index + 1}`
+    const fieldPairs = [
+      ['width', 'Width'],
+      ['gap', 'Gap'],
+      ['verticalAlign', 'Vertical Alignment'],
+      ['mobileOrder', 'Stack Order'],
+      ['background', 'Background'],
+    ]
+
+    fieldPairs.forEach(([field, label]) => {
+      const baseValue = baseEntry.row?.[field]
+      const compareValue = compareEntry.row?.[field]
+      if (areEqualNormalized(baseValue, compareValue))
+        return
+      details.push({
+        key: `${rowId}:${field}`,
+        label: `${rowLabel}: ${label}`,
+        base: getRowLayoutValueLabel(field, baseValue),
+        compare: getRowLayoutValueLabel(field, compareValue),
+      })
+    })
+
+    const baseColumnLayout = getRowColumnLayoutLabel(baseEntry.row)
+    const compareColumnLayout = getRowColumnLayoutLabel(compareEntry.row)
+    if (baseColumnLayout !== compareColumnLayout) {
+      details.push({
+        key: `${rowId}:columns`,
+        label: `${rowLabel}: Columns`,
+        base: baseColumnLayout,
+        compare: compareColumnLayout,
+      })
+    }
+  }
+
+  return details
+}
 
 const backgroundClass = (bgKey) => {
   if (!bgKey)
@@ -1223,6 +1379,74 @@ const currentPage = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`]?.[props.page] || null
 })
 
+const currentHistoryCompareDoc = computed(() => currentPage.value)
+
+const buildComparablePageDiffDoc = (doc) => {
+  if (!doc || typeof doc !== 'object')
+    return null
+
+  return {
+    content: Array.isArray(doc.content) ? doc.content : [],
+    postContent: Array.isArray(doc.postContent) ? doc.postContent : [],
+    structure: Array.isArray(doc.structure) ? doc.structure : [],
+    postStructure: Array.isArray(doc.postStructure) ? doc.postStructure : [],
+    metaTitle: doc.metaTitle ?? '',
+    metaDescription: doc.metaDescription ?? '',
+    structuredData: doc.structuredData ?? null,
+    postMetaTitle: doc.postMetaTitle ?? '',
+    postMetaDescription: doc.postMetaDescription ?? '',
+    postStructuredData: doc.postStructuredData ?? null,
+  }
+}
+
+const pageDocsMatchForDiff = (baseDoc, compareDoc) => {
+  return areEqualNormalized(
+    buildComparablePageDiffDoc(baseDoc),
+    buildComparablePageDiffDoc(compareDoc),
+  )
+}
+
+const getHistorySnapshotState = (item) => {
+  if (isPlainObject(item?.afterData))
+    return 'afterData'
+  if (isPlainObject(item?.beforeData))
+    return 'beforeData'
+  return ''
+}
+
+const getHistorySnapshotDoc = item => item?.[getHistorySnapshotState(item)] || null
+
+const historyPreviewItems = computed(() => {
+  return (state.historyItems || []).filter((item) => {
+    const historyDoc = getHistorySnapshotDoc(item)
+    if (!historyDoc)
+      return false
+    return !pageDocsMatchForDiff(historyDoc, currentPage.value)
+  })
+})
+
+const selectedHistoryEntry = computed(() => {
+  return historyPreviewItems.value.find(item => item.historyId === state.historySelectedId) || null
+})
+
+const historyPreviewHasPostView = computed(() => {
+  return hasPostView(state.historyPreviewDoc)
+})
+
+const historyPreviewRenderKey = computed(() => {
+  const historyId = String(state.historySelectedId || 'none')
+  const themeKey = String((effectiveThemeId.value || selectedThemeId.value || 'no-theme'))
+  const previewMode = String(state.historyPreviewView || 'list')
+  return `${historyId}:${themeKey}:${previewMode}:${previewRouteLastSegment.value || 'auto'}`
+})
+
+const historyVersionItems = computed(() => {
+  return historyPreviewItems.value.map((item, index) => ({
+    name: item.historyId,
+    title: formatHistoryEntryLabel(item, index),
+  }))
+})
+
 const pagePublishStatus = computed(() => getPagePublishStatus(props.page))
 
 const pagesCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`)
@@ -1281,6 +1505,191 @@ const templateAllowedBlockTypes = (workingDoc) => {
   if (!props.isTemplateSite)
     return ['Page']
   return normalizeTemplatePageTypeSelections(workingDoc?.type, { fallback: ['Page'], excludePost: Boolean(workingDoc?.post) })
+}
+
+const getHistoryTimestampMs = (value) => {
+  if (typeof value === 'number' && Number.isFinite(value))
+    return value
+  if (typeof value?.millis === 'number' && Number.isFinite(value.millis))
+    return value.millis
+  const isoValue = String(value?.iso || value || '').trim()
+  if (!isoValue)
+    return null
+  const parsed = Date.parse(isoValue)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+const formatHistoryDate = (value) => {
+  const millis = getHistoryTimestampMs(value)
+  if (!millis)
+    return 'Unknown date'
+  return new Date(millis).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+function formatHistoryEntryLabel(item, index = 0) {
+  const dateLabel = formatHistoryDate(item?.createdAt)
+  const fallbackLabel = `Entry ${index + 1}`
+  if (dateLabel)
+    return dateLabel
+  return fallbackLabel
+}
+
+const cloneHistoryPreviewDoc = (doc) => {
+  if (!isPlainObject(doc))
+    return null
+  const previewDoc = edgeGlobal.dupObject(doc)
+  ensureStructureDefaults(previewDoc, false)
+  if (hasPostView(previewDoc))
+    ensureStructureDefaults(previewDoc, true)
+  return previewDoc
+}
+
+const syncHistoryPreviewDoc = (entry) => {
+  state.historyPreviewDoc = cloneHistoryPreviewDoc(getHistorySnapshotDoc(entry))
+  state.historyPreviewView = hasPostView(state.historyPreviewDoc) ? state.historyPreviewView : 'list'
+}
+
+const isHistoryItemArray = (value) => {
+  if (!Array.isArray(value) || !value.length)
+    return false
+  return value.every((item) => {
+    return item && typeof item === 'object' && (
+      typeof item.historyId === 'string'
+      || typeof item.path === 'string'
+      || typeof item.relativePath === 'string'
+    )
+  })
+}
+
+const extractHistoryItemsFromResponse = (value, visited = new Set()) => {
+  if (!value || typeof value !== 'object')
+    return []
+  if (visited.has(value))
+    return []
+  visited.add(value)
+
+  if (isHistoryItemArray(value))
+    return value
+
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const nestedItems = extractHistoryItemsFromResponse(entry, visited)
+      if (nestedItems.length)
+        return nestedItems
+    }
+    return []
+  }
+
+  const priorityKeys = ['items', 'data', 'result']
+  for (const key of priorityKeys) {
+    if (!Object.prototype.hasOwnProperty.call(value, key))
+      continue
+    const nestedItems = extractHistoryItemsFromResponse(value[key], visited)
+    if (nestedItems.length)
+      return nestedItems
+  }
+
+  for (const nestedValue of Object.values(value)) {
+    const nestedItems = extractHistoryItemsFromResponse(nestedValue, visited)
+    if (nestedItems.length)
+      return nestedItems
+  }
+
+  return []
+}
+
+const loadPageHistory = async () => {
+  if (!edgeFirebase?.user?.uid || !currentPagePath.value)
+    return
+
+  state.historyLoading = true
+  state.historyError = ''
+  try {
+    const response = await edgeFirebase.runFunction('history-listHistory', {
+      uid: edgeFirebase.user.uid,
+      path: currentPagePath.value,
+      limit: 50,
+    })
+    let items = extractHistoryItemsFromResponse(response)
+
+    if (!items.length && edgeGlobal.edgeState.currentOrganization) {
+      const fallbackResponse = await edgeFirebase.runFunction('history-listHistory', {
+        uid: edgeFirebase.user.uid,
+        orgId: edgeGlobal.edgeState.currentOrganization,
+        limit: 200,
+      })
+      const fallbackItems = extractHistoryItemsFromResponse(fallbackResponse)
+      items = fallbackItems.filter((item) => {
+        const itemPath = String(item?.path || '').trim()
+        const itemRelativePath = String(item?.relativePath || '').trim()
+        return itemPath === currentPagePath.value || itemRelativePath === currentPageRelativePath.value
+      })
+    }
+
+    state.historyItems = items
+    const nextSelectedId = historyPreviewItems.value.find(item => item.historyId === state.historySelectedId)?.historyId
+      || historyPreviewItems.value[0]?.historyId
+      || ''
+    state.historySelectedId = nextSelectedId
+    syncHistoryPreviewDoc(selectedHistoryEntry.value)
+  }
+  catch (error) {
+    console.error('Failed to load page history', error)
+    state.historyItems = []
+    state.historySelectedId = ''
+    state.historyPreviewDoc = null
+    state.historyError = 'Failed to load page history.'
+  }
+  finally {
+    state.historyLoading = false
+  }
+}
+
+const openHistoryDialog = async () => {
+  if (!currentPage.value || !currentPagePath.value || !edgeFirebase?.user?.uid)
+    return
+  state.historyDialogOpen = true
+  await loadPageHistory()
+}
+
+const closeHistoryDialog = () => {
+  if (state.historyRestoring)
+    return
+  state.showHistoryDiffDialog = false
+  state.historyDialogOpen = false
+}
+
+const restoreHistoryVersion = async () => {
+  const historyEntry = selectedHistoryEntry.value
+  if (!historyEntry?.historyId || !edgeFirebase?.user?.uid)
+    return
+
+  state.historyRestoring = true
+  state.historyError = ''
+  try {
+    const targetState = getHistorySnapshotState(historyEntry)
+    await edgeFirebase.runFunction('history-restoreHistory', {
+      uid: edgeFirebase.user.uid,
+      historyId: historyEntry.historyId,
+      targetState,
+    })
+    const restoredDoc = cloneHistoryPreviewDoc(getHistorySnapshotDoc(historyEntry))
+    state.workingDoc = restoredDoc || {}
+    state.previewPageView = hasPostView(restoredDoc) ? state.historyPreviewView : 'list'
+    state.editMode = false
+    state.showHistoryDiffDialog = false
+    state.historyDialogOpen = false
+    state.editorKey += 1
+    notifySuccess(`Restored ${props.isTemplateSite ? 'template' : 'page'} from ${formatHistoryEntryLabel(historyEntry)}.`)
+  }
+  catch (error) {
+    console.error('Failed to restore history version', error)
+    state.historyError = 'Failed to restore this version.'
+    notifyError(`Failed to restore ${props.isTemplateSite ? 'template' : 'page'} history.`)
+  }
+  finally {
+    state.historyRestoring = false
+  }
 }
 
 const templateTagItems = computed(() => {
@@ -1703,6 +2112,10 @@ watch (currentPage, (newPage) => {
   state.workingDoc.structuredData = newPage?.structuredData
 }, { immediate: true, deep: true })
 
+watch(selectedHistoryEntry, (entry) => {
+  syncHistoryPreviewDoc(entry)
+}, { immediate: false })
+
 const stringifyLimited = (value, limit = 600) => {
   if (value == null)
     return '—'
@@ -1719,12 +2132,7 @@ const summarizeBlocks = (blocks) => {
   if (!Array.isArray(blocks) || blocks.length === 0)
     return 'No blocks'
   const count = blocks.length
-  const names = blocks
-    .map(block => block?.type || block?.component || block?.layout || block?.name)
-    .filter(Boolean)
-  const sample = Array.from(new Set(names)).slice(0, 3).join(', ')
-  const suffix = names.length > 3 ? ', ...' : ''
-  return `${count} block${count === 1 ? '' : 's'}${sample ? ` (${sample}${suffix})` : ''}`
+  return `${count} block${count === 1 ? '' : 's'}`
 }
 
 const summarizeStructure = (rows) => {
@@ -1757,117 +2165,275 @@ const describeBlock = (block) => {
   if (!block)
     return 'Block'
   const type = block.component || block.type || block.layout || 'Block'
-  const title = block.title || block.heading || block.label || block.name || ''
-  const summary = block.text || block.content || block.body || ''
+  const title = block?.values?.title || block?.values?.heading || block?.values?.label || block.title || block.heading || block.label || block.name || ''
   const parts = [type]
   if (title)
     parts.push(`“${String(title)}”`)
-  if (summary && String(summary).length < 80)
-    parts.push(String(summary))
   return parts.filter(Boolean).join(' - ')
 }
 
-const diffBlockFields = (publishedBlock, draftBlock) => {
-  const keys = new Set([
-    ...Object.keys(publishedBlock || {}),
-    ...Object.keys(draftBlock || {}),
-  ])
-  const changes = []
-  for (const key of keys) {
-    if (key === 'id' || key === 'blockId')
-      continue
-    const prevVal = publishedBlock?.[key]
-    const nextVal = draftBlock?.[key]
-    if (!areEqualNormalized(prevVal, nextVal)) {
-      changes.push(`${key}: ${summarizeChangeValue(prevVal, true)} → ${summarizeChangeValue(nextVal, true)}`)
-    }
-  }
-  return changes
+const getBlockChangeTypeLabel = (changeType) => {
+  if (changeType === 'added')
+    return 'Added'
+  if (changeType === 'removed')
+    return 'Removed'
+  if (changeType === 'moved')
+    return 'Moved'
+  if (changeType === 'movedChanged')
+    return 'Moved and Changed'
+  return 'Changed'
 }
 
-const buildBlockChangeDetails = (publishedBlocks = [], draftBlocks = []) => {
+const getBlockPositionLabel = (position) => {
+  if (!position)
+    return 'Not placed'
+  const parts = [
+    `Row ${position.rowIndex + 1}`,
+    `Column ${position.colIndex + 1}`,
+  ]
+  if (position.columnBlockCount > 1)
+    parts.push(`Position ${position.blockIndex + 1}`)
+  return parts.join(', ')
+}
+
+const normalizeBlockPositionForDiff = (position) => {
+  if (!position)
+    return null
+  return {
+    rowIndex: Number.isFinite(position.rowIndex) ? position.rowIndex : null,
+    colIndex: Number.isFinite(position.colIndex) ? position.colIndex : null,
+    blockIndex: Number.isFinite(position.blockIndex) ? position.blockIndex : null,
+  }
+}
+
+const buildBlockMap = (blocks = [], prefix = 'block') => {
+  const map = new Map()
+  blocks.forEach((block, index) => {
+    const key = String(block?.id || `${prefix}-${index}`)
+    map.set(key, block)
+  })
+  return map
+}
+
+const buildBlockPositionMap = (rows = []) => {
+  const positions = new Map()
+  if (!Array.isArray(rows))
+    return positions
+
+  rows.forEach((row, rowIndex) => {
+    const columns = Array.isArray(row?.columns) ? row.columns : []
+    columns.forEach((column, colIndex) => {
+      const blockIds = Array.isArray(column?.blocks) ? column.blocks : []
+      blockIds.forEach((blockId, blockIndex) => {
+        const normalizedBlockId = String(blockId || '').trim()
+        if (!normalizedBlockId || positions.has(normalizedBlockId))
+          return
+        positions.set(normalizedBlockId, {
+          rowIndex,
+          colIndex,
+          blockIndex,
+          columnBlockCount: blockIds.length,
+        })
+      })
+    })
+  })
+
+  return positions
+}
+
+const stripStructureBlocks = (rows = []) => {
+  if (!Array.isArray(rows))
+    return []
+
+  return rows.map((row) => {
+    const normalizedRow = {
+      ...(row || {}),
+      columns: Array.isArray(row?.columns)
+        ? row.columns.map((column) => {
+          const nextColumn = { ...(column || {}) }
+          delete nextColumn.blocks
+          return nextColumn
+        })
+        : [],
+    }
+    return normalizedRow
+  })
+}
+
+const buildBlockChangeDetails = (baseBlocks = [], compareBlocks = [], baseStructure = [], compareStructure = [], keyPrefix = 'blocks') => {
   const details = []
-  const publishedMap = new Map()
-  const draftMap = new Map()
+  const baseMap = buildBlockMap(baseBlocks, `${keyPrefix}-base`)
+  const compareMap = buildBlockMap(compareBlocks, `${keyPrefix}-compare`)
+  const basePositions = buildBlockPositionMap(baseStructure)
+  const comparePositions = buildBlockPositionMap(compareStructure)
+  const allBlockIds = new Set([
+    ...baseMap.keys(),
+    ...compareMap.keys(),
+    ...basePositions.keys(),
+    ...comparePositions.keys(),
+  ])
 
-  publishedBlocks.forEach((block, index) => {
-    const key = block?.id || block?.blockId || `pub-${index}`
-    publishedMap.set(key, block)
-  })
-  draftBlocks.forEach((block, index) => {
-    const key = block?.id || block?.blockId || `draft-${index}`
-    draftMap.set(key, block)
-  })
+  for (const blockId of allBlockIds) {
+    const baseBlock = baseMap.get(blockId) || null
+    const compareBlock = compareMap.get(blockId) || null
+    const basePosition = basePositions.get(blockId) || null
+    const comparePosition = comparePositions.get(blockId) || null
 
-  for (const [key, draftBlock] of draftMap.entries()) {
-    if (!publishedMap.has(key)) {
-      details.push(`Added ${describeBlock(draftBlock)}`)
+    if (!baseBlock && compareBlock) {
+      details.push({
+        key: `${keyPrefix}:added:${blockId}`,
+        changeType: 'added',
+        label: getBlockChangeTypeLabel('added'),
+        blockLabel: describeBlock(compareBlock),
+        baseBlock: null,
+        compareBlock,
+        basePositionLabel: 'Not present',
+        comparePositionLabel: getBlockPositionLabel(comparePosition),
+        showPreview: true,
+        sortPosition: comparePosition || basePosition || null,
+      })
       continue
     }
-    const publishedBlock = publishedMap.get(key)
-    if (!areEqualNormalized(publishedBlock, draftBlock)) {
-      const fieldChanges = diffBlockFields(publishedBlock, draftBlock)
-      if (fieldChanges.length)
-        details.push(`Updated ${describeBlock(draftBlock)} (${fieldChanges.join('; ')})`)
-      else
-        details.push(`Updated ${describeBlock(draftBlock)}`)
+
+    if (baseBlock && !compareBlock) {
+      details.push({
+        key: `${keyPrefix}:removed:${blockId}`,
+        changeType: 'removed',
+        label: getBlockChangeTypeLabel('removed'),
+        blockLabel: describeBlock(baseBlock),
+        baseBlock,
+        compareBlock: null,
+        basePositionLabel: getBlockPositionLabel(basePosition),
+        comparePositionLabel: 'Not present',
+        showPreview: true,
+        sortPosition: basePosition || comparePosition || null,
+      })
+      continue
     }
+
+    const moved = !areEqualNormalized(
+      normalizeBlockPositionForDiff(basePosition),
+      normalizeBlockPositionForDiff(comparePosition),
+    )
+    const changed = !areEqualNormalized(baseBlock, compareBlock)
+    if (!moved && !changed)
+      continue
+
+    const changeType = moved && changed ? 'movedChanged' : (moved ? 'moved' : 'changed')
+    details.push({
+      key: `${keyPrefix}:${changeType}:${blockId}`,
+      changeType,
+      label: getBlockChangeTypeLabel(changeType),
+      blockLabel: describeBlock(compareBlock || baseBlock),
+      baseBlock,
+      compareBlock,
+      basePositionLabel: getBlockPositionLabel(basePosition),
+      comparePositionLabel: getBlockPositionLabel(comparePosition),
+      showPreview: changeType !== 'moved',
+      sortPosition: comparePosition || basePosition || null,
+    })
   }
 
-  for (const [key, publishedBlock] of publishedMap.entries()) {
-    if (!draftMap.has(key)) {
-      details.push(`Removed ${describeBlock(publishedBlock)}`)
-    }
-  }
-
-  return details
+  return details.sort((a, b) => {
+    const aPos = a.sortPosition || {}
+    const bPos = b.sortPosition || {}
+    const aRow = Number.isFinite(aPos.rowIndex) ? aPos.rowIndex : Number.MAX_SAFE_INTEGER
+    const bRow = Number.isFinite(bPos.rowIndex) ? bPos.rowIndex : Number.MAX_SAFE_INTEGER
+    if (aRow !== bRow)
+      return aRow - bRow
+    const aCol = Number.isFinite(aPos.colIndex) ? aPos.colIndex : Number.MAX_SAFE_INTEGER
+    const bCol = Number.isFinite(bPos.colIndex) ? bPos.colIndex : Number.MAX_SAFE_INTEGER
+    if (aCol !== bCol)
+      return aCol - bCol
+    const aBlock = Number.isFinite(aPos.blockIndex) ? aPos.blockIndex : Number.MAX_SAFE_INTEGER
+    const bBlock = Number.isFinite(bPos.blockIndex) ? bPos.blockIndex : Number.MAX_SAFE_INTEGER
+    if (aBlock !== bBlock)
+      return aBlock - bBlock
+    return String(a.blockLabel || '').localeCompare(String(b.blockLabel || ''))
+  })
 }
 
-const unpublishedChangeDetails = computed(() => {
+const buildPageChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel } = {}) => {
   const changes = []
-  const draft = currentPage.value
-  const published = publishedPage.value
+  const base = baseDoc
+  const compare = compareDoc
 
-  if (!draft && !published)
+  if (!base && !compare)
     return changes
 
   const compareField = (key, label, formatter = v => summarizeChangeValue(v, false), options = {}) => {
-    const publishedVal = published?.[key]
-    const draftVal = draft?.[key]
-    if (areEqualNormalized(publishedVal, draftVal))
+    const baseVal = base?.[key]
+    const compareVal = compare?.[key]
+    if (areEqualNormalized(baseVal, compareVal))
       return
     const change = {
       key,
       label,
-      published: formatter(publishedVal),
-      draft: formatter(draftVal),
+      baseLabel,
+      compareLabel,
+      base: formatter(baseVal),
+      compare: formatter(compareVal),
     }
     if (options.details)
-      change.details = options.details(publishedVal, draftVal)
+      change.details = options.details(baseVal, compareVal)
     changes.push(change)
   }
 
-  if (!published && draft) {
+  if (!base && compare) {
     changes.push({
-      key: 'unpublished',
-      label: 'Not yet published',
-      published: 'No published version',
-      draft: 'Draft ready to publish',
+      key: 'compare-only',
+      label: compareLabel || 'Current',
+      baseLabel,
+      compareLabel,
+      base: `No ${String(baseLabel || 'base').toLowerCase()} available`,
+      compare: `${compareLabel || 'Current'} available`,
     })
   }
-  if (published && !draft) {
+  if (base && !compare) {
     changes.push({
-      key: 'draft-missing',
-      label: 'Draft missing',
-      published: 'Published version exists',
-      draft: 'No draft available',
+      key: 'base-only',
+      label: baseLabel || 'Selected',
+      baseLabel,
+      compareLabel,
+      base: `${baseLabel || 'Selected'} available`,
+      compare: `No ${String(compareLabel || 'current').toLowerCase()} available`,
     })
   }
 
-  compareField('content', 'Index content', summarizeBlocks, { details: (pubVal, draftVal) => buildBlockChangeDetails(pubVal, draftVal) })
-  compareField('postContent', 'Post content', summarizeBlocks, { details: (pubVal, draftVal) => buildBlockChangeDetails(pubVal, draftVal) })
-  compareField('structure', 'Index structure', summarizeStructure)
-  compareField('postStructure', 'Post structure', summarizeStructure)
+  const compareBlockArea = (keyPrefix, label, contentKey, structureKey, layoutLabel) => {
+    const baseBlocks = Array.isArray(base?.[contentKey]) ? base[contentKey] : []
+    const compareBlocks = Array.isArray(compare?.[contentKey]) ? compare[contentKey] : []
+    const baseStructure = Array.isArray(base?.[structureKey]) ? base[structureKey] : []
+    const compareStructure = Array.isArray(compare?.[structureKey]) ? compare[structureKey] : []
+    const blockChanges = buildBlockChangeDetails(baseBlocks, compareBlocks, baseStructure, compareStructure, keyPrefix)
+
+    if (blockChanges.length) {
+      changes.push({
+        key: `${keyPrefix}-blocks`,
+        label,
+        baseLabel,
+        compareLabel,
+        base: summarizeBlocks(baseBlocks),
+        compare: summarizeBlocks(compareBlocks),
+        blockChanges,
+      })
+    }
+
+    const baseLayout = stripStructureBlocks(baseStructure)
+    const compareLayout = stripStructureBlocks(compareStructure)
+    if (!areEqualNormalized(baseLayout, compareLayout)) {
+      changes.push({
+        key: `${keyPrefix}-layout`,
+        label: layoutLabel,
+        baseLabel,
+        compareLabel,
+        layoutChanges: buildLayoutChangeDetails(baseStructure, compareStructure),
+      })
+    }
+  }
+
+  compareBlockArea('index', 'Index blocks', 'content', 'structure', 'Index layout')
+  compareBlockArea('detail', 'Detail blocks', 'postContent', 'postStructure', 'Detail layout')
   compareField('metaTitle', 'Meta title', val => summarizeChangeValue(val, true))
   compareField('metaDescription', 'Meta description', val => summarizeChangeValue(val, true))
   compareField('structuredData', 'Structured data', val => summarizeChangeValue(val, true))
@@ -1876,6 +2442,65 @@ const unpublishedChangeDetails = computed(() => {
   compareField('postStructuredData', 'Detail structured data', val => summarizeChangeValue(val, true))
 
   return changes
+}
+
+const unpublishedChangeDetails = computed(() => {
+  return buildPageChangeDetails(publishedPage.value, currentPage.value, {
+    baseLabel: 'Published',
+    compareLabel: 'Draft',
+  })
+})
+
+const unsavedChangeDetails = computed(() => {
+  return buildPageChangeDetails(currentPage.value, state.editorWorkingDoc, {
+    baseLabel: 'Saved',
+    compareLabel: 'Current',
+  })
+})
+
+const showingUnsavedChanges = computed(() => {
+  return state.editorHasUnsavedChanges && unsavedChangeDetails.value.length > 0
+})
+
+const activePageChangeDetails = computed(() => {
+  if (showingUnsavedChanges.value)
+    return unsavedChangeDetails.value
+  return unpublishedChangeDetails.value
+})
+
+const pageChangesDialogTitle = computed(() => {
+  return showingUnsavedChanges.value ? 'Unsaved Changes' : 'Unpublished Changes'
+})
+
+const pageChangesDialogDescription = computed(() => {
+  if (showingUnsavedChanges.value)
+    return `Review what changed in memory versus the saved ${props.isTemplateSite ? 'template' : 'page'}.`
+  return `Review what changed since the last publish. Last Published: ${lastPublishedTime(props.page)}`
+})
+
+const historyDiffDetails = computed(() => {
+  return buildPageChangeDetails(getHistorySnapshotDoc(selectedHistoryEntry.value), currentHistoryCompareDoc.value, {
+    baseLabel: 'Selected History',
+    compareLabel: 'Current',
+  })
+})
+
+const historyDiffCountLabel = computed(() => {
+  if (!selectedHistoryEntry.value)
+    return 'Select an entry'
+  const count = historyDiffDetails.value.length
+  if (count === 0)
+    return 'No differences'
+  if (count === 1)
+    return '1 difference'
+  return `${count} differences`
+})
+
+const hasHistoryDiff = computed(() => historyDiffDetails.value.length > 0)
+
+watch(hasHistoryDiff, (nextValue) => {
+  if (!nextValue)
+    state.showHistoryDiffDialog = false
 })
 
 const publishPage = async (pageId) => {
@@ -1918,6 +2543,7 @@ const publishPage = async (pageId) => {
 
 const hasUnsavedChanges = (changes) => {
   console.log('Unsaved changes:', changes)
+  state.editorHasUnsavedChanges = changes === true
   if (changes === true) {
     edgeGlobal.edgeState.cmsPageWithUnsavedChanges = props.page
   }
@@ -1929,6 +2555,7 @@ const hasUnsavedChanges = (changes) => {
 
 <template>
   <edge-editor
+    :key="state.editorKey"
     :collection="`sites/${site}/pages`"
     :doc-id="page"
     :schema="schemas.pages"
@@ -1948,7 +2575,19 @@ const hasUnsavedChanges = (changes) => {
         <div class="flex w-full items-center">
           <div class="w-full border-t border-gray-300 dark:border-white/15" aria-hidden="true" />
           <div v-if="!props.isTemplateSite" class="px-4 text-gray-600 dark:text-gray-300 whitespace-nowrap text-center flex flex-col items-center gap-1">
-            <template v-if="pagePublishStatus.key === 'publishedWithChanges'">
+            <template v-if="slotProps.unsavedChanges">
+              <div class="flex items-center gap-2">
+                <edge-shad-button
+                  variant="outline"
+                  class="bg-yellow-100 text-yellow-800 border-yellow-300 hover:bg-yellow-100 hover:text-yellow-900 text-xs h-[32px] gap-1"
+                  @click="state.showUnpublishedChangesDialog = true"
+                >
+                  <AlertTriangle class="w-4 h-4" />
+                  Unsaved Changes
+                </edge-shad-button>
+              </div>
+            </template>
+            <template v-else-if="pagePublishStatus.key === 'publishedWithChanges'">
               <div class="flex items-center gap-2">
                 <edge-shad-button
                   variant="outline"
@@ -2039,6 +2678,21 @@ const hasUnsavedChanges = (changes) => {
               </edge-shad-button>
             </div>
             <span class="text-[10px] leading-tight text-slate-600 dark:text-slate-300">Viewport</span>
+          </div>
+          <div class="flex flex-col items-center gap-1 px-2">
+            <edge-shad-button
+              type="button"
+              variant="outline"
+              size="icon"
+              class="h-[26px] w-[26px]"
+              :disabled="!currentPage || !props.page || props.page === 'new'"
+              :title="props.isTemplateSite ? 'View Template History' : 'View Page History'"
+              :aria-label="props.isTemplateSite ? 'View Template History' : 'View Page History'"
+              @click="openHistoryDialog"
+            >
+              <History class="w-4 h-4" />
+            </edge-shad-button>
+            <span class="text-[10px] leading-tight text-slate-600 dark:text-slate-300">Versions</span>
           </div>
           <div v-if="hasPostView(slotProps.workingDoc)" class="flex flex-col items-center gap-1 px-2">
             <div class="flex items-center gap-1">
@@ -2787,6 +3441,218 @@ const hasUnsavedChanges = (changes) => {
       </Sheet>
     </template>
   </edge-editor>
+  <edge-shad-dialog v-model="state.historyDialogOpen">
+    <DialogContent class="w-full max-w-6xl">
+      <DialogHeader>
+        <DialogTitle class="text-left">
+          {{ props.isTemplateSite ? 'Template History' : 'Page History' }}
+        </DialogTitle>
+        <DialogDescription class="text-left">
+          Select a saved version, preview it, and restore it if needed.
+        </DialogDescription>
+      </DialogHeader>
+      <div class="min-w-0 space-y-4">
+        <div class="grid gap-4 md:grid-cols-[minmax(0,320px)_1fr] md:items-end">
+          <div class="flex min-w-0 flex-col justify-end">
+            <edge-shad-combobox
+              v-model="state.historySelectedId"
+              name="pageHistoryVersion"
+              label="History Entry"
+              :items="historyVersionItems"
+              placeholder="Select a history entry"
+              class="w-full"
+              :disabled="state.historyLoading || state.historyRestoring || historyVersionItems.length === 0"
+            />
+          </div>
+          <div class="flex min-w-0 flex-col justify-end">
+            <edge-shad-button
+              v-if="hasHistoryDiff"
+              type="button"
+              variant="outline"
+              class="h-10 justify-between gap-3 px-3 text-left mb-1"
+              :disabled="!selectedHistoryEntry || state.historyLoading"
+              @click="state.showHistoryDiffDialog = true"
+            >
+              <span class="truncate">View Diff</span>
+              <span class="shrink-0 text-xs text-slate-500 dark:text-slate-400">
+                {{ historyDiffCountLabel }}
+              </span>
+            </edge-shad-button>
+            <div
+              v-else-if="!selectedHistoryEntry && !state.historyLoading"
+              class="rounded-md border border-slate-300/70 bg-slate-50 mb-1  px-3 py-2 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300"
+            >
+              No older saved versions differ from the current {{ props.isTemplateSite ? 'template' : 'page' }}.
+            </div>
+          </div>
+        </div>
+
+        <div v-if="state.historyError" class="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
+          {{ state.historyError }}
+        </div>
+
+        <div
+          v-if="state.editorHasUnsavedChanges"
+          class="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200"
+        >
+          There are unsaved changes. History compares saved versions of this {{ props.isTemplateSite ? 'template' : 'page' }}. For unsaved changes, use the <strong>Unsaved Changes</strong> button in the page header.
+        </div>
+
+        <div v-if="historyPreviewHasPostView" class="flex items-center gap-2">
+          <edge-shad-button
+            type="button"
+            variant="outline"
+            class="h-8 px-3 text-xs"
+            :class="state.historyPreviewView === 'list' ? 'bg-slate-700 text-white border-slate-700 dark:bg-slate-200 dark:text-slate-900 dark:border-slate-200' : ''"
+            @click="state.historyPreviewView = 'list'"
+          >
+            Index Preview
+          </edge-shad-button>
+          <edge-shad-button
+            type="button"
+            variant="outline"
+            class="h-8 px-3 text-xs"
+            :class="state.historyPreviewView === 'post' ? 'bg-slate-700 text-white border-slate-700 dark:bg-slate-200 dark:text-slate-900 dark:border-slate-200' : ''"
+            @click="state.historyPreviewView = 'post'"
+          >
+            Detail Preview
+          </edge-shad-button>
+        </div>
+
+        <div class="min-w-0 rounded-md border border-slate-300 bg-card dark:border-slate-700">
+          <div
+            v-if="state.historyLoading"
+            class="flex h-[60vh] items-center justify-center gap-2 text-sm text-slate-500 dark:text-slate-400"
+          >
+            <Loader2 class="h-4 w-4 animate-spin" />
+            Loading history preview...
+          </div>
+          <div
+            v-else-if="!state.historyPreviewDoc"
+            class="flex h-[60vh] items-center justify-center px-6 text-center text-sm text-slate-500 dark:text-slate-400"
+          >
+            No older saved versions are available to preview.
+          </div>
+          <div
+            v-else-if="state.historyPreviewView !== 'post'"
+            :key="`${historyPreviewRenderKey}:list`"
+            data-cms-preview-surface="page"
+            data-cms-preview-mode="history"
+            class="relative isolate h-[60vh] overflow-y-auto overflow-x-hidden bg-card p-0"
+            :style="previewViewportContainStyle"
+          >
+            <div
+              v-if="!state.historyPreviewDoc?.structure?.length"
+              class="flex min-h-[50vh] items-center justify-center px-6 text-center text-sm text-slate-500 dark:text-slate-400"
+            >
+              No rows in this version.
+            </div>
+            <div v-else>
+              <div
+                v-for="(row, rowIndex) in state.historyPreviewDoc.structure"
+                :key="row.id || `history-list-row-${rowIndex}`"
+              >
+                <div
+                  class="mx-auto shadow-none border-0 p-0"
+                  :class="[rowWidthClass(row.width), backgroundClass(row.background)]"
+                  :style="rowBackgroundStyle(row.background)"
+                >
+                  <div :class="[rowGridClass(row), rowVerticalAlignClass(row)]" :style="rowGridStyle(row)">
+                    <div
+                      v-for="(column, colIndex) in row.columns || []"
+                      :key="column.id || colIndex"
+                      :class="columnMobileOrderClass(row, colIndex)"
+                      :style="{ ...columnSpanStyle(column), ...columnMobileOrderStyle(row, colIndex) }"
+                    >
+                      <div
+                        v-for="(blockId, blockPosition) in column.blocks || []"
+                        :key="`${historyPreviewRenderKey}:list:${blockId}:${blockPosition}`"
+                      >
+                        <edge-cms-block-api
+                          v-if="blockIndex(state.historyPreviewDoc, blockId, false) !== -1"
+                          :site-id="props.site"
+                          :content="state.historyPreviewDoc.content[blockIndex(state.historyPreviewDoc, blockId, false)]?.content"
+                          :values="state.historyPreviewDoc.content[blockIndex(state.historyPreviewDoc, blockId, false)]?.values"
+                          :meta="state.historyPreviewDoc.content[blockIndex(state.historyPreviewDoc, blockId, false)]?.meta"
+                          :viewport-mode="previewViewportMode"
+                          :theme="theme"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div
+            v-else
+            :key="`${historyPreviewRenderKey}:post`"
+            data-cms-preview-surface="page"
+            data-cms-preview-mode="history"
+            class="relative isolate h-[60vh] overflow-y-auto overflow-x-hidden bg-card p-0"
+            :style="previewViewportContainStyle"
+          >
+            <div
+              v-if="!state.historyPreviewDoc?.postStructure?.length"
+              class="flex min-h-[50vh] items-center justify-center px-6 text-center text-sm text-slate-500 dark:text-slate-400"
+            >
+              No detail rows in this version.
+            </div>
+            <div v-else>
+              <div
+                v-for="(row, rowIndex) in state.historyPreviewDoc.postStructure"
+                :key="row.id || `history-post-row-${rowIndex}`"
+              >
+                <div
+                  class="mx-auto shadow-none border-0 p-0"
+                  :class="[rowWidthClass(row.width), backgroundClass(row.background)]"
+                  :style="rowBackgroundStyle(row.background)"
+                >
+                  <div :class="[rowGridClass(row), rowVerticalAlignClass(row)]" :style="rowGridStyle(row)">
+                    <div
+                      v-for="(column, colIndex) in row.columns || []"
+                      :key="column.id || colIndex"
+                      :class="columnMobileOrderClass(row, colIndex)"
+                      :style="{ ...columnSpanStyle(column), ...columnMobileOrderStyle(row, colIndex) }"
+                    >
+                      <div
+                        v-for="(blockId, blockPosition) in column.blocks || []"
+                        :key="`${historyPreviewRenderKey}:post:${blockId}:${blockPosition}`"
+                      >
+                        <edge-cms-block-api
+                          v-if="blockIndex(state.historyPreviewDoc, blockId, true) !== -1"
+                          :site-id="props.site"
+                          :content="state.historyPreviewDoc.postContent[blockIndex(state.historyPreviewDoc, blockId, true)]?.content"
+                          :values="state.historyPreviewDoc.postContent[blockIndex(state.historyPreviewDoc, blockId, true)]?.values"
+                          :meta="state.historyPreviewDoc.postContent[blockIndex(state.historyPreviewDoc, blockId, true)]?.meta"
+                          :viewport-mode="previewViewportMode"
+                          :theme="theme"
+                          :route-last-segment="previewRouteLastSegment"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <DialogFooter class="pt-2 flex justify-between">
+        <edge-shad-button variant="outline" :disabled="state.historyRestoring" @click="closeHistoryDialog">
+          Cancel
+        </edge-shad-button>
+        <edge-shad-button
+          :disabled="state.historyLoading || state.historyRestoring || !selectedHistoryEntry"
+          @click="restoreHistoryVersion"
+        >
+          <Loader2 v-if="state.historyRestoring" class="mr-2 h-4 w-4 animate-spin" />
+          <RotateCcw v-else class="mr-2 h-4 w-4" />
+          Restore
+        </edge-shad-button>
+      </DialogFooter>
+    </DialogContent>
+  </edge-shad-dialog>
   <edge-shad-dialog v-model="state.importDocIdDialogOpen">
     <DialogContent class="pt-8">
       <DialogHeader>
@@ -2887,56 +3753,321 @@ const hasUnsavedChanges = (changes) => {
     </DialogContent>
   </edge-shad-dialog>
   <edge-shad-dialog v-model="state.showUnpublishedChangesDialog">
-    <DialogContent class="max-w-2xl">
+    <DialogContent class="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
       <DialogHeader>
         <DialogTitle class="text-left">
-          Unpublished Changes
+          {{ pageChangesDialogTitle }}
         </DialogTitle>
         <DialogDescription class="text-left">
-          Review what changed since the last publish. Last Published: {{ lastPublishedTime(page) }}
+          {{ pageChangesDialogDescription }}
         </DialogDescription>
       </DialogHeader>
-      <div v-if="unpublishedChangeDetails.length" class="space-y-3 mt-2">
-        <div
-          v-for="change in unpublishedChangeDetails"
-          :key="change.key"
-          class="rounded-md border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800 p-3 text-left"
-        >
-          <div class="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-2">
-            {{ change.label }}
-          </div>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-            <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
-              <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
-                Published
+      <div class="mt-2 flex-1 overflow-y-auto pr-1">
+        <div v-if="activePageChangeDetails.length" class="space-y-3">
+          <div
+            v-for="change in activePageChangeDetails"
+            :key="change.key"
+            class="rounded-md border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800 p-3 text-left"
+          >
+            <div class="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-2">
+              {{ change.label }}
+            </div>
+            <div v-if="!change.layoutChanges?.length" class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+              <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
+                <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
+                  {{ change.baseLabel || 'Published' }}
+                </div>
+                <div class="whitespace-pre-wrap break-words text-gray-900 dark:text-gray-100">
+                  {{ change.base }}
+                </div>
               </div>
-              <div class="whitespace-pre-wrap break-words text-gray-900 dark:text-gray-100">
-                {{ change.published }}
+              <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
+                <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
+                  {{ change.compareLabel || 'Draft' }}
+                </div>
+                <div class="whitespace-pre-wrap break-words text-gray-900 dark:text-gray-100">
+                  {{ change.compare }}
+                </div>
               </div>
             </div>
-            <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
-              <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
-                Draft
+            <div v-else class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+              <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
+                <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-2">
+                  {{ change.baseLabel || 'Published' }}
+                </div>
+                <div class="space-y-2">
+                  <div v-for="layoutChange in change.layoutChanges" :key="`${layoutChange.key}:base`" class="rounded border border-gray-200/80 dark:border-white/10 bg-white/70 dark:bg-gray-900/40 p-2">
+                    <div class="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                      {{ layoutChange.label }}
+                    </div>
+                    <div class="mt-1 text-slate-900 dark:text-slate-100">
+                      {{ layoutChange.base }}
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div class="whitespace-pre-wrap break-words text-gray-900 dark:text-gray-100">
-                {{ change.draft }}
+              <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
+                <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-2">
+                  {{ change.compareLabel || 'Draft' }}
+                </div>
+                <div class="space-y-2">
+                  <div v-for="layoutChange in change.layoutChanges" :key="`${layoutChange.key}:compare`" class="rounded border border-gray-200/80 dark:border-white/10 bg-white/70 dark:bg-gray-900/40 p-2">
+                    <div class="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                      {{ layoutChange.label }}
+                    </div>
+                    <div class="mt-1 text-slate-900 dark:text-slate-100">
+                      {{ layoutChange.compare }}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-          <div v-if="change.details?.length" class="mt-2 text-sm text-gray-700 dark:text-gray-300">
-            <ul class="list-disc pl-5 space-y-1">
-              <li v-for="(detail, detailIndex) in change.details" :key="`${change.key}-${detailIndex}`">
-                {{ detail }}
-              </li>
-            </ul>
+            <div v-if="change.blockChanges?.length" class="mt-3 space-y-3">
+              <div
+                v-for="blockChange in change.blockChanges"
+                :key="blockChange.key"
+                class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-3"
+              >
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-slate-700 dark:bg-slate-700 dark:text-slate-100">
+                    {{ blockChange.label }}
+                  </span>
+                  <span class="text-sm font-medium text-slate-900 dark:text-slate-100">{{ blockChange.blockLabel }}</span>
+                </div>
+                <div class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-600 dark:text-slate-300">
+                  <div><strong>{{ change.baseLabel || 'Published' }}:</strong> {{ blockChange.basePositionLabel }}</div>
+                  <div><strong>{{ change.compareLabel || 'Draft' }}:</strong> {{ blockChange.comparePositionLabel }}</div>
+                </div>
+                <div v-if="blockChange.showPreview" class="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  <div class="space-y-2">
+                    <div class="text-[11px] uppercase tracking-wide text-gray-500">
+                      {{ change.baseLabel || 'Published' }}
+                    </div>
+                    <div
+                      data-cms-preview-surface="page"
+                      data-cms-preview-mode="history"
+                      class="relative isolate overflow-hidden rounded border border-gray-200 dark:border-white/15 bg-white dark:bg-gray-900"
+                    >
+                      <div v-if="blockChange.baseBlock" class="max-h-64 overflow-auto p-3">
+                        <edge-cms-block-api
+                          :key="`${blockChange.key}:base`"
+                          :content="blockChange.baseBlock?.content"
+                          :values="blockChange.baseBlock?.values"
+                          :meta="blockChange.baseBlock?.meta"
+                          :theme="theme"
+                          :site-id="props.site"
+                          :route-last-segment="previewRouteLastSegment"
+                          :viewport-mode="previewViewportMode"
+                        />
+                      </div>
+                      <div v-else class="flex min-h-24 items-center justify-center px-4 py-6 text-sm text-slate-500 dark:text-slate-400">
+                        Not present
+                      </div>
+                    </div>
+                  </div>
+                  <div class="space-y-2">
+                    <div class="text-[11px] uppercase tracking-wide text-gray-500">
+                      {{ change.compareLabel || 'Draft' }}
+                    </div>
+                    <div
+                      data-cms-preview-surface="page"
+                      data-cms-preview-mode="history"
+                      class="relative isolate overflow-hidden rounded border border-gray-200 dark:border-white/15 bg-white dark:bg-gray-900"
+                    >
+                      <div v-if="blockChange.compareBlock" class="max-h-64 overflow-auto p-3">
+                        <edge-cms-block-api
+                          :key="`${blockChange.key}:compare`"
+                          :content="blockChange.compareBlock?.content"
+                          :values="blockChange.compareBlock?.values"
+                          :meta="blockChange.compareBlock?.meta"
+                          :theme="theme"
+                          :site-id="props.site"
+                          :route-last-segment="previewRouteLastSegment"
+                          :viewport-mode="previewViewportMode"
+                        />
+                      </div>
+                      <div v-else class="flex min-h-24 items-center justify-center px-4 py-6 text-sm text-slate-500 dark:text-slate-400">
+                        Not present
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-if="change.details?.length" class="mt-2 text-sm text-gray-700 dark:text-gray-300">
+              <ul class="list-disc pl-5 space-y-1">
+                <li v-for="(detail, detailIndex) in change.details" :key="`${change.key}-${detailIndex}`">
+                  {{ detail }}
+                </li>
+              </ul>
+            </div>
           </div>
         </div>
-      </div>
-      <div v-else class="text-sm text-gray-600 dark:text-gray-300 text-left">
-        No unpublished differences detected.
+        <div v-else class="text-sm text-gray-600 dark:text-gray-300 text-left">
+          No {{ showingUnsavedChanges ? 'unsaved' : 'unpublished' }} differences detected.
+        </div>
       </div>
       <DialogFooter class="pt-4">
         <edge-shad-button class="w-full" variant="outline" @click="state.showUnpublishedChangesDialog = false">
+          Close
+        </edge-shad-button>
+      </DialogFooter>
+    </DialogContent>
+  </edge-shad-dialog>
+  <edge-shad-dialog v-model="state.showHistoryDiffDialog">
+    <DialogContent class="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+      <DialogHeader>
+        <DialogTitle class="text-left">
+          History Diff
+        </DialogTitle>
+        <DialogDescription class="text-left">
+          Review differences between the selected history entry and the current {{ props.isTemplateSite ? 'template' : 'page' }}.
+        </DialogDescription>
+      </DialogHeader>
+      <div class="mt-2 flex-1 overflow-y-auto pr-1">
+        <div v-if="historyDiffDetails.length" class="space-y-3">
+          <div
+            v-for="change in historyDiffDetails"
+            :key="change.key"
+            class="rounded-md border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800 p-3 text-left"
+          >
+            <div class="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-2">
+              {{ change.label }}
+            </div>
+            <div v-if="!change.layoutChanges?.length" class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+              <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
+                <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
+                  {{ change.baseLabel || 'Selected History' }}
+                </div>
+                <div class="whitespace-pre-wrap break-words text-gray-900 dark:text-gray-100">
+                  {{ change.base }}
+                </div>
+              </div>
+              <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
+                <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
+                  {{ change.compareLabel || 'Current' }}
+                </div>
+                <div class="whitespace-pre-wrap break-words text-gray-900 dark:text-gray-100">
+                  {{ change.compare }}
+                </div>
+              </div>
+            </div>
+            <div v-else class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+              <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
+                <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-2">
+                  {{ change.baseLabel || 'Selected History' }}
+                </div>
+                <div class="space-y-2">
+                  <div v-for="layoutChange in change.layoutChanges" :key="`${layoutChange.key}:base`" class="rounded border border-gray-200/80 dark:border-white/10 bg-white/70 dark:bg-gray-900/40 p-2">
+                    <div class="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                      {{ layoutChange.label }}
+                    </div>
+                    <div class="mt-1 text-slate-900 dark:text-slate-100">
+                      {{ layoutChange.base }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
+                <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-2">
+                  {{ change.compareLabel || 'Current' }}
+                </div>
+                <div class="space-y-2">
+                  <div v-for="layoutChange in change.layoutChanges" :key="`${layoutChange.key}:compare`" class="rounded border border-gray-200/80 dark:border-white/10 bg-white/70 dark:bg-gray-900/40 p-2">
+                    <div class="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                      {{ layoutChange.label }}
+                    </div>
+                    <div class="mt-1 text-slate-900 dark:text-slate-100">
+                      {{ layoutChange.compare }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-if="change.blockChanges?.length" class="mt-3 space-y-3">
+              <div
+                v-for="blockChange in change.blockChanges"
+                :key="blockChange.key"
+                class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-3"
+              >
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-slate-700 dark:bg-slate-700 dark:text-slate-100">
+                    {{ blockChange.label }}
+                  </span>
+                  <span class="text-sm font-medium text-slate-900 dark:text-slate-100">{{ blockChange.blockLabel }}</span>
+                </div>
+                <div class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-600 dark:text-slate-300">
+                  <div><strong>{{ change.baseLabel || 'Selected History' }}:</strong> {{ blockChange.basePositionLabel }}</div>
+                  <div><strong>{{ change.compareLabel || 'Current' }}:</strong> {{ blockChange.comparePositionLabel }}</div>
+                </div>
+                <div v-if="blockChange.showPreview" class="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  <div class="space-y-2">
+                    <div class="text-[11px] uppercase tracking-wide text-gray-500">
+                      {{ change.baseLabel || 'Selected History' }}
+                    </div>
+                    <div
+                      data-cms-preview-surface="page"
+                      data-cms-preview-mode="history"
+                      class="relative isolate overflow-hidden rounded border border-gray-200 dark:border-white/15 bg-white dark:bg-gray-900"
+                    >
+                      <div v-if="blockChange.baseBlock" class="max-h-64 overflow-auto p-3">
+                        <edge-cms-block-api
+                          :key="`${blockChange.key}:base`"
+                          :content="blockChange.baseBlock?.content"
+                          :values="blockChange.baseBlock?.values"
+                          :meta="blockChange.baseBlock?.meta"
+                          :theme="theme"
+                          :site-id="props.site"
+                          :route-last-segment="previewRouteLastSegment"
+                          :viewport-mode="previewViewportMode"
+                        />
+                      </div>
+                      <div v-else class="flex min-h-24 items-center justify-center px-4 py-6 text-sm text-slate-500 dark:text-slate-400">
+                        Not present
+                      </div>
+                    </div>
+                  </div>
+                  <div class="space-y-2">
+                    <div class="text-[11px] uppercase tracking-wide text-gray-500">
+                      {{ change.compareLabel || 'Current' }}
+                    </div>
+                    <div
+                      data-cms-preview-surface="page"
+                      data-cms-preview-mode="history"
+                      class="relative isolate overflow-hidden rounded border border-gray-200 dark:border-white/15 bg-white dark:bg-gray-900"
+                    >
+                      <div v-if="blockChange.compareBlock" class="max-h-64 overflow-auto p-3">
+                        <edge-cms-block-api
+                          :key="`${blockChange.key}:compare`"
+                          :content="blockChange.compareBlock?.content"
+                          :values="blockChange.compareBlock?.values"
+                          :meta="blockChange.compareBlock?.meta"
+                          :theme="theme"
+                          :site-id="props.site"
+                          :route-last-segment="previewRouteLastSegment"
+                          :viewport-mode="previewViewportMode"
+                        />
+                      </div>
+                      <div v-else class="flex min-h-24 items-center justify-center px-4 py-6 text-sm text-slate-500 dark:text-slate-400">
+                        Not present
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-if="change.details?.length" class="mt-2 text-sm text-gray-700 dark:text-gray-300">
+              <ul class="list-disc pl-5 space-y-1">
+                <li v-for="(detail, detailIndex) in change.details" :key="`${change.key}-${detailIndex}`">
+                  {{ detail }}
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+      <DialogFooter class="pt-4">
+        <edge-shad-button class="w-full" variant="outline" @click="state.showHistoryDiffDialog = false">
           Close
         </edge-shad-button>
       </DialogFooter>

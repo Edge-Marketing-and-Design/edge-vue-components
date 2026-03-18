@@ -471,6 +471,34 @@
           "order": "DESCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "history",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "path",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "history",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "orgId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []
