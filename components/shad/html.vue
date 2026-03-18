@@ -184,6 +184,8 @@ const sourceLineNumberText = computed(() => {
 })
 
 const appliedHeightClasses = ref([])
+const toolbarControlClass = 'border border-slate-300 bg-white text-slate-700 shadow-sm hover:border-slate-400 hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-slate-400 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-50 dark:focus-visible:ring-slate-500 dark:disabled:border-slate-800 dark:disabled:bg-slate-950 dark:disabled:text-slate-600'
+const toolbarToggleClass = `${toolbarControlClass} data-[state=on]:border-slate-900 data-[state=on]:bg-slate-900 data-[state=on]:text-white dark:data-[state=on]:border-slate-100 dark:data-[state=on]:bg-slate-100 dark:data-[state=on]:text-slate-900`
 
 const resolveHeightClasses = () => {
   const raw = (props.heightClass || '').trim()
@@ -463,7 +465,7 @@ defineExpose({
                   <ToggleGroupItem
                     value="source"
                     :data-state="sourceMode ? 'on' : 'off'"
-                    class="edge-html-source-toggle"
+                    :class="`edge-html-source-toggle ${toolbarToggleClass}`"
                     title="Toggle HTML source"
                     @click.prevent="toggleSourceMode"
                   >
@@ -474,6 +476,7 @@ defineExpose({
                 <Button
                   v-if="sourceMode"
                   variant="outline"
+                  :class="toolbarControlClass"
                   title="Format HTML"
                   :disabled="sourceFormatting"
                   @click.prevent="formatSourceHtml"
@@ -485,6 +488,7 @@ defineExpose({
                     <ToggleGroupItem
                       v-if="enabledToggles.includes('bold')"
                       value="bold"
+                      :class="toolbarToggleClass"
                       :disabled="!editor.can().chain().focus().toggleBold().run()"
                       :data-state="editor.isActive('bold') ? 'on' : 'off'"
                       @click.prevent="editor.chain().focus().toggleBold().run()"
@@ -494,6 +498,7 @@ defineExpose({
                     <ToggleGroupItem
                       v-if="enabledToggles.includes('italic')"
                       value="italic"
+                      :class="toolbarToggleClass"
                       :disabled="!editor.can().chain().focus().toggleItalic().run()"
                       :data-state="editor.isActive('italic') ? 'on' : 'off'"
                       @click.prevent="editor.chain().focus().toggleItalic().run()"
@@ -503,6 +508,7 @@ defineExpose({
                     <ToggleGroupItem
                       v-if="enabledToggles.includes('underline')"
                       value="underline"
+                      :class="toolbarToggleClass"
                       :disabled="!editor.can().chain().focus().toggleUnderline().run()"
                       :data-state="editor.isActive('underline') ? 'on' : 'off'"
                       @click.prevent="editor.chain().focus().toggleUnderline().run()"
@@ -512,6 +518,7 @@ defineExpose({
                     <ToggleGroupItem
                       v-if="enabledToggles.includes('strike')"
                       value="strike"
+                      :class="toolbarToggleClass"
                       :disabled="!editor.can().chain().focus().toggleStrike().run()"
                       :data-state="editor.isActive('strike') ? 'on' : 'off'"
                       @click.prevent="editor.chain().focus().toggleStrike().run()"
@@ -523,6 +530,7 @@ defineExpose({
                     <ToggleGroupItem
                       v-if="enabledToggles.includes('code')"
                       value="code"
+                      :class="toolbarToggleClass"
                       :disabled="!editor.can().chain().focus().toggleCode().run()"
                       :data-state="editor.isActive('code') ? 'on' : 'off'"
                       @click.prevent="editor.chain().focus().toggleCode().run()"
@@ -532,6 +540,7 @@ defineExpose({
                     <ToggleGroupItem
                       v-if="enabledToggles.includes('codeBlock')"
                       value="codeBlock"
+                      :class="toolbarToggleClass"
                       :disabled="!editor.can().chain().focus().toggleCodeBlock().run()"
                       :data-state="editor.isActive('codeBlock') ? 'on' : 'off'"
                       @click.prevent="editor.chain().focus().toggleCodeBlock().run()"
@@ -547,6 +556,7 @@ defineExpose({
                     <ToggleGroupItem
                       v-if="enabledToggles.includes('heading1')"
                       value="heading1"
+                      :class="toolbarToggleClass"
                       :disabled="!editor.can().chain().focus().toggleHeading({ level: 1 }).run()"
                       :data-state="editor.isActive('heading', { level: 1 }) ? 'on' : 'off'"
                       @click.prevent="editor.chain().focus().toggleHeading({ level: 1 }).run()"
@@ -556,6 +566,7 @@ defineExpose({
                     <ToggleGroupItem
                       v-if="enabledToggles.includes('heading2')"
                       value="heading2"
+                      :class="toolbarToggleClass"
                       :disabled="!editor.can().chain().focus().toggleHeading({ level: 2 }).run()"
                       :data-state="editor.isActive('heading', { level: 2 }) ? 'on' : 'off'"
                       @click.prevent="editor.chain().focus().toggleHeading({ level: 2 }).run()"
@@ -565,6 +576,7 @@ defineExpose({
                     <ToggleGroupItem
                       v-if="enabledToggles.includes('heading3')"
                       value="heading3"
+                      :class="toolbarToggleClass"
                       :disabled="!editor.can().chain().focus().toggleHeading({ level: 3 }).run()"
                       :data-state="editor.isActive('heading', { level: 3 }) ? 'on' : 'off'"
                       @click.prevent="editor.chain().focus().toggleHeading({ level: 3 }).run()"
@@ -574,6 +586,7 @@ defineExpose({
                     <ToggleGroupItem
                       v-if="enabledToggles.includes('heading4')"
                       value="heading4"
+                      :class="toolbarToggleClass"
                       :disabled="!editor.can().chain().focus().toggleHeading({ level: 4 }).run()"
                       :data-state="editor.isActive('heading', { level: 4 }) ? 'on' : 'off'"
                       @click.prevent="editor.chain().focus().toggleHeading({ level: 4 }).run()"
@@ -583,6 +596,7 @@ defineExpose({
                     <ToggleGroupItem
                       v-if="enabledToggles.includes('heading5')"
                       value="heading5"
+                      :class="toolbarToggleClass"
                       :disabled="!editor.can().chain().focus().toggleHeading({ level: 5 }).run()"
                       :data-state="editor.isActive('heading', { level: 5 }) ? 'on' : 'off'"
                       @click.prevent="editor.chain().focus().toggleHeading({ level: 5 }).run()"
@@ -592,6 +606,7 @@ defineExpose({
                     <ToggleGroupItem
                       v-if="enabledToggles.includes('heading6')"
                       value="heading6"
+                      :class="toolbarToggleClass"
                       :disabled="!editor.can().chain().focus().toggleHeading({ level: 6 }).run()"
                       :data-state="editor.isActive('heading', { level: 6 }) ? 'on' : 'off'"
                       @click.prevent="editor.chain().focus().toggleHeading({ level: 6 }).run()"
@@ -603,6 +618,7 @@ defineExpose({
                   <Button
                     v-if="enabledToggles.includes('paragraph')"
                     variant="outline"
+                    :class="toolbarToggleClass"
                     :data-state="editor.isActive('paragraph') ? 'on' : 'off'"
                     @click.prevent="editor.chain().focus().setParagraph().run()"
                   >
@@ -612,6 +628,7 @@ defineExpose({
                   <Button
                     v-if="enabledToggles.includes('image')"
                     variant="outline"
+                    :class="toolbarControlClass"
                     @click.prevent="addImage"
                   >
                     <Image :size="16" />
@@ -621,6 +638,7 @@ defineExpose({
                     <ToggleGroupItem
                       v-if="enabledToggles.includes('bulletlist')"
                       value="bulletList"
+                      :class="toolbarToggleClass"
                       :disabled="!editor.can().chain().focus().toggleBulletList().run()"
                       :data-state="editor.isActive('bulletList') ? 'on' : 'off'"
                       @click.prevent="editor.chain().focus().toggleBulletList().run()"
@@ -630,6 +648,7 @@ defineExpose({
                     <ToggleGroupItem
                       v-if="enabledToggles.includes('orderedlist')"
                       value="orderedList"
+                      :class="toolbarToggleClass"
                       :disabled="!editor.can().chain().focus().toggleOrderedList().run()"
                       :data-state="editor.isActive('orderedList') ? 'on' : 'off'"
                       @click.prevent="editor.chain().focus().toggleOrderedList().run()"
@@ -638,16 +657,17 @@ defineExpose({
                     </ToggleGroupItem>
                   </ToggleGroup>
 
-                  <Button variant="outline" title="Clear formatting" @click.prevent="editor.chain().focus().unsetAllMarks().run()">
+                  <Button variant="outline" :class="toolbarControlClass" title="Clear formatting" @click.prevent="editor.chain().focus().unsetAllMarks().run()">
                     <RemoveFormatting :size="16" />
                   </Button>
 
-                  <Button variant="outline" title="Clear / Flatten Structure" @click.prevent="editor.chain().focus().clearNodes().run()">
+                  <Button variant="outline" :class="toolbarControlClass" title="Clear / Flatten Structure" @click.prevent="editor.chain().focus().clearNodes().run()">
                     <ListTree :size="16" />
                   </Button>
 
                   <Toggle
                     v-if="enabledToggles.includes('blockquote')"
+                    :class="toolbarToggleClass"
                     :disabled="!editor.can().chain().focus().toggleBlockquote().run()"
                     :data-state="editor.isActive('blockQuote') ? 'on' : 'off'"
                     @click.prevent="editor.chain().focus().toggleBlockquote().run()"
@@ -658,6 +678,7 @@ defineExpose({
                   <Button
                     v-if="enabledToggles.includes('horizontalrule')"
                     variant="outline"
+                    :class="toolbarControlClass"
                     title="Horizontal Rule"
                     @click.prevent="editor.chain().focus().setHorizontalRule().run()"
                   >
@@ -667,6 +688,7 @@ defineExpose({
                   <Button
                     v-if="enabledToggles.includes('hardbreak')"
                     variant="outline"
+                    :class="toolbarControlClass"
                     title="Hard Break"
                     @click.prevent="editor.chain().focus().setHardBreak().run()"
                   >
@@ -675,6 +697,7 @@ defineExpose({
 
                   <Button
                     variant="outline"
+                    :class="toolbarControlClass"
                     title="Undo"
                     :disabled="!editor.can().chain().focus().undo().run()"
                     @click.prevent="editor.chain().focus().undo().run()"
@@ -683,6 +706,7 @@ defineExpose({
                   </Button>
                   <Button
                     variant="outline"
+                    :class="toolbarControlClass"
                     title="Redo"
                     :disabled="!editor.can().chain().focus().redo().run()"
                     @click.prevent="editor.chain().focus().redo().run()"
@@ -698,6 +722,7 @@ defineExpose({
                 <ToggleGroup type="single">
                   <ToggleGroupItem
                     value="imageSizeSmall"
+                    :class="toolbarToggleClass"
                     :data-state="imageState.size === 'small' ? 'on' : 'off'"
                     title="Small image"
                     @click.prevent="setImageSize('small')"
@@ -706,6 +731,7 @@ defineExpose({
                   </ToggleGroupItem>
                   <ToggleGroupItem
                     value="imageSizeMedium"
+                    :class="toolbarToggleClass"
                     :data-state="imageState.size === 'medium' ? 'on' : 'off'"
                     title="Medium image"
                     @click.prevent="setImageSize('medium')"
@@ -714,6 +740,7 @@ defineExpose({
                   </ToggleGroupItem>
                   <ToggleGroupItem
                     value="imageSizeLarge"
+                    :class="toolbarToggleClass"
                     :data-state="imageState.size === 'large' ? 'on' : 'off'"
                     title="Large image"
                     @click.prevent="setImageSize('large')"
@@ -722,6 +749,7 @@ defineExpose({
                   </ToggleGroupItem>
                   <ToggleGroupItem
                     value="imageSizeFull"
+                    :class="toolbarToggleClass"
                     :data-state="imageState.size === 'full' ? 'on' : 'off'"
                     title="Full width image"
                     @click.prevent="setImageSize('full')"
@@ -732,6 +760,7 @@ defineExpose({
                 <ToggleGroup type="single">
                   <ToggleGroupItem
                     value="imageFloatLeft"
+                    :class="toolbarToggleClass"
                     :data-state="imageState.float === 'left' ? 'on' : 'off'"
                     title="Float left"
                     @click.prevent="setImageFloat('left')"
@@ -740,6 +769,7 @@ defineExpose({
                   </ToggleGroupItem>
                   <ToggleGroupItem
                     value="imageFloatNone"
+                    :class="toolbarToggleClass"
                     :data-state="imageState.float === 'none' ? 'on' : 'off'"
                     title="No float"
                     @click.prevent="setImageFloat('none')"
@@ -748,6 +778,7 @@ defineExpose({
                   </ToggleGroupItem>
                   <ToggleGroupItem
                     value="imageFloatRight"
+                    :class="toolbarToggleClass"
                     :data-state="imageState.float === 'right' ? 'on' : 'off'"
                     title="Float right"
                     @click.prevent="setImageFloat('right')"
@@ -774,6 +805,7 @@ defineExpose({
                 </div>
                 <Button
                   variant="outline"
+                  :class="toolbarControlClass"
                   title="Remove image"
                   @click.prevent="removeImage"
                 >
@@ -1023,15 +1055,6 @@ defineExpose({
   outline: none;
   overflow: auto;
   white-space: pre;
-}
-
-.edge-html-source-toggle {
-  color: hsl(var(--foreground));
-}
-
-.edge-html-source-toggle[data-state='on'] {
-  background-color: hsl(var(--accent));
-  color: hsl(var(--foreground));
 }
 
 .edge-html-source-toggle svg {
