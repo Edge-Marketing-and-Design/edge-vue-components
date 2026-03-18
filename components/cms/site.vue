@@ -1,7 +1,7 @@
 <script setup lang="js">
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { CircleAlert, FileCheck, FilePenLine, FileStack, FolderCog, FolderDown, FolderUp, FolderX, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload } from 'lucide-vue-next'
+import { CircleAlert, Download, FileCheck, FilePenLine, FileStack, FolderCog, FolderDown, FolderUp, FolderX, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload } from 'lucide-vue-next'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
 
 const props = defineProps({
@@ -21,6 +21,7 @@ const props = defineProps({
   },
 })
 const edgeFirebase = inject('edgeFirebase')
+const { saveJsonFiles } = useJsonFileSave()
 const { createDefaults: createSiteSettingsDefaults, createNewDocSchema: createSiteSettingsNewDocSchema } = useSiteSettingsTemplate()
 const { buildPageStructuredData } = useStructuredDataTemplates()
 
@@ -92,6 +93,13 @@ const state = reactive({
   selectedSubmissionId: '',
   publishSiteLoading: false,
   importingPages: false,
+  exportingPages: false,
+  exportDialogOpen: false,
+  exportDialogStatus: 'idle',
+  exportDialogProcessed: 0,
+  exportDialogTotal: 0,
+  exportDialogCurrentItem: '',
+  exportCancelRequested: false,
   importPageDocIdDialogOpen: false,
   importPageDocIdValue: '',
   importPageConflictDialogOpen: false,
@@ -1139,6 +1147,80 @@ const publishSiteAndSettings = async () => {
 const pages = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`] || {}
 })
+
+const openPagesExportDialog = (total) => {
+  state.exportDialogOpen = true
+  state.exportDialogStatus = 'running'
+  state.exportDialogProcessed = 0
+  state.exportDialogTotal = total
+  state.exportDialogCurrentItem = ''
+  state.exportCancelRequested = false
+}
+
+const syncPagesExportProgress = ({ completed = 0, total = 0, suggestedName = '' } = {}) => {
+  state.exportDialogOpen = true
+  state.exportDialogProcessed = completed
+  state.exportDialogTotal = total || state.exportDialogTotal
+  state.exportDialogCurrentItem = suggestedName || ''
+}
+
+const finishPagesExportDialog = (savedCount) => {
+  state.exportDialogProcessed = savedCount
+  state.exportDialogStatus = savedCount === state.exportDialogTotal ? 'complete' : 'canceled'
+  state.exportCancelRequested = false
+}
+
+const cancelPagesExport = () => {
+  if (!state.exportingPages)
+    return
+  state.exportCancelRequested = true
+}
+
+const closePagesExportDialog = () => {
+  if (state.exportingPages)
+    return
+  state.exportDialogOpen = false
+}
+
+const exportAllPages = async () => {
+  if (state.exportingPages)
+    return
+  const files = Object.entries(pages.value || {})
+    .sort(([leftId], [rightId]) => String(leftId).localeCompare(String(rightId)))
+    .map(([docId, doc]) => ({
+      suggestedName: `page-${docId}.json`,
+      payload: {
+        ...edgeGlobal.dupObject(doc || {}),
+        docId,
+      },
+    }))
+
+  if (!files.length) {
+    edgeFirebase?.toast?.error?.('No pages available to export.')
+    return
+  }
+
+  openPagesExportDialog(files.length)
+  state.exportingPages = true
+  try {
+    const savedCount = await saveJsonFiles(files, {
+      onProgress: syncPagesExportProgress,
+      shouldCancel: () => state.exportCancelRequested,
+    })
+    finishPagesExportDialog(savedCount)
+    if (savedCount === files.length)
+      edgeFirebase?.toast?.success?.(`Exported ${files.length} page${files.length === 1 ? '' : 's'}.`)
+    else if (savedCount > 0)
+      edgeFirebase?.toast?.success?.(`Exported ${savedCount} of ${files.length} pages.`)
+  }
+  finally {
+    state.exportingPages = false
+    if (state.exportDialogStatus === 'running') {
+      state.exportDialogStatus = 'canceled'
+      state.exportCancelRequested = false
+    }
+  }
+}
 
 const blocksCollection = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`] || {}
@@ -2625,19 +2707,6 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
             class="hidden"
             @change="handlePageImport"
           >
-          <edge-shad-button
-            type="button"
-            size="icon"
-            variant="outline"
-            class="h-9 w-9"
-            :disabled="state.importingPages"
-            title="Import Page"
-            aria-label="Import Page"
-            @click="triggerPageImport"
-          >
-            <Loader2 v-if="state.importingPages" class="h-3.5 w-3.5 animate-spin" />
-            <Upload v-else class="h-3.5 w-3.5" />
-          </edge-shad-button>
           <template v-if="!isTemplateSite && !hidePublishStatusAndActions">
             <Transition name="fade" mode="out-in">
               <div v-if="isSiteDiff || isAnyPagesDiff" key="unpublished" class="flex gap-2 items-center">
@@ -2697,10 +2766,19 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                   <FolderDown />
                   Unpublish Site
                 </DropdownMenuItem>
-
                 <DropdownMenuItem v-if="canEditSiteSettings" @click="state.siteSettings = true">
                   <FolderCog />
                   <span>Settings</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem :disabled="state.importingPages" @click="triggerPageImport">
+                  <Loader2 v-if="state.importingPages" class="animate-spin" />
+                  <Upload v-else />
+                  <span>Import Pages</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem :disabled="state.exportingPages || !Object.keys(pages || {}).length" @click="exportAllPages">
+                  <Loader2 v-if="state.exportingPages" class="animate-spin" />
+                  <Download v-else />
+                  <span>{{ state.exportingPages ? 'Exporting Pages...' : 'Export All Pages' }}</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -3047,6 +3125,16 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
         </Transition>
       </div>
     </div>
+    <edge-cms-json-export-progress-dialog
+      v-model="state.exportDialogOpen"
+      title="Exporting Pages"
+      :status="state.exportDialogStatus"
+      :processed="state.exportDialogProcessed"
+      :total="state.exportDialogTotal"
+      :current-item="state.exportDialogCurrentItem"
+      @cancel="cancelPagesExport"
+      @update:model-value="closePagesExportDialog"
+    />
     <edge-shad-dialog v-model="state.importPageDocIdDialogOpen">
       <DialogContent class="pt-8">
         <DialogHeader>

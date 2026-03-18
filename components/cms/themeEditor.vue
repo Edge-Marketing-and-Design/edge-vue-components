@@ -11,6 +11,7 @@ const props = defineProps({
 
 const emit = defineEmits(['head'])
 const edgeFirebase = inject('edgeFirebase')
+const { saveJsonFile } = useJsonFileSave()
 const { themes: themeNewDocSchema } = useCmsNewDocs()
 const { createDefaults: createSiteSettingsDefaults } = useSiteSettingsTemplate()
 const state = reactive({
@@ -287,20 +288,6 @@ const templatePageOptions = computed(() => {
 const themesCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/themes`)
 const themesCollection = computed(() => edgeFirebase.data?.[themesCollectionPath.value] || {})
 
-const downloadJsonFile = (payload, filename) => {
-  if (typeof window === 'undefined')
-    return
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
-  const objectUrl = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = objectUrl
-  anchor.download = filename
-  document.body.appendChild(anchor)
-  anchor.click()
-  anchor.remove()
-  URL.revokeObjectURL(objectUrl)
-}
-
 const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value)
 
 const cloneSchemaValue = (value) => {
@@ -329,15 +316,16 @@ const notifyError = (message) => {
   edgeFirebase?.toast?.error?.(message)
 }
 
-const exportCurrentTheme = () => {
+const exportCurrentTheme = async () => {
   const doc = themesCollection.value?.[props.themeId]
   if (!doc || !doc.docId) {
     notifyError('Save this theme before exporting.')
     return
   }
   const exportPayload = { ...getThemeDocDefaults(), ...doc }
-  downloadJsonFile(exportPayload, `theme-${doc.docId}.json`)
-  notifySuccess(`Exported theme "${doc.docId}".`)
+  const saved = await saveJsonFile(exportPayload, `theme-${doc.docId}.json`)
+  if (saved)
+    notifySuccess(`Exported theme "${doc.docId}".`)
 }
 
 watch (sites, async (newSites) => {

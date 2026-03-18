@@ -20,6 +20,7 @@ const props = defineProps({
 const emit = defineEmits(['head'])
 
 const edgeFirebase = inject('edgeFirebase')
+const { saveJsonFile } = useJsonFileSave()
 const router = useRouter()
 const { buildPageStructuredData } = useStructuredDataTemplates()
 const cmsMultiOrg = useState('cmsMultiOrg', () => true)
@@ -1314,20 +1315,6 @@ const addTemplateTagOption = (value) => {
     state.templateManualTags.push(normalized)
 }
 
-const downloadJsonFile = (payload, filename) => {
-  if (typeof window === 'undefined')
-    return
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
-  const objectUrl = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = objectUrl
-  anchor.download = filename
-  document.body.appendChild(anchor)
-  anchor.click()
-  anchor.remove()
-  URL.revokeObjectURL(objectUrl)
-}
-
 const readTextFile = file => new Promise((resolve, reject) => {
   if (typeof FileReader === 'undefined') {
     reject(new Error('File import is only available in the browser.'))
@@ -1604,16 +1591,19 @@ const openImportErrorDialog = (message) => {
   state.importErrorDialogOpen = true
 }
 
-const exportCurrentPage = () => {
+const exportCurrentPage = async () => {
   const doc = currentPage.value
   if (!doc || !props.page || props.page === 'new') {
-    notifyError('Save this page before exporting.')
+    notifyError(`Save this ${props.isTemplateSite ? 'template' : 'page'} before exporting.`)
     return
   }
   const docId = String(doc.docId || props.page).trim()
   const exportPayload = { ...getPageDocDefaults(), ...doc, docId }
-  downloadJsonFile(exportPayload, `page-${docId}.json`)
-  notifySuccess(`Exported page "${docId}".`)
+  const filePrefix = props.isTemplateSite ? 'template' : 'page'
+  const itemLabel = props.isTemplateSite ? 'template' : 'page'
+  const saved = await saveJsonFile(exportPayload, `${filePrefix}-${docId}.json`)
+  if (saved)
+    notifySuccess(`Exported ${itemLabel} "${docId}".`)
 }
 
 const _triggerPageImport = () => {
@@ -2008,8 +1998,8 @@ const hasUnsavedChanges = (changes) => {
             </template>
             <span class="text-[10px] leading-tight">Last Published: {{ lastPublishedTime(page) }}</span>
           </div>
-          <div v-else class="px-4 w-full max-w-xs">
-            <div class="w-full max-w-xs">
+          <div v-else class="px-4 w-full max-w-md">
+            <div class="flex w-full max-w-md items-center gap-2">
               <edge-shad-select
                 v-model="edgeGlobal.edgeState.blockEditorTheme"
                 name="theme"
@@ -2017,24 +2007,21 @@ const hasUnsavedChanges = (changes) => {
                 placeholder="Select Theme"
                 class="w-full text-xs h-[32px]"
               />
+              <edge-shad-button
+                type="button"
+                variant="outline"
+                class="h-[32px] gap-1 whitespace-nowrap"
+                :disabled="!currentPage || !props.page || props.page === 'new'"
+                title="Export Template"
+                aria-label="Export Template"
+                @click="exportCurrentPage"
+              >
+                <Download class="w-4 h-4" />
+                Export
+              </edge-shad-button>
             </div>
           </div>
           <div class="w-full border-t border-border" aria-hidden="true" />
-
-          <div class="flex items-center gap-2 px-3">
-            <edge-shad-button
-              type="button"
-              size="icon"
-              variant="outline"
-              class="h-8 w-8"
-              :disabled="!currentPage || !props.page || props.page === 'new'"
-              title="Export Page"
-              aria-label="Export Page"
-              @click="exportCurrentPage"
-            >
-              <Download class="w-3.5 h-3.5" />
-            </edge-shad-button>
-          </div>
 
           <div class="flex flex-col items-center gap-1 px-2">
             <div class="flex items-center gap-1">

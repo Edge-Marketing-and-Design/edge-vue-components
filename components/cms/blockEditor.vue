@@ -12,6 +12,7 @@ const props = defineProps({
 const emit = defineEmits(['head'])
 
 const edgeFirebase = inject('edgeFirebase')
+const { saveJsonFile } = useJsonFileSave()
 const { blocks: blockNewDocSchema } = useCmsNewDocs()
 const blockEditorPostPreviewCache = useState('edge-cms-block-editor-post-preview-cache', () => ({}))
 
@@ -787,20 +788,6 @@ const getTagsFromBlocks = computed(() => {
   return [{ name: 'Quick Picks', title: 'Quick Picks' }, ...filtered]
 })
 
-const downloadJsonFile = (payload, filename) => {
-  if (typeof window === 'undefined')
-    return
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
-  const objectUrl = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = objectUrl
-  anchor.download = filename
-  document.body.appendChild(anchor)
-  anchor.click()
-  anchor.remove()
-  URL.revokeObjectURL(objectUrl)
-}
-
 const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value)
 
 const cloneSchemaValue = (value) => {
@@ -829,15 +816,16 @@ const notifyError = (message) => {
   edgeFirebase?.toast?.error?.(message)
 }
 
-const exportCurrentBlock = () => {
+const exportCurrentBlock = async () => {
   const doc = blocks.value?.[props.blockId]
   if (!doc || !doc.docId) {
     notifyError('Save this block before exporting.')
     return
   }
   const exportPayload = { ...getBlockDocDefaults(), ...doc }
-  downloadJsonFile(exportPayload, `block-${doc.docId}.json`)
-  notifySuccess(`Exported block "${doc.docId}".`)
+  const saved = await saveJsonFile(exportPayload, `block-${doc.docId}.json`)
+  if (saved)
+    notifySuccess(`Exported block "${doc.docId}".`)
 }
 </script>
 

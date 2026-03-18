@@ -1,6 +1,6 @@
 <script setup lang="js">
 import { useVModel } from '@vueuse/core'
-import { ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePlus2, FileUp, FileWarning, FileX, Folder, FolderMinus, FolderOpen, FolderPen, FolderPlus, Link } from 'lucide-vue-next'
+import { Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePlus2, FileUp, FileWarning, FileX, Folder, FolderMinus, FolderOpen, FolderPen, FolderPlus, Link } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
@@ -50,6 +50,7 @@ const ROOT_MENUS = ['Site Root', 'Not In Menu']
 const router = useRouter()
 const modelValue = useVModel(props, 'modelValue', emit)
 const edgeFirebase = inject('edgeFirebase')
+const { saveJsonFile } = useJsonFileSave()
 const { buildPageStructuredData } = useStructuredDataTemplates()
 
 const isExternalLinkEntry = entry => entry?.item && typeof entry.item === 'object' && entry.item.type === 'external'
@@ -364,6 +365,35 @@ const addTemplateTagOption = (value) => {
     return
   if (!state.templateManualTags.includes(normalized))
     state.templateManualTags.push(normalized)
+}
+
+const getPageDocDefaults = () => ({
+  name: '',
+  type: ['Page'],
+  content: [],
+  postContent: [],
+  structure: [],
+  postStructure: [],
+  metaTitle: '',
+  metaDescription: '',
+  structuredData: buildPageStructuredData(),
+})
+
+const exportPage = async (pageId) => {
+  const docId = String(pageId || '').trim()
+  if (!docId) {
+    edgeFirebase?.toast?.error?.('Save this page before exporting.')
+    return
+  }
+  const doc = existingPagesCollection.value?.[docId]
+  if (!doc) {
+    edgeFirebase?.toast?.error?.(`Could not find page "${docId}" to export.`)
+    return
+  }
+  const exportPayload = { ...getPageDocDefaults(), ...doc, docId }
+  const saved = await saveJsonFile(exportPayload, `page-${docId}.json`)
+  if (saved)
+    edgeFirebase?.toast?.success?.(`Exported page "${docId}".`)
 }
 
 const BLANK_TEMPLATE_ID = 'blank'
@@ -1310,6 +1340,10 @@ const theme = computed(() => {
                       <DropdownMenuItem v-else-if="!props.isTemplateSite" disabled>
                         <ExternalLink />
                         <span>View Live Page</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem @click="exportPage(element.item)">
+                        <Download />
+                        <span>Export Page</span>
                       </DropdownMenuItem>
                       <DropdownMenuItem v-if="!props.isTemplateSite && isPublishedPageDiff(element.item)" @click="publishPage(element.item)">
                         <FileUp />

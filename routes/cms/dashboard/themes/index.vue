@@ -1,10 +1,19 @@
 <script setup>
 import { useEdgeCmsDialogPositionFix } from '~/edge/composables/useEdgeCmsDialogPositionFix'
+import { Download, MoreHorizontal } from 'lucide-vue-next'
 
 const edgeFirebase = inject('edgeFirebase')
+const { saveJsonFiles } = useJsonFileSave()
 const { themes: themeNewDocSchema } = useCmsNewDocs()
 const state = reactive({
   filter: '',
+  exportingThemes: false,
+  exportDialogOpen: false,
+  exportDialogStatus: 'idle',
+  exportDialogProcessed: 0,
+  exportDialogTotal: 0,
+  exportDialogCurrentItem: '',
+  exportCancelRequested: false,
   importingJson: false,
   importDocIdDialogOpen: false,
   importDocIdValue: '',
@@ -28,6 +37,80 @@ definePageMeta({
 
 const themesCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/themes`)
 const themesCollection = computed(() => edgeFirebase.data?.[themesCollectionPath.value] || {})
+
+const openThemesExportDialog = (total) => {
+  state.exportDialogOpen = true
+  state.exportDialogStatus = 'running'
+  state.exportDialogProcessed = 0
+  state.exportDialogTotal = total
+  state.exportDialogCurrentItem = ''
+  state.exportCancelRequested = false
+}
+
+const syncThemesExportProgress = ({ completed = 0, total = 0, suggestedName = '' } = {}) => {
+  state.exportDialogOpen = true
+  state.exportDialogProcessed = completed
+  state.exportDialogTotal = total || state.exportDialogTotal
+  state.exportDialogCurrentItem = suggestedName || ''
+}
+
+const finishThemesExportDialog = (savedCount) => {
+  state.exportDialogProcessed = savedCount
+  state.exportDialogStatus = savedCount === state.exportDialogTotal ? 'complete' : 'canceled'
+  state.exportCancelRequested = false
+}
+
+const cancelThemesExport = () => {
+  if (!state.exportingThemes)
+    return
+  state.exportCancelRequested = true
+}
+
+const closeThemesExportDialog = () => {
+  if (state.exportingThemes)
+    return
+  state.exportDialogOpen = false
+}
+
+const exportAllThemes = async () => {
+  if (state.exportingThemes)
+    return
+  const files = Object.entries(themesCollection.value || {})
+    .sort(([leftId], [rightId]) => String(leftId).localeCompare(String(rightId)))
+    .map(([docId, doc]) => ({
+      suggestedName: `theme-${docId}.json`,
+      payload: {
+        ...edgeGlobal.dupObject(doc || {}),
+        docId,
+      },
+    }))
+
+  if (!files.length) {
+    edgeFirebase?.toast?.error?.('No themes available to export.')
+    return
+  }
+
+  openThemesExportDialog(files.length)
+  state.exportingThemes = true
+  try {
+    const savedCount = await saveJsonFiles(files, {
+      onProgress: syncThemesExportProgress,
+      shouldCancel: () => state.exportCancelRequested,
+    })
+    finishThemesExportDialog(savedCount)
+    if (savedCount === files.length)
+      edgeFirebase?.toast?.success?.(`Exported ${files.length} theme${files.length === 1 ? '' : 's'}.`)
+    else if (savedCount > 0)
+      edgeFirebase?.toast?.success?.(`Exported ${savedCount} of ${files.length} themes.`)
+  }
+  finally {
+    state.exportingThemes = false
+    if (state.exportDialogStatus === 'running') {
+      state.exportDialogStatus = 'canceled'
+      state.exportCancelRequested = false
+    }
+  }
+}
 
 const readTextFile = file => new Promise((resolve, reject) => {
   if (typeof FileReader === 'undefined') {
@@ -258,19 +341,32 @@ const handleThemeImport = async (event) => {
             class="hidden"
             @change="handleThemeImport"
           >
-          <edge-shad-button
-            type="button"
-            size="icon"
-            variant="outline"
-            class="h-9 w-9"
-            :disabled="state.importingJson"
-            title="Import Themes"
-            aria-label="Import Themes"
-            @click="triggerThemeImport"
-          >
-            <Loader2 v-if="state.importingJson" class="h-4 w-4 animate-spin" />
-            <Upload v-else class="h-4 w-4" />
-          </edge-shad-button>
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <edge-shad-button
+                type="button"
+                size="icon"
+                variant="outline"
+                class="h-9 w-9"
+                title="Theme Actions"
+                aria-label="Theme Actions"
+              >
+                <MoreHorizontal class="h-4 w-4" />
+              </edge-shad-button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem :disabled="state.importingJson" @click="triggerThemeImport">
+                <Loader2 v-if="state.importingJson" class="h-4 w-4 animate-spin" />
+                <Upload v-else class="h-4 w-4" />
+                <span>Import Themes</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem :disabled="state.exportingThemes || !Object.keys(themesCollection || {}).length" @click="exportAllThemes">
+                <Loader2 v-if="state.exportingThemes" class="h-4 w-4 animate-spin" />
+                <Download v-else class="h-4 w-4" />
+                <span>{{ state.exportingThemes ? 'Exporting...' : 'Export All' }}</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <edge-shad-button class="uppercase bg-slate-700 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300" to="/app/dashboard/themes/new">
             Add Theme
           </edge-shad-button>
@@ -303,6 +399,16 @@ const handleThemeImport = async (event) => {
         </template>
       </template>
     </edge-dashboard>
+    <edge-cms-json-export-progress-dialog
+      v-model="state.exportDialogOpen"
+      title="Exporting Themes"
+      :status="state.exportDialogStatus"
+      :processed="state.exportDialogProcessed"
+      :total="state.exportDialogTotal"
+      :current-item="state.exportDialogCurrentItem"
+      @cancel="cancelThemesExport"
+      @update:model-value="closeThemesExportDialog"
+    />
     <edge-shad-dialog v-model="state.importDocIdDialogOpen">
       <DialogContent class="pt-8">
         <DialogHeader>

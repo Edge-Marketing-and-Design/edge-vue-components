@@ -1,6 +1,8 @@
 <script setup>
+import { Download, MoreHorizontal } from 'lucide-vue-next'
 const emit = defineEmits(['head'])
 const edgeFirebase = inject('edgeFirebase')
+const { saveJsonFiles } = useJsonFileSave()
 const { blocks: blockNewDocSchema } = useCmsNewDocs()
 const BLANK_BLOCK_TEMPLATE_ID = '__blank__'
 const state = reactive({
@@ -12,6 +14,13 @@ const state = reactive({
   selectedBlockDocIds: [],
   bulkDeleteDialogOpen: false,
   bulkDeleting: false,
+  exportingBlocks: false,
+  exportDialogOpen: false,
+  exportDialogStatus: 'idle',
+  exportDialogProcessed: 0,
+  exportDialogTotal: 0,
+  exportDialogCurrentItem: '',
+  exportCancelRequested: false,
   importingJson: false,
   importDocIdDialogOpen: false,
   importDocIdValue: '',
@@ -423,6 +432,81 @@ const themesCollection = computed(() => {
   return edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`] || {}
 })
 
+const openBlocksExportDialog = (total) => {
+  state.exportDialogOpen = true
+  state.exportDialogStatus = 'running'
+  state.exportDialogProcessed = 0
+  state.exportDialogTotal = total
+  state.exportDialogCurrentItem = ''
+  state.exportCancelRequested = false
+}
+
+const syncBlocksExportProgress = ({ completed = 0, total = 0, suggestedName = '' } = {}) => {
+  state.exportDialogOpen = true
+  state.exportDialogProcessed = completed
+  state.exportDialogTotal = total || state.exportDialogTotal
+  state.exportDialogCurrentItem = suggestedName || ''
+}
+
+const finishBlocksExportDialog = (savedCount) => {
+  state.exportDialogProcessed = savedCount
+  state.exportDialogStatus = savedCount === state.exportDialogTotal ? 'complete' : 'canceled'
+  state.exportCancelRequested = false
+}
+
+const cancelBlocksExport = () => {
+  if (!state.exportingBlocks)
+    return
+  state.exportCancelRequested = true
+}
+
+const closeBlocksExportDialog = () => {
+  if (state.exportingBlocks)
+    return
+  state.exportDialogOpen = false
+}
+
+const exportAllBlocks = async () => {
+  if (state.exportingBlocks)
+    return
+  const selectedDocIds = [...state.selectedBlockDocIds].filter(docId => blocksCollection.value?.[docId])
+  const files = selectedDocIds
+    .sort((leftId, rightId) => String(leftId).localeCompare(String(rightId)))
+    .map((docId) => ({
+      suggestedName: `block-${docId}.json`,
+      payload: {
+        ...edgeGlobal.dupObject(blocksCollection.value?.[docId] || {}),
+        docId,
+      },
+    }))
+
+  if (!files.length) {
+    edgeFirebase?.toast?.error?.('Select at least one block to export.')
+    return
+  }
+
+  openBlocksExportDialog(files.length)
+  state.exportingBlocks = true
+  try {
+    const savedCount = await saveJsonFiles(files, {
+      onProgress: syncBlocksExportProgress,
+      shouldCancel: () => state.exportCancelRequested,
+    })
+    finishBlocksExportDialog(savedCount)
+    if (savedCount === files.length)
+      edgeFirebase?.toast?.success?.(`Exported ${files.length} block${files.length === 1 ? '' : 's'}.`)
+    else if (savedCount > 0)
+      edgeFirebase?.toast?.success?.(`Exported ${savedCount} of ${files.length} blocks.`)
+  }
+  finally {
+    state.exportingBlocks = false
+    if (state.exportDialogStatus === 'running') {
+      state.exportDialogStatus = 'canceled'
+      state.exportCancelRequested = false
+    }
+  }
+}
+
 const parseHeadJson = (raw) => {
   if (!raw)
     return {}
@@ -566,6 +650,17 @@ const applyListSelectionFilters = (items = []) => {
 
 const blockCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/blocks`)
 const blocksCollection = computed(() => edgeFirebase.data?.[blockCollectionPath.value] || {})
+const visibleBlockItems = computed(() => {
+  const query = String(state.filter || '').trim().toLowerCase()
+  const items = Object.entries(blocksCollection.value || {}).map(([docId, doc]) => ({
+    docId,
+    ...(doc || {}),
+  }))
+  const filteredByQuery = !query
+    ? items
+    : items.filter(item => [item?.name, item?.docId].some(value => String(value || '').toLowerCase().includes(query)))
+  return applyListSelectionFilters(filteredByQuery)
+})
 const selectedBlockSet = computed(() => new Set(state.selectedBlockDocIds))
 const selectedBlockCount = computed(() => state.selectedBlockDocIds.length)
 const addBlockTemplateItems = computed(() => [blankBlockTemplate, ...INITIAL_BLOCK_TEMPLATES])
@@ -1098,19 +1193,32 @@ const handleBlockImport = async (event) => {
             class="hidden"
             @change="handleBlockImport"
           >
-          <edge-shad-button
-            type="button"
-            size="icon"
-            variant="outline"
-            class="h-9 w-9"
-            :disabled="state.importingJson"
-            title="Import Blocks"
-            aria-label="Import Blocks"
-            @click="triggerBlockImport"
-          >
-            <Loader2 v-if="state.importingJson" class="h-4 w-4 animate-spin" />
-            <Upload v-else class="h-4 w-4" />
-          </edge-shad-button>
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <edge-shad-button
+                type="button"
+                size="icon"
+                variant="outline"
+                class="h-9 w-9"
+                title="Block Actions"
+                aria-label="Block Actions"
+              >
+                <MoreHorizontal class="h-4 w-4" />
+              </edge-shad-button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem :disabled="state.importingJson" @click="triggerBlockImport">
+                <Loader2 v-if="state.importingJson" class="h-4 w-4 animate-spin" />
+                <Upload v-else class="h-4 w-4" />
+                <span>Import Blocks</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem :disabled="state.exportingBlocks || selectedBlockCount === 0" @click="exportAllBlocks">
+                <Loader2 v-if="state.exportingBlocks" class="h-4 w-4 animate-spin" />
+                <Download v-else class="h-4 w-4" />
+                <span>{{ state.exportingBlocks ? 'Exporting Selected...' : 'Export Selected' }}</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <edge-shad-button
             class="uppercase bg-slate-700 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
             @click="openAddBlockDialog"
@@ -1119,19 +1227,19 @@ const handleBlockImport = async (event) => {
           </edge-shad-button>
         </div>
       </template>
-      <template #list-header="slotProps">
+      <template #list-header>
         <div class="w-full mt-4 mx-0 rounded-md border border-slate-300/70 bg-slate-100/95 dark:border-slate-700 dark:bg-slate-900/95 px-3 py-2 space-y-2 backdrop-blur-sm shadow-sm">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="flex items-center gap-2">
               <Checkbox
-                :model-value="getVisibleSelectionState(applyListSelectionFilters(slotProps.filtered))"
+                :model-value="getVisibleSelectionState(visibleBlockItems)"
                 aria-label="Select visible blocks"
                 class="border-slate-400 bg-white shadow-sm dark:border-slate-600 dark:bg-slate-950 data-[state=checked]:bg-slate-700 data-[state=checked]:text-white dark:data-[state=checked]:bg-slate-200 dark:data-[state=checked]:text-slate-900"
                 @click.stop
-                @update:model-value="toggleVisibleBlockSelection(applyListSelectionFilters(slotProps.filtered), $event)"
+                @update:model-value="toggleVisibleBlockSelection(visibleBlockItems, $event)"
               />
               <span class="text-xs text-slate-600 dark:text-slate-300">
-                Select visible ({{ applyListSelectionFilters(slotProps.filtered).length }})
+                Select visible ({{ visibleBlockItems.length }})
               </span>
             </div>
             <div class="flex items-center gap-2">
@@ -1191,14 +1299,14 @@ const handleBlockImport = async (event) => {
           </div>
         </div>
       </template>
-      <template #list="slotProps">
+      <template #list>
         <div class="w-full pt-2 space-y-3 h-[calc(100vh-310px)]">
           <div
             class="grid gap-4 w-full"
             style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));"
           >
             <div
-              v-for="item in applyListSelectionFilters(slotProps.filtered)"
+              v-for="item in visibleBlockItems"
               :key="item.docId"
               role="button"
               tabindex="0"
@@ -1293,6 +1401,16 @@ const handleBlockImport = async (event) => {
         </div>
       </template>
     </edge-dashboard>
+    <edge-cms-json-export-progress-dialog
+      v-model="state.exportDialogOpen"
+      title="Exporting Blocks"
+      :status="state.exportDialogStatus"
+      :processed="state.exportDialogProcessed"
+      :total="state.exportDialogTotal"
+      :current-item="state.exportDialogCurrentItem"
+      @cancel="cancelBlocksExport"
+      @update:model-value="closeBlocksExportDialog"
+    />
     <edge-shad-dialog v-model="state.importDocIdDialogOpen">
       <DialogContent class="pt-8">
         <DialogHeader>
