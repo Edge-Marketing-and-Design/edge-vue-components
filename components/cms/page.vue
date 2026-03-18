@@ -3754,7 +3754,7 @@ const hasUnsavedChanges = (changes) => {
     </DialogContent>
   </edge-shad-dialog>
   <edge-shad-dialog v-model="state.showUnpublishedChangesDialog">
-    <DialogContent class="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+    <DialogContent class="max-w-[96vw] max-h-[92vh] overflow-hidden flex flex-col">
       <DialogHeader>
         <DialogTitle class="text-left">
           {{ pageChangesDialogTitle }}
@@ -3916,7 +3916,7 @@ const hasUnsavedChanges = (changes) => {
     </DialogContent>
   </edge-shad-dialog>
   <edge-shad-dialog v-model="state.showHistoryDiffDialog">
-    <DialogContent class="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+    <DialogContent class="max-w-[96vw] max-h-[92vh] overflow-hidden flex flex-col">
       <DialogHeader>
         <DialogTitle class="text-left">
           History Diff
