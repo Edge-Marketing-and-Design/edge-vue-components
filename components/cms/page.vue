@@ -1648,6 +1648,7 @@ const loadPageHistory = async () => {
 const openHistoryDialog = async () => {
   if (!currentPage.value || !currentPagePath.value || !edgeFirebase?.user?.uid)
     return
+  state.historySelectedId = ''
   state.historyDialogOpen = true
   await loadPageHistory()
 }
@@ -2432,8 +2433,8 @@ const buildPageChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel }
     }
   }
 
-  compareBlockArea('index', 'Index blocks', 'content', 'structure', 'Index layout')
-  compareBlockArea('detail', 'Detail blocks', 'postContent', 'postStructure', 'Detail layout')
+  compareBlockArea('index', 'Blocks', 'content', 'structure', 'Layout')
+  compareBlockArea('detail', 'Detail Blocks', 'postContent', 'postStructure', 'Detail Layout')
   compareField('metaTitle', 'Meta title', val => summarizeChangeValue(val, true))
   compareField('metaDescription', 'Meta description', val => summarizeChangeValue(val, true))
   compareField('structuredData', 'Structured data', val => summarizeChangeValue(val, true))

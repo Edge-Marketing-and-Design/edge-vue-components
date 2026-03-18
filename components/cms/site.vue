@@ -106,6 +106,7 @@ const state = reactive({
   importPageConflictDocId: '',
   importPageErrorDialogOpen: false,
   importPageErrorMessage: '',
+  showSiteSettingsDiffDialog: false,
   siteSettingsWorkingDoc: {},
   templatePageFilter: '',
   templatePageSearchType: 'all',
@@ -1046,6 +1047,100 @@ const isSiteDiff = computed(() => {
     })
   }
   return false
+})
+
+const SITE_SETTINGS_DIFF_FIELDS = [
+  { key: 'domains', label: 'Domains' },
+  { key: 'menus', label: 'Menus', format: 'menus' },
+  { key: 'theme', label: 'Theme' },
+  { key: 'allowedThemes', label: 'Allowed Themes' },
+  { key: 'logo', label: 'Logo' },
+  { key: 'logoLight', label: 'Logo Light' },
+  { key: 'logoText', label: 'Logo Text' },
+  { key: 'logoType', label: 'Logo Type' },
+  { key: 'brandLogoDark', label: 'Brand Logo Dark' },
+  { key: 'brandLogoLight', label: 'Brand Logo Light' },
+  { key: 'favicon', label: 'Favicon' },
+  { key: 'menuPosition', label: 'Menu Position' },
+  { key: 'forwardApex', label: 'Forward Apex', format: 'boolean' },
+  { key: 'contactEmail', label: 'Contact Email' },
+  { key: 'contactPhone', label: 'Contact Phone' },
+  { key: 'metaTitle', label: 'Meta Title' },
+  { key: 'metaDescription', label: 'Meta Description' },
+  { key: 'structuredData', label: 'Structured Data', format: 'json' },
+  { key: 'trackingFacebookPixel', label: 'Facebook Pixel' },
+  { key: 'trackingGoogleAnalytics', label: 'Google Analytics' },
+  { key: 'trackingAdroll', label: 'Adroll' },
+  { key: 'sureFeedURL', label: 'SureFeed URL' },
+  { key: 'socialFacebook', label: 'Facebook' },
+  { key: 'socialInstagram', label: 'Instagram' },
+  { key: 'socialTwitter', label: 'Twitter' },
+  { key: 'socialLinkedIn', label: 'LinkedIn' },
+  { key: 'socialYouTube', label: 'YouTube' },
+  { key: 'socialTikTok', label: 'TikTok' },
+]
+
+const summarizeSiteSettingsValue = (value, format = '') => {
+  if (format === 'boolean')
+    return value === true ? 'Yes' : value === false ? 'No' : '—'
+
+  if (format === 'menus') {
+    if (!value || typeof value !== 'object')
+      return '—'
+    const parts = Object.entries(value)
+      .map(([menuName, items]) => `${menuName} (${Array.isArray(items) ? items.length : 0})`)
+      .filter(Boolean)
+    return parts.length ? parts.join(', ') : '—'
+  }
+
+  if (format === 'json') {
+    if (value == null || value === '')
+      return '—'
+    try {
+      const stringValue = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+      return stringValue.length > 500 ? `${stringValue.slice(0, 500)}...` : stringValue
+    }
+    catch {
+      return String(value)
+    }
+  }
+
+  if (Array.isArray(value))
+    return value.length ? value.map(item => String(item || '').trim()).filter(Boolean).join(', ') : '—'
+
+  if (value && typeof value === 'object') {
+    try {
+      const stringValue = JSON.stringify(value, null, 2)
+      return stringValue.length > 500 ? `${stringValue.slice(0, 500)}...` : stringValue
+    }
+    catch {
+      return '—'
+    }
+  }
+
+  const normalized = String(value ?? '').trim()
+  return normalized || '—'
+}
+
+const siteSettingsDiffDetails = computed(() => {
+  const base = publishedSiteSettings.value || {}
+  const compare = siteData.value || {}
+  const details = []
+
+  SITE_SETTINGS_DIFF_FIELDS.forEach((field) => {
+    const baseValue = base?.[field.key]
+    const compareValue = compare?.[field.key]
+    if (areEqualNormalized(baseValue, compareValue))
+      return
+    details.push({
+      key: field.key,
+      label: field.label,
+      published: summarizeSiteSettingsValue(baseValue, field.format),
+      current: summarizeSiteSettingsValue(compareValue, field.format),
+    })
+  })
+
+  return details
 })
 
 const publishSiteSettings = async () => {
@@ -2710,10 +2805,21 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
           <template v-if="!isTemplateSite && !hidePublishStatusAndActions">
             <Transition name="fade" mode="out-in">
               <div v-if="isSiteDiff || isAnyPagesDiff" key="unpublished" class="flex gap-2 items-center">
-                <div class="flex gap-1 items-center bg-yellow-100 text-xs py-1 px-3 text-yellow-800 rounded">
+                <edge-shad-button
+                  v-if="isSiteDiff"
+                  variant="outline"
+                  class="flex gap-1 items-center border-yellow-300 bg-yellow-100 px-3 py-1 text-xs text-yellow-800 hover:bg-yellow-100 hover:text-yellow-900"
+                  @click="state.showSiteSettingsDiffDialog = true"
+                >
                   <CircleAlert class="!text-yellow-800 w-3 h-6" />
                   <span class="font-medium text-[10px]">
-                    {{ isSiteDiff ? (useMenuPublishLabels ? 'Unpublished Menu' : 'Unpublished Settings') : 'Unpublished Pages' }}
+                    {{ useMenuPublishLabels ? 'Unpublished Menu' : 'Unpublished Settings' }}
+                  </span>
+                </edge-shad-button>
+                <div v-else class="flex gap-1 items-center bg-yellow-100 text-xs py-1 px-3 text-yellow-800 rounded">
+                  <CircleAlert class="!text-yellow-800 w-3 h-6" />
+                  <span class="font-medium text-[10px]">
+                    Unpublished Pages
                   </span>
                 </div>
                 <edge-shad-button
@@ -3135,6 +3241,57 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
       @cancel="cancelPagesExport"
       @update:model-value="closePagesExportDialog"
     />
+    <edge-shad-dialog v-model="state.showSiteSettingsDiffDialog">
+      <DialogContent class="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle class="text-left">
+            {{ useMenuPublishLabels ? 'Unpublished Menu' : 'Unpublished Settings' }}
+          </DialogTitle>
+          <DialogDescription class="text-left">
+            Review what changed between the published site settings and the current site settings.
+          </DialogDescription>
+        </DialogHeader>
+        <div class="mt-2 flex-1 overflow-y-auto pr-1">
+          <div v-if="siteSettingsDiffDetails.length" class="space-y-3">
+            <div
+              v-for="change in siteSettingsDiffDetails"
+              :key="change.key"
+              class="rounded-md border border-slate-300 bg-slate-200 p-3 text-left dark:border-slate-700 dark:bg-slate-800"
+            >
+              <div class="mb-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
+                {{ change.label }}
+              </div>
+              <div class="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+                <div class="rounded border border-gray-200 bg-white/80 p-2 dark:border-white/15 dark:bg-gray-800">
+                  <div class="mb-1 text-[11px] uppercase tracking-wide text-gray-500">
+                    Published
+                  </div>
+                  <div class="whitespace-pre-wrap break-words text-gray-900 dark:text-gray-100">
+                    {{ change.published }}
+                  </div>
+                </div>
+                <div class="rounded border border-gray-200 bg-white/80 p-2 dark:border-white/15 dark:bg-gray-800">
+                  <div class="mb-1 text-[11px] uppercase tracking-wide text-gray-500">
+                    Current
+                  </div>
+                  <div class="whitespace-pre-wrap break-words text-gray-900 dark:text-gray-100">
+                    {{ change.current }}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div v-else class="text-sm text-gray-600 dark:text-gray-300 text-left">
+            No unpublished site settings differences detected.
+          </div>
+        </div>
+        <DialogFooter class="pt-4">
+          <edge-shad-button class="w-full" variant="outline" @click="state.showSiteSettingsDiffDialog = false">
+            Close
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
     <edge-shad-dialog v-model="state.importPageDocIdDialogOpen">
       <DialogContent class="pt-8">
         <DialogHeader>
