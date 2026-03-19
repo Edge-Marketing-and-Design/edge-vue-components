@@ -394,6 +394,7 @@ const clearTagFilters = () => {
       :theme="pickerTheme"
       :site-id="activeSiteId"
       :viewport-mode="pickerViewport"
+      :standalone-preview="true"
       @pending="blockLoaded($event, 'block')"
     />
       <edge-cms-block-render
@@ -404,6 +405,7 @@ const clearTagFilters = () => {
         :theme="pickerTheme"
         :site-id="activeSiteId"
         :viewport-mode="pickerViewport"
+        :standalone-preview="true"
       />
   </div>
   <div v-else-if="props.listOnly" class="p-6 h-[calc(100vh-50px)] overflow-hidden flex flex-col gap-4">
@@ -447,7 +449,7 @@ const clearTagFilters = () => {
                 <div class="text-4xl relative text-inherit text-center">
                   {{ block.name }}
                 </div>
-                <edge-cms-block-api :site-id="activeSiteId" :content="block.content" :theme="pickerTheme" :values="block.values" :meta="block.meta" :viewport-mode="pickerViewport" @pending="blockLoaded($event, block.docId)" />
+                <edge-cms-block-api :site-id="activeSiteId" :content="block.content" :theme="pickerTheme" :values="block.values" :meta="block.meta" :viewport-mode="pickerViewport" :standalone-preview="true" @pending="blockLoaded($event, block.docId)" />
                 <edge-cms-block-render
                   v-if="!pickerState.blocksLoaded.includes(block.docId)"
                   :content="loadingRender(block.content)"
@@ -455,6 +457,7 @@ const clearTagFilters = () => {
                   :meta="block.meta"
                   :theme="pickerTheme"
                   :viewport-mode="pickerViewport"
+                  :standalone-preview="true"
                 />
               </div>
             </div>
@@ -526,7 +529,7 @@ const clearTagFilters = () => {
                 <div class="text-4xl relative text-inherit text-center">
                   {{ block.name }}
                 </div>
-                <edge-cms-block-api :site-id="activeSiteId" :content="block.content" :theme="pickerTheme" :values="block.values" :meta="block.meta" :viewport-mode="pickerViewport" @pending="blockLoaded($event, block.docId)" />
+                <edge-cms-block-api :site-id="activeSiteId" :content="block.content" :theme="pickerTheme" :values="block.values" :meta="block.meta" :viewport-mode="pickerViewport" :standalone-preview="true" @pending="blockLoaded($event, block.docId)" />
                 <edge-cms-block-render
                   v-if="!pickerState.blocksLoaded.includes(block.docId)"
                   :content="loadingRender(block.content)"
@@ -534,6 +537,7 @@ const clearTagFilters = () => {
                   :meta="block.meta"
                   :theme="pickerTheme"
                   :viewport-mode="pickerViewport"
+                  :standalone-preview="true"
                 />
               </div>
             </div>

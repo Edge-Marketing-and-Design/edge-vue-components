@@ -29,6 +29,10 @@ const props = defineProps({
     type: String,
     default: 'auto',
   },
+  standalonePreview: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const emit = defineEmits(['loaded'])
@@ -1300,6 +1304,131 @@ function renderSafeHtml(content) {
   }
 }
 
+function getStandalonePreviewContentRoot() {
+  const host = hostEl.value
+  if (!host)
+    return null
+  const children = Array.from(host.children || [])
+  const direct = children.find((child) => {
+    if (!(child instanceof HTMLElement))
+      return false
+    const tag = child.tagName.toLowerCase()
+    return !['style', 'script', 'link', 'meta'].includes(tag)
+  })
+  return direct || host
+}
+
+function getFirstRenderableElement(root) {
+  if (!root || typeof document === 'undefined')
+    return null
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, {
+    acceptNode(node) {
+      if (!node || !(node instanceof HTMLElement))
+        return NodeFilter.FILTER_SKIP
+      if (node === root)
+        return NodeFilter.FILTER_SKIP
+      const tag = node.tagName.toLowerCase()
+      if (['script', 'style', 'link', 'meta'].includes(tag))
+        return NodeFilter.FILTER_SKIP
+      return NodeFilter.FILTER_ACCEPT
+    },
+  })
+  return walker.nextNode()
+}
+
+function resolveStandalonePreviewTargetElement() {
+  const contentRoot = getStandalonePreviewContentRoot()
+  let target = getFirstRenderableElement(contentRoot)
+  if (!target)
+    return null
+
+  for (;;) {
+    const onlyChild = target.children?.length === 1 ? target.firstElementChild : null
+    const ownText = Array.from(target.childNodes || []).some((node) => {
+      return node.nodeType === Node.TEXT_NODE && String(node.textContent || '').trim().length > 0
+    })
+    const hasOwnHooks = target.hasAttribute('data-viewport-base-class')
+      || target.hasAttribute('class')
+      || target.hasAttribute('style')
+      || target.hasAttribute('id')
+
+    if (!onlyChild || ownText || hasOwnHooks)
+      break
+
+    if (!(onlyChild instanceof HTMLElement))
+      break
+
+    const childTag = onlyChild.tagName.toLowerCase()
+    if (['style', 'script', 'link', 'meta'].includes(childTag))
+      break
+
+    target = onlyChild
+  }
+
+  return target
+}
+
+function resetStandalonePreviewOverrides(root) {
+  if (!root)
+    return
+  root.querySelectorAll('[data-cms-standalone-reset-margin-top]').forEach((el) => {
+    el.style.removeProperty('margin-top')
+    el.removeAttribute('data-cms-standalone-reset-margin-top')
+  })
+  root.querySelectorAll('[data-cms-standalone-reset-top]').forEach((el) => {
+    el.style.removeProperty('top')
+    el.removeAttribute('data-cms-standalone-reset-top')
+  })
+  root.querySelectorAll('[data-cms-standalone-reset-translate]').forEach((el) => {
+    el.style.removeProperty('translate')
+    el.removeAttribute('data-cms-standalone-reset-translate')
+  })
+}
+
+function syncStandalonePreviewInset() {
+  const host = hostEl.value
+  if (!host || typeof window === 'undefined')
+    return
+
+  if (!props.standalonePreview) {
+    host.style.removeProperty('padding-top')
+    host.style.removeProperty('display')
+    resetStandalonePreviewOverrides(host)
+    host.removeAttribute('data-cms-standalone-preview')
+    return
+  }
+
+  host.setAttribute('data-cms-standalone-preview', 'true')
+  host.style.removeProperty('padding-top')
+  host.style.display = 'flow-root'
+  resetStandalonePreviewOverrides(host)
+
+  const firstElement = resolveStandalonePreviewTargetElement()
+  if (!firstElement)
+    return
+
+  const computedStyle = window.getComputedStyle(firstElement)
+  const marginTop = Number.parseFloat(computedStyle.marginTop || '0')
+  if (Number.isFinite(marginTop) && marginTop < 0) {
+    firstElement.style.setProperty('margin-top', '0px', 'important')
+    firstElement.setAttribute('data-cms-standalone-reset-margin-top', 'true')
+  }
+
+  const topValue = Number.parseFloat(computedStyle.top || '0')
+  if (computedStyle.position !== 'static' && Number.isFinite(topValue) && topValue < 0) {
+    firstElement.style.setProperty('top', '0px', 'important')
+    firstElement.setAttribute('data-cms-standalone-reset-top', 'true')
+  }
+
+  const hostRect = host.getBoundingClientRect()
+  const adjustedRect = firstElement.getBoundingClientRect()
+  const overflowTop = hostRect.top - adjustedRect.top
+  if (overflowTop > 1) {
+    firstElement.style.setProperty('translate', `0 ${Math.ceil(overflowTop)}px`, 'important')
+    firstElement.setAttribute('data-cms-standalone-reset-translate', 'true')
+  }
+}
+
 function normalizeTheme(input = {}) {
   const t = input || {}
   const ext = t.extend || {}
@@ -1697,6 +1826,7 @@ onMounted(async () => {
   initEmblaCarousels(hostEl.value)
   initCmsNavHelpers(hostEl.value)
   await nextTick()
+  syncStandalonePreviewInset()
   hasMounted = true
   notifyLoaded()
 })
@@ -1714,6 +1844,7 @@ watch(
     initEmblaCarousels(hostEl.value)
     initCmsNavHelpers(hostEl.value)
     await nextTick()
+    syncStandalonePreviewInset()
     notifyLoaded()
   },
 )
@@ -1729,6 +1860,7 @@ watch(
     rewriteAllClasses(hostEl.value, val, props.isolated, props.viewportMode)
     initCmsNavHelpers(hostEl.value)
     await nextTick()
+    syncStandalonePreviewInset()
     notifyLoaded()
   },
   { immediate: true, deep: true },
@@ -1742,6 +1874,15 @@ watch(
     // Viewport button changes can alter preview surface width without a window resize.
     // Reinitialize nav helpers so fixed nav left/width is recalculated immediately.
     initCmsNavHelpers(hostEl.value)
+    syncStandalonePreviewInset()
+  },
+)
+
+watch(
+  () => props.standalonePreview,
+  async () => {
+    await nextTick()
+    syncStandalonePreviewInset()
   },
 )
 

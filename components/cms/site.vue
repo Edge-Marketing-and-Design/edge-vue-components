@@ -2824,7 +2824,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
               size="sm"
               class="h-8 px-4 text-xs gap-2 rounded-full"
               :class="state.viewMode === 'pages'
-                ? 'bg-gradient-to-r from-slate-900 to-slate-700 text-white shadow-sm dark:bg-gradient-to-r dark:from-slate-200 dark:to-slate-400 dark:text-slate-900'
+                ? 'bg-gradient-to-r from-slate-900 to-slate-700 text-white hover:text-white shadow-sm dark:bg-gradient-to-r dark:from-slate-200 dark:to-slate-400 dark:text-slate-900 dark:hover:text-slate-900'
                 : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100'"
               @click="setViewMode('pages')"
             >
@@ -2837,7 +2837,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
               size="sm"
               class="h-8 px-4 text-xs gap-2 rounded-full"
               :class="state.viewMode === 'posts'
-                ? 'bg-gradient-to-r from-slate-900 to-slate-700 text-white shadow-sm dark:bg-gradient-to-r dark:from-slate-200 dark:to-slate-400 dark:text-slate-900'
+                ? 'bg-gradient-to-r from-slate-900 to-slate-700 text-white hover:text-white shadow-sm dark:bg-gradient-to-r dark:from-slate-200 dark:to-slate-400 dark:text-slate-900 dark:hover:text-slate-900'
                 : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100'"
               @click="setViewMode('posts')"
             >
@@ -2850,7 +2850,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
               size="sm"
               class="h-8 px-4 text-xs gap-2 rounded-full"
               :class="state.viewMode === 'submissions'
-                ? 'bg-gradient-to-r from-slate-900 to-slate-700 text-white shadow-sm dark:bg-gradient-to-r dark:from-slate-200 dark:to-slate-400 dark:text-slate-900'
+                ? 'bg-gradient-to-r from-slate-900 to-slate-700 text-white hover:text-white shadow-sm dark:bg-gradient-to-r dark:from-slate-200 dark:to-slate-400 dark:text-slate-900 dark:hover:text-slate-900'
                 : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100'"
               @click="setViewMode('submissions')"
             >
