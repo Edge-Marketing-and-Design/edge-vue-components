@@ -1,6 +1,6 @@
 <script setup lang="js">
 import { useVModel } from '@vueuse/core'
-import { Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePlus2, FileUp, FileWarning, FileX, Folder, FolderMinus, FolderOpen, FolderPen, FolderPlus, Link } from 'lucide-vue-next'
+import { Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePlus2, FileUp, FileWarning, FileX, Folder, FolderMinus, FolderOpen, FolderPen, FolderPlus, History, Link } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
@@ -238,6 +238,16 @@ const pageRouteBase = computed(() => {
     ? '/app/dashboard/templates'
     : `/app/dashboard/sites/${props.site}`
 })
+
+const openPageVersions = (pageId) => {
+  const nextPageId = String(pageId || '').trim()
+  if (!nextPageId)
+    return
+  router.push({
+    path: `${pageRouteBase.value}/${nextPageId}`,
+    query: { history: '1' },
+  })
+}
 
 const isPublishedPageDiff = (pageId) => {
   const publishedPage = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`]?.[pageId]
@@ -1190,6 +1200,16 @@ const onSubmit = () => {
 defineExpose({
   openPageSettings: showPageSettings,
   openDeletePageDialog: deletePageShow,
+  openRenamePageDialog: renameFolderOrPageShow,
+  exportPage,
+  publishPage,
+  unPublishPage,
+  discardPageChanges,
+  buildLivePageUrl,
+  isPublishedPageDiff,
+  isPublishedPage: isPublished,
+  isRenameDisabled,
+  isDeleteDisabled,
 })
 
 const theme = computed(() => {
@@ -1340,6 +1360,10 @@ const theme = computed(() => {
                       <DropdownMenuItem v-else-if="!props.isTemplateSite" disabled>
                         <ExternalLink />
                         <span>View Live Page</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem @click="openPageVersions(element.item)">
+                        <History />
+                        <span>Versions</span>
                       </DropdownMenuItem>
                       <DropdownMenuItem @click="exportPage(element.item)">
                         <Download />

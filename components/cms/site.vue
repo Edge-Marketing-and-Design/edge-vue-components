@@ -1,7 +1,7 @@
 <script setup lang="js">
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { CircleAlert, Download, FileCheck, FilePenLine, FileStack, FolderCog, FolderDown, FolderUp, FolderX, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload } from 'lucide-vue-next'
+import { CircleAlert, Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePenLine, FileStack, FileUp, FileX, FolderCog, FolderDown, FolderUp, FolderX, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload } from 'lucide-vue-next'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
 
 const props = defineProps({
@@ -1598,6 +1598,8 @@ const sitePageGridItems = computed(() => {
       menuEntry: {
         name: pageDoc?.name || normalizedDocId,
         item: normalizedDocId,
+        menuName: 'Not In Menu',
+        index: -1,
       },
       lastUpdated: pageDoc?.last_updated || pageDoc?.doc_created_at || 0,
       description: String(pageDoc?.metaDescription || '').trim(),
@@ -1621,11 +1623,55 @@ const openSitePageSettings = (item) => {
   pageMenuRef.value?.openPageSettings?.(item.menuEntry)
 }
 
+const openSitePageRename = (item) => {
+  if (!item?.menuEntry)
+    return
+  pageMenuRef.value?.openRenamePageDialog?.(item.menuEntry)
+}
+
 const openSitePageDelete = (item) => {
   if (!item?.menuEntry)
     return
   pageMenuRef.value?.openDeletePageDialog?.(item.menuEntry)
 }
+
+const exportSitePage = (item) => {
+  const docId = String(item?.docId || '').trim()
+  if (!docId)
+    return
+  pageMenuRef.value?.exportPage?.(docId)
+}
+
+const publishSitePage = (item) => {
+  const docId = String(item?.docId || '').trim()
+  if (!docId)
+    return
+  pageMenuRef.value?.publishPage?.(docId)
+}
+
+const unPublishSitePage = (item) => {
+  const docId = String(item?.docId || '').trim()
+  if (!docId)
+    return
+  pageMenuRef.value?.unPublishPage?.(docId)
+}
+
+const discardSitePageChanges = (item) => {
+  const docId = String(item?.docId || '').trim()
+  if (!docId)
+    return
+  pageMenuRef.value?.discardPageChanges?.(docId)
+}
+
+const getSitePageLiveUrl = (item) => {
+  if (!item?.menuEntry)
+    return ''
+  return pageMenuRef.value?.buildLivePageUrl?.(item.menuEntry.menuName, item.menuEntry) || ''
+}
+
+const isSitePagePublished = item => !!pageMenuRef.value?.isPublishedPage?.(item?.docId)
+const isSitePageRenameDisabled = item => !!pageMenuRef.value?.isRenameDisabled?.(item?.menuEntry)
+const isSitePageDeleteDisabled = item => !!pageMenuRef.value?.isDeleteDisabled?.(item?.menuEntry)
 
 const _templatePageItems = computed(() => {
   return Object.entries(pages.value || {})
@@ -3139,26 +3185,69 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                                 </span>
                               </div>
                             </div>
-                            <div class="flex items-center gap-1">
-                              <edge-shad-button
-                                size="icon"
-                                variant="ghost"
-                                class="h-8 w-8 text-slate-600 hover:bg-slate-200 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-                                :disabled="edgeGlobal.edgeState.cmsPageWithUnsavedChanges === item.docId"
-                                @click.stop="openSitePageSettings(item)"
-                              >
-                                <FolderCog class="h-4 w-4" />
-                              </edge-shad-button>
-                              <edge-shad-button
-                                size="icon"
-                                variant="ghost"
-                                class="h-8 w-8 text-slate-600 hover:bg-slate-200 hover:text-red-700 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-red-300"
-                                :disabled="item.menuEntry?.disableDelete"
-                                @click.stop="openSitePageDelete(item)"
-                              >
-                                <Trash2 class="h-4 w-4" />
-                              </edge-shad-button>
-                            </div>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger as-child>
+                                <edge-shad-button
+                                  size="icon"
+                                  variant="ghost"
+                                  class="h-8 w-8 text-slate-600 hover:bg-slate-200 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                                  @click.stop
+                                >
+                                  <MoreHorizontal class="h-4 w-4" />
+                                </edge-shad-button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent side="right" align="start" @click.stop>
+                                <DropdownMenuLabel class="flex items-center gap-2">
+                                  <File class="w-5 h-5" /> {{ item.menuPath }}/{{ item.name }}
+                                </DropdownMenuLabel>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem :disabled="edgeGlobal.edgeState.cmsPageWithUnsavedChanges === item.docId" @click="openSitePageSettings(item)">
+                                  <FileCog />
+                                  <div class="flex flex-col">
+                                    <span>Settings</span>
+                                    <span v-if="edgeGlobal.edgeState.cmsPageWithUnsavedChanges === item.docId" class="text-xs text-red-500">(Unsaved Changes)</span>
+                                  </div>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  v-if="getSitePageLiveUrl(item)"
+                                  as-child
+                                >
+                                  <a :href="getSitePageLiveUrl(item)" target="_blank" rel="noopener noreferrer" @click.stop>
+                                    <ExternalLink />
+                                    <span>View Live Page</span>
+                                  </a>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem v-else disabled>
+                                  <ExternalLink />
+                                  <span>View Live Page</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem @click="exportSitePage(item)">
+                                  <Download />
+                                  <span>Export Page</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem v-if="isPublishedPageDiff(item.docId)" @click="publishSitePage(item)">
+                                  <FileUp />
+                                  <span>Publish</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem :disabled="isSitePageRenameDisabled(item)" @click="openSitePageRename(item)">
+                                  <FilePen />
+                                  <span>Rename</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem v-if="isPublishedPageDiff(item.docId) && isSitePagePublished(item)" @click="discardSitePageChanges(item)">
+                                  <FileX />
+                                  <span>Discard Changes</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem v-if="isSitePagePublished(item)" @click="unPublishSitePage(item)">
+                                  <FileDown />
+                                  <span>Unpublish</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem class="text-destructive" :disabled="isSitePageDeleteDisabled(item)" @click="openSitePageDelete(item)">
+                                  <FileMinus2 />
+                                  <span>Delete</span>
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
                           <div class="template-scale-wrapper border border-dashed border-border/60 rounded-md bg-background/80">
                             <div class="template-scale-inner">

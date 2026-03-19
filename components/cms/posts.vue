@@ -2,7 +2,7 @@
 import { computed, inject, onBeforeMount, reactive, ref, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { ArrowDown, ArrowUp, Clock3, Eye, File, FileCheck, FilePen, FileWarning, FileX, GripVertical, History, Image, ImagePlus, Loader2, MoreHorizontal, Pencil, Plus, RotateCcw, Save, Trash2, X } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, ArrowUp, Clock3, Eye, File, FileCheck, FilePen, FileWarning, FileX, GripVertical, History, Image, ImagePlus, Loader2, MoreHorizontal, Pencil, Plus, RotateCcw, Save, Trash2, X } from 'lucide-vue-next'
 
 const props = defineProps({
   site: {
@@ -3514,16 +3514,70 @@ const reindexPublishedPostsToKv = async () => {
         @unsaved-changes="handleEditorUnsavedChanges"
       >
         <template #header="slotProps">
-          <div class="relative flex items-center p-2 justify-between sticky top-0 z-50 rounded h-[50px] border border-stone-300 bg-stone-100 text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100">
-            <span class="text-lg font-semibold whitespace-nowrap pr-1">{{ sheetTitle }}</span>
-            <div class="flex w-full items-center">
-              <div class="w-full border-t border-stone-300 dark:border-stone-700" aria-hidden="true" />
-              <div class="flex items-center gap-1 pr-3">
+          <div class="relative flex flex-col gap-2 p-2 sticky top-0 z-50 rounded border border-stone-300 bg-stone-100 text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="flex min-w-0 flex-1 items-center gap-2 pr-2">
+                <edge-shad-button
+                  type="button"
+                  variant="text"
+                  class="text-xs h-[26px] text-slate-700 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white"
+                  @click="closeSheet"
+                >
+                  <ArrowLeft class="w-4 h-4" />
+                  Back
+                </edge-shad-button>
+                <span class="min-w-0 truncate pr-1 text-sm font-bold whitespace-nowrap sm:text-base">{{ sheetTitle }}</span>
+              </div>
+              <div class="flex shrink-0 flex-wrap items-center justify-end gap-1">
+                <edge-shad-button
+                  v-if="!slotProps.unsavedChanges"
+                  variant="text"
+                  class="h-[26px] shrink-0 text-xs text-red-700 hover:text-red-700/50"
+                  @click="closeSheet"
+                >
+                  <X class="w-4 h-4" />
+                  Close
+                </edge-shad-button>
+                <edge-shad-button
+                  v-else
+                  variant="text"
+                  class="h-[26px] shrink-0 text-xs text-red-700 hover:text-red-700/50"
+                  @click="closeSheet"
+                >
+                  <X class="w-4 h-4" />
+                  Cancel
+                </edge-shad-button>
+                <edge-shad-button
+                  v-if="isCreating || slotProps.unsavedChanges"
+                  variant="text"
+                  type="submit"
+                  class="h-[26px] shrink-0 bg-slate-300 text-xs text-slate-900 hover:bg-slate-400 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
+                  :disabled="slotProps.submitting"
+                >
+                  <Loader2 v-if="slotProps.submitting" class="w-4 h-4 animate-spin" />
+                  <Save v-else class="w-4 h-4" />
+                  <span>Save</span>
+                </edge-shad-button>
+              </div>
+            </div>
+            <div class="flex w-full min-w-0 flex-wrap items-center justify-between gap-1.5">
+              <div class="flex flex-wrap items-center gap-2 text-gray-600 dark:text-gray-300 sm:pl-2 sm:pr-1 sm:whitespace-nowrap">
+                <div class="flex items-center gap-2 text-sm">
+                  <FileWarning v-if="activePostPublishStatus.icon === 'changes'" class="h-4 w-4 text-yellow-600" />
+                  <FileCheck v-else-if="activePostPublishStatus.icon === 'published'" class="h-4 w-4 text-green-700" />
+                  <FileX v-else class="h-4 w-4 text-slate-500 dark:text-slate-300" />
+                  <span :class="activePostPublishStatus.badgeClass">{{ activePostPublishStatus.label }}</span>
+                </div>
+                <span class="text-[11px] leading-none text-gray-500 dark:text-gray-400">
+                  Last Published: {{ lastPublishedTime(state.activePostId) }}
+                </span>
+              </div>
+              <div class="flex flex-wrap items-center justify-end gap-1">
                 <edge-shad-button
                   v-if="!isCreating"
                   type="button"
                   variant="text"
-                  class="text-xs h-[26px] text-slate-700 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white"
+                  class="h-[26px] shrink-0 text-xs text-slate-700 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white"
                   @click="openHistoryDialog"
                 >
                   <History class="w-4 h-4" />
@@ -3532,7 +3586,7 @@ const reindexPublishedPostsToKv = async () => {
                 <edge-shad-button
                   type="button"
                   variant="text"
-                  class="text-xs h-[26px] text-slate-700 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white"
+                  class="h-[26px] shrink-0 text-xs text-slate-700 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white"
                   @click="state.editMode = !state.editMode"
                 >
                   <template v-if="state.editMode">
@@ -3543,35 +3597,6 @@ const reindexPublishedPostsToKv = async () => {
                     <Pencil class="w-4 h-4" />
                     Edit Mode
                   </template>
-                </edge-shad-button>
-                <edge-shad-button
-                  v-if="!slotProps.unsavedChanges"
-                  variant="text"
-                  class="hover:text-red-700/50 text-xs h-[26px] text-red-700"
-                  @click="closeSheet"
-                >
-                  <X class="w-4 h-4" />
-                  Close
-                </edge-shad-button>
-                <edge-shad-button
-                  v-else
-                  variant="text"
-                  class="hover:text-red-700/50 text-xs h-[26px] text-red-700"
-                  @click="closeSheet"
-                >
-                  <X class="w-4 h-4" />
-                  Cancel
-                </edge-shad-button>
-                <edge-shad-button
-                  v-if="isCreating || slotProps.unsavedChanges"
-                  variant="text"
-                  type="submit"
-                  class="text-xs h-[26px] bg-slate-300 text-slate-900 hover:bg-slate-400 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
-                  :disabled="slotProps.submitting"
-                >
-                  <Loader2 v-if="slotProps.submitting" class="w-4 h-4 animate-spin" />
-                  <Save v-else class="w-4 h-4" />
-                  <span>Save</span>
                 </edge-shad-button>
               </div>
             </div>
