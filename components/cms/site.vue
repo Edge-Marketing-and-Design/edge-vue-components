@@ -113,6 +113,7 @@ const state = reactive({
   templatePageTags: [],
   templatePageRenderContext: null,
   sitePageRenderContext: null,
+  pagePreviewsLoading: true,
 })
 
 const pageImportInputRef = ref(null)
@@ -940,39 +941,58 @@ const handleNewSiteSaved = async ({ docId, data, collection }) => {
   }
 }
 
+const queueSnapshotTask = (tasks, loader) => {
+  tasks.push(Promise.resolve().then(loader))
+}
+
 onBeforeMount(async () => {
+  const previewSnapshotTasks = []
+  const startupTasks = []
+
   if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/users`]) {
-    await edgeFirebase.startUsersSnapshot(edgeGlobal.edgeState.organizationDocPath)
+    queueSnapshotTask(startupTasks, () => edgeFirebase.startUsersSnapshot(edgeGlobal.edgeState.organizationDocPath))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/published-site-settings`]) {
-    await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/published-site-settings`)
+    queueSnapshotTask(startupTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/published-site-settings`))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/pages`]) {
-    await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/pages`)
+    queueSnapshotTask(previewSnapshotTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/pages`))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`]) {
-    await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`)
+    queueSnapshotTask(previewSnapshotTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/blocks`]) {
-    await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/blocks`)
-  }
-  if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published`]) {
-    await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published`)
+    queueSnapshotTask(previewSnapshotTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/blocks`))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites`]) {
-    await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites`)
+    queueSnapshotTask(previewSnapshotTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites`))
+  }
+  if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published`]) {
+    queueSnapshotTask(startupTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published`))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/posts`]) {
-    await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/posts`)
+    queueSnapshotTask(startupTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/posts`))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published_posts`]) {
-    await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published_posts`)
+    queueSnapshotTask(startupTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published_posts`))
   }
   if (props.site !== 'templates') {
     const submissionsPath = `organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/lead-actions`
     if (!edgeFirebase.data?.[submissionsPath]) {
-      await edgeFirebase.startSnapshot(submissionsPath, [{ field: 'action', operator: '==', value: 'Contact Form' }])
+      queueSnapshotTask(
+        startupTasks,
+        () => edgeFirebase.startSnapshot(submissionsPath, [{ field: 'action', operator: '==', value: 'Contact Form' }]),
+      )
     }
+  }
+
+  if (previewSnapshotTasks.length > 0) {
+    await Promise.allSettled(previewSnapshotTasks)
+  }
+  state.pagePreviewsLoading = false
+
+  if (startupTasks.length > 0) {
+    await Promise.allSettled(startupTasks)
   }
   state.mounted = true
 })
@@ -2641,7 +2661,13 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                     <div class="template-page-preview-scale-wrapper">
                       <div class="template-page-preview-scale-inner">
                         <div class="template-page-preview-content space-y-4">
-                          <template v-if="templatePageHasPreview(item) && selectedTemplatePreviewThemeReady">
+                          <template v-if="state.pagePreviewsLoading">
+                            <div class="flex h-32 flex-col items-center justify-center gap-3 mt-[100px] text-muted-foreground">
+                              <Loader2 class="h-100 w-100 animate-spin" />
+                              <span class="text-sm font-medium">Loading preview…</span>
+                            </div>
+                          </template>
+                          <template v-else-if="templatePageHasPreview(item) && selectedTemplatePreviewThemeReady">
                             <div
                               v-for="(row, rowIndex) in templatePreviewRows(item)"
                               :key="`${item.docId}-row-${row.id || rowIndex}`"
@@ -3137,7 +3163,13 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                           <div class="template-scale-wrapper border border-dashed border-border/60 rounded-md bg-background/80">
                             <div class="template-scale-inner">
                               <div class="template-scale-content space-y-4">
-                                <template v-if="templatePageHasPreview(item) && sitePreviewThemeReady">
+                                <template v-if="state.pagePreviewsLoading">
+                                  <div class="flex h-32 flex-col items-center justify-center gap-3 mt-[100px] text-muted-foreground">
+                                    <Loader2 class="h-100 w-100 animate-spin" />
+                                    <span class="text-sm font-medium">Loading preview…</span>
+                                  </div>
+                                </template>
+                                <template v-else-if="templatePageHasPreview(item) && sitePreviewThemeReady">
                                   <div
                                     v-for="(row, rowIndex) in templatePreviewRows(item)"
                                     :key="`${item.docId}-row-${row.id || rowIndex}`"
