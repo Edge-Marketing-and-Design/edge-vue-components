@@ -1609,6 +1609,7 @@ const sitePageGridItems = computed(() => {
   return orderedPages
 })
 
+
 const openSitePage = (docId) => {
   const nextDocId = String(docId || '').trim()
   if (!nextDocId)

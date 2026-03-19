@@ -2,7 +2,7 @@
 import { computed, inject, onBeforeMount, reactive, ref, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { ArrowDown, ArrowLeft, ArrowUp, Clock3, Eye, File, FileCheck, FilePen, FileWarning, FileX, GripVertical, History, Image, ImagePlus, Loader2, MoreHorizontal, Pencil, Plus, RotateCcw, Save, Trash2, X } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, ArrowUp, Clock3, Copy, Eye, File, FileCheck, FilePen, FileWarning, FileX, GripVertical, History, Image, ImagePlus, Loader2, MoreHorizontal, Pencil, Plus, RotateCcw, Save, Trash2, X } from 'lucide-vue-next'
 
 const props = defineProps({
   site: {
@@ -25,6 +25,8 @@ const props = defineProps({
 
 const emit = defineEmits(['updating', 'update:selectedPostId'])
 
+let copiedPostUrlResetTimer = null
+
 const edgeFirebase = inject('edgeFirebase')
 const cmsMultiOrg = useState('cmsMultiOrg', () => true)
 const isAdmin = computed(() => edgeGlobal.isAdminGlobal(edgeFirebase).value)
@@ -43,6 +45,7 @@ const collectionKey = computed(() => `${edgeGlobal.edgeState.organizationDocPath
 
 const publishedCollection = computed(() => `sites/${props.site}/published_posts`)
 const publishedCollectionKey = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/${publishedCollection.value}`)
+const sitePagesCollectionKey = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`)
 
 const normalizeForCompare = (value) => {
   if (Array.isArray(value))
@@ -545,6 +548,7 @@ const state = reactive({
   historyPreviewDoc: null,
   showHistoryDiffDialog: false,
   showStatusCompareDialog: false,
+  copiedPostUrlId: '',
   newDocs: {
     posts: {
       name: {
@@ -624,6 +628,12 @@ onBeforeMount(async () => {
   if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]) {
     await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/sites`)
   }
+  if (!edgeFirebase.data?.[sitePagesCollectionKey.value]) {
+    await edgeFirebase.startSnapshot(sitePagesCollectionKey.value)
+  }
+  if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`]) {
+    await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`)
+  }
   if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`]) {
     await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/themes`)
   }
@@ -636,6 +646,9 @@ onBeforeMount(async () => {
 })
 
 const posts = computed(() => edgeFirebase.data?.[collectionKey.value] || {})
+const siteDoc = computed(() => edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site] || null)
+const sitePages = computed(() => edgeFirebase.data?.[sitePagesCollectionKey.value] || {})
+const publishedSiteSettingsDoc = computed(() => edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`]?.[props.site] || null)
 const postTemplateCollectionKey = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/templates/pages`)
 const postTemplatesCollection = computed(() => edgeFirebase.data?.[postTemplateCollectionKey.value] || {})
 const pendingNewPostTemplateState = useState('edge-cms-pending-new-post-template', () => ({}))
@@ -819,6 +832,129 @@ const slugify = (value) => {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)+/g, '')
 }
+
+const normalizeDomain = (value) => {
+  if (!value)
+    return ''
+  let normalized = String(value).trim().toLowerCase()
+  if (!normalized)
+    return ''
+  if (normalized.includes('://')) {
+    try {
+      normalized = new URL(normalized).host
+    }
+    catch {
+      normalized = normalized.split('://').pop() || normalized
+    }
+  }
+  normalized = normalized.split('/')[0] || ''
+  return normalized.replace(/\.+$/g, '')
+}
+
+const firstValidDomain = (domains) => {
+  if (!Array.isArray(domains))
+    return ''
+  for (const domain of domains) {
+    const normalized = normalizeDomain(domain)
+    if (normalized)
+      return normalized
+  }
+  return ''
+}
+
+const normalizePathSlug = value => String(value || '').trim().toLowerCase()
+
+const isExternalMenuLink = entry => entry?.item && typeof entry.item === 'object' && entry.item.type === 'external'
+
+const isPostRoutePage = (pageDoc) => {
+  if (!pageDoc || typeof pageDoc !== 'object')
+    return false
+  return Boolean(pageDoc.post)
+    || (Array.isArray(pageDoc.postContent) && pageDoc.postContent.length > 0)
+    || (Array.isArray(pageDoc.postStructure) && pageDoc.postStructure.length > 0)
+}
+
+const getFirstFolderEntry = (entry) => {
+  if (!entry?.item || typeof entry.item !== 'object' || isExternalMenuLink(entry))
+    return null
+  for (const [folderSlug, nestedItems] of Object.entries(entry.item || {})) {
+    if (Array.isArray(nestedItems))
+      return { folderSlug, nestedItems }
+  }
+  return null
+}
+
+const findFirstPostRouteSegments = (menus, pagesById, folderSlugs = []) => {
+  for (const menuItems of Object.values(menus || {})) {
+    if (!Array.isArray(menuItems))
+      continue
+    for (const entry of menuItems) {
+      if (isExternalMenuLink(entry))
+        continue
+      if (typeof entry?.item === 'string') {
+        const pageSlug = normalizePathSlug(entry?.name)
+        if (!pageSlug)
+          continue
+        const pageDoc = pagesById?.[entry.item]
+        if (isPostRoutePage(pageDoc))
+          return [...folderSlugs, pageSlug]
+        continue
+      }
+      const folderEntry = getFirstFolderEntry(entry)
+      if (!folderEntry)
+        continue
+      const folderSlug = normalizePathSlug(folderEntry.folderSlug)
+      if (!folderSlug)
+        continue
+      const nested = findFirstPostRouteSegments({ [folderEntry.folderSlug]: folderEntry.nestedItems }, pagesById, [...folderSlugs, folderSlug])
+      if (nested.length)
+        return nested
+    }
+  }
+  return []
+}
+
+const postListLiveOrigin = computed(() => {
+  if (props.site === 'templates')
+    return ''
+  const host = firstValidDomain(publishedSiteSettingsDoc.value?.domains) || firstValidDomain(siteDoc.value?.domains)
+  return host ? `https://${host}` : ''
+})
+
+const firstPostRouteSegments = computed(() => {
+  return findFirstPostRouteSegments(siteDoc.value?.menus || {}, sitePages.value, [])
+})
+
+const getPostLiveUrl = (post) => {
+  if (props.site === 'templates')
+    return ''
+  const origin = postListLiveOrigin.value
+  if (!origin)
+    return ''
+  const routeSegments = firstPostRouteSegments.value
+  if (!routeSegments.length)
+    return ''
+  const postSlug = getPostSlug(post) || slugify(post?.title || post?.name || '')
+  if (!postSlug)
+    return ''
+
+  const encodedPostSlug = encodeURIComponent(postSlug)
+  if (routeSegments.length === 1 && routeSegments[0] === 'home')
+    return `${origin}/${encodedPostSlug}`
+
+  const encodedPath = routeSegments.map(segment => encodeURIComponent(segment)).join('/')
+  return `${origin}/${encodedPath}/${encodedPostSlug}`
+}
+
+const postLiveUrlUnavailableReason = computed(() => {
+  if (props.site === 'templates')
+    return 'Template posts do not have live site URLs.'
+  if (!postListLiveOrigin.value)
+    return 'Add a site domain before copying live post URLs.'
+  if (!firstPostRouteSegments.value.length)
+    return 'Add a page with both index and detail enabled before copying live post URLs.'
+  return ''
+})
 
 const ensureUniqueSlug = (input, excludeId = '') => {
   let base = slugify(input)
@@ -1480,6 +1616,29 @@ const notifySuccess = (message) => {
 
 const notifyError = (message) => {
   edgeFirebase?.toast?.error?.(message)
+}
+
+const copyPostLiveUrl = async (post) => {
+  const url = getPostLiveUrl(post)
+  if (!url) {
+    notifyError(postLiveUrlUnavailableReason.value || 'Unable to determine the live post URL.')
+    return
+  }
+
+  try {
+    await navigator.clipboard.writeText(url)
+    state.copiedPostUrlId = String(post?.id || '')
+    if (copiedPostUrlResetTimer)
+      clearTimeout(copiedPostUrlResetTimer)
+    copiedPostUrlResetTimer = setTimeout(() => {
+      state.copiedPostUrlId = ''
+      copiedPostUrlResetTimer = null
+    }, 1800)
+    notifySuccess('Copied live post URL.')
+  }
+  catch {
+    notifyError('Failed to copy live post URL.')
+  }
 }
 
 const restoreHistoryVersion = async () => {
@@ -2892,47 +3051,64 @@ const reindexPublishedPostsToKv = async () => {
                     {{ previewContent(post.blurb || post.content) || 'No content yet.' }}
                   </div>
                 </div>
-                <DropdownMenu>
-                  <DropdownMenuTrigger as-child>
-                    <edge-shad-button variant="ghost" size="icon" class="h-8 w-8" @click.stop>
-                      <MoreHorizontal class="h-4 w-4" />
-                    </edge-shad-button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent side="right" align="start">
-                    <DropdownMenuItem @click="openRenameDialog(post)">
-                      <FilePen class="h-4 w-4" />
-                      Rename
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      v-if="getPublishStatus(postKey(post), post).canPublish || getPublishStatus(postKey(post), post).publishBlockedReason"
-                      :disabled="Boolean(getPublishStatus(postKey(post), post).publishBlockedReason)"
-                      @click="publishPost(postKey(post))"
-                    >
-                      <FileCheck class="h-4 w-4" />
-                      Publish
-                    </DropdownMenuItem>
-                    <DropdownMenuItem v-if="post.publishAt" @click="clearScheduledPublish(postKey(post))">
-                      <X class="h-4 w-4" />
-                      Cancel Schedule
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      v-if="getPublishStatus(postKey(post), post).publishBlockedReason"
-                      disabled
-                      class="text-xs text-amber-700 dark:text-amber-300"
-                    >
-                      <FileWarning class="h-4 w-4" />
-                      {{ getPublishStatus(postKey(post), post).publishBlockedReason }}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem v-if="getPublishStatus(postKey(post), post).canUnpublish" @click="unPublishPost(postKey(post))">
-                      <FileWarning class="h-4 w-4" />
-                      Unpublish
-                    </DropdownMenuItem>
-                    <DropdownMenuItem class="text-destructive" @click="showDeleteDialog(post)">
-                      <Trash2 class="h-4 w-4" />
-                      Delete
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <div class="flex shrink-0 items-center gap-1">
+                  <edge-shad-button
+                    variant="ghost"
+                    class="h-8 gap-1 px-2 text-xs"
+                    :disabled="!getPostLiveUrl(post)"
+                    :title="getPostLiveUrl(post) || postLiveUrlUnavailableReason"
+                    @click.stop="copyPostLiveUrl(post)"
+                  >
+                    <FileCheck v-if="state.copiedPostUrlId === post.id" class="h-4 w-4" />
+                    <Copy v-else class="h-4 w-4" />
+                    <span>{{ state.copiedPostUrlId === post.id ? 'Copied' : 'URL' }}</span>
+                  </edge-shad-button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger as-child>
+                      <edge-shad-button variant="ghost" size="icon" class="h-8 w-8" @click.stop>
+                        <MoreHorizontal class="h-4 w-4" />
+                      </edge-shad-button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent side="right" align="start">
+                      <DropdownMenuItem :disabled="!getPostLiveUrl(post)" @click="copyPostLiveUrl(post)">
+                        <Copy class="h-4 w-4" />
+                        Copy Live URL
+                      </DropdownMenuItem>
+                      <DropdownMenuItem @click="openRenameDialog(post)">
+                        <FilePen class="h-4 w-4" />
+                        Rename
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        v-if="getPublishStatus(postKey(post), post).canPublish || getPublishStatus(postKey(post), post).publishBlockedReason"
+                        :disabled="Boolean(getPublishStatus(postKey(post), post).publishBlockedReason)"
+                        @click="publishPost(postKey(post))"
+                      >
+                        <FileCheck class="h-4 w-4" />
+                        Publish
+                      </DropdownMenuItem>
+                      <DropdownMenuItem v-if="post.publishAt" @click="clearScheduledPublish(postKey(post))">
+                        <X class="h-4 w-4" />
+                        Cancel Schedule
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        v-if="getPublishStatus(postKey(post), post).publishBlockedReason"
+                        disabled
+                        class="text-xs text-amber-700 dark:text-amber-300"
+                      >
+                        <FileWarning class="h-4 w-4" />
+                        {{ getPublishStatus(postKey(post), post).publishBlockedReason }}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem v-if="getPublishStatus(postKey(post), post).canUnpublish" @click="unPublishPost(postKey(post))">
+                        <FileWarning class="h-4 w-4" />
+                        Unpublish
+                      </DropdownMenuItem>
+                      <DropdownMenuItem class="text-destructive" @click="showDeleteDialog(post)">
+                        <Trash2 class="h-4 w-4" />
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </div>
               <div class="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                 <span
@@ -3028,6 +3204,10 @@ const reindexPublishedPostsToKv = async () => {
                 </SidebarMenuAction>
               </DropdownMenuTrigger>
               <DropdownMenuContent side="right" align="start">
+                <DropdownMenuItem :disabled="!getPostLiveUrl(post)" @click="copyPostLiveUrl(post)">
+                  <Copy class="h-4 w-4" />
+                  Copy Live URL
+                </DropdownMenuItem>
                 <DropdownMenuItem @click="openRenameDialog(post)">
                   <FilePen class="h-4 w-4" />
                   Rename

@@ -1,5 +1,5 @@
 <script setup>
-import { ArrowDown, ArrowLeft, ArrowUp, Download, ExternalLink, FileCheck, FileDown, FileMinus2, FilePen, FileUp, FileWarning, FileX, History, Loader2, Maximize2, Monitor, MoreHorizontal, RotateCcw, Smartphone, Sparkles, Tablet, UploadCloud } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, ArrowUp, Download, ExternalLink, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FileUp, FileWarning, FileX, History, Loader2, Maximize2, Monitor, MoreHorizontal, RotateCcw, Smartphone, Sparkles, Tablet, UploadCloud } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 const props = defineProps({
@@ -105,6 +105,7 @@ const state = reactive({
   historyPreviewDoc: null,
   historyPreviewView: 'list',
   showHistoryDiffDialog: false,
+  pageSettingsOpen: false,
   renamePageDialogOpen: false,
   renamePageValue: '',
   renamePageSubmitting: false,
@@ -2134,6 +2135,32 @@ const getDocDefaultsFromSchema = (schema = {}) => {
 const getPageDocDefaults = () => getDocDefaultsFromSchema(state.newDocs?.pages || {})
 
 const isBlankString = value => String(value || '').trim() === ''
+const isJsonInvalid = (value) => {
+  if (value === null || value === undefined)
+    return false
+  if (typeof value === 'object')
+    return false
+  const text = String(value).trim()
+  if (!text)
+    return false
+  try {
+    JSON.parse(text)
+    return false
+  }
+  catch {
+    return true
+  }
+}
+
+const hasStructuredDataErrors = (doc) => {
+  if (!doc)
+    return false
+  if (isJsonInvalid(doc.structuredData))
+    return true
+  if (doc.post && isJsonInvalid(doc.postStructuredData))
+    return true
+  return false
+}
 
 const applyImportedPageSeoDefaults = (doc) => {
   if (!isPlainObject(doc))
@@ -2293,6 +2320,12 @@ const openRenamePageDialog = () => {
   state.renamePageValue = currentPageRenameLabel.value
   state.renamePageSubmitting = false
   state.renamePageDialogOpen = true
+}
+
+const openCurrentPageSettings = async () => {
+  if (!currentPage.value || !props.page || props.page === 'new')
+    return
+  state.pageSettingsOpen = true
 }
 
 const removePageFromMenuItems = (items, pageId) => {
@@ -3305,6 +3338,14 @@ const hasUnsavedChanges = (changes) => {
                   <DropdownMenuLabel>
                     {{ props.isTemplateSite ? 'Template Actions' : 'Page Actions' }}
                   </DropdownMenuLabel>
+                  <DropdownMenuItem
+                    v-if="slotProps.unsavedChanges"
+                    disabled
+                    class="pointer-events-none min-h-0 py-1 text-[11px] text-amber-700 focus:text-amber-700 dark:text-amber-300 dark:focus:text-amber-300"
+                  >
+                    <FileWarning class="w-3.5 h-3.5 shrink-0" />
+                    <span>Save or cancel changes to enable disabled actions.</span>
+                  </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     v-if="!props.isTemplateSite && currentPageLiveUrl"
@@ -3318,6 +3359,13 @@ const hasUnsavedChanges = (changes) => {
                   <DropdownMenuItem v-else-if="!props.isTemplateSite" disabled>
                     <ExternalLink class="w-4 h-4" />
                     <span>View Live Page</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    :disabled="slotProps.unsavedChanges || !currentPage || !props.page || props.page === 'new'"
+                    @click="openCurrentPageSettings"
+                  >
+                    <FileCog class="w-4 h-4" />
+                    <span>Settings</span>
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     :disabled="!currentPage || !props.page || props.page === 'new'"
@@ -3461,6 +3509,147 @@ const hasUnsavedChanges = (changes) => {
           </div>
         </div>
         <div :class="props.isTemplateSite ? 'min-w-0 flex-1' : ''">
+          <Sheet v-model:open="state.pageSettingsOpen">
+            <SheetContent side="left" class="w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl">
+              <SheetHeader>
+                <SheetTitle>{{ slotProps.workingDoc?.name || pageName || (props.isTemplateSite ? 'Template' : 'Page') }}</SheetTitle>
+                <SheetDescription />
+              </SheetHeader>
+              <div class="p-6 space-y-4 h-[calc(100vh-142px)] overflow-y-auto">
+                <edge-shad-checkbox
+                  v-if="props.isTemplateSite && !templateTypeIncludesPost(slotProps.workingDoc)"
+                  v-model="slotProps.workingDoc.post"
+                  label="Is a Post Template"
+                  name="page-settings-post"
+                >
+                  Creates both an Index Page and a Detail Page for this section.
+                  The Index Page lists all items (e.g., /{{ slotProps.workingDoc.name }}), while the Detail Page displays a single item (e.g., /{{ slotProps.workingDoc.name }}/:slug).
+                </edge-shad-checkbox>
+                <edge-shad-select-tags
+                  v-if="props.isTemplateSite"
+                  :model-value="normalizeTemplatePageTypeSelections(slotProps.workingDoc.type, { fallback: ['Page'], excludePost: Boolean(slotProps.workingDoc.post) })"
+                  name="page-settings-type"
+                  label="Type"
+                  placeholder="Select types"
+                  :items="templateTypeItems(slotProps.workingDoc)"
+                  item-title="title"
+                  item-value="name"
+                  :allow-additions="false"
+                  @update:model-value="(value) => {
+                    slotProps.workingDoc.type = normalizeTemplatePageTypeSelections(value, { fallback: ['Page'], excludePost: Boolean(slotProps.workingDoc.post) })
+                  }"
+                />
+                <edge-shad-select-tags
+                  v-if="props.isTemplateSite"
+                  v-model="slotProps.workingDoc.tags"
+                  name="page-settings-tags"
+                  label="Tags"
+                  placeholder="Add tags"
+                  :items="templateTagItems"
+                  :allow-additions="true"
+                  @add="addTemplateTagOption"
+                />
+                <Card>
+                  <CardHeader>
+                    <CardTitle>SEO</CardTitle>
+                    <CardDescription>Meta tags for the page.</CardDescription>
+                  </CardHeader>
+                  <CardContent class="pt-0">
+                    <Tabs class="w-full" default-value="list">
+                      <TabsList v-if="slotProps.workingDoc?.post" class="w-full grid grid-cols-2 gap-1 rounded-lg border border-border/60 bg-muted/30 p-1">
+                        <TabsTrigger
+                          value="list"
+                          class="text-xs font-semibold uppercase tracking-wide transition-all data-[state=active]:bg-slate-900 data-[state=active]:text-white data-[state=active]:shadow-sm"
+                        >
+                          Index Page
+                        </TabsTrigger>
+                        <TabsTrigger
+                          value="post"
+                          class="text-xs font-semibold uppercase tracking-wide transition-all data-[state=active]:bg-slate-900 data-[state=active]:text-white data-[state=active]:shadow-sm"
+                        >
+                          Detail Page
+                        </TabsTrigger>
+                      </TabsList>
+                      <TabsContent value="list" class="mt-4 space-y-4">
+                        <edge-shad-input
+                          v-model="slotProps.workingDoc.metaTitle"
+                          label="Meta Title"
+                          name="page-settings-metaTitle"
+                        />
+                        <edge-shad-textarea
+                          v-model="slotProps.workingDoc.metaDescription"
+                          label="Meta Description"
+                          name="page-settings-metaDescription"
+                        />
+                        <div class="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                          CMS tokens in double curly braces are replaced on the front end.
+                          Example: <span v-pre class="font-semibold text-foreground">"{{cms-site}}"</span> for the site URL,
+                          <span v-pre class="font-semibold text-foreground">"{{cms-url}}"</span> for the page URL, and
+                          <span v-pre class="font-semibold text-foreground">"{{cms-logo}}"</span> for the logo URL. Keep the tokens intact.
+                        </div>
+                        <edge-cms-code-editor
+                          v-model="slotProps.workingDoc.structuredData"
+                          title="Structured Data (JSON-LD)"
+                          language="json"
+                          name="page-settings-structuredData"
+                          validate-json
+                          height="300px"
+                          class="mb-4 w-full"
+                        />
+                      </TabsContent>
+                      <TabsContent value="post" class="mt-4 space-y-4">
+                        <div class="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                          You can use template keys in double curly braces to pull data from the detail record.
+                          Example: <span v-pre class="font-semibold text-foreground">"{{name}}"</span> will be replaced with the record’s name.
+                          Dot notation is supported for nested objects, e.g. <span v-pre class="font-semibold text-foreground">"{{data.name}}"</span>.
+                          These keys work in the Title, Description, and Structured Data fields.
+                        </div>
+                        <edge-shad-input
+                          v-model="slotProps.workingDoc.postMetaTitle"
+                          label="Meta Title"
+                          name="page-settings-postMetaTitle"
+                        />
+                        <edge-shad-textarea
+                          v-model="slotProps.workingDoc.postMetaDescription"
+                          label="Meta Description"
+                          name="page-settings-postMetaDescription"
+                        />
+                        <div class="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                          CMS tokens in double curly braces are replaced on the front end.
+                          Example: <span v-pre class="font-semibold text-foreground">"{{cms-site}}"</span> for the site URL,
+                          <span v-pre class="font-semibold text-foreground">"{{cms-url}}"</span> for the page URL, and
+                          <span v-pre class="font-semibold text-foreground">"{{cms-logo}}"</span> for the logo URL. Keep the tokens intact.
+                        </div>
+                        <edge-cms-code-editor
+                          v-model="slotProps.workingDoc.postStructuredData"
+                          title="Structured Data (JSON-LD)"
+                          language="json"
+                          name="page-settings-postStructuredData"
+                          validate-json
+                          height="300px"
+                          class="mb-4 w-full"
+                        />
+                      </TabsContent>
+                    </Tabs>
+                  </CardContent>
+                </Card>
+              </div>
+              <SheetFooter class="pt-2 flex justify-between">
+                <edge-shad-button variant="destructive" class="text-white" @click="state.pageSettingsOpen = false">
+                  Cancel
+                </edge-shad-button>
+                <edge-shad-button
+                  type="submit"
+                  class="bg-slate-800 hover:bg-slate-400 w-full"
+                  :disabled="slotProps.submitting || hasStructuredDataErrors(slotProps.workingDoc)"
+                  @click="state.pageSettingsOpen = false"
+                >
+                  <Loader2 v-if="slotProps.submitting" class="h-4 w-4 animate-spin" />
+                  <span v-else>Update</span>
+                </edge-shad-button>
+              </SheetFooter>
+            </SheetContent>
+          </Sheet>
           <Tabs class="w-full" :model-value="hasPostView(slotProps.workingDoc) ? state.previewPageView : 'list'">
             <TabsContent value="list" class="mt-0">
               <div

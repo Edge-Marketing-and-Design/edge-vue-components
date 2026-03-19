@@ -1262,6 +1262,25 @@ const openEditor = async (event) => {
   state.afterLoad = true
 }
 
+const getAuthoredFieldMeta = (field) => {
+  const normalizedField = String(field || '').trim()
+  if (!normalizedField)
+    return null
+
+  const blockData = edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[modelValue.value?.blockId]
+  const authoredContent = String(blockData?.content || modelValue.value?.content || '').trim()
+  if (!authoredContent)
+    return null
+
+  const parsed = parseBlockContentModel(authoredContent)
+  return parsed?.meta?.[normalizedField] || null
+}
+
+const hasAuthoredLimit = (field) => {
+  const authoredMeta = getAuthoredFieldMeta(field)
+  return !!authoredMeta && Object.prototype.hasOwnProperty.call(authoredMeta, 'limit')
+}
+
 const isLimitOne = (field) => {
   const limit = Number(state.meta?.[field]?.limit)
   return Number.isFinite(limit) && limit === 1
@@ -1351,7 +1370,7 @@ const hasEditableArrayControls = (entry) => {
   const supportsQueryControls = collectionPath !== 'post'
   const queryOptions = Array.isArray(entry.meta?.queryOptions) ? entry.meta.queryOptions : []
   const hasQueryOptions = supportsQueryControls && queryOptions.length > 0
-  const hasLimitControl = supportsQueryControls && !isLimitOne(entry.field)
+  const hasLimitControl = supportsQueryControls && hasAuthoredLimit(entry.field) && !isLimitOne(entry.field)
 
   return hasQueryOptions || hasLimitControl
 }
@@ -2086,7 +2105,7 @@ const getTagsFromPosts = computed(() => {
                       </div>
                     </template>
                     <edge-shad-number
-                      v-if="entry.meta?.collection?.path !== 'post' && !isLimitOne(entry.field)"
+                      v-if="entry.meta?.collection?.path !== 'post' && hasAuthoredLimit(entry.field) && !isLimitOne(entry.field)"
                       v-model="state.meta[entry.field].limit"
                       name="limit"
                       label="Limit"
