@@ -115,6 +115,10 @@ const state = reactive({
 const pageImportInputRef = ref(null)
 const pageImportDocIdResolver = ref(null)
 const pageImportConflictResolver = ref(null)
+const listPreviewSurfaceRef = ref(null)
+const postPreviewSurfaceRef = ref(null)
+const historyListPreviewSurfaceRef = ref(null)
+const historyPostPreviewSurfaceRef = ref(null)
 
 const schemas = {
   pages: toTypedSchema(z.object({
@@ -184,6 +188,39 @@ const buildScaledPreviewSurfaceStyle = (baseHeight) => {
     height: previewScaleMultiplier.value === 1
       ? normalizedHeight
       : `calc((${normalizedHeight}) / ${previewScaleMultiplier.value})`,
+  }
+}
+
+const previewSurfaceRefEntries = computed(() => ([
+  ['list', listPreviewSurfaceRef.value],
+  ['post', postPreviewSurfaceRef.value],
+  ['historyList', historyListPreviewSurfaceRef.value],
+  ['historyPost', historyPostPreviewSurfaceRef.value],
+]))
+
+const capturePreviewScrollPositions = () => {
+  const positions = {}
+  for (const [key, element] of previewSurfaceRefEntries.value) {
+    if (!element || typeof element.scrollTop !== 'number')
+      continue
+    positions[key] = {
+      top: Number(element.scrollTop || 0),
+      left: Number(element.scrollLeft || 0),
+    }
+    element.scrollTop = 0
+    element.scrollLeft = 0
+  }
+  return positions
+}
+
+const restorePreviewScrollPositions = (positions) => {
+  const previewSurfaceMap = Object.fromEntries(previewSurfaceRefEntries.value)
+  for (const [key, scrollState] of Object.entries(positions || {})) {
+    const element = previewSurfaceMap?.[key]
+    if (!element || typeof element.scrollTop !== 'number')
+      continue
+    element.scrollTop = Number(scrollState?.top || 0)
+    element.scrollLeft = Number(scrollState?.left || 0)
   }
 }
 
@@ -884,8 +921,7 @@ const pagePreviewRenderKey = computed(() => {
   const pageKey = String(props.page || '')
   const themeKey = String((effectiveThemeId.value || selectedThemeId.value || 'no-theme'))
   const modeKey = state.editMode ? 'edit' : 'preview'
-  const scaleKey = String(state.previewScale || '100')
-  return `${siteKey}:${pageKey}:${themeKey}:${modeKey}:${scaleKey}`
+  return `${siteKey}:${pageKey}:${themeKey}:${modeKey}`
 })
 
 const parsedTheme = computed(() => {
@@ -1735,8 +1771,7 @@ const historyPreviewRenderKey = computed(() => {
   const historyId = String(state.historySelectedId || 'none')
   const themeKey = String((effectiveThemeId.value || selectedThemeId.value || 'no-theme'))
   const previewMode = String(state.historyPreviewView || 'list')
-  const scaleKey = String(state.previewScale || '100')
-  return `${historyId}:${themeKey}:${previewMode}:${previewRouteLastSegment.value || 'auto'}:${scaleKey}`
+  return `${historyId}:${themeKey}:${previewMode}:${previewRouteLastSegment.value || 'auto'}`
 })
 
 const historyVersionItems = computed(() => {
@@ -2571,6 +2606,19 @@ watch (currentPage, (newPage) => {
 watch(selectedHistoryEntry, (entry) => {
   syncHistoryPreviewDoc(entry)
 }, { immediate: false })
+
+watch(
+  [() => state.previewViewport, () => state.previewScale],
+  async () => {
+    const savedScrollPositions = capturePreviewScrollPositions()
+    await nextTick()
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        restorePreviewScrollPositions(savedScrollPositions)
+      })
+    })
+  },
+)
 
 watch(
   [() => route.query.history, currentPage, currentPagePath, () => edgeFirebase?.user?.uid],
@@ -3409,6 +3457,7 @@ const hasUnsavedChanges = (changes) => {
             <TabsContent value="list" class="mt-0">
               <div
                 :key="`${pagePreviewRenderKey}:list`"
+                ref="listPreviewSurfaceRef"
                 data-cms-preview-surface="page"
                 :data-cms-preview-mode="state.editMode ? 'edit' : 'preview'"
                 class="w-full h-[calc(100vh-220px)]  mt-2 overflow-y-auto mx-auto bg-card border border-border shadow-sm md:shadow-md p-0 space-y-6"
@@ -3665,6 +3714,7 @@ const hasUnsavedChanges = (changes) => {
             <TabsContent v-if="hasPostView(slotProps.workingDoc)" value="post" class="mt-0">
               <div
                 :key="`${pagePreviewRenderKey}:post`"
+                ref="postPreviewSurfaceRef"
                 data-cms-preview-surface="page"
                 :data-cms-preview-mode="state.editMode ? 'edit' : 'preview'"
                 class="w-full  h-[calc(100vh-180px)]  mt-2 overflow-y-auto mx-auto bg-card border border-border shadow-sm md:shadow-md p-0 space-y-6"
@@ -4126,6 +4176,7 @@ const hasUnsavedChanges = (changes) => {
           <div
             v-else-if="state.historyPreviewView !== 'post'"
             :key="`${historyPreviewRenderKey}:list`"
+            ref="historyListPreviewSurfaceRef"
             data-cms-preview-surface="page"
             data-cms-preview-mode="history"
             class="relative isolate h-[60vh] overflow-y-auto overflow-x-hidden bg-card p-0"
@@ -4177,6 +4228,7 @@ const hasUnsavedChanges = (changes) => {
           <div
             v-else
             :key="`${historyPreviewRenderKey}:post`"
+            ref="historyPostPreviewSurfaceRef"
             data-cms-preview-surface="page"
             data-cms-preview-mode="history"
             class="relative isolate h-[60vh] overflow-y-auto overflow-x-hidden bg-card p-0"
