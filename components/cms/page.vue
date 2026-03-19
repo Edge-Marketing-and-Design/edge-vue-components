@@ -2937,6 +2937,7 @@ const buildPageChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel }
       compareLabel,
       base: formatter(baseVal),
       compare: formatter(compareVal),
+      viewScope: options.viewScope || 'shared',
     }
     if (options.details)
       change.details = options.details(baseVal, compareVal)
@@ -2951,6 +2952,7 @@ const buildPageChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel }
       compareLabel,
       base: `No ${String(baseLabel || 'base').toLowerCase()} available`,
       compare: `${compareLabel || 'Current'} available`,
+      viewScope: 'shared',
     })
   }
   if (base && !compare) {
@@ -2961,6 +2963,7 @@ const buildPageChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel }
       compareLabel,
       base: `${baseLabel || 'Selected'} available`,
       compare: `No ${String(compareLabel || 'current').toLowerCase()} available`,
+      viewScope: 'shared',
     })
   }
 
@@ -2980,6 +2983,7 @@ const buildPageChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel }
         base: summarizeBlocks(baseBlocks),
         compare: summarizeBlocks(compareBlocks),
         blockChanges,
+        viewScope: keyPrefix === 'detail' ? 'post' : 'list',
       })
     }
 
@@ -2992,20 +2996,29 @@ const buildPageChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel }
         baseLabel,
         compareLabel,
         layoutChanges: buildLayoutChangeDetails(baseStructure, compareStructure),
+        viewScope: keyPrefix === 'detail' ? 'post' : 'list',
       })
     }
   }
 
   compareBlockArea('index', 'Blocks', 'content', 'structure', 'Layout')
   compareBlockArea('detail', 'Detail Blocks', 'postContent', 'postStructure', 'Detail Layout')
-  compareField('metaTitle', 'Meta title', val => summarizeChangeValue(val, true))
-  compareField('metaDescription', 'Meta description', val => summarizeChangeValue(val, true))
-  compareField('structuredData', 'Structured data', val => summarizeChangeValue(val, true))
-  compareField('postMetaTitle', 'Detail meta title', val => summarizeChangeValue(val, true))
-  compareField('postMetaDescription', 'Detail meta description', val => summarizeChangeValue(val, true))
-  compareField('postStructuredData', 'Detail structured data', val => summarizeChangeValue(val, true))
+  compareField('metaTitle', 'Meta title', val => summarizeChangeValue(val, true), { viewScope: 'list' })
+  compareField('metaDescription', 'Meta description', val => summarizeChangeValue(val, true), { viewScope: 'list' })
+  compareField('structuredData', 'Structured data', val => summarizeChangeValue(val, true), { viewScope: 'list' })
+  compareField('postMetaTitle', 'Detail meta title', val => summarizeChangeValue(val, true), { viewScope: 'post' })
+  compareField('postMetaDescription', 'Detail meta description', val => summarizeChangeValue(val, true), { viewScope: 'post' })
+  compareField('postStructuredData', 'Detail structured data', val => summarizeChangeValue(val, true), { viewScope: 'post' })
 
   return changes
+}
+
+const filterPageChangeDetailsForView = (changes, view = 'list') => {
+  const normalizedView = view === 'post' ? 'post' : 'list'
+  return (Array.isArray(changes) ? changes : []).filter((change) => {
+    const scope = String(change?.viewScope || 'shared')
+    return scope === 'shared' || scope === normalizedView
+  })
 }
 
 const unpublishedChangeDetails = computed(() => {
@@ -3063,10 +3076,11 @@ const openPageStatusCompareDialog = () => {
 }
 
 const historyDiffDetails = computed(() => {
-  return buildPageChangeDetails(getHistorySnapshotDoc(selectedHistoryEntry.value), currentHistoryCompareDoc.value, {
+  const allChanges = buildPageChangeDetails(getHistorySnapshotDoc(selectedHistoryEntry.value), currentHistoryCompareDoc.value, {
     baseLabel: 'Selected History',
     compareLabel: 'Current',
   })
+  return filterPageChangeDetailsForView(allChanges, state.historyPreviewView)
 })
 
 const historyDiffCountLabel = computed(() => {
