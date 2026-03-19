@@ -172,6 +172,21 @@ const previewViewportContainStyle = computed(() => {
   }
 })
 
+const buildScaledPreviewSurfaceStyle = (baseHeight) => {
+  const normalizedHeight = String(baseHeight || '').trim()
+  if (!normalizedHeight) {
+    return {
+      ...(previewViewportContainStyle.value || {}),
+    }
+  }
+  return {
+    ...(previewViewportContainStyle.value || {}),
+    height: previewScaleMultiplier.value === 1
+      ? normalizedHeight
+      : `calc((${normalizedHeight}) / ${previewScaleMultiplier.value})`,
+  }
+}
+
 const setPreviewViewport = (viewportId) => {
   state.previewViewport = viewportId
 }
@@ -3398,7 +3413,7 @@ const hasUnsavedChanges = (changes) => {
                 :data-cms-preview-mode="state.editMode ? 'edit' : 'preview'"
                 class="w-full h-[calc(100vh-220px)]  mt-2 overflow-y-auto mx-auto bg-card border border-border shadow-sm md:shadow-md p-0 space-y-6"
                 :class="[{ 'transition-all duration-300': !state.editMode }, state.editMode ? 'rounded-lg' : 'rounded-none']"
-                :style="previewViewportContainStyle"
+                :style="buildScaledPreviewSurfaceStyle('calc(100vh - 220px)')"
               >
                 <edge-button-divider v-if="state.editMode" class="my-2">
                   <Popover v-model:open="state.addRowPopoverOpen.listTop">
@@ -3654,7 +3669,7 @@ const hasUnsavedChanges = (changes) => {
                 :data-cms-preview-mode="state.editMode ? 'edit' : 'preview'"
                 class="w-full  h-[calc(100vh-180px)]  mt-2 overflow-y-auto mx-auto bg-card border border-border shadow-sm md:shadow-md p-0 space-y-6"
                 :class="[{ 'transition-all duration-300': !state.editMode }, state.editMode ? 'rounded-lg' : 'rounded-none']"
-                :style="previewViewportContainStyle"
+                :style="buildScaledPreviewSurfaceStyle('calc(100vh - 180px)')"
               >
                 <edge-button-divider v-if="state.editMode" class="my-2">
                   <Popover v-model:open="state.addRowPopoverOpen.postTop">
@@ -4114,7 +4129,7 @@ const hasUnsavedChanges = (changes) => {
             data-cms-preview-surface="page"
             data-cms-preview-mode="history"
             class="relative isolate h-[60vh] overflow-y-auto overflow-x-hidden bg-card p-0"
-            :style="previewViewportContainStyle"
+            :style="buildScaledPreviewSurfaceStyle('60vh')"
           >
             <div
               v-if="!renderedHistoryPreviewDoc?.structure?.length"
@@ -4165,7 +4180,7 @@ const hasUnsavedChanges = (changes) => {
             data-cms-preview-surface="page"
             data-cms-preview-mode="history"
             class="relative isolate h-[60vh] overflow-y-auto overflow-x-hidden bg-card p-0"
-            :style="previewViewportContainStyle"
+            :style="buildScaledPreviewSurfaceStyle('60vh')"
           >
             <div
               v-if="!renderedHistoryPreviewDoc?.postStructure?.length"
