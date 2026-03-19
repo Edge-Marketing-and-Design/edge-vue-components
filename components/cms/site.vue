@@ -2085,8 +2085,8 @@ const isPublishedPageDiff = (pageId) => {
 }
 
 const _pageStatusLabel = pageId => (isPublishedPageDiff(pageId) ? 'Draft' : 'Published')
-const hasSelection = computed(() => Boolean(props.page) || Boolean(state.selectedPostId))
-const showSplitView = computed(() => isTemplateSite.value || (canViewPagesTab.value && (state.viewMode === 'pages' || hasSelection.value)))
+const isEditingPage = computed(() => Boolean(props.page))
+const showSplitView = computed(() => !isEditingPage.value && (isTemplateSite.value || (canViewPagesTab.value && state.viewMode === 'pages')))
 const isEditingPost = computed(() => canViewPostsTab.value && state.viewMode === 'posts' && Boolean(state.selectedPostId))
 
 const ensureValidViewMode = () => {
@@ -3113,8 +3113,11 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
               @update:selected-post-id="clearPostSelection"
             />
           </div>
+          <div v-else-if="props.page && !state.updating" :key="props.page" class="w-full h-full">
+            <NuxtPage class="flex flex-col flex-1 px-0 mx-0 pt-0" />
+          </div>
           <ResizablePanelGroup v-else-if="showSplitView" direction="horizontal" class="w-full h-full flex-1 min-h-0">
-            <ResizablePanel class="bg-slate-100 text-slate-900 min-h-0 overflow-hidden dark:bg-slate-900 dark:text-slate-100" :default-size="16">
+            <ResizablePanel class="bg-slate-100 text-slate-900 min-h-0 overflow-hidden dark:bg-slate-900 dark:text-slate-100" :default-size="20">
               <SidebarGroup class="mt-0 pt-0 h-full min-h-0">
                 <SidebarGroupContent class="h-full min-h-0 overflow-y-auto">
                   <SidebarMenu class="pb-4 edge-cms-site-menu">
@@ -3145,11 +3148,8 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
             </ResizablePanel>
             <ResizablePanel ref="mainPanel" class="min-h-0">
               <Transition name="fade" mode="out-in">
-                <div v-if="props.page && !state.updating" :key="props.page" class="max-h-[calc(100vh-100px)] overflow-y-auto w-full">
-                  <NuxtPage class="flex flex-col flex-1 px-0 mx-0 pt-0" />
-                </div>
                 <div
-                  v-else-if="!state.updating && !props.page && !isTemplateSite && canViewPagesTab && state.viewMode === 'pages'"
+                  v-if="!state.updating && !props.page && !isTemplateSite && canViewPagesTab && state.viewMode === 'pages'"
                   class="w-full h-[calc(100vh-100px)] overflow-y-auto p-4"
                 >
                   <div
