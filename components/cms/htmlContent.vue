@@ -898,17 +898,28 @@ function initCmsNavHelpers(scope) {
       navMain.style.bottom = ''
     }
 
+    const readPreviewSurfaceScale = () => {
+      if (!previewSurface || typeof window === 'undefined')
+        return 1
+      const zoomValue = previewSurface.style?.zoom || window.getComputedStyle(previewSurface).zoom
+      const parsed = Number.parseFloat(String(zoomValue || '1'))
+      if (!Number.isFinite(parsed) || parsed <= 0)
+        return 1
+      return parsed
+    }
+
     const updatePinnedPreviewPosition = () => {
       if (!shouldPinInsidePreview() || !navMain || !previewSurface)
         return
       const surfaceRect = previewSurface.getBoundingClientRect()
+      const previewScale = readPreviewSurfaceScale()
       if (pinnedViewportTop == null)
         pinnedViewportTop = resolvePinnedTop()
-      navMain.style.left = `${Math.round(surfaceRect.left)}px`
-      navMain.style.width = `${Math.round(surfaceRect.width)}px`
+      navMain.style.left = `${Math.round(surfaceRect.left / previewScale)}px`
+      navMain.style.width = `${Math.round(surfaceRect.width / previewScale)}px`
       navMain.style.right = 'auto'
       navMain.style.bottom = 'auto'
-      navMain.style.top = `${pinnedViewportTop}px`
+      navMain.style.top = `${Math.round(pinnedViewportTop / previewScale)}px`
     }
 
     if (navMain && transitionClassTokens.length) {

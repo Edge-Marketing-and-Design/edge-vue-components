@@ -65,6 +65,7 @@ const state = reactive({
   importErrorDialogOpen: false,
   importErrorMessage: '',
   previewViewport: 'full',
+  previewScale: '100',
   previewPageView: 'list',
   newRowLayout: '6',
   newPostRowLayout: '6',
@@ -136,7 +137,21 @@ const previewViewportOptions = [
   { id: 'mobile', label: 'Mobile', width: '420px', icon: Smartphone },
 ]
 
+const previewScaleOptions = [
+  { name: '100', title: '100%' },
+  { name: '75', title: '75%' },
+  { name: '50', title: '50%' },
+  { name: '25', title: '25%' },
+]
+
 const selectedPreviewViewport = computed(() => previewViewportOptions.find(option => option.id === state.previewViewport) || previewViewportOptions[0])
+const previewScaleValue = computed(() => {
+  const parsed = Number.parseInt(String(state.previewScale || '100'), 10)
+  if (!Number.isFinite(parsed) || parsed <= 0)
+    return 100
+  return parsed
+})
+const previewScaleMultiplier = computed(() => previewScaleValue.value / 100)
 
 const previewViewportStyle = computed(() => {
   const selected = selectedPreviewViewport.value
@@ -153,6 +168,7 @@ const previewViewportStyle = computed(() => {
 const previewViewportContainStyle = computed(() => {
   return {
     ...(previewViewportStyle.value || {}),
+    zoom: previewScaleMultiplier.value,
   }
 })
 
@@ -853,7 +869,8 @@ const pagePreviewRenderKey = computed(() => {
   const pageKey = String(props.page || '')
   const themeKey = String((effectiveThemeId.value || selectedThemeId.value || 'no-theme'))
   const modeKey = state.editMode ? 'edit' : 'preview'
-  return `${siteKey}:${pageKey}:${themeKey}:${modeKey}`
+  const scaleKey = String(state.previewScale || '100')
+  return `${siteKey}:${pageKey}:${themeKey}:${modeKey}:${scaleKey}`
 })
 
 const parsedTheme = computed(() => {
@@ -1703,7 +1720,8 @@ const historyPreviewRenderKey = computed(() => {
   const historyId = String(state.historySelectedId || 'none')
   const themeKey = String((effectiveThemeId.value || selectedThemeId.value || 'no-theme'))
   const previewMode = String(state.historyPreviewView || 'list')
-  return `${historyId}:${themeKey}:${previewMode}:${previewRouteLastSegment.value || 'auto'}`
+  const scaleKey = String(state.previewScale || '100')
+  return `${historyId}:${themeKey}:${previewMode}:${previewRouteLastSegment.value || 'auto'}:${scaleKey}`
 })
 
 const historyVersionItems = computed(() => {
@@ -3147,6 +3165,15 @@ const hasUnsavedChanges = (changes) => {
             </div>
           </div>
           <div class="flex flex-wrap items-center justify-end gap-1.5 sm:flex-1">
+            <div class="w-[88px] shrink-0">
+              <edge-shad-select
+                v-model="state.previewScale"
+                name="previewScale"
+                :items="previewScaleOptions"
+                placeholder="%"
+                class="w-full text-xs h-[32px]"
+              />
+            </div>
             <div class="flex shrink-0 items-center gap-1 px-1">
               <edge-shad-button
                 v-for="option in previewViewportOptions"
