@@ -1,5 +1,5 @@
 <script setup>
-import { Download, FilePenLine, FileStack, Loader2, MoreHorizontal, Plus, Trash2, Upload } from 'lucide-vue-next'
+import { Download, File, FilePenLine, FileStack, Loader2, MoreHorizontal, Plus, Trash2, Upload } from 'lucide-vue-next'
 
 const emit = defineEmits(['head'])
 const edgeFirebase = inject('edgeFirebase')
@@ -24,6 +24,10 @@ const state = reactive({
   exportDialogCurrentItem: '',
   exportCancelRequested: false,
   templatePageRenderContext: null,
+  newTemplateDialogOpen: false,
+  addTemplateTab: 'blank',
+  selectedExistingTemplateId: '',
+  creatingTemplateFromExisting: false,
   importingPages: false,
   importPageDocIdDialogOpen: false,
   importPageDocIdValue: '',
@@ -471,6 +475,20 @@ const selectedTemplateSet = computed(() => new Set(state.selectedTemplateDocIds)
 const selectedTemplateCount = computed(() => state.selectedTemplateDocIds.length)
 const normalizeDocId = value => String(value || '').trim()
 const isTemplateSelected = docId => selectedTemplateSet.value.has(normalizeDocId(docId))
+const existingTemplateItems = computed(() => {
+  return Object.entries(templatePagesCollection.value || {})
+    .map(([docId, doc]) => ({
+      docId,
+      ...(doc || {}),
+      name: getTemplatePageName({ docId, ...(doc || {}) }),
+      description: getTemplatePageDescription({ docId, ...(doc || {}) }),
+    }))
+    .sort((left, right) => String(left?.name || '').localeCompare(String(right?.name || '')))
+})
+const selectedExistingTemplate = computed(() => {
+  return existingTemplateItems.value.find(template => template.docId === state.selectedExistingTemplateId) || null
+})
+const isExistingTemplateSelected = docId => state.selectedExistingTemplateId === docId
 
 const setTemplateSelection = (docId, checked) => {
   const normalizedDocId = normalizeDocId(docId)
@@ -578,8 +596,20 @@ const openTemplatePage = (docId) => {
   router.push(`/app/dashboard/templates/${nextDocId}`)
 }
 
+const resetNewTemplateDialog = () => {
+  state.addTemplateTab = 'blank'
+  state.selectedExistingTemplateId = existingTemplateItems.value?.[0]?.docId || ''
+  state.creatingTemplateFromExisting = false
+}
+
+const closeNewTemplateDialog = () => {
+  state.newTemplateDialogOpen = false
+  resetNewTemplateDialog()
+}
+
 const openNewTemplatePage = () => {
-  router.push('/app/dashboard/templates/new')
+  resetNewTemplateDialog()
+  state.newTemplateDialogOpen = true
 }
 
 const readTextFile = file => new Promise((resolve, reject) => {
@@ -681,6 +711,56 @@ const makeImportedPageNameForNew = (baseName, docsMap = {}) => {
     candidate = `${normalizedBase}-${suffix}`
   }
   return candidate
+}
+
+const buildDuplicatedTemplatePayload = (sourceDoc, targetDocId, docsMap = {}) => {
+  const sourceName = String(sourceDoc?.name || sourceDoc?.docId || '').trim()
+  const fallbackName = sourceName || 'Template'
+  const nextName = makeImportedPageNameForNew(fallbackName, docsMap)
+  const duplicatedSource = edgeGlobal.dupObject(sourceDoc || {})
+  delete duplicatedSource.docId
+  delete duplicatedSource.doc_created_at
+  delete duplicatedSource.last_updated
+
+  return applyImportedPageSeoDefaults({
+    ...getPageDocDefaults(),
+    ...duplicatedSource,
+    docId: targetDocId,
+    name: nextName,
+  })
+}
+
+const createTemplateFromSelection = async () => {
+  if (state.creatingTemplateFromExisting)
+    return
+
+  if (state.addTemplateTab === 'blank') {
+    closeNewTemplateDialog()
+    router.push('/app/dashboard/templates/new')
+    return
+  }
+
+  const sourceTemplate = selectedExistingTemplate.value
+  if (!sourceTemplate)
+    return
+
+  state.creatingTemplateFromExisting = true
+  try {
+    const existingTemplates = { ...(templatePagesCollection.value || {}) }
+    const targetDocId = makeRandomPageDocId(existingTemplates)
+    const payload = buildDuplicatedTemplatePayload(sourceTemplate, targetDocId, existingTemplates)
+    await edgeFirebase.storeDoc(templatePagesCollectionPath.value, payload, targetDocId)
+    closeNewTemplateDialog()
+    edgeFirebase?.toast?.success?.(`Duplicated template "${sourceTemplate.name || sourceTemplate.docId}" as "${targetDocId}".`)
+    router.push(`/app/dashboard/templates/${targetDocId}`)
+  }
+  catch (error) {
+    console.error('Failed to duplicate template', error)
+    edgeFirebase?.toast?.error?.('Failed to duplicate template.')
+  }
+  finally {
+    state.creatingTemplateFromExisting = false
+  }
 }
 
 const requestPageImportDocId = (initialValue = '') => {
@@ -838,6 +918,13 @@ watch(templatePagesCollection, (collection) => {
   const validDocIds = new Set(Object.keys(collection || {}))
   state.selectedTemplateDocIds = state.selectedTemplateDocIds.filter(docId => validDocIds.has(docId))
 }, { deep: true })
+
+watch(existingTemplateItems, (items) => {
+  const selectedDocId = String(state.selectedExistingTemplateId || '').trim()
+  const hasSelectedDocId = items.some(item => item.docId === selectedDocId)
+  if (!selectedDocId || !hasSelectedDocId)
+    state.selectedExistingTemplateId = items?.[0]?.docId || ''
+}, { immediate: true, deep: true })
 
 watch(
   [() => edgeGlobal.edgeState.currentOrganization, selectedTemplatePreviewSiteId],
@@ -1170,12 +1257,151 @@ watch(themeCollection, () => {
             </div>
             <edge-shad-button variant="outline" class="gap-2" @click="openNewTemplatePage">
               <Plus class="h-4 w-4" />
-              Add Page
+              Add Template
             </edge-shad-button>
           </div>
         </div>
       </template>
     </edge-dashboard>
+
+    <edge-shad-dialog v-model="state.newTemplateDialogOpen">
+      <DialogContent class="pt-6 w-full max-w-6xl h-[90vh] flex flex-col">
+        <DialogHeader class="pb-2">
+          <DialogTitle class="text-left">
+            Create New Template
+          </DialogTitle>
+          <DialogDescription>
+            Start from a blank template or duplicate an existing template.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div class="flex min-h-0 flex-1 flex-col">
+          <div class="min-h-0 flex-1 overflow-y-auto pr-1">
+            <p class="text-xs text-muted-foreground">
+              Start a new template from scratch, or duplicate an existing template below.
+            </p>
+            <edge-button-divider class="my-4">
+              <span class="text-xs text-muted-foreground !nowrap text-center">Blank Template</span>
+            </edge-button-divider>
+            <div class="grid grid-cols-1 gap-3 auto-rows-fr pb-2 sm:grid-cols-2 lg:grid-cols-4">
+              <button
+                type="button"
+                class="rounded-lg border bg-card p-3 text-left transition focus:outline-none focus-visible:ring-2 flex flex-col gap-3"
+                :class="state.addTemplateTab === 'blank' ? 'border-primary ring-2 ring-primary/50 shadow-lg' : 'border-border hover:border-primary/40'"
+                :aria-pressed="state.addTemplateTab === 'blank'"
+                @click="state.addTemplateTab = 'blank'"
+              >
+                <div class="flex items-center justify-between gap-2">
+                  <span class="truncate font-semibold">Blank</span>
+                  <File class="h-4 w-4 text-muted-foreground" />
+                </div>
+                <div class="template-scale-wrapper border border-dashed border-border/60 rounded-md bg-background/80">
+                  <div class="template-scale-inner">
+                    <div class="template-scale-content space-y-4">
+                      <div class="flex h-32 items-center justify-center text-[100px] mt-[100px] text-muted-foreground">
+                        Blank page
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <p class="line-clamp-2 text-xs text-muted-foreground">
+                  Create a new template without any blocks.
+                </p>
+              </button>
+            </div>
+
+            <edge-button-divider class="my-4">
+              <span class="text-xs text-muted-foreground !nowrap text-center">Duplicate Existing Template</span>
+            </edge-button-divider>
+            <div v-if="existingTemplateItems.length" class="pb-2">
+              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 auto-rows-fr">
+                <button
+                  v-for="template in existingTemplateItems"
+                  :key="template.docId"
+                  type="button"
+                  class="rounded-lg border bg-card text-left p-3 flex flex-col gap-3 transition focus:outline-none focus-visible:ring-2"
+                  :class="state.addTemplateTab === 'existing' && isExistingTemplateSelected(template.docId) ? 'border-primary ring-2 ring-primary/50 shadow-lg' : 'border-border hover:border-primary/40'"
+                  :aria-pressed="state.addTemplateTab === 'existing' && isExistingTemplateSelected(template.docId)"
+                  @click="state.addTemplateTab = 'existing'; state.selectedExistingTemplateId = template.docId"
+                >
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="font-semibold truncate">{{ template.name }}</span>
+                    <File class="w-4 h-4 text-muted-foreground" />
+                  </div>
+                  <div class="template-scale-wrapper border border-dashed border-border/60 rounded-md bg-background/80">
+                    <div class="template-scale-inner">
+                      <div class="template-scale-content space-y-4">
+                        <template v-if="templatePageHasPreview(template) && selectedTemplatePreviewThemeReady">
+                          <div
+                            v-for="(row, rowIndex) in templatePreviewRows(template)"
+                            :key="`${template.docId}-row-${row.id || rowIndex}`"
+                            class="w-full"
+                          >
+                            <div :class="previewGridClass(row)">
+                              <div
+                                v-for="(column, colIndex) in row.columns"
+                                :key="`${template.docId}-row-${row.id || rowIndex}-col-${column.id || colIndex}`"
+                                class="min-w-0"
+                                :style="previewColumnStyle(column)"
+                              >
+                                <div
+                                  v-for="(blockRef, blockIdx) in column.blocks || []"
+                                  :key="`${template.docId}-row-${row.id || rowIndex}-col-${column.id || colIndex}-block-${blockIdx}`"
+                                >
+                                  <edge-cms-block-api
+                                    v-if="resolveTemplateBlockForPreview(template, blockRef)"
+                                    :key="`${getTemplatePagePreviewKey(template.docId)}:${blockIdx}`"
+                                    :site-id="selectedTemplatePreviewSiteId"
+                                    :content="resolveTemplateBlockForPreview(template, blockRef).content"
+                                    :values="resolveTemplateBlockForPreview(template, blockRef).values"
+                                    :meta="resolveTemplateBlockForPreview(template, blockRef).meta"
+                                    :theme="selectedTemplatePreviewTheme"
+                                    :render-context="state.templatePageRenderContext"
+                                    :isolated="true"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </template>
+                        <template v-else>
+                          <div class="flex h-32 items-center justify-center text-[100px] mt-[100px] text-muted-foreground">
+                            No blocks yet
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+                  </div>
+                  <p v-if="template.description" class="line-clamp-2 text-xs text-muted-foreground">
+                    {{ template.description }}
+                  </p>
+                </button>
+              </div>
+            </div>
+            <div
+              v-else
+              class="flex items-center justify-center rounded-lg border border-dashed border-muted-foreground/40 px-6 py-10 text-center text-sm text-muted-foreground"
+            >
+              No existing templates yet. Start with Blank first.
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter class="flex justify-between pt-2">
+          <edge-shad-button variant="outline" @click="closeNewTemplateDialog">
+            Cancel
+          </edge-shad-button>
+          <edge-shad-button
+            class="w-full bg-slate-800 text-white hover:bg-slate-400"
+            :disabled="state.creatingTemplateFromExisting || (state.addTemplateTab === 'existing' && !selectedExistingTemplate)"
+            @click="createTemplateFromSelection"
+          >
+            <Loader2 v-if="state.creatingTemplateFromExisting" class="mr-2 h-4 w-4 animate-spin" />
+            Continue
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
 
     <edge-cms-json-export-progress-dialog
       v-model="state.exportDialogOpen"
