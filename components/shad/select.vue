@@ -14,6 +14,11 @@ const props = defineProps({
     required: false,
     default: 'w-full',
   },
+  triggerClass: {
+    type: null,
+    required: false,
+    default: null,
+  },
   placeholder: {
     type: String,
     required: false,
@@ -77,7 +82,7 @@ const modelValue = useVModel(props, 'modelValue', emits, {
   <template v-if="props.name">
     <FormField v-slot="{ componentField }" :name="props.name">
       <FormItem>
-        <FormLabel class="flex">
+        <FormLabel v-if="props.label || $slots.default" class="flex">
           {{ props.label }}
           <div class="ml-auto inline-block">
             <slot />
@@ -86,7 +91,7 @@ const modelValue = useVModel(props, 'modelValue', emits, {
         <div class="relative w-full items-center">
           <Select v-model="modelValue" :disabled="props.disabled" :multiple="props.multiple" :default-value="modelValue" v-bind="componentField">
             <FormControl>
-              <SelectTrigger class="text-foreground" :class="[$slots.icon ? 'pr-8' : '', props.class]">
+              <SelectTrigger class="text-foreground" :class="[$slots.icon ? 'pr-8' : '', props.class, props.triggerClass]">
                 <SelectValue :placeholder="props.placeholder" />
               </SelectTrigger>
             </FormControl>
@@ -106,7 +111,7 @@ const modelValue = useVModel(props, 'modelValue', emits, {
             <slot name="icon" />
           </span>
         </div>
-        <FormDescription>
+        <FormDescription v-if="props.description">
           {{ props.description }}
         </FormDescription>
         <FormMessage />
@@ -116,13 +121,13 @@ const modelValue = useVModel(props, 'modelValue', emits, {
 
   <template v-else>
     <div class="w-full">
-      <label class="flex mb-1">
+      <label v-if="props.label" class="flex mb-1">
         {{ props.label }}
       </label>
       <div class="relative w-full items-center">
         <Select v-model="modelValue" :disabled="props.disabled" :default-value="modelValue">
-          <SelectTrigger class="text-foreground" :class="[$slots.icon ? 'pr-8' : '', props.class]">
-            <SelectValue />
+          <SelectTrigger class="text-foreground" :class="[$slots.icon ? 'pr-8' : '', props.class, props.triggerClass]">
+            <SelectValue :placeholder="props.placeholder" />
           </SelectTrigger>
           <SelectContent>
             <SelectGroup>
@@ -140,7 +145,7 @@ const modelValue = useVModel(props, 'modelValue', emits, {
           <slot name="icon" />
         </span>
       </div>
-      <p class="text-sm text-muted-foreground mt-1">
+      <p v-if="props.description" class="text-sm text-muted-foreground mt-1">
         {{ props.description }}
       </p>
     </div>

@@ -1,5 +1,5 @@
 <script setup>
-import { AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, Download, ExternalLink, FileCheck, FileDown, FileMinus2, FilePen, FileUp, FileX, History, Loader2, Maximize2, Monitor, MoreHorizontal, RotateCcw, Smartphone, Sparkles, Tablet, UploadCloud } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, ArrowUp, Download, ExternalLink, FileCheck, FileDown, FileMinus2, FilePen, FileUp, FileWarning, FileX, History, Loader2, Maximize2, Monitor, MoreHorizontal, RotateCcw, Smartphone, Sparkles, Tablet, UploadCloud } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 const props = defineProps({
@@ -1441,8 +1441,10 @@ const getPagePublishStatus = (pageId) => {
     return {
       key: 'unpublished',
       label: 'Unpublished',
+      icon: 'unpublished',
       canPublish: true,
       canUnpublish: false,
+      badgeClass: 'text-slate-600 dark:text-slate-300',
     }
   }
 
@@ -1450,16 +1452,20 @@ const getPagePublishStatus = (pageId) => {
     return {
       key: 'publishedWithChanges',
       label: 'Published (Unpublished Changes)',
+      icon: 'changes',
       canPublish: true,
       canUnpublish: true,
+      badgeClass: 'text-amber-700 dark:text-amber-300',
     }
   }
 
   return {
     key: 'published',
     label: 'Published',
+    icon: 'published',
     canPublish: false,
     canUnpublish: true,
+    badgeClass: 'text-emerald-700 dark:text-emerald-300',
   }
 }
 
@@ -2484,7 +2490,16 @@ const discardCurrentPageChanges = async () => {
   if (props.isTemplateSite || !publishedPage.value || !props.page || props.page === 'new')
     return
   try {
-    await edgeFirebase.storeDoc(pagesCollectionPath.value, publishedPage.value, props.page)
+    const discardedDoc = resolveSyncedPageDoc(edgeGlobal.dupObject(publishedPage.value))
+    await edgeFirebase.storeDoc(pagesCollectionPath.value, discardedDoc, props.page)
+    if (pagesCollection.value)
+      pagesCollection.value[props.page] = edgeGlobal.dupObject(discardedDoc)
+    state.workingDoc = buildPageWorkingDocOverrides(discardedDoc)
+    state.editorWorkingDoc = discardedDoc ? edgeGlobal.dupObject(discardedDoc) : null
+    state.editorHasUnsavedChanges = false
+    state.previewPageView = hasPostView(discardedDoc) ? state.previewPageView : 'list'
+    state.showUnpublishedChangesDialog = false
+    state.editorKey += 1
     notifySuccess(`Discarded unpublished changes for "${props.page}".`)
   }
   catch (error) {
@@ -2994,6 +3009,26 @@ const pageChangesDialogDescription = computed(() => {
   return `Review what changed since the last publish. Last Published: ${lastPublishedTime(props.page)}`
 })
 
+const showStatusCompareLink = computed(() => {
+  if (props.isTemplateSite)
+    return showingUnsavedChanges.value
+  return showingUnsavedChanges.value || pagePublishStatus.value.key === 'publishedWithChanges'
+})
+
+const pageStatusDisplayLabel = computed(() => {
+  if (!showingUnsavedChanges.value)
+    return pagePublishStatus.value.label
+  return pagePublishStatus.value.key === 'unpublished'
+    ? 'Unpublished (Unsaved Changes)'
+    : 'Published (Unsaved Changes)'
+})
+
+const openPageStatusCompareDialog = () => {
+  if (!showStatusCompareLink.value)
+    return
+  state.showUnpublishedChangesDialog = true
+}
+
 const historyDiffDetails = computed(() => {
   return buildPageChangeDetails(getHistorySnapshotDoc(selectedHistoryEntry.value), currentHistoryCompareDoc.value, {
     baseLabel: 'Selected History',
@@ -3142,81 +3177,54 @@ const hasUnsavedChanges = (changes) => {
           </div>
         </div>
 
-        <div class="flex w-full min-w-0 flex-wrap items-center justify-between gap-1.5">
-          <div v-if="!props.isTemplateSite" class="flex flex-wrap items-center gap-2 text-gray-600 dark:text-gray-300 sm:px-1 sm:whitespace-nowrap">
-            <template v-if="slotProps.unsavedChanges">
-              <edge-shad-button
-                variant="outline"
-                class="bg-yellow-100 text-yellow-800 border-yellow-300 hover:bg-yellow-100 hover:text-yellow-900 text-xs h-[32px] gap-1"
-                @click="state.showUnpublishedChangesDialog = true"
-              >
-                <AlertTriangle class="w-4 h-4" />
-                Unsaved Changes
-              </edge-shad-button>
-            </template>
-            <template v-else-if="pagePublishStatus.key === 'publishedWithChanges'">
-              <div class="flex items-center gap-2">
-                <edge-shad-button
-                  variant="outline"
-                  class="bg-yellow-100 text-yellow-800 border-yellow-300 hover:bg-yellow-100 hover:text-yellow-900 text-xs h-[32px] gap-1"
-                  @click="state.showUnpublishedChangesDialog = true"
-                >
-                  <AlertTriangle class="w-4 h-4" />
-                  Unpublished Changes
-                </edge-shad-button>
-                <edge-shad-button
-                  class="text-xs h-[32px] gap-1 shadow-sm bg-slate-700 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
-                  :disabled="state.publishLoading"
-                  @click="publishPage(page)"
-                >
-                  <Loader2 v-if="state.publishLoading" class="w-4 h-4 animate-spin" />
-                  <UploadCloud v-else class="w-4 h-4" />
-                  Publish
-                </edge-shad-button>
-              </div>
-            </template>
-            <template v-else-if="pagePublishStatus.key === 'unpublished'">
-              <div class="flex items-center gap-2">
-                <edge-chip class="bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100 h-[32px]">
-                  <div class="w-full inline-flex items-center gap-1">
-                    <FileX class="w-3.5 h-3.5" />
-                    Unpublished
-                  </div>
-                </edge-chip>
-                <edge-shad-button
-                  class="text-xs h-[32px] gap-1 shadow-sm bg-slate-700 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
-                  :disabled="state.publishLoading"
-                  @click="publishPage(page)"
-                >
-                  <Loader2 v-if="state.publishLoading" class="w-4 h-4 animate-spin" />
-                  <UploadCloud v-else class="w-4 h-4" />
-                  Publish
-                </edge-shad-button>
-              </div>
-            </template>
-            <template v-else>
-              <edge-chip class="bg-green-100 text-green-800 h-[32px]">
-                <div class="w-full inline-flex items-center gap-1">
-                  <FileCheck class="w-3.5 h-3.5" />
-                  Published
-                </div>
-              </edge-chip>
-            </template>
+        <div class="flex w-full min-w-0 flex-wrap items-center justify-between gap-1 border border-stone-300/80 bg-stone-200/70 px-2 py-0.5 text-stone-700 dark:border-stone-700/80 dark:bg-stone-800/80 dark:text-stone-200">
+          <div v-if="!props.isTemplateSite" class="flex flex-wrap items-center gap-1.5 text-gray-600 dark:text-gray-300 sm:px-1 sm:whitespace-nowrap">
+            <button
+              v-if="showStatusCompareLink"
+              type="button"
+              class="inline-flex items-center gap-1 text-[11px] font-medium leading-none text-amber-700 underline decoration-dashed underline-offset-4 hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-200 sm:text-xs"
+              @click="openPageStatusCompareDialog"
+            >
+              <FileWarning v-if="showingUnsavedChanges || pagePublishStatus.icon === 'changes'" class="h-3.5 w-3.5 shrink-0 text-yellow-600" />
+              <FileCheck v-else-if="pagePublishStatus.icon === 'published'" class="h-3.5 w-3.5 shrink-0 text-green-700" />
+              <FileX v-else class="h-3.5 w-3.5 shrink-0 text-slate-500 dark:text-slate-300" />
+              <span>{{ pageStatusDisplayLabel }}</span>
+            </button>
+            <div
+              v-else
+              class="inline-flex items-center gap-1 text-[11px] font-medium leading-none sm:text-xs"
+              :class="showingUnsavedChanges ? 'text-amber-700 dark:text-amber-300' : pagePublishStatus.badgeClass"
+            >
+              <FileWarning v-if="showingUnsavedChanges || pagePublishStatus.icon === 'changes'" class="h-3.5 w-3.5 shrink-0 text-yellow-600" />
+              <FileCheck v-else-if="pagePublishStatus.icon === 'published'" class="h-3.5 w-3.5 shrink-0 text-green-700" />
+              <FileX v-else class="h-3.5 w-3.5 shrink-0 text-slate-500 dark:text-slate-300" />
+              <span>{{ pageStatusDisplayLabel }}</span>
+            </div>
             <span class="text-[11px] leading-none text-gray-500 dark:text-gray-400">Last Published: {{ lastPublishedTime(page) }}</span>
+            <edge-shad-button
+              v-if="pagePublishStatus.canPublish"
+              class="text-xs h-[28px] gap-1 shadow-sm bg-slate-700 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
+              :disabled="state.publishLoading"
+              @click="publishPage(page)"
+            >
+              <Loader2 v-if="state.publishLoading" class="w-4 h-4 animate-spin" />
+              <UploadCloud v-else class="w-4 h-4" />
+              Publish
+            </edge-shad-button>
           </div>
           <div v-else class="w-full sm:w-auto sm:max-w-md sm:px-1">
-            <div class="flex w-full items-center gap-2 sm:max-w-md">
+            <div class="flex w-full items-center gap-1.5 sm:max-w-md">
               <edge-shad-select
                 v-model="edgeGlobal.edgeState.blockEditorTheme"
-                name="theme"
                 :items="themes.map(t => ({ title: t.name, name: t.docId }))"
                 placeholder="Select Theme"
-                class="w-full text-xs h-[32px]"
+                class="w-full"
+                trigger-class="!h-7 min-h-7 px-2 py-1 text-xs"
               />
               <edge-shad-button
                 type="button"
                 variant="outline"
-                class="h-[32px] gap-1 whitespace-nowrap"
+                class="h-7 gap-1 whitespace-nowrap"
                 :disabled="!currentPage || !props.page || props.page === 'new'"
                 title="Export Template"
                 aria-label="Export Template"
@@ -3227,14 +3235,14 @@ const hasUnsavedChanges = (changes) => {
               </edge-shad-button>
             </div>
           </div>
-          <div class="flex flex-wrap items-center justify-end gap-1.5 sm:flex-1">
+          <div class="flex flex-wrap items-center justify-end gap-1 sm:flex-1">
             <div class="w-[88px] shrink-0">
               <edge-shad-select
                 v-model="state.previewScale"
-                name="previewScale"
                 :items="previewScaleOptions"
                 placeholder="%"
-                class="w-full text-xs h-[32px]"
+                class="w-full"
+                trigger-class="!h-7 min-h-7 px-2 py-1 text-xs"
               />
             </div>
             <div class="flex shrink-0 items-center gap-1 px-1">
@@ -3244,7 +3252,7 @@ const hasUnsavedChanges = (changes) => {
                 type="button"
                 variant="ghost"
                 size="icon"
-                class="h-[26px] w-[26px] text-xs gap-1 border transition-colors"
+                class="h-6 w-6 text-xs gap-1 border transition-colors"
                 :class="state.previewViewport === option.id ? 'bg-slate-700 text-white border-slate-700 shadow-sm dark:bg-slate-200 dark:text-slate-900 dark:border-slate-200' : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700 dark:hover:bg-slate-800'"
                 @click="setPreviewViewport(option.id)"
               >
@@ -3255,7 +3263,7 @@ const hasUnsavedChanges = (changes) => {
               <edge-shad-button
                 type="button"
                 variant="ghost"
-                class="h-[26px] px-2 text-xs border transition-colors"
+                class="h-6 px-2 text-xs border transition-colors"
                 :class="state.previewPageView === 'list' ? 'bg-slate-700 text-white border-slate-700 shadow-sm dark:bg-slate-200 dark:text-slate-900 dark:border-slate-200' : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700 dark:hover:bg-slate-800'"
                 @click="setPreviewPageView('list')"
               >
@@ -3264,7 +3272,7 @@ const hasUnsavedChanges = (changes) => {
               <edge-shad-button
                 type="button"
                 variant="ghost"
-                class="h-[26px] px-2 text-xs border transition-colors"
+                class="h-6 px-2 text-xs border transition-colors"
                 :class="state.previewPageView === 'post' ? 'bg-slate-700 text-white border-slate-700 shadow-sm dark:bg-slate-200 dark:text-slate-900 dark:border-slate-200' : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700 dark:hover:bg-slate-800'"
                 @click="setPreviewPageView('post')"
               >
@@ -3275,7 +3283,7 @@ const hasUnsavedChanges = (changes) => {
               <edge-shad-button
                 type="button"
                 variant="outline"
-                class="h-[26px] px-2 text-xs"
+                class="h-6 px-2 text-xs"
                 @click="openRouteLastSegmentDialog"
               >
                 Test URL
@@ -3288,7 +3296,7 @@ const hasUnsavedChanges = (changes) => {
                     type="button"
                     variant="outline"
                     size="icon"
-                    class="h-[26px] w-[26px]"
+                    class="h-6 w-6"
                   >
                     <MoreHorizontal class="w-4 h-4" />
                   </edge-shad-button>

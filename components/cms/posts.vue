@@ -544,6 +544,7 @@ const state = reactive({
   historySelectedId: '',
   historyPreviewDoc: null,
   showHistoryDiffDialog: false,
+  showStatusCompareDialog: false,
   newDocs: {
     posts: {
       name: {
@@ -1184,6 +1185,64 @@ const activePostPublishStatus = computed(() => {
   }
   return getPublishStatus(state.activePostId)
 })
+
+const publishedActivePost = computed(() => {
+  if (!state.activePostId || state.activePostId === 'new')
+    return null
+  return publishedPosts.value?.[state.activePostId] || null
+})
+
+const unpublishedPostChangeDetails = computed(() => {
+  return buildPostChangeDetails(publishedActivePost.value, activePost.value, {
+    baseLabel: 'Published',
+    compareLabel: 'Draft',
+  })
+})
+
+const unsavedPostChangeDetails = computed(() => {
+  return buildPostChangeDetails(activePost.value, state.editorDoc, {
+    baseLabel: 'Saved',
+    compareLabel: 'Current',
+  })
+})
+
+const showingUnsavedPostChanges = computed(() => {
+  return state.editorHasUnsavedChanges && unsavedPostChangeDetails.value.length > 0
+})
+
+const activePostChangeDetails = computed(() => {
+  if (showingUnsavedPostChanges.value)
+    return unsavedPostChangeDetails.value
+  return unpublishedPostChangeDetails.value
+})
+
+const postChangesDialogTitle = computed(() => {
+  return showingUnsavedPostChanges.value ? 'Unsaved Changes' : 'Unpublished Changes'
+})
+
+const postChangesDialogDescription = computed(() => {
+  if (showingUnsavedPostChanges.value)
+    return 'Review what changed in memory versus the saved post.'
+  return `Review what changed since the last publish. Last Published: ${lastPublishedTime(state.activePostId)}`
+})
+
+const showPostStatusCompareLink = computed(() => {
+  return showingUnsavedPostChanges.value || activePostPublishStatus.value.icon === 'changes'
+})
+
+const postStatusDisplayLabel = computed(() => {
+  if (!showingUnsavedPostChanges.value)
+    return activePostPublishStatus.value.label
+  return activePostPublishStatus.value.icon === 'unpublished'
+    ? 'Unpublished (Unsaved Changes)'
+    : 'Published (Unsaved Changes)'
+})
+
+const openPostStatusCompareDialog = () => {
+  if (!showPostStatusCompareLink.value)
+    return
+  state.showStatusCompareDialog = true
+}
 
 const formatIsoToDateTimeLocalInput = (isoString) => {
   const value = String(isoString || '').trim()
@@ -3339,6 +3398,165 @@ const reindexPublishedPostsToKv = async () => {
     </DialogContent>
   </edge-shad-dialog>
 
+  <edge-shad-dialog v-model="state.showStatusCompareDialog">
+    <DialogContent class="max-w-[96vw] max-h-[97vh] overflow-hidden flex flex-col">
+      <DialogHeader>
+        <DialogTitle class="text-left">
+          {{ postChangesDialogTitle }}
+        </DialogTitle>
+        <DialogDescription class="text-left">
+          {{ postChangesDialogDescription }}
+        </DialogDescription>
+      </DialogHeader>
+      <div class="mt-2 flex-1 overflow-y-auto pr-1">
+        <div v-if="activePostChangeDetails.length" class="space-y-3">
+          <div
+            v-for="change in activePostChangeDetails"
+            :key="change.key"
+            class="rounded-md border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800 p-3 text-left"
+          >
+            <div class="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-2">
+              {{ change.label }}
+            </div>
+            <div v-if="!change.layoutChanges?.length" class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+              <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
+                <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
+                  {{ change.baseLabel || 'Published' }}
+                </div>
+                <div class="whitespace-pre-wrap break-words text-gray-900 dark:text-gray-100">
+                  {{ change.base }}
+                </div>
+              </div>
+              <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
+                <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
+                  {{ change.compareLabel || 'Draft' }}
+                </div>
+                <div class="whitespace-pre-wrap break-words text-gray-900 dark:text-gray-100">
+                  {{ change.compare }}
+                </div>
+              </div>
+            </div>
+            <div v-else class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+              <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
+                <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-2">
+                  {{ change.baseLabel || 'Published' }}
+                </div>
+                <div class="space-y-2">
+                  <div v-for="layoutChange in change.layoutChanges" :key="`${layoutChange.key}:base`" class="rounded border border-gray-200/80 dark:border-white/10 bg-white/70 dark:bg-gray-900/40 p-2">
+                    <div class="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                      {{ layoutChange.label }}
+                    </div>
+                    <div class="mt-1 text-slate-900 dark:text-slate-100">
+                      {{ layoutChange.base }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
+                <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-2">
+                  {{ change.compareLabel || 'Draft' }}
+                </div>
+                <div class="space-y-2">
+                  <div v-for="layoutChange in change.layoutChanges" :key="`${layoutChange.key}:compare`" class="rounded border border-gray-200/80 dark:border-white/10 bg-white/70 dark:bg-gray-900/40 p-2">
+                    <div class="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                      {{ layoutChange.label }}
+                    </div>
+                    <div class="mt-1 text-slate-900 dark:text-slate-100">
+                      {{ layoutChange.compare }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-if="change.blockChanges?.length" class="mt-3 space-y-3">
+              <div
+                v-for="blockChange in change.blockChanges"
+                :key="blockChange.key"
+                class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-3"
+              >
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-slate-700 dark:bg-slate-700 dark:text-slate-100">
+                    {{ blockChange.label }}
+                  </span>
+                  <span class="text-sm font-medium text-slate-900 dark:text-slate-100">{{ blockChange.blockLabel }}</span>
+                </div>
+                <div class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-600 dark:text-slate-300">
+                  <div><strong>{{ change.baseLabel || 'Published' }}:</strong> {{ blockChange.basePositionLabel }}</div>
+                  <div><strong>{{ change.compareLabel || 'Draft' }}:</strong> {{ blockChange.comparePositionLabel }}</div>
+                </div>
+                <div v-if="blockChange.showPreview" class="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  <div class="space-y-2">
+                    <div class="text-[11px] uppercase tracking-wide text-gray-500">
+                      {{ change.baseLabel || 'Published' }}
+                    </div>
+                    <div
+                      data-cms-preview-surface="post"
+                      data-cms-preview-mode="history"
+                      class="relative isolate overflow-hidden rounded border border-gray-200 dark:border-white/15 bg-white dark:bg-gray-900"
+                    >
+                      <div v-if="blockChange.baseBlock" class="p-3">
+                        <edge-cms-block-api
+                          :key="`${blockChange.key}:base`"
+                          :site-id="props.site"
+                          :content="blockChange.baseBlock?.content"
+                          :values="blockChange.baseBlock?.values"
+                          :meta="blockChange.baseBlock?.meta"
+                          :theme="theme"
+                        />
+                      </div>
+                      <div v-else class="flex min-h-24 items-center justify-center px-4 py-6 text-sm text-slate-500 dark:text-slate-400">
+                        Not present
+                      </div>
+                    </div>
+                  </div>
+                  <div class="space-y-2">
+                    <div class="text-[11px] uppercase tracking-wide text-gray-500">
+                      {{ change.compareLabel || 'Draft' }}
+                    </div>
+                    <div
+                      data-cms-preview-surface="post"
+                      data-cms-preview-mode="history"
+                      class="relative isolate overflow-hidden rounded border border-gray-200 dark:border-white/15 bg-white dark:bg-gray-900"
+                    >
+                      <div v-if="blockChange.compareBlock" class="p-3">
+                        <edge-cms-block-api
+                          :key="`${blockChange.key}:compare`"
+                          :site-id="props.site"
+                          :content="blockChange.compareBlock?.content"
+                          :values="blockChange.compareBlock?.values"
+                          :meta="blockChange.compareBlock?.meta"
+                          :theme="theme"
+                        />
+                      </div>
+                      <div v-else class="flex min-h-24 items-center justify-center px-4 py-6 text-sm text-slate-500 dark:text-slate-400">
+                        Not present
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-if="change.details?.length" class="mt-2 text-sm text-gray-700 dark:text-gray-300">
+              <ul class="list-disc pl-5 space-y-1">
+                <li v-for="(detail, detailIndex) in change.details" :key="`${change.key}-${detailIndex}`">
+                  {{ detail }}
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        <div v-else class="text-sm text-gray-600 dark:text-gray-300 text-left">
+          No {{ showingUnsavedPostChanges ? 'unsaved' : 'unpublished' }} differences detected.
+        </div>
+      </div>
+      <DialogFooter class="pt-4">
+        <edge-shad-button class="w-full" variant="outline" @click="state.showStatusCompareDialog = false">
+          Close
+        </edge-shad-button>
+      </DialogFooter>
+    </DialogContent>
+  </edge-shad-dialog>
+
   <edge-shad-dialog v-model="state.showHistoryDiffDialog">
     <DialogContent class="max-w-[96vw] max-h-[97vh] overflow-hidden flex flex-col">
       <DialogHeader>
@@ -3560,13 +3778,28 @@ const reindexPublishedPostsToKv = async () => {
                 </edge-shad-button>
               </div>
             </div>
-            <div class="flex w-full min-w-0 flex-wrap items-center justify-between gap-1.5">
-              <div class="flex flex-wrap items-center gap-2 text-gray-600 dark:text-gray-300 sm:pl-2 sm:pr-1 sm:whitespace-nowrap">
-                <div class="flex items-center gap-2 text-sm">
-                  <FileWarning v-if="activePostPublishStatus.icon === 'changes'" class="h-4 w-4 text-yellow-600" />
-                  <FileCheck v-else-if="activePostPublishStatus.icon === 'published'" class="h-4 w-4 text-green-700" />
-                  <FileX v-else class="h-4 w-4 text-slate-500 dark:text-slate-300" />
-                  <span :class="activePostPublishStatus.badgeClass">{{ activePostPublishStatus.label }}</span>
+            <div class="flex w-full min-w-0 flex-wrap items-center justify-between gap-1 border border-stone-300/80 bg-stone-200/70 px-2 py-0.5 text-stone-700 dark:border-stone-700/80 dark:bg-stone-800/80 dark:text-stone-200">
+              <div class="flex flex-wrap items-center gap-1.5 text-gray-600 dark:text-gray-300 sm:pl-2 sm:pr-1 sm:whitespace-nowrap">
+                <button
+                  v-if="showPostStatusCompareLink"
+                  type="button"
+                  class="inline-flex items-center gap-1 text-[11px] font-medium leading-none text-amber-700 underline decoration-dashed underline-offset-4 hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-200 sm:text-xs"
+                  @click="openPostStatusCompareDialog"
+                >
+                  <FileWarning v-if="showingUnsavedPostChanges || activePostPublishStatus.icon === 'changes'" class="h-3.5 w-3.5 shrink-0 text-yellow-600" />
+                  <FileCheck v-else-if="activePostPublishStatus.icon === 'published'" class="h-3.5 w-3.5 shrink-0 text-green-700" />
+                  <FileX v-else class="h-3.5 w-3.5 shrink-0 text-slate-500 dark:text-slate-300" />
+                  <span>{{ postStatusDisplayLabel }}</span>
+                </button>
+                <div
+                  v-else
+                  class="inline-flex items-center gap-1 text-[11px] font-medium leading-none sm:text-xs"
+                  :class="showingUnsavedPostChanges ? 'text-amber-700 dark:text-amber-300' : activePostPublishStatus.badgeClass"
+                >
+                  <FileWarning v-if="showingUnsavedPostChanges || activePostPublishStatus.icon === 'changes'" class="h-3.5 w-3.5 shrink-0 text-yellow-600" />
+                  <FileCheck v-else-if="activePostPublishStatus.icon === 'published'" class="h-3.5 w-3.5 shrink-0 text-green-700" />
+                  <FileX v-else class="h-3.5 w-3.5 shrink-0 text-slate-500 dark:text-slate-300" />
+                  <span>{{ postStatusDisplayLabel }}</span>
                 </div>
                 <span class="text-[11px] leading-none text-gray-500 dark:text-gray-400">
                   Last Published: {{ lastPublishedTime(state.activePostId) }}
@@ -3577,7 +3810,7 @@ const reindexPublishedPostsToKv = async () => {
                   v-if="!isCreating"
                   type="button"
                   variant="text"
-                  class="h-[26px] shrink-0 text-xs text-slate-700 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white"
+                  class="h-[22px] shrink-0 text-xs text-slate-700 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white"
                   @click="openHistoryDialog"
                 >
                   <History class="w-4 h-4" />
@@ -3586,7 +3819,7 @@ const reindexPublishedPostsToKv = async () => {
                 <edge-shad-button
                   type="button"
                   variant="text"
-                  class="h-[26px] shrink-0 text-xs text-slate-700 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white"
+                  class="h-[22px] shrink-0 text-xs text-slate-700 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white"
                   @click="state.editMode = !state.editMode"
                 >
                   <template v-if="state.editMode">
