@@ -84,11 +84,11 @@ const numericValue = computed({
           :disabled="props.disabled"
         >
           <NumberFieldContent>
-            <NumberFieldDecrement class="" />
+            <NumberFieldDecrement class="!inset-y-0 !top-0 !h-full !w-10 !translate-y-0 !p-0 inline-flex items-center justify-center self-stretch" />
             <FormControl>
               <NumberFieldInput />
             </FormControl>
-            <NumberFieldIncrement class="" />
+            <NumberFieldIncrement class="!inset-y-0 !top-0 !h-full !w-10 !translate-y-0 !p-0 inline-flex items-center justify-center self-stretch" />
           </NumberFieldContent>
         </NumberField>
 

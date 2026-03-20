@@ -2,7 +2,7 @@
 import { computed, inject, onBeforeMount, reactive, ref, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { ArrowDown, ArrowUp, Clock3, Eye, File, FileCheck, FilePen, FileWarning, FileX, GripVertical, Image, ImagePlus, Loader2, MoreHorizontal, Pencil, Plus, Save, Trash2, X } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, ArrowUp, Clock3, Copy, Eye, File, FileCheck, FilePen, FileWarning, FileX, GripVertical, History, Image, ImagePlus, Loader2, MoreHorizontal, Pencil, Plus, RotateCcw, Save, Trash2, X } from 'lucide-vue-next'
 
 const props = defineProps({
   site: {
@@ -25,6 +25,8 @@ const props = defineProps({
 
 const emit = defineEmits(['updating', 'update:selectedPostId'])
 
+let copiedPostUrlResetTimer = null
+
 const edgeFirebase = inject('edgeFirebase')
 const cmsMultiOrg = useState('cmsMultiOrg', () => true)
 const isAdmin = computed(() => edgeGlobal.isAdminGlobal(edgeFirebase).value)
@@ -43,6 +45,7 @@ const collectionKey = computed(() => `${edgeGlobal.edgeState.organizationDocPath
 
 const publishedCollection = computed(() => `sites/${props.site}/published_posts`)
 const publishedCollectionKey = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/${publishedCollection.value}`)
+const sitePagesCollectionKey = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`)
 
 const normalizeForCompare = (value) => {
   if (Array.isArray(value))
@@ -57,6 +60,7 @@ const normalizeForCompare = (value) => {
 }
 
 const stableSerialize = value => JSON.stringify(normalizeForCompare(value))
+const areEqualNormalized = (a, b) => stableSerialize(a) === stableSerialize(b)
 
 const normalizePostType = (value) => {
   const type = String(value || '').trim().toLowerCase()
@@ -514,6 +518,8 @@ const state = reactive({
   editMode: false,
   sheetOpen: false,
   activePostId: '',
+  editorKey: 0,
+  editorHasUnsavedChanges: false,
   newPostDialogOpen: false,
   postTemplateFilter: 'quick-picks',
   selectedPostTemplateId: '__blank__',
@@ -533,6 +539,16 @@ const state = reactive({
   listTypeFilter: 'all',
   reindexPublishedPostsLoading: false,
   publishAtInput: '',
+  historyDialogOpen: false,
+  historyLoading: false,
+  historyRestoring: false,
+  historyError: '',
+  historyItems: [],
+  historySelectedId: '',
+  historyPreviewDoc: null,
+  showHistoryDiffDialog: false,
+  showStatusCompareDialog: false,
+  copiedPostUrlId: '',
   newDocs: {
     posts: {
       name: {
@@ -612,8 +628,17 @@ onBeforeMount(async () => {
   if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]) {
     await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/sites`)
   }
+  if (!edgeFirebase.data?.[sitePagesCollectionKey.value]) {
+    await edgeFirebase.startSnapshot(sitePagesCollectionKey.value)
+  }
+  if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`]) {
+    await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`)
+  }
   if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`]) {
     await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/themes`)
+  }
+  if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]) {
+    await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/blocks`)
   }
   if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/templates/pages`]) {
     await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/sites/templates/pages`)
@@ -621,6 +646,9 @@ onBeforeMount(async () => {
 })
 
 const posts = computed(() => edgeFirebase.data?.[collectionKey.value] || {})
+const siteDoc = computed(() => edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site] || null)
+const sitePages = computed(() => edgeFirebase.data?.[sitePagesCollectionKey.value] || {})
+const publishedSiteSettingsDoc = computed(() => edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`]?.[props.site] || null)
 const postTemplateCollectionKey = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/templates/pages`)
 const postTemplatesCollection = computed(() => edgeFirebase.data?.[postTemplateCollectionKey.value] || {})
 const pendingNewPostTemplateState = useState('edge-cms-pending-new-post-template', () => ({}))
@@ -647,6 +675,27 @@ const theme = computed(() => {
   catch {
     return null
   }
+})
+
+const blocksCollection = computed(() => edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`] || {})
+
+const themeColorMap = computed(() => {
+  const map = {}
+  const colors = theme.value?.extend?.colors
+  if (!colors || typeof colors !== 'object')
+    return map
+
+  for (const [key, val] of Object.entries(colors)) {
+    if (typeof val === 'string' && val !== '')
+      map[key] = val
+  }
+  return map
+})
+
+const themeColorOptions = computed(() => {
+  const colors = themeColorMap.value
+  const options = Object.keys(colors || {}).map(color => ({ name: color, title: color.charAt(0).toUpperCase() + color.slice(1) }))
+  return [{ name: 'transparent', title: 'Transparent' }, ...options]
 })
 
 const postTemplateStateKey = computed(() => {
@@ -784,6 +833,129 @@ const slugify = (value) => {
     .replace(/(^-|-$)+/g, '')
 }
 
+const normalizeDomain = (value) => {
+  if (!value)
+    return ''
+  let normalized = String(value).trim().toLowerCase()
+  if (!normalized)
+    return ''
+  if (normalized.includes('://')) {
+    try {
+      normalized = new URL(normalized).host
+    }
+    catch {
+      normalized = normalized.split('://').pop() || normalized
+    }
+  }
+  normalized = normalized.split('/')[0] || ''
+  return normalized.replace(/\.+$/g, '')
+}
+
+const firstValidDomain = (domains) => {
+  if (!Array.isArray(domains))
+    return ''
+  for (const domain of domains) {
+    const normalized = normalizeDomain(domain)
+    if (normalized)
+      return normalized
+  }
+  return ''
+}
+
+const normalizePathSlug = value => String(value || '').trim().toLowerCase()
+
+const isExternalMenuLink = entry => entry?.item && typeof entry.item === 'object' && entry.item.type === 'external'
+
+const isPostRoutePage = (pageDoc) => {
+  if (!pageDoc || typeof pageDoc !== 'object')
+    return false
+  return Boolean(pageDoc.post)
+    || (Array.isArray(pageDoc.postContent) && pageDoc.postContent.length > 0)
+    || (Array.isArray(pageDoc.postStructure) && pageDoc.postStructure.length > 0)
+}
+
+const getFirstFolderEntry = (entry) => {
+  if (!entry?.item || typeof entry.item !== 'object' || isExternalMenuLink(entry))
+    return null
+  for (const [folderSlug, nestedItems] of Object.entries(entry.item || {})) {
+    if (Array.isArray(nestedItems))
+      return { folderSlug, nestedItems }
+  }
+  return null
+}
+
+const findFirstPostRouteSegments = (menus, pagesById, folderSlugs = []) => {
+  for (const menuItems of Object.values(menus || {})) {
+    if (!Array.isArray(menuItems))
+      continue
+    for (const entry of menuItems) {
+      if (isExternalMenuLink(entry))
+        continue
+      if (typeof entry?.item === 'string') {
+        const pageSlug = normalizePathSlug(entry?.name)
+        if (!pageSlug)
+          continue
+        const pageDoc = pagesById?.[entry.item]
+        if (isPostRoutePage(pageDoc))
+          return [...folderSlugs, pageSlug]
+        continue
+      }
+      const folderEntry = getFirstFolderEntry(entry)
+      if (!folderEntry)
+        continue
+      const folderSlug = normalizePathSlug(folderEntry.folderSlug)
+      if (!folderSlug)
+        continue
+      const nested = findFirstPostRouteSegments({ [folderEntry.folderSlug]: folderEntry.nestedItems }, pagesById, [...folderSlugs, folderSlug])
+      if (nested.length)
+        return nested
+    }
+  }
+  return []
+}
+
+const postListLiveOrigin = computed(() => {
+  if (props.site === 'templates')
+    return ''
+  const host = firstValidDomain(publishedSiteSettingsDoc.value?.domains) || firstValidDomain(siteDoc.value?.domains)
+  return host ? `https://${host}` : ''
+})
+
+const firstPostRouteSegments = computed(() => {
+  return findFirstPostRouteSegments(siteDoc.value?.menus || {}, sitePages.value, [])
+})
+
+const getPostLiveUrl = (post) => {
+  if (props.site === 'templates')
+    return ''
+  const origin = postListLiveOrigin.value
+  if (!origin)
+    return ''
+  const routeSegments = firstPostRouteSegments.value
+  if (!routeSegments.length)
+    return ''
+  const postSlug = getPostSlug(post) || slugify(post?.title || post?.name || '')
+  if (!postSlug)
+    return ''
+
+  const encodedPostSlug = encodeURIComponent(postSlug)
+  if (routeSegments.length === 1 && routeSegments[0] === 'home')
+    return `${origin}/${encodedPostSlug}`
+
+  const encodedPath = routeSegments.map(segment => encodeURIComponent(segment)).join('/')
+  return `${origin}/${encodedPath}/${encodedPostSlug}`
+}
+
+const postLiveUrlUnavailableReason = computed(() => {
+  if (props.site === 'templates')
+    return 'Template posts do not have live site URLs.'
+  if (!postListLiveOrigin.value)
+    return 'Add a site domain before copying live post URLs.'
+  if (!firstPostRouteSegments.value.length)
+    return 'Add a page with both index and detail enabled before copying live post URLs.'
+  return ''
+})
+
 const ensureUniqueSlug = (input, excludeId = '') => {
   let base = slugify(input)
   if (!base)
@@ -810,6 +982,332 @@ const activePost = computed(() => {
   return posts.value?.[state.activePostId] || null
 })
 
+const currentPostPath = computed(() => {
+  const orgPath = String(edgeGlobal.edgeState.organizationDocPath || '').trim()
+  const postId = String(state.activePostId || '').trim()
+  if (!orgPath || !postId || postId === 'new')
+    return ''
+  return `${orgPath}/${collection.value}/${postId}`
+})
+
+const currentPostRelativePath = computed(() => {
+  const postId = String(state.activePostId || '').trim()
+  if (!postId || postId === 'new')
+    return ''
+  return `${collection.value}/${postId}`
+})
+
+const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value)
+
+const getOptionTitle = (options = [], value, fallback = '—') => {
+  const normalizedValue = String(value ?? '').trim()
+  if (!normalizedValue)
+    return fallback
+  return options.find(option => option.name === normalizedValue)?.title || normalizedValue
+}
+
+const getRowLayoutValueLabel = (field, value) => {
+  if (field === 'width') {
+    const widthMap = [
+      { name: 'full', title: 'Full width (100%)' },
+      { name: 'max-w-screen-2xl', title: 'Max width 2XL' },
+      { name: 'max-w-screen-xl', title: 'Max width XL' },
+      { name: 'max-w-screen-lg', title: 'Max width LG' },
+      { name: 'max-w-screen-md', title: 'Max width MD' },
+      { name: 'max-w-screen-sm', title: 'Max width SM' },
+    ]
+    return getOptionTitle(widthMap, value, 'Full width (100%)')
+  }
+  if (field === 'gap') {
+    const gapMap = [
+      { name: '0', title: 'No gap' },
+      { name: '2', title: 'Small' },
+      { name: '4', title: 'Medium' },
+      { name: '6', title: 'Large' },
+      { name: '8', title: 'X-Large' },
+    ]
+    return getOptionTitle(gapMap, value, 'Medium')
+  }
+  if (field === 'verticalAlign') {
+    const verticalMap = [
+      { name: 'start', title: 'Top' },
+      { name: 'center', title: 'Middle' },
+      { name: 'end', title: 'Bottom' },
+      { name: 'stretch', title: 'Stretch' },
+    ]
+    return getOptionTitle(verticalMap, value, 'Top')
+  }
+  if (field === 'mobileStack') {
+    const mobileMap = [
+      { name: 'normal', title: 'Left first' },
+      { name: 'reverse', title: 'Right first' },
+    ]
+    return getOptionTitle(mobileMap, value, 'Left first')
+  }
+  if (field === 'background')
+    return getOptionTitle(themeColorOptions.value, value || 'transparent', 'Transparent')
+  return String(value ?? '—')
+}
+
+const getRowColumnLayoutLabel = (row) => {
+  const spans = (row?.columns || [])
+    .map(col => Number.isFinite(col?.span) ? col.span : null)
+    .filter(Number.isFinite)
+  if (spans.length)
+    return spans.join(' / ')
+  const count = row?.columns?.length || 0
+  if (!count)
+    return 'No columns'
+  return `${count} column${count === 1 ? '' : 's'}`
+}
+
+const buildLayoutRowMap = (rows = []) => {
+  const rowMap = new Map()
+  if (!Array.isArray(rows))
+    return rowMap
+
+  rows.forEach((row, index) => {
+    const rowId = String(row?.id || `row-${index}`)
+    rowMap.set(rowId, {
+      id: rowId,
+      index,
+      row,
+    })
+  })
+
+  return rowMap
+}
+
+const buildLayoutChangeDetails = (baseRows = [], compareRows = []) => {
+  const details = []
+  const baseMap = buildLayoutRowMap(baseRows)
+  const compareMap = buildLayoutRowMap(compareRows)
+  const allRowIds = new Set([...baseMap.keys(), ...compareMap.keys()])
+
+  for (const rowId of allRowIds) {
+    const baseEntry = baseMap.get(rowId) || null
+    const compareEntry = compareMap.get(rowId) || null
+
+    if (!baseEntry && compareEntry) {
+      details.push({
+        key: `${rowId}:added`,
+        label: `Row ${compareEntry.index + 1}`,
+        base: 'Not present',
+        compare: `Added (${getRowColumnLayoutLabel(compareEntry.row)})`,
+      })
+      continue
+    }
+
+    if (baseEntry && !compareEntry) {
+      details.push({
+        key: `${rowId}:removed`,
+        label: `Row ${baseEntry.index + 1}`,
+        base: `Removed (${getRowColumnLayoutLabel(baseEntry.row)})`,
+        compare: 'Not present',
+      })
+      continue
+    }
+
+    if (baseEntry.index !== compareEntry.index) {
+      details.push({
+        key: `${rowId}:moved`,
+        label: 'Row Order',
+        base: `Row ${baseEntry.index + 1}`,
+        compare: `Row ${compareEntry.index + 1}`,
+      })
+    }
+
+    const rowLabel = `Row ${compareEntry.index + 1}`
+    const fieldPairs = [
+      ['width', 'Width'],
+      ['gap', 'Gap'],
+      ['verticalAlign', 'Vertical Alignment'],
+      ['mobileStack', 'Stack Order'],
+      ['background', 'Background'],
+    ]
+
+    fieldPairs.forEach(([field, label]) => {
+      const baseValue = baseEntry.row?.[field]
+      const compareValue = compareEntry.row?.[field]
+      if (areEqualNormalized(baseValue, compareValue))
+        return
+      details.push({
+        key: `${rowId}:${field}`,
+        label: `${rowLabel}: ${label}`,
+        base: getRowLayoutValueLabel(field, baseValue),
+        compare: getRowLayoutValueLabel(field, compareValue),
+      })
+    })
+
+    const baseColumnLayout = getRowColumnLayoutLabel(baseEntry.row)
+    const compareColumnLayout = getRowColumnLayoutLabel(compareEntry.row)
+    if (baseColumnLayout !== compareColumnLayout) {
+      details.push({
+        key: `${rowId}:columns`,
+        label: `${rowLabel}: Columns`,
+        base: baseColumnLayout,
+        compare: compareColumnLayout,
+      })
+    }
+  }
+
+  return details
+}
+
+function mergeSyncedBlockMeta(currentMeta, existingMeta) {
+  const nextMeta = edgeGlobal.dupObject(currentMeta || {})
+  if (!isPlainObject(existingMeta))
+    return nextMeta
+
+  Object.entries(existingMeta).forEach(([key, value]) => {
+    if (!isPlainObject(value) || !isPlainObject(value.queryItems))
+      return
+    if (!isPlainObject(nextMeta[key]))
+      nextMeta[key] = {}
+    nextMeta[key].queryItems = edgeGlobal.dupObject(value.queryItems)
+  })
+
+  return nextMeta
+}
+
+const resolveSyncedPostBlock = (block) => {
+  if (!isPlainObject(block))
+    return block
+
+  const resolvedBlock = edgeGlobal.dupObject(block)
+  const blockId = String(resolvedBlock.blockId || '').trim()
+  if (!blockId)
+    return resolvedBlock
+
+  const currentBlockDoc = blocksCollection.value?.[blockId]
+  if (!isPlainObject(currentBlockDoc))
+    return resolvedBlock
+
+  return {
+    ...edgeGlobal.dupObject(currentBlockDoc),
+    id: resolvedBlock.id,
+    blockId,
+    synced: resolvedBlock.synced ?? currentBlockDoc.synced ?? false,
+    values: edgeGlobal.dupObject(resolvedBlock.values || {}),
+    meta: mergeSyncedBlockMeta(currentBlockDoc.meta, resolvedBlock.meta),
+  }
+}
+
+const resolveSyncedPostBlocks = (blocks = []) => {
+  if (!Array.isArray(blocks))
+    return []
+  return blocks.map(block => resolveSyncedPostBlock(block))
+}
+
+const resolveSyncedPostDoc = (doc) => {
+  if (!isPlainObject(doc))
+    return doc
+
+  const nextDoc = edgeGlobal.dupObject(doc)
+  nextDoc.content = resolveSyncedPostBlocks(nextDoc.content)
+  const blockIds = Array.isArray(nextDoc.content) ? nextDoc.content.map(block => block?.blockId).filter(Boolean) : []
+  nextDoc.blockIds = [...new Set(blockIds)]
+  return nextDoc
+}
+
+const buildComparablePostBlock = (block) => {
+  if (!isPlainObject(block))
+    return block
+
+  const blockId = String(block.blockId || '').trim()
+  const currentBlockDoc = blockId ? blocksCollection.value?.[blockId] : null
+  if (blockId && isPlainObject(currentBlockDoc)) {
+    const comparableMeta = {}
+    Object.entries(block.meta || {}).forEach(([key, value]) => {
+      if (isPlainObject(value) && isPlainObject(value.queryItems))
+        comparableMeta[key] = { queryItems: edgeGlobal.dupObject(value.queryItems) }
+    })
+    return {
+      id: String(block.id || ''),
+      blockId,
+      synced: block.synced ?? currentBlockDoc.synced ?? false,
+      values: edgeGlobal.dupObject(block.values || {}),
+      meta: comparableMeta,
+    }
+  }
+
+  return edgeGlobal.dupObject(block)
+}
+
+const buildComparablePostDiffDoc = (doc) => {
+  if (!doc || typeof doc !== 'object')
+    return null
+
+  const normalizedDoc = resolveSyncedPostDoc(normalizePostBuilderDoc(edgeGlobal.dupObject(doc)).normalized)
+
+  return {
+    title: normalizedDoc?.title || '',
+    name: normalizedDoc?.name || '',
+    blurb: normalizedDoc?.blurb || '',
+    tags: Array.isArray(normalizedDoc?.tags) ? normalizedDoc.tags : [],
+    featuredImage: normalizedDoc?.featuredImage || '',
+    content: Array.isArray(normalizedDoc?.content) ? normalizedDoc.content.map(buildComparablePostBlock) : [],
+    structure: Array.isArray(normalizedDoc?.structure) ? normalizedDoc.structure : [],
+    type: normalizePostType(normalizedDoc?.type),
+    event: eventComparable(normalizedDoc?.event),
+    publishAt: typeof normalizedDoc?.publishAt === 'string' ? normalizedDoc.publishAt : '',
+    publishAtTimezone: typeof normalizedDoc?.publishAtTimezone === 'string' ? normalizedDoc.publishAtTimezone : '',
+  }
+}
+
+const currentHistoryCompareDoc = computed(() => resolveSyncedPostDoc(activePost.value))
+
+const getHistorySnapshotState = (item) => {
+  if (isPlainObject(item?.afterData))
+    return 'afterData'
+  if (isPlainObject(item?.beforeData))
+    return 'beforeData'
+  return ''
+}
+
+const getHistorySnapshotDoc = item => item?.[getHistorySnapshotState(item)] || null
+
+const rawHistoryPreviewItems = computed(() => {
+  return (state.historyItems || []).filter(item => !!getHistorySnapshotDoc(item))
+})
+
+const postDocsMatchForDiff = (baseDoc, compareDoc) => {
+  return areEqualNormalized(
+    buildComparablePostDiffDoc(baseDoc),
+    buildComparablePostDiffDoc(compareDoc),
+  )
+}
+
+const historyPreviewItems = computed(() => {
+  const items = rawHistoryPreviewItems.value
+  if (!items.length)
+    return []
+
+  const [firstItem, ...restItems] = items
+  const firstHistoryDoc = getHistorySnapshotDoc(firstItem)
+  if (firstHistoryDoc && postDocsMatchForDiff(firstHistoryDoc, activePost.value))
+    return restItems
+
+  return items
+})
+
+const selectedHistoryEntry = computed(() => {
+  return historyPreviewItems.value.find(item => item.historyId === state.historySelectedId) || null
+})
+
+const historyVersionItems = computed(() => {
+  return historyPreviewItems.value.map((item, index) => ({
+    name: item.historyId,
+    title: formatHistoryEntryLabel(item, index),
+  }))
+})
+
+const renderedHistoryPreviewDoc = computed(() => {
+  if (!isPlainObject(state.historyPreviewDoc))
+    return null
+  return resolveSyncedPostDoc(normalizePostBuilderDoc(edgeGlobal.dupObject(state.historyPreviewDoc)).normalized)
+})
+
 const activePostPublishStatus = computed(() => {
   if (!state.activePostId || state.activePostId === 'new') {
     return {
@@ -823,6 +1321,64 @@ const activePostPublishStatus = computed(() => {
   }
   return getPublishStatus(state.activePostId)
 })
+
+const publishedActivePost = computed(() => {
+  if (!state.activePostId || state.activePostId === 'new')
+    return null
+  return publishedPosts.value?.[state.activePostId] || null
+})
+
+const unpublishedPostChangeDetails = computed(() => {
+  return buildPostChangeDetails(publishedActivePost.value, activePost.value, {
+    baseLabel: 'Published',
+    compareLabel: 'Draft',
+  })
+})
+
+const unsavedPostChangeDetails = computed(() => {
+  return buildPostChangeDetails(activePost.value, state.editorDoc, {
+    baseLabel: 'Saved',
+    compareLabel: 'Current',
+  })
+})
+
+const showingUnsavedPostChanges = computed(() => {
+  return state.editorHasUnsavedChanges && unsavedPostChangeDetails.value.length > 0
+})
+
+const activePostChangeDetails = computed(() => {
+  if (showingUnsavedPostChanges.value)
+    return unsavedPostChangeDetails.value
+  return unpublishedPostChangeDetails.value
+})
+
+const postChangesDialogTitle = computed(() => {
+  return showingUnsavedPostChanges.value ? 'Unsaved Changes' : 'Unpublished Changes'
+})
+
+const postChangesDialogDescription = computed(() => {
+  if (showingUnsavedPostChanges.value)
+    return 'Review what changed in memory versus the saved post.'
+  return `Review what changed since the last publish. Last Published: ${lastPublishedTime(state.activePostId)}`
+})
+
+const showPostStatusCompareLink = computed(() => {
+  return showingUnsavedPostChanges.value || activePostPublishStatus.value.icon === 'changes'
+})
+
+const postStatusDisplayLabel = computed(() => {
+  if (!showingUnsavedPostChanges.value)
+    return activePostPublishStatus.value.label
+  return activePostPublishStatus.value.icon === 'unpublished'
+    ? 'Unpublished (Unsaved Changes)'
+    : 'Published (Unsaved Changes)'
+})
+
+const openPostStatusCompareDialog = () => {
+  if (!showPostStatusCompareLink.value)
+    return
+  state.showStatusCompareDialog = true
+}
 
 const formatIsoToDateTimeLocalInput = (isoString) => {
   const value = String(isoString || '').trim()
@@ -896,6 +1452,232 @@ const sheetTitle = computed(() => {
 })
 
 const currentDocId = () => (state.activePostId && (state.activePostId !== 'new' ? state.activePostId : ''))
+
+const getHistoryTimestampMs = (value) => {
+  if (typeof value === 'number' && Number.isFinite(value))
+    return value
+  if (typeof value?.millis === 'number' && Number.isFinite(value.millis))
+    return value.millis
+  const isoValue = String(value?.iso || value || '').trim()
+  if (!isoValue)
+    return null
+  const parsed = Date.parse(isoValue)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+const formatHistoryDate = (value) => {
+  const millis = getHistoryTimestampMs(value)
+  if (!millis)
+    return 'Unknown date'
+  return new Date(millis).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+function formatHistoryEntryLabel(item, index = 0) {
+  const dateLabel = formatHistoryDate(item?.createdAt)
+  return dateLabel || `Entry ${index + 1}`
+}
+
+const cloneHistoryPreviewDoc = (doc) => {
+  if (!isPlainObject(doc))
+    return null
+  return resolveSyncedPostDoc(normalizePostBuilderDoc(edgeGlobal.dupObject(doc)).normalized)
+}
+
+const syncHistoryPreviewDoc = (entry) => {
+  state.historyPreviewDoc = cloneHistoryPreviewDoc(getHistorySnapshotDoc(entry))
+}
+
+const isHistoryItemArray = (value) => {
+  if (!Array.isArray(value) || !value.length)
+    return false
+  return value.every((item) => {
+    return item && typeof item === 'object' && (
+      typeof item.historyId === 'string'
+      || typeof item.path === 'string'
+      || typeof item.relativePath === 'string'
+    )
+  })
+}
+
+const extractHistoryItemsFromResponse = (value, visited = new Set()) => {
+  if (!value || typeof value !== 'object')
+    return []
+  if (visited.has(value))
+    return []
+  visited.add(value)
+
+  if (isHistoryItemArray(value))
+    return value
+
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const nestedItems = extractHistoryItemsFromResponse(entry, visited)
+      if (nestedItems.length)
+        return nestedItems
+    }
+    return []
+  }
+
+  const priorityKeys = ['items', 'data', 'result']
+  for (const key of priorityKeys) {
+    if (!Object.prototype.hasOwnProperty.call(value, key))
+      continue
+    const nestedItems = extractHistoryItemsFromResponse(value[key], visited)
+    if (nestedItems.length)
+      return nestedItems
+  }
+
+  for (const nestedValue of Object.values(value)) {
+    const nestedItems = extractHistoryItemsFromResponse(nestedValue, visited)
+    if (nestedItems.length)
+      return nestedItems
+  }
+
+  return []
+}
+
+const loadPostHistoryFallbackItems = async () => {
+  if (!edgeFirebase?.user?.uid || !edgeGlobal.edgeState.currentOrganization)
+    return []
+
+  const fallbackResponse = await edgeFirebase.runFunction('history-listHistory', {
+    uid: edgeFirebase.user.uid,
+    orgId: edgeGlobal.edgeState.currentOrganization,
+    limit: 200,
+  })
+  const fallbackItems = extractHistoryItemsFromResponse(fallbackResponse)
+  return fallbackItems.filter((item) => {
+    const itemPath = String(item?.path || '').trim()
+    const itemRelativePath = String(item?.relativePath || '').trim()
+    return itemPath === currentPostPath.value || itemRelativePath === currentPostRelativePath.value
+  })
+}
+
+const loadPostHistory = async () => {
+  if (!edgeFirebase?.user?.uid || !currentPostPath.value)
+    return
+
+  state.historyLoading = true
+  state.historyError = ''
+  try {
+    let items = []
+    try {
+      const response = await edgeFirebase.runFunction('history-listHistory', {
+        uid: edgeFirebase.user.uid,
+        path: currentPostPath.value,
+        limit: 50,
+      })
+      items = extractHistoryItemsFromResponse(response)
+    }
+    catch (error) {
+      console.warn('Direct post history lookup failed, falling back to org history lookup', error)
+    }
+
+    if (!items.length)
+      items = await loadPostHistoryFallbackItems()
+
+    state.historyItems = items
+    const nextSelectedId = historyPreviewItems.value.find(item => item.historyId === state.historySelectedId)?.historyId
+      || historyPreviewItems.value[0]?.historyId
+      || ''
+    state.historySelectedId = nextSelectedId
+    syncHistoryPreviewDoc(selectedHistoryEntry.value)
+  }
+  catch (error) {
+    console.error('Failed to load post history', error)
+    state.historyItems = []
+    state.historySelectedId = ''
+    state.historyPreviewDoc = null
+    state.historyError = 'Failed to load post history.'
+  }
+  finally {
+    state.historyLoading = false
+  }
+}
+
+const openHistoryDialog = async () => {
+  if (!activePost.value || !currentPostPath.value || !edgeFirebase?.user?.uid)
+    return
+  state.historySelectedId = ''
+  state.historyDialogOpen = true
+  await loadPostHistory()
+}
+
+const closeHistoryDialog = () => {
+  if (state.historyRestoring)
+    return
+  state.showHistoryDiffDialog = false
+  state.historyDialogOpen = false
+}
+
+const notifySuccess = (message) => {
+  edgeFirebase?.toast?.success?.(message)
+}
+
+const notifyError = (message) => {
+  edgeFirebase?.toast?.error?.(message)
+}
+
+const copyPostLiveUrl = async (post) => {
+  const url = getPostLiveUrl(post)
+  if (!url) {
+    notifyError(postLiveUrlUnavailableReason.value || 'Unable to determine the live post URL.')
+    return
+  }
+
+  try {
+    await navigator.clipboard.writeText(url)
+    state.copiedPostUrlId = String(post?.id || '')
+    if (copiedPostUrlResetTimer)
+      clearTimeout(copiedPostUrlResetTimer)
+    copiedPostUrlResetTimer = setTimeout(() => {
+      state.copiedPostUrlId = ''
+      copiedPostUrlResetTimer = null
+    }, 1800)
+    notifySuccess('Copied live post URL.')
+  }
+  catch {
+    notifyError('Failed to copy live post URL.')
+  }
+}
+
+const restoreHistoryVersion = async () => {
+  const historyEntry = selectedHistoryEntry.value
+  if (!historyEntry?.historyId || !edgeFirebase?.user?.uid || !state.activePostId || state.activePostId === 'new')
+    return
+
+  state.historyRestoring = true
+  state.historyError = ''
+  try {
+    const targetState = getHistorySnapshotState(historyEntry)
+    await edgeFirebase.runFunction('history-restoreHistory', {
+      uid: edgeFirebase.user.uid,
+      historyId: historyEntry.historyId,
+      targetState,
+    })
+
+    const restoredDoc = cloneHistoryPreviewDoc(getHistorySnapshotDoc(historyEntry))
+    if (restoredDoc)
+      await edgeFirebase.storeDoc(collectionKey.value, restoredDoc, state.activePostId)
+    if (restoredDoc && posts.value)
+      posts.value[state.activePostId] = edgeGlobal.dupObject(restoredDoc)
+    state.editorDoc = restoredDoc ? edgeGlobal.dupObject(restoredDoc) : null
+    state.editorHasUnsavedChanges = false
+    state.editMode = false
+    state.showHistoryDiffDialog = false
+    state.historyDialogOpen = false
+    state.editorKey += 1
+    notifySuccess(`Restored post from ${formatHistoryEntryLabel(historyEntry)}.`)
+  }
+  catch (error) {
+    console.error('Failed to restore post history version', error)
+    state.historyError = 'Failed to restore this version.'
+    notifyError('Failed to restore post history.')
+  }
+  finally {
+    state.historyRestoring = false
+  }
+}
 
 watch(
   () => state.editorDoc?.title,
@@ -971,6 +1753,357 @@ const formatTimestamp = (input) => {
     return 'Not yet saved'
   }
 }
+
+const stringifyLimited = (value, limit = 600) => {
+  if (value == null)
+    return '—'
+  try {
+    const stringValue = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+    return stringValue.length > limit ? `${stringValue.slice(0, limit)}...` : stringValue
+  }
+  catch {
+    return '—'
+  }
+}
+
+const summarizeBlocks = (blocks) => {
+  if (!Array.isArray(blocks) || blocks.length === 0)
+    return 'No blocks'
+  const count = blocks.length
+  return `${count} block${count === 1 ? '' : 's'}`
+}
+
+const summarizeChangeValue = (value, detailed = false) => {
+  if (value == null || value === '')
+    return '—'
+  if (Array.isArray(value)) {
+    return detailed ? stringifyLimited(value) : summarizeBlocks(value)
+  }
+  if (typeof value === 'object') {
+    return stringifyLimited(value, detailed ? 900 : 180)
+  }
+  const stringVal = String(value).trim()
+  return stringVal.length > (detailed ? 320 : 180) ? `${stringVal.slice(0, detailed ? 317 : 177)}...` : stringVal
+}
+
+const describeBlock = (block) => {
+  if (!block)
+    return 'Block'
+  const type = block.component || block.type || block.layout || 'Block'
+  const title = block?.values?.title || block?.values?.heading || block?.values?.label || block.title || block.heading || block.label || block.name || ''
+  const parts = [type]
+  if (title)
+    parts.push(`“${String(title)}”`)
+  return parts.filter(Boolean).join(' - ')
+}
+
+const getBlockChangeTypeLabel = (changeType) => {
+  if (changeType === 'added')
+    return 'Added'
+  if (changeType === 'removed')
+    return 'Removed'
+  if (changeType === 'moved')
+    return 'Moved'
+  if (changeType === 'movedChanged')
+    return 'Moved and Changed'
+  return 'Changed'
+}
+
+const getBlockPositionLabel = (position) => {
+  if (!position)
+    return 'Not placed'
+  const parts = [
+    `Row ${position.rowIndex + 1}`,
+    `Column ${position.colIndex + 1}`,
+  ]
+  if (position.columnBlockCount > 1)
+    parts.push(`Position ${position.blockIndex + 1}`)
+  return parts.join(', ')
+}
+
+const normalizeBlockPositionForDiff = (position) => {
+  if (!position)
+    return null
+  return {
+    rowIndex: Number.isFinite(position.rowIndex) ? position.rowIndex : null,
+    colIndex: Number.isFinite(position.colIndex) ? position.colIndex : null,
+    blockIndex: Number.isFinite(position.blockIndex) ? position.blockIndex : null,
+  }
+}
+
+const buildBlockMap = (blocks = [], prefix = 'block') => {
+  const map = new Map()
+  blocks.forEach((block, index) => {
+    const key = String(block?.id || `${prefix}-${index}`)
+    map.set(key, block)
+  })
+  return map
+}
+
+const buildBlockPositionMap = (rows = []) => {
+  const positions = new Map()
+  if (!Array.isArray(rows))
+    return positions
+
+  rows.forEach((row, rowIndex) => {
+    const columns = Array.isArray(row?.columns) ? row.columns : []
+    columns.forEach((column, colIndex) => {
+      const blockIds = Array.isArray(column?.blocks) ? column.blocks : []
+      blockIds.forEach((blockId, blockIndex) => {
+        const normalizedBlockId = String(blockId || '').trim()
+        if (!normalizedBlockId || positions.has(normalizedBlockId))
+          return
+        positions.set(normalizedBlockId, {
+          rowIndex,
+          colIndex,
+          blockIndex,
+          columnBlockCount: blockIds.length,
+        })
+      })
+    })
+  })
+
+  return positions
+}
+
+const stripStructureBlocks = (rows = []) => {
+  if (!Array.isArray(rows))
+    return []
+
+  return rows.map((row) => {
+    const normalizedRow = {
+      ...(row || {}),
+      columns: Array.isArray(row?.columns)
+        ? row.columns.map((column) => {
+          const nextColumn = { ...(column || {}) }
+          delete nextColumn.blocks
+          return nextColumn
+        })
+        : [],
+    }
+    return normalizedRow
+  })
+}
+
+const buildBlockChangeDetails = (baseBlocks = [], compareBlocks = [], baseStructure = [], compareStructure = [], keyPrefix = 'blocks') => {
+  const details = []
+  const baseMap = buildBlockMap(baseBlocks, `${keyPrefix}-base`)
+  const compareMap = buildBlockMap(compareBlocks, `${keyPrefix}-compare`)
+  const basePositions = buildBlockPositionMap(baseStructure)
+  const comparePositions = buildBlockPositionMap(compareStructure)
+  const allBlockIds = new Set([
+    ...baseMap.keys(),
+    ...compareMap.keys(),
+    ...basePositions.keys(),
+    ...comparePositions.keys(),
+  ])
+
+  for (const blockId of allBlockIds) {
+    const baseBlock = baseMap.get(blockId) || null
+    const compareBlock = compareMap.get(blockId) || null
+    const basePosition = basePositions.get(blockId) || null
+    const comparePosition = comparePositions.get(blockId) || null
+    const baseComparableBlock = buildComparablePostBlock(baseBlock)
+    const compareComparableBlock = buildComparablePostBlock(compareBlock)
+    const baseRenderBlock = resolveSyncedPostBlock(baseBlock)
+    const compareRenderBlock = resolveSyncedPostBlock(compareBlock)
+
+    if (!baseBlock && compareBlock) {
+      details.push({
+        key: `${keyPrefix}:added:${blockId}`,
+        changeType: 'added',
+        label: getBlockChangeTypeLabel('added'),
+        blockLabel: describeBlock(compareBlock),
+        baseBlock: null,
+        compareBlock: compareRenderBlock,
+        basePositionLabel: 'Not present',
+        comparePositionLabel: getBlockPositionLabel(comparePosition),
+        showPreview: true,
+        sortPosition: comparePosition || basePosition || null,
+      })
+      continue
+    }
+
+    if (baseBlock && !compareBlock) {
+      details.push({
+        key: `${keyPrefix}:removed:${blockId}`,
+        changeType: 'removed',
+        label: getBlockChangeTypeLabel('removed'),
+        blockLabel: describeBlock(baseBlock),
+        baseBlock: baseRenderBlock,
+        compareBlock: null,
+        basePositionLabel: getBlockPositionLabel(basePosition),
+        comparePositionLabel: 'Not present',
+        showPreview: true,
+        sortPosition: basePosition || comparePosition || null,
+      })
+      continue
+    }
+
+    const moved = !areEqualNormalized(
+      normalizeBlockPositionForDiff(basePosition),
+      normalizeBlockPositionForDiff(comparePosition),
+    )
+    const changed = !areEqualNormalized(baseComparableBlock, compareComparableBlock)
+    if (!moved && !changed)
+      continue
+
+    let changeType = 'changed'
+    if (moved && changed)
+      changeType = 'movedChanged'
+    else if (moved)
+      changeType = 'moved'
+    details.push({
+      key: `${keyPrefix}:${changeType}:${blockId}`,
+      changeType,
+      label: getBlockChangeTypeLabel(changeType),
+      blockLabel: describeBlock(compareBlock || baseBlock),
+      baseBlock: baseRenderBlock,
+      compareBlock: compareRenderBlock,
+      basePositionLabel: getBlockPositionLabel(basePosition),
+      comparePositionLabel: getBlockPositionLabel(comparePosition),
+      showPreview: changeType !== 'moved',
+      sortPosition: comparePosition || basePosition || null,
+    })
+  }
+
+  return details.sort((a, b) => {
+    const aPos = a.sortPosition || {}
+    const bPos = b.sortPosition || {}
+    const aRow = Number.isFinite(aPos.rowIndex) ? aPos.rowIndex : Number.MAX_SAFE_INTEGER
+    const bRow = Number.isFinite(bPos.rowIndex) ? bPos.rowIndex : Number.MAX_SAFE_INTEGER
+    if (aRow !== bRow)
+      return aRow - bRow
+    const aCol = Number.isFinite(aPos.colIndex) ? aPos.colIndex : Number.MAX_SAFE_INTEGER
+    const bCol = Number.isFinite(bPos.colIndex) ? bPos.colIndex : Number.MAX_SAFE_INTEGER
+    if (aCol !== bCol)
+      return aCol - bCol
+    const aBlock = Number.isFinite(aPos.blockIndex) ? aPos.blockIndex : Number.MAX_SAFE_INTEGER
+    const bBlock = Number.isFinite(bPos.blockIndex) ? bPos.blockIndex : Number.MAX_SAFE_INTEGER
+    if (aBlock !== bBlock)
+      return aBlock - bBlock
+    return String(a.blockLabel || '').localeCompare(String(b.blockLabel || ''))
+  })
+}
+
+const buildPostChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel } = {}) => {
+  const changes = []
+  const base = baseDoc ? resolveSyncedPostDoc(normalizePostBuilderDoc(edgeGlobal.dupObject(baseDoc)).normalized) : null
+  const compare = compareDoc ? resolveSyncedPostDoc(normalizePostBuilderDoc(edgeGlobal.dupObject(compareDoc)).normalized) : null
+
+  if (!base && !compare)
+    return changes
+
+  const compareField = (key, label, formatter = v => summarizeChangeValue(v, false)) => {
+    const baseVal = base?.[key]
+    const compareVal = compare?.[key]
+    if (areEqualNormalized(baseVal, compareVal))
+      return
+    changes.push({
+      key,
+      label,
+      baseLabel,
+      compareLabel,
+      base: formatter(baseVal),
+      compare: formatter(compareVal),
+    })
+  }
+
+  if (!base && compare) {
+    changes.push({
+      key: 'compare-only',
+      label: compareLabel || 'Current',
+      baseLabel,
+      compareLabel,
+      base: `No ${String(baseLabel || 'base').toLowerCase()} available`,
+      compare: `${compareLabel || 'Current'} available`,
+    })
+  }
+  if (base && !compare) {
+    changes.push({
+      key: 'base-only',
+      label: baseLabel || 'Selected',
+      baseLabel,
+      compareLabel,
+      base: `${baseLabel || 'Selected'} available`,
+      compare: `No ${String(compareLabel || 'current').toLowerCase()} available`,
+    })
+  }
+
+  const compareBlockArea = (keyPrefix, label, contentKey, structureKey, layoutLabel) => {
+    const baseBlocks = Array.isArray(base?.[contentKey]) ? base[contentKey] : []
+    const compareBlocks = Array.isArray(compare?.[contentKey]) ? compare[contentKey] : []
+    const baseStructure = Array.isArray(base?.[structureKey]) ? base[structureKey] : []
+    const compareStructure = Array.isArray(compare?.[structureKey]) ? compare[structureKey] : []
+    const blockChanges = buildBlockChangeDetails(baseBlocks, compareBlocks, baseStructure, compareStructure, keyPrefix)
+
+    if (blockChanges.length) {
+      changes.push({
+        key: `${keyPrefix}-blocks`,
+        label,
+        baseLabel,
+        compareLabel,
+        base: summarizeBlocks(baseBlocks),
+        compare: summarizeBlocks(compareBlocks),
+        blockChanges,
+      })
+    }
+
+    const baseLayout = stripStructureBlocks(baseStructure)
+    const compareLayout = stripStructureBlocks(compareStructure)
+    if (!areEqualNormalized(baseLayout, compareLayout)) {
+      changes.push({
+        key: `${keyPrefix}-layout`,
+        label: layoutLabel,
+        baseLabel,
+        compareLabel,
+        layoutChanges: buildLayoutChangeDetails(baseStructure, compareStructure),
+      })
+    }
+  }
+
+  compareBlockArea('post', 'Blocks', 'content', 'structure', 'Layout')
+  compareField('title', 'Title')
+  compareField('name', 'Slug')
+  compareField('blurb', 'Blurb', val => summarizeChangeValue(val, true))
+  compareField('tags', 'Tags', val => summarizeChangeValue(val, true))
+  compareField('featuredImage', 'Featured Image', val => summarizeChangeValue(val, true))
+  compareField('type', 'Post Type')
+  compareField('publishAt', 'Publish At', val => summarizeChangeValue(val, true))
+  compareField('publishAtTimezone', 'Publish Timezone')
+  compareField('event', 'Event Settings', val => summarizeChangeValue(val, true))
+
+  return changes
+}
+
+const historyDiffDetails = computed(() => {
+  return buildPostChangeDetails(getHistorySnapshotDoc(selectedHistoryEntry.value), currentHistoryCompareDoc.value, {
+    baseLabel: 'Selected History',
+    compareLabel: 'Current',
+  })
+})
+
+const historyDiffCountLabel = computed(() => {
+  if (!selectedHistoryEntry.value)
+    return 'Select an entry'
+  const count = historyDiffDetails.value.length
+  if (count === 0)
+    return 'No differences'
+  if (count === 1)
+    return '1 difference'
+  return `${count} differences`
+})
+
+const hasHistoryDiff = computed(() => historyDiffDetails.value.length > 0)
+
+watch(selectedHistoryEntry, (entry) => {
+  syncHistoryPreviewDoc(entry)
+})
+
+watch(hasHistoryDiff, (nextValue) => {
+  if (!nextValue)
+    state.showHistoryDiffDialog = false
+})
 
 const formatEventDateTime = (input) => {
   const value = String(input || '').trim()
@@ -1461,12 +2594,23 @@ const closeSheet = () => {
   state.activePostId = ''
   state.newDocs.posts = createNewPostDocSchema()
   resetEditorTracking()
+  state.editorHasUnsavedChanges = false
+  state.historyDialogOpen = false
+  state.historyError = ''
+  state.historyItems = []
+  state.historySelectedId = ''
+  state.historyPreviewDoc = null
+  state.showHistoryDiffDialog = false
   if (props.mode === 'editor')
     emit('update:selectedPostId', '')
 }
 
 const handlePostSaved = () => {
   console.log('Post saved')
+}
+
+const handleEditorUnsavedChanges = (changes) => {
+  state.editorHasUnsavedChanges = changes === true
 }
 
 const onWorkingDocUpdate = (doc) => {
@@ -1907,47 +3051,64 @@ const reindexPublishedPostsToKv = async () => {
                     {{ previewContent(post.blurb || post.content) || 'No content yet.' }}
                   </div>
                 </div>
-                <DropdownMenu>
-                  <DropdownMenuTrigger as-child>
-                    <edge-shad-button variant="ghost" size="icon" class="h-8 w-8" @click.stop>
-                      <MoreHorizontal class="h-4 w-4" />
-                    </edge-shad-button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent side="right" align="start">
-                    <DropdownMenuItem @click="openRenameDialog(post)">
-                      <FilePen class="h-4 w-4" />
-                      Rename
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      v-if="getPublishStatus(postKey(post), post).canPublish || getPublishStatus(postKey(post), post).publishBlockedReason"
-                      :disabled="Boolean(getPublishStatus(postKey(post), post).publishBlockedReason)"
-                      @click="publishPost(postKey(post))"
-                    >
-                      <FileCheck class="h-4 w-4" />
-                      Publish
-                    </DropdownMenuItem>
-                    <DropdownMenuItem v-if="post.publishAt" @click="clearScheduledPublish(postKey(post))">
-                      <X class="h-4 w-4" />
-                      Cancel Schedule
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      v-if="getPublishStatus(postKey(post), post).publishBlockedReason"
-                      disabled
-                      class="text-xs text-amber-700 dark:text-amber-300"
-                    >
-                      <FileWarning class="h-4 w-4" />
-                      {{ getPublishStatus(postKey(post), post).publishBlockedReason }}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem v-if="getPublishStatus(postKey(post), post).canUnpublish" @click="unPublishPost(postKey(post))">
-                      <FileWarning class="h-4 w-4" />
-                      Unpublish
-                    </DropdownMenuItem>
-                    <DropdownMenuItem class="text-destructive" @click="showDeleteDialog(post)">
-                      <Trash2 class="h-4 w-4" />
-                      Delete
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <div class="flex shrink-0 items-center gap-1">
+                  <edge-shad-button
+                    variant="ghost"
+                    class="h-8 gap-1 px-2 text-xs"
+                    :disabled="!getPostLiveUrl(post)"
+                    :title="getPostLiveUrl(post) || postLiveUrlUnavailableReason"
+                    @click.stop="copyPostLiveUrl(post)"
+                  >
+                    <FileCheck v-if="state.copiedPostUrlId === post.id" class="h-4 w-4" />
+                    <Copy v-else class="h-4 w-4" />
+                    <span>{{ state.copiedPostUrlId === post.id ? 'Copied' : 'URL' }}</span>
+                  </edge-shad-button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger as-child>
+                      <edge-shad-button variant="ghost" size="icon" class="h-8 w-8" @click.stop>
+                        <MoreHorizontal class="h-4 w-4" />
+                      </edge-shad-button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent side="right" align="start">
+                      <DropdownMenuItem :disabled="!getPostLiveUrl(post)" @click="copyPostLiveUrl(post)">
+                        <Copy class="h-4 w-4" />
+                        Copy Live URL
+                      </DropdownMenuItem>
+                      <DropdownMenuItem @click="openRenameDialog(post)">
+                        <FilePen class="h-4 w-4" />
+                        Rename
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        v-if="getPublishStatus(postKey(post), post).canPublish || getPublishStatus(postKey(post), post).publishBlockedReason"
+                        :disabled="Boolean(getPublishStatus(postKey(post), post).publishBlockedReason)"
+                        @click="publishPost(postKey(post))"
+                      >
+                        <FileCheck class="h-4 w-4" />
+                        Publish
+                      </DropdownMenuItem>
+                      <DropdownMenuItem v-if="post.publishAt" @click="clearScheduledPublish(postKey(post))">
+                        <X class="h-4 w-4" />
+                        Cancel Schedule
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        v-if="getPublishStatus(postKey(post), post).publishBlockedReason"
+                        disabled
+                        class="text-xs text-amber-700 dark:text-amber-300"
+                      >
+                        <FileWarning class="h-4 w-4" />
+                        {{ getPublishStatus(postKey(post), post).publishBlockedReason }}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem v-if="getPublishStatus(postKey(post), post).canUnpublish" @click="unPublishPost(postKey(post))">
+                        <FileWarning class="h-4 w-4" />
+                        Unpublish
+                      </DropdownMenuItem>
+                      <DropdownMenuItem class="text-destructive" @click="showDeleteDialog(post)">
+                        <Trash2 class="h-4 w-4" />
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </div>
               <div class="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                 <span
@@ -2043,6 +3204,10 @@ const reindexPublishedPostsToKv = async () => {
                 </SidebarMenuAction>
               </DropdownMenuTrigger>
               <DropdownMenuContent side="right" align="start">
+                <DropdownMenuItem :disabled="!getPostLiveUrl(post)" @click="copyPostLiveUrl(post)">
+                  <Copy class="h-4 w-4" />
+                  Copy Live URL
+                </DropdownMenuItem>
                 <DropdownMenuItem @click="openRenameDialog(post)">
                   <FilePen class="h-4 w-4" />
                   Rename
@@ -2296,10 +3461,443 @@ const reindexPublishedPostsToKv = async () => {
     </DialogContent>
   </edge-shad-dialog>
 
+  <edge-shad-dialog v-model="state.historyDialogOpen">
+    <DialogContent class="w-full max-w-6xl">
+      <DialogHeader>
+        <DialogTitle class="text-left">
+          Post History
+        </DialogTitle>
+        <DialogDescription class="text-left">
+          Select a saved version, preview it, and restore it if needed.
+        </DialogDescription>
+      </DialogHeader>
+      <div class="min-w-0 space-y-4">
+        <div class="grid gap-4 md:grid-cols-[minmax(0,320px)_1fr] md:items-end">
+          <div class="flex min-w-0 flex-col justify-end">
+            <edge-shad-combobox
+              v-model="state.historySelectedId"
+              name="postHistoryVersion"
+              label="History Entry"
+              :items="historyVersionItems"
+              placeholder="Select a history entry"
+              class="w-full"
+              :disabled="state.historyLoading || state.historyRestoring || historyVersionItems.length === 0"
+            />
+          </div>
+          <div class="flex min-w-0 flex-col justify-end">
+            <edge-shad-button
+              type="button"
+              variant="outline"
+              class="h-10 justify-between gap-3 px-3 text-left mb-1"
+              :disabled="!selectedHistoryEntry || state.historyLoading || !hasHistoryDiff"
+              @click="state.showHistoryDiffDialog = true"
+            >
+              <span class="truncate">{{ hasHistoryDiff ? 'View Diff' : 'No Differences' }}</span>
+              <span class="shrink-0 text-xs text-slate-500 dark:text-slate-400">
+                {{ historyDiffCountLabel }}
+              </span>
+            </edge-shad-button>
+          </div>
+        </div>
+
+        <div v-if="state.historyError" class="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
+          {{ state.historyError }}
+        </div>
+
+        <div
+          v-if="state.editorHasUnsavedChanges"
+          class="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200"
+        >
+          There are unsaved changes. History compares saved versions of this post.
+        </div>
+
+        <div class="min-w-0 rounded-md border border-slate-300 bg-card dark:border-slate-700">
+          <div
+            v-if="state.historyLoading"
+            class="flex h-[60vh] items-center justify-center gap-2 text-sm text-slate-500 dark:text-slate-400"
+          >
+            <Loader2 class="h-4 w-4 animate-spin" />
+            Loading history preview...
+          </div>
+          <div
+            v-else-if="!state.historyPreviewDoc"
+            class="flex h-[60vh] items-center justify-center px-6 text-center text-sm text-slate-500 dark:text-slate-400"
+          >
+            No older saved versions are available to preview.
+          </div>
+          <div
+            v-else
+            data-cms-preview-surface="post"
+            data-cms-preview-mode="history"
+            class="relative isolate h-[60vh] overflow-y-auto overflow-x-hidden bg-card p-6"
+          >
+            <div
+              v-if="!renderedHistoryPreviewDoc?.structure?.length"
+              class="flex min-h-[50vh] items-center justify-center px-6 text-center text-sm text-slate-500 dark:text-slate-400"
+            >
+              No rows in this version.
+            </div>
+            <div v-else class="space-y-4">
+              <div
+                v-for="(row, rowIndex) in renderedHistoryPreviewDoc.structure"
+                :key="row.id || `history-post-row-${rowIndex}`"
+                class="space-y-4"
+              >
+                <div
+                  v-for="(blockId, blockPosition) in row?.columns?.[0]?.blocks || []"
+                  :key="`history-post:${blockId}:${blockPosition}`"
+                >
+                  <edge-cms-block-api
+                    v-if="postBlockIndex(renderedHistoryPreviewDoc, blockId) !== -1"
+                    :site-id="props.site"
+                    :content="renderedHistoryPreviewDoc.content[postBlockIndex(renderedHistoryPreviewDoc, blockId)]?.content"
+                    :values="renderedHistoryPreviewDoc.content[postBlockIndex(renderedHistoryPreviewDoc, blockId)]?.values"
+                    :meta="renderedHistoryPreviewDoc.content[postBlockIndex(renderedHistoryPreviewDoc, blockId)]?.meta"
+                    :theme="theme"
+                    :render-context="renderedHistoryPreviewDoc"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <DialogFooter class="pt-2 flex justify-between">
+        <edge-shad-button variant="outline" :disabled="state.historyRestoring" @click="closeHistoryDialog">
+          Cancel
+        </edge-shad-button>
+        <edge-shad-button
+          :disabled="state.historyLoading || state.historyRestoring || !selectedHistoryEntry"
+          @click="restoreHistoryVersion"
+        >
+          <Loader2 v-if="state.historyRestoring" class="mr-2 h-4 w-4 animate-spin" />
+          <RotateCcw v-else class="mr-2 h-4 w-4" />
+          Restore
+        </edge-shad-button>
+      </DialogFooter>
+    </DialogContent>
+  </edge-shad-dialog>
+
+  <edge-shad-dialog v-model="state.showStatusCompareDialog">
+    <DialogContent class="max-w-[96vw] max-h-[97vh] overflow-hidden flex flex-col">
+      <DialogHeader>
+        <DialogTitle class="text-left">
+          {{ postChangesDialogTitle }}
+        </DialogTitle>
+        <DialogDescription class="text-left">
+          {{ postChangesDialogDescription }}
+        </DialogDescription>
+      </DialogHeader>
+      <div class="mt-2 flex-1 overflow-y-auto pr-1">
+        <div v-if="activePostChangeDetails.length" class="space-y-3">
+          <div
+            v-for="change in activePostChangeDetails"
+            :key="change.key"
+            class="rounded-md border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800 p-3 text-left"
+          >
+            <div class="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-2">
+              {{ change.label }}
+            </div>
+            <div v-if="!change.layoutChanges?.length" class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+              <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
+                <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
+                  {{ change.baseLabel || 'Published' }}
+                </div>
+                <div class="whitespace-pre-wrap break-words text-gray-900 dark:text-gray-100">
+                  {{ change.base }}
+                </div>
+              </div>
+              <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
+                <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
+                  {{ change.compareLabel || 'Draft' }}
+                </div>
+                <div class="whitespace-pre-wrap break-words text-gray-900 dark:text-gray-100">
+                  {{ change.compare }}
+                </div>
+              </div>
+            </div>
+            <div v-else class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+              <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
+                <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-2">
+                  {{ change.baseLabel || 'Published' }}
+                </div>
+                <div class="space-y-2">
+                  <div v-for="layoutChange in change.layoutChanges" :key="`${layoutChange.key}:base`" class="rounded border border-gray-200/80 dark:border-white/10 bg-white/70 dark:bg-gray-900/40 p-2">
+                    <div class="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                      {{ layoutChange.label }}
+                    </div>
+                    <div class="mt-1 text-slate-900 dark:text-slate-100">
+                      {{ layoutChange.base }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
+                <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-2">
+                  {{ change.compareLabel || 'Draft' }}
+                </div>
+                <div class="space-y-2">
+                  <div v-for="layoutChange in change.layoutChanges" :key="`${layoutChange.key}:compare`" class="rounded border border-gray-200/80 dark:border-white/10 bg-white/70 dark:bg-gray-900/40 p-2">
+                    <div class="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                      {{ layoutChange.label }}
+                    </div>
+                    <div class="mt-1 text-slate-900 dark:text-slate-100">
+                      {{ layoutChange.compare }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-if="change.blockChanges?.length" class="mt-3 space-y-3">
+              <div
+                v-for="blockChange in change.blockChanges"
+                :key="blockChange.key"
+                class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-3"
+              >
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-slate-700 dark:bg-slate-700 dark:text-slate-100">
+                    {{ blockChange.label }}
+                  </span>
+                  <span class="text-sm font-medium text-slate-900 dark:text-slate-100">{{ blockChange.blockLabel }}</span>
+                </div>
+                <div class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-600 dark:text-slate-300">
+                  <div><strong>{{ change.baseLabel || 'Published' }}:</strong> {{ blockChange.basePositionLabel }}</div>
+                  <div><strong>{{ change.compareLabel || 'Draft' }}:</strong> {{ blockChange.comparePositionLabel }}</div>
+                </div>
+                <div v-if="blockChange.showPreview" class="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  <div class="space-y-2">
+                    <div class="text-[11px] uppercase tracking-wide text-gray-500">
+                      {{ change.baseLabel || 'Published' }}
+                    </div>
+                    <div
+                      data-cms-preview-surface="post"
+                      data-cms-preview-mode="history"
+                      class="relative isolate overflow-hidden rounded border border-gray-200 dark:border-white/15 bg-white dark:bg-gray-900"
+                    >
+                      <div v-if="blockChange.baseBlock" class="p-3">
+                        <edge-cms-block-api
+                          :key="`${blockChange.key}:base`"
+                          :site-id="props.site"
+                          :content="blockChange.baseBlock?.content"
+                          :values="blockChange.baseBlock?.values"
+                          :meta="blockChange.baseBlock?.meta"
+                          :theme="theme"
+                        />
+                      </div>
+                      <div v-else class="flex min-h-24 items-center justify-center px-4 py-6 text-sm text-slate-500 dark:text-slate-400">
+                        Not present
+                      </div>
+                    </div>
+                  </div>
+                  <div class="space-y-2">
+                    <div class="text-[11px] uppercase tracking-wide text-gray-500">
+                      {{ change.compareLabel || 'Draft' }}
+                    </div>
+                    <div
+                      data-cms-preview-surface="post"
+                      data-cms-preview-mode="history"
+                      class="relative isolate overflow-hidden rounded border border-gray-200 dark:border-white/15 bg-white dark:bg-gray-900"
+                    >
+                      <div v-if="blockChange.compareBlock" class="p-3">
+                        <edge-cms-block-api
+                          :key="`${blockChange.key}:compare`"
+                          :site-id="props.site"
+                          :content="blockChange.compareBlock?.content"
+                          :values="blockChange.compareBlock?.values"
+                          :meta="blockChange.compareBlock?.meta"
+                          :theme="theme"
+                        />
+                      </div>
+                      <div v-else class="flex min-h-24 items-center justify-center px-4 py-6 text-sm text-slate-500 dark:text-slate-400">
+                        Not present
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-if="change.details?.length" class="mt-2 text-sm text-gray-700 dark:text-gray-300">
+              <ul class="list-disc pl-5 space-y-1">
+                <li v-for="(detail, detailIndex) in change.details" :key="`${change.key}-${detailIndex}`">
+                  {{ detail }}
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        <div v-else class="text-sm text-gray-600 dark:text-gray-300 text-left">
+          No {{ showingUnsavedPostChanges ? 'unsaved' : 'unpublished' }} differences detected.
+        </div>
+      </div>
+      <DialogFooter class="pt-4">
+        <edge-shad-button class="w-full" variant="outline" @click="state.showStatusCompareDialog = false">
+          Close
+        </edge-shad-button>
+      </DialogFooter>
+    </DialogContent>
+  </edge-shad-dialog>
+
+  <edge-shad-dialog v-model="state.showHistoryDiffDialog">
+    <DialogContent class="max-w-[96vw] max-h-[97vh] overflow-hidden flex flex-col">
+      <DialogHeader>
+        <DialogTitle class="text-left">
+          History Diff
+        </DialogTitle>
+        <DialogDescription class="text-left">
+          Review differences between the selected history entry and the current post.
+        </DialogDescription>
+      </DialogHeader>
+      <div class="mt-2 flex-1 overflow-y-auto pr-1">
+        <div v-if="historyDiffDetails.length" class="space-y-3">
+          <div
+            v-for="change in historyDiffDetails"
+            :key="change.key"
+            class="rounded-md border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800 p-3 text-left"
+          >
+            <div class="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-2">
+              {{ change.label }}
+            </div>
+            <div v-if="!change.layoutChanges?.length" class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+              <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
+                <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
+                  {{ change.baseLabel || 'Selected History' }}
+                </div>
+                <div class="whitespace-pre-wrap break-words text-gray-900 dark:text-gray-100">
+                  {{ change.base }}
+                </div>
+              </div>
+              <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
+                <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
+                  {{ change.compareLabel || 'Current' }}
+                </div>
+                <div class="whitespace-pre-wrap break-words text-gray-900 dark:text-gray-100">
+                  {{ change.compare }}
+                </div>
+              </div>
+            </div>
+            <div v-else class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+              <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
+                <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-2">
+                  {{ change.baseLabel || 'Selected History' }}
+                </div>
+                <div class="space-y-2">
+                  <div v-for="layoutChange in change.layoutChanges" :key="`${layoutChange.key}:base`" class="rounded border border-gray-200/80 dark:border-white/10 bg-white/70 dark:bg-gray-900/40 p-2">
+                    <div class="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                      {{ layoutChange.label }}
+                    </div>
+                    <div class="mt-1 text-slate-900 dark:text-slate-100">
+                      {{ layoutChange.base }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
+                <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-2">
+                  {{ change.compareLabel || 'Current' }}
+                </div>
+                <div class="space-y-2">
+                  <div v-for="layoutChange in change.layoutChanges" :key="`${layoutChange.key}:compare`" class="rounded border border-gray-200/80 dark:border-white/10 bg-white/70 dark:bg-gray-900/40 p-2">
+                    <div class="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                      {{ layoutChange.label }}
+                    </div>
+                    <div class="mt-1 text-slate-900 dark:text-slate-100">
+                      {{ layoutChange.compare }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-if="change.blockChanges?.length" class="mt-3 space-y-3">
+              <div
+                v-for="blockChange in change.blockChanges"
+                :key="blockChange.key"
+                class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-3"
+              >
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-slate-700 dark:bg-slate-700 dark:text-slate-100">
+                    {{ blockChange.label }}
+                  </span>
+                  <span class="text-sm font-medium text-slate-900 dark:text-slate-100">{{ blockChange.blockLabel }}</span>
+                </div>
+                <div class="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-600 dark:text-slate-300">
+                  <div><strong>{{ change.baseLabel || 'Selected History' }}:</strong> {{ blockChange.basePositionLabel }}</div>
+                  <div><strong>{{ change.compareLabel || 'Current' }}:</strong> {{ blockChange.comparePositionLabel }}</div>
+                </div>
+                <div v-if="blockChange.showPreview" class="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  <div class="space-y-2">
+                    <div class="text-[11px] uppercase tracking-wide text-gray-500">
+                      {{ change.baseLabel || 'Selected History' }}
+                    </div>
+                    <div
+                      data-cms-preview-surface="post"
+                      data-cms-preview-mode="history"
+                      class="relative isolate overflow-hidden rounded border border-gray-200 dark:border-white/15 bg-white dark:bg-gray-900"
+                    >
+                      <div v-if="blockChange.baseBlock" class="p-3">
+                        <edge-cms-block-api
+                          :key="`${blockChange.key}:base`"
+                          :content="blockChange.baseBlock?.content"
+                          :values="blockChange.baseBlock?.values"
+                          :meta="blockChange.baseBlock?.meta"
+                          :theme="theme"
+                          :site-id="props.site"
+                        />
+                      </div>
+                      <div v-else class="flex min-h-24 items-center justify-center px-4 py-6 text-sm text-slate-500 dark:text-slate-400">
+                        Not present
+                      </div>
+                    </div>
+                  </div>
+                  <div class="space-y-2">
+                    <div class="text-[11px] uppercase tracking-wide text-gray-500">
+                      {{ change.compareLabel || 'Current' }}
+                    </div>
+                    <div
+                      data-cms-preview-surface="post"
+                      data-cms-preview-mode="history"
+                      class="relative isolate overflow-hidden rounded border border-gray-200 dark:border-white/15 bg-white dark:bg-gray-900"
+                    >
+                      <div v-if="blockChange.compareBlock" class="p-3">
+                        <edge-cms-block-api
+                          :key="`${blockChange.key}:compare`"
+                          :content="blockChange.compareBlock?.content"
+                          :values="blockChange.compareBlock?.values"
+                          :meta="blockChange.compareBlock?.meta"
+                          :theme="theme"
+                          :site-id="props.site"
+                        />
+                      </div>
+                      <div v-else class="flex min-h-24 items-center justify-center px-4 py-6 text-sm text-slate-500 dark:text-slate-400">
+                        Not present
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-if="change.details?.length" class="mt-2 text-sm text-gray-700 dark:text-gray-300">
+              <ul class="list-disc pl-5 space-y-1">
+                <li v-for="(detail, detailIndex) in change.details" :key="`${change.key}-${detailIndex}`">
+                  {{ detail }}
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+      <DialogFooter class="pt-4">
+        <edge-shad-button class="w-full" variant="outline" @click="state.showHistoryDiffDialog = false">
+          Close
+        </edge-shad-button>
+      </DialogFooter>
+    </DialogContent>
+  </edge-shad-dialog>
+
   <template v-if="props.mode === 'editor'">
     <div v-if="editorOpen" class="h-full flex flex-col bg-background px-0">
       <edge-editor
         v-if="editorOpen"
+        :key="state.editorKey"
         :collection="collection"
         :doc-id="state.activePostId"
         :schema="schemas.posts"
@@ -2311,17 +3909,97 @@ const reindexPublishedPostsToKv = async () => {
         :no-close-after-save="true"
         :save-function-override="handlePostSaved"
         @working-doc="onWorkingDocUpdate"
+        @unsaved-changes="handleEditorUnsavedChanges"
       >
         <template #header="slotProps">
-          <div class="relative flex items-center p-2 justify-between sticky top-0 z-50 rounded h-[50px] border border-stone-300 bg-stone-100 text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100">
-            <span class="text-lg font-semibold whitespace-nowrap pr-1">{{ sheetTitle }}</span>
-            <div class="flex w-full items-center">
-              <div class="w-full border-t border-stone-300 dark:border-stone-700" aria-hidden="true" />
-              <div class="flex items-center gap-1 pr-3">
+          <div class="relative flex flex-col gap-2 p-2 sticky top-0 z-50 rounded border border-stone-300 bg-stone-100 text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="flex min-w-0 flex-1 items-center gap-2 pr-2">
                 <edge-shad-button
                   type="button"
                   variant="text"
                   class="text-xs h-[26px] text-slate-700 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white"
+                  @click="closeSheet"
+                >
+                  <ArrowLeft class="w-4 h-4" />
+                  Back
+                </edge-shad-button>
+                <span class="min-w-0 truncate pr-1 text-sm font-bold whitespace-nowrap sm:text-base">{{ sheetTitle }}</span>
+              </div>
+              <div class="flex shrink-0 flex-wrap items-center justify-end gap-1">
+                <edge-shad-button
+                  v-if="!slotProps.unsavedChanges"
+                  variant="text"
+                  class="h-[26px] shrink-0 text-xs text-red-700 hover:text-red-700/50"
+                  @click="closeSheet"
+                >
+                  <X class="w-4 h-4" />
+                  Close
+                </edge-shad-button>
+                <edge-shad-button
+                  v-else
+                  variant="text"
+                  class="h-[26px] shrink-0 text-xs text-red-700 hover:text-red-700/50"
+                  @click="closeSheet"
+                >
+                  <X class="w-4 h-4" />
+                  Cancel
+                </edge-shad-button>
+                <edge-shad-button
+                  v-if="isCreating || slotProps.unsavedChanges"
+                  variant="text"
+                  type="submit"
+                  class="h-[26px] shrink-0 bg-slate-300 text-xs text-slate-900 hover:bg-slate-400 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
+                  :disabled="slotProps.submitting"
+                >
+                  <Loader2 v-if="slotProps.submitting" class="w-4 h-4 animate-spin" />
+                  <Save v-else class="w-4 h-4" />
+                  <span>Save</span>
+                </edge-shad-button>
+              </div>
+            </div>
+            <div class="flex w-full min-w-0 flex-wrap items-center justify-between gap-1 border border-stone-300/80 bg-stone-200/70 px-2 py-0.5 text-stone-700 dark:border-stone-700/80 dark:bg-stone-800/80 dark:text-stone-200">
+              <div class="flex flex-wrap items-center gap-1.5 text-gray-600 dark:text-gray-300 sm:pl-2 sm:pr-1 sm:whitespace-nowrap">
+                <button
+                  v-if="showPostStatusCompareLink"
+                  type="button"
+                  class="inline-flex items-center gap-1 text-[11px] font-medium leading-none text-amber-700 underline decoration-dashed underline-offset-4 hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-200 sm:text-xs"
+                  @click="openPostStatusCompareDialog"
+                >
+                  <FileWarning v-if="showingUnsavedPostChanges || activePostPublishStatus.icon === 'changes'" class="h-3.5 w-3.5 shrink-0 text-yellow-600" />
+                  <FileCheck v-else-if="activePostPublishStatus.icon === 'published'" class="h-3.5 w-3.5 shrink-0 text-green-700" />
+                  <FileX v-else class="h-3.5 w-3.5 shrink-0 text-slate-500 dark:text-slate-300" />
+                  <span>{{ postStatusDisplayLabel }}</span>
+                </button>
+                <div
+                  v-else
+                  class="inline-flex items-center gap-1 text-[11px] font-medium leading-none sm:text-xs"
+                  :class="showingUnsavedPostChanges ? 'text-amber-700 dark:text-amber-300' : activePostPublishStatus.badgeClass"
+                >
+                  <FileWarning v-if="showingUnsavedPostChanges || activePostPublishStatus.icon === 'changes'" class="h-3.5 w-3.5 shrink-0 text-yellow-600" />
+                  <FileCheck v-else-if="activePostPublishStatus.icon === 'published'" class="h-3.5 w-3.5 shrink-0 text-green-700" />
+                  <FileX v-else class="h-3.5 w-3.5 shrink-0 text-slate-500 dark:text-slate-300" />
+                  <span>{{ postStatusDisplayLabel }}</span>
+                </div>
+                <span class="text-[11px] leading-none text-gray-500 dark:text-gray-400">
+                  Last Published: {{ lastPublishedTime(state.activePostId) }}
+                </span>
+              </div>
+              <div class="flex flex-wrap items-center justify-end gap-1">
+                <edge-shad-button
+                  v-if="!isCreating"
+                  type="button"
+                  variant="text"
+                  class="h-[22px] shrink-0 text-xs text-slate-700 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white"
+                  @click="openHistoryDialog"
+                >
+                  <History class="w-4 h-4" />
+                  Versions
+                </edge-shad-button>
+                <edge-shad-button
+                  type="button"
+                  variant="text"
+                  class="h-[22px] shrink-0 text-xs text-slate-700 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white"
                   @click="state.editMode = !state.editMode"
                 >
                   <template v-if="state.editMode">
@@ -2332,35 +4010,6 @@ const reindexPublishedPostsToKv = async () => {
                     <Pencil class="w-4 h-4" />
                     Edit Mode
                   </template>
-                </edge-shad-button>
-                <edge-shad-button
-                  v-if="!slotProps.unsavedChanges"
-                  variant="text"
-                  class="hover:text-red-700/50 text-xs h-[26px] text-red-700"
-                  @click="closeSheet"
-                >
-                  <X class="w-4 h-4" />
-                  Close
-                </edge-shad-button>
-                <edge-shad-button
-                  v-else
-                  variant="text"
-                  class="hover:text-red-700/50 text-xs h-[26px] text-red-700"
-                  @click="closeSheet"
-                >
-                  <X class="w-4 h-4" />
-                  Cancel
-                </edge-shad-button>
-                <edge-shad-button
-                  v-if="isCreating || slotProps.unsavedChanges"
-                  variant="text"
-                  type="submit"
-                  class="text-xs h-[26px] bg-slate-300 text-slate-900 hover:bg-slate-400 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
-                  :disabled="slotProps.submitting"
-                >
-                  <Loader2 v-if="slotProps.submitting" class="w-4 h-4 animate-spin" />
-                  <Save v-else class="w-4 h-4" />
-                  <span>Save</span>
                 </edge-shad-button>
               </div>
             </div>
@@ -2396,6 +4045,9 @@ const reindexPublishedPostsToKv = async () => {
                       <X class="h-3 w-3" />
                       Clear
                     </edge-shad-button>
+                  </div>
+                  <div v-if="isCreating" class="text-xs text-amber-700 dark:text-amber-300">
+                    Save this post before <strong>Publish Now</strong> and <strong>Schedule Publish</strong> are available.
                   </div>
                   <div v-if="slotProps.unsavedChanges" class="text-xs text-amber-700 dark:text-amber-300">
                     Save changes before publishing.
@@ -2729,6 +4381,7 @@ const reindexPublishedPostsToKv = async () => {
                           <edge-cms-block-picker
                             :site-id="props.site"
                             :theme="theme"
+                            :render-context="slotProps.workingDoc"
                             :allowed-types="['Post']"
                             @pick="(block) => addPostBlockToRow(slotProps.workingDoc, rowIndex, 0, block)"
                           />
@@ -2770,6 +4423,7 @@ const reindexPublishedPostsToKv = async () => {
                                   <edge-cms-block-picker
                                     :site-id="props.site"
                                     :theme="theme"
+                                    :render-context="slotProps.workingDoc"
                                     :allowed-types="['Post']"
                                     @pick="(block) => addPostBlockToRow(slotProps.workingDoc, rowIndex, blockPosition + 1, block)"
                                   />
@@ -2782,6 +4436,7 @@ const reindexPublishedPostsToKv = async () => {
                           <edge-cms-block-picker
                             :site-id="props.site"
                             :theme="theme"
+                            :render-context="slotProps.workingDoc"
                             :allowed-types="['Post']"
                             @pick="(block) => addPostBlockToRow(slotProps.workingDoc, rowIndex, row.columns[0].blocks.length, block)"
                           />
@@ -2830,6 +4485,7 @@ const reindexPublishedPostsToKv = async () => {
       </div>
       <edge-editor
         v-if="editorOpen"
+        :key="state.editorKey"
         :collection="collection"
         :doc-id="state.activePostId"
         :schema="schemas.posts"
@@ -2840,10 +4496,21 @@ const reindexPublishedPostsToKv = async () => {
         :no-close-after-save="true"
         :save-function-override="handlePostSaved"
         @working-doc="onWorkingDocUpdate"
+        @unsaved-changes="handleEditorUnsavedChanges"
       >
         <template #main="slotProps">
           <div class="p-6 space-y-4  h-[calc(100vh-122px)] overflow-y-auto">
-            <div class="flex justify-end">
+            <div class="flex justify-end gap-2">
+              <edge-shad-button
+                v-if="!isCreating"
+                type="button"
+                variant="text"
+                class="hover:text-slate-700 text-xs h-[26px] text-slate-600 dark:text-slate-300 dark:hover:text-slate-100"
+                @click="openHistoryDialog"
+              >
+                <History class="w-4 h-4" />
+                Versions
+              </edge-shad-button>
               <edge-shad-button
                 type="button"
                 variant="text"
@@ -2987,6 +4654,7 @@ const reindexPublishedPostsToKv = async () => {
                     <edge-cms-block-picker
                       :site-id="props.site"
                       :theme="theme"
+                      :render-context="slotProps.workingDoc"
                       :allowed-types="['Post']"
                       @pick="(block) => addPostBlockToRow(slotProps.workingDoc, rowIndex, 0, block)"
                     />
@@ -3028,6 +4696,7 @@ const reindexPublishedPostsToKv = async () => {
                             <edge-cms-block-picker
                               :site-id="props.site"
                               :theme="theme"
+                              :render-context="slotProps.workingDoc"
                               :allowed-types="['Post']"
                               @pick="(block) => addPostBlockToRow(slotProps.workingDoc, rowIndex, blockPosition + 1, block)"
                             />
@@ -3040,6 +4709,7 @@ const reindexPublishedPostsToKv = async () => {
                     <edge-cms-block-picker
                       :site-id="props.site"
                       :theme="theme"
+                      :render-context="slotProps.workingDoc"
                       :allowed-types="['Post']"
                       @pick="(block) => addPostBlockToRow(slotProps.workingDoc, rowIndex, row.columns[0].blocks.length, block)"
                     />

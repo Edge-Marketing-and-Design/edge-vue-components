@@ -1352,6 +1352,7 @@ const handleBlockImport = async (event) => {
                           :meta="item.meta"
                           :theme="selectedPreviewTheme"
                           :render-context="state.previewRenderContext"
+                          :standalone-preview="true"
                           @pending="blockLoaded($event, item.docId)"
                         />
                         <edge-cms-block-render
@@ -1362,6 +1363,7 @@ const handleBlockImport = async (event) => {
                           :meta="item.meta"
                           :theme="selectedPreviewTheme"
                           :render-context="state.previewRenderContext"
+                          :standalone-preview="true"
                         />
                       </div>
                     </div>
@@ -1539,6 +1541,7 @@ const handleBlockImport = async (event) => {
                               :meta="template.meta"
                               :theme="selectedPreviewTheme"
                               :render-context="state.previewRenderContext"
+                              :standalone-preview="true"
                               @pending="blockLoaded($event, getTemplatePreviewKey(template.docId))"
                             />
                             <edge-cms-block-render
@@ -1549,6 +1552,7 @@ const handleBlockImport = async (event) => {
                               :meta="template.meta"
                               :theme="selectedPreviewTheme"
                               :render-context="state.previewRenderContext"
+                              :standalone-preview="true"
                             />
                           </div>
                         </div>
@@ -1592,6 +1596,7 @@ const handleBlockImport = async (event) => {
                               :meta="block.meta"
                               :theme="selectedPreviewTheme"
                               :render-context="state.previewRenderContext"
+                              :standalone-preview="true"
                               @pending="blockLoaded($event, `existing:${block.docId}`)"
                             />
                             <edge-cms-block-render
@@ -1602,6 +1607,7 @@ const handleBlockImport = async (event) => {
                               :meta="block.meta"
                               :theme="selectedPreviewTheme"
                               :render-context="state.previewRenderContext"
+                              :standalone-preview="true"
                             />
                           </div>
                         </div>

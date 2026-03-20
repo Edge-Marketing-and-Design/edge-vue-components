@@ -41,8 +41,12 @@ const props = defineProps({
     type: Object,
     default: null,
   },
+  standalonePreview: {
+    type: Boolean,
+    default: false,
+  },
 })
-const emit = defineEmits(['pending'])
+const emit = defineEmits(['pending', 'loaded'])
 const edgeFirebase = inject('edgeFirebase')
 const previewRouteSegmentCache = useState('edge-cms-preview-route-segment-cache', () => ({}))
 const fallbackRouteLastSegment = ref('')
@@ -289,6 +293,8 @@ const finalValues = computed(() => {
     :meta="runtimeMeta"
     :viewport-mode="props.viewportMode"
     :render-context="props.renderContext"
+    :standalone-preview="props.standalonePreview"
+    @loaded="emit('loaded')"
   />
 </template>
 

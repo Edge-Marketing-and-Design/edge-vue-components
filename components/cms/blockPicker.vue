@@ -26,6 +26,10 @@ const props = defineProps({
     type: [String, Array],
     default: () => [],
   },
+  renderContext: {
+    type: Object,
+    default: null,
+  },
 })
 
 const emit = defineEmits(['pick'])
@@ -39,6 +43,7 @@ const SHARED_PICKER_STATE = reactive({
     theme: null,
     viewportMode: 'auto',
     allowedTypes: [],
+    renderContext: null,
   },
   blocksLoaded: [],
   selectedTags: ['Quick Picks'],
@@ -83,6 +88,7 @@ const activeProps = computed(() => {
     theme: props.theme,
     viewportMode: props.viewportMode,
     allowedTypes: props.allowedTypes,
+    renderContext: props.renderContext,
   }
 })
 
@@ -97,6 +103,7 @@ const themeId = computed(() => {
 const activeSiteId = computed(() => activeProps.value.siteId || '')
 const pickerTheme = computed(() => activeProps.value.theme || null)
 const pickerViewport = computed(() => activeProps.value.viewportMode || 'auto')
+const pickerRenderContext = computed(() => activeProps.value.renderContext || null)
 
 const normalizePreviewType = (value) => {
   return value === 'dark' ? 'dark' : 'light'
@@ -281,6 +288,7 @@ const openPicker = () => {
       theme: props.theme,
       viewportMode: props.viewportMode,
       allowedTypes: props.allowedTypes,
+      renderContext: props.renderContext,
     }
     if (!SHARED_PICKER_STATE.hostId)
       SHARED_PICKER_STATE.hostId = instanceId
@@ -394,6 +402,8 @@ const clearTagFilters = () => {
       :theme="pickerTheme"
       :site-id="activeSiteId"
       :viewport-mode="pickerViewport"
+      :render-context="pickerRenderContext"
+      :standalone-preview="true"
       @pending="blockLoaded($event, 'block')"
     />
       <edge-cms-block-render
@@ -404,6 +414,8 @@ const clearTagFilters = () => {
         :theme="pickerTheme"
         :site-id="activeSiteId"
         :viewport-mode="pickerViewport"
+        :render-context="pickerRenderContext"
+        :standalone-preview="true"
       />
   </div>
   <div v-else-if="props.listOnly" class="p-6 h-[calc(100vh-50px)] overflow-hidden flex flex-col gap-4">
@@ -447,7 +459,7 @@ const clearTagFilters = () => {
                 <div class="text-4xl relative text-inherit text-center">
                   {{ block.name }}
                 </div>
-                <edge-cms-block-api :site-id="activeSiteId" :content="block.content" :theme="pickerTheme" :values="block.values" :meta="block.meta" :viewport-mode="pickerViewport" @pending="blockLoaded($event, block.docId)" />
+                <edge-cms-block-api :site-id="activeSiteId" :content="block.content" :theme="pickerTheme" :values="block.values" :meta="block.meta" :viewport-mode="pickerViewport" :render-context="pickerRenderContext" :standalone-preview="true" @pending="blockLoaded($event, block.docId)" />
                 <edge-cms-block-render
                   v-if="!pickerState.blocksLoaded.includes(block.docId)"
                   :content="loadingRender(block.content)"
@@ -455,6 +467,8 @@ const clearTagFilters = () => {
                   :meta="block.meta"
                   :theme="pickerTheme"
                   :viewport-mode="pickerViewport"
+                  :render-context="pickerRenderContext"
+                  :standalone-preview="true"
                 />
               </div>
             </div>
@@ -526,7 +540,7 @@ const clearTagFilters = () => {
                 <div class="text-4xl relative text-inherit text-center">
                   {{ block.name }}
                 </div>
-                <edge-cms-block-api :site-id="activeSiteId" :content="block.content" :theme="pickerTheme" :values="block.values" :meta="block.meta" :viewport-mode="pickerViewport" @pending="blockLoaded($event, block.docId)" />
+                <edge-cms-block-api :site-id="activeSiteId" :content="block.content" :theme="pickerTheme" :values="block.values" :meta="block.meta" :viewport-mode="pickerViewport" :render-context="pickerRenderContext" :standalone-preview="true" @pending="blockLoaded($event, block.docId)" />
                 <edge-cms-block-render
                   v-if="!pickerState.blocksLoaded.includes(block.docId)"
                   :content="loadingRender(block.content)"
@@ -534,6 +548,8 @@ const clearTagFilters = () => {
                   :meta="block.meta"
                   :theme="pickerTheme"
                   :viewport-mode="pickerViewport"
+                  :render-context="pickerRenderContext"
+                  :standalone-preview="true"
                 />
               </div>
             </div>

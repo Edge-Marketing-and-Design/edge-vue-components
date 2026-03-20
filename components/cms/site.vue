@@ -1,7 +1,7 @@
 <script setup lang="js">
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { CircleAlert, Download, FileCheck, FilePenLine, FileStack, FolderCog, FolderDown, FolderUp, FolderX, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload } from 'lucide-vue-next'
+import { CircleAlert, Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePenLine, FileStack, FileUp, FileX, FolderCog, FolderDown, FolderUp, FolderX, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload } from 'lucide-vue-next'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
 
 const props = defineProps({
@@ -113,6 +113,7 @@ const state = reactive({
   templatePageTags: [],
   templatePageRenderContext: null,
   sitePageRenderContext: null,
+  pagePreviewsLoading: true,
 })
 
 const pageImportInputRef = ref(null)
@@ -940,39 +941,58 @@ const handleNewSiteSaved = async ({ docId, data, collection }) => {
   }
 }
 
+const queueSnapshotTask = (tasks, loader) => {
+  tasks.push(Promise.resolve().then(loader))
+}
+
 onBeforeMount(async () => {
+  const previewSnapshotTasks = []
+  const startupTasks = []
+
   if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/users`]) {
-    await edgeFirebase.startUsersSnapshot(edgeGlobal.edgeState.organizationDocPath)
+    queueSnapshotTask(startupTasks, () => edgeFirebase.startUsersSnapshot(edgeGlobal.edgeState.organizationDocPath))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/published-site-settings`]) {
-    await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/published-site-settings`)
+    queueSnapshotTask(startupTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/published-site-settings`))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/pages`]) {
-    await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/pages`)
+    queueSnapshotTask(previewSnapshotTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/pages`))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`]) {
-    await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`)
+    queueSnapshotTask(previewSnapshotTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/blocks`]) {
-    await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/blocks`)
-  }
-  if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published`]) {
-    await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published`)
+    queueSnapshotTask(previewSnapshotTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/blocks`))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites`]) {
-    await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites`)
+    queueSnapshotTask(previewSnapshotTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites`))
+  }
+  if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published`]) {
+    queueSnapshotTask(startupTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published`))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/posts`]) {
-    await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/posts`)
+    queueSnapshotTask(startupTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/posts`))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published_posts`]) {
-    await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published_posts`)
+    queueSnapshotTask(startupTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published_posts`))
   }
   if (props.site !== 'templates') {
     const submissionsPath = `organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/lead-actions`
     if (!edgeFirebase.data?.[submissionsPath]) {
-      await edgeFirebase.startSnapshot(submissionsPath, [{ field: 'action', operator: '==', value: 'Contact Form' }])
+      queueSnapshotTask(
+        startupTasks,
+        () => edgeFirebase.startSnapshot(submissionsPath, [{ field: 'action', operator: '==', value: 'Contact Form' }]),
+      )
     }
+  }
+
+  if (previewSnapshotTasks.length > 0) {
+    await Promise.allSettled(previewSnapshotTasks)
+  }
+  state.pagePreviewsLoading = false
+
+  if (startupTasks.length > 0) {
+    await Promise.allSettled(startupTasks)
   }
   state.mounted = true
 })
@@ -1578,6 +1598,8 @@ const sitePageGridItems = computed(() => {
       menuEntry: {
         name: pageDoc?.name || normalizedDocId,
         item: normalizedDocId,
+        menuName: 'Not In Menu',
+        index: -1,
       },
       lastUpdated: pageDoc?.last_updated || pageDoc?.doc_created_at || 0,
       description: String(pageDoc?.metaDescription || '').trim(),
@@ -1586,6 +1608,7 @@ const sitePageGridItems = computed(() => {
 
   return orderedPages
 })
+
 
 const openSitePage = (docId) => {
   const nextDocId = String(docId || '').trim()
@@ -1601,11 +1624,55 @@ const openSitePageSettings = (item) => {
   pageMenuRef.value?.openPageSettings?.(item.menuEntry)
 }
 
+const openSitePageRename = (item) => {
+  if (!item?.menuEntry)
+    return
+  pageMenuRef.value?.openRenamePageDialog?.(item.menuEntry)
+}
+
 const openSitePageDelete = (item) => {
   if (!item?.menuEntry)
     return
   pageMenuRef.value?.openDeletePageDialog?.(item.menuEntry)
 }
+
+const exportSitePage = (item) => {
+  const docId = String(item?.docId || '').trim()
+  if (!docId)
+    return
+  pageMenuRef.value?.exportPage?.(docId)
+}
+
+const publishSitePage = (item) => {
+  const docId = String(item?.docId || '').trim()
+  if (!docId)
+    return
+  pageMenuRef.value?.publishPage?.(docId)
+}
+
+const unPublishSitePage = (item) => {
+  const docId = String(item?.docId || '').trim()
+  if (!docId)
+    return
+  pageMenuRef.value?.unPublishPage?.(docId)
+}
+
+const discardSitePageChanges = (item) => {
+  const docId = String(item?.docId || '').trim()
+  if (!docId)
+    return
+  pageMenuRef.value?.discardPageChanges?.(docId)
+}
+
+const getSitePageLiveUrl = (item) => {
+  if (!item?.menuEntry)
+    return ''
+  return pageMenuRef.value?.buildLivePageUrl?.(item.menuEntry.menuName, item.menuEntry) || ''
+}
+
+const isSitePagePublished = item => !!pageMenuRef.value?.isPublishedPage?.(item?.docId)
+const isSitePageRenameDisabled = item => !!pageMenuRef.value?.isRenameDisabled?.(item?.menuEntry)
+const isSitePageDeleteDisabled = item => !!pageMenuRef.value?.isDeleteDisabled?.(item?.menuEntry)
 
 const _templatePageItems = computed(() => {
   return Object.entries(pages.value || {})
@@ -2019,8 +2086,8 @@ const isPublishedPageDiff = (pageId) => {
 }
 
 const _pageStatusLabel = pageId => (isPublishedPageDiff(pageId) ? 'Draft' : 'Published')
-const hasSelection = computed(() => Boolean(props.page) || Boolean(state.selectedPostId))
-const showSplitView = computed(() => isTemplateSite.value || (canViewPagesTab.value && (state.viewMode === 'pages' || hasSelection.value)))
+const isEditingPage = computed(() => Boolean(props.page))
+const showSplitView = computed(() => !isEditingPage.value && (isTemplateSite.value || (canViewPagesTab.value && state.viewMode === 'pages')))
 const isEditingPost = computed(() => canViewPostsTab.value && state.viewMode === 'posts' && Boolean(state.selectedPostId))
 
 const ensureValidViewMode = () => {
@@ -2641,7 +2708,13 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                     <div class="template-page-preview-scale-wrapper">
                       <div class="template-page-preview-scale-inner">
                         <div class="template-page-preview-content space-y-4">
-                          <template v-if="templatePageHasPreview(item) && selectedTemplatePreviewThemeReady">
+                          <template v-if="state.pagePreviewsLoading">
+                            <div class="flex h-32 flex-col items-center justify-center gap-3 mt-[100px] text-muted-foreground">
+                              <Loader2 class="h-100 w-100 animate-spin" />
+                              <span class="text-sm font-medium">Loading preview…</span>
+                            </div>
+                          </template>
+                          <template v-else-if="templatePageHasPreview(item) && selectedTemplatePreviewThemeReady">
                             <div
                               v-for="(row, rowIndex) in templatePreviewRows(item)"
                               :key="`${item.docId}-row-${row.id || rowIndex}`"
@@ -2752,7 +2825,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
               size="sm"
               class="h-8 px-4 text-xs gap-2 rounded-full"
               :class="state.viewMode === 'pages'
-                ? 'bg-gradient-to-r from-slate-900 to-slate-700 text-white shadow-sm dark:bg-gradient-to-r dark:from-slate-200 dark:to-slate-400 dark:text-slate-900'
+                ? 'bg-gradient-to-r from-slate-900 to-slate-700 text-white hover:text-white shadow-sm dark:bg-gradient-to-r dark:from-slate-200 dark:to-slate-400 dark:text-slate-900 dark:hover:text-slate-900'
                 : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100'"
               @click="setViewMode('pages')"
             >
@@ -2765,7 +2838,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
               size="sm"
               class="h-8 px-4 text-xs gap-2 rounded-full"
               :class="state.viewMode === 'posts'
-                ? 'bg-gradient-to-r from-slate-900 to-slate-700 text-white shadow-sm dark:bg-gradient-to-r dark:from-slate-200 dark:to-slate-400 dark:text-slate-900'
+                ? 'bg-gradient-to-r from-slate-900 to-slate-700 text-white hover:text-white shadow-sm dark:bg-gradient-to-r dark:from-slate-200 dark:to-slate-400 dark:text-slate-900 dark:hover:text-slate-900'
                 : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100'"
               @click="setViewMode('posts')"
             >
@@ -2778,7 +2851,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
               size="sm"
               class="h-8 px-4 text-xs gap-2 rounded-full"
               :class="state.viewMode === 'submissions'
-                ? 'bg-gradient-to-r from-slate-900 to-slate-700 text-white shadow-sm dark:bg-gradient-to-r dark:from-slate-200 dark:to-slate-400 dark:text-slate-900'
+                ? 'bg-gradient-to-r from-slate-900 to-slate-700 text-white hover:text-white shadow-sm dark:bg-gradient-to-r dark:from-slate-200 dark:to-slate-400 dark:text-slate-900 dark:hover:text-slate-900'
                 : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100'"
               @click="setViewMode('submissions')"
             >
@@ -3041,8 +3114,11 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
               @update:selected-post-id="clearPostSelection"
             />
           </div>
+          <div v-else-if="props.page && !state.updating" :key="props.page" class="w-full h-full">
+            <NuxtPage class="flex flex-col flex-1 px-0 mx-0 pt-0" />
+          </div>
           <ResizablePanelGroup v-else-if="showSplitView" direction="horizontal" class="w-full h-full flex-1 min-h-0">
-            <ResizablePanel class="bg-slate-100 text-slate-900 min-h-0 overflow-hidden dark:bg-slate-900 dark:text-slate-100" :default-size="16">
+            <ResizablePanel class="bg-slate-100 text-slate-900 min-h-0 overflow-hidden dark:bg-slate-900 dark:text-slate-100" :default-size="20">
               <SidebarGroup class="mt-0 pt-0 h-full min-h-0">
                 <SidebarGroupContent class="h-full min-h-0 overflow-y-auto">
                   <SidebarMenu class="pb-4 edge-cms-site-menu">
@@ -3073,11 +3149,8 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
             </ResizablePanel>
             <ResizablePanel ref="mainPanel" class="min-h-0">
               <Transition name="fade" mode="out-in">
-                <div v-if="props.page && !state.updating" :key="props.page" class="max-h-[calc(100vh-100px)] overflow-y-auto w-full">
-                  <NuxtPage class="flex flex-col flex-1 px-0 mx-0 pt-0" />
-                </div>
                 <div
-                  v-else-if="!state.updating && !props.page && !isTemplateSite && canViewPagesTab && state.viewMode === 'pages'"
+                  v-if="!state.updating && !props.page && !isTemplateSite && canViewPagesTab && state.viewMode === 'pages'"
                   class="w-full h-[calc(100vh-100px)] overflow-y-auto p-4"
                 >
                   <div
@@ -3113,31 +3186,80 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                                 </span>
                               </div>
                             </div>
-                            <div class="flex items-center gap-1">
-                              <edge-shad-button
-                                size="icon"
-                                variant="ghost"
-                                class="h-8 w-8 text-slate-600 hover:bg-slate-200 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-                                :disabled="edgeGlobal.edgeState.cmsPageWithUnsavedChanges === item.docId"
-                                @click.stop="openSitePageSettings(item)"
-                              >
-                                <FolderCog class="h-4 w-4" />
-                              </edge-shad-button>
-                              <edge-shad-button
-                                size="icon"
-                                variant="ghost"
-                                class="h-8 w-8 text-slate-600 hover:bg-slate-200 hover:text-red-700 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-red-300"
-                                :disabled="item.menuEntry?.disableDelete"
-                                @click.stop="openSitePageDelete(item)"
-                              >
-                                <Trash2 class="h-4 w-4" />
-                              </edge-shad-button>
-                            </div>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger as-child>
+                                <edge-shad-button
+                                  size="icon"
+                                  variant="ghost"
+                                  class="h-8 w-8 text-slate-600 hover:bg-slate-200 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                                  @click.stop
+                                >
+                                  <MoreHorizontal class="h-4 w-4" />
+                                </edge-shad-button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent side="right" align="start" @click.stop>
+                                <DropdownMenuLabel class="flex items-center gap-2">
+                                  <File class="w-5 h-5" /> {{ item.menuPath }}/{{ item.name }}
+                                </DropdownMenuLabel>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem :disabled="edgeGlobal.edgeState.cmsPageWithUnsavedChanges === item.docId" @click="openSitePageSettings(item)">
+                                  <FileCog />
+                                  <div class="flex flex-col">
+                                    <span>Settings</span>
+                                    <span v-if="edgeGlobal.edgeState.cmsPageWithUnsavedChanges === item.docId" class="text-xs text-red-500">(Unsaved Changes)</span>
+                                  </div>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  v-if="getSitePageLiveUrl(item)"
+                                  as-child
+                                >
+                                  <a :href="getSitePageLiveUrl(item)" target="_blank" rel="noopener noreferrer" @click.stop>
+                                    <ExternalLink />
+                                    <span>View Live Page</span>
+                                  </a>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem v-else disabled>
+                                  <ExternalLink />
+                                  <span>View Live Page</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem @click="exportSitePage(item)">
+                                  <Download />
+                                  <span>Export Page</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem v-if="isPublishedPageDiff(item.docId)" @click="publishSitePage(item)">
+                                  <FileUp />
+                                  <span>Publish</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem :disabled="isSitePageRenameDisabled(item)" @click="openSitePageRename(item)">
+                                  <FilePen />
+                                  <span>Rename</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem v-if="isPublishedPageDiff(item.docId) && isSitePagePublished(item)" @click="discardSitePageChanges(item)">
+                                  <FileX />
+                                  <span>Discard Changes</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem v-if="isSitePagePublished(item)" @click="unPublishSitePage(item)">
+                                  <FileDown />
+                                  <span>Unpublish</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem class="text-destructive" :disabled="isSitePageDeleteDisabled(item)" @click="openSitePageDelete(item)">
+                                  <FileMinus2 />
+                                  <span>Delete</span>
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
                           <div class="template-scale-wrapper border border-dashed border-border/60 rounded-md bg-background/80">
                             <div class="template-scale-inner">
                               <div class="template-scale-content space-y-4">
-                                <template v-if="templatePageHasPreview(item) && sitePreviewThemeReady">
+                                <template v-if="state.pagePreviewsLoading">
+                                  <div class="flex h-32 flex-col items-center justify-center gap-3 mt-[100px] text-muted-foreground">
+                                    <Loader2 class="h-100 w-100 animate-spin" />
+                                    <span class="text-sm font-medium">Loading preview…</span>
+                                  </div>
+                                </template>
+                                <template v-else-if="templatePageHasPreview(item) && sitePreviewThemeReady">
                                   <div
                                     v-for="(row, rowIndex) in templatePreviewRows(item)"
                                     :key="`${item.docId}-row-${row.id || rowIndex}`"

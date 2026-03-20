@@ -30,6 +30,10 @@ const props = defineProps({
     type: Object,
     default: null,
   },
+  standalonePreview: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const emit = defineEmits(['loaded'])
@@ -86,6 +90,7 @@ const rendered = computed(() => {
     :theme="theme"
     :isolated="props.isolated"
     :viewport-mode="props.viewportMode"
+    :standalone-preview="props.standalonePreview"
     @loaded="emit('loaded')"
   />
 </template>

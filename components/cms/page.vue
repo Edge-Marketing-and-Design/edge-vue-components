@@ -1,5 +1,5 @@
 <script setup>
-import { AlertTriangle, ArrowDown, ArrowUp, Download, FileCheck, FileX, History, Loader2, Maximize2, Monitor, RotateCcw, Smartphone, Sparkles, Tablet, UploadCloud } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, ArrowUp, Download, ExternalLink, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FileUp, FileWarning, FileX, History, Loader2, Maximize2, Monitor, MoreHorizontal, RotateCcw, Smartphone, Sparkles, Tablet, UploadCloud } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 const props = defineProps({
@@ -21,6 +21,7 @@ const emit = defineEmits(['head'])
 
 const edgeFirebase = inject('edgeFirebase')
 const { saveJsonFile } = useJsonFileSave()
+const route = useRoute()
 const router = useRouter()
 const { buildPageStructuredData } = useStructuredDataTemplates()
 const cmsMultiOrg = useState('cmsMultiOrg', () => true)
@@ -64,6 +65,7 @@ const state = reactive({
   importErrorDialogOpen: false,
   importErrorMessage: '',
   previewViewport: 'full',
+  previewScale: '100',
   previewPageView: 'list',
   newRowLayout: '6',
   newPostRowLayout: '6',
@@ -103,11 +105,22 @@ const state = reactive({
   historyPreviewDoc: null,
   historyPreviewView: 'list',
   showHistoryDiffDialog: false,
+  pageSettingsOpen: false,
+  renamePageDialogOpen: false,
+  renamePageValue: '',
+  renamePageSubmitting: false,
+  deletePageDialogOpen: false,
+  deletePageSubmitting: false,
 })
 
 const pageImportInputRef = ref(null)
 const pageImportDocIdResolver = ref(null)
 const pageImportConflictResolver = ref(null)
+const listPreviewSurfaceRef = ref(null)
+const postPreviewSurfaceRef = ref(null)
+const historyListPreviewSurfaceRef = ref(null)
+const historyPostPreviewSurfaceRef = ref(null)
+const pagePreviewRenderContext = ref(null)
 
 const schemas = {
   pages: toTypedSchema(z.object({
@@ -117,6 +130,12 @@ const schemas = {
   })),
 }
 
+const renamePageSchema = toTypedSchema(z.object({
+  name: z.string({
+    required_error: 'Name is required',
+  }).min(1, { message: 'Name is required' }),
+}))
+
 const previewViewportOptions = [
   { id: 'full', label: 'Wild Width', width: '100%', icon: Maximize2 },
   { id: 'large', label: 'Large Screen', width: '1280px', icon: Monitor },
@@ -124,7 +143,21 @@ const previewViewportOptions = [
   { id: 'mobile', label: 'Mobile', width: '420px', icon: Smartphone },
 ]
 
+const previewScaleOptions = [
+  { name: '100', title: '100%' },
+  { name: '75', title: '75%' },
+  { name: '50', title: '50%' },
+  { name: '25', title: '25%' },
+]
+
 const selectedPreviewViewport = computed(() => previewViewportOptions.find(option => option.id === state.previewViewport) || previewViewportOptions[0])
+const previewScaleValue = computed(() => {
+  const parsed = Number.parseInt(String(state.previewScale || '100'), 10)
+  if (!Number.isFinite(parsed) || parsed <= 0)
+    return 100
+  return parsed
+})
+const previewScaleMultiplier = computed(() => previewScaleValue.value / 100)
 
 const previewViewportStyle = computed(() => {
   const selected = selectedPreviewViewport.value
@@ -141,8 +174,57 @@ const previewViewportStyle = computed(() => {
 const previewViewportContainStyle = computed(() => {
   return {
     ...(previewViewportStyle.value || {}),
+    zoom: previewScaleMultiplier.value,
   }
 })
+
+const buildScaledPreviewSurfaceStyle = (baseHeight) => {
+  const normalizedHeight = String(baseHeight || '').trim()
+  if (!normalizedHeight) {
+    return {
+      ...(previewViewportContainStyle.value || {}),
+    }
+  }
+  return {
+    ...(previewViewportContainStyle.value || {}),
+    height: previewScaleMultiplier.value === 1
+      ? normalizedHeight
+      : `calc((${normalizedHeight}) / ${previewScaleMultiplier.value})`,
+  }
+}
+
+const previewSurfaceRefEntries = computed(() => ([
+  ['list', listPreviewSurfaceRef.value],
+  ['post', postPreviewSurfaceRef.value],
+  ['historyList', historyListPreviewSurfaceRef.value],
+  ['historyPost', historyPostPreviewSurfaceRef.value],
+]))
+
+const capturePreviewScrollPositions = () => {
+  const positions = {}
+  for (const [key, element] of previewSurfaceRefEntries.value) {
+    if (!element || typeof element.scrollTop !== 'number')
+      continue
+    positions[key] = {
+      top: Number(element.scrollTop || 0),
+      left: Number(element.scrollLeft || 0),
+    }
+    element.scrollTop = 0
+    element.scrollLeft = 0
+  }
+  return positions
+}
+
+const restorePreviewScrollPositions = (positions) => {
+  const previewSurfaceMap = Object.fromEntries(previewSurfaceRefEntries.value)
+  for (const [key, scrollState] of Object.entries(positions || {})) {
+    const element = previewSurfaceMap?.[key]
+    if (!element || typeof element.scrollTop !== 'number')
+      continue
+    element.scrollTop = Number(scrollState?.top || 0)
+    element.scrollLeft = Number(scrollState?.left || 0)
+  }
+}
 
 const setPreviewViewport = (viewportId) => {
   state.previewViewport = viewportId
@@ -536,6 +618,7 @@ const ensurePreviewSnapshots = async () => {
   const themesPath = `organizations/${orgId}/themes`
   const sitesPath = `organizations/${orgId}/sites`
   const blocksPath = `organizations/${orgId}/blocks`
+  const publishedSiteSettingsPath = `organizations/${orgId}/published-site-settings`
 
   // Non-blocking bootstrap: never hold page render on snapshot latency.
   try {
@@ -547,6 +630,9 @@ const ensurePreviewSnapshots = async () => {
     }
     if (!edgeFirebase.data?.[blocksPath]) {
       await edgeFirebase.startSnapshot(blocksPath)
+    }
+    if (!edgeFirebase.data?.[publishedSiteSettingsPath]) {
+      await edgeFirebase.startSnapshot(publishedSiteSettingsPath)
     }
   }
   catch (error) {
@@ -614,6 +700,60 @@ const clearRouteLastSegment = () => {
 const pageName = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`]?.[props.page]?.name || ''
 })
+
+const previewSiteOptions = computed(() => {
+  return Object.entries(edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`] || {})
+    .filter(([siteId]) => String(siteId || '').trim() && siteId !== 'templates')
+    .map(([siteId, siteDoc]) => ({
+      name: siteId,
+      title: siteDoc?.name || siteId,
+    }))
+    .sort((a, b) => a.title.localeCompare(b.title))
+})
+
+const selectedPreviewContextSiteId = computed(() => {
+  if (!props.isTemplateSite)
+    return String(props.site || '').trim()
+
+  const selectedSiteId = String(edgeGlobal.edgeState.blockEditorSite || '').trim()
+  if (selectedSiteId)
+    return selectedSiteId
+
+  return String(previewSiteOptions.value?.[0]?.name || '').trim()
+})
+
+const previewContextCache = useState('edge-cms-template-page-preview-context-cache', () => ({}))
+
+const fetchPreviewContextForSite = async (siteId) => {
+  const normalizedSiteId = String(siteId || '').trim()
+  if (!normalizedSiteId)
+    return null
+
+  const cacheKey = `${edgeGlobal.edgeState.currentOrganization}:${normalizedSiteId}`
+  const cached = previewContextCache.value?.[cacheKey]
+  if (cached && typeof cached === 'object')
+    return edgeGlobal.dupObject(cached)
+
+  try {
+    const staticSearch = new edgeFirebase.SearchStaticData()
+    const collectionPath = `${edgeGlobal.edgeState.organizationDocPath}/sites/${normalizedSiteId}/published_posts`
+    await staticSearch.getData(collectionPath, [], [], 1)
+    const firstPost = Object.values(staticSearch.results?.data || {})[0] || null
+    if (firstPost && typeof firstPost === 'object') {
+      previewContextCache.value[cacheKey] = edgeGlobal.dupObject(firstPost)
+      return edgeGlobal.dupObject(firstPost)
+    }
+  }
+  catch (error) {
+    console.error('Failed to load page preview context', error)
+  }
+
+  return null
+}
+
+const loadPagePreviewRenderContext = async () => {
+  pagePreviewRenderContext.value = await fetchPreviewContextForSite(selectedPreviewContextSiteId.value)
+}
 
 const currentPagePath = computed(() => {
   const orgPath = String(edgeGlobal.edgeState.organizationDocPath || '').trim()
@@ -824,6 +964,14 @@ watch(selectedThemeId, (themeId) => {
   }
   loadSiteThemeFallback()
 }, { immediate: true })
+
+watch(
+  [() => edgeGlobal.edgeState.currentOrganization, selectedPreviewContextSiteId],
+  async () => {
+    await loadPagePreviewRenderContext()
+  },
+  { immediate: true },
+)
 
 const effectiveThemeId = computed(() => {
   const normalized = String(selectedThemeId.value || '').trim()
@@ -1357,8 +1505,10 @@ const getPagePublishStatus = (pageId) => {
     return {
       key: 'unpublished',
       label: 'Unpublished',
+      icon: 'unpublished',
       canPublish: true,
       canUnpublish: false,
+      badgeClass: 'text-slate-600 dark:text-slate-300',
     }
   }
 
@@ -1366,16 +1516,20 @@ const getPagePublishStatus = (pageId) => {
     return {
       key: 'publishedWithChanges',
       label: 'Published (Unpublished Changes)',
+      icon: 'changes',
       canPublish: true,
       canUnpublish: true,
+      badgeClass: 'text-amber-700 dark:text-amber-300',
     }
   }
 
   return {
     key: 'published',
     label: 'Published',
+    icon: 'published',
     canPublish: false,
     canUnpublish: true,
+    badgeClass: 'text-emerald-700 dark:text-emerald-300',
   }
 }
 
@@ -1393,6 +1547,139 @@ const publishedPage = computed(() => {
 
 const currentPage = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`]?.[props.page] || null
+})
+
+const siteDoc = computed(() => {
+  return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site] || null
+})
+
+const publishedSiteSettingsDoc = computed(() => {
+  return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`]?.[props.site] || null
+})
+
+const isExternalMenuLink = entry => entry?.item && typeof entry.item === 'object' && entry.item.type === 'external'
+
+const normalizeDomain = (value) => {
+  if (!value)
+    return ''
+  let normalized = String(value).trim().toLowerCase()
+  if (!normalized)
+    return ''
+  if (normalized.includes('://')) {
+    try {
+      normalized = new URL(normalized).host
+    }
+    catch {
+      normalized = normalized.split('://').pop() || normalized
+    }
+  }
+  normalized = normalized.split('/')[0] || ''
+  return normalized.replace(/\.+$/g, '')
+}
+
+const firstValidDomain = (domains) => {
+  if (!Array.isArray(domains))
+    return ''
+  for (const domain of domains) {
+    const normalized = normalizeDomain(domain)
+    if (normalized)
+      return normalized
+  }
+  return ''
+}
+
+const normalizePathSlug = value => String(value || '').trim().toLowerCase()
+
+const currentPageLiveOrigin = computed(() => {
+  if (props.isTemplateSite)
+    return ''
+  const host = firstValidDomain(publishedSiteSettingsDoc.value?.domains) || firstValidDomain(siteDoc.value?.domains)
+  return host ? `https://${host}` : ''
+})
+
+const findPageRouteSegments = (menus, pageId, folderSlugs = []) => {
+  for (const menuItems of Object.values(menus || {})) {
+    if (!Array.isArray(menuItems))
+      continue
+    for (const entry of menuItems) {
+      if (isExternalMenuLink(entry))
+        continue
+      if (typeof entry?.item === 'string' && entry.item === pageId) {
+        const pageSlug = normalizePathSlug(entry?.name)
+        if (!pageSlug)
+          return []
+        return [...folderSlugs, pageSlug]
+      }
+      if (entry?.item && typeof entry.item === 'object') {
+        const folderSlug = Object.keys(entry.item || {})[0]
+        if (!folderSlug)
+          continue
+        const nested = findPageRouteSegments(entry.item[folderSlug], pageId, [...folderSlugs, normalizePathSlug(folderSlug)])
+        if (nested.length)
+          return nested
+      }
+    }
+  }
+  return []
+}
+
+const currentPageLiveUrl = computed(() => {
+  const origin = currentPageLiveOrigin.value
+  if (!origin || props.isTemplateSite)
+    return ''
+
+  const routeSegments = findPageRouteSegments(siteDoc.value?.menus || {}, props.page, [])
+  if (!routeSegments.length)
+    return ''
+
+  if (routeSegments.length === 1 && routeSegments[0] === 'home')
+    return `${origin}/`
+
+  return `${origin}/${routeSegments.map(segment => encodeURIComponent(segment)).join('/')}`
+})
+
+const currentMenuPageEntry = computed(() => {
+  if (props.isTemplateSite)
+    return null
+  let found = null
+  const visitItems = (items) => {
+    if (found || !Array.isArray(items))
+      return
+    for (const entry of items) {
+      if (!entry || typeof entry !== 'object')
+        continue
+      if (typeof entry?.item === 'string' && entry.item === props.page) {
+        found = edgeGlobal.dupObject(entry)
+        return
+      }
+      if (entry?.item && typeof entry.item === 'object') {
+        for (const nested of Object.values(entry.item)) {
+          if (Array.isArray(nested))
+            visitItems(nested)
+          if (found)
+            return
+        }
+      }
+    }
+  }
+  for (const menuItems of Object.values(siteDoc.value?.menus || {})) {
+    visitItems(menuItems)
+    if (found)
+      break
+  }
+  return found
+})
+
+const currentPageRenameLabel = computed(() => {
+  if (props.isTemplateSite)
+    return String(currentPage.value?.name || props.page || '').trim() || 'Template'
+  return String(
+    currentMenuPageEntry.value?.menuTitle
+    || currentMenuPageEntry.value?.name
+    || currentPage.value?.name
+    || props.page
+    || '',
+  ).trim() || 'Page'
 })
 
 const blocksCollection = computed(() => edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`] || {})
@@ -1779,6 +2066,15 @@ const closeHistoryDialog = () => {
   state.historyDialogOpen = false
 }
 
+const openHistoryFromRoute = async () => {
+  if (!route.query.history || state.historyDialogOpen || !currentPage.value || !currentPagePath.value || !edgeFirebase?.user?.uid)
+    return
+  await openHistoryDialog()
+  const nextQuery = { ...route.query }
+  delete nextQuery.history
+  await router.replace({ query: nextQuery })
+}
+
 const restoreHistoryVersion = async () => {
   const historyEntry = selectedHistoryEntry.value
   if (!historyEntry?.historyId || !edgeFirebase?.user?.uid)
@@ -1902,6 +2198,32 @@ const getDocDefaultsFromSchema = (schema = {}) => {
 const getPageDocDefaults = () => getDocDefaultsFromSchema(state.newDocs?.pages || {})
 
 const isBlankString = value => String(value || '').trim() === ''
+const isJsonInvalid = (value) => {
+  if (value === null || value === undefined)
+    return false
+  if (typeof value === 'object')
+    return false
+  const text = String(value).trim()
+  if (!text)
+    return false
+  try {
+    JSON.parse(text)
+    return false
+  }
+  catch {
+    return true
+  }
+}
+
+const hasStructuredDataErrors = (doc) => {
+  if (!doc)
+    return false
+  if (isJsonInvalid(doc.structuredData))
+    return true
+  if (doc.post && isJsonInvalid(doc.postStructuredData))
+    return true
+  return false
+}
 
 const applyImportedPageSeoDefaults = (doc) => {
   if (!isPlainObject(doc))
@@ -2055,6 +2377,124 @@ const makeImportedPageNameForNew = (baseName, docsMap = {}) => {
   return candidate
 }
 
+const openRenamePageDialog = () => {
+  if (!props.page || props.page === 'new')
+    return
+  state.renamePageValue = currentPageRenameLabel.value
+  state.renamePageSubmitting = false
+  state.renamePageDialogOpen = true
+}
+
+const openCurrentPageSettings = async () => {
+  if (!currentPage.value || !props.page || props.page === 'new')
+    return
+  state.pageSettingsOpen = true
+}
+
+const removePageFromMenuItems = (items, pageId) => {
+  if (!Array.isArray(items))
+    return []
+
+  return items
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object')
+        return entry
+
+      if (typeof entry.item === 'string')
+        return entry.item === pageId ? null : entry
+
+      if (entry.item && typeof entry.item === 'object') {
+        const nextEntry = edgeGlobal.dupObject(entry)
+        for (const [folderSlug, nestedItems] of Object.entries(nextEntry.item || {})) {
+          nextEntry.item[folderSlug] = removePageFromMenuItems(nestedItems, pageId)
+        }
+        return nextEntry
+      }
+
+      return entry
+    })
+    .filter(Boolean)
+}
+
+const removePageFromMenus = (menus, pageId) => {
+  const nextMenus = normalizeMenusForImport(menus)
+  for (const [menuName, items] of Object.entries(nextMenus))
+    nextMenus[menuName] = removePageFromMenuItems(items, pageId)
+  return nextMenus
+}
+
+const renameCurrentPageAction = async () => {
+  const nextName = String(state.renamePageValue || '').trim()
+  if (!nextName || state.renamePageSubmitting || !props.page || props.page === 'new')
+    return
+
+  state.renamePageSubmitting = true
+  try {
+    if (props.isTemplateSite) {
+      await edgeFirebase.changeDoc(pagesCollectionPath.value, props.page, { name: nextName })
+      notifySuccess(`Renamed template "${props.page}".`)
+      state.renamePageDialogOpen = false
+      return
+    }
+
+    const menus = normalizeMenusForImport(siteDoc.value?.menus)
+    const currentEntry = currentMenuPageEntry.value
+    const existingNames = collectMenuPageNames(menus)
+    if (currentEntry?.name)
+      existingNames.delete(String(currentEntry.name || '').trim())
+
+    const nextSlug = makeUniqueMenuPageName(nextName, existingNames)
+    const nextMenuTitle = nextName || titleFromSlug(nextSlug)
+    const menuResults = edgeGlobal.dupObject(menus)
+
+    walkMenuEntries(Object.values(menuResults).flat(), (entry) => {
+      if (typeof entry?.item !== 'string' || entry.item !== props.page)
+        return
+      entry.name = nextSlug
+      entry.menuTitle = nextMenuTitle
+    })
+
+    await edgeFirebase.changeDoc(pagesCollectionPath.value, props.page, { name: nextSlug })
+    await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, { menus: menuResults })
+    notifySuccess(`Renamed page "${props.page}".`)
+    state.renamePageDialogOpen = false
+  }
+  catch (error) {
+    console.error('Failed to rename page', error)
+    notifyError(`Failed to rename ${props.isTemplateSite ? 'template' : 'page'}.`)
+  }
+  finally {
+    state.renamePageSubmitting = false
+  }
+}
+
+const deleteCurrentPage = async () => {
+  if (state.deletePageSubmitting || !props.page || props.page === 'new')
+    return
+
+  state.deletePageSubmitting = true
+  try {
+    if (!props.isTemplateSite) {
+      const nextMenus = removePageFromMenus(siteDoc.value?.menus, props.page)
+      await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, { menus: nextMenus })
+      if (isPagePublished(props.page))
+        await edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`, props.page)
+    }
+
+    await edgeFirebase.removeDoc(pagesCollectionPath.value, props.page)
+    state.deletePageDialogOpen = false
+    notifySuccess(`Deleted ${props.isTemplateSite ? 'template' : 'page'} "${props.page}".`)
+    await router.push(pageEditorBasePath.value)
+  }
+  catch (error) {
+    console.error('Failed to delete page', error)
+    notifyError(`Failed to delete ${props.isTemplateSite ? 'template' : 'page'}.`)
+  }
+  finally {
+    state.deletePageSubmitting = false
+  }
+}
+
 const requestPageImportDocId = (initialValue = '') => {
   state.importDocIdValue = String(initialValue || '')
   state.importDocIdDialogOpen = true
@@ -2140,6 +2580,41 @@ const exportCurrentPage = async () => {
   const saved = await saveJsonFile(exportPayload, `${filePrefix}-${docId}.json`)
   if (saved)
     notifySuccess(`Exported ${itemLabel} "${docId}".`)
+}
+
+const discardCurrentPageChanges = async () => {
+  if (props.isTemplateSite || !publishedPage.value || !props.page || props.page === 'new')
+    return
+  try {
+    const discardedDoc = resolveSyncedPageDoc(edgeGlobal.dupObject(publishedPage.value))
+    await edgeFirebase.storeDoc(pagesCollectionPath.value, discardedDoc, props.page)
+    if (pagesCollection.value)
+      pagesCollection.value[props.page] = edgeGlobal.dupObject(discardedDoc)
+    state.workingDoc = buildPageWorkingDocOverrides(discardedDoc)
+    state.editorWorkingDoc = discardedDoc ? edgeGlobal.dupObject(discardedDoc) : null
+    state.editorHasUnsavedChanges = false
+    state.previewPageView = hasPostView(discardedDoc) ? state.previewPageView : 'list'
+    state.showUnpublishedChangesDialog = false
+    state.editorKey += 1
+    notifySuccess(`Discarded unpublished changes for "${props.page}".`)
+  }
+  catch (error) {
+    console.error('Failed to discard page changes', error)
+    notifyError('Failed to discard unpublished changes.')
+  }
+}
+
+const unPublishCurrentPage = async () => {
+  if (props.isTemplateSite || !props.page || props.page === 'new' || !isPagePublished(props.page))
+    return
+  try {
+    await edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`, props.page)
+    notifySuccess(`Unpublished page "${props.page}".`)
+  }
+  catch (error) {
+    console.error('Failed to unpublish page', error)
+    notifyError('Failed to unpublish page.')
+  }
 }
 
 const _triggerPageImport = () => {
@@ -2242,6 +2717,27 @@ watch (currentPage, (newPage) => {
 watch(selectedHistoryEntry, (entry) => {
   syncHistoryPreviewDoc(entry)
 }, { immediate: false })
+
+watch(
+  [() => state.previewViewport, () => state.previewScale],
+  async () => {
+    const savedScrollPositions = capturePreviewScrollPositions()
+    await nextTick()
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        restorePreviewScrollPositions(savedScrollPositions)
+      })
+    })
+  },
+)
+
+watch(
+  [() => route.query.history, currentPage, currentPagePath, () => edgeFirebase?.user?.uid],
+  async () => {
+    await openHistoryFromRoute()
+  },
+  { immediate: true },
+)
 
 const stringifyLimited = (value, limit = 600) => {
   if (value == null)
@@ -2504,6 +3000,7 @@ const buildPageChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel }
       compareLabel,
       base: formatter(baseVal),
       compare: formatter(compareVal),
+      viewScope: options.viewScope || 'shared',
     }
     if (options.details)
       change.details = options.details(baseVal, compareVal)
@@ -2518,6 +3015,7 @@ const buildPageChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel }
       compareLabel,
       base: `No ${String(baseLabel || 'base').toLowerCase()} available`,
       compare: `${compareLabel || 'Current'} available`,
+      viewScope: 'shared',
     })
   }
   if (base && !compare) {
@@ -2528,6 +3026,7 @@ const buildPageChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel }
       compareLabel,
       base: `${baseLabel || 'Selected'} available`,
       compare: `No ${String(compareLabel || 'current').toLowerCase()} available`,
+      viewScope: 'shared',
     })
   }
 
@@ -2547,6 +3046,7 @@ const buildPageChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel }
         base: summarizeBlocks(baseBlocks),
         compare: summarizeBlocks(compareBlocks),
         blockChanges,
+        viewScope: keyPrefix === 'detail' ? 'post' : 'list',
       })
     }
 
@@ -2559,20 +3059,29 @@ const buildPageChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel }
         baseLabel,
         compareLabel,
         layoutChanges: buildLayoutChangeDetails(baseStructure, compareStructure),
+        viewScope: keyPrefix === 'detail' ? 'post' : 'list',
       })
     }
   }
 
   compareBlockArea('index', 'Blocks', 'content', 'structure', 'Layout')
   compareBlockArea('detail', 'Detail Blocks', 'postContent', 'postStructure', 'Detail Layout')
-  compareField('metaTitle', 'Meta title', val => summarizeChangeValue(val, true))
-  compareField('metaDescription', 'Meta description', val => summarizeChangeValue(val, true))
-  compareField('structuredData', 'Structured data', val => summarizeChangeValue(val, true))
-  compareField('postMetaTitle', 'Detail meta title', val => summarizeChangeValue(val, true))
-  compareField('postMetaDescription', 'Detail meta description', val => summarizeChangeValue(val, true))
-  compareField('postStructuredData', 'Detail structured data', val => summarizeChangeValue(val, true))
+  compareField('metaTitle', 'Meta title', val => summarizeChangeValue(val, true), { viewScope: 'list' })
+  compareField('metaDescription', 'Meta description', val => summarizeChangeValue(val, true), { viewScope: 'list' })
+  compareField('structuredData', 'Structured data', val => summarizeChangeValue(val, true), { viewScope: 'list' })
+  compareField('postMetaTitle', 'Detail meta title', val => summarizeChangeValue(val, true), { viewScope: 'post' })
+  compareField('postMetaDescription', 'Detail meta description', val => summarizeChangeValue(val, true), { viewScope: 'post' })
+  compareField('postStructuredData', 'Detail structured data', val => summarizeChangeValue(val, true), { viewScope: 'post' })
 
   return changes
+}
+
+const filterPageChangeDetailsForView = (changes, view = 'list') => {
+  const normalizedView = view === 'post' ? 'post' : 'list'
+  return (Array.isArray(changes) ? changes : []).filter((change) => {
+    const scope = String(change?.viewScope || 'shared')
+    return scope === 'shared' || scope === normalizedView
+  })
 }
 
 const unpublishedChangeDetails = computed(() => {
@@ -2609,11 +3118,32 @@ const pageChangesDialogDescription = computed(() => {
   return `Review what changed since the last publish. Last Published: ${lastPublishedTime(props.page)}`
 })
 
+const showStatusCompareLink = computed(() => {
+  if (props.isTemplateSite)
+    return showingUnsavedChanges.value
+  return showingUnsavedChanges.value || pagePublishStatus.value.key === 'publishedWithChanges'
+})
+
+const pageStatusDisplayLabel = computed(() => {
+  if (!showingUnsavedChanges.value)
+    return pagePublishStatus.value.label
+  return pagePublishStatus.value.key === 'unpublished'
+    ? 'Unpublished (Unsaved Changes)'
+    : 'Published (Unsaved Changes)'
+})
+
+const openPageStatusCompareDialog = () => {
+  if (!showStatusCompareLink.value)
+    return
+  state.showUnpublishedChangesDialog = true
+}
+
 const historyDiffDetails = computed(() => {
-  return buildPageChangeDetails(getHistorySnapshotDoc(selectedHistoryEntry.value), currentHistoryCompareDoc.value, {
+  const allChanges = buildPageChangeDetails(getHistorySnapshotDoc(selectedHistoryEntry.value), currentHistoryCompareDoc.value, {
     baseLabel: 'Selected History',
     compareLabel: 'Current',
   })
+  return filterPageChangeDetailsForView(allChanges, state.historyPreviewView)
 })
 
 const historyDiffCountLabel = computed(() => {
@@ -2700,87 +3230,111 @@ const hasUnsavedChanges = (changes) => {
     @unsaved-changes="hasUnsavedChanges"
   >
     <template #header="slotProps">
-      <div class="rounded-none relative flex items-center p-2 justify-between top-0 z-50 rounded h-[50px] border border-stone-300 bg-stone-100 text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100">
-        <span class="text-lg font-semibold whitespace-nowrap pr-1">{{ slotProps.workingDoc?.name || pageName || 'Untitled Page' }}</span>
-
-        <div class="flex w-full items-center">
-          <div class="w-full border-t border-gray-300 dark:border-white/15" aria-hidden="true" />
-          <div v-if="!props.isTemplateSite" class="px-4 text-gray-600 dark:text-gray-300 whitespace-nowrap text-center flex flex-col items-center gap-1">
-            <template v-if="slotProps.unsavedChanges">
-              <div class="flex items-center gap-2">
-                <edge-shad-button
-                  variant="outline"
-                  class="bg-yellow-100 text-yellow-800 border-yellow-300 hover:bg-yellow-100 hover:text-yellow-900 text-xs h-[32px] gap-1"
-                  @click="state.showUnpublishedChangesDialog = true"
-                >
-                  <AlertTriangle class="w-4 h-4" />
-                  Unsaved Changes
-                </edge-shad-button>
-              </div>
-            </template>
-            <template v-else-if="pagePublishStatus.key === 'publishedWithChanges'">
-              <div class="flex items-center gap-2">
-                <edge-shad-button
-                  variant="outline"
-                  class="bg-yellow-100 text-yellow-800 border-yellow-300 hover:bg-yellow-100 hover:text-yellow-900 text-xs h-[32px] gap-1"
-                  @click="state.showUnpublishedChangesDialog = true"
-                >
-                  <AlertTriangle class="w-4 h-4" />
-                  Unpublished Changes
-                </edge-shad-button>
-                <edge-shad-button
-                  class="text-xs h-[32px] gap-1 shadow-sm bg-slate-700 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
-                  :disabled="state.publishLoading"
-                  @click="publishPage(page)"
-                >
-                  <Loader2 v-if="state.publishLoading" class="w-4 h-4 animate-spin" />
-                  <UploadCloud v-else class="w-4 h-4" />
-                  Publish
-                </edge-shad-button>
-              </div>
-            </template>
-            <template v-else-if="pagePublishStatus.key === 'unpublished'">
-              <div class="flex items-center gap-2">
-                <edge-chip class="bg-slate-200 text-slate-800 dark:bg-slate-700 dark:text-slate-100 h-[32px]">
-                  <div class="w-full inline-flex items-center gap-1">
-                    <FileX class="w-3.5 h-3.5" />
-                    Unpublished
-                  </div>
-                </edge-chip>
-                <edge-shad-button
-                  class="text-xs h-[32px] gap-1 shadow-sm bg-slate-700 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
-                  :disabled="state.publishLoading"
-                  @click="publishPage(page)"
-                >
-                  <Loader2 v-if="state.publishLoading" class="w-4 h-4 animate-spin" />
-                  <UploadCloud v-else class="w-4 h-4" />
-                  Publish
-                </edge-shad-button>
-              </div>
-            </template>
-            <template v-else>
-              <edge-chip class="bg-green-100 text-green-800 h-[32px]">
-                <div class="w-full inline-flex items-center gap-1">
-                  <FileCheck class="w-3.5 h-3.5" />
-                  Published
-                </div>
-              </edge-chip>
-            </template>
-            <span class="text-[10px] leading-tight">Last Published: {{ lastPublishedTime(page) }}</span>
+      <div class="rounded-none relative flex flex-col gap-2 p-2 top-0 z-50 rounded border border-stone-300 bg-stone-100 text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex min-w-0 flex-1 items-center gap-2 pr-2">
+            <edge-shad-button
+              type="button"
+              variant="text"
+              class="text-xs h-[26px] text-slate-700 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white"
+              @click="slotProps.onCancel"
+            >
+              <ArrowLeft class="w-4 h-4" />
+              Back
+            </edge-shad-button>
+            <span class="min-w-0 truncate pr-1 text-sm font-bold whitespace-nowrap sm:text-base">{{ slotProps.workingDoc?.name || pageName || 'Untitled Page' }}</span>
           </div>
-          <div v-else class="px-4 w-full max-w-md">
-            <div class="flex w-full max-w-md items-center gap-2">
+          <div class="flex shrink-0 flex-wrap items-center justify-end gap-1">
+            <edge-shad-button variant="text" class="h-[26px] shrink-0 text-xs text-slate-700 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white" @click="state.editMode = !state.editMode">
+              <template v-if="state.editMode">
+                <Eye class="w-4 h-4" />
+                Preview Mode
+              </template>
+              <template v-else>
+                <Pencil class="w-4 h-4" />
+                Edit Mode
+              </template>
+            </edge-shad-button>
+            <edge-shad-button
+              v-if="!slotProps.unsavedChanges"
+              variant="text"
+              class="h-[26px] shrink-0 text-xs text-red-700 hover:text-red-700/50"
+              @click="slotProps.onCancel"
+            >
+              <X class="w-4 h-4" />
+              Close
+            </edge-shad-button>
+            <edge-shad-button
+              v-else
+              variant="text"
+              class="h-[26px] shrink-0 text-xs text-red-700 hover:text-red-700/50"
+              @click="slotProps.onCancel"
+            >
+              <X class="w-4 h-4" />
+              Cancel
+            </edge-shad-button>
+            <edge-shad-button
+              v-if="state.editMode || slotProps.unsavedChanges"
+              variant="text"
+              type="submit"
+              class="h-[26px] shrink-0 bg-slate-300 text-xs text-slate-900 hover:bg-slate-400 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
+              :disabled="slotProps.submitting"
+            >
+              <Loader2 v-if="slotProps.submitting" class="w-4 h-4 animate-spin" />
+              <Save v-else class="w-4 h-4" />
+              <span>Save</span>
+            </edge-shad-button>
+          </div>
+        </div>
+
+        <div class="flex w-full min-w-0 flex-wrap items-center justify-between gap-1 border border-stone-300/80 bg-stone-200/70 px-2 py-0.5 text-stone-700 dark:border-stone-700/80 dark:bg-stone-800/80 dark:text-stone-200">
+          <div v-if="!props.isTemplateSite" class="flex flex-wrap items-center gap-1.5 text-gray-600 dark:text-gray-300 sm:px-1 sm:whitespace-nowrap">
+            <button
+              v-if="showStatusCompareLink"
+              type="button"
+              class="inline-flex items-center gap-1 text-[11px] font-medium leading-none text-amber-700 underline decoration-dashed underline-offset-4 hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-200 sm:text-xs"
+              @click="openPageStatusCompareDialog"
+            >
+              <FileWarning v-if="showingUnsavedChanges || pagePublishStatus.icon === 'changes'" class="h-3.5 w-3.5 shrink-0 text-yellow-600" />
+              <FileCheck v-else-if="pagePublishStatus.icon === 'published'" class="h-3.5 w-3.5 shrink-0 text-green-700" />
+              <FileX v-else class="h-3.5 w-3.5 shrink-0 text-slate-500 dark:text-slate-300" />
+              <span>{{ pageStatusDisplayLabel }}</span>
+            </button>
+            <div
+              v-else
+              class="inline-flex items-center gap-1 text-[11px] font-medium leading-none sm:text-xs"
+              :class="showingUnsavedChanges ? 'text-amber-700 dark:text-amber-300' : pagePublishStatus.badgeClass"
+            >
+              <FileWarning v-if="showingUnsavedChanges || pagePublishStatus.icon === 'changes'" class="h-3.5 w-3.5 shrink-0 text-yellow-600" />
+              <FileCheck v-else-if="pagePublishStatus.icon === 'published'" class="h-3.5 w-3.5 shrink-0 text-green-700" />
+              <FileX v-else class="h-3.5 w-3.5 shrink-0 text-slate-500 dark:text-slate-300" />
+              <span>{{ pageStatusDisplayLabel }}</span>
+            </div>
+            <span class="text-[11px] leading-none text-gray-500 dark:text-gray-400">Last Published: {{ lastPublishedTime(page) }}</span>
+            <edge-shad-button
+              v-if="pagePublishStatus.canPublish"
+              class="text-xs h-[28px] gap-1 shadow-sm bg-slate-700 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
+              :disabled="state.publishLoading"
+              @click="publishPage(page)"
+            >
+              <Loader2 v-if="state.publishLoading" class="w-4 h-4 animate-spin" />
+              <UploadCloud v-else class="w-4 h-4" />
+              Publish
+            </edge-shad-button>
+          </div>
+          <div v-else class="w-full sm:w-auto sm:max-w-md sm:px-1">
+            <div class="flex w-full items-center gap-1.5 sm:max-w-md">
               <edge-shad-select
                 v-model="edgeGlobal.edgeState.blockEditorTheme"
-                name="theme"
                 :items="themes.map(t => ({ title: t.name, name: t.docId }))"
                 placeholder="Select Theme"
-                class="w-full text-xs h-[32px]"
+                class="w-full"
+                trigger-class="!h-7 min-h-7 px-2 py-1 text-xs"
               />
               <edge-shad-button
                 type="button"
                 variant="outline"
-                class="h-[32px] gap-1 whitespace-nowrap"
+                class="h-7 gap-1 whitespace-nowrap"
                 :disabled="!currentPage || !props.page || props.page === 'new'"
                 title="Export Template"
                 aria-label="Export Template"
@@ -2791,46 +3345,35 @@ const hasUnsavedChanges = (changes) => {
               </edge-shad-button>
             </div>
           </div>
-          <div class="w-full border-t border-border" aria-hidden="true" />
-
-          <div class="flex flex-col items-center gap-1 px-2">
-            <div class="flex items-center gap-1">
+          <div class="flex flex-wrap items-center justify-end gap-1 sm:flex-1">
+            <div class="w-[88px] shrink-0">
+              <edge-shad-select
+                v-model="state.previewScale"
+                :items="previewScaleOptions"
+                placeholder="%"
+                class="w-full"
+                trigger-class="!h-7 min-h-7 px-2 py-1 text-xs"
+              />
+            </div>
+            <div class="flex shrink-0 items-center gap-1 px-1">
               <edge-shad-button
                 v-for="option in previewViewportOptions"
                 :key="option.id"
                 type="button"
                 variant="ghost"
                 size="icon"
-                class="h-[26px] w-[26px] text-xs gap-1 border transition-colors"
+                class="h-6 w-6 text-xs gap-1 border transition-colors"
                 :class="state.previewViewport === option.id ? 'bg-slate-700 text-white border-slate-700 shadow-sm dark:bg-slate-200 dark:text-slate-900 dark:border-slate-200' : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700 dark:hover:bg-slate-800'"
                 @click="setPreviewViewport(option.id)"
               >
                 <component :is="option.icon" class="w-3.5 h-3.5" />
               </edge-shad-button>
             </div>
-            <span class="text-[10px] leading-tight text-slate-600 dark:text-slate-300">Viewport</span>
-          </div>
-          <div class="flex flex-col items-center gap-1 px-2">
-            <edge-shad-button
-              type="button"
-              variant="outline"
-              size="icon"
-              class="h-[26px] w-[26px]"
-              :disabled="!currentPage || !props.page || props.page === 'new'"
-              :title="props.isTemplateSite ? 'View Template History' : 'View Page History'"
-              :aria-label="props.isTemplateSite ? 'View Template History' : 'View Page History'"
-              @click="openHistoryDialog"
-            >
-              <History class="w-4 h-4" />
-            </edge-shad-button>
-            <span class="text-[10px] leading-tight text-slate-600 dark:text-slate-300">Versions</span>
-          </div>
-          <div v-if="hasPostView(slotProps.workingDoc)" class="flex flex-col items-center gap-1 px-2">
-            <div class="flex items-center gap-1">
+            <div v-if="hasPostView(slotProps.workingDoc)" class="flex shrink-0 items-center gap-1 px-1">
               <edge-shad-button
                 type="button"
                 variant="ghost"
-                class="h-[26px] px-2 text-xs border transition-colors"
+                class="h-6 px-2 text-xs border transition-colors"
                 :class="state.previewPageView === 'list' ? 'bg-slate-700 text-white border-slate-700 shadow-sm dark:bg-slate-200 dark:text-slate-900 dark:border-slate-200' : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700 dark:hover:bg-slate-800'"
                 @click="setPreviewPageView('list')"
               >
@@ -2839,68 +3382,126 @@ const hasUnsavedChanges = (changes) => {
               <edge-shad-button
                 type="button"
                 variant="ghost"
-                class="h-[26px] px-2 text-xs border transition-colors"
+                class="h-6 px-2 text-xs border transition-colors"
                 :class="state.previewPageView === 'post' ? 'bg-slate-700 text-white border-slate-700 shadow-sm dark:bg-slate-200 dark:text-slate-900 dark:border-slate-200' : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700 dark:hover:bg-slate-800'"
                 @click="setPreviewPageView('post')"
               >
                 Detail
               </edge-shad-button>
             </div>
-            <span class="text-[10px] leading-tight text-slate-600 dark:text-slate-300">View</span>
+            <div v-if="hasPostView(slotProps.workingDoc) && state.previewPageView === 'post'" class="flex shrink-0 items-center gap-1 px-1">
+              <edge-shad-button
+                type="button"
+                variant="outline"
+                class="h-6 px-2 text-xs"
+                @click="openRouteLastSegmentDialog"
+              >
+                Test URL
+              </edge-shad-button>
+            </div>
+            <div class="flex shrink-0 items-center gap-1 px-1">
+              <DropdownMenu>
+                <DropdownMenuTrigger as-child>
+                  <edge-shad-button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    class="h-6 w-6"
+                  >
+                    <MoreHorizontal class="w-4 h-4" />
+                  </edge-shad-button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent side="bottom" align="end">
+                  <DropdownMenuLabel>
+                    {{ props.isTemplateSite ? 'Template Actions' : 'Page Actions' }}
+                  </DropdownMenuLabel>
+                  <DropdownMenuItem
+                    v-if="slotProps.unsavedChanges"
+                    disabled
+                    class="pointer-events-none min-h-0 py-1 text-[11px] text-amber-700 focus:text-amber-700 dark:text-amber-300 dark:focus:text-amber-300"
+                  >
+                    <FileWarning class="w-3.5 h-3.5 shrink-0" />
+                    <span>Save or cancel changes to enable disabled actions.</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    v-if="!props.isTemplateSite && currentPageLiveUrl"
+                    as-child
+                  >
+                    <a :href="currentPageLiveUrl" target="_blank" rel="noopener noreferrer">
+                      <ExternalLink class="w-4 h-4" />
+                      <span>View Live Page</span>
+                    </a>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem v-else-if="!props.isTemplateSite" disabled>
+                    <ExternalLink class="w-4 h-4" />
+                    <span>View Live Page</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    :disabled="slotProps.unsavedChanges || !currentPage || !props.page || props.page === 'new'"
+                    @click="openCurrentPageSettings"
+                  >
+                    <FileCog class="w-4 h-4" />
+                    <span>Settings</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    :disabled="!currentPage || !props.page || props.page === 'new'"
+                    @click="openHistoryDialog"
+                  >
+                    <History class="w-4 h-4" />
+                    <span>Versions</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    :disabled="!currentPage || !props.page || props.page === 'new'"
+                    @click="exportCurrentPage"
+                  >
+                    <Download class="w-4 h-4" />
+                    <span>Export {{ props.isTemplateSite ? 'Template' : 'Page' }}</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    :disabled="slotProps.unsavedChanges || state.renamePageSubmitting || !currentPage || !props.page || props.page === 'new'"
+                    @click="openRenamePageDialog"
+                  >
+                    <FilePen class="w-4 h-4" />
+                    <span>Rename</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    v-if="!props.isTemplateSite && pagePublishStatus.canPublish"
+                    :disabled="slotProps.unsavedChanges || state.publishLoading"
+                    @click="publishPage(page)"
+                  >
+                    <FileUp class="w-4 h-4" />
+                    <span>Publish</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    v-if="!props.isTemplateSite && isPublishedPageDiff(page) && isPagePublished(page)"
+                    :disabled="slotProps.unsavedChanges"
+                    @click="discardCurrentPageChanges"
+                  >
+                    <RotateCcw class="w-4 h-4" />
+                    <span>Discard Changes</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    v-if="!props.isTemplateSite && pagePublishStatus.canUnpublish"
+                    :disabled="slotProps.unsavedChanges"
+                    @click="unPublishCurrentPage"
+                  >
+                    <FileDown class="w-4 h-4" />
+                    <span>Unpublish</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    class="text-destructive"
+                    :disabled="slotProps.unsavedChanges || state.deletePageSubmitting || !currentPage || !props.page || props.page === 'new'"
+                    @click="state.deletePageDialogOpen = true"
+                  >
+                    <FileMinus2 class="w-4 h-4" />
+                    <span>Delete</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
-          <div v-if="hasPostView(slotProps.workingDoc) && state.previewPageView === 'post'" class="flex flex-col items-center gap-1 px-2">
-            <edge-shad-button
-              type="button"
-              variant="outline"
-              class="h-[26px] px-2 text-xs"
-              @click="openRouteLastSegmentDialog"
-            >
-              Test URL
-            </edge-shad-button>
-            <span class="max-w-[120px] truncate text-[10px] leading-tight text-slate-600 dark:text-slate-300">
-              {{ previewRouteLastSegment || 'Auto' }}
-            </span>
-          </div>
-
-          <edge-shad-button variant="text" class="text-xs h-[26px] text-slate-700 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white" @click="state.editMode = !state.editMode">
-            <template v-if="state.editMode">
-              <Eye class="w-4 h-4" />
-              Preview Mode
-            </template>
-            <template v-else>
-              <Pencil class="w-4 h-4" />
-              Edit Mode
-            </template>
-          </edge-shad-button>
-          <edge-shad-button
-            v-if="!slotProps.unsavedChanges"
-            variant="text"
-            class="hover:text-red-700/50 text-xs h-[26px] text-red-700"
-            @click="slotProps.onCancel"
-          >
-            <X class="w-4 h-4" />
-            Close
-          </edge-shad-button>
-          <edge-shad-button
-            v-else
-            variant="text"
-            class="hover:text-red-700/50 text-xs h-[26px] text-red-700"
-            @click="slotProps.onCancel"
-          >
-            <X class="w-4 h-4" />
-            Cancel
-          </edge-shad-button>
-          <edge-shad-button
-            v-if="state.editMode || slotProps.unsavedChanges"
-            variant="text"
-            type="submit"
-            class="text-xs h-[26px] bg-slate-300 text-slate-900 hover:bg-slate-400 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
-            :disabled="slotProps.submitting"
-          >
-            <Loader2 v-if="slotProps.submitting" class="w-4 h-4 animate-spin" />
-            <Save v-else class="w-4 h-4" />
-            <span>Save</span>
-          </edge-shad-button>
         </div>
       </div>
     </template>
@@ -2985,15 +3586,157 @@ const hasUnsavedChanges = (changes) => {
           </div>
         </div>
         <div :class="props.isTemplateSite ? 'min-w-0 flex-1' : ''">
+          <Sheet v-model:open="state.pageSettingsOpen">
+            <SheetContent side="left" class="w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl">
+              <SheetHeader>
+                <SheetTitle>{{ slotProps.workingDoc?.name || pageName || (props.isTemplateSite ? 'Template' : 'Page') }}</SheetTitle>
+                <SheetDescription />
+              </SheetHeader>
+              <div class="p-6 space-y-4 h-[calc(100vh-142px)] overflow-y-auto">
+                <edge-shad-checkbox
+                  v-if="props.isTemplateSite && !templateTypeIncludesPost(slotProps.workingDoc)"
+                  v-model="slotProps.workingDoc.post"
+                  label="Is a Post Template"
+                  name="page-settings-post"
+                >
+                  Creates both an Index Page and a Detail Page for this section.
+                  The Index Page lists all items (e.g., /{{ slotProps.workingDoc.name }}), while the Detail Page displays a single item (e.g., /{{ slotProps.workingDoc.name }}/:slug).
+                </edge-shad-checkbox>
+                <edge-shad-select-tags
+                  v-if="props.isTemplateSite"
+                  :model-value="normalizeTemplatePageTypeSelections(slotProps.workingDoc.type, { fallback: ['Page'], excludePost: Boolean(slotProps.workingDoc.post) })"
+                  name="page-settings-type"
+                  label="Type"
+                  placeholder="Select types"
+                  :items="templateTypeItems(slotProps.workingDoc)"
+                  item-title="title"
+                  item-value="name"
+                  :allow-additions="false"
+                  @update:model-value="(value) => {
+                    slotProps.workingDoc.type = normalizeTemplatePageTypeSelections(value, { fallback: ['Page'], excludePost: Boolean(slotProps.workingDoc.post) })
+                  }"
+                />
+                <edge-shad-select-tags
+                  v-if="props.isTemplateSite"
+                  v-model="slotProps.workingDoc.tags"
+                  name="page-settings-tags"
+                  label="Tags"
+                  placeholder="Add tags"
+                  :items="templateTagItems"
+                  :allow-additions="true"
+                  @add="addTemplateTagOption"
+                />
+                <Card>
+                  <CardHeader>
+                    <CardTitle>SEO</CardTitle>
+                    <CardDescription>Meta tags for the page.</CardDescription>
+                  </CardHeader>
+                  <CardContent class="pt-0">
+                    <Tabs class="w-full" default-value="list">
+                      <TabsList v-if="slotProps.workingDoc?.post" class="w-full grid grid-cols-2 gap-1 rounded-lg border border-border/60 bg-muted/30 p-1">
+                        <TabsTrigger
+                          value="list"
+                          class="text-xs font-semibold uppercase tracking-wide transition-all data-[state=active]:bg-slate-900 data-[state=active]:text-white data-[state=active]:shadow-sm"
+                        >
+                          Index Page
+                        </TabsTrigger>
+                        <TabsTrigger
+                          value="post"
+                          class="text-xs font-semibold uppercase tracking-wide transition-all data-[state=active]:bg-slate-900 data-[state=active]:text-white data-[state=active]:shadow-sm"
+                        >
+                          Detail Page
+                        </TabsTrigger>
+                      </TabsList>
+                      <TabsContent value="list" class="mt-4 space-y-4">
+                        <edge-shad-input
+                          v-model="slotProps.workingDoc.metaTitle"
+                          label="Meta Title"
+                          name="page-settings-metaTitle"
+                        />
+                        <edge-shad-textarea
+                          v-model="slotProps.workingDoc.metaDescription"
+                          label="Meta Description"
+                          name="page-settings-metaDescription"
+                        />
+                        <div class="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                          CMS tokens in double curly braces are replaced on the front end.
+                          Example: <span v-pre class="font-semibold text-foreground">"{{cms-site}}"</span> for the site URL,
+                          <span v-pre class="font-semibold text-foreground">"{{cms-url}}"</span> for the page URL, and
+                          <span v-pre class="font-semibold text-foreground">"{{cms-logo}}"</span> for the logo URL. Keep the tokens intact.
+                        </div>
+                        <edge-cms-code-editor
+                          v-model="slotProps.workingDoc.structuredData"
+                          title="Structured Data (JSON-LD)"
+                          language="json"
+                          name="page-settings-structuredData"
+                          validate-json
+                          height="300px"
+                          class="mb-4 w-full"
+                        />
+                      </TabsContent>
+                      <TabsContent value="post" class="mt-4 space-y-4">
+                        <div class="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                          You can use template keys in double curly braces to pull data from the detail record.
+                          Example: <span v-pre class="font-semibold text-foreground">"{{name}}"</span> will be replaced with the record’s name.
+                          Dot notation is supported for nested objects, e.g. <span v-pre class="font-semibold text-foreground">"{{data.name}}"</span>.
+                          These keys work in the Title, Description, and Structured Data fields.
+                        </div>
+                        <edge-shad-input
+                          v-model="slotProps.workingDoc.postMetaTitle"
+                          label="Meta Title"
+                          name="page-settings-postMetaTitle"
+                        />
+                        <edge-shad-textarea
+                          v-model="slotProps.workingDoc.postMetaDescription"
+                          label="Meta Description"
+                          name="page-settings-postMetaDescription"
+                        />
+                        <div class="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                          CMS tokens in double curly braces are replaced on the front end.
+                          Example: <span v-pre class="font-semibold text-foreground">"{{cms-site}}"</span> for the site URL,
+                          <span v-pre class="font-semibold text-foreground">"{{cms-url}}"</span> for the page URL, and
+                          <span v-pre class="font-semibold text-foreground">"{{cms-logo}}"</span> for the logo URL. Keep the tokens intact.
+                        </div>
+                        <edge-cms-code-editor
+                          v-model="slotProps.workingDoc.postStructuredData"
+                          title="Structured Data (JSON-LD)"
+                          language="json"
+                          name="page-settings-postStructuredData"
+                          validate-json
+                          height="300px"
+                          class="mb-4 w-full"
+                        />
+                      </TabsContent>
+                    </Tabs>
+                  </CardContent>
+                </Card>
+              </div>
+              <SheetFooter class="pt-2 flex justify-between">
+                <edge-shad-button variant="destructive" class="text-white" @click="state.pageSettingsOpen = false">
+                  Cancel
+                </edge-shad-button>
+                <edge-shad-button
+                  type="submit"
+                  class="bg-slate-800 hover:bg-slate-400 w-full"
+                  :disabled="slotProps.submitting || hasStructuredDataErrors(slotProps.workingDoc)"
+                  @click="state.pageSettingsOpen = false"
+                >
+                  <Loader2 v-if="slotProps.submitting" class="h-4 w-4 animate-spin" />
+                  <span v-else>Update</span>
+                </edge-shad-button>
+              </SheetFooter>
+            </SheetContent>
+          </Sheet>
           <Tabs class="w-full" :model-value="hasPostView(slotProps.workingDoc) ? state.previewPageView : 'list'">
             <TabsContent value="list" class="mt-0">
               <div
                 :key="`${pagePreviewRenderKey}:list`"
+                ref="listPreviewSurfaceRef"
                 data-cms-preview-surface="page"
                 :data-cms-preview-mode="state.editMode ? 'edit' : 'preview'"
-                class="w-full h-[calc(100vh-200px)]  mt-2 overflow-y-auto mx-auto bg-card border border-border shadow-sm md:shadow-md p-0 space-y-6"
+                class="w-full h-[calc(100vh-220px)]  mt-2 overflow-y-auto mx-auto bg-card border border-border shadow-sm md:shadow-md p-0 space-y-6"
                 :class="[{ 'transition-all duration-300': !state.editMode }, state.editMode ? 'rounded-lg' : 'rounded-none']"
-                :style="previewViewportContainStyle"
+                :style="buildScaledPreviewSurfaceStyle('calc(100vh - 220px)')"
               >
                 <edge-button-divider v-if="state.editMode" class="my-2">
                   <Popover v-model:open="state.addRowPopoverOpen.listTop">
@@ -3135,7 +3878,8 @@ const hasUnsavedChanges = (changes) => {
                                       v-if="blockIndex(slotProps.workingDoc, blockId, false) !== -1"
                                       :key="`${pagePreviewRenderKey}:${blockId}:${effectiveThemeId}:list`"
                                       v-model="slotProps.workingDoc.content[blockIndex(slotProps.workingDoc, blockId, false)]"
-                                      :site-id="props.site"
+                                      :site-id="selectedPreviewContextSiteId"
+                                      :render-context="pagePreviewRenderContext"
                                       :edit-mode="state.editMode"
                                       :override-clicks-in-edit-mode="state.editMode"
                                       :allow-preview-content-edit="!state.editMode && canOpenPreviewBlockContentEditor"
@@ -3245,11 +3989,12 @@ const hasUnsavedChanges = (changes) => {
             <TabsContent v-if="hasPostView(slotProps.workingDoc)" value="post" class="mt-0">
               <div
                 :key="`${pagePreviewRenderKey}:post`"
+                ref="postPreviewSurfaceRef"
                 data-cms-preview-surface="page"
                 :data-cms-preview-mode="state.editMode ? 'edit' : 'preview'"
                 class="w-full  h-[calc(100vh-180px)]  mt-2 overflow-y-auto mx-auto bg-card border border-border shadow-sm md:shadow-md p-0 space-y-6"
                 :class="[{ 'transition-all duration-300': !state.editMode }, state.editMode ? 'rounded-lg' : 'rounded-none']"
-                :style="previewViewportContainStyle"
+                :style="buildScaledPreviewSurfaceStyle('calc(100vh - 180px)')"
               >
                 <edge-button-divider v-if="state.editMode" class="my-2">
                   <Popover v-model:open="state.addRowPopoverOpen.postTop">
@@ -3391,6 +4136,7 @@ const hasUnsavedChanges = (changes) => {
                                       v-if="blockIndex(slotProps.workingDoc, blockId, true) !== -1"
                                       :key="`${pagePreviewRenderKey}:${blockId}:${effectiveThemeId}:post:${previewRouteLastSegment || 'auto'}`"
                                       v-model="slotProps.workingDoc.postContent[blockIndex(slotProps.workingDoc, blockId, true)]"
+                                      :render-context="pagePreviewRenderContext"
                                       :edit-mode="state.editMode"
                                       :override-clicks-in-edit-mode="state.editMode"
                                       :allow-preview-content-edit="!state.editMode && canOpenPreviewBlockContentEditor"
@@ -3398,7 +4144,7 @@ const hasUnsavedChanges = (changes) => {
                                       :viewport-mode="previewViewportMode"
                                       :block-id="blockId"
                                       :theme="theme"
-                                      :site-id="props.site"
+                                      :site-id="selectedPreviewContextSiteId"
                                       :route-last-segment="previewRouteLastSegment"
                                       @delete="(block) => deleteBlock(block, slotProps, true)"
                                     />
@@ -3572,6 +4318,52 @@ const hasUnsavedChanges = (changes) => {
       </Sheet>
     </template>
   </edge-editor>
+  <edge-shad-dialog v-model="state.renamePageDialogOpen">
+    <DialogContent class="max-w-md">
+      <edge-shad-form :schema="renamePageSchema" @submit="renameCurrentPageAction">
+        <DialogHeader>
+          <DialogTitle>Rename {{ props.isTemplateSite ? 'Template' : 'Page' }}</DialogTitle>
+          <DialogDescription>
+            {{ props.isTemplateSite ? 'Update the template name.' : 'Update the page name used in the site menu and route.' }}
+          </DialogDescription>
+        </DialogHeader>
+        <div class="space-y-3">
+          <edge-shad-input v-model="state.renamePageValue" name="name" label="Name" placeholder="Enter name" />
+        </div>
+        <DialogFooter class="pt-2 flex justify-between">
+          <edge-shad-button variant="outline" @click="state.renamePageDialogOpen = false">
+            Cancel
+          </edge-shad-button>
+          <edge-shad-button type="submit" :disabled="state.renamePageSubmitting">
+            <Loader2 v-if="state.renamePageSubmitting" class="h-4 w-4 animate-spin" />
+            <span v-else>Rename</span>
+          </edge-shad-button>
+        </DialogFooter>
+      </edge-shad-form>
+    </DialogContent>
+  </edge-shad-dialog>
+  <edge-shad-dialog v-model="state.deletePageDialogOpen">
+    <DialogContent class="max-w-md">
+      <DialogHeader>
+        <DialogTitle class="text-left">
+          Delete {{ props.isTemplateSite ? 'Template' : 'Page' }} "{{ currentPageRenameLabel }}"
+        </DialogTitle>
+        <DialogDescription />
+      </DialogHeader>
+      <div class="text-left px-1">
+        Are you sure you want to delete "{{ currentPageRenameLabel }}"? This action cannot be undone.
+      </div>
+      <DialogFooter class="pt-2 flex justify-between">
+        <edge-shad-button variant="outline" @click="state.deletePageDialogOpen = false">
+          Cancel
+        </edge-shad-button>
+        <edge-shad-button variant="destructive" :disabled="state.deletePageSubmitting" @click="deleteCurrentPage">
+          <Loader2 v-if="state.deletePageSubmitting" class="h-4 w-4 animate-spin" />
+          <span v-else>Delete</span>
+        </edge-shad-button>
+      </DialogFooter>
+    </DialogContent>
+  </edge-shad-dialog>
   <edge-shad-dialog v-model="state.historyDialogOpen">
     <DialogContent class="w-full max-w-6xl">
       <DialogHeader>
@@ -3660,10 +4452,11 @@ const hasUnsavedChanges = (changes) => {
           <div
             v-else-if="state.historyPreviewView !== 'post'"
             :key="`${historyPreviewRenderKey}:list`"
+            ref="historyListPreviewSurfaceRef"
             data-cms-preview-surface="page"
             data-cms-preview-mode="history"
             class="relative isolate h-[60vh] overflow-y-auto overflow-x-hidden bg-card p-0"
-            :style="previewViewportContainStyle"
+            :style="buildScaledPreviewSurfaceStyle('60vh')"
           >
             <div
               v-if="!renderedHistoryPreviewDoc?.structure?.length"
@@ -3694,12 +4487,13 @@ const hasUnsavedChanges = (changes) => {
                       >
                         <edge-cms-block-api
                           v-if="blockIndex(renderedHistoryPreviewDoc, blockId, false) !== -1"
-                          :site-id="props.site"
+                          :site-id="selectedPreviewContextSiteId"
                           :content="renderedHistoryPreviewDoc.content[blockIndex(renderedHistoryPreviewDoc, blockId, false)]?.content"
                           :values="renderedHistoryPreviewDoc.content[blockIndex(renderedHistoryPreviewDoc, blockId, false)]?.values"
                           :meta="renderedHistoryPreviewDoc.content[blockIndex(renderedHistoryPreviewDoc, blockId, false)]?.meta"
                           :viewport-mode="previewViewportMode"
                           :theme="theme"
+                          :render-context="pagePreviewRenderContext"
                         />
                       </div>
                     </div>
@@ -3711,10 +4505,11 @@ const hasUnsavedChanges = (changes) => {
           <div
             v-else
             :key="`${historyPreviewRenderKey}:post`"
+            ref="historyPostPreviewSurfaceRef"
             data-cms-preview-surface="page"
             data-cms-preview-mode="history"
             class="relative isolate h-[60vh] overflow-y-auto overflow-x-hidden bg-card p-0"
-            :style="previewViewportContainStyle"
+            :style="buildScaledPreviewSurfaceStyle('60vh')"
           >
             <div
               v-if="!renderedHistoryPreviewDoc?.postStructure?.length"
@@ -3745,13 +4540,14 @@ const hasUnsavedChanges = (changes) => {
                       >
                         <edge-cms-block-api
                           v-if="blockIndex(renderedHistoryPreviewDoc, blockId, true) !== -1"
-                          :site-id="props.site"
+                          :site-id="selectedPreviewContextSiteId"
                           :content="renderedHistoryPreviewDoc.postContent[blockIndex(renderedHistoryPreviewDoc, blockId, true)]?.content"
                           :values="renderedHistoryPreviewDoc.postContent[blockIndex(renderedHistoryPreviewDoc, blockId, true)]?.values"
                           :meta="renderedHistoryPreviewDoc.postContent[blockIndex(renderedHistoryPreviewDoc, blockId, true)]?.meta"
                           :viewport-mode="previewViewportMode"
                           :theme="theme"
                           :route-last-segment="previewRouteLastSegment"
+                          :render-context="pagePreviewRenderContext"
                         />
                       </div>
                     </div>
@@ -3979,9 +4775,10 @@ const hasUnsavedChanges = (changes) => {
                           :values="blockChange.baseBlock?.values"
                           :meta="blockChange.baseBlock?.meta"
                           :theme="theme"
-                          :site-id="props.site"
+                          :site-id="selectedPreviewContextSiteId"
                           :route-last-segment="previewRouteLastSegment"
                           :viewport-mode="previewViewportMode"
+                          :render-context="pagePreviewRenderContext"
                         />
                       </div>
                       <div v-else class="flex min-h-24 items-center justify-center px-4 py-6 text-sm text-slate-500 dark:text-slate-400">
@@ -4005,9 +4802,10 @@ const hasUnsavedChanges = (changes) => {
                           :values="blockChange.compareBlock?.values"
                           :meta="blockChange.compareBlock?.meta"
                           :theme="theme"
-                          :site-id="props.site"
+                          :site-id="selectedPreviewContextSiteId"
                           :route-last-segment="previewRouteLastSegment"
                           :viewport-mode="previewViewportMode"
+                          :render-context="pagePreviewRenderContext"
                         />
                       </div>
                       <div v-else class="flex min-h-24 items-center justify-center px-4 py-6 text-sm text-slate-500 dark:text-slate-400">
@@ -4141,9 +4939,10 @@ const hasUnsavedChanges = (changes) => {
                           :values="blockChange.baseBlock?.values"
                           :meta="blockChange.baseBlock?.meta"
                           :theme="theme"
-                          :site-id="props.site"
+                          :site-id="selectedPreviewContextSiteId"
                           :route-last-segment="previewRouteLastSegment"
                           :viewport-mode="previewViewportMode"
+                          :render-context="pagePreviewRenderContext"
                         />
                       </div>
                       <div v-else class="flex min-h-24 items-center justify-center px-4 py-6 text-sm text-slate-500 dark:text-slate-400">
@@ -4167,9 +4966,10 @@ const hasUnsavedChanges = (changes) => {
                           :values="blockChange.compareBlock?.values"
                           :meta="blockChange.compareBlock?.meta"
                           :theme="theme"
-                          :site-id="props.site"
+                          :site-id="selectedPreviewContextSiteId"
                           :route-last-segment="previewRouteLastSegment"
                           :viewport-mode="previewViewportMode"
+                          :render-context="pagePreviewRenderContext"
                         />
                       </div>
                       <div v-else class="flex min-h-24 items-center justify-center px-4 py-6 text-sm text-slate-500 dark:text-slate-400">

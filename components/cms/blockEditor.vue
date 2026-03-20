@@ -33,6 +33,7 @@ const state = reactive({
   initialBlocksSeeded: false,
   seedingInitialBlocks: false,
   previewViewport: 'full',
+  previewScale: '100',
   previewBlock: null,
   previewSourceValues: {},
   previewRenderContext: null,
@@ -61,6 +62,12 @@ const previewViewportOptions = [
   { id: 'large', label: 'Large Screen', width: '1280px', icon: Monitor },
   { id: 'medium', label: 'Medium', width: '992px', icon: Tablet },
   { id: 'mobile', label: 'Mobile', width: '420px', icon: Smartphone },
+]
+const previewScaleOptions = [
+  { name: '100', title: '100%' },
+  { name: '75', title: '75%' },
+  { name: '50', title: '50%' },
+  { name: '25', title: '25%' },
 ]
 const previewTypeOptions = [
   { name: 'light', title: 'Light Preview' },
@@ -135,6 +142,13 @@ const areTypeArraysEqual = (left, right) => {
 }
 
 const selectedPreviewViewport = computed(() => previewViewportOptions.find(option => option.id === state.previewViewport) || previewViewportOptions[0])
+const previewScaleValue = computed(() => {
+  const parsed = Number.parseInt(String(state.previewScale || '100'), 10)
+  if (!Number.isFinite(parsed) || parsed <= 0)
+    return 100
+  return parsed
+})
+const previewScaleMultiplier = computed(() => previewScaleValue.value / 100)
 
 const previewViewportStyle = computed(() => {
   const selected = selectedPreviewViewport.value
@@ -145,6 +159,13 @@ const previewViewportStyle = computed(() => {
     maxWidth: selected.width,
     marginLeft: 'auto',
     marginRight: 'auto',
+  }
+})
+
+const previewViewportContainStyle = computed(() => {
+  return {
+    ...(previewViewportStyle.value || {}),
+    zoom: previewScaleMultiplier.value,
   }
 })
 
@@ -1499,16 +1520,23 @@ const exportCurrentBlock = async () => {
               </edge-cms-code-editor>
             </div>
             <div class="w-1/2 space-y-2">
-              <div class="flex items-center justify-between">
+              <div class="flex items-center justify-between gap-2">
                 <span class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Viewport</span>
-                <div class="flex items-center gap-1">
+                <div class="flex shrink-0 items-center gap-1 flex-nowrap">
+                  <edge-shad-select
+                    v-model="state.previewScale"
+                    :items="previewScaleOptions"
+                    placeholder="%"
+                    class="w-[84px] shrink-0"
+                    trigger-class="!h-7 min-h-7 px-2 py-1 text-xs"
+                  />
                   <edge-shad-button
                     v-for="option in previewViewportOptions"
                     :key="option.id"
                     type="button"
                     size="icon"
                     variant="ghost"
-                    class="h-[28px] w-[28px] text-xs border transition-colors"
+                    class="h-[28px] w-[28px] shrink-0 text-xs border transition-colors"
                     :class="state.previewViewport === option.id ? 'bg-slate-700 text-white border-slate-700 shadow-sm dark:bg-slate-200 dark:text-slate-900 dark:border-slate-200' : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700 dark:hover:bg-slate-800'"
                     @click="setPreviewViewport(option.id)"
                   >
@@ -1518,7 +1546,7 @@ const exportCurrentBlock = async () => {
               </div>
               <div
                 class="w-full mx-auto rounded-none overflow-visible"
-                :style="previewViewportStyle"
+                :style="previewViewportContainStyle"
               >
                 <div class="w-full mx-auto bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30" :class="previewSurfaceClass" style="transform: translateZ(0);">
                   <edge-cms-block
@@ -1534,6 +1562,7 @@ const exportCurrentBlock = async () => {
                     :disable-interactive-preview-in-edit="false"
                     :suppress-interactive-clicks-except-allowed="true"
                     :allow-delete="false"
+                    :standalone-preview="true"
                     :viewport-mode="previewViewportMode"
                     :block-id="state.previewBlock.id"
                     @delete="ignorePreviewDelete"
@@ -1619,7 +1648,7 @@ const exportCurrentBlock = async () => {
             <div
               v-else
               class="w-full mx-auto rounded-none overflow-visible"
-              :style="previewViewportStyle"
+              :style="previewViewportContainStyle"
             >
               <div class="w-full mx-auto bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30" :class="previewSurfaceClass" style="transform: translateZ(0);">
                 <edge-cms-block
@@ -1633,6 +1662,7 @@ const exportCurrentBlock = async () => {
                   :disable-interactive-preview-in-edit="false"
                   :suppress-interactive-clicks-except-allowed="true"
                   :allow-delete="false"
+                  :standalone-preview="true"
                   :viewport-mode="previewViewportMode"
                   :block-id="state.historyPreviewBlock.id"
                   @delete="ignorePreviewDelete"
@@ -1693,7 +1723,7 @@ const exportCurrentBlock = async () => {
                     <div
                       class="w-full mx-auto overflow-hidden drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30"
                       :class="getPreviewSurfaceClass(historyDiffBasePreviewBlock)"
-                      :style="previewViewportStyle"
+                      :style="previewViewportContainStyle"
                     >
                       <edge-cms-block
                         :model-value="historyDiffBasePreviewBlock"
@@ -1729,7 +1759,7 @@ const exportCurrentBlock = async () => {
                     <div
                       class="w-full mx-auto overflow-hidden drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30"
                       :class="getPreviewSurfaceClass(historyDiffComparePreviewBlock)"
-                      :style="previewViewportStyle"
+                      :style="previewViewportContainStyle"
                     >
                       <edge-cms-block
                         :model-value="historyDiffComparePreviewBlock"
