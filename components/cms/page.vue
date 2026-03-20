@@ -120,6 +120,7 @@ const listPreviewSurfaceRef = ref(null)
 const postPreviewSurfaceRef = ref(null)
 const historyListPreviewSurfaceRef = ref(null)
 const historyPostPreviewSurfaceRef = ref(null)
+const pagePreviewRenderContext = ref(null)
 
 const schemas = {
   pages: toTypedSchema(z.object({
@@ -700,6 +701,60 @@ const pageName = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`]?.[props.page]?.name || ''
 })
 
+const previewSiteOptions = computed(() => {
+  return Object.entries(edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`] || {})
+    .filter(([siteId]) => String(siteId || '').trim() && siteId !== 'templates')
+    .map(([siteId, siteDoc]) => ({
+      name: siteId,
+      title: siteDoc?.name || siteId,
+    }))
+    .sort((a, b) => a.title.localeCompare(b.title))
+})
+
+const selectedPreviewContextSiteId = computed(() => {
+  if (!props.isTemplateSite)
+    return String(props.site || '').trim()
+
+  const selectedSiteId = String(edgeGlobal.edgeState.blockEditorSite || '').trim()
+  if (selectedSiteId)
+    return selectedSiteId
+
+  return String(previewSiteOptions.value?.[0]?.name || '').trim()
+})
+
+const previewContextCache = useState('edge-cms-template-page-preview-context-cache', () => ({}))
+
+const fetchPreviewContextForSite = async (siteId) => {
+  const normalizedSiteId = String(siteId || '').trim()
+  if (!normalizedSiteId)
+    return null
+
+  const cacheKey = `${edgeGlobal.edgeState.currentOrganization}:${normalizedSiteId}`
+  const cached = previewContextCache.value?.[cacheKey]
+  if (cached && typeof cached === 'object')
+    return edgeGlobal.dupObject(cached)
+
+  try {
+    const staticSearch = new edgeFirebase.SearchStaticData()
+    const collectionPath = `${edgeGlobal.edgeState.organizationDocPath}/sites/${normalizedSiteId}/published_posts`
+    await staticSearch.getData(collectionPath, [], [], 1)
+    const firstPost = Object.values(staticSearch.results?.data || {})[0] || null
+    if (firstPost && typeof firstPost === 'object') {
+      previewContextCache.value[cacheKey] = edgeGlobal.dupObject(firstPost)
+      return edgeGlobal.dupObject(firstPost)
+    }
+  }
+  catch (error) {
+    console.error('Failed to load page preview context', error)
+  }
+
+  return null
+}
+
+const loadPagePreviewRenderContext = async () => {
+  pagePreviewRenderContext.value = await fetchPreviewContextForSite(selectedPreviewContextSiteId.value)
+}
+
 const currentPagePath = computed(() => {
   const orgPath = String(edgeGlobal.edgeState.organizationDocPath || '').trim()
   const siteId = String(props.site || '').trim()
@@ -909,6 +964,14 @@ watch(selectedThemeId, (themeId) => {
   }
   loadSiteThemeFallback()
 }, { immediate: true })
+
+watch(
+  [() => edgeGlobal.edgeState.currentOrganization, selectedPreviewContextSiteId],
+  async () => {
+    await loadPagePreviewRenderContext()
+  },
+  { immediate: true },
+)
 
 const effectiveThemeId = computed(() => {
   const normalized = String(selectedThemeId.value || '').trim()
@@ -3815,7 +3878,8 @@ const hasUnsavedChanges = (changes) => {
                                       v-if="blockIndex(slotProps.workingDoc, blockId, false) !== -1"
                                       :key="`${pagePreviewRenderKey}:${blockId}:${effectiveThemeId}:list`"
                                       v-model="slotProps.workingDoc.content[blockIndex(slotProps.workingDoc, blockId, false)]"
-                                      :site-id="props.site"
+                                      :site-id="selectedPreviewContextSiteId"
+                                      :render-context="pagePreviewRenderContext"
                                       :edit-mode="state.editMode"
                                       :override-clicks-in-edit-mode="state.editMode"
                                       :allow-preview-content-edit="!state.editMode && canOpenPreviewBlockContentEditor"
@@ -4072,6 +4136,7 @@ const hasUnsavedChanges = (changes) => {
                                       v-if="blockIndex(slotProps.workingDoc, blockId, true) !== -1"
                                       :key="`${pagePreviewRenderKey}:${blockId}:${effectiveThemeId}:post:${previewRouteLastSegment || 'auto'}`"
                                       v-model="slotProps.workingDoc.postContent[blockIndex(slotProps.workingDoc, blockId, true)]"
+                                      :render-context="pagePreviewRenderContext"
                                       :edit-mode="state.editMode"
                                       :override-clicks-in-edit-mode="state.editMode"
                                       :allow-preview-content-edit="!state.editMode && canOpenPreviewBlockContentEditor"
@@ -4079,7 +4144,7 @@ const hasUnsavedChanges = (changes) => {
                                       :viewport-mode="previewViewportMode"
                                       :block-id="blockId"
                                       :theme="theme"
-                                      :site-id="props.site"
+                                      :site-id="selectedPreviewContextSiteId"
                                       :route-last-segment="previewRouteLastSegment"
                                       @delete="(block) => deleteBlock(block, slotProps, true)"
                                     />
@@ -4422,12 +4487,13 @@ const hasUnsavedChanges = (changes) => {
                       >
                         <edge-cms-block-api
                           v-if="blockIndex(renderedHistoryPreviewDoc, blockId, false) !== -1"
-                          :site-id="props.site"
+                          :site-id="selectedPreviewContextSiteId"
                           :content="renderedHistoryPreviewDoc.content[blockIndex(renderedHistoryPreviewDoc, blockId, false)]?.content"
                           :values="renderedHistoryPreviewDoc.content[blockIndex(renderedHistoryPreviewDoc, blockId, false)]?.values"
                           :meta="renderedHistoryPreviewDoc.content[blockIndex(renderedHistoryPreviewDoc, blockId, false)]?.meta"
                           :viewport-mode="previewViewportMode"
                           :theme="theme"
+                          :render-context="pagePreviewRenderContext"
                         />
                       </div>
                     </div>
@@ -4474,13 +4540,14 @@ const hasUnsavedChanges = (changes) => {
                       >
                         <edge-cms-block-api
                           v-if="blockIndex(renderedHistoryPreviewDoc, blockId, true) !== -1"
-                          :site-id="props.site"
+                          :site-id="selectedPreviewContextSiteId"
                           :content="renderedHistoryPreviewDoc.postContent[blockIndex(renderedHistoryPreviewDoc, blockId, true)]?.content"
                           :values="renderedHistoryPreviewDoc.postContent[blockIndex(renderedHistoryPreviewDoc, blockId, true)]?.values"
                           :meta="renderedHistoryPreviewDoc.postContent[blockIndex(renderedHistoryPreviewDoc, blockId, true)]?.meta"
                           :viewport-mode="previewViewportMode"
                           :theme="theme"
                           :route-last-segment="previewRouteLastSegment"
+                          :render-context="pagePreviewRenderContext"
                         />
                       </div>
                     </div>
@@ -4708,9 +4775,10 @@ const hasUnsavedChanges = (changes) => {
                           :values="blockChange.baseBlock?.values"
                           :meta="blockChange.baseBlock?.meta"
                           :theme="theme"
-                          :site-id="props.site"
+                          :site-id="selectedPreviewContextSiteId"
                           :route-last-segment="previewRouteLastSegment"
                           :viewport-mode="previewViewportMode"
+                          :render-context="pagePreviewRenderContext"
                         />
                       </div>
                       <div v-else class="flex min-h-24 items-center justify-center px-4 py-6 text-sm text-slate-500 dark:text-slate-400">
@@ -4734,9 +4802,10 @@ const hasUnsavedChanges = (changes) => {
                           :values="blockChange.compareBlock?.values"
                           :meta="blockChange.compareBlock?.meta"
                           :theme="theme"
-                          :site-id="props.site"
+                          :site-id="selectedPreviewContextSiteId"
                           :route-last-segment="previewRouteLastSegment"
                           :viewport-mode="previewViewportMode"
+                          :render-context="pagePreviewRenderContext"
                         />
                       </div>
                       <div v-else class="flex min-h-24 items-center justify-center px-4 py-6 text-sm text-slate-500 dark:text-slate-400">
@@ -4870,9 +4939,10 @@ const hasUnsavedChanges = (changes) => {
                           :values="blockChange.baseBlock?.values"
                           :meta="blockChange.baseBlock?.meta"
                           :theme="theme"
-                          :site-id="props.site"
+                          :site-id="selectedPreviewContextSiteId"
                           :route-last-segment="previewRouteLastSegment"
                           :viewport-mode="previewViewportMode"
+                          :render-context="pagePreviewRenderContext"
                         />
                       </div>
                       <div v-else class="flex min-h-24 items-center justify-center px-4 py-6 text-sm text-slate-500 dark:text-slate-400">
@@ -4896,9 +4966,10 @@ const hasUnsavedChanges = (changes) => {
                           :values="blockChange.compareBlock?.values"
                           :meta="blockChange.compareBlock?.meta"
                           :theme="theme"
-                          :site-id="props.site"
+                          :site-id="selectedPreviewContextSiteId"
                           :route-last-segment="previewRouteLastSegment"
                           :viewport-mode="previewViewportMode"
+                          :render-context="pagePreviewRenderContext"
                         />
                       </div>
                       <div v-else class="flex min-h-24 items-center justify-center px-4 py-6 text-sm text-slate-500 dark:text-slate-400">

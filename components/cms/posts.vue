@@ -4381,6 +4381,7 @@ const reindexPublishedPostsToKv = async () => {
                           <edge-cms-block-picker
                             :site-id="props.site"
                             :theme="theme"
+                            :render-context="slotProps.workingDoc"
                             :allowed-types="['Post']"
                             @pick="(block) => addPostBlockToRow(slotProps.workingDoc, rowIndex, 0, block)"
                           />
@@ -4422,6 +4423,7 @@ const reindexPublishedPostsToKv = async () => {
                                   <edge-cms-block-picker
                                     :site-id="props.site"
                                     :theme="theme"
+                                    :render-context="slotProps.workingDoc"
                                     :allowed-types="['Post']"
                                     @pick="(block) => addPostBlockToRow(slotProps.workingDoc, rowIndex, blockPosition + 1, block)"
                                   />
@@ -4434,6 +4436,7 @@ const reindexPublishedPostsToKv = async () => {
                           <edge-cms-block-picker
                             :site-id="props.site"
                             :theme="theme"
+                            :render-context="slotProps.workingDoc"
                             :allowed-types="['Post']"
                             @pick="(block) => addPostBlockToRow(slotProps.workingDoc, rowIndex, row.columns[0].blocks.length, block)"
                           />
@@ -4651,6 +4654,7 @@ const reindexPublishedPostsToKv = async () => {
                     <edge-cms-block-picker
                       :site-id="props.site"
                       :theme="theme"
+                      :render-context="slotProps.workingDoc"
                       :allowed-types="['Post']"
                       @pick="(block) => addPostBlockToRow(slotProps.workingDoc, rowIndex, 0, block)"
                     />
@@ -4692,6 +4696,7 @@ const reindexPublishedPostsToKv = async () => {
                             <edge-cms-block-picker
                               :site-id="props.site"
                               :theme="theme"
+                              :render-context="slotProps.workingDoc"
                               :allowed-types="['Post']"
                               @pick="(block) => addPostBlockToRow(slotProps.workingDoc, rowIndex, blockPosition + 1, block)"
                             />
@@ -4704,6 +4709,7 @@ const reindexPublishedPostsToKv = async () => {
                     <edge-cms-block-picker
                       :site-id="props.site"
                       :theme="theme"
+                      :render-context="slotProps.workingDoc"
                       :allowed-types="['Post']"
                       @pick="(block) => addPostBlockToRow(slotProps.workingDoc, rowIndex, row.columns[0].blocks.length, block)"
                     />
