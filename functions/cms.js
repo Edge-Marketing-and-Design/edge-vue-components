@@ -2910,6 +2910,97 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
   }
 })
 
+exports.restrictedContentGetUserRuleAccess = onCall(async (request) => {
+  const data = request.data || {}
+  const orgId = String(data.orgId || '').trim()
+  const siteId = String(data.siteId || '').trim()
+  const userId = String(data.userId || '').trim()
+
+  if (!request?.auth?.uid)
+    throw new HttpsError('unauthenticated', 'Authentication required.')
+  if (!orgId || !siteId || !userId)
+    throw new HttpsError('invalid-argument', 'Missing orgId, siteId, or userId.')
+  if (userId !== request.auth.uid)
+    throw new HttpsError('permission-denied', 'userId must match the authenticated user.')
+
+  const { siteRef, audienceUsersRef, membersRef } = getRestrictedSiteRefs(orgId, siteId)
+  const siteSnap = await siteRef.get()
+  if (!siteSnap.exists)
+    throw new HttpsError('not-found', 'Site not found.')
+
+  const siteData = siteSnap.data() || {}
+  const restrictedContent = (siteData.restrictedContent && typeof siteData.restrictedContent === 'object')
+    ? siteData.restrictedContent
+    : {}
+  const configuredRuleIds = new Set(
+    (Array.isArray(restrictedContent.rules) ? restrictedContent.rules : [])
+      .map((item, index) => normalizeRestrictedRuleForFunction(item, `rule-${index + 1}`))
+      .filter(item => item.id)
+      .map(item => item.id),
+  )
+
+  const audienceUserSnap = await resolveAudienceUserForAuth(orgId, siteId, userId)
+  if (!audienceUserSnap?.exists) {
+    return {
+      success: true,
+      userId,
+      audienceUserId: '',
+      status: 'inactive',
+      registrationPaymentStatus: 'not_required',
+      ruleIds: [],
+      paidRuleIds: [],
+      pendingPaymentRuleIds: [],
+      rules: {},
+    }
+  }
+
+  const audienceUserId = audienceUserSnap.id
+  const audienceUser = audienceUserSnap.data() || {}
+  const audienceAuthUid = String(audienceUser.authUid || '').trim()
+  if (!audienceAuthUid || audienceAuthUid !== userId) {
+    await audienceUsersRef.doc(audienceUserId).set({
+      authUid: userId,
+      userId,
+      last_updated: Date.now(),
+    }, { merge: true })
+  }
+
+  const memberSnap = await membersRef.doc(audienceUserId).get()
+  const memberData = memberSnap.exists ? (memberSnap.data() || {}) : {}
+  const status = String(memberData.status || '').trim().toLowerCase() || 'inactive'
+  const registrationPaymentStatus = String(memberData.registrationPaymentStatus || '').trim().toLowerCase() || 'not_required'
+  const rawRuleIds = Array.isArray(memberData.accessRuleIds) ? memberData.accessRuleIds.filter(Boolean) : []
+  const paidRuleIdsRaw = Array.isArray(memberData.paidAccessRuleIds) ? memberData.paidAccessRuleIds.filter(Boolean) : []
+  const pendingRuleIdsRaw = Array.isArray(memberData.pendingPaymentRuleIds) ? memberData.pendingPaymentRuleIds.filter(Boolean) : []
+  const paidSet = new Set(paidRuleIdsRaw)
+  const pendingSet = new Set(pendingRuleIdsRaw)
+  const blocked = status === 'revoked' || status === 'paused'
+  const filteredRawRuleIds = rawRuleIds.filter(ruleId => configuredRuleIds.has(ruleId))
+  const ruleIds = blocked ? [] : filteredRawRuleIds.filter(ruleId => !pendingSet.has(ruleId))
+  const paidRuleIds = filteredRawRuleIds.filter(ruleId => paidSet.has(ruleId))
+  const pendingPaymentRuleIds = filteredRawRuleIds.filter(ruleId => pendingSet.has(ruleId))
+  const rules = {}
+  filteredRawRuleIds.forEach((ruleId) => {
+    rules[ruleId] = {
+      hasAccess: ruleIds.includes(ruleId),
+      isPaid: paidSet.has(ruleId),
+      paymentPending: pendingSet.has(ruleId),
+    }
+  })
+
+  return {
+    success: true,
+    userId,
+    audienceUserId,
+    status,
+    registrationPaymentStatus,
+    ruleIds,
+    paidRuleIds,
+    pendingPaymentRuleIds,
+    rules,
+  }
+})
+
 exports.restrictedContentCreateStripeLink = onCall({ timeoutSeconds: 180 }, async (request) => {
   assertCallableUser(request)
   const data = request.data || {}
