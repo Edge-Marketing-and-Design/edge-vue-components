@@ -417,14 +417,16 @@ watch(() => props.settings?.forwardApex, (value) => {
         class="w-full"
       />
       <div class="rounded-lg border border-border/60 bg-muted/40 p-4 space-y-3">
-        <edge-shad-switch
+        <edge-cms-boolean-card
           v-model="forwardApexEnabled"
           name="forwardApex"
           label="Forward Apex (non-www) domains to www"
           class="w-full"
+          checked-label="Forwarding On"
+          unchecked-label="Forwarding Off"
         >
           Use a single canonical host (www) to avoid duplicate URLs and consolidate SEO signals.
-        </edge-shad-switch>
+        </edge-cms-boolean-card>
         <p class="text-xs text-amber-700 dark:text-amber-300">
           Warning: if your DNS provider already redirects www to non-www, this can create a redirect loop.
         </p>

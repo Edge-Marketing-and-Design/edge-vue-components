@@ -2,6 +2,16 @@ import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTem
 
 export const useSiteSettingsTemplate = () => {
   const { buildSiteStructuredData } = useStructuredDataTemplates()
+  const createRestrictedContentDefaults = () => ({
+    enabled: false,
+    registrationPricing: 'free',
+    provider: 'stripe',
+    defaultCurrency: 'USD',
+    registrationTermsUrl: '',
+    loginHelpText: '',
+    registrationSuccessMessage: '',
+    rules: [],
+  })
   const createDefaults = () => ({
     name: '',
     theme: '',
@@ -32,6 +42,7 @@ export const useSiteSettingsTemplate = () => {
     socialYouTube: '',
     socialTikTok: '',
     users: [],
+    restrictedContent: createRestrictedContentDefaults(),
     aiAgentUserId: '',
     aiInstructions: '',
   })
@@ -77,6 +88,7 @@ export const useSiteSettingsTemplate = () => {
 
   return {
     createDefaults,
+    createRestrictedContentDefaults,
     createNewDocSchema,
     settingsKeys,
   }

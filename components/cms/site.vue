@@ -1,7 +1,7 @@
 <script setup lang="js">
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { CircleAlert, Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePenLine, FileStack, FileUp, FileX, FolderCog, FolderDown, FolderUp, FolderX, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload } from 'lucide-vue-next'
+import { CircleAlert, Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePenLine, FileStack, FileUp, FileX, FolderCog, FolderDown, FolderUp, FolderX, Inbox, Loader2, LockKeyhole, LockOpen, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload } from 'lucide-vue-next'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
 
 const props = defineProps({
@@ -199,6 +199,11 @@ const canEditSiteSettings = computed(() => {
     return true
   return currentOrgRoleName.value === 'admin' || currentOrgRoleName.value === 'site admin'
 })
+const canManageRestrictedContent = computed(() => {
+  if (!cmsMultiOrg.value)
+    return currentOrgRoleName.value === 'admin'
+  return currentOrgRoleName.value === 'admin' || currentOrgRoleName.value === 'site admin'
+})
 const useMenuPublishLabels = computed(() => {
   return cmsMultiOrg.value && !canEditSiteSettings.value
 })
@@ -221,6 +226,7 @@ const cmsTabAccess = computed(() => {
 const canViewPagesTab = computed(() => cmsTabAccess.value.pages)
 const canViewPostsTab = computed(() => cmsTabAccess.value.posts)
 const canViewInboxTab = computed(() => cmsTabAccess.value.inbox)
+const canViewRestrictedTab = computed(() => !isTemplateSite.value && canManageRestrictedContent.value)
 const hidePublishStatusAndActions = computed(() => cmsMultiOrg.value && !canViewPagesTab.value)
 const defaultViewMode = computed(() => {
   if (canViewPagesTab.value)
@@ -229,12 +235,15 @@ const defaultViewMode = computed(() => {
     return 'posts'
   if (canViewInboxTab.value)
     return 'submissions'
+  if (canViewRestrictedTab.value)
+    return 'restricted'
   return 'pages'
 })
 
 const siteData = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site] || {}
 })
+const restrictedContentEnabled = computed(() => Boolean(siteData.value?.restrictedContent?.enabled))
 const publishedSiteSettings = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`]?.[props.site] || {}
 })
@@ -999,6 +1008,7 @@ onBeforeMount(async () => {
 
 const isSiteDiff = computed(() => {
   const publishedSite = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`]?.[props.site]
+  const defaultRestrictedContent = createSiteSettingsDefaults().restrictedContent || {}
   if (!publishedSite && siteData.value) {
     return true
   }
@@ -1035,6 +1045,7 @@ const isSiteDiff = computed(() => {
       socialLinkedIn: publishedSite.socialLinkedIn,
       socialYouTube: publishedSite.socialYouTube,
       socialTikTok: publishedSite.socialTikTok,
+      restrictedContent: publishedSite.restrictedContent || defaultRestrictedContent,
     }, {
       domains: siteData.value.domains,
       menus: siteData.value.menus,
@@ -1064,6 +1075,7 @@ const isSiteDiff = computed(() => {
       socialLinkedIn: siteData.value.socialLinkedIn,
       socialYouTube: siteData.value.socialYouTube,
       socialTikTok: siteData.value.socialTikTok,
+      restrictedContent: siteData.value.restrictedContent || defaultRestrictedContent,
     })
   }
   return false
@@ -1098,6 +1110,7 @@ const SITE_SETTINGS_DIFF_FIELDS = [
   { key: 'socialLinkedIn', label: 'LinkedIn' },
   { key: 'socialYouTube', label: 'YouTube' },
   { key: 'socialTikTok', label: 'TikTok' },
+  { key: 'restrictedContent', label: 'Restricted Content' },
 ]
 
 const summarizeSiteSettingsValue = (value, format = '') => {
@@ -1172,6 +1185,7 @@ const discardSiteSettings = async () => {
   console.log('Discarding site settings for site:', props.site)
   const publishedSite = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`]?.[props.site]
   if (publishedSite) {
+    const defaultRestrictedContent = createSiteSettingsDefaults().restrictedContent || {}
     await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, {
       domains: publishedSite.domains || [],
       menus: publishedSite.menus || {},
@@ -1201,6 +1215,7 @@ const discardSiteSettings = async () => {
       socialLinkedIn: publishedSite.socialLinkedIn || '',
       socialYouTube: publishedSite.socialYouTube || '',
       socialTikTok: publishedSite.socialTikTok || '',
+      restrictedContent: publishedSite.restrictedContent || defaultRestrictedContent,
     })
   }
 }
@@ -1608,7 +1623,6 @@ const sitePageGridItems = computed(() => {
 
   return orderedPages
 })
-
 
 const openSitePage = (docId) => {
   const nextDocId = String(docId || '').trim()
@@ -2098,6 +2112,8 @@ const ensureValidViewMode = () => {
     nextMode = defaultViewMode.value
   if (nextMode === 'submissions' && !canViewInboxTab.value)
     nextMode = defaultViewMode.value
+  if (nextMode === 'restricted' && !canViewRestrictedTab.value)
+    nextMode = defaultViewMode.value
 
   if (state.viewMode !== nextMode)
     state.viewMode = nextMode
@@ -2120,6 +2136,8 @@ const setViewMode = (mode) => {
     return
   if (mode === 'submissions' && !canViewInboxTab.value)
     return
+  if (mode === 'restricted' && !canViewRestrictedTab.value)
+    return
   if (state.viewMode === mode)
     return
   state.viewMode = mode
@@ -2139,6 +2157,18 @@ const handlePostSelect = (postId) => {
   state.viewMode = 'posts'
   if (props.page)
     router.replace(pageRouteBase.value)
+}
+
+const handleRestrictedUsageTarget = (item) => {
+  const targetType = String(item?.targetType || '').trim()
+  const docId = String(item?.docId || '').trim()
+  if (!docId)
+    return
+  if (targetType === 'post') {
+    handlePostSelect(docId)
+    return
+  }
+  openSitePage(docId)
 }
 
 const clearPostSelection = () => {
@@ -2221,6 +2251,10 @@ watch(canEditSiteSettings, (allowed) => {
   if (!allowed && state.siteSettings) {
     state.siteSettings = false
   }
+}, { immediate: true })
+
+watch(canManageRestrictedContent, () => {
+  ensureValidViewMode()
 }, { immediate: true })
 
 watch([isViewingSubmissions, sortedSubmissionIds], () => {
@@ -2506,11 +2540,6 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                   Include user data and instructions for the first AI-generated version of the site.
                 </p>
               </div>
-              <!-- <edge-shad-switch
-                v-model="state.aiSectionOpen"
-                name="enableAi"
-                label="Add AI details"
-              /> -->
             </div>
             <div class="space-y-3">
               <edge-shad-select
@@ -2818,7 +2847,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
           </span>
         </div>
         <div class="flex justify-center">
-          <div v-if="!isTemplateSite && (canViewPagesTab || canViewPostsTab || canViewInboxTab)" class="flex items-center rounded-full border border-slate-300 bg-white p-1 shadow-sm dark:border-slate-600 dark:bg-slate-950">
+          <div v-if="!isTemplateSite && (canViewPagesTab || canViewPostsTab || canViewInboxTab || canViewRestrictedTab)" class="flex items-center rounded-full border border-slate-300 bg-white p-1 shadow-sm dark:border-slate-600 dark:bg-slate-950">
             <edge-shad-button
               v-if="canViewPagesTab"
               variant="ghost"
@@ -2863,6 +2892,20 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
               >
                 {{ unreadSubmissionsCount }}
               </span>
+            </edge-shad-button>
+            <edge-shad-button
+              v-if="canViewRestrictedTab"
+              variant="ghost"
+              size="sm"
+              class="h-8 px-4 text-xs gap-2 rounded-full"
+              :class="state.viewMode === 'restricted'
+                ? 'bg-gradient-to-r from-slate-900 to-slate-700 text-white hover:text-white shadow-sm dark:bg-gradient-to-r dark:from-slate-200 dark:to-slate-400 dark:text-slate-900 dark:hover:text-slate-900'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100'"
+              @click="setViewMode('restricted')"
+            >
+              <LockKeyhole v-if="restrictedContentEnabled" class="h-4 w-4" />
+              <LockOpen v-else class="h-4 w-4" />
+              Restrictions
             </edge-shad-button>
           </div>
         </div>
@@ -3105,6 +3148,14 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                 </div>
               </template>
             </edge-dashboard>
+          </div>
+          <div v-else-if="state.viewMode === 'restricted' && canViewRestrictedTab" class="flex-1 overflow-y-auto p-6">
+            <edge-cms-restricted-content
+              :site-id="props.site"
+              :site-doc="siteData"
+              :can-manage="canManageRestrictedContent"
+              @open-usage-target="handleRestrictedUsageTarget"
+            />
           </div>
           <div v-else-if="isEditingPost" class="w-full h-full">
             <edge-cms-posts

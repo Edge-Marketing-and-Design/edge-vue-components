@@ -19,12 +19,21 @@ const props = defineProps({
   },
 })
 const edgeFirebase = inject('edgeFirebase')
+const cmsMultiOrg = useState('cmsMultiOrg', () => false)
 const isAdmin = computed(() => {
   const orgRole = edgeFirebase?.user?.roles.find(role =>
     role.collectionPath === edgeGlobal.edgeState.organizationDocPath.replaceAll('/', '-'),
   )
 
   return orgRole && orgRole.role === 'admin'
+})
+const currentOrgRoleName = computed(() => {
+  return String(edgeGlobal.getRoleName(edgeFirebase?.user?.roles || [], edgeGlobal.edgeState.currentOrganization) || '').trim().toLowerCase()
+})
+const canManageAudienceUsers = computed(() => {
+  if (!cmsMultiOrg.value)
+    return currentOrgRoleName.value === 'admin'
+  return currentOrgRoleName.value === 'admin' || currentOrgRoleName.value === 'site admin'
 })
 const organizations = computed(() => edgeGlobal.edgeState.organizations || [])
 const currentOrg = computed(() => organizations.value.find(org => org.docId === edgeGlobal.edgeState.currentOrganization))
@@ -104,12 +113,13 @@ const firstPart = computed(() => {
         <span v-if="hasMultipleOrgs" class="ml-auto text-xs text-muted-foreground">Switch</span>
         <ChevronsUpDown v-if="hasMultipleOrgs" class="h-4 w-4 ml-2" />
       </DropdownMenuItem>
-      <template v-if="isAdmin">
+      <template v-if="isAdmin || canManageAudienceUsers">
         <DropdownMenuSeparator />
         <DropdownMenuLabel class="text-xs text-muted-foreground">
           {{ props.title }} Settings
         </DropdownMenuLabel>
         <DropdownMenuItem
+          v-if="isAdmin"
           class="cursor-pointer"
           :class="{ 'bg-accent': currentRoutePath === `${firstPart}/account/organization-settings` }"
           @click="goTo(`${firstPart}/account/organization-settings`)"
@@ -119,6 +129,7 @@ const firstPart = computed(() => {
           <Check v-if="currentRoutePath === `${firstPart}/account/organization-settings`" class="h-3 w-3 mr-2 ml-auto" />
         </DropdownMenuItem>
         <DropdownMenuItem
+          v-if="isAdmin"
           class="cursor-pointer"
           :class="{ 'bg-accent': currentRoutePath === `${firstPart}/account/organization-members` }"
           @click="goTo(`${firstPart}/account/organization-members`)"
@@ -126,6 +137,16 @@ const firstPart = computed(() => {
           <Users class="h-4 w-4 mr-2" />
           Members
           <Check v-if="currentRoutePath === `${firstPart}/account/organization-members`" class="h-3 w-3 mr-2 ml-auto" />
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          v-if="canManageAudienceUsers"
+          class="cursor-pointer"
+          :class="{ 'bg-accent': currentRoutePath === `${firstPart}/account/audience-users` }"
+          @click="goTo(`${firstPart}/account/audience-users`)"
+        >
+          <UserRoundCheck class="h-4 w-4 mr-2" />
+          Audience Users
+          <Check v-if="currentRoutePath === `${firstPart}/account/audience-users`" class="h-3 w-3 mr-2 ml-auto" />
         </DropdownMenuItem>
       </template>
       <DropdownMenuSeparator />

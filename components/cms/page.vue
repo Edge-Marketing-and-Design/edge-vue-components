@@ -26,6 +26,14 @@ const router = useRouter()
 const { buildPageStructuredData } = useStructuredDataTemplates()
 const cmsMultiOrg = useState('cmsMultiOrg', () => true)
 const isAdmin = computed(() => edgeGlobal.isAdminGlobal(edgeFirebase).value)
+const currentOrgRoleName = computed(() => {
+  return String(edgeGlobal.getRoleName(edgeFirebase?.user?.roles || [], edgeGlobal.edgeState.currentOrganization) || '').toLowerCase()
+})
+const canManageRestrictionAssignments = computed(() => {
+  if (!cmsMultiOrg.value)
+    return currentOrgRoleName.value === 'admin'
+  return currentOrgRoleName.value === 'admin' || currentOrgRoleName.value === 'site admin'
+})
 const isDevModeEnabled = computed(() => process.dev || Boolean(edgeGlobal.edgeState.devOverride))
 const canOpenPreviewBlockContentEditor = computed(() => {
   if (!isAdmin.value)
@@ -47,6 +55,8 @@ const state = reactive({
       metaTitle: { value: '' },
       metaDescription: { value: '' },
       structuredData: { value: buildPageStructuredData() },
+      restrictionRuleId: { value: '' },
+      postRestrictionRuleId: { value: '' },
     },
   },
   editMode: false,
@@ -127,6 +137,8 @@ const schemas = {
     name: z.string({
       required_error: 'Name is required',
     }).min(1, { message: 'Name is required' }),
+    restrictionRuleId: z.string().optional(),
+    postRestrictionRuleId: z.string().optional(),
   })),
 }
 
@@ -191,6 +203,54 @@ const buildScaledPreviewSurfaceStyle = (baseHeight) => {
       ? normalizedHeight
       : `calc((${normalizedHeight}) / ${previewScaleMultiplier.value})`,
   }
+}
+
+const normalizeSiteRestrictionRules = (value = []) => {
+  if (!Array.isArray(value))
+    return []
+  return value
+    .map((item, index) => {
+      const normalizedItem = (item && typeof item === 'object') ? item : {}
+      const id = String(normalizedItem.id || normalizedItem.docId || `rule-${index + 1}`).trim()
+      return {
+        id,
+        name: String(normalizedItem.name || '').trim(),
+      }
+    })
+    .filter(item => item.id)
+}
+
+const restrictedRules = computed(() => {
+  return normalizeSiteRestrictionRules(siteDoc.value?.restrictedContent?.rules)
+})
+const NO_RESTRICTION_RULE_VALUE = '__no_restriction_rule__'
+const restrictionRuleOptions = computed(() => {
+  const options = restrictedRules.value
+    .map(item => ({
+      value: item.id,
+      label: item.name || item.id,
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label))
+
+  return [{ value: NO_RESTRICTION_RULE_VALUE, label: 'No rule selected' }, ...options]
+})
+const availableRestrictionRuleCount = computed(() => Math.max(0, restrictionRuleOptions.value.length - 1))
+const isRestrictedContentEnabled = computed(() => Boolean(siteDoc.value?.restrictedContent?.enabled))
+const showRestrictionRulePicker = computed(() => {
+  if (props.isTemplateSite)
+    return false
+  if (!canManageRestrictionAssignments.value)
+    return false
+  if (!isRestrictedContentEnabled.value)
+    return false
+  return availableRestrictionRuleCount.value > 0
+})
+
+const getRestrictionRuleLabel = (ruleId) => {
+  const normalizedRuleId = String(ruleId || '').trim()
+  if (!normalizedRuleId)
+    return 'No rule selected'
+  return restrictedRules.value.find(item => item.id === normalizedRuleId)?.name || normalizedRuleId
 }
 
 const previewSurfaceRefEntries = computed(() => ([
@@ -373,9 +433,11 @@ const buildPageWorkingDocOverrides = (doc) => {
     metaTitle: doc?.metaTitle,
     metaDescription: doc?.metaDescription,
     structuredData: doc?.structuredData,
+    restrictionRuleId: doc?.restrictionRuleId,
     postMetaTitle: doc?.postMetaTitle,
     postMetaDescription: doc?.postMetaDescription,
     postStructuredData: doc?.postStructuredData,
+    postRestrictionRuleId: doc?.postRestrictionRuleId,
   }
 }
 
@@ -619,7 +681,6 @@ const ensurePreviewSnapshots = async () => {
   const sitesPath = `organizations/${orgId}/sites`
   const blocksPath = `organizations/${orgId}/blocks`
   const publishedSiteSettingsPath = `organizations/${orgId}/published-site-settings`
-
   // Non-blocking bootstrap: never hold page render on snapshot latency.
   try {
     if (!edgeFirebase.data?.[themesPath]) {
@@ -658,6 +719,7 @@ const editorDocUpdates = (workingDoc) => {
   ensureStructureDefaults(workingDoc, false)
   if (workingDoc?.post || (Array.isArray(workingDoc?.postContent) && workingDoc.postContent.length > 0) || Array.isArray(workingDoc?.postStructure))
     ensureStructureDefaults(workingDoc, true)
+  Object.assign(state.workingDoc, buildPageWorkingDocOverrides(workingDoc))
   if (props.isTemplateSite) {
     const normalizedTypes = normalizeTemplatePageTypeSelections(workingDoc?.type, { fallback: ['Page'], excludePost: Boolean(workingDoc?.post) })
     if (JSON.stringify(workingDoc?.type || []) !== JSON.stringify(normalizedTypes))
@@ -1473,9 +1535,11 @@ const isPublishedPageDiff = (pageId) => {
         metaTitle: publishedPage.metaTitle,
         metaDescription: publishedPage.metaDescription,
         structuredData: publishedPage.structuredData,
+        restrictionRuleId: publishedPage.restrictionRuleId,
         postMetaTitle: publishedPage.postMetaTitle,
         postMetaDescription: publishedPage.postMetaDescription,
         postStructuredData: publishedPage.postStructuredData,
+        postRestrictionRuleId: publishedPage.postRestrictionRuleId,
       },
       {
         content: draftPage.content,
@@ -1485,9 +1549,11 @@ const isPublishedPageDiff = (pageId) => {
         metaTitle: draftPage.metaTitle,
         metaDescription: draftPage.metaDescription,
         structuredData: draftPage.structuredData,
+        restrictionRuleId: draftPage.restrictionRuleId,
         postMetaTitle: draftPage.postMetaTitle,
         postMetaDescription: draftPage.postMetaDescription,
         postStructuredData: draftPage.postStructuredData,
+        postRestrictionRuleId: draftPage.postRestrictionRuleId,
       },
     )
   }
@@ -1787,9 +1853,11 @@ const buildComparablePageDiffDoc = (doc) => {
     metaTitle: doc.metaTitle ?? '',
     metaDescription: doc.metaDescription ?? '',
     structuredData: doc.structuredData ?? null,
+    restrictionRuleId: doc.restrictionRuleId ?? '',
     postMetaTitle: doc.postMetaTitle ?? '',
     postMetaDescription: doc.postMetaDescription ?? '',
     postStructuredData: doc.postStructuredData ?? null,
+    postRestrictionRuleId: doc.postRestrictionRuleId ?? '',
   }
 }
 
@@ -2229,6 +2297,12 @@ const applyImportedPageSeoDefaults = (doc) => {
   if (!isPlainObject(doc))
     return doc
 
+  if (typeof doc.restrictionRuleId !== 'string')
+    doc.restrictionRuleId = ''
+
+  if (typeof doc.postRestrictionRuleId !== 'string')
+    doc.postRestrictionRuleId = ''
+
   if (isBlankString(doc.structuredData))
     doc.structuredData = buildPageStructuredData()
 
@@ -2241,6 +2315,11 @@ const applyImportedPageSeoDefaults = (doc) => {
 const validateImportedPageDoc = (doc) => {
   if (!isPlainObject(doc))
     throw new Error(INVALID_PAGE_IMPORT_MESSAGE)
+
+  if (!Object.prototype.hasOwnProperty.call(doc, 'restrictionRuleId'))
+    doc.restrictionRuleId = ''
+  if (!Object.prototype.hasOwnProperty.call(doc, 'postRestrictionRuleId'))
+    doc.postRestrictionRuleId = ''
 
   const requiredKeys = Object.keys(state.newDocs?.pages || {})
   const missing = requiredKeys.filter(key => !Object.prototype.hasOwnProperty.call(doc, key))
@@ -2712,6 +2791,8 @@ watch (currentPage, (newPage) => {
   state.workingDoc.metaTitle = newPage?.metaTitle
   state.workingDoc.metaDescription = newPage?.metaDescription
   state.workingDoc.structuredData = newPage?.structuredData
+  state.workingDoc.restrictionRuleId = newPage?.restrictionRuleId
+  state.workingDoc.postRestrictionRuleId = newPage?.postRestrictionRuleId
 }, { immediate: true, deep: true })
 
 watch(selectedHistoryEntry, (entry) => {
@@ -3069,9 +3150,11 @@ const buildPageChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel }
   compareField('metaTitle', 'Meta title', val => summarizeChangeValue(val, true), { viewScope: 'list' })
   compareField('metaDescription', 'Meta description', val => summarizeChangeValue(val, true), { viewScope: 'list' })
   compareField('structuredData', 'Structured data', val => summarizeChangeValue(val, true), { viewScope: 'list' })
+  compareField('restrictionRuleId', 'Restriction rule', val => getRestrictionRuleLabel(val), { viewScope: 'list' })
   compareField('postMetaTitle', 'Detail meta title', val => summarizeChangeValue(val, true), { viewScope: 'post' })
   compareField('postMetaDescription', 'Detail meta description', val => summarizeChangeValue(val, true), { viewScope: 'post' })
   compareField('postStructuredData', 'Detail structured data', val => summarizeChangeValue(val, true), { viewScope: 'post' })
+  compareField('postRestrictionRuleId', 'Detail restriction rule', val => getRestrictionRuleLabel(val), { viewScope: 'post' })
 
   return changes
 }
@@ -3658,6 +3741,17 @@ const hasUnsavedChanges = (changes) => {
                           label="Meta Description"
                           name="page-settings-metaDescription"
                         />
+                        <edge-shad-select
+                          v-if="showRestrictionRulePicker"
+                          :model-value="slotProps.workingDoc.restrictionRuleId || NO_RESTRICTION_RULE_VALUE"
+                          :items="restrictionRuleOptions"
+                          item-title="label"
+                          item-value="value"
+                          label="Restriction Rule"
+                          name="page-settings-restrictionRuleId"
+                          description="Choose which access rule should protect this page."
+                          @update:model-value="value => slotProps.workingDoc.restrictionRuleId = value === NO_RESTRICTION_RULE_VALUE ? '' : value"
+                        />
                         <div class="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
                           CMS tokens in double curly braces are replaced on the front end.
                           Example: <span v-pre class="font-semibold text-foreground">"{{cms-site}}"</span> for the site URL,
@@ -3690,6 +3784,17 @@ const hasUnsavedChanges = (changes) => {
                           v-model="slotProps.workingDoc.postMetaDescription"
                           label="Meta Description"
                           name="page-settings-postMetaDescription"
+                        />
+                        <edge-shad-select
+                          v-if="showRestrictionRulePicker"
+                          :model-value="slotProps.workingDoc.postRestrictionRuleId || NO_RESTRICTION_RULE_VALUE"
+                          :items="restrictionRuleOptions"
+                          item-title="label"
+                          item-value="value"
+                          label="Restriction Rule"
+                          name="page-settings-postRestrictionRuleId"
+                          description="Choose which access rule should protect each detail page."
+                          @update:model-value="value => slotProps.workingDoc.postRestrictionRuleId = value === NO_RESTRICTION_RULE_VALUE ? '' : value"
                         />
                         <div class="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
                           CMS tokens in double curly braces are replaced on the front end.
