@@ -1638,6 +1638,16 @@ const openSitePageSettings = (item) => {
   pageMenuRef.value?.openPageSettings?.(item.menuEntry)
 }
 
+const openSitePageVersions = (item) => {
+  const docId = String(item?.docId || '').trim()
+  if (!docId)
+    return
+  router.push({
+    path: `${pageRouteBase.value}/${docId}`,
+    query: { history: '1' },
+  })
+}
+
 const openSitePageRename = (item) => {
   if (!item?.menuEntry)
     return
@@ -2408,11 +2418,75 @@ const isAnyPagesPublished = computed(() => {
   return Object.keys(publishedData).length > 0
 })
 
+const normalizeRestrictedPageRuleAssignments = (value = {}) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return {}
+  return Object.entries(value).reduce((acc, [key, ruleId]) => {
+    const normalizedKey = String(key || '').trim()
+    const normalizedRuleId = String(ruleId || '').trim()
+    if (normalizedKey && normalizedRuleId)
+      acc[normalizedKey] = normalizedRuleId
+    return acc
+  }, {})
+}
+
+const getPageRestrictionAssignmentKey = (pageId, isDetail = false) => {
+  const normalizedPageId = String(pageId || '').trim()
+  if (!normalizedPageId)
+    return ''
+  return isDetail ? `${normalizedPageId}-details` : normalizedPageId
+}
+
+const persistSitePageRuleAssignments = async (pageId, restrictionRuleId = '', postRestrictionRuleId = '') => {
+  const normalizedPageId = String(pageId || '').trim()
+  if (!normalizedPageId)
+    return
+
+  const currentAssignments = normalizeRestrictedPageRuleAssignments(siteData.value?.restrictedContent?.pageRuleAssignments)
+  const nextAssignments = { ...currentAssignments }
+  const listKey = getPageRestrictionAssignmentKey(normalizedPageId, false)
+  const detailKey = getPageRestrictionAssignmentKey(normalizedPageId, true)
+  const normalizedListRuleId = String(restrictionRuleId || '').trim()
+  const normalizedDetailRuleId = String(postRestrictionRuleId || '').trim()
+
+  if (normalizedListRuleId)
+    nextAssignments[listKey] = normalizedListRuleId
+  else
+    delete nextAssignments[listKey]
+
+  if (normalizedDetailRuleId)
+    nextAssignments[detailKey] = normalizedDetailRuleId
+  else
+    delete nextAssignments[detailKey]
+
+  if (areEqualNormalized(currentAssignments, nextAssignments))
+    return
+
+  const nextRestrictedContent = {
+    ...((siteData.value?.restrictedContent && typeof siteData.value.restrictedContent === 'object') ? siteData.value.restrictedContent : {}),
+    pageRuleAssignments: nextAssignments,
+  }
+  await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, {
+    restrictedContent: nextRestrictedContent,
+  })
+}
+
 const pageSettingsUpdated = async (pageData) => {
-  console.log('Page settings updated:', pageData)
+  const pageId = String(pageData?.pageId || '').trim()
   state.updating = true
-  await nextTick()
-  state.updating = false
+  try {
+    if (pageId) {
+      await persistSitePageRuleAssignments(
+        pageId,
+        pageData?.restrictionRuleId,
+        pageData?.postRestrictionRuleId,
+      )
+    }
+    await nextTick()
+  }
+  finally {
+    state.updating = false
+  }
 }
 
 const getNextVersion = (value) => {
@@ -3276,6 +3350,10 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                                 <DropdownMenuItem @click="exportSitePage(item)">
                                   <Download />
                                   <span>Export Page</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem @click="openSitePageVersions(item)">
+                                  <FileStack />
+                                  <span>Versions</span>
                                 </DropdownMenuItem>
                                 <DropdownMenuItem v-if="isPublishedPageDiff(item.docId)" @click="publishSitePage(item)">
                                   <FileUp />

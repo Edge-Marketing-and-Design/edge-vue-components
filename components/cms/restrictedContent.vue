@@ -87,7 +87,7 @@ const membersCollection = computed(() => `sites/${props.siteId}/restricted-membe
 const membersCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/${membersCollection.value}`)
 const pagesCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.siteId}/pages`)
 const postsCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.siteId}/posts`)
-const audienceUsersCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/audience-users`)
+const audienceUsersCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.siteId}/audience-users`)
 const stripeIntegrationCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.siteId}/private-integrations`)
 
 const sitePages = computed(() => edgeFirebase.data?.[pagesCollectionPath.value] || {})
@@ -109,7 +109,6 @@ const state = reactive({
   memberFilter: '',
   selectedRuleId: '',
   selectedMemberId: '',
-  memberCreateMode: 'existing',
   memberManualName: '',
   memberManualEmail: '',
   memberManualError: '',
@@ -149,7 +148,6 @@ const memberDocSchema = {
 }
 
 const resetMemberManualCreate = () => {
-  state.memberCreateMode = 'existing'
   state.memberManualName = ''
   state.memberManualEmail = ''
   state.memberManualError = ''
@@ -158,16 +156,6 @@ const resetMemberManualCreate = () => {
 
 const currentRules = computed(() => {
   return normalizeRestrictedRules(state.settings.rules)
-})
-
-const audienceUserOptions = computed(() => {
-  return Object.values(audienceUsers.value || {})
-    .filter(item => item?.docId)
-    .map(item => ({
-      value: item.docId,
-      label: item.name || item.email || item.docId,
-    }))
-    .sort((a, b) => a.label.localeCompare(b.label))
 })
 
 const ruleTagItems = computed(() => {
@@ -688,7 +676,6 @@ const createAudienceUserFromMember = async (workingDoc) => {
   })
   if (existingAudienceUser?.docId) {
     workingDoc.audienceUserId = existingAudienceUser.docId
-    state.memberCreateMode = 'existing'
     state.memberManualError = ''
     return
   }
@@ -697,14 +684,20 @@ const createAudienceUserFromMember = async (workingDoc) => {
   state.memberManualError = ''
   try {
     const docId = (globalThis.crypto?.randomUUID?.() || `aud-${Date.now()}`)
+    const audienceUserDocPermissionPath = `organizations-${edgeGlobal.edgeState.currentOrganization}-sites-${props.siteId}-audience-users-${docId}`
     await edgeFirebase.storeDoc('staged-users', {
       docId,
       meta: {
         name,
         email,
       },
-      roles: {},
-      collectionPaths: [],
+      roles: {
+        [audienceUserDocPermissionPath]: {
+          collectionPath: audienceUserDocPermissionPath,
+          role: 'user',
+        },
+      },
+      collectionPaths: [audienceUserDocPermissionPath],
       specialPermissions: {},
       userId: '',
     }, docId)
@@ -721,7 +714,6 @@ const createAudienceUserFromMember = async (workingDoc) => {
     }, docId)
 
     workingDoc.audienceUserId = docId
-    state.memberCreateMode = 'existing'
     state.memberManualName = ''
     state.memberManualEmail = ''
   }
@@ -1079,9 +1071,6 @@ onBeforeUnmount(async () => {
                         <span class="rounded-full bg-slate-100 px-2 py-1 text-slate-800 dark:bg-slate-800 dark:text-slate-200">
                           {{ getRuleUsageCounts(item.id).pageCount }} pages
                         </span>
-                        <span class="rounded-full bg-slate-100 px-2 py-1 text-slate-800 dark:bg-slate-800 dark:text-slate-200">
-                          {{ getRuleUsageCounts(item.id).postCount }} posts
-                        </span>
                       </div>
                     </div>
                     <edge-shad-button
@@ -1372,8 +1361,6 @@ onBeforeUnmount(async () => {
                   <template #main="slotProps">
                     <edge-shad-form
                       :initial-values="{
-                        'restricted-member-create-mode': state.memberCreateMode,
-                        'restricted-member-audience-user': slotProps.workingDoc.audienceUserId,
                         'restricted-member-manual-name': state.memberManualName,
                         'restricted-member-manual-email': state.memberManualEmail,
                         'restricted-member-status': slotProps.workingDoc.status,
@@ -1383,35 +1370,7 @@ onBeforeUnmount(async () => {
                       }"
                     >
                       <div class="space-y-4 px-6 pt-6 pb-6">
-                        <div class="grid gap-4 md:grid-cols-2">
-                          <edge-shad-select
-                            v-model="state.memberCreateMode"
-                            name="restricted-member-create-mode"
-                            label="Person"
-                            :items="[
-                              { label: 'Choose Existing', value: 'existing' },
-                              { label: 'Create New', value: 'new' },
-                            ]"
-                            item-title="label"
-                            item-value="value"
-                          />
-                          <div v-if="state.memberCreateMode === 'existing'" class="rounded-lg border border-dashed border-border/70 bg-muted/20 p-3 text-sm text-muted-foreground">
-                            Choose someone you already added to the organization.
-                          </div>
-                          <div v-else class="rounded-lg border border-dashed border-border/70 bg-muted/20 p-3 text-sm text-muted-foreground">
-                            Create the person here and a sign-up record will be created for them automatically.
-                          </div>
-                        </div>
-                        <edge-shad-select
-                          v-if="state.memberCreateMode === 'existing'"
-                          v-model="slotProps.workingDoc.audienceUserId"
-                          name="restricted-member-audience-user"
-                          label="Audience User"
-                          :items="audienceUserOptions"
-                          item-title="label"
-                          item-value="value"
-                        />
-                        <div v-else class="space-y-4 rounded-lg border border-border/60 bg-muted/20 p-4">
+                        <div class="space-y-4 rounded-lg border border-border/60 bg-muted/20 p-4">
                           <div class="grid gap-4 md:grid-cols-2">
                             <edge-shad-input
                               v-model="state.memberManualName"

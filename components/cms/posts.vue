@@ -4258,18 +4258,6 @@ const reindexPublishedPostsToKv = async () => {
                     label="Post Type"
                     :disabled="slotProps.submitting"
                   />
-                  <edge-shad-select
-                    v-if="showRestrictionRulePicker"
-                    :model-value="slotProps.workingDoc.restrictionRuleId || NO_RESTRICTION_RULE_VALUE"
-                    :items="restrictionRuleOptions"
-                    item-title="label"
-                    item-value="value"
-                    name="restrictionRuleId"
-                    label="Restriction Rule"
-                    description="Choose which access rule should protect this post."
-                    :disabled="slotProps.submitting"
-                    @update:model-value="value => slotProps.workingDoc.restrictionRuleId = value === NO_RESTRICTION_RULE_VALUE ? '' : value"
-                  />
                 </div>
                 <div
                   v-if="slotProps.workingDoc.type === 'event'"
@@ -4662,18 +4650,6 @@ const reindexPublishedPostsToKv = async () => {
               name="title"
               label="Title"
               :disabled="slotProps.submitting"
-            />
-            <edge-shad-select
-              v-if="showRestrictionRulePicker"
-              :model-value="slotProps.workingDoc.restrictionRuleId || NO_RESTRICTION_RULE_VALUE"
-              :items="restrictionRuleOptions"
-              item-title="label"
-              item-value="value"
-              name="restrictionRuleId"
-              label="Restriction Rule"
-              description="Choose which access rule should protect this post."
-              :disabled="slotProps.submitting"
-              @update:model-value="value => slotProps.workingDoc.restrictionRuleId = value === NO_RESTRICTION_RULE_VALUE ? '' : value"
             />
             <div class="relative bg-muted py-2 h-48 rounded-md flex items-center justify-center hover:opacity-80 transition-opacity cursor-pointer">
               <div class="bg-black/80 absolute left-0 top-0 w-full h-full opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center z-10 cursor-pointer">

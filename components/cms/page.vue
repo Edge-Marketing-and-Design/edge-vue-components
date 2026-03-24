@@ -55,8 +55,6 @@ const state = reactive({
       metaTitle: { value: '' },
       metaDescription: { value: '' },
       structuredData: { value: buildPageStructuredData() },
-      restrictionRuleId: { value: '' },
-      postRestrictionRuleId: { value: '' },
     },
   },
   editMode: false,
@@ -121,6 +119,9 @@ const state = reactive({
   renamePageSubmitting: false,
   deletePageDialogOpen: false,
   deletePageSubmitting: false,
+  pageSettingsRestrictionRuleId: '',
+  pageSettingsPostRestrictionRuleId: '',
+  savingPageRuleAssignments: false,
 })
 
 const pageImportInputRef = ref(null)
@@ -137,8 +138,6 @@ const schemas = {
     name: z.string({
       required_error: 'Name is required',
     }).min(1, { message: 'Name is required' }),
-    restrictionRuleId: z.string().optional(),
-    postRestrictionRuleId: z.string().optional(),
   })),
 }
 
@@ -220,8 +219,23 @@ const normalizeSiteRestrictionRules = (value = []) => {
     .filter(item => item.id)
 }
 
+const normalizeRestrictedPageRuleAssignments = (value = {}) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return {}
+  return Object.entries(value).reduce((acc, [key, ruleId]) => {
+    const normalizedKey = String(key || '').trim()
+    const normalizedRuleId = String(ruleId || '').trim()
+    if (normalizedKey && normalizedRuleId)
+      acc[normalizedKey] = normalizedRuleId
+    return acc
+  }, {})
+}
+
 const restrictedRules = computed(() => {
   return normalizeSiteRestrictionRules(siteDoc.value?.restrictedContent?.rules)
+})
+const restrictedPageRuleAssignments = computed(() => {
+  return normalizeRestrictedPageRuleAssignments(siteDoc.value?.restrictedContent?.pageRuleAssignments)
 })
 const NO_RESTRICTION_RULE_VALUE = '__no_restriction_rule__'
 const restrictionRuleOptions = computed(() => {
@@ -251,6 +265,20 @@ const getRestrictionRuleLabel = (ruleId) => {
   if (!normalizedRuleId)
     return 'No rule selected'
   return restrictedRules.value.find(item => item.id === normalizedRuleId)?.name || normalizedRuleId
+}
+
+const getPageRestrictionAssignmentKey = (pageId, isDetail = false) => {
+  const normalizedPageId = String(pageId || '').trim()
+  if (!normalizedPageId)
+    return ''
+  return isDetail ? `${normalizedPageId}-details` : normalizedPageId
+}
+
+const getPageRestrictionAssignment = (pageId, isDetail = false) => {
+  const key = getPageRestrictionAssignmentKey(pageId, isDetail)
+  if (!key)
+    return ''
+  return String(restrictedPageRuleAssignments.value?.[key] || '').trim()
 }
 
 const previewSurfaceRefEntries = computed(() => ([
@@ -433,11 +461,9 @@ const buildPageWorkingDocOverrides = (doc) => {
     metaTitle: doc?.metaTitle,
     metaDescription: doc?.metaDescription,
     structuredData: doc?.structuredData,
-    restrictionRuleId: doc?.restrictionRuleId,
     postMetaTitle: doc?.postMetaTitle,
     postMetaDescription: doc?.postMetaDescription,
     postStructuredData: doc?.postStructuredData,
-    postRestrictionRuleId: doc?.postRestrictionRuleId,
   }
 }
 
@@ -716,6 +742,10 @@ const getNextVersion = (value) => {
 }
 
 const editorDocUpdates = (workingDoc) => {
+  if (workingDoc && Object.prototype.hasOwnProperty.call(workingDoc, 'restrictionRuleId'))
+    delete workingDoc.restrictionRuleId
+  if (workingDoc && Object.prototype.hasOwnProperty.call(workingDoc, 'postRestrictionRuleId'))
+    delete workingDoc.postRestrictionRuleId
   ensureStructureDefaults(workingDoc, false)
   if (workingDoc?.post || (Array.isArray(workingDoc?.postContent) && workingDoc.postContent.length > 0) || Array.isArray(workingDoc?.postStructure))
     ensureStructureDefaults(workingDoc, true)
@@ -1535,11 +1565,9 @@ const isPublishedPageDiff = (pageId) => {
         metaTitle: publishedPage.metaTitle,
         metaDescription: publishedPage.metaDescription,
         structuredData: publishedPage.structuredData,
-        restrictionRuleId: publishedPage.restrictionRuleId,
         postMetaTitle: publishedPage.postMetaTitle,
         postMetaDescription: publishedPage.postMetaDescription,
         postStructuredData: publishedPage.postStructuredData,
-        postRestrictionRuleId: publishedPage.postRestrictionRuleId,
       },
       {
         content: draftPage.content,
@@ -1549,11 +1577,9 @@ const isPublishedPageDiff = (pageId) => {
         metaTitle: draftPage.metaTitle,
         metaDescription: draftPage.metaDescription,
         structuredData: draftPage.structuredData,
-        restrictionRuleId: draftPage.restrictionRuleId,
         postMetaTitle: draftPage.postMetaTitle,
         postMetaDescription: draftPage.postMetaDescription,
         postStructuredData: draftPage.postStructuredData,
-        postRestrictionRuleId: draftPage.postRestrictionRuleId,
       },
     )
   }
@@ -1853,11 +1879,9 @@ const buildComparablePageDiffDoc = (doc) => {
     metaTitle: doc.metaTitle ?? '',
     metaDescription: doc.metaDescription ?? '',
     structuredData: doc.structuredData ?? null,
-    restrictionRuleId: doc.restrictionRuleId ?? '',
     postMetaTitle: doc.postMetaTitle ?? '',
     postMetaDescription: doc.postMetaDescription ?? '',
     postStructuredData: doc.postStructuredData ?? null,
-    postRestrictionRuleId: doc.postRestrictionRuleId ?? '',
   }
 }
 
@@ -2297,12 +2321,6 @@ const applyImportedPageSeoDefaults = (doc) => {
   if (!isPlainObject(doc))
     return doc
 
-  if (typeof doc.restrictionRuleId !== 'string')
-    doc.restrictionRuleId = ''
-
-  if (typeof doc.postRestrictionRuleId !== 'string')
-    doc.postRestrictionRuleId = ''
-
   if (isBlankString(doc.structuredData))
     doc.structuredData = buildPageStructuredData()
 
@@ -2315,11 +2333,6 @@ const applyImportedPageSeoDefaults = (doc) => {
 const validateImportedPageDoc = (doc) => {
   if (!isPlainObject(doc))
     throw new Error(INVALID_PAGE_IMPORT_MESSAGE)
-
-  if (!Object.prototype.hasOwnProperty.call(doc, 'restrictionRuleId'))
-    doc.restrictionRuleId = ''
-  if (!Object.prototype.hasOwnProperty.call(doc, 'postRestrictionRuleId'))
-    doc.postRestrictionRuleId = ''
 
   const requiredKeys = Object.keys(state.newDocs?.pages || {})
   const missing = requiredKeys.filter(key => !Object.prototype.hasOwnProperty.call(doc, key))
@@ -2467,6 +2480,8 @@ const openRenamePageDialog = () => {
 const openCurrentPageSettings = async () => {
   if (!currentPage.value || !props.page || props.page === 'new')
     return
+  state.pageSettingsRestrictionRuleId = getPageRestrictionAssignment(props.page, false)
+  state.pageSettingsPostRestrictionRuleId = getPageRestrictionAssignment(props.page, true)
   state.pageSettingsOpen = true
 }
 
@@ -2555,7 +2570,17 @@ const deleteCurrentPage = async () => {
   try {
     if (!props.isTemplateSite) {
       const nextMenus = removePageFromMenus(siteDoc.value?.menus, props.page)
-      await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, { menus: nextMenus })
+      const nextAssignments = { ...normalizeRestrictedPageRuleAssignments(siteDoc.value?.restrictedContent?.pageRuleAssignments) }
+      delete nextAssignments[getPageRestrictionAssignmentKey(props.page, false)]
+      delete nextAssignments[getPageRestrictionAssignmentKey(props.page, true)]
+      const nextRestrictedContent = {
+        ...((siteDoc.value?.restrictedContent && typeof siteDoc.value.restrictedContent === 'object') ? siteDoc.value.restrictedContent : {}),
+        pageRuleAssignments: nextAssignments,
+      }
+      await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, {
+        menus: nextMenus,
+        restrictedContent: nextRestrictedContent,
+      })
       if (isPagePublished(props.page))
         await edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`, props.page)
     }
@@ -2696,6 +2721,72 @@ const unPublishCurrentPage = async () => {
   }
 }
 
+const persistPageRestrictionAssignments = async (pageId = props.page) => {
+  const normalizedPageId = String(pageId || '').trim()
+  if (!normalizedPageId || props.isTemplateSite)
+    return
+
+  const currentAssignments = normalizeRestrictedPageRuleAssignments(siteDoc.value?.restrictedContent?.pageRuleAssignments)
+  const nextAssignments = { ...currentAssignments }
+  const listAssignment = String(state.pageSettingsRestrictionRuleId || '').trim()
+  const detailAssignment = String(state.pageSettingsPostRestrictionRuleId || '').trim()
+  const listKey = getPageRestrictionAssignmentKey(normalizedPageId, false)
+  const detailKey = getPageRestrictionAssignmentKey(normalizedPageId, true)
+
+  if (listAssignment)
+    nextAssignments[listKey] = listAssignment
+  else
+    delete nextAssignments[listKey]
+
+  if (detailAssignment)
+    nextAssignments[detailKey] = detailAssignment
+  else
+    delete nextAssignments[detailKey]
+
+  if (JSON.stringify(currentAssignments) === JSON.stringify(nextAssignments))
+    return
+
+  state.savingPageRuleAssignments = true
+  try {
+    const nextRestrictedContent = {
+      ...((siteDoc.value?.restrictedContent && typeof siteDoc.value.restrictedContent === 'object') ? siteDoc.value.restrictedContent : {}),
+      pageRuleAssignments: nextAssignments,
+    }
+    await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, {
+      restrictedContent: nextRestrictedContent,
+    })
+  }
+  finally {
+    state.savingPageRuleAssignments = false
+  }
+}
+
+const handlePageSettingsUpdate = async (submit) => {
+  if (state.savingPageRuleAssignments)
+    return
+
+  try {
+    if (!props.isTemplateSite && props.page && props.page !== 'new')
+      await persistPageRestrictionAssignments(props.page)
+    await submit()
+    state.pageSettingsOpen = false
+  }
+  catch (error) {
+    console.error('Failed to update page settings', error)
+    notifyError('Failed to update page settings.')
+  }
+}
+
+const handlePageSaved = async ({ docId }) => {
+  try {
+    await persistPageRestrictionAssignments(docId || props.page)
+  }
+  catch (error) {
+    console.error('Failed to save page restriction assignments', error)
+    edgeFirebase?.toast?.error?.('Page saved, but the restriction setting could not be updated.')
+  }
+}
+
 const _triggerPageImport = () => {
   pageImportInputRef.value?.click()
 }
@@ -2791,8 +2882,13 @@ watch (currentPage, (newPage) => {
   state.workingDoc.metaTitle = newPage?.metaTitle
   state.workingDoc.metaDescription = newPage?.metaDescription
   state.workingDoc.structuredData = newPage?.structuredData
-  state.workingDoc.restrictionRuleId = newPage?.restrictionRuleId
-  state.workingDoc.postRestrictionRuleId = newPage?.postRestrictionRuleId
+}, { immediate: true, deep: true })
+
+watch([() => props.page, restrictedPageRuleAssignments], () => {
+  if (!state.pageSettingsOpen) {
+    state.pageSettingsRestrictionRuleId = getPageRestrictionAssignment(props.page, false)
+    state.pageSettingsPostRestrictionRuleId = getPageRestrictionAssignment(props.page, true)
+  }
 }, { immediate: true, deep: true })
 
 watch(selectedHistoryEntry, (entry) => {
@@ -3150,11 +3246,9 @@ const buildPageChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel }
   compareField('metaTitle', 'Meta title', val => summarizeChangeValue(val, true), { viewScope: 'list' })
   compareField('metaDescription', 'Meta description', val => summarizeChangeValue(val, true), { viewScope: 'list' })
   compareField('structuredData', 'Structured data', val => summarizeChangeValue(val, true), { viewScope: 'list' })
-  compareField('restrictionRuleId', 'Restriction rule', val => getRestrictionRuleLabel(val), { viewScope: 'list' })
   compareField('postMetaTitle', 'Detail meta title', val => summarizeChangeValue(val, true), { viewScope: 'post' })
   compareField('postMetaDescription', 'Detail meta description', val => summarizeChangeValue(val, true), { viewScope: 'post' })
   compareField('postStructuredData', 'Detail structured data', val => summarizeChangeValue(val, true), { viewScope: 'post' })
-  compareField('postRestrictionRuleId', 'Detail restriction rule', val => getRestrictionRuleLabel(val), { viewScope: 'post' })
 
   return changes
 }
@@ -3311,6 +3405,7 @@ const hasUnsavedChanges = (changes) => {
     :working-doc-overrides="state.workingDoc"
     @working-doc="editorDocUpdates"
     @unsaved-changes="hasUnsavedChanges"
+    @saved="handlePageSaved"
   >
     <template #header="slotProps">
       <div class="rounded-none relative flex flex-col gap-2 p-2 top-0 z-50 rounded border border-stone-300 bg-stone-100 text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100">
@@ -3743,14 +3838,14 @@ const hasUnsavedChanges = (changes) => {
                         />
                         <edge-shad-select
                           v-if="showRestrictionRulePicker"
-                          :model-value="slotProps.workingDoc.restrictionRuleId || NO_RESTRICTION_RULE_VALUE"
+                          :model-value="state.pageSettingsRestrictionRuleId || NO_RESTRICTION_RULE_VALUE"
                           :items="restrictionRuleOptions"
                           item-title="label"
                           item-value="value"
                           label="Restriction Rule"
                           name="page-settings-restrictionRuleId"
                           description="Choose which access rule should protect this page."
-                          @update:model-value="value => slotProps.workingDoc.restrictionRuleId = value === NO_RESTRICTION_RULE_VALUE ? '' : value"
+                          @update:model-value="value => state.pageSettingsRestrictionRuleId = value === NO_RESTRICTION_RULE_VALUE ? '' : value"
                         />
                         <div class="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
                           CMS tokens in double curly braces are replaced on the front end.
@@ -3787,14 +3882,14 @@ const hasUnsavedChanges = (changes) => {
                         />
                         <edge-shad-select
                           v-if="showRestrictionRulePicker"
-                          :model-value="slotProps.workingDoc.postRestrictionRuleId || NO_RESTRICTION_RULE_VALUE"
+                          :model-value="state.pageSettingsPostRestrictionRuleId || NO_RESTRICTION_RULE_VALUE"
                           :items="restrictionRuleOptions"
                           item-title="label"
                           item-value="value"
                           label="Restriction Rule"
                           name="page-settings-postRestrictionRuleId"
                           description="Choose which access rule should protect each detail page."
-                          @update:model-value="value => slotProps.workingDoc.postRestrictionRuleId = value === NO_RESTRICTION_RULE_VALUE ? '' : value"
+                          @update:model-value="value => state.pageSettingsPostRestrictionRuleId = value === NO_RESTRICTION_RULE_VALUE ? '' : value"
                         />
                         <div class="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
                           CMS tokens in double curly braces are replaced on the front end.
@@ -3821,10 +3916,10 @@ const hasUnsavedChanges = (changes) => {
                   Cancel
                 </edge-shad-button>
                 <edge-shad-button
-                  type="submit"
+                  type="button"
                   class="bg-slate-800 hover:bg-slate-400 w-full"
-                  :disabled="slotProps.submitting || hasStructuredDataErrors(slotProps.workingDoc)"
-                  @click="state.pageSettingsOpen = false"
+                  :disabled="slotProps.submitting || state.savingPageRuleAssignments || hasStructuredDataErrors(slotProps.workingDoc)"
+                  @click="handlePageSettingsUpdate(slotProps.onSubmit)"
                 >
                   <Loader2 v-if="slotProps.submitting" class="h-4 w-4 animate-spin" />
                   <span v-else>Update</span>

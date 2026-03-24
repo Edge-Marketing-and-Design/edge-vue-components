@@ -52,6 +52,7 @@ const modelValue = useVModel(props, 'modelValue', emit)
 const edgeFirebase = inject('edgeFirebase')
 const { saveJsonFile } = useJsonFileSave()
 const { buildPageStructuredData } = useStructuredDataTemplates()
+const cmsMultiOrg = useState('cmsMultiOrg', () => true)
 
 const isExternalLinkEntry = entry => entry?.item && typeof entry.item === 'object' && entry.item.type === 'external'
 const isPageEntry = entry => typeof entry?.item === 'string'
@@ -157,6 +158,80 @@ const ensurePostSeoDefaults = (doc) => {
     doc.postMetaDescription = doc.metaDescription || ''
   if (isBlankString(doc.postStructuredData))
     doc.postStructuredData = doc.structuredData || buildPageStructuredData()
+}
+const normalizeSiteRestrictionRules = (value = []) => {
+  if (!Array.isArray(value))
+    return []
+  return value
+    .map((item, index) => {
+      const normalizedItem = (item && typeof item === 'object') ? item : {}
+      const id = String(normalizedItem.id || normalizedItem.docId || `rule-${index + 1}`).trim()
+      return {
+        id,
+        name: String(normalizedItem.name || '').trim(),
+      }
+    })
+    .filter(item => item.id)
+}
+const normalizeRestrictedPageRuleAssignments = (value = {}) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return {}
+  return Object.entries(value).reduce((acc, [key, ruleId]) => {
+    const normalizedKey = String(key || '').trim()
+    const normalizedRuleId = String(ruleId || '').trim()
+    if (normalizedKey && normalizedRuleId)
+      acc[normalizedKey] = normalizedRuleId
+    return acc
+  }, {})
+}
+const currentOrgRoleName = computed(() => {
+  return String(edgeGlobal.getRoleName(edgeFirebase?.user?.roles || [], edgeGlobal.edgeState.currentOrganization) || '').toLowerCase()
+})
+const canManageRestrictionAssignments = computed(() => {
+  if (!cmsMultiOrg.value)
+    return currentOrgRoleName.value === 'admin'
+  return currentOrgRoleName.value === 'admin' || currentOrgRoleName.value === 'site admin'
+})
+const siteDoc = computed(() => {
+  return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site] || {}
+})
+const restrictedRules = computed(() => {
+  return normalizeSiteRestrictionRules(siteDoc.value?.restrictedContent?.rules)
+})
+const restrictedPageRuleAssignments = computed(() => {
+  return normalizeRestrictedPageRuleAssignments(siteDoc.value?.restrictedContent?.pageRuleAssignments)
+})
+const NO_RESTRICTION_RULE_VALUE = '__no_restriction_rule__'
+const restrictionRuleOptions = computed(() => {
+  const options = restrictedRules.value
+    .map(item => ({
+      value: item.id,
+      label: item.name || item.id,
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label))
+  return [{ value: NO_RESTRICTION_RULE_VALUE, label: 'No rule selected' }, ...options]
+})
+const isRestrictedContentEnabled = computed(() => Boolean(siteDoc.value?.restrictedContent?.enabled))
+const showRestrictionRulePicker = computed(() => {
+  if (props.isTemplateSite)
+    return false
+  if (!canManageRestrictionAssignments.value)
+    return false
+  if (!isRestrictedContentEnabled.value)
+    return false
+  return restrictedRules.value.length > 0
+})
+const getPageRestrictionAssignmentKey = (pageId, isDetail = false) => {
+  const normalizedPageId = String(pageId || '').trim()
+  if (!normalizedPageId)
+    return ''
+  return isDetail ? `${normalizedPageId}-details` : normalizedPageId
+}
+const getPageRestrictionAssignment = (pageId, isDetail = false) => {
+  const key = getPageRestrictionAssignmentKey(pageId, isDetail)
+  if (!key)
+    return ''
+  return String(restrictedPageRuleAssignments.value?.[key] || '').trim()
 }
 
 const orderedMenus = computed(() => {
@@ -316,6 +391,8 @@ const state = reactive({
   deletePageDialog: false,
   pageSettings: false,
   pageData: {},
+  pageSettingsRestrictionRuleId: '',
+  pageSettingsPostRestrictionRuleId: '',
   linkDialogMode: 'add',
   linkName: '',
   linkUrl: '',
@@ -1172,6 +1249,9 @@ const discardPageChanges = async (pageId) => {
 const showPageSettings = (page) => {
   console.log('showPageSettings', page)
   state.pageData = page
+  const pageId = String(page?.item || '').trim()
+  state.pageSettingsRestrictionRuleId = getPageRestrictionAssignment(pageId, false)
+  state.pageSettingsPostRestrictionRuleId = getPageRestrictionAssignment(pageId, true)
   state.pageSettings = true
 }
 
@@ -1192,7 +1272,11 @@ const formErrors = (error) => {
 
 const onSubmit = () => {
   if (!state.hasError) {
-    emit('pageSettingsUpdate', state.pageData)
+    emit('pageSettingsUpdate', {
+      pageId: String(state.pageData?.item || '').trim(),
+      restrictionRuleId: String(state.pageSettingsRestrictionRuleId || '').trim(),
+      postRestrictionRuleId: String(state.pageSettingsPostRestrictionRuleId || '').trim(),
+    })
     state.pageSettings = false
   }
 }
@@ -1802,6 +1886,17 @@ const theme = computed(() => {
                       label="Meta Description"
                       name="metaDescription"
                     />
+                    <edge-shad-select
+                      v-if="showRestrictionRulePicker"
+                      :model-value="state.pageSettingsRestrictionRuleId || NO_RESTRICTION_RULE_VALUE"
+                      :items="restrictionRuleOptions"
+                      item-title="label"
+                      item-value="value"
+                      label="Restriction Rule"
+                      name="page-settings-restrictionRuleId"
+                      description="Choose which access rule should protect this page."
+                      @update:model-value="value => state.pageSettingsRestrictionRuleId = value === NO_RESTRICTION_RULE_VALUE ? '' : value"
+                    />
                     <div class="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
                       CMS tokens in double curly braces are replaced on the front end.
                       Example: <span v-pre class="font-semibold text-foreground">"{{cms-site}}"</span> for the site URL,
@@ -1834,6 +1929,17 @@ const theme = computed(() => {
                       v-model="slotProps.workingDoc.postMetaDescription"
                       label="Meta Description"
                       name="postMetaDescription"
+                    />
+                    <edge-shad-select
+                      v-if="showRestrictionRulePicker"
+                      :model-value="state.pageSettingsPostRestrictionRuleId || NO_RESTRICTION_RULE_VALUE"
+                      :items="restrictionRuleOptions"
+                      item-title="label"
+                      item-value="value"
+                      label="Restriction Rule"
+                      name="page-settings-postRestrictionRuleId"
+                      description="Choose which access rule should protect each detail page."
+                      @update:model-value="value => state.pageSettingsPostRestrictionRuleId = value === NO_RESTRICTION_RULE_VALUE ? '' : value"
                     />
 
                     <div class="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">

@@ -1,4 +1,5 @@
 const axios = require('axios')
+const Stripe = require('stripe')
 const {
   logger,
   admin,
@@ -218,7 +219,7 @@ const getApiKey = (req) => {
 const normalizeEmail = (value) => {
   if (!value)
     return ''
-  const trimmed = String(value).trim()
+  const trimmed = String(value).trim().toLowerCase()
   return trimmed.includes('@') ? trimmed : ''
 }
 
@@ -2485,6 +2486,610 @@ const assertCallableUser = (request) => {
   if (request?.data?.uid !== request.auth.uid)
     throw new HttpsError('permission-denied', 'UID mismatch.')
 }
+
+const getRestrictedSiteRefs = (orgId, siteId) => {
+  const orgRef = db.collection('organizations').doc(orgId)
+  const siteRef = orgRef.collection('sites').doc(siteId)
+  return {
+    orgRef,
+    siteRef,
+    audienceUsersRef: siteRef.collection('audience-users'),
+    membersRef: siteRef.collection('restricted-members'),
+    privateStripeRef: siteRef.collection('private-integrations').doc('stripe'),
+  }
+}
+
+const normalizeRestrictedRuleForFunction = (value = {}, fallbackId = '') => {
+  const normalizedValue = (value && typeof value === 'object') ? value : {}
+  const id = String(normalizedValue.id || normalizedValue.docId || fallbackId || '').trim()
+  return {
+    id,
+    name: String(normalizedValue.name || '').trim(),
+    protected: normalizedValue.protected !== false,
+    allowRegistration: Boolean(normalizedValue.allowRegistration),
+    registrationMode: normalizedValue.registrationMode === 'paid' ? 'paid' : 'free',
+    registrationStripeProductId: String(normalizedValue.registrationStripeProductId || normalizedValue.stripeProductId || '').trim(),
+  }
+}
+
+const getRestrictedRuleContext = async (orgId, siteId, ruleId) => {
+  const normalizedOrgId = String(orgId || '').trim()
+  const normalizedSiteId = String(siteId || '').trim()
+  const normalizedRuleId = String(ruleId || '').trim()
+  if (!normalizedOrgId || !normalizedSiteId || !normalizedRuleId)
+    throw new HttpsError('invalid-argument', 'Missing orgId, siteId, or ruleId.')
+
+  const { siteRef } = getRestrictedSiteRefs(normalizedOrgId, normalizedSiteId)
+  const siteSnap = await siteRef.get()
+  if (!siteSnap.exists)
+    throw new HttpsError('not-found', 'Site not found.')
+
+  const siteData = siteSnap.data() || {}
+  const restrictedContent = (siteData.restrictedContent && typeof siteData.restrictedContent === 'object')
+    ? siteData.restrictedContent
+    : {}
+  if (!restrictedContent.enabled)
+    throw new HttpsError('failed-precondition', 'Restricted content is not enabled for this site.')
+
+  const rules = Array.isArray(restrictedContent.rules) ? restrictedContent.rules : []
+  const normalizedRules = rules
+    .map((item, index) => normalizeRestrictedRuleForFunction(item, `rule-${index + 1}`))
+    .filter(item => item.id)
+  const rule = normalizedRules.find(item => item.id === normalizedRuleId)
+  if (!rule)
+    throw new HttpsError('not-found', 'Restriction rule not found.')
+  if (!rule.protected)
+    throw new HttpsError('failed-precondition', 'This rule is not enforcing access right now.')
+  if (!rule.allowRegistration)
+    throw new HttpsError('failed-precondition', 'Registration is not allowed for this rule.')
+
+  const effectiveRegistrationMode = restrictedContent.registrationPricing === 'paid' && rule.registrationMode === 'paid'
+    ? 'paid'
+    : 'free'
+
+  return {
+    siteRef,
+    siteData,
+    restrictedContent,
+    rule,
+    effectiveRegistrationMode,
+  }
+}
+
+const buildRestrictedMemberPayload = ({
+  existingMember = null,
+  audienceUserId,
+  ruleId,
+  status,
+  paymentStatus,
+  markPaid = false,
+  markPending = false,
+  clearPending = false,
+  clearPaid = false,
+  now = Date.now(),
+}) => {
+  const existingAccessRuleIds = Array.isArray(existingMember?.accessRuleIds) ? existingMember.accessRuleIds : []
+  const accessRuleIds = Array.from(new Set(existingAccessRuleIds.concat(ruleId).filter(Boolean)))
+  const existingPaidAccessRuleIds = Array.isArray(existingMember?.paidAccessRuleIds) ? existingMember.paidAccessRuleIds : []
+  const existingPendingPaymentRuleIds = Array.isArray(existingMember?.pendingPaymentRuleIds) ? existingMember.pendingPaymentRuleIds : []
+  let paidAccessRuleIds = [...existingPaidAccessRuleIds]
+  let pendingPaymentRuleIds = [...existingPendingPaymentRuleIds]
+
+  if (markPaid && ruleId && !paidAccessRuleIds.includes(ruleId))
+    paidAccessRuleIds.push(ruleId)
+  if (clearPaid && ruleId)
+    paidAccessRuleIds = paidAccessRuleIds.filter(item => item !== ruleId)
+
+  if (markPending && ruleId && !pendingPaymentRuleIds.includes(ruleId))
+    pendingPaymentRuleIds.push(ruleId)
+  if (clearPending && ruleId)
+    pendingPaymentRuleIds = pendingPaymentRuleIds.filter(item => item !== ruleId)
+
+  return {
+    audienceUserId,
+    accessRuleIds,
+    status: String(existingMember?.status || '').trim() || status,
+    expiresAt: String(existingMember?.expiresAt || '').trim(),
+    notes: String(existingMember?.notes || '').trim(),
+    paidAccessRuleIds,
+    pendingPaymentRuleIds,
+    registrationPaymentStatus: paymentStatus,
+    doc_created_at: Number(existingMember?.doc_created_at || now),
+    last_updated: now,
+  }
+}
+
+const findAudienceUserByEmail = async (audienceUsersRef, email) => {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail)
+    return null
+  const snap = await audienceUsersRef.where('email', '==', normalizedEmail).limit(1).get()
+  if (snap.empty)
+    return null
+  return snap.docs[0]
+}
+
+const resolveAudienceUserForAuth = async (orgId, siteId, authUid) => {
+  const siteRef = db.collection('organizations').doc(orgId).collection('sites').doc(siteId)
+  const audienceUsersRef = siteRef.collection('audience-users')
+  const byAuthUid = await audienceUsersRef.where('authUid', '==', authUid).limit(1).get()
+  if (!byAuthUid.empty)
+    return byAuthUid.docs[0]
+
+  const userSnap = await db.collection('users').doc(authUid).get()
+  const stagedDocId = String(userSnap.data()?.stagedDocId || '').trim()
+  if (stagedDocId) {
+    const directAudienceSnap = await audienceUsersRef.doc(stagedDocId).get()
+    if (directAudienceSnap.exists)
+      return directAudienceSnap
+
+    const byStagedId = await audienceUsersRef.where('stagedUserId', '==', stagedDocId).limit(1).get()
+    if (!byStagedId.empty)
+      return byStagedId.docs[0]
+  }
+
+  return null
+}
+
+const buildStripePriceSummary = (price) => {
+  if (!price)
+    return null
+  return {
+    id: price.id,
+    currency: price.currency || 'usd',
+    unitAmount: Number(price.unit_amount || 0),
+    nickname: price.nickname || '',
+    recurring: price.recurring
+      ? {
+          interval: price.recurring.interval || '',
+          intervalCount: Number(price.recurring.interval_count || 1),
+        }
+      : null,
+  }
+}
+
+const getStripeMetadata = (object = {}) => {
+  if (object?.metadata && typeof object.metadata === 'object' && Object.keys(object.metadata).length)
+    return object.metadata
+
+  if (object?.subscription_details?.metadata && typeof object.subscription_details.metadata === 'object')
+    return object.subscription_details.metadata
+
+  return {}
+}
+
+const updateRestrictedMemberPaymentState = async ({
+  orgId,
+  siteId,
+  audienceUserId,
+  ruleId,
+  paymentStatus,
+  grantPaidAccess = false,
+  revokePaidAccess = false,
+}) => {
+  const normalizedOrgId = String(orgId || '').trim()
+  const normalizedSiteId = String(siteId || '').trim()
+  const normalizedAudienceUserId = String(audienceUserId || '').trim()
+  const normalizedRuleId = String(ruleId || '').trim()
+  if (!normalizedOrgId || !normalizedSiteId || !normalizedAudienceUserId || !normalizedRuleId)
+    return
+
+  const { membersRef } = getRestrictedSiteRefs(normalizedOrgId, normalizedSiteId)
+  const memberRef = membersRef.doc(normalizedAudienceUserId)
+  const memberSnap = await memberRef.get()
+  const memberData = memberSnap.exists ? (memberSnap.data() || {}) : {}
+
+  await memberRef.set(buildRestrictedMemberPayload({
+    existingMember: memberData,
+    audienceUserId: normalizedAudienceUserId,
+    ruleId: normalizedRuleId,
+    status: String(memberData.status || '').trim() || 'active',
+    paymentStatus,
+    markPaid: grantPaidAccess,
+    markPending: !grantPaidAccess && !revokePaidAccess && paymentStatus === 'pending',
+    clearPending: grantPaidAccess || revokePaidAccess,
+    clearPaid: revokePaidAccess,
+    now: Date.now(),
+  }), { merge: true })
+}
+
+exports.restrictedContentBeginRegistration = onCall(async (request) => {
+  const data = request.data || {}
+  const orgId = String(data.orgId || '').trim()
+  const siteId = String(data.siteId || '').trim()
+  const ruleId = String(data.ruleId || '').trim()
+  const name = String(data.name || '').trim()
+  const email = normalizeEmail(data.email)
+
+  if (!orgId || !siteId || !ruleId || !name || !email)
+    throw new HttpsError('invalid-argument', 'Missing orgId, siteId, ruleId, name, or email.')
+
+  try {
+    const { rule, effectiveRegistrationMode } = await getRestrictedRuleContext(orgId, siteId, ruleId)
+    const { audienceUsersRef, membersRef } = getRestrictedSiteRefs(orgId, siteId)
+    const now = Date.now()
+
+    const audienceUserSnap = await findAudienceUserByEmail(audienceUsersRef, email)
+    let docId = String(audienceUserSnap?.id || '').trim()
+
+    if (audienceUserSnap?.exists) {
+      const audienceUser = audienceUserSnap.data() || {}
+      if (audienceUser.authUid) {
+        throw new HttpsError('already-exists', 'This email is already registered. Please log in instead.')
+      }
+    }
+
+    if (!docId)
+      docId = db.collection('staged-users').doc().id
+
+    const stagedUserRef = db.collection('staged-users').doc(docId)
+    const stagedUserSnap = await stagedUserRef.get()
+    const stagedUserData = stagedUserSnap.exists ? (stagedUserSnap.data() || {}) : {}
+    if (stagedUserData.userId) {
+      throw new HttpsError('already-exists', 'This email is already registered. Please log in instead.')
+    }
+
+    const audienceUserDocPermissionPath = `organizations-${orgId}-sites-${siteId}-audience-users-${docId}`
+    const stagedRoles = (stagedUserData.roles && typeof stagedUserData.roles === 'object' && !Array.isArray(stagedUserData.roles))
+      ? { ...stagedUserData.roles }
+      : {}
+    stagedRoles[audienceUserDocPermissionPath] = {
+      collectionPath: audienceUserDocPermissionPath,
+      role: 'user',
+    }
+    const stagedCollectionPaths = Array.isArray(stagedUserData.collectionPaths)
+      ? [...stagedUserData.collectionPaths]
+      : []
+    if (!stagedCollectionPaths.includes(audienceUserDocPermissionPath))
+      stagedCollectionPaths.push(audienceUserDocPermissionPath)
+
+    if (!stagedUserSnap.exists) {
+      await stagedUserRef.set({
+        docId,
+        uid: '',
+        userId: '',
+        meta: {
+          name,
+          email,
+        },
+        roles: stagedRoles,
+        collectionPaths: stagedCollectionPaths,
+        specialPermissions: {},
+        doc_created_at: now,
+        last_updated: now,
+      })
+    }
+    else {
+      await stagedUserRef.set({
+        meta: {
+          ...(stagedUserData.meta || {}),
+          name,
+          email,
+        },
+        roles: stagedRoles,
+        collectionPaths: stagedCollectionPaths,
+        last_updated: now,
+      }, { merge: true })
+    }
+
+    const existingAudienceUser = audienceUserSnap?.exists ? (audienceUserSnap.data() || {}) : {}
+    await audienceUsersRef.doc(docId).set({
+      docId,
+      name,
+      email,
+      authUid: String(existingAudienceUser.authUid || '').trim(),
+      stagedUserId: docId,
+      status: String(existingAudienceUser.status || '').trim() || 'invited',
+      billingStripeCustomerId: String(existingAudienceUser.billingStripeCustomerId || '').trim(),
+      notes: String(existingAudienceUser.notes || '').trim(),
+      doc_created_at: Number(existingAudienceUser.doc_created_at || now),
+      last_updated: now,
+    }, { merge: true })
+
+    const memberRef = membersRef.doc(docId)
+    const memberSnap = await memberRef.get()
+    const memberData = memberSnap.exists ? (memberSnap.data() || {}) : {}
+    if (String(memberData.status || '').trim().toLowerCase() === 'revoked') {
+      throw new HttpsError('permission-denied', 'Access for this email has been revoked. Please contact support.')
+    }
+
+    await memberRef.set(buildRestrictedMemberPayload({
+      existingMember: memberData,
+      audienceUserId: docId,
+      ruleId: rule.id,
+      status: String(memberData.status || '').trim() || 'active',
+      paymentStatus: effectiveRegistrationMode === 'paid' ? 'pending' : 'not_required',
+      markPaid: effectiveRegistrationMode !== 'paid',
+      markPending: effectiveRegistrationMode === 'paid',
+      clearPending: effectiveRegistrationMode !== 'paid',
+      now,
+    }), { merge: true })
+
+    return {
+      success: true,
+      registrationCode: docId,
+      audienceUserId: docId,
+      memberId: docId,
+      registrationMode: effectiveRegistrationMode,
+    }
+  }
+  catch (error) {
+    logger.error('restrictedContentBeginRegistration failed', error)
+    if (error instanceof HttpsError)
+      throw error
+    throw new HttpsError('internal', String(error?.message || 'Unable to begin registration right now.'))
+  }
+})
+
+exports.restrictedContentCreateStripeLink = onCall({ timeoutSeconds: 180 }, async (request) => {
+  assertCallableUser(request)
+  const data = request.data || {}
+  const orgId = String(data.orgId || '').trim()
+  const siteId = String(data.siteId || '').trim()
+  const ruleId = String(data.ruleId || '').trim()
+  const requestedPriceId = String(data.priceId || '').trim()
+  const successUrl = String(data.successUrl || data.returnUrl || '').trim()
+  const cancelUrl = String(data.cancelUrl || data.returnUrl || '').trim()
+  const quantity = Math.max(1, Math.trunc(Number(data.quantity || 1) || 1))
+
+  if (!orgId || !siteId || !ruleId)
+    throw new HttpsError('invalid-argument', 'Missing orgId, siteId, or ruleId.')
+  if (!successUrl || !cancelUrl)
+    throw new HttpsError('invalid-argument', 'Missing successUrl or cancelUrl.')
+
+  const { rule, effectiveRegistrationMode } = await getRestrictedRuleContext(orgId, siteId, ruleId)
+  if (effectiveRegistrationMode !== 'paid')
+    throw new HttpsError('failed-precondition', 'This rule does not require payment.')
+  if (!rule.registrationStripeProductId)
+    throw new HttpsError('failed-precondition', 'This rule does not have a Stripe product configured.')
+
+  const { audienceUsersRef, membersRef, privateStripeRef } = getRestrictedSiteRefs(orgId, siteId)
+  const audienceUserSnap = await resolveAudienceUserForAuth(orgId, siteId, request.auth.uid)
+  if (!audienceUserSnap?.exists)
+    throw new HttpsError('not-found', 'No audience user was found for the current account.')
+
+  const audienceUserId = audienceUserSnap.id
+  const audienceUser = audienceUserSnap.data() || {}
+  if (!audienceUser.authUid || audienceUser.authUid !== request.auth.uid) {
+    await audienceUsersRef.doc(audienceUserId).set({
+      authUid: request.auth.uid,
+      last_updated: Date.now(),
+    }, { merge: true })
+  }
+
+  const stripeSnap = await privateStripeRef.get()
+  if (!stripeSnap.exists)
+    throw new HttpsError('failed-precondition', 'Stripe is not configured for this site.')
+
+  const stripeConfig = stripeSnap.data() || {}
+  const stripeSecretKey = String(stripeConfig.secretKey || '').trim()
+  if (!stripeSecretKey)
+    throw new HttpsError('failed-precondition', 'Stripe secret key is missing for this site.')
+
+  const stripe = new Stripe(stripeSecretKey)
+  const pricesResponse = await stripe.prices.list({
+    product: rule.registrationStripeProductId,
+    active: true,
+    limit: 100,
+  })
+  const prices = Array.isArray(pricesResponse.data) ? pricesResponse.data.filter(Boolean) : []
+  if (!prices.length)
+    throw new HttpsError('failed-precondition', 'No active Stripe prices were found for this product.')
+
+  let selectedPrice = null
+  if (requestedPriceId)
+    selectedPrice = prices.find(price => price.id === requestedPriceId) || null
+
+  if (!selectedPrice && prices.length === 1)
+    selectedPrice = prices[0]
+
+  if (!selectedPrice) {
+    return {
+      success: false,
+      requiresPriceSelection: true,
+      prices: prices.map(buildStripePriceSummary).filter(Boolean),
+    }
+  }
+
+  let customerId = String(audienceUser.billingStripeCustomerId || '').trim()
+  if (!customerId) {
+    const customer = await stripe.customers.create({
+      email: String(audienceUser.email || request.auth.token?.email || '').trim() || undefined,
+      name: String(audienceUser.name || request.auth.token?.name || '').trim() || undefined,
+      metadata: {
+        orgId,
+        siteId,
+        audienceUserId,
+        ruleId,
+      },
+    })
+    customerId = customer.id
+    await audienceUsersRef.doc(audienceUserId).set({
+      billingStripeCustomerId: customerId,
+      authUid: request.auth.uid,
+      last_updated: Date.now(),
+    }, { merge: true })
+  }
+
+  const memberRef = membersRef.doc(audienceUserId)
+  const memberSnap = await memberRef.get()
+  const memberData = memberSnap.exists ? (memberSnap.data() || {}) : {}
+  await memberRef.set(buildRestrictedMemberPayload({
+    existingMember: memberData,
+    audienceUserId,
+    ruleId: rule.id,
+    status: String(memberData.status || '').trim() || 'active',
+    paymentStatus: 'pending',
+    markPending: true,
+    now: Date.now(),
+  }), { merge: true })
+
+  const session = await stripe.checkout.sessions.create({
+    mode: selectedPrice.recurring ? 'subscription' : 'payment',
+    customer: customerId,
+    line_items: [{
+      price: selectedPrice.id,
+      quantity,
+    }],
+    success_url: successUrl,
+    cancel_url: cancelUrl,
+    client_reference_id: `${orgId}:${siteId}:${rule.id}:${audienceUserId}`,
+    metadata: {
+      orgId,
+      siteId,
+      ruleId: rule.id,
+      audienceUserId,
+      memberId: audienceUserId,
+      uid: request.auth.uid,
+      stripeProductId: rule.registrationStripeProductId,
+      stripePriceId: selectedPrice.id,
+      quantity: String(quantity),
+    },
+    subscription_data: selectedPrice.recurring
+      ? {
+          metadata: {
+            orgId,
+            siteId,
+            ruleId: rule.id,
+            audienceUserId,
+            memberId: audienceUserId,
+            uid: request.auth.uid,
+            stripeProductId: rule.registrationStripeProductId,
+            stripePriceId: selectedPrice.id,
+            quantity: String(quantity),
+          },
+        }
+      : undefined,
+    payment_intent_data: !selectedPrice.recurring
+      ? {
+          metadata: {
+            orgId,
+            siteId,
+            ruleId: rule.id,
+            audienceUserId,
+            memberId: audienceUserId,
+            uid: request.auth.uid,
+            stripeProductId: rule.registrationStripeProductId,
+            stripePriceId: selectedPrice.id,
+            quantity: String(quantity),
+          },
+        }
+      : undefined,
+  })
+
+  return {
+    success: true,
+    requiresPriceSelection: false,
+    url: session.url,
+    customerId,
+    price: buildStripePriceSummary(selectedPrice),
+  }
+})
+
+exports.restrictedContentStripeWebhook = onRequest(async (req, res) => {
+  if (req.method !== 'POST') {
+    res.status(405).send('Method not allowed.')
+    return
+  }
+
+  const orgId = String(req.query.orgId || req.query.org || '').trim()
+  const siteId = String(req.query.siteId || req.query.site || '').trim()
+  if (!orgId || !siteId) {
+    res.status(400).send('Missing orgId or siteId.')
+    return
+  }
+
+  try {
+    const { privateStripeRef, audienceUsersRef } = getRestrictedSiteRefs(orgId, siteId)
+    const stripeSnap = await privateStripeRef.get()
+    if (!stripeSnap.exists) {
+      res.status(404).send('Stripe config not found.')
+      return
+    }
+
+    const stripeConfig = stripeSnap.data() || {}
+    const stripeSecretKey = String(stripeConfig.secretKey || '').trim()
+    const webhookSecret = String(stripeConfig.webhookSecret || '').trim()
+    if (!stripeSecretKey || !webhookSecret) {
+      res.status(412).send('Stripe webhook is not configured for this site.')
+      return
+    }
+
+    const stripe = new Stripe(stripeSecretKey)
+    let event
+    try {
+      event = stripe.webhooks.constructEvent(req.rawBody, req.headers['stripe-signature'], webhookSecret)
+    }
+    catch (error) {
+      logger.error('restrictedContentStripeWebhook signature verification failed', error)
+      res.status(400).send(`Webhook Error: ${error.message}`)
+      return
+    }
+
+    const object = event.data?.object || {}
+    const metadata = getStripeMetadata(object)
+    const metadataOrgId = String(metadata.orgId || '').trim() || orgId
+    const metadataSiteId = String(metadata.siteId || '').trim() || siteId
+    const audienceUserId = String(metadata.audienceUserId || '').trim()
+    const ruleId = String(metadata.ruleId || '').trim()
+    const customerId = String(object.customer || '').trim()
+
+    if (customerId && audienceUserId) {
+      await audienceUsersRef.doc(audienceUserId).set({
+        billingStripeCustomerId: customerId,
+        last_updated: Date.now(),
+      }, { merge: true })
+    }
+
+    if (metadataOrgId && metadataSiteId && audienceUserId && ruleId) {
+      if (event.type === 'checkout.session.completed') {
+        const paymentStatus = String(object.payment_status || '').trim().toLowerCase()
+        const shouldGrant = paymentStatus === 'paid' || String(object.mode || '').trim() === 'subscription'
+        await updateRestrictedMemberPaymentState({
+          orgId: metadataOrgId,
+          siteId: metadataSiteId,
+          audienceUserId,
+          ruleId,
+          paymentStatus: shouldGrant ? 'paid' : (paymentStatus || 'pending'),
+          grantPaidAccess: shouldGrant,
+          revokePaidAccess: false,
+        })
+      }
+
+      if (event.type === 'customer.subscription.updated' || event.type === 'customer.subscription.deleted') {
+        const subscriptionStatus = String(object.status || '').trim().toLowerCase()
+        const isActive = ['active', 'trialing'].includes(subscriptionStatus)
+        await updateRestrictedMemberPaymentState({
+          orgId: metadataOrgId,
+          siteId: metadataSiteId,
+          audienceUserId,
+          ruleId,
+          paymentStatus: isActive ? 'paid' : (subscriptionStatus || 'cancelled'),
+          grantPaidAccess: isActive,
+          revokePaidAccess: !isActive,
+        })
+      }
+
+      if (event.type === 'invoice.payment_failed') {
+        await updateRestrictedMemberPaymentState({
+          orgId: metadataOrgId,
+          siteId: metadataSiteId,
+          audienceUserId,
+          ruleId,
+          paymentStatus: 'failed',
+          grantPaidAccess: false,
+          revokePaidAccess: true,
+        })
+      }
+    }
+
+    res.status(200).json({ received: true })
+  }
+  catch (error) {
+    logger.error('restrictedContentStripeWebhook failed', error)
+    res.status(500).send('Webhook processing failed.')
+  }
+})
 
 exports.updateSeoFromAi = onCall({ timeoutSeconds: 180 }, async (request) => {
   assertCallableUser(request)
