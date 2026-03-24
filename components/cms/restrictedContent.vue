@@ -684,24 +684,6 @@ const createAudienceUserFromMember = async (workingDoc) => {
   state.memberManualError = ''
   try {
     const docId = (globalThis.crypto?.randomUUID?.() || `aud-${Date.now()}`)
-    const audienceUserDocPermissionPath = `organizations-${edgeGlobal.edgeState.currentOrganization}-sites-${props.siteId}-audience-users-${docId}`
-    await edgeFirebase.storeDoc('staged-users', {
-      docId,
-      meta: {
-        name,
-        email,
-      },
-      roles: {
-        [audienceUserDocPermissionPath]: {
-          collectionPath: audienceUserDocPermissionPath,
-          role: 'user',
-        },
-      },
-      collectionPaths: [audienceUserDocPermissionPath],
-      specialPermissions: {},
-      userId: '',
-    }, docId)
-
     await edgeFirebase.storeDoc(audienceUsersCollectionPath.value, {
       docId,
       name,

@@ -2512,7 +2512,8 @@ const normalizeRestrictedRuleForFunction = (value = {}, fallbackId = '') => {
   }
 }
 
-const getRestrictedRuleContext = async (orgId, siteId, ruleId) => {
+const getRestrictedRuleContext = async (orgId, siteId, ruleId, options = {}) => {
+  const requireAllowRegistration = options.requireAllowRegistration !== false
   const normalizedOrgId = String(orgId || '').trim()
   const normalizedSiteId = String(siteId || '').trim()
   const normalizedRuleId = String(ruleId || '').trim()
@@ -2540,7 +2541,7 @@ const getRestrictedRuleContext = async (orgId, siteId, ruleId) => {
     throw new HttpsError('not-found', 'Restriction rule not found.')
   if (!rule.protected)
     throw new HttpsError('failed-precondition', 'This rule is not enforcing access right now.')
-  if (!rule.allowRegistration)
+  if (requireAllowRegistration && !rule.allowRegistration)
     throw new HttpsError('failed-precondition', 'Registration is not allowed for this rule.')
 
   const effectiveRegistrationMode = restrictedContent.registrationPricing === 'paid' && rule.registrationMode === 'paid'
@@ -2607,6 +2608,63 @@ const findAudienceUserByEmail = async (audienceUsersRef, email) => {
   if (snap.empty)
     return null
   return snap.docs[0]
+}
+
+const resolveAuthUserUidByEmail = async (email) => {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail)
+    return ''
+  try {
+    const authUser = await admin.auth().getUserByEmail(normalizedEmail)
+    return String(authUser?.uid || '').trim()
+  }
+  catch (error) {
+    if (error?.code === 'auth/user-not-found')
+      return ''
+    throw error
+  }
+}
+
+const grantRestrictedAudiencePathToUser = async ({ uid, permissionPath, email }) => {
+  const normalizedUid = String(uid || '').trim()
+  const normalizedPermissionPath = String(permissionPath || '').trim()
+  if (!normalizedUid || !normalizedPermissionPath)
+    return
+
+  const userRef = db.collection('users').doc(normalizedUid)
+  const userSnap = await userRef.get()
+  const userData = userSnap.exists ? (userSnap.data() || {}) : {}
+  const nextRoles = (userData.roles && typeof userData.roles === 'object' && !Array.isArray(userData.roles))
+    ? { ...userData.roles }
+    : {}
+  nextRoles[normalizedPermissionPath] = {
+    collectionPath: normalizedPermissionPath,
+    role: 'user',
+  }
+  const nextCollectionPaths = Array.isArray(userData.collectionPaths)
+    ? [...userData.collectionPaths]
+    : []
+  if (!nextCollectionPaths.includes(normalizedPermissionPath))
+    nextCollectionPaths.push(normalizedPermissionPath)
+
+  const updatePayload = {
+    roles: nextRoles,
+    collectionPaths: nextCollectionPaths,
+    last_updated: Date.now(),
+  }
+
+  if (userSnap.exists) {
+    await userRef.set(updatePayload, { merge: true })
+  }
+  else {
+    await userRef.set({
+      userId: normalizedUid,
+      meta: {
+        email: normalizeEmail(email),
+      },
+      ...updatePayload,
+    }, { merge: true })
+  }
 }
 
 const resolveAudienceUserForAuth = async (orgId, siteId, authUid) => {
@@ -2695,6 +2753,7 @@ const updateRestrictedMemberPaymentState = async ({
 
 exports.restrictedContentBeginRegistration = onCall(async (request) => {
   const data = request.data || {}
+  const requestAuthUid = String(request?.auth?.uid || '').trim()
   const orgId = String(data.orgId || '').trim()
   const siteId = String(data.siteId || '').trim()
   const ruleId = String(data.ruleId || '').trim()
@@ -2705,19 +2764,31 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
     throw new HttpsError('invalid-argument', 'Missing orgId, siteId, ruleId, name, or email.')
 
   try {
-    const { rule, effectiveRegistrationMode } = await getRestrictedRuleContext(orgId, siteId, ruleId)
+    const { rule, effectiveRegistrationMode } = await getRestrictedRuleContext(orgId, siteId, ruleId, { requireAllowRegistration: false })
     const { audienceUsersRef, membersRef } = getRestrictedSiteRefs(orgId, siteId)
     const now = Date.now()
+    const existingAuthUidByEmail = await resolveAuthUserUidByEmail(email)
+    const linkedAuthUid = existingAuthUidByEmail || requestAuthUid
+
+    if (existingAuthUidByEmail && !requestAuthUid)
+      throw new HttpsError('unauthenticated', 'This email already has an account. Please log in first and continue.')
+    if (existingAuthUidByEmail && requestAuthUid && existingAuthUidByEmail !== requestAuthUid)
+      throw new HttpsError('permission-denied', 'Signed-in account does not match this email.')
 
     const audienceUserSnap = await findAudienceUserByEmail(audienceUsersRef, email)
     let docId = String(audienceUserSnap?.id || '').trim()
 
     if (audienceUserSnap?.exists) {
       const audienceUser = audienceUserSnap.data() || {}
-      if (audienceUser.authUid) {
-        throw new HttpsError('already-exists', 'This email is already registered. Please log in instead.')
-      }
+      const audienceAuthUid = String(audienceUser.authUid || '').trim()
+      if (audienceAuthUid && !requestAuthUid)
+        throw new HttpsError('unauthenticated', 'This email already has an account. Please log in first and continue.')
+      if (audienceAuthUid && requestAuthUid && audienceAuthUid !== requestAuthUid)
+        throw new HttpsError('permission-denied', 'Signed-in account does not match this email.')
     }
+
+    if (!docId && !rule.allowRegistration)
+      throw new HttpsError('failed-precondition', 'Registration is not allowed for this rule.')
 
     if (!docId)
       docId = db.collection('staged-users').doc().id
@@ -2725,9 +2796,11 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
     const stagedUserRef = db.collection('staged-users').doc(docId)
     const stagedUserSnap = await stagedUserRef.get()
     const stagedUserData = stagedUserSnap.exists ? (stagedUserSnap.data() || {}) : {}
-    if (stagedUserData.userId) {
-      throw new HttpsError('already-exists', 'This email is already registered. Please log in instead.')
-    }
+    const stagedUserId = String(stagedUserData.userId || '').trim()
+    if (stagedUserId && linkedAuthUid && stagedUserId !== linkedAuthUid)
+      throw new HttpsError('permission-denied', 'Existing registration is linked to another account.')
+    if (stagedUserId && !linkedAuthUid)
+      throw new HttpsError('unauthenticated', 'This email already has an account. Please log in first and continue.')
 
     const audienceUserDocPermissionPath = `organizations-${orgId}-sites-${siteId}-audience-users-${docId}`
     const stagedRoles = (stagedUserData.roles && typeof stagedUserData.roles === 'object' && !Array.isArray(stagedUserData.roles))
@@ -2746,8 +2819,8 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
     if (!stagedUserSnap.exists) {
       await stagedUserRef.set({
         docId,
-        uid: '',
-        userId: '',
+        uid: linkedAuthUid || '',
+        userId: linkedAuthUid || '',
         meta: {
           name,
           email,
@@ -2766,6 +2839,12 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
           name,
           email,
         },
+        ...(linkedAuthUid && !stagedUserId
+          ? {
+              uid: linkedAuthUid,
+              userId: linkedAuthUid,
+            }
+          : {}),
         roles: stagedRoles,
         collectionPaths: stagedCollectionPaths,
         last_updated: now,
@@ -2773,11 +2852,13 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
     }
 
     const existingAudienceUser = audienceUserSnap?.exists ? (audienceUserSnap.data() || {}) : {}
+    const existingAudienceAuthUid = String(existingAudienceUser.authUid || '').trim()
     await audienceUsersRef.doc(docId).set({
       docId,
       name,
       email,
-      authUid: String(existingAudienceUser.authUid || '').trim(),
+      authUid: linkedAuthUid || existingAudienceAuthUid,
+      userId: linkedAuthUid || String(existingAudienceUser.userId || '').trim(),
       stagedUserId: docId,
       status: String(existingAudienceUser.status || '').trim() || 'invited',
       billingStripeCustomerId: String(existingAudienceUser.billingStripeCustomerId || '').trim(),
@@ -2804,6 +2885,14 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
       clearPending: effectiveRegistrationMode !== 'paid',
       now,
     }), { merge: true })
+
+    if (linkedAuthUid) {
+      await grantRestrictedAudiencePathToUser({
+        uid: linkedAuthUid,
+        permissionPath: audienceUserDocPermissionPath,
+        email,
+      })
+    }
 
     return {
       success: true,
