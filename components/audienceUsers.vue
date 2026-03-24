@@ -1,6 +1,6 @@
 <script setup>
 import { toTypedSchema } from '@vee-validate/zod'
-import { IdCard, Mail, Search, ShieldCheck, Trash2, UserPlus, Users } from 'lucide-vue-next'
+import { Mail, Search, ShieldCheck, Trash2, UserPlus, Users } from 'lucide-vue-next'
 import * as z from 'zod'
 
 const edgeFirebase = inject('edgeFirebase')
@@ -220,7 +220,7 @@ onBeforeUnmount(async () => {
                     <span class="truncate">{{ item.email || 'No email added' }}</span>
                   </div>
                   <div v-if="item.authUid" class="mt-1 flex items-center gap-1 truncate text-[11px] text-muted-foreground">
-                    <IdCard class="h-3.5 w-3.5 shrink-0" />
+                    <ShieldCheck class="h-3.5 w-3.5 shrink-0" />
                     <span class="truncate">{{ item.authUid }}</span>
                   </div>
                 </div>
