@@ -251,6 +251,7 @@ const syncAudienceHistoryUuidForUser = async ({
 
   const userData = userSnap.data() || {}
   const email = normalizeEmail(userData?.meta?.email || userData?.email || userData?.contactEmail || '')
+  const name = String(userData?.meta?.name || userData?.name || '').trim()
   if (!email) {
     logger.warn('History sync user email missing', { orgId: normalizedOrgId, siteId: normalizedSiteId, userId: normalizedUserId })
     return
@@ -270,6 +271,8 @@ const syncAudienceHistoryUuidForUser = async ({
       history_uuid: Firestore.FieldValue.arrayUnion(normalizedHistoryUuid),
       last_updated: nowMs,
     }
+    if (name && !String(audienceData.name || '').trim())
+      updatePayload.name = name
     if (!String(audienceData.authUid || '').trim())
       updatePayload.authUid = normalizedUserId
     await audienceDoc.ref.set(updatePayload, { merge: true })
@@ -277,6 +280,7 @@ const syncAudienceHistoryUuidForUser = async ({
   }
 
   await audienceUsersRef.add({
+    name,
     email,
     authUid: normalizedUserId,
     history_uuid: [normalizedHistoryUuid],
