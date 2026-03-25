@@ -230,6 +230,61 @@ const normalizeEmailList = (value) => {
   return single ? [single] : []
 }
 
+const syncAudienceHistoryUuidForUser = async ({
+  orgId,
+  siteId,
+  userId,
+  historyUuid,
+}) => {
+  const normalizedOrgId = String(orgId || '').trim()
+  const normalizedSiteId = String(siteId || '').trim()
+  const normalizedUserId = String(userId || '').trim()
+  const normalizedHistoryUuid = String(historyUuid || '').trim()
+  if (!normalizedOrgId || !normalizedSiteId || !normalizedUserId || !normalizedHistoryUuid)
+    return
+
+  const userSnap = await db.collection('users').doc(normalizedUserId).get()
+  if (!userSnap.exists) {
+    logger.warn('History sync user not found', { orgId: normalizedOrgId, siteId: normalizedSiteId, userId: normalizedUserId })
+    return
+  }
+
+  const userData = userSnap.data() || {}
+  const email = normalizeEmail(userData?.meta?.email || userData?.email || userData?.contactEmail || '')
+  if (!email) {
+    logger.warn('History sync user email missing', { orgId: normalizedOrgId, siteId: normalizedSiteId, userId: normalizedUserId })
+    return
+  }
+
+  const audienceUsersRef = db.collection('organizations').doc(normalizedOrgId)
+    .collection('sites').doc(normalizedSiteId)
+    .collection('audience-users')
+  const audienceByEmailSnap = await audienceUsersRef.where('email', '==', email).limit(1).get()
+  const nowMs = Date.now()
+
+  if (!audienceByEmailSnap.empty) {
+    const audienceDoc = audienceByEmailSnap.docs[0]
+    const audienceData = audienceDoc.data() || {}
+    const updatePayload = {
+      email,
+      history_uuid: Firestore.FieldValue.arrayUnion(normalizedHistoryUuid),
+      last_updated: nowMs,
+    }
+    if (!String(audienceData.authUid || '').trim())
+      updatePayload.authUid = normalizedUserId
+    await audienceDoc.ref.set(updatePayload, { merge: true })
+    return
+  }
+
+  await audienceUsersRef.add({
+    email,
+    authUid: normalizedUserId,
+    history_uuid: [normalizedHistoryUuid],
+    doc_created_at: nowMs,
+    last_updated: nowMs,
+  })
+}
+
 const normalizeDomain = (value) => {
   if (!value)
     return ''
@@ -793,6 +848,22 @@ exports.trackHistory = onRequest(async (req, res) => {
       timestamp: now,
     })
     const siteId = typeof data?.siteId === 'string' ? data.siteId.trim() : ''
+    const authUserId = typeof data?.userId === 'string'
+      ? data.userId.trim()
+      : (typeof data?.uid === 'string' ? data.uid.trim() : '')
+    if (siteId && authUserId) {
+      try {
+        await syncAudienceHistoryUuidForUser({
+          orgId,
+          siteId,
+          userId: authUserId,
+          historyUuid: docRef.id,
+        })
+      }
+      catch (error) {
+        logger.error('Failed to sync audience history_uuid', error)
+      }
+    }
     if (siteId) {
       await db.collection('organizations').doc(orgId)
         .collection('sites').doc(siteId)
