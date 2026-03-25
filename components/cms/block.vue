@@ -71,6 +71,10 @@ const props = defineProps({
     type: Boolean,
     default: true,
   },
+  previewAuthLoggedIn: {
+    type: Boolean,
+    default: true,
+  },
 })
 const emit = defineEmits(['update:modelValue', 'delete'])
 const edgeFirebase = inject('edgeFirebase')
@@ -86,7 +90,6 @@ const PROTECTION_UNAUTH_BEHAVIORS = [
 
 const createBlockProtectionDefaults = () => ({
   enabled: false,
-  allowSelfSignup: true,
   access: 'loggedIn',
   ruleId: '',
   unauthBehavior: 'hide',
@@ -95,13 +98,13 @@ const createBlockProtectionDefaults = () => ({
   loginPromptButtonLabel: 'Log In',
 })
 
-const normalizeBlockProtection = (value = {}) => {
+const normalizeBlockProtection = (value = {}, options = {}) => {
+  const allowPaidPlan = options.allowPaidPlan !== false
   const next = {
     ...createBlockProtectionDefaults(),
     ...((value && typeof value === 'object') ? value : {}),
   }
   next.enabled = next.enabled === true
-  next.allowSelfSignup = next.allowSelfSignup !== false
   next.access = next.access === 'paidPlan' ? 'paidPlan' : 'loggedIn'
   next.ruleId = String(next.ruleId || '').trim()
   next.unauthBehavior = PROTECTION_UNAUTH_BEHAVIORS.some(item => item.name === next.unauthBehavior)
@@ -111,10 +114,30 @@ const normalizeBlockProtection = (value = {}) => {
   next.loginPromptMessage = String(next.loginPromptMessage || '').trim() || 'Log in to view this content.'
   next.loginPromptButtonLabel = String(next.loginPromptButtonLabel || '').trim() || 'Log In'
 
-  if (next.access !== 'paidPlan')
+  if (!allowPaidPlan) {
+    next.access = 'loggedIn'
     next.ruleId = ''
+  }
+  else if (next.access !== 'paidPlan') {
+    next.ruleId = ''
+  }
   delete next.alternateBlockId
   return next
+}
+
+const resolveSiteRestrictedSettings = () => {
+  const siteId = String(props.siteId || '').trim()
+  if (!siteId)
+    return {}
+  const siteDoc = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[siteId] || {}
+  const restrictedContent = (siteDoc?.restrictedContent && typeof siteDoc.restrictedContent === 'object')
+    ? siteDoc.restrictedContent
+    : {}
+  return restrictedContent
+}
+
+const resolveSiteAllowsSelfRegistration = () => {
+  return resolveSiteRestrictedSettings()?.allowSelfRegistration !== false
 }
 
 function normalizeConfigLiteral(str) {
@@ -255,6 +278,7 @@ const state = reactive({
   editorMode: 'fields',
   previewViewport: 'full',
   previewScale: '100',
+  previewAuthLoggedIn: true,
   draft: {},
   delete: false,
   meta: {},
@@ -400,10 +424,36 @@ const isPageBlockEditor = computed(() => resolvedEditorBlockTypes.value.includes
 const showProtectionEditor = computed(() => {
   return !props.standalonePreview && props.allowProtectionEditor && isPageBlockEditor.value
 })
+const normalizedProtection = computed(() => normalizeBlockProtection(modelValue.value?.protection, {
+  allowPaidPlan: resolveSiteAllowsSelfRegistration(),
+}))
 const showProtectedEditOverlay = computed(() => {
   if (!props.editMode || !showProtectionEditor.value)
     return false
-  return normalizeBlockProtection(modelValue.value?.protection).enabled
+  return normalizedProtection.value.enabled
+})
+const isLoggedOutPreviewMode = computed(() => {
+  return !props.editMode && !props.standalonePreview && props.previewAuthLoggedIn === false
+})
+const shouldHideForLoggedOutPreview = computed(() => {
+  return isLoggedOutPreviewMode.value
+    && normalizedProtection.value.enabled
+    && normalizedProtection.value.unauthBehavior === 'hide'
+})
+const showProtectedLoggedOutPreviewOverlay = computed(() => {
+  return isLoggedOutPreviewMode.value
+    && normalizedProtection.value.enabled
+    && normalizedProtection.value.unauthBehavior !== 'hide'
+})
+const protectionSelfSignupLabel = computed(() => siteAllowsSelfRegistration.value ? 'Yes' : 'No')
+const protectionUnauthBehaviorLabel = computed(() => {
+  return PROTECTION_UNAUTH_BEHAVIORS.find(item => item.name === normalizedProtection.value.unauthBehavior)?.title || 'Hide Block'
+})
+const protectionAccessLabel = computed(() => {
+  if (normalizedProtection.value.access !== 'paidPlan')
+    return 'Any Logged-In User'
+  const selectedPlan = siteRestrictedPlanOptions.value.find(option => option.value === normalizedProtection.value.ruleId)
+  return selectedPlan?.label ? `Paid Plan: ${selectedPlan.label}` : 'Paid Plan'
 })
 
 const shouldContainFixedPreview = computed(() => {
@@ -459,6 +509,7 @@ const previewScaleValue = computed(() => {
   return parsed
 })
 const previewScaleMultiplier = computed(() => previewScaleValue.value / 100)
+const previewAuthClass = computed(() => state.previewAuthLoggedIn ? 'cms-auth-preview-logged-in' : 'cms-auth-preview-logged-out')
 const previewViewportStyle = computed(() => {
   const selected = selectedPreviewViewport.value
   if (!selected || selected.id === 'full')
@@ -483,6 +534,9 @@ const previewViewportMode = computed(() => {
 })
 const setPreviewViewport = (viewportId) => {
   state.previewViewport = viewportId
+}
+const setPreviewAuthMode = (loggedIn) => {
+  state.previewAuthLoggedIn = loggedIn === true
 }
 const arrayImageDialogKey = (entryField, index, schemaField) => `${entryField}::${index}::${schemaField}`
 const normalizeSelectedImageUrl = (url) => {
@@ -559,7 +613,7 @@ const BLOCK_CONTENT_SNIPPETS = [
   },
   {
     label: 'Post Content Example',
-    snippet: `{{{#array {"field":"list","schema":[{"field":"name","value":"text"},{"field":"content","value":"richtext"}],"collection":{"path":"posts","uniqueKey":"{orgId}:{siteId}","query":[],"order":[]},"queryOptions":[],"limit":3,"value":[]}}}}
+    snippet: `{{{#array {"field":"list","collection":{"path":"posts","uniqueKey":"{orgId}:{siteId}","order":[]},"queryOptions":[],"queryItems":{"name":"{routeLastSegment}"},"limit":1,"value":[]}}}}
   <article>
     <h2>{{item.name}}</h2>
     {{{#renderBlocks {"field":"item"}}}}
@@ -603,14 +657,12 @@ const previewBlockDisplayName = computed(() => {
   return String(found || '').trim() || 'Block'
 })
 
+const siteRestrictedSettings = computed(() => {
+  return resolveSiteRestrictedSettings()
+})
+
 const siteRestrictedPlanOptions = computed(() => {
-  const siteId = String(props.siteId || '').trim()
-  if (!siteId)
-    return []
-  const siteDoc = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[siteId] || {}
-  const restrictedContent = (siteDoc?.restrictedContent && typeof siteDoc.restrictedContent === 'object')
-    ? siteDoc.restrictedContent
-    : {}
+  const restrictedContent = siteRestrictedSettings.value
   const plans = Array.isArray(restrictedContent?.rules) ? restrictedContent.rules : []
   return plans
     .map((item, index) => {
@@ -623,6 +675,20 @@ const siteRestrictedPlanOptions = computed(() => {
     })
     .filter(item => item.value)
     .sort((a, b) => a.label.localeCompare(b.label))
+})
+
+const siteAllowsSelfRegistration = computed(() => {
+  return siteRestrictedSettings.value?.allowSelfRegistration !== false
+})
+
+const protectionAccessModeOptions = computed(() => {
+  if (siteAllowsSelfRegistration.value)
+    return PROTECTION_ACCESS_MODES
+  return PROTECTION_ACCESS_MODES.filter(item => item.name !== 'paidPlan')
+})
+
+const previewAuthToggleVisible = computed(() => {
+  return Boolean(siteRestrictedSettings.value?.enabled)
 })
 
 const ensureQueryItemsDefaults = (meta) => {
@@ -1352,7 +1418,9 @@ const openEditor = async (event) => {
   }
   modelValue.value.blockUpdatedAt = new Date().toISOString()
   state.validationErrors = []
-  state.protectionDraft = normalizeBlockProtection(modelValue.value?.protection)
+  state.protectionDraft = normalizeBlockProtection(modelValue.value?.protection, {
+    allowPaidPlan: siteAllowsSelfRegistration.value,
+  })
   state.editorMode = 'fields'
   state.open = true
   state.afterLoad = true
@@ -1534,7 +1602,9 @@ const save = () => {
     values: JSON.parse(JSON.stringify(state.draft)),
     meta: sanitizeQueryItems(state.meta),
   }
-  const normalizedProtection = normalizeBlockProtection(state.protectionDraft)
+  const normalizedProtection = normalizeBlockProtection(state.protectionDraft, {
+    allowPaidPlan: siteAllowsSelfRegistration.value,
+  })
   if (normalizedProtection.enabled)
     updated.protection = normalizedProtection
   else
@@ -1542,6 +1612,13 @@ const save = () => {
   modelValue.value = updated
   state.open = false
 }
+
+watch(siteAllowsSelfRegistration, (allowed) => {
+  if (!allowed && state.protectionDraft.access === 'paidPlan') {
+    state.protectionDraft.access = 'loggedIn'
+    state.protectionDraft.ruleId = ''
+  }
+})
 
 const aiFieldOptions = computed(() => {
   return editableMetaEntries.value
@@ -1717,6 +1794,7 @@ const getTagsFromPosts = computed(() => {
 <template>
   <div>
     <div
+      v-if="!shouldHideForLoggedOutPreview"
       :class="[{ 'cursor-pointer': canOpenEditor }, blockWrapperClass]"
       :style="blockWrapperStyle"
       class="relative group"
@@ -1740,6 +1818,21 @@ const getTagsFromPosts = computed(() => {
         <div class="absolute left-2 top-2 inline-flex items-center gap-1 rounded bg-black/75 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-white">
           <LockKeyhole class="h-3.5 w-3.5" />
           Protected
+        </div>
+      </div>
+      <div v-if="showProtectedLoggedOutPreviewOverlay" class="pointer-events-none absolute inset-0 z-[9998] bg-red-600/35">
+        <div class="flex h-full w-full items-center justify-center p-4">
+          <div class="max-w-[420px] rounded-lg border border-white/20 bg-black/75 px-4 py-3 text-center text-white shadow-lg">
+            <div class="mb-2 flex items-center justify-center gap-2 text-sm font-semibold uppercase tracking-wide">
+              <LockKeyhole class="h-4 w-4" />
+              Protected Content
+            </div>
+            <div class="space-y-1 text-xs text-white/90">
+              <div>Allow self signup: {{ protectionSelfSignupLabel }}</div>
+              <div>Access: {{ protectionAccessLabel }}</div>
+              <div>When not logged in: {{ protectionUnauthBehaviorLabel }}</div>
+            </div>
+          </div>
         </div>
       </div>
       <!-- Darken overlay on hover -->
@@ -1856,9 +1949,10 @@ const getTagsFromPosts = computed(() => {
                 </edge-cms-code-editor>
               </div>
               <div class="min-h-0 rounded-md border border-border bg-card overflow-hidden flex flex-col">
-                <div class="flex items-center justify-between gap-2 px-3 py-2 border-b border-border bg-muted/40">
+                <div class="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/40">
                   <span class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Live Preview</span>
-                  <div class="flex shrink-0 items-center gap-1 flex-nowrap">
+                  <div class="ml-auto flex shrink-0 items-center gap-2">
+                    <div class="flex shrink-0 items-center gap-1 flex-nowrap">
                     <edge-shad-select
                       v-model="state.previewScale"
                       :items="previewScaleOptions"
@@ -1878,11 +1972,20 @@ const getTagsFromPosts = computed(() => {
                     >
                       <component :is="option.icon" class="w-3.5 h-3.5" />
                     </edge-shad-button>
+                    </div>
+                    <label v-if="previewAuthToggleVisible" class="inline-flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded-md border border-slate-300 bg-white/90 px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:bg-slate-800">
+                      <Checkbox
+                        :model-value="!state.previewAuthLoggedIn"
+                        aria-label="Block preview logged out"
+                        @update:model-value="setPreviewAuthMode(!Boolean($event))"
+                      />
+                      Preview logged out
+                    </label>
                   </div>
                 </div>
                 <div class="flex-1 min-h-0 overflow-y-auto p-3">
                   <div class="w-full mx-auto rounded-none overflow-visible" :style="previewViewportContainStyle">
-                    <div class="relative overflow-visible rounded-none" :class="[previewContentSurfaceClass, previewContentCanvasClass]" style="transform: translateZ(0);">
+                    <div class="relative overflow-visible rounded-none" :class="[previewContentSurfaceClass, previewContentCanvasClass, previewAuthClass]" style="transform: translateZ(0);">
                       <edge-cms-block-api
                         :site-id="props.siteId"
                         :route-last-segment="props.routeLastSegment"
@@ -1951,9 +2054,10 @@ const getTagsFromPosts = computed(() => {
           <edge-shad-form ref="blockFormRef" :class="props.editMode ? 'flex min-h-0 flex-1 flex-col' : ''">
             <div :class="props.editMode ? 'grid min-h-0 flex-1 gap-4 overflow-hidden px-6 pb-4 pt-3 xl:grid-cols-[minmax(0,1fr)_minmax(320px,26vw)]' : ''">
               <div v-if="props.editMode" class="min-h-0 rounded-md border border-border bg-card overflow-hidden flex flex-col">
-                <div class="flex items-center justify-between gap-2 px-3 py-2 border-b border-border bg-muted/40">
+                <div class="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/40">
                   <span class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Live Preview</span>
-                  <div class="flex shrink-0 items-center gap-1 flex-nowrap">
+                  <div class="ml-auto flex shrink-0 items-center gap-2">
+                    <div class="flex shrink-0 items-center gap-1 flex-nowrap">
                     <edge-shad-select
                       v-model="state.previewScale"
                       :items="previewScaleOptions"
@@ -1973,11 +2077,20 @@ const getTagsFromPosts = computed(() => {
                     >
                       <component :is="option.icon" class="w-3.5 h-3.5" />
                     </edge-shad-button>
+                    </div>
+                    <label v-if="previewAuthToggleVisible" class="inline-flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded-md border border-slate-300 bg-white/90 px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:bg-slate-800">
+                      <Checkbox
+                        :model-value="!state.previewAuthLoggedIn"
+                        aria-label="Block preview logged out"
+                        @update:model-value="setPreviewAuthMode(!Boolean($event))"
+                      />
+                      Preview logged out
+                    </label>
                   </div>
                 </div>
                 <div class="flex-1 min-h-0 overflow-y-auto p-3">
                   <div class="w-full mx-auto rounded-none overflow-visible" :style="previewViewportContainStyle">
-                    <div ref="fieldEditorPreviewRef" class="relative overflow-visible rounded-none" :class="[fieldEditorPreviewSurfaceClass, fieldEditorPreviewCanvasClass]" style="transform: translateZ(0);">
+                    <div ref="fieldEditorPreviewRef" class="relative overflow-visible rounded-none" :class="[fieldEditorPreviewSurfaceClass, fieldEditorPreviewCanvasClass, previewAuthClass]" style="transform: translateZ(0);">
                       <edge-cms-block-api
                         :site-id="props.siteId"
                         :route-last-segment="props.routeLastSegment"
@@ -2038,19 +2151,10 @@ const getTagsFromPosts = computed(() => {
                       />
 
                       <template v-if="state.protectionDraft.enabled">
-                        <edge-cms-boolean-card
-                          v-model="state.protectionDraft.allowSelfSignup"
-                          name="block-protection-allow-self-signup"
-                          label="Allow Self Signup?"
-                          checked-label="Allow"
-                          unchecked-label="Manual Only"
-                          class="w-full"
-                        />
-
                         <div class="grid gap-3 md:grid-cols-2">
                           <edge-shad-select
                             v-model="state.protectionDraft.access"
-                            :items="PROTECTION_ACCESS_MODES"
+                            :items="protectionAccessModeOptions"
                             item-title="title"
                             item-value="name"
                             name="block-protection-access"
@@ -2064,6 +2168,9 @@ const getTagsFromPosts = computed(() => {
                             name="block-protection-unauth"
                             label="When Not Logged In"
                           />
+                        </div>
+                        <div v-if="!siteAllowsSelfRegistration" class="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-200">
+                          Site-wide self registration is disabled, so paid plan access is not available.
                         </div>
 
                         <edge-shad-select
@@ -2494,5 +2601,19 @@ const getTagsFromPosts = computed(() => {
   border-radius: 0.375rem;
   box-shadow: 0 0 0 3px rgb(59 130 246 / 0.95);
   background: rgb(59 130 246 / 0.08);
+}
+
+.cms-auth-preview-logged-in :deep(.cms-show-logged-out),
+.cms-auth-preview-logged-in :deep([data-cms-show-logged-out]),
+.cms-auth-preview-logged-in :deep(.cms-hide-logged-in),
+.cms-auth-preview-logged-in :deep([data-cms-hide-logged-in]) {
+  display: none !important;
+}
+
+.cms-auth-preview-logged-out :deep(.cms-show-logged-in),
+.cms-auth-preview-logged-out :deep([data-cms-show-logged-in]),
+.cms-auth-preview-logged-out :deep(.cms-hide-logged-out),
+.cms-auth-preview-logged-out :deep([data-cms-hide-logged-out]) {
+  display: none !important;
 }
 </style>

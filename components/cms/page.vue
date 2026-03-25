@@ -74,6 +74,7 @@ const state = reactive({
   importErrorMessage: '',
   previewViewport: 'full',
   previewScale: '100',
+  previewAuthLoggedIn: true,
   previewPageView: 'list',
   newRowLayout: '6',
   newPostRowLayout: '6',
@@ -169,6 +170,7 @@ const previewScaleValue = computed(() => {
   return parsed
 })
 const previewScaleMultiplier = computed(() => previewScaleValue.value / 100)
+const previewAuthClass = computed(() => state.previewAuthLoggedIn ? 'cms-auth-preview-logged-in' : 'cms-auth-preview-logged-out')
 
 const previewViewportStyle = computed(() => {
   const selected = selectedPreviewViewport.value
@@ -322,6 +324,10 @@ const hasPostView = (workingDoc) => {
 
 const setPreviewPageView = (view) => {
   state.previewPageView = view === 'post' ? 'post' : 'list'
+}
+
+const setPreviewAuthMode = (loggedIn) => {
+  state.previewAuthLoggedIn = loggedIn === true
 }
 
 const previewViewportMode = computed(() => {
@@ -3547,6 +3553,16 @@ const hasUnsavedChanges = (changes) => {
                 <component :is="option.icon" class="w-3.5 h-3.5" />
               </edge-shad-button>
             </div>
+            <div v-if="!state.editMode && isRestrictedContentEnabled" class="flex shrink-0 items-center gap-2 px-1">
+              <label class="inline-flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded-md border border-slate-300 bg-white/90 px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:bg-slate-800">
+                <Checkbox
+                  :model-value="!state.previewAuthLoggedIn"
+                  aria-label="Page preview logged out"
+                  @update:model-value="setPreviewAuthMode(!Boolean($event))"
+                />
+                Preview logged out
+              </label>
+            </div>
             <div v-if="hasPostView(slotProps.workingDoc)" class="flex shrink-0 items-center gap-1 px-1">
               <edge-shad-button
                 type="button"
@@ -3935,7 +3951,7 @@ const hasUnsavedChanges = (changes) => {
                 data-cms-preview-surface="page"
                 :data-cms-preview-mode="state.editMode ? 'edit' : 'preview'"
                 class="w-full h-[calc(100vh-220px)]  mt-2 overflow-y-auto mx-auto bg-card border border-border shadow-sm md:shadow-md p-0 space-y-6"
-                :class="[{ 'transition-all duration-300': !state.editMode }, state.editMode ? 'rounded-lg' : 'rounded-none']"
+                :class="[{ 'transition-all duration-300': !state.editMode }, state.editMode ? 'rounded-lg' : 'rounded-none', !state.editMode ? previewAuthClass : '']"
                 :style="buildScaledPreviewSurfaceStyle('calc(100vh - 220px)')"
               >
                 <edge-button-divider v-if="state.editMode" class="my-2">
@@ -4085,6 +4101,7 @@ const hasUnsavedChanges = (changes) => {
                                       :allow-preview-content-edit="!state.editMode && canOpenPreviewBlockContentEditor"
                                       :contain-fixed="state.editMode"
                                       :viewport-mode="previewViewportMode"
+                                      :preview-auth-logged-in="state.previewAuthLoggedIn"
                                       :block-id="blockId"
                                       :theme="theme"
                                       :allow-protection-editor="isRestrictedContentEnabled"
@@ -4194,7 +4211,7 @@ const hasUnsavedChanges = (changes) => {
                 data-cms-preview-surface="page"
                 :data-cms-preview-mode="state.editMode ? 'edit' : 'preview'"
                 class="w-full  h-[calc(100vh-180px)]  mt-2 overflow-y-auto mx-auto bg-card border border-border shadow-sm md:shadow-md p-0 space-y-6"
-                :class="[{ 'transition-all duration-300': !state.editMode }, state.editMode ? 'rounded-lg' : 'rounded-none']"
+                :class="[{ 'transition-all duration-300': !state.editMode }, state.editMode ? 'rounded-lg' : 'rounded-none', !state.editMode ? previewAuthClass : '']"
                 :style="buildScaledPreviewSurfaceStyle('calc(100vh - 180px)')"
               >
                 <edge-button-divider v-if="state.editMode" class="my-2">
@@ -4343,11 +4360,12 @@ const hasUnsavedChanges = (changes) => {
                                       :allow-preview-content-edit="!state.editMode && canOpenPreviewBlockContentEditor"
                                       :contain-fixed="state.editMode"
                                       :viewport-mode="previewViewportMode"
+                                      :preview-auth-logged-in="state.previewAuthLoggedIn"
                                       :block-id="blockId"
                                       :theme="theme"
                                       :site-id="selectedPreviewContextSiteId"
                                       :route-last-segment="previewRouteLastSegment"
-                                      :allow-protection-editor="false"
+                                      :allow-protection-editor="isRestrictedContentEnabled"
                                       @delete="(block) => deleteBlock(block, slotProps, true)"
                                     />
                                     <div
@@ -5232,5 +5250,19 @@ const hasUnsavedChanges = (changes) => {
 
 .cms-page-preview-mode :deep([data-cms-preview-surface]) {
   color: initial !important;
+}
+
+.cms-auth-preview-logged-in :deep(.cms-show-logged-out),
+.cms-auth-preview-logged-in :deep([data-cms-show-logged-out]),
+.cms-auth-preview-logged-in :deep(.cms-hide-logged-in),
+.cms-auth-preview-logged-in :deep([data-cms-hide-logged-in]) {
+  display: none !important;
+}
+
+.cms-auth-preview-logged-out :deep(.cms-show-logged-in),
+.cms-auth-preview-logged-out :deep([data-cms-show-logged-in]),
+.cms-auth-preview-logged-out :deep(.cms-hide-logged-out),
+.cms-auth-preview-logged-out :deep([data-cms-hide-logged-out]) {
+  display: none !important;
 }
 </style>

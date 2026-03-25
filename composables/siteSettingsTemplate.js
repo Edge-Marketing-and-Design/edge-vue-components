@@ -4,6 +4,7 @@ export const useSiteSettingsTemplate = () => {
   const { buildSiteStructuredData } = useStructuredDataTemplates()
   const createRestrictedContentDefaults = () => ({
     enabled: false,
+    allowSelfRegistration: true,
     registrationPricing: 'free',
     provider: 'stripe',
     defaultCurrency: 'USD',

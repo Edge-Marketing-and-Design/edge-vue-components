@@ -870,6 +870,7 @@ onBeforeUnmount(async () => {
               <edge-shad-form
                 :initial-values="{
                   'restricted-content-enabled': state.settings.enabled,
+                  'restricted-content-allow-self-registration': state.settings.allowSelfRegistration,
                   'restricted-content-terms-url': state.settings.registrationTermsUrl,
                   'restricted-content-login-help': state.settings.loginHelpText,
                   'restricted-content-success-message': state.settings.registrationSuccessMessage,
@@ -894,9 +895,16 @@ onBeforeUnmount(async () => {
                   >
                     Turn this on when you are ready for this site to start using these access plans.
                   </edge-cms-boolean-card>
-                  <div class="rounded-lg border border-border/60 bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-                    All pricing is shown in USD.
-                  </div>
+                  <edge-cms-boolean-card
+                    v-model="state.settings.allowSelfRegistration"
+                    name="restricted-content-allow-self-registration"
+                    label="Allow visitors to self register"
+                    class="w-full"
+                    checked-label="Allowed"
+                    unchecked-label="Disabled"
+                  >
+                    When this is off, paid plan access is disabled in block protection.
+                  </edge-cms-boolean-card>
                   <edge-shad-input
                     v-model="state.settings.registrationTermsUrl"
                     name="restricted-content-terms-url"

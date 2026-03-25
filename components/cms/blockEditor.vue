@@ -34,6 +34,7 @@ const state = reactive({
   seedingInitialBlocks: false,
   previewViewport: 'full',
   previewScale: '100',
+  previewAuthLoggedIn: true,
   previewBlock: null,
   previewSourceValues: {},
   previewRenderContext: null,
@@ -149,6 +150,7 @@ const previewScaleValue = computed(() => {
   return parsed
 })
 const previewScaleMultiplier = computed(() => previewScaleValue.value / 100)
+const previewAuthClass = computed(() => state.previewAuthLoggedIn ? 'cms-auth-preview-logged-in' : 'cms-auth-preview-logged-out')
 
 const previewViewportStyle = computed(() => {
   const selected = selectedPreviewViewport.value
@@ -171,6 +173,10 @@ const previewViewportContainStyle = computed(() => {
 
 const setPreviewViewport = (viewportId) => {
   state.previewViewport = viewportId
+}
+
+const setPreviewAuthMode = (loggedIn) => {
+  state.previewAuthLoggedIn = loggedIn === true
 }
 
 const previewViewportMode = computed(() => {
@@ -312,7 +318,7 @@ const BLOCK_CONTENT_SNIPPETS = [
   },
   {
     label: 'Post Content Example',
-    snippet: `{{{#array {"field":"list","schema":[{"field":"name","value":"text"},{"field":"content","value":"richtext"}],"collection":{"path":"posts","uniqueKey":"{orgId}:{siteId}","query":[],"order":[]},"queryOptions":[],"limit":3,"value":[]}}}}
+    snippet: `{{{#array {"field":"list","collection":{"path":"posts","uniqueKey":"{orgId}:{siteId}","order":[]},"queryOptions":[],"queryItems":{"name":"{routeLastSegment}"},"limit":1,"value":[]}}}}
   <article>
     <h2>{{item.name}}</h2>
     {{{#renderBlocks {"field":"item"}}}}
@@ -829,6 +835,14 @@ const sites = computed(() => {
   return Object.entries(sitesMap)
     .map(([docId, data]) => ({ docId, ...(data || {}) }))
     .filter(site => site.docId && site.docId !== 'templates')
+})
+
+const previewAuthToggleVisible = computed(() => {
+  const siteId = String(edgeGlobal.edgeState.blockEditorSite || '').trim()
+  if (!siteId)
+    return false
+  const siteDoc = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[siteId] || {}
+  return Boolean(siteDoc?.restrictedContent?.enabled)
 })
 
 watch (sites, async (newSites) => {
@@ -1520,9 +1534,10 @@ const exportCurrentBlock = async () => {
               </edge-cms-code-editor>
             </div>
             <div class="w-1/2 space-y-2">
-              <div class="flex items-center justify-between gap-2">
+              <div class="flex items-center gap-2">
                 <span class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Viewport</span>
-                <div class="flex shrink-0 items-center gap-1 flex-nowrap">
+                <div class="ml-auto flex shrink-0 items-center gap-2">
+                  <div class="flex shrink-0 items-center gap-1 flex-nowrap">
                   <edge-shad-select
                     v-model="state.previewScale"
                     :items="previewScaleOptions"
@@ -1542,13 +1557,22 @@ const exportCurrentBlock = async () => {
                   >
                     <component :is="option.icon" class="w-3.5 h-3.5" />
                   </edge-shad-button>
+                  </div>
+                  <label v-if="previewAuthToggleVisible" class="inline-flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded-md border border-slate-300 bg-white/90 px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:bg-slate-800">
+                    <Checkbox
+                      :model-value="!state.previewAuthLoggedIn"
+                      aria-label="Block preview logged out"
+                      @update:model-value="setPreviewAuthMode(!Boolean($event))"
+                    />
+                    Preview logged out
+                  </label>
                 </div>
               </div>
               <div
                 class="w-full mx-auto rounded-none overflow-visible"
                 :style="previewViewportContainStyle"
               >
-                <div class="w-full mx-auto bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30" :class="previewSurfaceClass" style="transform: translateZ(0);">
+                <div class="w-full mx-auto bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30" :class="[previewSurfaceClass, previewAuthClass]" style="transform: translateZ(0);">
                   <edge-cms-block
                     v-if="state.previewBlock"
                     :key="previewThemeRenderKey"
@@ -1650,7 +1674,7 @@ const exportCurrentBlock = async () => {
               class="w-full mx-auto rounded-none overflow-visible"
               :style="previewViewportContainStyle"
             >
-              <div class="w-full mx-auto bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30" :class="previewSurfaceClass" style="transform: translateZ(0);">
+              <div class="w-full mx-auto bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30" :class="[previewSurfaceClass, previewAuthClass]" style="transform: translateZ(0);">
                 <edge-cms-block
                   v-model="state.historyPreviewBlock"
                   class="!h-[70vh] overflow-y-auto"
@@ -1722,7 +1746,7 @@ const exportCurrentBlock = async () => {
                   >
                     <div
                       class="w-full mx-auto overflow-hidden drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30"
-                      :class="getPreviewSurfaceClass(historyDiffBasePreviewBlock)"
+                      :class="[previewAuthClass, getPreviewSurfaceClass(historyDiffBasePreviewBlock)]"
                       :style="previewViewportContainStyle"
                     >
                       <edge-cms-block
@@ -1758,7 +1782,7 @@ const exportCurrentBlock = async () => {
                   >
                     <div
                       class="w-full mx-auto overflow-hidden drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30"
-                      :class="getPreviewSurfaceClass(historyDiffComparePreviewBlock)"
+                      :class="[previewAuthClass, getPreviewSurfaceClass(historyDiffComparePreviewBlock)]"
                       :style="previewViewportContainStyle"
                     >
                       <edge-cms-block
@@ -1791,7 +1815,7 @@ const exportCurrentBlock = async () => {
       </DialogContent>
     </edge-shad-dialog>
     <Sheet v-model:open="state.helpOpen">
-      <SheetContent side="right" class="w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl">
+      <SheetContent side="right" class="!w-screen !max-w-none sm:!max-w-none md:!max-w-none">
         <SheetHeader>
           <SheetTitle class="text-left">
             Block Editor Guide
@@ -1802,7 +1826,7 @@ const exportCurrentBlock = async () => {
         </SheetHeader>
         <div class="px-6 pb-6">
           <Tabs class="w-full" default-value="guide">
-            <TabsList class="w-full mt-3 rounded-sm grid grid-cols-6 border border-slate-300 bg-slate-200 dark:border-slate-700 dark:bg-slate-800">
+            <TabsList class="w-full mt-3 rounded-sm grid grid-cols-7 border border-slate-300 bg-slate-200 dark:border-slate-700 dark:bg-slate-800">
               <TabsTrigger value="guide" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
                 Block Guide
               </TabsTrigger>
@@ -1814,6 +1838,9 @@ const exportCurrentBlock = async () => {
               </TabsTrigger>
               <TabsTrigger value="form-helpers" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
                 Forms
+              </TabsTrigger>
+              <TabsTrigger value="auth-helpers" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
+                Auth
               </TabsTrigger>
               <TabsTrigger value="nav-bar" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
                 Nav
@@ -2406,7 +2433,7 @@ const exportCurrentBlock = async () => {
                     <p class="text-sm text-foreground">
                       Inside that block render, use <code v-pre>{{renderItem.someField}}</code> to output values directly from the current item passed into <code>renderBlocks</code>.
                     </p>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {"field":"list","schema":[{"field":"name","value":"text"},{"field":"content","value":"richtext"}],"collection":{"path":"posts","queryItems":{"name":"{routeLastSegment}"},"order":[]},"queryOptions":[],"limit":1,"value":[]}}}}
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {"field":"list","collection":{"path":"posts","uniqueKey":"{orgId}:{siteId}","order":[]},"queryOptions":[],"queryItems":{"name":"{routeLastSegment}"},"limit":1,"value":[]}}}}
   <article>
     <h2>{{item.name}}</h2>
     {{{#renderBlocks {"field":"item"}}}}
@@ -3013,6 +3040,60 @@ const exportCurrentBlock = async () => {
               </div>
             </TabsContent>
 
+            <TabsContent value="auth-helpers">
+              <div class="h-[calc(100vh-190px)] overflow-y-auto pr-1 pb-6">
+                <div class="space-y-6">
+                  <section class="space-y-2">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      What This Does
+                    </h3>
+                    <p class="text-sm text-foreground">
+                      Add helper classes in block HTML so runtime can mark login CTAs and toggle visibility based on auth state.
+                    </p>
+                  </section>
+
+                  <section class="space-y-2">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Login / Logout Helpers
+                    </h3>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div><code>.cms-login-button</code> or <code>[data-cms-login-button]</code>: marks a login CTA.</div>
+                      <div><code>.cms-logout-button</code> or <code>[data-cms-logout-button]</code>: marks a logout CTA.</div>
+                      <div>Runtime adds <code>data-cms-auth-action="login|logout"</code> plus <code>data-cms-interactive="true"</code> so frontend can open login UI or trigger logout.</div>
+                    </div>
+                  </section>
+
+                  <section class="space-y-2">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Visibility Helpers
+                    </h3>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div><code>.cms-show-logged-in</code> or <code>[data-cms-show-logged-in]</code>: only visible when logged in.</div>
+                      <div><code>.cms-show-logged-out</code> or <code>[data-cms-show-logged-out]</code>: only visible when logged out.</div>
+                      <div><code>.cms-hide-logged-in</code> or <code>[data-cms-hide-logged-in]</code>: hidden when logged in.</div>
+                      <div><code>.cms-hide-logged-out</code> or <code>[data-cms-hide-logged-out]</code>: hidden when logged out.</div>
+                      <div>Runtime writes <code>data-cms-auth-state="logged-in|logged-out"</code> on the block HTML root.</div>
+                    </div>
+                  </section>
+
+                  <section class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Example
+                    </h3>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;div class="flex items-center gap-3"&gt;
+  &lt;button type="button" class="cms-login-button cms-show-logged-out inline-flex items-center rounded-md bg-black px-4 py-2 text-white"&gt;
+    Log In
+  &lt;/button&gt;
+
+  &lt;button type="button" class="cms-logout-button cms-show-logged-in inline-flex items-center rounded-md border px-4 py-2"&gt;
+    Log Out
+  &lt;/button&gt;
+&lt;/div&gt;</code></pre>
+                  </section>
+                </div>
+              </div>
+            </TabsContent>
+
             <TabsContent value="scroll-reveals">
               <div class="h-[calc(100vh-190px)] overflow-y-auto pr-1 pb-6">
                 <div class="space-y-6">
@@ -3228,3 +3309,19 @@ const exportCurrentBlock = async () => {
     </Sheet>
   </div>
 </template>
+
+<style scoped>
+.cms-auth-preview-logged-in :deep(.cms-show-logged-out),
+.cms-auth-preview-logged-in :deep([data-cms-show-logged-out]),
+.cms-auth-preview-logged-in :deep(.cms-hide-logged-in),
+.cms-auth-preview-logged-in :deep([data-cms-hide-logged-in]) {
+  display: none !important;
+}
+
+.cms-auth-preview-logged-out :deep(.cms-show-logged-in),
+.cms-auth-preview-logged-out :deep([data-cms-show-logged-in]),
+.cms-auth-preview-logged-out :deep(.cms-hide-logged-out),
+.cms-auth-preview-logged-out :deep([data-cms-hide-logged-out]) {
+  display: none !important;
+}
+</style>
