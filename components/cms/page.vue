@@ -4347,7 +4347,7 @@ const hasUnsavedChanges = (changes) => {
                                       :theme="theme"
                                       :site-id="selectedPreviewContextSiteId"
                                       :route-last-segment="previewRouteLastSegment"
-                                      :allow-protection-editor="isRestrictedContentEnabled"
+                                      :allow-protection-editor="false"
                                       @delete="(block) => deleteBlock(block, slotProps, true)"
                                     />
                                     <div

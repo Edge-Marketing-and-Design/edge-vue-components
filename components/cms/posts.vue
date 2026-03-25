@@ -4525,7 +4525,7 @@ const reindexPublishedPostsToKv = async () => {
                                   :contain-fixed="true"
                                   :block-id="blockId"
                                   :theme="theme"
-                                  :allow-protection-editor="isRestrictedContentEnabled"
+                                  :allow-protection-editor="false"
                                   @delete="() => deletePostBlock(slotProps.workingDoc, blockId)"
                                 />
                                 <div v-if="state.editMode" class="block-drag-handle pointer-events-none absolute inset-x-0 top-2 flex justify-center opacity-0 transition group-hover:opacity-100 z-30">
@@ -4799,7 +4799,7 @@ const reindexPublishedPostsToKv = async () => {
                             :contain-fixed="true"
                             :block-id="blockId"
                             :theme="theme"
-                            :allow-protection-editor="isRestrictedContentEnabled"
+                            :allow-protection-editor="false"
                             @delete="() => deletePostBlock(slotProps.workingDoc, blockId)"
                           />
                           <div v-if="state.editMode" class="block-drag-handle pointer-events-none absolute inset-x-0 top-2 flex justify-center opacity-0 transition group-hover:opacity-100 z-30">

@@ -380,9 +380,28 @@ const effectivePreviewType = computed(() => {
 const canOpenFieldEditor = computed(() => props.editMode)
 const canOpenPreviewContentEditor = computed(() => !props.editMode && props.allowPreviewContentEdit)
 const canOpenEditor = computed(() => canOpenFieldEditor.value || canOpenPreviewContentEditor.value)
-const showProtectionEditor = computed(() => !props.standalonePreview && props.allowProtectionEditor)
+const resolvedEditorBlockTypes = computed(() => {
+  const instanceTypes = normalizeBlockTypes(modelValue.value?.type, { fallbackToPage: false })
+  if (instanceTypes.length)
+    return instanceTypes
+
+  const blockDocId = sourceBlockDocId.value
+  if (!blockDocId)
+    return ['Page']
+
+  const blocksPath = `${edgeGlobal.edgeState.organizationDocPath}/blocks`
+  const blockDoc = edgeFirebase.data?.[blocksPath]?.[blockDocId]
+  const templateTypes = normalizeBlockTypes(blockDoc?.type, { fallbackToPage: false })
+  if (templateTypes.length)
+    return templateTypes
+  return ['Page']
+})
+const isPageBlockEditor = computed(() => resolvedEditorBlockTypes.value.includes('Page'))
+const showProtectionEditor = computed(() => {
+  return !props.standalonePreview && props.allowProtectionEditor && isPageBlockEditor.value
+})
 const showProtectedEditOverlay = computed(() => {
-  if (!props.editMode)
+  if (!props.editMode || !showProtectionEditor.value)
     return false
   return normalizeBlockProtection(modelValue.value?.protection).enabled
 })
