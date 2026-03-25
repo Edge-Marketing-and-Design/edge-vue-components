@@ -2494,7 +2494,6 @@ const getRestrictedSiteRefs = (orgId, siteId) => {
     orgRef,
     siteRef,
     audienceUsersRef: siteRef.collection('audience-users'),
-    membersRef: siteRef.collection('restricted-members'),
     privateStripeRef: siteRef.collection('private-integrations').doc('stripe'),
   }
 }
@@ -2732,8 +2731,8 @@ const updateRestrictedMemberPaymentState = async ({
   if (!normalizedOrgId || !normalizedSiteId || !normalizedAudienceUserId || !normalizedRuleId)
     return
 
-  const { membersRef } = getRestrictedSiteRefs(normalizedOrgId, normalizedSiteId)
-  const memberRef = membersRef.doc(normalizedAudienceUserId)
+  const { audienceUsersRef } = getRestrictedSiteRefs(normalizedOrgId, normalizedSiteId)
+  const memberRef = audienceUsersRef.doc(normalizedAudienceUserId)
   const memberSnap = await memberRef.get()
   const memberData = memberSnap.exists ? (memberSnap.data() || {}) : {}
 
@@ -2765,7 +2764,7 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
 
   try {
     const { rule, effectiveRegistrationMode } = await getRestrictedRuleContext(orgId, siteId, ruleId, { requireAllowRegistration: false })
-    const { audienceUsersRef, membersRef } = getRestrictedSiteRefs(orgId, siteId)
+    const { audienceUsersRef } = getRestrictedSiteRefs(orgId, siteId)
     const now = Date.now()
     const existingAuthUidByEmail = await resolveAuthUserUidByEmail(email)
     const linkedAuthUid = existingAuthUidByEmail || requestAuthUid
@@ -2867,7 +2866,7 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
       last_updated: now,
     }, { merge: true })
 
-    const memberRef = membersRef.doc(docId)
+    const memberRef = audienceUsersRef.doc(docId)
     const memberSnap = await memberRef.get()
     const memberData = memberSnap.exists ? (memberSnap.data() || {}) : {}
     if (String(memberData.status || '').trim().toLowerCase() === 'revoked') {
@@ -2923,7 +2922,7 @@ exports.restrictedContentGetUserRuleAccess = onCall(async (request) => {
   if (userId !== request.auth.uid)
     throw new HttpsError('permission-denied', 'userId must match the authenticated user.')
 
-  const { siteRef, audienceUsersRef, membersRef } = getRestrictedSiteRefs(orgId, siteId)
+  const { siteRef, audienceUsersRef } = getRestrictedSiteRefs(orgId, siteId)
   const siteSnap = await siteRef.get()
   if (!siteSnap.exists)
     throw new HttpsError('not-found', 'Site not found.')
@@ -2965,8 +2964,7 @@ exports.restrictedContentGetUserRuleAccess = onCall(async (request) => {
     }, { merge: true })
   }
 
-  const memberSnap = await membersRef.doc(audienceUserId).get()
-  const memberData = memberSnap.exists ? (memberSnap.data() || {}) : {}
+  const memberData = audienceUserSnap.data() || {}
   const status = String(memberData.status || '').trim().toLowerCase() || 'inactive'
   const registrationPaymentStatus = String(memberData.registrationPaymentStatus || '').trim().toLowerCase() || 'not_required'
   const rawRuleIds = Array.isArray(memberData.accessRuleIds) ? memberData.accessRuleIds.filter(Boolean) : []
@@ -3023,7 +3021,7 @@ exports.restrictedContentCreateStripeLink = onCall({ timeoutSeconds: 180 }, asyn
   if (!rule.registrationStripeProductId)
     throw new HttpsError('failed-precondition', 'This rule does not have a Stripe product configured.')
 
-  const { audienceUsersRef, membersRef, privateStripeRef } = getRestrictedSiteRefs(orgId, siteId)
+  const { audienceUsersRef, privateStripeRef } = getRestrictedSiteRefs(orgId, siteId)
   const audienceUserSnap = await resolveAudienceUserForAuth(orgId, siteId, request.auth.uid)
   if (!audienceUserSnap?.exists)
     throw new HttpsError('not-found', 'No audience user was found for the current account.')
@@ -3091,7 +3089,7 @@ exports.restrictedContentCreateStripeLink = onCall({ timeoutSeconds: 180 }, asyn
     }, { merge: true })
   }
 
-  const memberRef = membersRef.doc(audienceUserId)
+  const memberRef = audienceUsersRef.doc(audienceUserId)
   const memberSnap = await memberRef.get()
   const memberData = memberSnap.exists ? (memberSnap.data() || {}) : {}
   await memberRef.set(buildRestrictedMemberPayload({

@@ -11,7 +11,6 @@ export const useSiteSettingsTemplate = () => {
     loginHelpText: '',
     registrationSuccessMessage: '',
     rules: [],
-    pageRuleAssignments: {},
   })
   const createDefaults = () => ({
     name: '',

@@ -1,7 +1,7 @@
 <script setup>
 import { useVModel } from '@vueuse/core'
 import { renderTemplate } from '@edgedev/template-engine'
-import { ImagePlus, Loader2, Maximize2, Monitor, Plus, Smartphone, Sparkles, Tablet, X } from 'lucide-vue-next'
+import { ChevronDown, ImagePlus, Loader2, LockKeyhole, LockOpen, Maximize2, Monitor, Plus, Smartphone, Sparkles, Tablet, X } from 'lucide-vue-next'
 const props = defineProps({
   modelValue: {
     type: Object,
@@ -67,9 +67,55 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  allowProtectionEditor: {
+    type: Boolean,
+    default: true,
+  },
 })
 const emit = defineEmits(['update:modelValue', 'delete'])
 const edgeFirebase = inject('edgeFirebase')
+const PROTECTION_ACCESS_MODES = [
+  { name: 'loggedIn', title: 'Any Logged-In User' },
+  { name: 'paidPlan', title: 'Paid Access Plan' },
+]
+const PROTECTION_UNAUTH_BEHAVIORS = [
+  { name: 'hide', title: 'Hide Block' },
+  { name: 'showLogin', title: 'Show Login' },
+  { name: 'blurWithLoginPrompt', title: 'Blur + Login Prompt' },
+]
+
+const createBlockProtectionDefaults = () => ({
+  enabled: false,
+  allowSelfSignup: true,
+  access: 'loggedIn',
+  ruleId: '',
+  unauthBehavior: 'hide',
+  loginPromptTitle: 'Members only',
+  loginPromptMessage: 'Log in to view this content.',
+  loginPromptButtonLabel: 'Log In',
+})
+
+const normalizeBlockProtection = (value = {}) => {
+  const next = {
+    ...createBlockProtectionDefaults(),
+    ...((value && typeof value === 'object') ? value : {}),
+  }
+  next.enabled = next.enabled === true
+  next.allowSelfSignup = next.allowSelfSignup !== false
+  next.access = next.access === 'paidPlan' ? 'paidPlan' : 'loggedIn'
+  next.ruleId = String(next.ruleId || '').trim()
+  next.unauthBehavior = PROTECTION_UNAUTH_BEHAVIORS.some(item => item.name === next.unauthBehavior)
+    ? next.unauthBehavior
+    : 'hide'
+  next.loginPromptTitle = String(next.loginPromptTitle || '').trim() || 'Members only'
+  next.loginPromptMessage = String(next.loginPromptMessage || '').trim() || 'Log in to view this content.'
+  next.loginPromptButtonLabel = String(next.loginPromptButtonLabel || '').trim() || 'Log In'
+
+  if (next.access !== 'paidPlan')
+    next.ruleId = ''
+  delete next.alternateBlockId
+  return next
+}
 
 function normalizeConfigLiteral(str) {
   return str
@@ -227,6 +273,8 @@ const state = reactive({
   aiGenerating: false,
   aiError: '',
   validationErrors: [],
+  protectionDraft: createBlockProtectionDefaults(),
+  protectionPanelOpen: false,
   blockContentDraft: '',
   blockContentDocId: '',
   blockContentUpdating: false,
@@ -332,6 +380,12 @@ const effectivePreviewType = computed(() => {
 const canOpenFieldEditor = computed(() => props.editMode)
 const canOpenPreviewContentEditor = computed(() => !props.editMode && props.allowPreviewContentEdit)
 const canOpenEditor = computed(() => canOpenFieldEditor.value || canOpenPreviewContentEditor.value)
+const showProtectionEditor = computed(() => !props.standalonePreview && props.allowProtectionEditor)
+const showProtectedEditOverlay = computed(() => {
+  if (!props.editMode)
+    return false
+  return normalizeBlockProtection(modelValue.value?.protection).enabled
+})
 
 const shouldContainFixedPreview = computed(() => {
   return (props.editMode || props.containFixed) && hasFixedPositionInContent.value
@@ -528,6 +582,28 @@ const previewBlockDisplayName = computed(() => {
   ]
   const found = candidates.find(value => String(value || '').trim())
   return String(found || '').trim() || 'Block'
+})
+
+const siteRestrictedPlanOptions = computed(() => {
+  const siteId = String(props.siteId || '').trim()
+  if (!siteId)
+    return []
+  const siteDoc = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[siteId] || {}
+  const restrictedContent = (siteDoc?.restrictedContent && typeof siteDoc.restrictedContent === 'object')
+    ? siteDoc.restrictedContent
+    : {}
+  const plans = Array.isArray(restrictedContent?.rules) ? restrictedContent.rules : []
+  return plans
+    .map((item, index) => {
+      const normalizedItem = (item && typeof item === 'object') ? item : {}
+      const id = String(normalizedItem.id || normalizedItem.docId || `rule-${index + 1}`).trim()
+      return {
+        value: id,
+        label: String(normalizedItem.name || id).trim() || id,
+      }
+    })
+    .filter(item => item.value)
+    .sort((a, b) => a.label.localeCompare(b.label))
 })
 
 const ensureQueryItemsDefaults = (meta) => {
@@ -1257,6 +1333,7 @@ const openEditor = async (event) => {
   }
   modelValue.value.blockUpdatedAt = new Date().toISOString()
   state.validationErrors = []
+  state.protectionDraft = normalizeBlockProtection(modelValue.value?.protection)
   state.editorMode = 'fields'
   state.open = true
   state.afterLoad = true
@@ -1438,6 +1515,11 @@ const save = () => {
     values: JSON.parse(JSON.stringify(state.draft)),
     meta: sanitizeQueryItems(state.meta),
   }
+  const normalizedProtection = normalizeBlockProtection(state.protectionDraft)
+  if (normalizedProtection.enabled)
+    updated.protection = normalizedProtection
+  else
+    delete updated.protection
   modelValue.value = updated
   state.open = false
 }
@@ -1634,6 +1716,12 @@ const getTagsFromPosts = computed(() => {
           :render-context="props.renderContext"
           :standalone-preview="props.standalonePreview"
         />
+      </div>
+      <div v-if="showProtectedEditOverlay" class="pointer-events-none absolute inset-0 z-[9998] bg-black/20">
+        <div class="absolute left-2 top-2 inline-flex items-center gap-1 rounded bg-black/75 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-white">
+          <LockKeyhole class="h-3.5 w-3.5" />
+          Protected
+        </div>
       </div>
       <!-- Darken overlay on hover -->
       <div v-if="props.editMode" class="pointer-events-none absolute inset-0 bg-black/50 opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-[10000]" />
@@ -1888,15 +1976,7 @@ const getTagsFromPosts = computed(() => {
                 </div>
               </div>
               <div :class="props.editMode ? 'min-h-0 flex flex-col overflow-hidden rounded-md border border-border bg-card' : ''">
-                <div v-if="editableMetaEntries.length === 0">
-                  <Alert variant="info" :class="props.editMode ? 'mb-4' : 'mt-4 mb-4'">
-                    <AlertTitle>No editable fields found</AlertTitle>
-                    <AlertDescription class="text-sm">
-                      This block does not have any editable fields defined.
-                    </AlertDescription>
-                  </Alert>
-                </div>
-                <div v-else-if="props.editMode" class="shrink-0 border-b border-border bg-muted/30 px-4 py-2 text-[11px] font-medium text-muted-foreground">
+                <div v-if="props.editMode && editableMetaEntries.length > 0" class="shrink-0 border-b border-border bg-muted/30 px-4 py-2 text-[11px] font-medium text-muted-foreground">
                   Scroll this panel for more fields.
                 </div>
                 <div
@@ -1906,276 +1986,377 @@ const getTagsFromPosts = computed(() => {
                       ? 'h-[calc(100vh-160px)] p-6 space-y-4 overflow-y-auto'
                       : 'h-[calc(100vh-130px)] p-6 space-y-4 overflow-y-auto'"
                 >
-              <template v-for="entry in editableMetaEntries" :key="entry.field">
-                <div v-if="entry.meta.type === 'array'" @focusin="setActivePreviewField(entry.field)" @mousedown.capture="setActivePreviewField(entry.field)">
-                  <div v-if="!entry.meta?.api && !entry.meta?.collection">
-                    <div v-if="entry.meta?.schema">
-                      <Card v-if="!state.reload" class="mb-4 bg-white shadow-sm border border-gray-200 p-4">
-                        <CardHeader class="p-0 mb-2">
-                          <div class="relative flex items-center p-2 justify-between sticky top-0 z-10 rounded border border-slate-300 bg-slate-200 text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
-                            <span class="text-lg font-semibold whitespace-nowrap pr-1"> {{ genTitleFromField(entry) }}</span>
-                            <div class="flex w-full items-center">
-                              <div class="w-full border-t border-gray-300 dark:border-white/15" aria-hidden="true" />
-                              <edge-shad-button variant="text" class="text-xs h-[26px] text-slate-700 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white" @click="state.editMode = !state.editMode">
-                                <Popover
-                                  :open="!!state.arrayAddPopoverOpenByField[entry.field]"
-                                  @update:open="(open) => setArrayAddPopoverOpen(entry.field, open)"
-                                >
-                                  <PopoverTrigger as-child>
-                                    <edge-shad-button
-                                      variant="text"
-                                      type="submit"
-                                      class="bg-slate-300 text-slate-900 hover:bg-slate-400 text-xs h-[26px] dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
+                  <div v-if="showProtectionEditor" class="rounded-lg border border-border/60 bg-muted/20">
+                    <button
+                      type="button"
+                      class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left"
+                      @click="state.protectionPanelOpen = !state.protectionPanelOpen"
+                    >
+                      <div class="flex items-center gap-2">
+                        <LockKeyhole v-if="state.protectionDraft.enabled" class="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                        <LockOpen v-else class="h-4 w-4 text-muted-foreground" />
+                        <span class="text-sm font-semibold text-foreground">Protect</span>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <span class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          {{ state.protectionDraft.enabled ? 'Protected' : 'Public' }}
+                        </span>
+                        <ChevronDown
+                          class="h-4 w-4 text-muted-foreground transition-transform"
+                          :class="state.protectionPanelOpen ? 'rotate-180' : ''"
+                        />
+                      </div>
+                    </button>
+
+                    <div v-if="state.protectionPanelOpen" class="space-y-2 border-t border-border/60 p-3">
+                      <edge-cms-boolean-card
+                        v-model="state.protectionDraft.enabled"
+                        name="block-protection-enabled"
+                        label="Enable Protection"
+                        checked-label="Protected"
+                        unchecked-label="Public"
+                        class="w-full"
+                      />
+
+                      <template v-if="state.protectionDraft.enabled">
+                        <edge-cms-boolean-card
+                          v-model="state.protectionDraft.allowSelfSignup"
+                          name="block-protection-allow-self-signup"
+                          label="Allow Self Signup?"
+                          checked-label="Allow"
+                          unchecked-label="Manual Only"
+                          class="w-full"
+                        />
+
+                        <div class="grid gap-3 md:grid-cols-2">
+                          <edge-shad-select
+                            v-model="state.protectionDraft.access"
+                            :items="PROTECTION_ACCESS_MODES"
+                            item-title="title"
+                            item-value="name"
+                            name="block-protection-access"
+                            label="Access"
+                          />
+                          <edge-shad-select
+                            v-model="state.protectionDraft.unauthBehavior"
+                            :items="PROTECTION_UNAUTH_BEHAVIORS"
+                            item-title="title"
+                            item-value="name"
+                            name="block-protection-unauth"
+                            label="When Not Logged In"
+                          />
+                        </div>
+
+                        <edge-shad-select
+                          v-if="state.protectionDraft.access === 'paidPlan'"
+                          v-model="state.protectionDraft.ruleId"
+                          :items="siteRestrictedPlanOptions"
+                          item-title="label"
+                          item-value="value"
+                          name="block-protection-plan"
+                          label="Paid Access Plan"
+                          placeholder="Select a plan"
+                        />
+
+                        <div v-if="state.protectionDraft.unauthBehavior === 'blurWithLoginPrompt'" class="space-y-3">
+                          <edge-shad-input
+                            v-model="state.protectionDraft.loginPromptTitle"
+                            name="block-protection-login-prompt-title"
+                            label="Prompt Title"
+                            placeholder="Members only"
+                          />
+                          <edge-shad-textarea
+                            v-model="state.protectionDraft.loginPromptMessage"
+                            name="block-protection-login-prompt-message"
+                            label="Prompt Message"
+                            placeholder="Log in to view this content."
+                          />
+                          <edge-shad-input
+                            v-model="state.protectionDraft.loginPromptButtonLabel"
+                            name="block-protection-login-prompt-button-label"
+                            label="Button Label"
+                            placeholder="Log In"
+                          />
+                        </div>
+                      </template>
+                    </div>
+                  </div>
+                  <Alert v-if="editableMetaEntries.length === 0" variant="info" :class="props.editMode ? 'mb-4' : 'mt-4 mb-4'">
+                    <AlertTitle>No editable fields found</AlertTitle>
+                    <AlertDescription class="text-sm">
+                      This block does not have any editable fields defined.
+                    </AlertDescription>
+                  </Alert>
+                  <template v-for="entry in editableMetaEntries" :key="entry.field">
+                    <div v-if="entry.meta.type === 'array'" @focusin="setActivePreviewField(entry.field)" @mousedown.capture="setActivePreviewField(entry.field)">
+                      <div v-if="!entry.meta?.api && !entry.meta?.collection">
+                        <div v-if="entry.meta?.schema">
+                          <Card v-if="!state.reload" class="mb-4 bg-white shadow-sm border border-gray-200 p-4">
+                            <CardHeader class="p-0 mb-2">
+                              <div class="relative flex items-center p-2 justify-between sticky top-0 z-10 rounded border border-slate-300 bg-slate-200 text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                                <span class="text-lg font-semibold whitespace-nowrap pr-1"> {{ genTitleFromField(entry) }}</span>
+                                <div class="flex w-full items-center">
+                                  <div class="w-full border-t border-gray-300 dark:border-white/15" aria-hidden="true" />
+                                  <edge-shad-button variant="text" class="text-xs h-[26px] text-slate-700 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white" @click="state.editMode = !state.editMode">
+                                    <Popover
+                                      :open="!!state.arrayAddPopoverOpenByField[entry.field]"
+                                      @update:open="(open) => setArrayAddPopoverOpen(entry.field, open)"
                                     >
-                                      <Plus class="w-4 h-4" />
-                                    </edge-shad-button>
-                                  </PopoverTrigger>
-                                  <PopoverContent align="start" class="!w-[calc(100vw-3rem)] md:!w-[calc(50vw-3rem)] max-w-none bg-slate-200 border-slate-300">
-                                    <Card class="border-none shadow-none p-4 bg-transparent">
-                                      <div class="mb-2 flex justify-end">
-                                        <edge-shad-button
-                                          type="button"
-                                          variant="ghost"
-                                          size="icon"
-                                          class="h-7 w-7"
-                                          @click="closeArrayAddPopover(entry.field)"
-                                        >
-                                          <X class="h-4 w-4" />
-                                        </edge-shad-button>
-                                      </div>
-                                      <template v-for="schemaItem in entry.meta.schema" :key="schemaItem.field">
-                                        <edge-cms-block-input
-                                          v-model="state.arrayItems[entry.field][schemaItem.field]"
-                                          :type="schemaItem.type"
-                                          :field="schemaItem.field"
-                                          :schema="schemaItem"
-                                          :site="props.siteId"
-                                          :label="genTitleFromField(schemaItem)"
-                                        />
-                                      </template>
-                                      <CardFooter class="mt-2 flex justify-end gap-2">
-                                        <edge-shad-button
-                                          type="button"
-                                          variant="outline"
-                                          class="text-xs h-[26px]"
-                                          @click="closeArrayAddPopover(entry.field)"
-                                        >
-                                          Cancel
-                                        </edge-shad-button>
-                                        <edge-shad-button
-                                          type="button"
-                                          class="bg-slate-700 text-white hover:bg-slate-800 text-xs h-[26px] dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
-                                          @click="addToArray(entry.field)"
-                                        >
-                                          Add Entry
-                                        </edge-shad-button>
-                                      </CardFooter>
-                                    </Card>
-                                  </PopoverContent>
-                                </Popover>
-                              </edge-shad-button>
-                            </div>
-                          </div>
-                        </CardHeader>
-                        <draggable
-                          v-if="state.draft?.[entry.field] && state.draft[entry.field].length > 0"
-                          v-model="state.draft[entry.field]"
-                          handle=".handle"
-                          item-key="index"
-                        >
-                          <template #item="{ element, index }">
-                            <div :key="index" class="">
-                              <div class="flex w-full items-start gap-2 border-1 border-dotted py-1 mb-1">
-                                <div class="text-left px-2 shrink-0 pt-1">
-                                  <Grip class="handle pointer" />
-                                </div>
-                                <div class="px-2 py-2 flex-1 min-w-0 flex flex-wrap gap-1">
-                                  <template v-for="schemaItem in entry.meta.schema" :key="schemaItem.field">
-                                    <Dialog v-if="schemaItem.type === 'image'" v-model:open="state.imageOpenByField[arrayImageDialogKey(entry.field, index, schemaItem.field)]">
-                                      <DialogTrigger as-child>
-                                        <Alert class="w-[200px] text-xs py-1 px-2 cursor-pointer hover:bg-primary hover:text-white">
-                                          <AlertTitle>{{ genTitleFromField(schemaItem) }}</AlertTitle>
-                                          <AlertDescription class="text-sm truncate max-w-[200px]">
-                                            <div class="w-full flex justify-center">
-                                              <div
-                                                v-if="element[schemaItem.field]"
-                                                class="inline-flex h-8 min-w-8 max-w-[72px] items-center justify-center rounded border border-border px-1"
-                                                :class="previewBackgroundClass(element[schemaItem.field])"
-                                              >
-                                                <img
-                                                  :src="element[schemaItem.field]"
-                                                  class="max-h-7 w-auto max-w-full object-contain"
-                                                >
-                                              </div>
-                                              <span v-else class="inline-flex items-center gap-1 justify-center">
-                                                <ImagePlus class="h-3.5 w-3.5" />
-                                                Select Image
-                                              </span>
-                                            </div>
-                                          </AlertDescription>
-                                        </Alert>
-                                      </DialogTrigger>
-                                      <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-y-auto">
-                                        <DialogHeader>
-                                          <DialogTitle>Select Image</DialogTitle>
-                                          <DialogDescription />
-                                        </DialogHeader>
-                                        <edge-cms-media-manager
-                                          v-if="schemaItem?.tags && schemaItem.tags.length > 0"
-                                          :site="props.siteId"
-                                          :select-mode="true"
-                                          :default-tags="schemaItem.tags"
-                                          @select="(url) => setArrayImageValue(entry.field, index, schemaItem.field, url)"
-                                        />
-                                        <edge-cms-media-manager
-                                          v-else
-                                          :site="props.siteId"
-                                          :select-mode="true"
-                                          @select="(url) => setArrayImageValue(entry.field, index, schemaItem.field, url)"
-                                        />
-                                      </DialogContent>
-                                    </Dialog>
-                                    <Popover v-else>
                                       <PopoverTrigger as-child>
-                                        <Alert class="w-[200px] text-xs py-1 px-2 cursor-pointer hover:bg-primary hover:text-white">
-                                          <AlertTitle> {{ genTitleFromField(schemaItem) }}</AlertTitle>
-                                          <AlertDescription class="text-sm truncate max-w-[200px]">
-                                            {{ element[schemaItem.field] }}
-                                          </AlertDescription>
-                                        </Alert>
+                                        <edge-shad-button
+                                          variant="text"
+                                          type="submit"
+                                          class="bg-slate-300 text-slate-900 hover:bg-slate-400 text-xs h-[26px] dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
+                                        >
+                                          <Plus class="w-4 h-4" />
+                                        </edge-shad-button>
                                       </PopoverTrigger>
-                                      <PopoverContent align="start" class="!w-[calc(100vw-3rem)] md:!w-[calc(50vw-3rem)] max-w-none">
-                                        <Card class="border-none shadow-none p-4">
-                                          <edge-cms-block-input
-                                            v-model="element[schemaItem.field]"
-                                            :type="schemaItem.type"
-                                            :schema="schemaItem"
-                                            :field="`${schemaItem.field}-${index}-entry`"
-                                            :site="props.siteId"
-                                            :label="genTitleFromField(schemaItem)"
-                                          />
+                                      <PopoverContent align="start" class="!w-[calc(100vw-3rem)] md:!w-[calc(50vw-3rem)] max-w-none bg-slate-200 border-slate-300">
+                                        <Card class="border-none shadow-none p-4 bg-transparent">
+                                          <div class="mb-2 flex justify-end">
+                                            <edge-shad-button
+                                              type="button"
+                                              variant="ghost"
+                                              size="icon"
+                                              class="h-7 w-7"
+                                              @click="closeArrayAddPopover(entry.field)"
+                                            >
+                                              <X class="h-4 w-4" />
+                                            </edge-shad-button>
+                                          </div>
+                                          <template v-for="schemaItem in entry.meta.schema" :key="schemaItem.field">
+                                            <edge-cms-block-input
+                                              v-model="state.arrayItems[entry.field][schemaItem.field]"
+                                              :type="schemaItem.type"
+                                              :field="schemaItem.field"
+                                              :schema="schemaItem"
+                                              :site="props.siteId"
+                                              :label="genTitleFromField(schemaItem)"
+                                            />
+                                          </template>
+                                          <CardFooter class="mt-2 flex justify-end gap-2">
+                                            <edge-shad-button
+                                              type="button"
+                                              variant="outline"
+                                              class="text-xs h-[26px]"
+                                              @click="closeArrayAddPopover(entry.field)"
+                                            >
+                                              Cancel
+                                            </edge-shad-button>
+                                            <edge-shad-button
+                                              type="button"
+                                              class="bg-slate-700 text-white hover:bg-slate-800 text-xs h-[26px] dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
+                                              @click="addToArray(entry.field)"
+                                            >
+                                              Add Entry
+                                            </edge-shad-button>
+                                          </CardFooter>
                                         </Card>
                                       </PopoverContent>
                                     </Popover>
-                                  </template>
-                                </div>
-                                <div class="text-left px-2 shrink-0 pt-1">
-                                  <edge-shad-button
-                                    variant="destructive"
-                                    size="icon"
-                                    class="h-6 w-6"
-                                    @click="state.draft[entry.field].splice(index, 1)"
-                                  >
-                                    <Trash class="h-3.5 w-3.5" />
                                   </edge-shad-button>
                                 </div>
                               </div>
-                            </div>
-                          </template>
-                        </draggable>
-                      </Card>
-                    </div>
-                    <edge-cms-block-input
-                      v-else
-                      v-model="state.draft[entry.field]"
-                      :type="entry.meta.type"
-                      :field="entry.field"
-                      :site="props.siteId"
-                      :label="genTitleFromField(entry)"
-                    />
-                  </div>
-                  <div v-else>
-                    <template v-if="entry.meta?.queryOptions">
-                      <div v-for="option in entry.meta.queryOptions" :key="option.field" class="mb-2">
-                        <edge-shad-select-tags
-                          v-if="entry.meta?.collection?.path === 'posts' && option.field === 'tags'"
-                          v-model="state.meta[entry.field].queryItems[option.field]"
-                          :items="getTagsFromPosts"
-                          :label="`${genTitleFromField(option)}`"
-                          :name="option.field"
-                          :placeholder="`Select ${genTitleFromField(option)}`"
-                        />
-                        <edge-cms-options-select
-                          v-else-if="entry.meta?.collection?.path !== 'post'"
-                          v-model="state.meta[entry.field].queryItems[option.field]"
-                          :option="option"
-                          :label="genTitleFromField(option)"
-                          :multiple="option?.multiple || false"
+                            </CardHeader>
+                            <draggable
+                              v-if="state.draft?.[entry.field] && state.draft[entry.field].length > 0"
+                              v-model="state.draft[entry.field]"
+                              handle=".handle"
+                              item-key="index"
+                            >
+                              <template #item="{ element, index }">
+                                <div :key="index" class="">
+                                  <div class="flex w-full items-start gap-2 border-1 border-dotted py-1 mb-1">
+                                    <div class="text-left px-2 shrink-0 pt-1">
+                                      <Grip class="handle pointer" />
+                                    </div>
+                                    <div class="px-2 py-2 flex-1 min-w-0 flex flex-wrap gap-1">
+                                      <template v-for="schemaItem in entry.meta.schema" :key="schemaItem.field">
+                                        <Dialog v-if="schemaItem.type === 'image'" v-model:open="state.imageOpenByField[arrayImageDialogKey(entry.field, index, schemaItem.field)]">
+                                          <DialogTrigger as-child>
+                                            <Alert class="w-[200px] text-xs py-1 px-2 cursor-pointer hover:bg-primary hover:text-white">
+                                              <AlertTitle>{{ genTitleFromField(schemaItem) }}</AlertTitle>
+                                              <AlertDescription class="text-sm truncate max-w-[200px]">
+                                                <div class="w-full flex justify-center">
+                                                  <div
+                                                    v-if="element[schemaItem.field]"
+                                                    class="inline-flex h-8 min-w-8 max-w-[72px] items-center justify-center rounded border border-border px-1"
+                                                    :class="previewBackgroundClass(element[schemaItem.field])"
+                                                  >
+                                                    <img
+                                                      :src="element[schemaItem.field]"
+                                                      class="max-h-7 w-auto max-w-full object-contain"
+                                                    >
+                                                  </div>
+                                                  <span v-else class="inline-flex items-center gap-1 justify-center">
+                                                    <ImagePlus class="h-3.5 w-3.5" />
+                                                    Select Image
+                                                  </span>
+                                                </div>
+                                              </AlertDescription>
+                                            </Alert>
+                                          </DialogTrigger>
+                                          <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-y-auto">
+                                            <DialogHeader>
+                                              <DialogTitle>Select Image</DialogTitle>
+                                              <DialogDescription />
+                                            </DialogHeader>
+                                            <edge-cms-media-manager
+                                              v-if="schemaItem?.tags && schemaItem.tags.length > 0"
+                                              :site="props.siteId"
+                                              :select-mode="true"
+                                              :default-tags="schemaItem.tags"
+                                              @select="(url) => setArrayImageValue(entry.field, index, schemaItem.field, url)"
+                                            />
+                                            <edge-cms-media-manager
+                                              v-else
+                                              :site="props.siteId"
+                                              :select-mode="true"
+                                              @select="(url) => setArrayImageValue(entry.field, index, schemaItem.field, url)"
+                                            />
+                                          </DialogContent>
+                                        </Dialog>
+                                        <Popover v-else>
+                                          <PopoverTrigger as-child>
+                                            <Alert class="w-[200px] text-xs py-1 px-2 cursor-pointer hover:bg-primary hover:text-white">
+                                              <AlertTitle> {{ genTitleFromField(schemaItem) }}</AlertTitle>
+                                              <AlertDescription class="text-sm truncate max-w-[200px]">
+                                                {{ element[schemaItem.field] }}
+                                              </AlertDescription>
+                                            </Alert>
+                                          </PopoverTrigger>
+                                          <PopoverContent align="start" class="!w-[calc(100vw-3rem)] md:!w-[calc(50vw-3rem)] max-w-none">
+                                            <Card class="border-none shadow-none p-4">
+                                              <edge-cms-block-input
+                                                v-model="element[schemaItem.field]"
+                                                :type="schemaItem.type"
+                                                :schema="schemaItem"
+                                                :field="`${schemaItem.field}-${index}-entry`"
+                                                :site="props.siteId"
+                                                :label="genTitleFromField(schemaItem)"
+                                              />
+                                            </Card>
+                                          </PopoverContent>
+                                        </Popover>
+                                      </template>
+                                    </div>
+                                    <div class="text-left px-2 shrink-0 pt-1">
+                                      <edge-shad-button
+                                        variant="destructive"
+                                        size="icon"
+                                        class="h-6 w-6"
+                                        @click="state.draft[entry.field].splice(index, 1)"
+                                      >
+                                        <Trash class="h-3.5 w-3.5" />
+                                      </edge-shad-button>
+                                    </div>
+                                  </div>
+                                </div>
+                              </template>
+                            </draggable>
+                          </Card>
+                        </div>
+                        <edge-cms-block-input
+                          v-else
+                          v-model="state.draft[entry.field]"
+                          :type="entry.meta.type"
+                          :field="entry.field"
+                          :site="props.siteId"
+                          :label="genTitleFromField(entry)"
                         />
                       </div>
-                    </template>
-                    <edge-shad-number
-                      v-if="entry.meta?.collection?.path !== 'post' && hasAuthoredLimit(entry.field) && !isLimitOne(entry.field)"
-                      v-model="state.meta[entry.field].limit"
-                      name="limit"
-                      label="Limit"
-                    />
-                  </div>
-                </div>
-                <div v-else-if="entry.meta?.type === 'image'" class="w-full" @focusin="setActivePreviewField(entry.field)" @mousedown.capture="setActivePreviewField(entry.field)">
-                  <div class="mb-2 text-sm font-medium text-foreground">
-                    {{ genTitleFromField(entry) }}
-                  </div>
-                  <div class="relative py-2 rounded-md flex items-center justify-center" :class="previewBackgroundClass(state.draft[entry.field])">
-                    <div class="bg-black/80 absolute left-0 top-0 w-full h-full opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center z-10 cursor-pointer">
-                      <Dialog v-model:open="state.imageOpenByField[entry.field]">
-                        <DialogTrigger as-child>
-                          <edge-shad-button variant="outline" class="bg-white text-black hover:bg-gray-200">
-                            <ImagePlus class="h-5 w-5 mr-2" />
-                            Select Image
-                          </edge-shad-button>
-                        </DialogTrigger>
-                        <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-y-auto">
-                          <DialogHeader>
-                            <DialogTitle>Select Image</DialogTitle>
-                            <DialogDescription />
-                          </DialogHeader>
-                          <edge-cms-media-manager
-                            v-if="entry.meta?.tags && entry.meta.tags.length > 0"
-                            :site="props.siteId"
-                            :select-mode="true"
-                            :default-tags="entry.meta.tags"
-                            @select="(url) => { state.draft[entry.field] = url; state.imageOpenByField[entry.field] = false }"
-                          />
-                          <edge-cms-media-manager
-                            v-else
-                            :site="props.siteId"
-                            :select-mode="true"
-                            @select="(url) => { state.draft[entry.field] = url; state.imageOpenByField[entry.field] = false }"
-                          />
-                        </DialogContent>
-                      </Dialog>
+                      <div v-else>
+                        <template v-if="entry.meta?.queryOptions">
+                          <div v-for="option in entry.meta.queryOptions" :key="option.field" class="mb-2">
+                            <edge-shad-select-tags
+                              v-if="entry.meta?.collection?.path === 'posts' && option.field === 'tags'"
+                              v-model="state.meta[entry.field].queryItems[option.field]"
+                              :items="getTagsFromPosts"
+                              :label="`${genTitleFromField(option)}`"
+                              :name="option.field"
+                              :placeholder="`Select ${genTitleFromField(option)}`"
+                            />
+                            <edge-cms-options-select
+                              v-else-if="entry.meta?.collection?.path !== 'post'"
+                              v-model="state.meta[entry.field].queryItems[option.field]"
+                              :option="option"
+                              :label="genTitleFromField(option)"
+                              :multiple="option?.multiple || false"
+                            />
+                          </div>
+                        </template>
+                        <edge-shad-number
+                          v-if="entry.meta?.collection?.path !== 'post' && hasAuthoredLimit(entry.field) && !isLimitOne(entry.field)"
+                          v-model="state.meta[entry.field].limit"
+                          name="limit"
+                          label="Limit"
+                        />
+                      </div>
                     </div>
-                    <img
-                      v-if="state.draft[entry.field]"
-                      :src="state.draft[entry.field]"
-                      class="max-h-40 max-w-full h-auto w-auto object-contain"
-                    >
-                  </div>
-                </div>
-                <div v-else-if="entry.meta?.option" @focusin="setActivePreviewField(entry.field)" @mousedown.capture="setActivePreviewField(entry.field)">
-                  <!-- <cms-publication-picker-field
+                    <div v-else-if="entry.meta?.type === 'image'" class="w-full" @focusin="setActivePreviewField(entry.field)" @mousedown.capture="setActivePreviewField(entry.field)">
+                      <div class="mb-2 text-sm font-medium text-foreground">
+                        {{ genTitleFromField(entry) }}
+                      </div>
+                      <div class="relative py-2 rounded-md flex items-center justify-center" :class="previewBackgroundClass(state.draft[entry.field])">
+                        <div class="bg-black/80 absolute left-0 top-0 w-full h-full opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center z-10 cursor-pointer">
+                          <Dialog v-model:open="state.imageOpenByField[entry.field]">
+                            <DialogTrigger as-child>
+                              <edge-shad-button variant="outline" class="bg-white text-black hover:bg-gray-200">
+                                <ImagePlus class="h-5 w-5 mr-2" />
+                                Select Image
+                              </edge-shad-button>
+                            </DialogTrigger>
+                            <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-y-auto">
+                              <DialogHeader>
+                                <DialogTitle>Select Image</DialogTitle>
+                                <DialogDescription />
+                              </DialogHeader>
+                              <edge-cms-media-manager
+                                v-if="entry.meta?.tags && entry.meta.tags.length > 0"
+                                :site="props.siteId"
+                                :select-mode="true"
+                                :default-tags="entry.meta.tags"
+                                @select="(url) => { state.draft[entry.field] = url; state.imageOpenByField[entry.field] = false }"
+                              />
+                              <edge-cms-media-manager
+                                v-else
+                                :site="props.siteId"
+                                :select-mode="true"
+                                @select="(url) => { state.draft[entry.field] = url; state.imageOpenByField[entry.field] = false }"
+                              />
+                            </DialogContent>
+                          </Dialog>
+                        </div>
+                        <img
+                          v-if="state.draft[entry.field]"
+                          :src="state.draft[entry.field]"
+                          class="max-h-40 max-w-full h-auto w-auto object-contain"
+                        >
+                      </div>
+                    </div>
+                    <div v-else-if="entry.meta?.option" @focusin="setActivePreviewField(entry.field)" @mousedown.capture="setActivePreviewField(entry.field)">
+                      <!-- <cms-publication-picker-field
                     v-if="entry.meta.option?.picker === 'publication'"
                     v-model="state.draft[entry.field]"
                     :option="entry.meta.option"
                     :label="genTitleFromField(entry)"
                   /> -->
-                  <edge-cms-options-select
-                    v-model="state.draft[entry.field]"
-                    :option="entry.meta.option"
-                    :label="genTitleFromField(entry)"
-                  />
-                </div>
-                <div v-else @focusin="setActivePreviewField(entry.field)" @mousedown.capture="setActivePreviewField(entry.field)">
-                  <edge-cms-block-input
-                    v-model="state.draft[entry.field]"
-                    :type="entry.meta.type"
-                    :field="entry.field"
-                    :site="props.siteId"
-                    :label="genTitleFromField(entry)"
-                  />
-                </div>
-              </template>
+                      <edge-cms-options-select
+                        v-model="state.draft[entry.field]"
+                        :option="entry.meta.option"
+                        :label="genTitleFromField(entry)"
+                      />
+                    </div>
+                    <div v-else @focusin="setActivePreviewField(entry.field)" @mousedown.capture="setActivePreviewField(entry.field)">
+                      <edge-cms-block-input
+                        v-model="state.draft[entry.field]"
+                        :type="entry.meta.type"
+                        :field="entry.field"
+                        :site="props.siteId"
+                        :label="genTitleFromField(entry)"
+                      />
+                    </div>
+                  </template>
                 </div>
                 <div :class="props.editMode ? 'shrink-0 border-t border-border bg-card px-4 py-3' : 'sticky bottom-0 bg-background px-6 pb-4 pt-2'">
                   <Alert v-if="state.validationErrors.length" variant="destructive" class="mb-3">

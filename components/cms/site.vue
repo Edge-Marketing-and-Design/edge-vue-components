@@ -2437,38 +2437,8 @@ const getPageRestrictionAssignmentKey = (pageId, isDetail = false) => {
   return isDetail ? `${normalizedPageId}-details` : normalizedPageId
 }
 
-const persistSitePageRuleAssignments = async (pageId, restrictionRuleId = '', postRestrictionRuleId = '') => {
-  const normalizedPageId = String(pageId || '').trim()
-  if (!normalizedPageId)
-    return
-
-  const currentAssignments = normalizeRestrictedPageRuleAssignments(siteData.value?.restrictedContent?.pageRuleAssignments)
-  const nextAssignments = { ...currentAssignments }
-  const listKey = getPageRestrictionAssignmentKey(normalizedPageId, false)
-  const detailKey = getPageRestrictionAssignmentKey(normalizedPageId, true)
-  const normalizedListRuleId = String(restrictionRuleId || '').trim()
-  const normalizedDetailRuleId = String(postRestrictionRuleId || '').trim()
-
-  if (normalizedListRuleId)
-    nextAssignments[listKey] = normalizedListRuleId
-  else
-    delete nextAssignments[listKey]
-
-  if (normalizedDetailRuleId)
-    nextAssignments[detailKey] = normalizedDetailRuleId
-  else
-    delete nextAssignments[detailKey]
-
-  if (areEqualNormalized(currentAssignments, nextAssignments))
-    return
-
-  const nextRestrictedContent = {
-    ...((siteData.value?.restrictedContent && typeof siteData.value.restrictedContent === 'object') ? siteData.value.restrictedContent : {}),
-    pageRuleAssignments: nextAssignments,
-  }
-  await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, {
-    restrictedContent: nextRestrictedContent,
-  })
+const persistSitePageRuleAssignments = async (_pageId, _restrictionRuleId = '', _postRestrictionRuleId = '') => {
+  return
 }
 
 const pageSettingsUpdated = async (pageData) => {

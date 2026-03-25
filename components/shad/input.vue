@@ -44,6 +44,11 @@ const props = defineProps({
     required: false,
     default: false,
   },
+  inputAttrs: {
+    type: Object,
+    required: false,
+    default: () => ({}),
+  },
 })
 
 const emits = defineEmits(['update:modelValue', 'blur'])
@@ -109,7 +114,7 @@ onMounted(() => {
               :default-value="props.modelValue"
               :class="classComputed"
               :type="state.type"
-              v-bind="componentField"
+              v-bind="{ ...componentField, ...props.inputAttrs }"
               :placeholder="props.placeholder"
               :disabled="props.disabled"
               @change="onInputChange"

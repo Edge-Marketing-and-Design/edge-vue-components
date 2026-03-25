@@ -17,12 +17,9 @@ const props = defineProps({
     default: false,
   },
 })
-const emit = defineEmits(['open-usage-target'])
-
 const edgeFirebase = inject('edgeFirebase')
 const { createRestrictedContentDefaults } = useSiteSettingsTemplate()
 
-const REGISTRATION_MODES = ['free', 'paid']
 const MEMBER_STATUSES = ['active', 'paused', 'revoked']
 const normalizeObject = (value) => {
   if (Array.isArray(value))
@@ -42,6 +39,8 @@ const buildRestrictedSettings = (value = {}) => {
   return {
     ...createRestrictedContentDefaults(),
     ...normalizedValue,
+    registrationPricing: 'paid',
+    provider: 'stripe',
     defaultCurrency: 'USD',
     rules: normalizeRestrictedRules(normalizedValue.rules),
   }
@@ -53,9 +52,9 @@ const createRuleDoc = (value = {}, fallbackId = '') => {
   return {
     id,
     name: String(normalizedValue.name || '').trim(),
-    protected: normalizedValue.protected !== false,
-    allowRegistration: Boolean(normalizedValue.allowRegistration),
-    registrationMode: normalizedValue.registrationMode === 'paid' ? 'paid' : 'free',
+    protected: true,
+    allowRegistration: true,
+    registrationMode: 'paid',
     currency: 'USD',
     registrationStripeProductId: String(normalizedValue.registrationStripeProductId || normalizedValue.stripeProductId || '').trim(),
   }
@@ -83,7 +82,7 @@ const buildStripeIntegration = (value = {}) => {
   }
 }
 
-const membersCollection = computed(() => `sites/${props.siteId}/restricted-members`)
+const membersCollection = computed(() => `sites/${props.siteId}/audience-users`)
 const membersCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/${membersCollection.value}`)
 const pagesCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.siteId}/pages`)
 const postsCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.siteId}/posts`)
@@ -113,7 +112,6 @@ const state = reactive({
   memberManualEmail: '',
   memberManualError: '',
   memberCreatingUser: false,
-  paginatedMembers: [],
   settingsSaving: false,
   stripeSaving: false,
   ruleWorkingDoc: createRuleDoc(),
@@ -121,19 +119,13 @@ const state = reactive({
   ruleError: '',
   membersLoading: false,
   membersLoadingMore: false,
-  memberStaticCurrentPage: 0,
-  memberStaticSearch: null,
   ruleDeleteDialogOpen: false,
   ruleDeleteDocId: '',
   ruleDeleteSubmitting: false,
 })
 
-const MEMBERS_PAGE_LIMIT = 50
-
 const memberSchema = toTypedSchema(z.object({
-  audienceUserId: z.string({
-    required_error: 'Audience user is required',
-  }).min(1, { message: 'Audience user is required' }),
+  audienceUserId: z.string().optional(),
   status: z.string({
     required_error: 'Status is required',
   }).min(1, { message: 'Status is required' }),
@@ -190,11 +182,95 @@ const getAudienceUserLabel = (audienceUserId) => {
   return item?.name || item?.email || audienceUserId
 }
 
+const getMemberHeaderTitle = (workingDoc = {}, fallbackTitle = '') => {
+  const name = String(workingDoc?.name || '').trim()
+  if (name)
+    return name
+
+  const email = String(workingDoc?.email || '').trim()
+  if (email)
+    return email
+
+  const audienceUserId = String(workingDoc?.audienceUserId || '').trim()
+  const audienceLabel = getAudienceUserLabel(audienceUserId)
+  if (audienceLabel)
+    return audienceLabel
+
+  const fallback = String(fallbackTitle || '').trim()
+  if (fallback)
+    return fallback
+
+  return 'Member'
+}
+
 const getRuleLabel = (ruleId) => {
   if (!ruleId)
     return ''
   const item = currentRules.value.find(candidate => candidate.id === ruleId)
   return item?.name || ruleId
+}
+
+const getBlockProtectionPlanId = (block) => {
+  if (!block || typeof block !== 'object')
+    return ''
+  const protection = (block.protection && typeof block.protection === 'object') ? block.protection : null
+  if (!protection || protection.enabled !== true)
+    return ''
+  if (String(protection.access || '').trim() !== 'paidPlan')
+    return ''
+  return String(protection.ruleId || '').trim()
+}
+
+const getBlockProtectionLabel = (block) => {
+  if (!block || typeof block !== 'object')
+    return 'Block'
+  return String(block?.name || block?.blockId || block?.id || 'Block').trim() || 'Block'
+}
+
+const clearBlockPlanReference = (block, removedPlanId) => {
+  if (!block || typeof block !== 'object')
+    return { changed: false, block }
+
+  const protection = (block.protection && typeof block.protection === 'object') ? block.protection : null
+  if (!protection)
+    return { changed: false, block }
+
+  if (String(protection.access || '').trim() !== 'paidPlan')
+    return { changed: false, block }
+  if (String(protection.ruleId || '').trim() !== removedPlanId)
+    return { changed: false, block }
+
+  return {
+    changed: true,
+    block: {
+      ...block,
+      protection: {
+        ...protection,
+        enabled: false,
+        access: 'loggedIn',
+        ruleId: '',
+        alternateBlockId: '',
+      },
+    },
+  }
+}
+
+const clearPlanFromBlockList = (blocks = [], removedPlanId) => {
+  if (!Array.isArray(blocks) || !removedPlanId)
+    return { changed: false, blocks }
+
+  let changed = false
+  const nextBlocks = blocks.map((block) => {
+    const result = clearBlockPlanReference(block, removedPlanId)
+    if (result.changed)
+      changed = true
+    return result.block
+  })
+
+  return {
+    changed,
+    blocks: changed ? nextBlocks : blocks,
+  }
 }
 
 const buildRuleUsage = (ruleId) => {
@@ -207,47 +283,53 @@ const buildRuleUsage = (ruleId) => {
     .filter(item => item?.docId)
     .sort((a, b) => String(a?.name || a?.docId || '').localeCompare(String(b?.name || b?.docId || '')))
     .forEach((page) => {
-      if (String(page?.restrictionRuleId || '').trim() === normalizedRuleId) {
+      const listBlocks = Array.isArray(page?.content) ? page.content : []
+      listBlocks.forEach((block) => {
+        if (getBlockProtectionPlanId(block) !== normalizedRuleId)
+          return
         usage.push({
-          id: `page:${page.docId}`,
-          type: 'Page',
+          id: `page:list:${page.docId}:${String(block?.id || block?.blockId || '').trim()}`,
+          type: 'Page Block',
           targetType: 'page',
           docId: page.docId,
-          label: page.name || page.docId,
+          label: `${page.name || page.docId} - ${getBlockProtectionLabel(block)}`,
         })
-      }
-      if (String(page?.postRestrictionRuleId || '').trim() === normalizedRuleId) {
+      })
+
+      const detailBlocks = Array.isArray(page?.postContent) ? page.postContent : []
+      detailBlocks.forEach((block) => {
+        if (getBlockProtectionPlanId(block) !== normalizedRuleId)
+          return
         usage.push({
-          id: `page-detail:${page.docId}`,
-          type: 'Detail Pages',
+          id: `page:detail:${page.docId}:${String(block?.id || block?.blockId || '').trim()}`,
+          type: 'Detail Block',
           targetType: 'page',
           docId: page.docId,
-          label: page.name || page.docId,
+          label: `${page.name || page.docId} - ${getBlockProtectionLabel(block)}`,
         })
-      }
+      })
     })
 
   Object.values(sitePosts.value || {})
-    .filter(item => item?.docId && String(item?.restrictionRuleId || '').trim() === normalizedRuleId)
+    .filter(item => item?.docId)
     .sort((a, b) => String(a?.title || a?.name || a?.docId || '').localeCompare(String(b?.title || b?.name || b?.docId || '')))
     .forEach((post) => {
-      usage.push({
-        id: `post:${post.docId}`,
-        type: 'Post',
-        targetType: 'post',
-        docId: post.docId,
-        label: post.title || post.name || post.docId,
+      const postBlocks = Array.isArray(post?.content) ? post.content : []
+      postBlocks.forEach((block) => {
+        if (getBlockProtectionPlanId(block) !== normalizedRuleId)
+          return
+        usage.push({
+          id: `post:${post.docId}:${String(block?.id || block?.blockId || '').trim()}`,
+          type: 'Post Block',
+          targetType: 'post',
+          docId: post.docId,
+          label: `${post.title || post.name || post.docId} - ${getBlockProtectionLabel(block)}`,
+        })
       })
     })
 
   return usage
 }
-
-const selectedRuleUsage = computed(() => {
-  if (!state.selectedRuleId || state.selectedRuleId === 'new')
-    return []
-  return buildRuleUsage(state.selectedRuleId)
-})
 
 const pendingRuleDeleteUsage = computed(() => {
   return buildRuleUsage(state.ruleDeleteDocId)
@@ -263,25 +345,26 @@ const ruleDirty = computed(() => {
   return JSON.stringify(normalizeObject(createRuleDoc(state.ruleWorkingDoc, state.ruleWorkingDoc.id))) !== JSON.stringify(normalizeObject(selectedRuleSavedDoc.value))
 })
 
-const getRuleUsageCounts = (ruleId) => {
-  const usage = buildRuleUsage(ruleId)
-  let pageCount = 0
-  let postCount = 0
-  usage.forEach((item) => {
-    if (item.targetType === 'post')
-      postCount += 1
-    else
-      pageCount += 1
-  })
-  return {
-    pageCount,
-    postCount,
-  }
-}
-
 const filteredMembers = computed(() => {
   const filter = String(state.memberFilter || '').trim().toLowerCase()
-  return state.paginatedMembers
+  const mergedMembers = Object.values(audienceUsers.value || {})
+    .map((audienceUser) => {
+      const docId = String(audienceUser?.docId || '').trim()
+      if (!docId)
+        return null
+      return {
+        ...audienceUser,
+        docId,
+        audienceUserId: String(audienceUser?.audienceUserId || docId).trim(),
+        status: String(audienceUser?.status || 'active').trim() || 'active',
+        accessRuleIds: Array.isArray(audienceUser?.accessRuleIds) ? audienceUser.accessRuleIds : [],
+        expiresAt: String(audienceUser?.expiresAt || '').trim(),
+        notes: String(audienceUser?.notes || '').trim(),
+      }
+    })
+    .filter(Boolean)
+
+  return mergedMembers
     .filter((item) => {
       if (!item?.docId)
         return false
@@ -298,8 +381,8 @@ const filteredMembers = computed(() => {
     .sort((a, b) => getAudienceUserLabel(a?.audienceUserId).localeCompare(getAudienceUserLabel(b?.audienceUserId)))
 })
 
-const memberTotal = computed(() => Number(state.memberStaticSearch?.results?.total || state.paginatedMembers.length || 0))
-const canLoadMoreMembers = computed(() => Boolean(state.memberStaticSearch?.results && !state.memberStaticSearch.results.staticIsLastPage))
+const memberTotal = computed(() => Object.keys(audienceUsers.value || {}).length)
+const canLoadMoreMembers = computed(() => false)
 
 const settingsDirty = computed(() => {
   return JSON.stringify(normalizeObject(buildRestrictedSettings(state.settings))) !== JSON.stringify(normalizeObject(currentSettings.value))
@@ -309,19 +392,11 @@ const stripeDirty = computed(() => {
   return JSON.stringify(normalizeObject(buildStripeIntegration(state.stripeIntegration))) !== JSON.stringify(normalizeObject(currentStripeIntegration.value))
 })
 
-const siteUsesPaidRegistration = computed(() => state.settings.registrationPricing === 'paid')
-
 const normalizeRuleForSite = (value = {}) => {
   const nextRule = createRuleDoc(value, value?.id || value?.docId || '')
-  if (!nextRule.allowRegistration) {
-    nextRule.registrationMode = 'free'
-    nextRule.registrationStripeProductId = ''
-    return nextRule
-  }
-  if (!siteUsesPaidRegistration.value) {
-    nextRule.registrationMode = 'free'
-    nextRule.registrationStripeProductId = ''
-  }
+  nextRule.protected = true
+  nextRule.allowRegistration = true
+  nextRule.registrationMode = 'paid'
   return nextRule
 }
 
@@ -332,14 +407,6 @@ const statusClass = (status) => {
   if (normalized === 'paused')
     return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200'
   return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200'
-}
-
-const sortMembers = (items = []) => {
-  return [...items].sort((a, b) => {
-    const aLabel = getAudienceUserLabel(a?.audienceUserId) || String(a?.audienceUserId || a?.docId || '')
-    const bLabel = getAudienceUserLabel(b?.audienceUserId) || String(b?.audienceUserId || b?.docId || '')
-    return aLabel.localeCompare(bLabel)
-  })
 }
 
 const syncSettingsFromSiteDoc = () => {
@@ -399,56 +466,16 @@ const loadInitialMembers = async () => {
     return
   state.membersLoading = true
   state.selectedMemberId = ''
-  state.paginatedMembers = []
-  try {
-    state.memberStaticSearch = new edgeFirebase.SearchStaticData()
-    await state.memberStaticSearch.getData(
-      membersCollectionPath.value,
-      [],
-      [{ field: 'audienceUserId', direction: 'asc' }],
-      MEMBERS_PAGE_LIMIT,
-    )
-    state.memberStaticCurrentPage = Number(state.memberStaticSearch?.results?.staticCurrentPage || 0)
-    state.paginatedMembers = Object.values(state.memberStaticSearch?.results?.data || {})
-  }
-  finally {
-    state.membersLoading = false
-  }
+  state.membersLoading = false
 }
 
 const loadMoreMembers = async () => {
-  if (!canLoadMoreMembers.value || state.membersLoadingMore || !state.memberStaticSearch)
-    return
-  state.membersLoadingMore = true
-  try {
-    await state.memberStaticSearch.next()
-    const nextPage = Number(state.memberStaticSearch?.results?.staticCurrentPage || 0)
-    if (nextPage !== state.memberStaticCurrentPage) {
-      state.paginatedMembers = sortMembers([
-        ...state.paginatedMembers,
-        ...Object.values(state.memberStaticSearch?.results?.data || {}),
-      ])
-      state.memberStaticCurrentPage = nextPage
-    }
-  }
-  finally {
-    state.membersLoadingMore = false
-  }
+  return
 }
 
 const handleMemberSaved = ({ docId, data }) => {
   if (!docId || !data)
     return
-  const existingIndex = state.paginatedMembers.findIndex(item => item.docId === docId)
-  if (existingIndex > -1) {
-    state.paginatedMembers.splice(existingIndex, 1, { ...data, docId })
-    state.paginatedMembers = sortMembers(state.paginatedMembers)
-    return
-  }
-  state.paginatedMembers = sortMembers([{ ...data, docId }, ...state.paginatedMembers])
-  if (state.memberStaticSearch?.results) {
-    state.memberStaticSearch.results.total = Number(state.memberStaticSearch.results.total || 0) + 1
-  }
 }
 
 const startSnapshots = async () => {
@@ -499,8 +526,8 @@ const openNewRule = async () => {
   state.ruleWorkingDoc = createRuleDoc({
     id: `rule-${globalThis.crypto?.randomUUID?.() || Date.now()}`,
     protected: true,
-    allowRegistration: false,
-    registrationMode: 'free',
+    allowRegistration: true,
+    registrationMode: 'paid',
     registrationStripeProductId: '',
   })
   state.ruleError = ''
@@ -542,7 +569,7 @@ const saveRule = async () => {
     id: state.ruleWorkingDoc.id || state.selectedRuleId,
   })
   if (!nextRule.name) {
-    state.ruleError = 'Rule name is required.'
+    state.ruleError = 'Plan name is required.'
     return
   }
   state.ruleSubmitting = true
@@ -558,7 +585,7 @@ const saveRule = async () => {
     state.ruleWorkingDoc = createRuleDoc(nextRule, nextRule.id)
   }
   catch (error) {
-    state.ruleError = String(error?.message || 'Unable to save this rule right now.')
+    state.ruleError = String(error?.message || 'Unable to save this plan right now.')
   }
   finally {
     state.ruleSubmitting = false
@@ -574,21 +601,28 @@ const deleteRule = async () => {
     const pageUpdates = Object.values(sitePages.value || {})
       .filter(item => item?.docId)
       .flatMap((page) => {
+        const listResult = clearPlanFromBlockList(page?.content, docId)
+        const detailResult = clearPlanFromBlockList(page?.postContent, docId)
         const update = {}
-        if (String(page?.restrictionRuleId || '').trim() === docId)
-          update.restrictionRuleId = ''
-        if (String(page?.postRestrictionRuleId || '').trim() === docId)
-          update.postRestrictionRuleId = ''
+        if (listResult.changed)
+          update.content = listResult.blocks
+        if (detailResult.changed)
+          update.postContent = detailResult.blocks
         if (!Object.keys(update).length)
           return []
         return [edgeFirebase.changeDoc(pagesCollectionPath.value, page.docId, update)]
       })
 
     const postUpdates = Object.values(sitePosts.value || {})
-      .filter(item => item?.docId && String(item?.restrictionRuleId || '').trim() === docId)
-      .map(post => edgeFirebase.changeDoc(postsCollectionPath.value, post.docId, { restrictionRuleId: '' }))
+      .filter(item => item?.docId)
+      .flatMap((post) => {
+        const contentResult = clearPlanFromBlockList(post?.content, docId)
+        if (!contentResult.changed)
+          return []
+        return [edgeFirebase.changeDoc(postsCollectionPath.value, post.docId, { content: contentResult.blocks })]
+      })
 
-    const loadedMemberUpdates = state.paginatedMembers
+    const loadedMemberUpdates = filteredMembers.value
       .filter(item => Array.isArray(item?.accessRuleIds) && item.accessRuleIds.includes(docId))
       .map((member) => {
         const nextAccessRuleIds = member.accessRuleIds.filter(ruleId => ruleId !== docId)
@@ -597,15 +631,6 @@ const deleteRule = async () => {
 
     if (pageUpdates.length || postUpdates.length || loadedMemberUpdates.length)
       await Promise.all([...pageUpdates, ...postUpdates, ...loadedMemberUpdates])
-
-    state.paginatedMembers = state.paginatedMembers.map((member) => {
-      if (!Array.isArray(member?.accessRuleIds) || !member.accessRuleIds.includes(docId))
-        return member
-      return {
-        ...member,
-        accessRuleIds: member.accessRuleIds.filter(ruleId => ruleId !== docId),
-      }
-    })
 
     const nextRules = normalizeRestrictedRules(currentRules.value.filter(item => item.id !== docId))
     const nextSettings = buildRestrictedSettings({
@@ -645,13 +670,9 @@ const closeMemberEditor = () => {
 const deleteMember = async (docId) => {
   if (!docId)
     return
-  await edgeFirebase.removeDoc(membersCollectionPath.value, docId)
+  await edgeFirebase.removeDoc(audienceUsersCollectionPath.value, docId)
   if (state.selectedMemberId === docId)
     state.selectedMemberId = ''
-  state.paginatedMembers = state.paginatedMembers.filter(item => item.docId !== docId)
-  if (state.memberStaticSearch?.results) {
-    state.memberStaticSearch.results.total = Math.max(0, Number(state.memberStaticSearch.results.total || 0) - 1)
-  }
 }
 
 const createAudienceUserFromMember = async (workingDoc) => {
@@ -715,8 +736,6 @@ watch(() => props.canManage, async (allowed) => {
   }
   state.selectedRuleId = ''
   state.selectedMemberId = ''
-  state.paginatedMembers = []
-  state.memberStaticSearch = null
   await stopSnapshots()
 }, { immediate: true })
 
@@ -768,15 +787,15 @@ onBeforeUnmount(async () => {
       <DialogContent class="pt-10">
         <DialogHeader>
           <DialogTitle class="text-left">
-            Delete Rule?
+            Delete Paid Access Plan?
           </DialogTitle>
           <DialogDescription class="text-left">
-            This will delete the rule and remove it from any pages and posts currently using it on this site.
+            This will delete the paid access plan and remove it from any pages and posts currently using it on this site.
           </DialogDescription>
         </DialogHeader>
         <div v-if="pendingRuleDeleteUsage.length" class="space-y-2">
           <div class="text-sm font-medium text-foreground">
-            This rule is currently used by:
+            This paid access plan is currently used by:
           </div>
           <div class="max-h-48 space-y-2 overflow-y-auto rounded-lg border border-border/60 bg-muted/20 p-3">
             <div
@@ -798,7 +817,7 @@ onBeforeUnmount(async () => {
             Cancel
           </edge-shad-button>
           <edge-shad-button class="bg-red-700 text-white hover:bg-red-600" :disabled="state.ruleDeleteSubmitting" @click="deleteRule">
-            Delete Rule
+            Delete Plan
           </edge-shad-button>
         </DialogFooter>
       </DialogContent>
@@ -818,7 +837,7 @@ onBeforeUnmount(async () => {
             Restrictions
           </div>
           <p class="mt-1 text-sm text-muted-foreground">
-            Choose what content requires access, whether people can sign up, and whether access is free or paid.
+            Choose what content requires access and whether people can sign up.
           </p>
         </div>
       </div>
@@ -831,7 +850,7 @@ onBeforeUnmount(async () => {
           </TabsTrigger>
           <TabsTrigger value="rules" class="gap-2">
             <ShieldCheck class="h-4 w-4" />
-            Rules
+            Paid Access Plans
           </TabsTrigger>
           <TabsTrigger value="members" class="gap-2">
             <Users class="h-4 w-4" />
@@ -844,15 +863,13 @@ onBeforeUnmount(async () => {
             <CardHeader>
               <CardTitle>Restriction Settings</CardTitle>
               <CardDescription>
-                Set the default access options for this site here. Individual rules are managed in the Rules tab.
+                Set the default access options for this site here. Individual plans are managed in the Paid Access Plans tab.
               </CardDescription>
             </CardHeader>
             <CardContent class="min-h-0 flex-1 space-y-4 overflow-y-auto">
               <edge-shad-form
                 :initial-values="{
                   'restricted-content-enabled': state.settings.enabled,
-                  'restricted-content-registration-pricing': state.settings.registrationPricing,
-                  'restricted-content-provider': state.settings.provider,
                   'restricted-content-terms-url': state.settings.registrationTermsUrl,
                   'restricted-content-login-help': state.settings.loginHelpText,
                   'restricted-content-success-message': state.settings.registrationSuccessMessage,
@@ -875,24 +892,8 @@ onBeforeUnmount(async () => {
                     checked-label="Enabled"
                     unchecked-label="Disabled"
                   >
-                    Turn this on when you are ready for this site to start using these access rules.
+                    Turn this on when you are ready for this site to start using these access plans.
                   </edge-cms-boolean-card>
-                  <edge-shad-select
-                    v-model="state.settings.registrationPricing"
-                    name="restricted-content-registration-pricing"
-                    label="Registration Pricing"
-                    :items="['free', 'paid']"
-                  />
-                  <div v-if="!siteUsesPaidRegistration" class="rounded-lg border border-border/60 bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-                    Registration is free on this site, so payment settings are hidden.
-                  </div>
-                  <edge-shad-select
-                    v-if="siteUsesPaidRegistration"
-                    v-model="state.settings.provider"
-                    name="restricted-content-provider"
-                    label="Payment Provider"
-                    :items="['stripe']"
-                  />
                   <div class="rounded-lg border border-border/60 bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
                     All pricing is shown in USD.
                   </div>
@@ -913,70 +914,7 @@ onBeforeUnmount(async () => {
                     label="Registration Success Message"
                   />
                   <div class="rounded-lg border border-dashed border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">
-                    General access settings are saved with the site. Payment keys are saved separately below.
-                  </div>
-                </div>
-              </edge-shad-form>
-
-              <edge-shad-form
-                v-if="siteUsesPaidRegistration"
-                :initial-values="{
-                  'restricted-content-stripe-publishable-key': state.stripeIntegration.publishableKey,
-                  'restricted-content-stripe-secret-key': state.stripeIntegration.secretKey,
-                  'restricted-content-stripe-webhook-secret': state.stripeIntegration.webhookSecret,
-                }"
-              >
-                <div class="space-y-4 rounded-lg border border-border/60 bg-background/70 p-4">
-                  <div class="flex items-start justify-between gap-4">
-                    <div>
-                      <div class="text-sm font-semibold text-foreground">
-                        Private Stripe Integration
-                      </div>
-                      <p class="mt-1 text-sm text-muted-foreground">
-                        Add the Stripe keys for this site here. These are only needed when registration is paid.
-                      </p>
-                    </div>
-                    <div class="flex items-center gap-2">
-                      <edge-shad-button
-                        variant="outline"
-                        :disabled="!stripeDirty || state.stripeSaving"
-                        @click="resetStripeIntegration"
-                      >
-                        Reset Stripe
-                      </edge-shad-button>
-                      <edge-shad-button
-                        class="bg-slate-800 text-white hover:bg-slate-700"
-                        :disabled="!stripeDirty || state.stripeSaving"
-                        @click="saveStripeIntegration"
-                      >
-                        Save Stripe
-                      </edge-shad-button>
-                    </div>
-                  </div>
-                  <div class="grid gap-4 md:grid-cols-2">
-                    <edge-shad-input
-                      v-model="state.stripeIntegration.publishableKey"
-                      name="restricted-content-stripe-publishable-key"
-                      label="Stripe Publishable Key"
-                      placeholder="pk_live_..."
-                    />
-                    <edge-shad-input
-                      v-model="state.stripeIntegration.secretKey"
-                      name="restricted-content-stripe-secret-key"
-                      type="password"
-                      label="Stripe Secret Key"
-                      placeholder="sk_live_..."
-                    />
-                  </div>
-                  <edge-shad-input
-                    v-model="state.stripeIntegration.webhookSecret"
-                    name="restricted-content-stripe-webhook-secret"
-                    type="password"
-                    label="Stripe Webhook Secret"
-                    placeholder="whsec_..."
-                  />
-                  <div class="rounded-lg border border-dashed border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">
-                    These keys are kept separate from the rest of the site settings and are used only for payments on this site.
+                    General access settings are saved with the site.
                   </div>
                 </div>
               </edge-shad-form>
@@ -1001,19 +939,101 @@ onBeforeUnmount(async () => {
         </TabsContent>
 
         <TabsContent value="rules" class="mt-4 min-h-0 flex-1">
+          <edge-shad-form
+            :initial-values="{
+              'restricted-content-stripe-publishable-key': state.stripeIntegration.publishableKey,
+              'restricted-content-stripe-secret-key': state.stripeIntegration.secretKey,
+              'restricted-content-stripe-webhook-secret': state.stripeIntegration.webhookSecret,
+            }"
+          >
+            <Card class="mb-4 border border-border/60 bg-card">
+              <CardContent class="space-y-4 p-4">
+                <div class="flex items-start justify-between gap-4">
+                  <div>
+                    <div class="text-sm font-semibold text-foreground">
+                      Stripe Settings
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <edge-shad-button
+                      variant="outline"
+                      :disabled="!stripeDirty || state.stripeSaving"
+                      @click="resetStripeIntegration"
+                    >
+                      Reset Stripe
+                    </edge-shad-button>
+                    <edge-shad-button
+                      class="bg-slate-800 text-white hover:bg-slate-700"
+                      :disabled="!stripeDirty || state.stripeSaving"
+                      @click="saveStripeIntegration"
+                    >
+                      Save Stripe
+                    </edge-shad-button>
+                  </div>
+                </div>
+                <div class="grid gap-4 md:grid-cols-2">
+                  <edge-shad-input
+                    v-model="state.stripeIntegration.publishableKey"
+                    name="restricted-content-stripe-publishable-key"
+                    label="Stripe Publishable Key"
+                    placeholder="pk_live_..."
+                    :input-attrs="{
+                      autocomplete: 'off',
+                      autocapitalize: 'none',
+                      autocorrect: 'off',
+                      spellcheck: 'false',
+                      'data-lpignore': 'true',
+                      'data-1p-ignore': 'true',
+                    }"
+                  />
+                  <edge-shad-input
+                    v-model="state.stripeIntegration.secretKey"
+                    name="restricted-content-stripe-secret-key"
+                    type="password"
+                    label="Stripe Secret Key"
+                    placeholder="sk_live_..."
+                    :input-attrs="{
+                      autocomplete: 'new-password',
+                      autocapitalize: 'none',
+                      autocorrect: 'off',
+                      spellcheck: 'false',
+                      'data-lpignore': 'true',
+                      'data-1p-ignore': 'true',
+                    }"
+                  />
+                </div>
+                <edge-shad-input
+                  v-model="state.stripeIntegration.webhookSecret"
+                  name="restricted-content-stripe-webhook-secret"
+                  type="password"
+                  label="Stripe Webhook Secret"
+                  placeholder="whsec_..."
+                  :input-attrs="{
+                    autocomplete: 'new-password',
+                    autocapitalize: 'none',
+                    autocorrect: 'off',
+                    spellcheck: 'false',
+                    'data-lpignore': 'true',
+                    'data-1p-ignore': 'true',
+                  }"
+                />
+              </CardContent>
+            </Card>
+          </edge-shad-form>
+
           <div class="grid min-h-0 h-full gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
             <Card class="min-h-0 border border-border/60 bg-card">
               <CardHeader class="space-y-3">
                 <div class="flex items-center justify-between gap-3">
                   <div>
                     <CardTitle class="text-base">
-                      Restriction Rules
+                      Paid Access Plans
                     </CardTitle>
-                    <CardDescription>{{ filteredRules.length }} rules</CardDescription>
+                    <CardDescription>{{ filteredRules.length }} plans</CardDescription>
                   </div>
                   <edge-shad-button class="gap-2 bg-slate-800 text-white hover:bg-slate-700" @click="openNewRule">
                     <ShieldCheck class="h-4 w-4" />
-                    Add Rule
+                    Add Plan
                   </edge-shad-button>
                 </div>
                 <edge-shad-form :initial-values="{ 'restricted-rule-filter': state.ruleFilter }">
@@ -1021,7 +1041,7 @@ onBeforeUnmount(async () => {
                     v-model="state.ruleFilter"
                     name="restricted-rule-filter"
                     label=""
-                    placeholder="Search rules..."
+                    placeholder="Search plans..."
                   >
                     <template #icon>
                       <Search class="h-4 w-4" />
@@ -1043,17 +1063,6 @@ onBeforeUnmount(async () => {
                       <div class="truncate font-semibold text-foreground">
                         {{ item.name || item.id }}
                       </div>
-                      <div class="mt-2 flex flex-wrap gap-2 text-[10px] font-semibold uppercase">
-                        <span class="rounded-full bg-slate-100 px-2 py-1 text-slate-800 dark:bg-slate-800 dark:text-slate-200">
-                          {{ item.protected === false ? 'Open' : 'Protected' }}
-                        </span>
-                        <span class="rounded-full bg-slate-100 px-2 py-1 text-slate-800 dark:bg-slate-800 dark:text-slate-200">
-                          {{ item.allowRegistration ? (siteUsesPaidRegistration ? (item.registrationMode || 'free') : 'free') : 'manual only' }}
-                        </span>
-                        <span class="rounded-full bg-slate-100 px-2 py-1 text-slate-800 dark:bg-slate-800 dark:text-slate-200">
-                          {{ getRuleUsageCounts(item.id).pageCount }} pages
-                        </span>
-                      </div>
                     </div>
                     <edge-shad-button
                       size="icon"
@@ -1066,7 +1075,7 @@ onBeforeUnmount(async () => {
                   </div>
                 </button>
                 <div v-if="!filteredRules.length" class="rounded-lg border border-dashed border-border/70 px-4 py-10 text-center text-sm text-muted-foreground">
-                  No rules have been added yet.
+                  No plans have been added yet.
                 </div>
               </CardContent>
             </Card>
@@ -1077,7 +1086,7 @@ onBeforeUnmount(async () => {
                   <div class="flex items-center justify-between border-b border-border/60 px-6 py-4">
                     <div class="flex min-w-0 items-center text-sm font-semibold text-foreground">
                       <ShieldCheck class="mr-2 h-4 w-4" />
-                      <span class="truncate">{{ state.selectedRuleId === 'new' ? 'New Rule' : (state.ruleWorkingDoc.name || 'Edit Rule') }}</span>
+                      <span class="truncate">{{ state.selectedRuleId === 'new' ? 'New Plan' : (state.ruleWorkingDoc.name || 'Edit Plan') }}</span>
                     </div>
                     <div class="flex items-center gap-2">
                       <edge-shad-button
@@ -1100,9 +1109,6 @@ onBeforeUnmount(async () => {
                     <edge-shad-form
                       :initial-values="{
                         'restricted-rule-name': state.ruleWorkingDoc.name,
-                        'restricted-rule-protected': state.ruleWorkingDoc.protected,
-                        'restricted-rule-allow-registration': state.ruleWorkingDoc.allowRegistration,
-                        'restricted-rule-registration-mode': state.ruleWorkingDoc.registrationMode,
                         'restricted-rule-stripe-product-id': state.ruleWorkingDoc.registrationStripeProductId,
                       }"
                     >
@@ -1110,86 +1116,20 @@ onBeforeUnmount(async () => {
                         <edge-shad-input
                           v-model="state.ruleWorkingDoc.name"
                           name="restricted-rule-name"
-                          label="Rule Name"
-                          description="Use one rule for any pages and posts that should share the same access."
+                          label="Plan Name"
+                          description="Use one plan for any pages and posts that should share the same access."
                         />
                         <div v-if="state.ruleError" class="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-700 dark:bg-red-950/30 dark:text-red-200">
                           {{ state.ruleError }}
                         </div>
-                        <div class="grid gap-4 md:grid-cols-2">
-                          <edge-cms-boolean-card
-                            v-model="state.ruleWorkingDoc.protected"
-                            name="restricted-rule-protected"
-                            label="Protected"
-                            checked-label="Protected"
-                            unchecked-label="Open"
-                            stretch
-                          >
-                            Turn this off if you are still setting things up and do not want this rule to block access yet.
-                          </edge-cms-boolean-card>
-                          <edge-cms-boolean-card
-                            v-model="state.ruleWorkingDoc.allowRegistration"
-                            name="restricted-rule-allow-registration"
-                            label="Allow Registration"
-                            checked-label="Registration On"
-                            unchecked-label="Manual Only"
-                            stretch
-                          >
-                            Turn this on if people should be able to sign up for access on their own.
-                          </edge-cms-boolean-card>
-                        </div>
-                        <div v-if="siteUsesPaidRegistration" class="grid gap-4 md:grid-cols-2">
-                          <edge-shad-select
-                            v-model="state.ruleWorkingDoc.registrationMode"
-                            name="restricted-rule-registration-mode"
-                            label="Registration Mode"
-                            :items="REGISTRATION_MODES"
-                            :disabled="!state.ruleWorkingDoc.allowRegistration"
-                          />
-                          <edge-shad-input
-                            v-model="state.ruleWorkingDoc.registrationStripeProductId"
-                            name="restricted-rule-stripe-product-id"
-                            type="text"
-                            label="Stripe Product ID"
-                            :disabled="!state.ruleWorkingDoc.allowRegistration || state.ruleWorkingDoc.registrationMode !== 'paid'"
-                            placeholder="prod_..."
-                            description="Use the Stripe product for this offer so buyers can choose from that product's available pricing options."
-                          />
-                        </div>
-                        <div v-else class="rounded-lg border border-border/60 bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-                          This site uses free registration, so payment details are hidden for every rule.
-                        </div>
-                        <div class="space-y-3 rounded-xl border border-border/60 bg-muted/20 p-4">
-                          <div>
-                            <div class="text-sm font-semibold text-foreground">
-                              Used By
-                            </div>
-                            <div class="text-xs text-muted-foreground">
-                              Pages and posts currently attached to this rule.
-                            </div>
-                          </div>
-                          <div v-if="selectedRuleUsage.length" class="space-y-2">
-                            <button
-                              v-for="item in selectedRuleUsage"
-                              :key="item.id"
-                              type="button"
-                              class="flex w-full items-center justify-between gap-3 rounded-lg border border-border/60 bg-background px-3 py-2 text-left"
-                              @click="emit('open-usage-target', item)"
-                            >
-                              <div class="min-w-0">
-                                <div class="truncate text-sm font-medium text-foreground">
-                                  {{ item.label }}
-                                </div>
-                              </div>
-                              <span class="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold uppercase text-slate-800 dark:bg-slate-800 dark:text-slate-200">
-                                {{ item.type }}
-                              </span>
-                            </button>
-                          </div>
-                          <div v-else class="rounded-lg border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">
-                            This rule is not attached to any pages or posts yet.
-                          </div>
-                        </div>
+                        <edge-shad-input
+                          v-model="state.ruleWorkingDoc.registrationStripeProductId"
+                          name="restricted-rule-stripe-product-id"
+                          type="text"
+                          label="Stripe Product ID"
+                          placeholder="prod_..."
+                          description="Use the Stripe product for this offer so buyers can choose from that product's available pricing options."
+                        />
                       </div>
                     </edge-shad-form>
                   </div>
@@ -1201,10 +1141,10 @@ onBeforeUnmount(async () => {
                       <ShieldCheck class="h-6 w-6" />
                     </div>
                     <h3 class="text-lg font-semibold text-foreground">
-                      Select a rule
+                      Select a plan
                     </h3>
                     <p class="mt-2 text-sm text-muted-foreground">
-                      Rules act as reusable access groups that you can attach to pages and posts.
+                      Paid Access Plans act as reusable access groups that you can attach to pages and posts.
                     </p>
                   </div>
                 </div>
@@ -1262,7 +1202,7 @@ onBeforeUnmount(async () => {
                         {{ getAudienceUserLabel(item.audienceUserId) || item.docId }}
                       </div>
                       <div class="mt-1 text-xs text-muted-foreground">
-                        {{ Array.isArray(item.accessRuleIds) ? item.accessRuleIds.length : 0 }} assigned rule{{ (Array.isArray(item.accessRuleIds) ? item.accessRuleIds.length : 0) === 1 ? '' : 's' }}
+                        {{ Array.isArray(item.accessRuleIds) ? item.accessRuleIds.length : 0 }} assigned plan{{ (Array.isArray(item.accessRuleIds) ? item.accessRuleIds.length : 0) === 1 ? '' : 's' }}
                       </div>
                       <div v-if="Array.isArray(item.accessRuleIds) && item.accessRuleIds.length" class="mt-2 flex flex-wrap gap-1">
                         <span
@@ -1323,7 +1263,7 @@ onBeforeUnmount(async () => {
                 >
                   <template #header-start="slotProps">
                     <Users class="mr-2 h-4 w-4" />
-                    {{ slotProps.title }}
+                    {{ getMemberHeaderTitle(slotProps.workingDoc, slotProps.title) }}
                   </template>
                   <template #header-end="slotProps">
                     <edge-shad-button
@@ -1402,19 +1342,13 @@ onBeforeUnmount(async () => {
                         <edge-shad-select-tags
                           v-model="slotProps.workingDoc.accessRuleIds"
                           name="restricted-member-rule-ids"
-                          label="Assigned Rules"
-                          placeholder="Select rules"
+                          label="Assigned Plans"
+                          placeholder="Select plans"
                           :items="ruleTagItems"
                           item-title="label"
                           item-value="value"
                           :allow-additions="false"
                         />
-                        <div v-if="ruleTagItems.length" class="rounded-lg border border-dashed border-border/70 bg-muted/20 p-3 text-xs text-muted-foreground">
-                          Rules you can assign:
-                          <span class="font-medium text-foreground">
-                            {{ ruleTagItems.map(item => item.label).join(', ') }}
-                          </span>
-                        </div>
                         <edge-shad-textarea
                           v-model="slotProps.workingDoc.notes"
                           name="restricted-member-notes"
@@ -1434,7 +1368,7 @@ onBeforeUnmount(async () => {
                       Select a member
                     </h3>
                     <p class="mt-2 text-sm text-muted-foreground">
-                      Members are the people who can access the rules you assign on this site.
+                      Members are the people who can access the plans you assign on this site.
                     </p>
                   </div>
                 </div>

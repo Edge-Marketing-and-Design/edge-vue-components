@@ -816,11 +816,7 @@ const restrictionRuleOptions = computed(() => {
 const availableRestrictionRuleCount = computed(() => Math.max(0, restrictionRuleOptions.value.length - 1))
 const isRestrictedContentEnabled = computed(() => Boolean(siteDoc.value?.restrictedContent?.enabled))
 const showRestrictionRulePicker = computed(() => {
-  if (!canManageRestrictionAssignments.value)
-    return false
-  if (!isRestrictedContentEnabled.value)
-    return false
-  return availableRestrictionRuleCount.value > 0
+  return false
 })
 
 const getRestrictionRuleLabel = (ruleId) => {
@@ -1249,6 +1245,10 @@ const resolveSyncedPostBlock = (block) => {
   if (!isPlainObject(currentBlockDoc))
     return resolvedBlock
 
+  const instanceProtection = isPlainObject(resolvedBlock.protection)
+    ? edgeGlobal.dupObject(resolvedBlock.protection)
+    : null
+
   return {
     ...edgeGlobal.dupObject(currentBlockDoc),
     id: resolvedBlock.id,
@@ -1256,6 +1256,7 @@ const resolveSyncedPostBlock = (block) => {
     synced: resolvedBlock.synced ?? currentBlockDoc.synced ?? false,
     values: edgeGlobal.dupObject(resolvedBlock.values || {}),
     meta: mergeSyncedBlockMeta(currentBlockDoc.meta, resolvedBlock.meta),
+    ...(instanceProtection ? { protection: instanceProtection } : {}),
   }
 }
 
@@ -1294,6 +1295,7 @@ const buildComparablePostBlock = (block) => {
       synced: block.synced ?? currentBlockDoc.synced ?? false,
       values: edgeGlobal.dupObject(block.values || {}),
       meta: comparableMeta,
+      protection: isPlainObject(block.protection) ? edgeGlobal.dupObject(block.protection) : {},
     }
   }
 
@@ -4523,6 +4525,7 @@ const reindexPublishedPostsToKv = async () => {
                                   :contain-fixed="true"
                                   :block-id="blockId"
                                   :theme="theme"
+                                  :allow-protection-editor="isRestrictedContentEnabled"
                                   @delete="() => deletePostBlock(slotProps.workingDoc, blockId)"
                                 />
                                 <div v-if="state.editMode" class="block-drag-handle pointer-events-none absolute inset-x-0 top-2 flex justify-center opacity-0 transition group-hover:opacity-100 z-30">
@@ -4796,6 +4799,7 @@ const reindexPublishedPostsToKv = async () => {
                             :contain-fixed="true"
                             :block-id="blockId"
                             :theme="theme"
+                            :allow-protection-editor="isRestrictedContentEnabled"
                             @delete="() => deletePostBlock(slotProps.workingDoc, blockId)"
                           />
                           <div v-if="state.editMode" class="block-drag-handle pointer-events-none absolute inset-x-0 top-2 flex justify-center opacity-0 transition group-hover:opacity-100 z-30">

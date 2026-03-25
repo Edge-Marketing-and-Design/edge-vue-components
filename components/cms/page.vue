@@ -251,13 +251,7 @@ const restrictionRuleOptions = computed(() => {
 const availableRestrictionRuleCount = computed(() => Math.max(0, restrictionRuleOptions.value.length - 1))
 const isRestrictedContentEnabled = computed(() => Boolean(siteDoc.value?.restrictedContent?.enabled))
 const showRestrictionRulePicker = computed(() => {
-  if (props.isTemplateSite)
-    return false
-  if (!canManageRestrictionAssignments.value)
-    return false
-  if (!isRestrictedContentEnabled.value)
-    return false
-  return availableRestrictionRuleCount.value > 0
+  return false
 })
 
 const getRestrictionRuleLabel = (ruleId) => {
@@ -1809,6 +1803,10 @@ function resolveSyncedPageBlock(block) {
   if (!isObjectRecord(currentBlockDoc))
     return resolvedBlock
 
+  const instanceProtection = isObjectRecord(resolvedBlock.protection)
+    ? edgeGlobal.dupObject(resolvedBlock.protection)
+    : null
+
   return {
     ...edgeGlobal.dupObject(currentBlockDoc),
     id: resolvedBlock.id,
@@ -1816,6 +1814,7 @@ function resolveSyncedPageBlock(block) {
     synced: resolvedBlock.synced ?? currentBlockDoc.synced ?? false,
     values: edgeGlobal.dupObject(resolvedBlock.values || {}),
     meta: mergeSyncedBlockMeta(currentBlockDoc.meta, resolvedBlock.meta),
+    ...(instanceProtection ? { protection: instanceProtection } : {}),
   }
 }
 
@@ -1859,6 +1858,7 @@ function buildComparablePageBlock(block) {
       synced: block.synced ?? currentBlockDoc.synced ?? false,
       values: edgeGlobal.dupObject(block.values || {}),
       meta: comparableMeta,
+      protection: isObjectRecord(block.protection) ? edgeGlobal.dupObject(block.protection) : {},
     }
   }
 
@@ -4087,6 +4087,7 @@ const hasUnsavedChanges = (changes) => {
                                       :viewport-mode="previewViewportMode"
                                       :block-id="blockId"
                                       :theme="theme"
+                                      :allow-protection-editor="isRestrictedContentEnabled"
                                       @delete="(block) => deleteBlock(block, slotProps)"
                                     />
                                     <div
@@ -4346,6 +4347,7 @@ const hasUnsavedChanges = (changes) => {
                                       :theme="theme"
                                       :site-id="selectedPreviewContextSiteId"
                                       :route-last-segment="previewRouteLastSegment"
+                                      :allow-protection-editor="isRestrictedContentEnabled"
                                       @delete="(block) => deleteBlock(block, slotProps, true)"
                                     />
                                     <div

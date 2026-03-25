@@ -213,13 +213,7 @@ const restrictionRuleOptions = computed(() => {
 })
 const isRestrictedContentEnabled = computed(() => Boolean(siteDoc.value?.restrictedContent?.enabled))
 const showRestrictionRulePicker = computed(() => {
-  if (props.isTemplateSite)
-    return false
-  if (!canManageRestrictionAssignments.value)
-    return false
-  if (!isRestrictedContentEnabled.value)
-    return false
-  return restrictedRules.value.length > 0
+  return false
 })
 const getPageRestrictionAssignmentKey = (pageId, isDetail = false) => {
   const normalizedPageId = String(pageId || '').trim()
