@@ -2573,6 +2573,36 @@ const getRestrictedSiteRefs = (orgId, siteId) => {
   }
 }
 
+const getRestrictedSiteContext = async (orgId, siteId) => {
+  const normalizedOrgId = String(orgId || '').trim()
+  const normalizedSiteId = String(siteId || '').trim()
+  if (!normalizedOrgId || !normalizedSiteId)
+    throw new HttpsError('invalid-argument', 'Missing orgId or siteId.')
+
+  const { siteRef } = getRestrictedSiteRefs(normalizedOrgId, normalizedSiteId)
+  const siteSnap = await siteRef.get()
+  if (!siteSnap.exists)
+    throw new HttpsError('not-found', 'Site not found.')
+
+  const siteData = siteSnap.data() || {}
+  const restrictedContent = (siteData.restrictedContent && typeof siteData.restrictedContent === 'object')
+    ? siteData.restrictedContent
+    : {}
+  if (!restrictedContent.enabled)
+    throw new HttpsError('failed-precondition', 'Restricted content is not enabled for this site.')
+
+  const effectiveRegistrationMode = restrictedContent.registrationPricing === 'paid'
+    ? 'paid'
+    : 'free'
+
+  return {
+    siteRef,
+    siteData,
+    restrictedContent,
+    effectiveRegistrationMode,
+  }
+}
+
 const normalizeRestrictedRuleForFunction = (value = {}, fallbackId = '') => {
   const normalizedValue = (value && typeof value === 'object') ? value : {}
   const id = String(normalizedValue.id || normalizedValue.docId || fallbackId || '').trim()
@@ -2588,23 +2618,11 @@ const normalizeRestrictedRuleForFunction = (value = {}, fallbackId = '') => {
 
 const getRestrictedRuleContext = async (orgId, siteId, ruleId, options = {}) => {
   const requireAllowRegistration = options.requireAllowRegistration !== false
-  const normalizedOrgId = String(orgId || '').trim()
-  const normalizedSiteId = String(siteId || '').trim()
   const normalizedRuleId = String(ruleId || '').trim()
-  if (!normalizedOrgId || !normalizedSiteId || !normalizedRuleId)
+  if (!normalizedRuleId)
     throw new HttpsError('invalid-argument', 'Missing orgId, siteId, or ruleId.')
 
-  const { siteRef } = getRestrictedSiteRefs(normalizedOrgId, normalizedSiteId)
-  const siteSnap = await siteRef.get()
-  if (!siteSnap.exists)
-    throw new HttpsError('not-found', 'Site not found.')
-
-  const siteData = siteSnap.data() || {}
-  const restrictedContent = (siteData.restrictedContent && typeof siteData.restrictedContent === 'object')
-    ? siteData.restrictedContent
-    : {}
-  if (!restrictedContent.enabled)
-    throw new HttpsError('failed-precondition', 'Restricted content is not enabled for this site.')
+  const { siteRef, siteData, restrictedContent } = await getRestrictedSiteContext(orgId, siteId)
 
   const rules = Array.isArray(restrictedContent.rules) ? restrictedContent.rules : []
   const normalizedRules = rules
@@ -2840,11 +2858,17 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
   const name = String(data.name || '').trim()
   const email = normalizeEmail(data.email)
 
-  if (!orgId || !siteId || !ruleId || !name || !email)
-    return fail('invalid-argument', 'Missing orgId, siteId, ruleId, name, or email.')
+  if (!orgId || !siteId || !email)
+    return fail('invalid-argument', 'Missing orgId, siteId, or email.')
 
   try {
-    const { rule, effectiveRegistrationMode } = await getRestrictedRuleContext(orgId, siteId, ruleId, { requireAllowRegistration: false })
+    const { restrictedContent, effectiveRegistrationMode: siteRegistrationMode } = await getRestrictedSiteContext(orgId, siteId)
+    const effectiveRegistrationMode = siteRegistrationMode === 'paid' ? 'paid' : 'free'
+    if (effectiveRegistrationMode === 'paid' && !ruleId)
+      return fail('invalid-argument', 'Missing ruleId for paid registration.')
+    const { rule } = effectiveRegistrationMode === 'paid'
+      ? await getRestrictedRuleContext(orgId, siteId, ruleId, { requireAllowRegistration: false })
+      : { rule: null }
     const { audienceUsersRef } = getRestrictedSiteRefs(orgId, siteId)
     const now = Date.now()
     const audienceUserSnap = await findAudienceUserByEmail(audienceUsersRef, email)
@@ -2958,7 +2982,7 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
     await memberRef.set(buildRestrictedMemberPayload({
       existingMember: memberData,
       audienceUserId: docId,
-      ruleId: rule.id,
+      ruleId: effectiveRegistrationMode === 'paid' ? rule.id : '',
       status: String(memberData.status || '').trim() || 'active',
       paymentStatus: effectiveRegistrationMode === 'paid' ? 'pending' : 'not_required',
       markPaid: effectiveRegistrationMode !== 'paid',
@@ -2983,9 +3007,10 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
       const accessRuleIds = Array.isArray(refreshedMember.accessRuleIds) ? refreshedMember.accessRuleIds.filter(Boolean) : []
       const paidRuleIds = Array.isArray(refreshedMember.paidAccessRuleIds) ? refreshedMember.paidAccessRuleIds.filter(Boolean) : []
       const pendingRuleIds = Array.isArray(refreshedMember.pendingPaymentRuleIds) ? refreshedMember.pendingPaymentRuleIds.filter(Boolean) : []
-      const isAssigned = accessRuleIds.includes(rule.id)
-      const isPaid = paidRuleIds.includes(rule.id)
-      const paymentPending = pendingRuleIds.includes(rule.id)
+      const activeRuleId = effectiveRegistrationMode === 'paid' ? String(rule?.id || '').trim() : ''
+      const isAssigned = activeRuleId ? accessRuleIds.includes(activeRuleId) : false
+      const isPaid = activeRuleId ? paidRuleIds.includes(activeRuleId) : false
+      const paymentPending = activeRuleId ? pendingRuleIds.includes(activeRuleId) : false
       const hasAccess = !blocked && isAssigned && !paymentPending
 
       const response = {
@@ -2997,7 +3022,7 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
 
       if (effectiveRegistrationMode === 'paid') {
         response.ruleAccess = {
-          ruleId: rule.id,
+          ruleId: activeRuleId,
           requiresPayment: effectiveRegistrationMode === 'paid',
           hasAccess,
           isPaid,
