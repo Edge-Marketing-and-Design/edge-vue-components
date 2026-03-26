@@ -2968,15 +2968,23 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
     const memberRef = audienceUsersRef.doc(docId)
     const memberSnap = await memberRef.get()
     const memberData = memberSnap.exists ? (memberSnap.data() || {}) : {}
-    if (String(memberData.status || '').trim().toLowerCase() === 'revoked') {
+    const currentMemberStatus = String(memberData.status || '').trim().toLowerCase()
+    if (currentMemberStatus === 'revoked') {
       return fail('permission-denied', 'Access for this email has been revoked. Please contact support.')
     }
+    const promoteToActive = Boolean(requestAuthUid) && (!currentMemberStatus || currentMemberStatus === 'invited')
+    const payloadExistingMember = promoteToActive
+      ? {
+          ...memberData,
+          status: '',
+        }
+      : memberData
 
     await memberRef.set(buildRestrictedMemberPayload({
-      existingMember: memberData,
+      existingMember: payloadExistingMember,
       audienceUserId: docId,
       ruleId: hasRuleId && effectiveRegistrationMode === 'paid' ? rule.id : '',
-      status: String(memberData.status || '').trim() || 'active',
+      status: promoteToActive ? 'active' : (String(memberData.status || '').trim() || 'active'),
       paymentStatus: 'not_required',
       markPaid: false,
       markPending: false,
@@ -3011,6 +3019,7 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
         audienceUserId: docId,
         memberId: docId,
         registrationMode: effectiveRegistrationMode,
+        status,
       }
 
       if (activeRuleId) {

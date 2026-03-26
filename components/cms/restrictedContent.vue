@@ -1,6 +1,6 @@
 <script setup>
 import { toTypedSchema } from '@vee-validate/zod'
-import { LockKeyhole, Search, Settings2, ShieldCheck, Trash2, UserRoundCheck, Users } from 'lucide-vue-next'
+import { LockKeyhole, RefreshCw, Search, Settings2, ShieldCheck, Trash2, UserRoundCheck, Users } from 'lucide-vue-next'
 import * as z from 'zod'
 
 const props = defineProps({
@@ -90,7 +90,6 @@ const stripeIntegrationCollectionPath = computed(() => `${edgeGlobal.edgeState.o
 
 const sitePages = computed(() => edgeFirebase.data?.[pagesCollectionPath.value] || {})
 const sitePosts = computed(() => edgeFirebase.data?.[postsCollectionPath.value] || {})
-const audienceUsers = computed(() => edgeFirebase.data?.[audienceUsersCollectionPath.value] || {})
 const stripeIntegrationDoc = computed(() => edgeFirebase.data?.[stripeIntegrationCollectionPath.value]?.stripe || {})
 
 const currentSettings = computed(() => buildRestrictedSettings(props.siteDoc?.restrictedContent))
@@ -114,9 +113,15 @@ const state = reactive({
   ruleError: '',
   membersLoading: false,
   membersLoadingMore: false,
+  memberSearch: null,
+  memberRows: [],
+  memberSearchDebounce: null,
   ruleDeleteDialogOpen: false,
   ruleDeleteDocId: '',
   ruleDeleteSubmitting: false,
+  memberDeleteDialogOpen: false,
+  memberDeleteDocId: '',
+  memberDeleteSubmitting: false,
 })
 
 const memberSchema = toTypedSchema(z.object({
@@ -127,6 +132,7 @@ const memberSchema = toTypedSchema(z.object({
 }))
 
 const memberDocSchema = {
+  memberSource: { value: 'manual' },
   name: { value: '' },
   email: { value: '' },
   audienceUserId: { value: '' },
@@ -165,10 +171,29 @@ const filteredRules = computed(() => {
     .sort((a, b) => String(a?.name || a?.id || '').localeCompare(String(b?.name || b?.id || '')))
 })
 
+const normalizeMemberRow = (member = {}) => {
+  const docId = String(member?.docId || '').trim()
+  if (!docId)
+    return null
+  return {
+    ...member,
+    docId,
+    audienceUserId: String(member?.audienceUserId || docId).trim(),
+    status: String(member?.status || 'active').trim() || 'active',
+    accessRuleIds: Array.isArray(member?.accessRuleIds) ? member.accessRuleIds : [],
+    expiresAt: String(member?.expiresAt || '').trim(),
+    notes: String(member?.notes || '').trim(),
+    authUid: String(member?.authUid || '').trim(),
+    stagedUserId: String(member?.stagedUserId || '').trim(),
+    memberSource: String(member?.memberSource || member?.source || '').trim(),
+    manual: member?.manual === true,
+  }
+}
+
 const getAudienceUserLabel = (audienceUserId) => {
   if (!audienceUserId)
     return ''
-  const item = audienceUsers.value?.[audienceUserId]
+  const item = (state.memberRows || []).find(member => member?.docId === audienceUserId || member?.audienceUserId === audienceUserId)
   return item?.name || item?.email || audienceUserId
 }
 
@@ -337,22 +362,7 @@ const ruleDirty = computed(() => {
 
 const filteredMembers = computed(() => {
   const filter = String(state.memberFilter || '').trim().toLowerCase()
-  const mergedMembers = Object.values(audienceUsers.value || {})
-    .map((audienceUser) => {
-      const docId = String(audienceUser?.docId || '').trim()
-      if (!docId)
-        return null
-      return {
-        ...audienceUser,
-        docId,
-        audienceUserId: String(audienceUser?.audienceUserId || docId).trim(),
-        status: String(audienceUser?.status || 'active').trim() || 'active',
-        accessRuleIds: Array.isArray(audienceUser?.accessRuleIds) ? audienceUser.accessRuleIds : [],
-        expiresAt: String(audienceUser?.expiresAt || '').trim(),
-        notes: String(audienceUser?.notes || '').trim(),
-      }
-    })
-    .filter(Boolean)
+  const mergedMembers = (state.memberRows || [])
 
   return mergedMembers
     .filter((item) => {
@@ -371,7 +381,9 @@ const filteredMembers = computed(() => {
     .sort((a, b) => getAudienceUserLabel(a?.audienceUserId).localeCompare(getAudienceUserLabel(b?.audienceUserId)))
 })
 
-const memberTotal = computed(() => Object.keys(audienceUsers.value || {}).length)
+const memberTotal = computed(() => {
+  return (state.memberRows || []).length
+})
 const canLoadMoreMembers = computed(() => false)
 
 const settingsDirty = computed(() => {
@@ -455,8 +467,46 @@ const loadInitialMembers = async () => {
   if (!props.canManage)
     return
   state.membersLoading = true
-  state.selectedMemberId = ''
-  state.membersLoading = false
+  try {
+    const queryText = String(state.memberFilter || '').trim()
+    const limit = 250
+    const collectionPath = audienceUsersCollectionPath.value
+    const buildPrefixFilters = field => (queryText
+      ? [
+          { field, operator: '>=', value: queryText },
+          { field, operator: '<=', value: `${queryText}\uF8FF` },
+        ]
+      : [])
+
+    const staticSearches = []
+    const querySets = queryText
+      ? [
+          [{ field: 'status', operator: '!=', value: 'invited' }, ...buildPrefixFilters('name')],
+          [{ field: 'status', operator: '!=', value: 'invited' }, ...buildPrefixFilters('email')],
+        ]
+      : [
+          [{ field: 'status', operator: '!=', value: 'invited' }],
+        ]
+
+    const merged = {}
+    for (const query of querySets) {
+      const staticSearch = new edgeFirebase.SearchStaticData()
+      staticSearches.push(staticSearch)
+      await staticSearch.getData(collectionPath, query, [], limit)
+      const rows = Object.values(staticSearch?.results?.data || {})
+      rows.forEach((row) => {
+        const normalized = normalizeMemberRow(row)
+        if (normalized?.docId)
+          merged[normalized.docId] = normalized
+      })
+    }
+    state.memberSearch = staticSearches[0] || null
+    state.memberRows = Object.values(merged)
+      .sort((a, b) => getAudienceUserLabel(a?.docId).localeCompare(getAudienceUserLabel(b?.docId)))
+  }
+  finally {
+    state.membersLoading = false
+  }
 }
 
 const loadMoreMembers = async () => {
@@ -466,6 +516,8 @@ const loadMoreMembers = async () => {
 const handleMemberSaved = ({ docId, data }) => {
   if (!docId || !data)
     return
+  state.selectedMemberId = docId
+  loadInitialMembers()
 }
 
 const startSnapshots = async () => {
@@ -476,8 +528,6 @@ const startSnapshots = async () => {
     tasks.push(edgeFirebase.startSnapshot(pagesCollectionPath.value))
   if (!edgeFirebase.data?.[postsCollectionPath.value])
     tasks.push(edgeFirebase.startSnapshot(postsCollectionPath.value))
-  if (!edgeFirebase.data?.[audienceUsersCollectionPath.value])
-    tasks.push(edgeFirebase.startSnapshot(audienceUsersCollectionPath.value))
   if (!edgeFirebase.data?.[stripeIntegrationCollectionPath.value])
     tasks.push(edgeFirebase.startSnapshot(stripeIntegrationCollectionPath.value))
   if (tasks.length)
@@ -504,8 +554,6 @@ const stopSnapshots = async () => {
     tasks.push(edgeFirebase.stopSnapshot(pagesCollectionPath.value))
   if (postsCollectionPath.value)
     tasks.push(edgeFirebase.stopSnapshot(postsCollectionPath.value))
-  if (audienceUsersCollectionPath.value)
-    tasks.push(edgeFirebase.stopSnapshot(audienceUsersCollectionPath.value))
   if (stripeIntegrationCollectionPath.value)
     tasks.push(edgeFirebase.stopSnapshot(stripeIntegrationCollectionPath.value))
   await Promise.allSettled(tasks)
@@ -654,12 +702,37 @@ const closeMemberEditor = () => {
   state.selectedMemberId = ''
 }
 
-const deleteMember = async (docId) => {
-  if (!docId)
+const openDeleteMemberDialog = (docId) => {
+  const normalizedDocId = String(docId || '').trim()
+  if (!normalizedDocId)
     return
-  await edgeFirebase.removeDoc(audienceUsersCollectionPath.value, docId)
-  if (state.selectedMemberId === docId)
-    state.selectedMemberId = ''
+  state.memberDeleteDocId = normalizedDocId
+  state.memberDeleteDialogOpen = true
+}
+
+const closeDeleteMemberDialog = () => {
+  if (state.memberDeleteSubmitting)
+    return
+  state.memberDeleteDialogOpen = false
+  state.memberDeleteDocId = ''
+}
+
+const deleteMember = async (docId) => {
+  const normalizedDocId = String(docId || state.memberDeleteDocId || '').trim()
+  if (!normalizedDocId || state.memberDeleteSubmitting)
+    return
+  state.memberDeleteSubmitting = true
+  try {
+    await edgeFirebase.removeDoc(audienceUsersCollectionPath.value, normalizedDocId)
+    if (state.selectedMemberId === normalizedDocId)
+      state.selectedMemberId = ''
+    await loadInitialMembers()
+    state.memberDeleteDialogOpen = false
+    state.memberDeleteDocId = ''
+  }
+  finally {
+    state.memberDeleteSubmitting = false
+  }
 }
 
 watch(() => props.canManage, async (allowed) => {
@@ -696,10 +769,6 @@ watch(postsCollectionPath, async (nextPath, previousPath) => {
   await restartSnapshotForPath(nextPath, previousPath)
 })
 
-watch(audienceUsersCollectionPath, async (nextPath, previousPath) => {
-  await restartSnapshotForPath(nextPath, previousPath)
-})
-
 watch(stripeIntegrationCollectionPath, async (nextPath, previousPath) => {
   await restartSnapshotForPath(nextPath, previousPath)
 })
@@ -710,7 +779,17 @@ watch(membersCollectionPath, async () => {
     await loadInitialMembers()
 })
 
+watch(() => state.memberFilter, () => {
+  if (state.memberSearchDebounce)
+    clearTimeout(state.memberSearchDebounce)
+  state.memberSearchDebounce = setTimeout(() => {
+    loadInitialMembers()
+  }, 250)
+})
+
 onBeforeUnmount(async () => {
+  if (state.memberSearchDebounce)
+    clearTimeout(state.memberSearchDebounce)
   await stopSnapshots()
 })
 </script>
@@ -752,6 +831,26 @@ onBeforeUnmount(async () => {
           </edge-shad-button>
           <edge-shad-button class="bg-red-700 text-white hover:bg-red-600" :disabled="state.ruleDeleteSubmitting" @click="deleteRule">
             Delete Plan
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
+    <edge-shad-dialog v-model="state.memberDeleteDialogOpen">
+      <DialogContent class="pt-10">
+        <DialogHeader>
+          <DialogTitle class="text-left">
+            Delete Member?
+          </DialogTitle>
+          <DialogDescription class="text-left">
+            This will permanently remove this member from the site.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter class="flex justify-between pt-2">
+          <edge-shad-button variant="outline" :disabled="state.memberDeleteSubmitting" @click="closeDeleteMemberDialog">
+            Cancel
+          </edge-shad-button>
+          <edge-shad-button class="bg-red-700 text-white hover:bg-red-600" :disabled="state.memberDeleteSubmitting" @click="deleteMember()">
+            Delete Member
           </edge-shad-button>
         </DialogFooter>
       </DialogContent>
@@ -1138,18 +1237,30 @@ onBeforeUnmount(async () => {
                     Add Member
                   </edge-shad-button>
                 </div>
-                <edge-shad-form :initial-values="{ 'restricted-member-filter': state.memberFilter }">
-                  <edge-shad-input
-                    v-model="state.memberFilter"
-                    name="restricted-member-filter"
-                    label=""
-                    placeholder="Filter loaded members..."
+                <div class="flex items-center gap-2">
+                  <edge-shad-form :initial-values="{ 'restricted-member-filter': state.memberFilter }" class="min-w-0 flex-1">
+                    <edge-shad-input
+                      v-model="state.memberFilter"
+                      name="restricted-member-filter"
+                      label=""
+                      placeholder="Filter loaded members..."
+                    >
+                      <template #icon>
+                        <Search class="h-4 w-4" />
+                      </template>
+                    </edge-shad-input>
+                  </edge-shad-form>
+                  <edge-shad-button
+                    type="button"
+                    size="icon"
+                    variant="outline"
+                    class="h-9 w-9 shrink-0"
+                    :disabled="state.membersLoading || state.membersLoadingMore"
+                    @click="loadInitialMembers"
                   >
-                    <template #icon>
-                      <Search class="h-4 w-4" />
-                    </template>
-                  </edge-shad-input>
-                </edge-shad-form>
+                    <RefreshCw class="h-4 w-4" :class="state.membersLoading ? 'animate-spin' : ''" />
+                  </edge-shad-button>
+                </div>
               </CardHeader>
               <CardContent class="min-h-0 flex-1 space-y-2 overflow-y-auto">
                 <div v-if="state.membersLoading" class="rounded-lg border border-dashed border-border/70 px-4 py-10 text-center text-sm text-muted-foreground">
@@ -1189,7 +1300,7 @@ onBeforeUnmount(async () => {
                         size="icon"
                         variant="ghost"
                         class="h-8 w-8 text-muted-foreground hover:text-destructive"
-                        @click.stop="deleteMember(item.docId)"
+                        @click.stop="openDeleteMemberDialog(item.docId)"
                       >
                         <Trash2 class="h-4 w-4" />
                       </edge-shad-button>
