@@ -101,17 +101,13 @@ const currentStripeIntegration = computed(() => buildStripeIntegration({
 }))
 
 const state = reactive({
-  activeTab: 'settings',
+  activeTab: 'members',
   settings: buildRestrictedSettings(),
   stripeIntegration: createStripeIntegrationDefaults(),
   ruleFilter: '',
   memberFilter: '',
   selectedRuleId: '',
   selectedMemberId: '',
-  memberManualName: '',
-  memberManualEmail: '',
-  memberManualError: '',
-  memberCreatingUser: false,
   settingsSaving: false,
   stripeSaving: false,
   ruleWorkingDoc: createRuleDoc(),
@@ -132,18 +128,13 @@ const memberSchema = toTypedSchema(z.object({
 }))
 
 const memberDocSchema = {
+  name: { value: '' },
+  email: { value: '' },
   audienceUserId: { value: '' },
   status: { value: 'active' },
   accessRuleIds: { value: [] },
   expiresAt: { value: '' },
   notes: { value: '' },
-}
-
-const resetMemberManualCreate = () => {
-  state.memberManualName = ''
-  state.memberManualEmail = ''
-  state.memberManualError = ''
-  state.memberCreatingUser = false
 }
 
 const currentRules = computed(() => {
@@ -652,19 +643,16 @@ const deleteRule = async () => {
 
 const openNewMember = () => {
   state.selectedMemberId = 'new'
-  resetMemberManualCreate()
 }
 
 const openMember = (docId) => {
   if (!docId)
     return
   state.selectedMemberId = docId
-  resetMemberManualCreate()
 }
 
 const closeMemberEditor = () => {
   state.selectedMemberId = ''
-  resetMemberManualCreate()
 }
 
 const deleteMember = async (docId) => {
@@ -673,59 +661,6 @@ const deleteMember = async (docId) => {
   await edgeFirebase.removeDoc(audienceUsersCollectionPath.value, docId)
   if (state.selectedMemberId === docId)
     state.selectedMemberId = ''
-}
-
-const createAudienceUserFromMember = async (workingDoc) => {
-  const name = String(state.memberManualName || '').trim()
-  const email = String(state.memberManualEmail || '').trim().toLowerCase()
-
-  if (!name) {
-    state.memberManualError = 'Enter a name before creating a person.'
-    return
-  }
-  if (!email) {
-    state.memberManualError = 'Enter an email before creating a person.'
-    return
-  }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    state.memberManualError = 'Enter a valid email address.'
-    return
-  }
-
-  const existingAudienceUser = Object.values(audienceUsers.value || {}).find((item) => {
-    return String(item?.email || '').trim().toLowerCase() === email
-  })
-  if (existingAudienceUser?.docId) {
-    workingDoc.audienceUserId = existingAudienceUser.docId
-    state.memberManualError = ''
-    return
-  }
-
-  state.memberCreatingUser = true
-  state.memberManualError = ''
-  try {
-    const docId = (globalThis.crypto?.randomUUID?.() || `aud-${Date.now()}`)
-    await edgeFirebase.storeDoc(audienceUsersCollectionPath.value, {
-      docId,
-      name,
-      email,
-      authUid: '',
-      stagedUserId: docId,
-      status: 'invited',
-      billingStripeCustomerId: '',
-      notes: '',
-    }, docId)
-
-    workingDoc.audienceUserId = docId
-    state.memberManualName = ''
-    state.memberManualEmail = ''
-  }
-  catch (error) {
-    state.memberManualError = String(error?.message || 'Unable to create this person right now.')
-  }
-  finally {
-    state.memberCreatingUser = false
-  }
 }
 
 watch(() => props.canManage, async (allowed) => {
@@ -782,7 +717,7 @@ onBeforeUnmount(async () => {
 </script>
 
 <template>
-  <div class="flex h-[calc(100vh-140px)] flex-col gap-4">
+  <div class="flex h-[calc(100vh-140px)] flex-col gap-4 overflow-hidden">
     <edge-shad-dialog v-model="state.ruleDeleteDialogOpen">
       <DialogContent class="pt-10">
         <DialogHeader>
@@ -834,7 +769,7 @@ onBeforeUnmount(async () => {
         <div>
           <div class="flex items-center gap-2 text-xl font-semibold text-foreground">
             <LockKeyhole class="h-5 w-5" />
-            Restrictions
+            Members
           </div>
           <p class="mt-1 text-sm text-muted-foreground">
             Choose what content requires access and whether people can sign up.
@@ -842,8 +777,12 @@ onBeforeUnmount(async () => {
         </div>
       </div>
 
-      <Tabs v-model="state.activeTab" class="flex min-h-0 flex-1 flex-col">
-        <TabsList class="grid w-full grid-cols-3 rounded-lg border border-slate-300 bg-slate-100 p-1 dark:border-slate-700 dark:bg-slate-900">
+      <Tabs v-model="state.activeTab" class="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <TabsList class="sticky top-0 z-10 grid w-full shrink-0 grid-cols-3 rounded-lg border border-slate-300 bg-slate-100 p-1 dark:border-slate-700 dark:bg-slate-900">
+          <TabsTrigger value="members" class="gap-2">
+            <Users class="h-4 w-4" />
+            Members
+          </TabsTrigger>
           <TabsTrigger value="settings" class="gap-2">
             <Settings2 class="h-4 w-4" />
             Settings
@@ -852,19 +791,35 @@ onBeforeUnmount(async () => {
             <ShieldCheck class="h-4 w-4" />
             Paid Access Plans
           </TabsTrigger>
-          <TabsTrigger value="members" class="gap-2">
-            <Users class="h-4 w-4" />
-            Members
-          </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="settings" class="mt-4 min-h-0 flex flex-1">
+        <TabsContent value="settings" class="mt-4 min-h-0 flex flex-1 overflow-y-auto">
           <Card class="min-h-0 flex flex-1 flex-col border border-border/60 bg-card">
             <CardHeader>
-              <CardTitle>Restriction Settings</CardTitle>
-              <CardDescription>
-                Set the default access options for this site here. Individual plans are managed in the Paid Access Plans tab.
-              </CardDescription>
+              <div class="flex items-start justify-between gap-4">
+                <div>
+                  <CardTitle>Restriction Settings</CardTitle>
+                  <CardDescription>
+                    Set the default access options for this site here. Individual plans are managed in the Paid Access Plans tab.
+                  </CardDescription>
+                </div>
+                <div class="flex items-center gap-2">
+                  <edge-shad-button
+                    variant="outline"
+                    :disabled="!settingsDirty || state.settingsSaving"
+                    @click="resetSettings"
+                  >
+                    Reset
+                  </edge-shad-button>
+                  <edge-shad-button
+                    class="bg-slate-800 text-white hover:bg-slate-700"
+                    :disabled="!settingsDirty || state.settingsSaving"
+                    @click="saveSettings"
+                  >
+                    Save Settings
+                  </edge-shad-button>
+                </div>
+              </div>
             </CardHeader>
             <CardContent class="min-h-0 flex-1 space-y-4 overflow-y-auto">
               <edge-shad-form
@@ -886,16 +841,6 @@ onBeforeUnmount(async () => {
                     </p>
                   </div>
                   <edge-cms-boolean-card
-                    v-model="state.settings.enabled"
-                    name="restricted-content-enabled"
-                    label="Enable restricted content for this site"
-                    class="w-full"
-                    checked-label="Enabled"
-                    unchecked-label="Disabled"
-                  >
-                    Turn this on when you are ready for this site to start using these access plans.
-                  </edge-cms-boolean-card>
-                  <edge-cms-boolean-card
                     v-model="state.settings.allowSelfRegistration"
                     name="restricted-content-allow-self-registration"
                     label="Allow visitors to self register"
@@ -903,7 +848,7 @@ onBeforeUnmount(async () => {
                     checked-label="Allowed"
                     unchecked-label="Disabled"
                   >
-                    When this is off, paid plan access is disabled in block protection.
+                    When this is off, visitors cannot self register and must be added manually. Manual member emails must match the email they use to sign up.
                   </edge-cms-boolean-card>
                   <edge-shad-input
                     v-model="state.settings.registrationTermsUrl"
@@ -927,26 +872,10 @@ onBeforeUnmount(async () => {
                 </div>
               </edge-shad-form>
             </CardContent>
-            <CardFooter class="shrink-0 border-t border-border/60 bg-card flex justify-end gap-2">
-              <edge-shad-button
-                variant="outline"
-                :disabled="!settingsDirty || state.settingsSaving"
-                @click="resetSettings"
-              >
-                Reset
-              </edge-shad-button>
-              <edge-shad-button
-                class="bg-slate-800 text-white hover:bg-slate-700"
-                :disabled="!settingsDirty || state.settingsSaving"
-                @click="saveSettings"
-              >
-                Save Settings
-              </edge-shad-button>
-            </CardFooter>
           </Card>
         </TabsContent>
 
-        <TabsContent value="rules" class="mt-4 min-h-0 flex-1">
+        <TabsContent value="rules" class="mt-4 min-h-0 flex flex-1 flex-col overflow-hidden">
           <edge-shad-form
             :initial-values="{
               'restricted-content-stripe-publishable-key': state.stripeIntegration.publishableKey,
@@ -954,8 +883,8 @@ onBeforeUnmount(async () => {
               'restricted-content-stripe-webhook-secret': state.stripeIntegration.webhookSecret,
             }"
           >
-            <Card class="mb-4 border border-border/60 bg-card">
-              <CardContent class="space-y-4 p-4">
+            <Card class="mb-4 shrink-0 border border-border/60 bg-card">
+              <CardContent class="space-y-3 p-3">
                 <div class="flex items-start justify-between gap-4">
                   <div>
                     <div class="text-sm font-semibold text-foreground">
@@ -979,7 +908,7 @@ onBeforeUnmount(async () => {
                     </edge-shad-button>
                   </div>
                 </div>
-                <div class="grid gap-4 md:grid-cols-2">
+                <div class="grid gap-3 lg:grid-cols-3">
                   <edge-shad-input
                     v-model="state.stripeIntegration.publishableKey"
                     name="restricted-content-stripe-publishable-key"
@@ -1009,29 +938,29 @@ onBeforeUnmount(async () => {
                       'data-1p-ignore': 'true',
                     }"
                   />
+                  <edge-shad-input
+                    v-model="state.stripeIntegration.webhookSecret"
+                    name="restricted-content-stripe-webhook-secret"
+                    type="password"
+                    label="Stripe Webhook Secret"
+                    placeholder="whsec_..."
+                    :input-attrs="{
+                      autocomplete: 'new-password',
+                      autocapitalize: 'none',
+                      autocorrect: 'off',
+                      spellcheck: 'false',
+                      'data-lpignore': 'true',
+                      'data-1p-ignore': 'true',
+                    }"
+                  />
                 </div>
-                <edge-shad-input
-                  v-model="state.stripeIntegration.webhookSecret"
-                  name="restricted-content-stripe-webhook-secret"
-                  type="password"
-                  label="Stripe Webhook Secret"
-                  placeholder="whsec_..."
-                  :input-attrs="{
-                    autocomplete: 'new-password',
-                    autocapitalize: 'none',
-                    autocorrect: 'off',
-                    spellcheck: 'false',
-                    'data-lpignore': 'true',
-                    'data-1p-ignore': 'true',
-                  }"
-                />
               </CardContent>
             </Card>
           </edge-shad-form>
 
-          <div class="grid min-h-0 h-full gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
-            <Card class="min-h-0 border border-border/60 bg-card">
-              <CardHeader class="space-y-3">
+          <div class="grid min-h-0 flex-1 gap-4 overflow-hidden lg:grid-cols-[340px_minmax(0,1fr)]">
+            <Card class="min-h-0 h-full border border-border/60 bg-card flex flex-col overflow-hidden">
+              <CardHeader class="shrink-0 space-y-3">
                 <div class="flex items-center justify-between gap-3">
                   <div>
                     <CardTitle class="text-base">
@@ -1057,7 +986,7 @@ onBeforeUnmount(async () => {
                   </edge-shad-input>
                 </edge-shad-form>
               </CardHeader>
-              <CardContent class="min-h-0 space-y-2 overflow-y-auto">
+              <CardContent class="min-h-0 flex-1 space-y-2 overflow-y-auto">
                 <button
                   v-for="item in filteredRules"
                   :key="item.id"
@@ -1088,9 +1017,9 @@ onBeforeUnmount(async () => {
               </CardContent>
             </Card>
 
-            <Card class="min-h-0 border border-border/60 bg-card">
-              <CardContent class="h-full min-h-0 p-0">
-                <div v-if="state.selectedRuleId" class="flex h-full flex-col">
+            <Card class="min-h-0 h-full border border-border/60 bg-card flex flex-col overflow-hidden">
+              <CardContent class="h-full min-h-0 overflow-hidden p-0">
+                <div v-if="state.selectedRuleId" class="flex h-full min-h-0 flex-col">
                   <div class="flex items-center justify-between border-b border-border/60 px-6 py-4">
                     <div class="flex min-w-0 items-center text-sm font-semibold text-foreground">
                       <ShieldCheck class="mr-2 h-4 w-4" />
@@ -1161,10 +1090,41 @@ onBeforeUnmount(async () => {
           </div>
         </TabsContent>
 
-        <TabsContent value="members" class="mt-4 min-h-0 flex-1">
-          <div class="grid min-h-0 h-full gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
-            <Card class="min-h-0 border border-border/60 bg-card">
-              <CardHeader class="space-y-3">
+        <TabsContent value="members" class="mt-4 min-h-0 flex flex-1 flex-col overflow-hidden">
+          <Card class="mb-4 shrink-0 border border-border/60 bg-card">
+            <CardContent class="space-y-2 p-3">
+              <edge-cms-boolean-card
+                v-model="state.settings.enabled"
+                name="restricted-content-enabled"
+                label="Enable Site Membership"
+                class="w-full"
+                checked-label="Enabled"
+                unchecked-label="Disabled"
+              >
+                When this is enabled, site login is enabled and blocks can be restricted to logged-in users.
+              </edge-cms-boolean-card>
+              <div class="flex justify-end gap-2">
+                <edge-shad-button
+                  variant="outline"
+                  class="h-8"
+                  :disabled="!settingsDirty || state.settingsSaving"
+                  @click="resetSettings"
+                >
+                  Reset
+                </edge-shad-button>
+                <edge-shad-button
+                  class="h-8 bg-slate-800 text-white hover:bg-slate-700"
+                  :disabled="!settingsDirty || state.settingsSaving"
+                  @click="saveSettings"
+                >
+                  Save Membership
+                </edge-shad-button>
+              </div>
+            </CardContent>
+          </Card>
+          <div class="grid min-h-0 flex-1 gap-4 overflow-hidden lg:grid-cols-[340px_minmax(0,1fr)]">
+            <Card class="min-h-0 h-full border border-border/60 bg-card flex flex-col overflow-hidden">
+              <CardHeader class="shrink-0 space-y-3">
                 <div class="flex items-center justify-between gap-3">
                   <div>
                     <CardTitle class="text-base">
@@ -1192,7 +1152,7 @@ onBeforeUnmount(async () => {
                   </edge-shad-input>
                 </edge-shad-form>
               </CardHeader>
-              <CardContent class="min-h-0 space-y-2 overflow-y-auto">
+              <CardContent class="min-h-0 flex-1 space-y-2 overflow-y-auto">
                 <div v-if="state.membersLoading" class="rounded-lg border border-dashed border-border/70 px-4 py-10 text-center text-sm text-muted-foreground">
                   Loading members...
                 </div>
@@ -1207,7 +1167,7 @@ onBeforeUnmount(async () => {
                   <div class="flex items-start justify-between gap-2">
                     <div class="min-w-0">
                       <div class="truncate font-semibold text-foreground">
-                        {{ getAudienceUserLabel(item.audienceUserId) || item.docId }}
+                        {{ item.name || item.email || getAudienceUserLabel(item.audienceUserId) || item.docId }}
                       </div>
                       <div class="mt-1 text-xs text-muted-foreground">
                         {{ Array.isArray(item.accessRuleIds) ? item.accessRuleIds.length : 0 }} assigned plan{{ (Array.isArray(item.accessRuleIds) ? item.accessRuleIds.length : 0) === 1 ? '' : 's' }}
@@ -1253,8 +1213,8 @@ onBeforeUnmount(async () => {
               </CardContent>
             </Card>
 
-            <Card class="min-h-0 border border-border/60 bg-card">
-              <CardContent class="h-full min-h-0 p-0">
+            <Card class="min-h-0 h-full border border-border/60 bg-card flex flex-col overflow-hidden">
+              <CardContent class="h-full min-h-0 overflow-y-auto p-0">
                 <edge-editor
                   v-if="state.selectedMemberId"
                   :collection="membersCollection"
@@ -1263,10 +1223,10 @@ onBeforeUnmount(async () => {
                   :new-doc-schema="memberDocSchema"
                   new-title-override="New Member"
                   :show-footer="false"
-                  class="h-full border-none bg-transparent px-0 pt-0 shadow-none"
-                  card-content-class="px-6"
+                  class="h-full min-h-0 border-none bg-transparent px-0 pt-0 shadow-none"
+                  card-content-class="px-6 pb-6"
                   :save-function-override="closeMemberEditor"
-                  title-field="audienceUserId"
+                  title-field="name"
                   @saved="handleMemberSaved"
                 >
                   <template #header-start="slotProps">
@@ -1291,41 +1251,29 @@ onBeforeUnmount(async () => {
                   <template #main="slotProps">
                     <edge-shad-form
                       :initial-values="{
-                        'restricted-member-manual-name': state.memberManualName,
-                        'restricted-member-manual-email': state.memberManualEmail,
+                        'restricted-member-name': slotProps.workingDoc.name,
+                        'restricted-member-email': slotProps.workingDoc.email,
                         'restricted-member-status': slotProps.workingDoc.status,
                         'restricted-member-expires-at': slotProps.workingDoc.expiresAt,
                         'restricted-member-rule-ids': slotProps.workingDoc.accessRuleIds,
                         'restricted-member-notes': slotProps.workingDoc.notes,
                       }"
                     >
-                      <div class="space-y-4 px-6 pt-6 pb-6">
-                        <div class="space-y-4 rounded-lg border border-border/60 bg-muted/20 p-4">
-                          <div class="grid gap-4 md:grid-cols-2">
-                            <edge-shad-input
-                              v-model="state.memberManualName"
-                              name="restricted-member-manual-name"
-                              label="Name"
-                              placeholder="Jane Doe"
-                            />
-                            <edge-shad-input
-                              v-model="state.memberManualEmail"
-                              name="restricted-member-manual-email"
-                              label="Email"
-                              placeholder="jane@example.com"
-                            />
-                          </div>
-                          <div v-if="state.memberManualError" class="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-200">
-                            {{ state.memberManualError }}
-                          </div>
-                          <edge-shad-button
-                            type="button"
-                            class="bg-slate-800 text-white hover:bg-slate-700"
-                            :disabled="state.memberCreatingUser"
-                            @click="createAudienceUserFromMember(slotProps.workingDoc)"
-                          >
-                            {{ state.memberCreatingUser ? 'Creating Person...' : 'Create Person' }}
-                          </edge-shad-button>
+                      <div class="space-y-4 pt-6 pb-6">
+                        <div class="grid gap-4 md:grid-cols-2">
+                          <edge-shad-input
+                            v-model="slotProps.workingDoc.name"
+                            name="restricted-member-name"
+                            label="Name"
+                            placeholder="Jane Doe"
+                          />
+                          <edge-shad-input
+                            v-model="slotProps.workingDoc.email"
+                            name="restricted-member-email"
+                            label="Email"
+                            placeholder="jane@example.com"
+                            :disabled="Boolean(slotProps.workingDoc.userId || slotProps.workingDoc.authUid)"
+                          />
                         </div>
                         <div
                           v-if="slotProps.workingDoc.audienceUserId"

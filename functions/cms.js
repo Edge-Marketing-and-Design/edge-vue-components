@@ -2826,6 +2826,12 @@ const updateRestrictedMemberPaymentState = async ({
 }
 
 exports.restrictedContentBeginRegistration = onCall(async (request) => {
+  const fail = (errorCode, message) => ({
+    success: false,
+    errorCode: String(errorCode || 'internal'),
+    message: String(message || 'Unable to begin registration right now.'),
+  })
+
   const data = request.data || {}
   const requestAuthUid = String(request?.auth?.uid || '').trim()
   const orgId = String(data.orgId || '').trim()
@@ -2835,34 +2841,35 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
   const email = normalizeEmail(data.email)
 
   if (!orgId || !siteId || !ruleId || !name || !email)
-    throw new HttpsError('invalid-argument', 'Missing orgId, siteId, ruleId, name, or email.')
+    return fail('invalid-argument', 'Missing orgId, siteId, ruleId, name, or email.')
 
   try {
     const { rule, effectiveRegistrationMode } = await getRestrictedRuleContext(orgId, siteId, ruleId, { requireAllowRegistration: false })
     const { audienceUsersRef } = getRestrictedSiteRefs(orgId, siteId)
     const now = Date.now()
+    const audienceUserSnap = await findAudienceUserByEmail(audienceUsersRef, email)
+    let docId = String(audienceUserSnap?.id || '').trim()
     const existingAuthUidByEmail = await resolveAuthUserUidByEmail(email)
     const linkedAuthUid = existingAuthUidByEmail || requestAuthUid
 
+    if (existingAuthUidByEmail && !requestAuthUid && !docId && restrictedContent.allowSelfRegistration === false)
+      return fail('no-self-registration', 'Self registration is not allowed for this site.')
     if (existingAuthUidByEmail && !requestAuthUid)
-      throw new HttpsError('unauthenticated', 'This email already has an account. Please log in first and continue.')
+      return fail('unauthenticated', 'This email already has an account. Please log in first and continue.')
     if (existingAuthUidByEmail && requestAuthUid && existingAuthUidByEmail !== requestAuthUid)
-      throw new HttpsError('permission-denied', 'Signed-in account does not match this email.')
-
-    const audienceUserSnap = await findAudienceUserByEmail(audienceUsersRef, email)
-    let docId = String(audienceUserSnap?.id || '').trim()
+      return fail('permission-denied', 'Signed-in account does not match this email.')
 
     if (audienceUserSnap?.exists) {
       const audienceUser = audienceUserSnap.data() || {}
       const audienceAuthUid = String(audienceUser.authUid || '').trim()
       if (audienceAuthUid && !requestAuthUid)
-        throw new HttpsError('unauthenticated', 'This email already has an account. Please log in first and continue.')
+        return fail('unauthenticated', 'This email already has an account. Please log in first and continue.')
       if (audienceAuthUid && requestAuthUid && audienceAuthUid !== requestAuthUid)
-        throw new HttpsError('permission-denied', 'Signed-in account does not match this email.')
+        return fail('permission-denied', 'Signed-in account does not match this email.')
     }
 
-    if (!docId && !rule.allowRegistration)
-      throw new HttpsError('failed-precondition', 'Registration is not allowed for this rule.')
+    if (!docId && restrictedContent.allowSelfRegistration === false)
+      return fail('no-self-registration', 'Self registration is not allowed for this site.')
 
     if (!docId)
       docId = db.collection('staged-users').doc().id
@@ -2872,9 +2879,9 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
     const stagedUserData = stagedUserSnap.exists ? (stagedUserSnap.data() || {}) : {}
     const stagedUserId = String(stagedUserData.userId || '').trim()
     if (stagedUserId && linkedAuthUid && stagedUserId !== linkedAuthUid)
-      throw new HttpsError('permission-denied', 'Existing registration is linked to another account.')
+      return fail('permission-denied', 'Existing registration is linked to another account.')
     if (stagedUserId && !linkedAuthUid)
-      throw new HttpsError('unauthenticated', 'This email already has an account. Please log in first and continue.')
+      return fail('unauthenticated', 'This email already has an account. Please log in first and continue.')
 
     const audienceUserDocPermissionPath = `organizations-${orgId}-sites-${siteId}-audience-users-${docId}`
     const stagedRoles = (stagedUserData.roles && typeof stagedUserData.roles === 'object' && !Array.isArray(stagedUserData.roles))
@@ -2945,7 +2952,7 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
     const memberSnap = await memberRef.get()
     const memberData = memberSnap.exists ? (memberSnap.data() || {}) : {}
     if (String(memberData.status || '').trim().toLowerCase() === 'revoked') {
-      throw new HttpsError('permission-denied', 'Access for this email has been revoked. Please contact support.')
+      return fail('permission-denied', 'Access for this email has been revoked. Please contact support.')
     }
 
     await memberRef.set(buildRestrictedMemberPayload({
@@ -2968,6 +2975,40 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
       })
     }
 
+    if (requestAuthUid) {
+      const refreshedMemberSnap = await memberRef.get()
+      const refreshedMember = refreshedMemberSnap.exists ? (refreshedMemberSnap.data() || {}) : {}
+      const status = String(refreshedMember.status || '').trim().toLowerCase() || 'inactive'
+      const blocked = status === 'revoked' || status === 'paused'
+      const accessRuleIds = Array.isArray(refreshedMember.accessRuleIds) ? refreshedMember.accessRuleIds.filter(Boolean) : []
+      const paidRuleIds = Array.isArray(refreshedMember.paidAccessRuleIds) ? refreshedMember.paidAccessRuleIds.filter(Boolean) : []
+      const pendingRuleIds = Array.isArray(refreshedMember.pendingPaymentRuleIds) ? refreshedMember.pendingPaymentRuleIds.filter(Boolean) : []
+      const isAssigned = accessRuleIds.includes(rule.id)
+      const isPaid = paidRuleIds.includes(rule.id)
+      const paymentPending = pendingRuleIds.includes(rule.id)
+      const hasAccess = !blocked && isAssigned && !paymentPending
+
+      const response = {
+        success: true,
+        audienceUserId: docId,
+        memberId: docId,
+        registrationMode: effectiveRegistrationMode,
+      }
+
+      if (effectiveRegistrationMode === 'paid') {
+        response.ruleAccess = {
+          ruleId: rule.id,
+          requiresPayment: effectiveRegistrationMode === 'paid',
+          hasAccess,
+          isPaid,
+          paymentPending,
+          status,
+        }
+      }
+
+      return response
+    }
+
     return {
       success: true,
       registrationCode: docId,
@@ -2979,8 +3020,8 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
   catch (error) {
     logger.error('restrictedContentBeginRegistration failed', error)
     if (error instanceof HttpsError)
-      throw error
-    throw new HttpsError('internal', String(error?.message || 'Unable to begin registration right now.'))
+      return fail(error.code, error.message)
+    return fail('internal', String(error?.message || 'Unable to begin registration right now.'))
   }
 })
 
