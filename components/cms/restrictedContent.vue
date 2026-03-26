@@ -138,7 +138,6 @@ const memberDocSchema = {
   audienceUserId: { value: '' },
   status: { value: 'active' },
   accessRuleIds: { value: [] },
-  expiresAt: { value: '' },
   notes: { value: '' },
 }
 
@@ -181,7 +180,6 @@ const normalizeMemberRow = (member = {}) => {
     audienceUserId: String(member?.audienceUserId || docId).trim(),
     status: String(member?.status || 'active').trim() || 'active',
     accessRuleIds: Array.isArray(member?.accessRuleIds) ? member.accessRuleIds : [],
-    expiresAt: String(member?.expiresAt || '').trim(),
     notes: String(member?.notes || '').trim(),
     authUid: String(member?.authUid || '').trim(),
     stagedUserId: String(member?.stagedUserId || '').trim(),
@@ -1364,13 +1362,12 @@ onBeforeUnmount(async () => {
                         'restricted-member-name': slotProps.workingDoc.name,
                         'restricted-member-email': slotProps.workingDoc.email,
                         'restricted-member-status': slotProps.workingDoc.status,
-                        'restricted-member-expires-at': slotProps.workingDoc.expiresAt,
                         'restricted-member-rule-ids': slotProps.workingDoc.accessRuleIds,
                         'restricted-member-notes': slotProps.workingDoc.notes,
                       }"
                     >
                       <div class="space-y-4 pt-6 pb-6">
-                        <div class="grid gap-4 md:grid-cols-2">
+                        <div class="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_220px]">
                           <edge-shad-input
                             v-model="slotProps.workingDoc.name"
                             name="restricted-member-name"
@@ -1384,26 +1381,18 @@ onBeforeUnmount(async () => {
                             placeholder="jane@example.com"
                             :disabled="Boolean(slotProps.workingDoc.userId || slotProps.workingDoc.authUid)"
                           />
-                        </div>
-                        <div
-                          v-if="slotProps.workingDoc.audienceUserId"
-                          class="rounded-lg border border-dashed border-border/70 bg-muted/20 p-3 text-sm text-muted-foreground"
-                        >
-                          {{ getAudienceUserLabel(slotProps.workingDoc.audienceUserId) }}
-                        </div>
-                        <div class="grid gap-4 md:grid-cols-2">
                           <edge-shad-select
                             v-model="slotProps.workingDoc.status"
                             name="restricted-member-status"
                             label="Status"
                             :items="MEMBER_STATUSES"
                           />
-                          <edge-shad-input
-                            v-model="slotProps.workingDoc.expiresAt"
-                            name="restricted-member-expires-at"
-                            label="Expires At"
-                            placeholder="2026-12-31"
-                          />
+                        </div>
+                        <div
+                          v-if="slotProps.workingDoc.audienceUserId"
+                          class="rounded-lg border border-dashed border-border/70 bg-muted/20 p-3 text-sm text-muted-foreground"
+                        >
+                          {{ getAudienceUserLabel(slotProps.workingDoc.audienceUserId) }}
                         </div>
                         <edge-shad-select-tags
                           v-model="slotProps.workingDoc.accessRuleIds"
