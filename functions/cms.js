@@ -2591,15 +2591,10 @@ const getRestrictedSiteContext = async (orgId, siteId) => {
   if (!restrictedContent.enabled)
     throw new HttpsError('failed-precondition', 'Restricted content is not enabled for this site.')
 
-  const effectiveRegistrationMode = restrictedContent.registrationPricing === 'paid'
-    ? 'paid'
-    : 'free'
-
   return {
     siteRef,
     siteData,
     restrictedContent,
-    effectiveRegistrationMode,
   }
 }
 
@@ -2636,7 +2631,7 @@ const getRestrictedRuleContext = async (orgId, siteId, ruleId, options = {}) => 
   if (requireAllowRegistration && !rule.allowRegistration)
     throw new HttpsError('failed-precondition', 'Registration is not allowed for this rule.')
 
-  const effectiveRegistrationMode = restrictedContent.registrationPricing === 'paid' && rule.registrationMode === 'paid'
+  const effectiveRegistrationMode = rule.registrationMode === 'paid'
     ? 'paid'
     : 'free'
 
@@ -2862,13 +2857,11 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
     return fail('invalid-argument', 'Missing orgId, siteId, or email.')
 
   try {
-    const { restrictedContent, effectiveRegistrationMode: siteRegistrationMode } = await getRestrictedSiteContext(orgId, siteId)
-    const effectiveRegistrationMode = siteRegistrationMode === 'paid' ? 'paid' : 'free'
-    if (effectiveRegistrationMode === 'paid' && !ruleId)
-      return fail('invalid-argument', 'Missing ruleId for paid registration.')
-    const { rule } = effectiveRegistrationMode === 'paid'
+    const { restrictedContent } = await getRestrictedSiteContext(orgId, siteId)
+    const hasRuleId = Boolean(ruleId)
+    const { rule, effectiveRegistrationMode } = hasRuleId
       ? await getRestrictedRuleContext(orgId, siteId, ruleId, { requireAllowRegistration: false })
-      : { rule: null }
+      : { rule: null, effectiveRegistrationMode: 'free' }
     const { audienceUsersRef } = getRestrictedSiteRefs(orgId, siteId)
     const now = Date.now()
     const audienceUserSnap = await findAudienceUserByEmail(audienceUsersRef, email)
@@ -2982,12 +2975,12 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
     await memberRef.set(buildRestrictedMemberPayload({
       existingMember: memberData,
       audienceUserId: docId,
-      ruleId: effectiveRegistrationMode === 'paid' ? rule.id : '',
+      ruleId: hasRuleId && effectiveRegistrationMode === 'paid' ? rule.id : '',
       status: String(memberData.status || '').trim() || 'active',
-      paymentStatus: effectiveRegistrationMode === 'paid' ? 'pending' : 'not_required',
-      markPaid: effectiveRegistrationMode !== 'paid',
-      markPending: effectiveRegistrationMode === 'paid',
-      clearPending: effectiveRegistrationMode !== 'paid',
+      paymentStatus: 'not_required',
+      markPaid: false,
+      markPending: false,
+      clearPending: false,
       now,
     }), { merge: true })
 
@@ -3007,7 +3000,7 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
       const accessRuleIds = Array.isArray(refreshedMember.accessRuleIds) ? refreshedMember.accessRuleIds.filter(Boolean) : []
       const paidRuleIds = Array.isArray(refreshedMember.paidAccessRuleIds) ? refreshedMember.paidAccessRuleIds.filter(Boolean) : []
       const pendingRuleIds = Array.isArray(refreshedMember.pendingPaymentRuleIds) ? refreshedMember.pendingPaymentRuleIds.filter(Boolean) : []
-      const activeRuleId = effectiveRegistrationMode === 'paid' ? String(rule?.id || '').trim() : ''
+      const activeRuleId = hasRuleId && effectiveRegistrationMode === 'paid' ? String(rule?.id || '').trim() : ''
       const isAssigned = activeRuleId ? accessRuleIds.includes(activeRuleId) : false
       const isPaid = activeRuleId ? paidRuleIds.includes(activeRuleId) : false
       const paymentPending = activeRuleId ? pendingRuleIds.includes(activeRuleId) : false
@@ -3020,10 +3013,10 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
         registrationMode: effectiveRegistrationMode,
       }
 
-      if (effectiveRegistrationMode === 'paid') {
+      if (activeRuleId) {
         response.ruleAccess = {
           ruleId: activeRuleId,
-          requiresPayment: effectiveRegistrationMode === 'paid',
+          requiresPayment: true,
           hasAccess,
           isPaid,
           paymentPending,

@@ -39,7 +39,6 @@ const buildRestrictedSettings = (value = {}) => {
   return {
     ...createRestrictedContentDefaults(),
     ...normalizedValue,
-    registrationPricing: 'paid',
     provider: 'stripe',
     defaultCurrency: 'USD',
     rules: normalizeRestrictedRules(normalizedValue.rules),
