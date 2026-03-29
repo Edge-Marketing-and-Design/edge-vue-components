@@ -1,7 +1,7 @@
 <script setup lang="js">
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { CircleAlert, Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePenLine, FileStack, FileUp, FileX, FolderCog, FolderDown, FolderUp, FolderX, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload, Users } from 'lucide-vue-next'
+import { CircleAlert, Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePenLine, FileStack, FileUp, FileX, FolderCog, FolderDown, FolderUp, FolderX, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload, Users, X } from 'lucide-vue-next'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
 
 const props = defineProps({
@@ -3048,6 +3048,17 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
               </DropdownMenuContent>
             </DropdownMenu>
           </template>
+          <edge-shad-button
+            v-if="!props.page && !isTemplateSite"
+            variant="outline"
+            size="icon"
+            class="h-9 w-9"
+            to="/app/dashboard/sites?forceList=1"
+            title="Close Site"
+            aria-label="Close Site"
+          >
+            <X class="h-4 w-4" />
+          </edge-shad-button>
         </div>
       </div>
       <div class="flex-1 min-h-0">
