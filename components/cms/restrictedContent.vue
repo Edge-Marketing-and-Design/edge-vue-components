@@ -81,6 +81,13 @@ const buildStripeIntegration = (value = {}) => {
   }
 }
 
+const isStripeIntegrationEmpty = (value = {}) => {
+  const normalized = buildStripeIntegration(value)
+  return !String(normalized.publishableKey || '').trim()
+    && !String(normalized.secretKey || '').trim()
+    && !String(normalized.webhookSecret || '').trim()
+}
+
 const membersCollection = computed(() => `sites/${props.siteId}/audience-users`)
 const membersCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/${membersCollection.value}`)
 const pagesCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.siteId}/pages`)
@@ -88,9 +95,31 @@ const postsCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationD
 const audienceUsersCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.siteId}/audience-users`)
 const stripeIntegrationCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.siteId}/private-integrations`)
 
+const pickStripeIntegrationDoc = (value = {}) => {
+  const normalized = (value && typeof value === 'object') ? value : {}
+  const directStripe = normalized?.stripe
+  if (directStripe && typeof directStripe === 'object')
+    return directStripe
+
+  const candidates = Object.values(normalized)
+    .filter(item => item && typeof item === 'object')
+    .filter(item => item.publishableKey || item.secretKey || item.webhookSecret)
+
+  if (!candidates.length)
+    return {}
+
+  candidates.sort((a, b) => {
+    const aUpdated = Number(a?.doc_updated_at || a?.docUpdatedAt || a?.doc_created_at || a?.docCreatedAt || 0)
+    const bUpdated = Number(b?.doc_updated_at || b?.docUpdatedAt || b?.doc_created_at || b?.docCreatedAt || 0)
+    return bUpdated - aUpdated
+  })
+
+  return candidates[0] || {}
+}
+
 const sitePages = computed(() => edgeFirebase.data?.[pagesCollectionPath.value] || {})
 const sitePosts = computed(() => edgeFirebase.data?.[postsCollectionPath.value] || {})
-const stripeIntegrationDoc = computed(() => edgeFirebase.data?.[stripeIntegrationCollectionPath.value]?.stripe || {})
+const stripeIntegrationDoc = computed(() => pickStripeIntegrationDoc(edgeFirebase.data?.[stripeIntegrationCollectionPath.value] || {}))
 
 const currentSettings = computed(() => buildRestrictedSettings(props.siteDoc?.restrictedContent))
 const currentStripeIntegration = computed(() => buildStripeIntegration({
@@ -450,7 +479,28 @@ const saveStripeIntegration = async () => {
     return
   state.stripeSaving = true
   try {
-    await edgeFirebase.storeDoc(stripeIntegrationCollectionPath.value, buildStripeIntegration(state.stripeIntegration), 'stripe')
+    const uid = String(edgeFirebase?.user?.uid || edgeFirebase?.user?.firebaseUser?.uid || '').trim()
+    const payload = {
+      docId: 'stripe',
+      ...buildStripeIntegration(state.stripeIntegration),
+      ...(uid ? { uid } : {}),
+    }
+    let result = null
+    try {
+      result = await edgeFirebase.storeDocRaw(stripeIntegrationCollectionPath.value, payload, 'stripe')
+    }
+    catch (rawError) {
+      console.warn('saveStripeIntegration storeDocRaw failed, retrying storeDoc', rawError)
+      result = await edgeFirebase.storeDoc(stripeIntegrationCollectionPath.value, payload)
+    }
+    if (result?.success === false)
+      throw new Error(String(result?.message || 'Unable to save Stripe settings right now.'))
+    state.stripeIntegration = buildStripeIntegration(payload)
+    edgeFirebase?.toast?.success?.('Stripe settings saved.')
+  }
+  catch (error) {
+    console.error('saveStripeIntegration failed', error)
+    edgeFirebase?.toast?.error?.(String(error?.message || 'Unable to save Stripe settings right now.'))
   }
   finally {
     state.stripeSaving = false
@@ -750,7 +800,7 @@ watch(() => props.siteDoc?.restrictedContent, (_nextValue, previousValue) => {
 }, { immediate: true, deep: true })
 
 watch(currentStripeIntegration, (_nextValue, previousValue) => {
-  if (previousValue === undefined || !stripeDirty.value)
+  if (previousValue === undefined || !stripeDirty.value || isStripeIntegrationEmpty(state.stripeIntegration))
     syncStripeIntegrationFromDoc()
 }, { immediate: true, deep: true })
 
@@ -1049,6 +1099,17 @@ onBeforeUnmount(async () => {
                       'data-1p-ignore': 'true',
                     }"
                   />
+                </div>
+                <div class="rounded-lg border border-dashed border-border/70 bg-muted/20 p-3 text-xs text-muted-foreground">
+                  <div class="font-semibold text-foreground">
+                    Webhook setup help
+                  </div>
+                  <div class="mt-1">
+                    Do not send all events. Enable only:
+                  </div>
+                  <div class="mt-1">
+                    <code>checkout.session.completed</code>, <code>checkout.session.async_payment_succeeded</code>, <code>checkout.session.async_payment_failed</code>, <code>customer.subscription.updated</code>, and <code>customer.subscription.deleted</code>.
+                  </div>
                 </div>
               </CardContent>
             </Card>
