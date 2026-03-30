@@ -2601,6 +2601,9 @@ const getRestrictedSiteContext = async (orgId, siteId) => {
 const normalizeRestrictedRuleForFunction = (value = {}, fallbackId = '') => {
   const normalizedValue = (value && typeof value === 'object') ? value : {}
   const id = String(normalizedValue.id || normalizedValue.docId || fallbackId || '').trim()
+  const registrationStripePrices = Array.isArray(normalizedValue.registrationStripePrices)
+    ? normalizedValue.registrationStripePrices
+    : (Array.isArray(normalizedValue.stripePrices) ? normalizedValue.stripePrices : [])
   return {
     id,
     name: String(normalizedValue.name || '').trim(),
@@ -2608,6 +2611,16 @@ const normalizeRestrictedRuleForFunction = (value = {}, fallbackId = '') => {
     allowRegistration: Boolean(normalizedValue.allowRegistration),
     registrationMode: normalizedValue.registrationMode === 'paid' ? 'paid' : 'free',
     registrationStripeProductId: String(normalizedValue.registrationStripeProductId || normalizedValue.stripeProductId || '').trim(),
+    registrationStripePrices: registrationStripePrices
+      .map((item) => {
+        const normalizedItem = (item && typeof item === 'object') ? item : {}
+        return {
+          priceId: String(normalizedItem.priceId || normalizedItem.id || '').trim(),
+          title: String(normalizedItem.title || '').trim(),
+          description: String(normalizedItem.description || '').trim(),
+        }
+      })
+      .filter(item => item.priceId),
   }
 }
 
@@ -3155,14 +3168,14 @@ exports.restrictedContentCreateStripeLink = onCall({ timeoutSeconds: 180 }, asyn
 
   if (!orgId || !siteId || !ruleId)
     throw new HttpsError('invalid-argument', 'Missing orgId, siteId, or ruleId.')
+  if (!requestedPriceId)
+    throw new HttpsError('invalid-argument', 'Missing priceId for paid checkout.')
   if (!successUrl || !cancelUrl)
     throw new HttpsError('invalid-argument', 'Missing successUrl or cancelUrl.')
 
   const { rule, effectiveRegistrationMode } = await getRestrictedRuleContext(orgId, siteId, ruleId)
   if (effectiveRegistrationMode !== 'paid')
     throw new HttpsError('failed-precondition', 'This rule does not require payment.')
-  if (!rule.registrationStripeProductId)
-    throw new HttpsError('failed-precondition', 'This rule does not have a Stripe product configured.')
 
   const { audienceUsersRef, privateStripeRef } = getRestrictedSiteRefs(orgId, siteId)
   const audienceUserSnap = await resolveAudienceUserForAuth(orgId, siteId, request.auth.uid)
@@ -3188,54 +3201,47 @@ exports.restrictedContentCreateStripeLink = onCall({ timeoutSeconds: 180 }, asyn
     throw new HttpsError('failed-precondition', 'Stripe secret key is missing for this site.')
 
   const stripe = new Stripe(stripeSecretKey)
-  const pricesResponse = await stripe.prices.list({
-    product: rule.registrationStripeProductId,
-    active: true,
-    limit: 100,
-  })
-  const prices = Array.isArray(pricesResponse.data) ? pricesResponse.data.filter(Boolean) : []
-  if (!prices.length)
-    throw new HttpsError('failed-precondition', 'No active Stripe prices were found for this product.')
+  const configuredPriceOptions = Array.isArray(rule.registrationStripePrices) ? rule.registrationStripePrices : []
+  const configuredPriceIds = Array.from(new Set(configuredPriceOptions.map(item => String(item?.priceId || '').trim()).filter(Boolean)))
+  const configuredPriceLookup = configuredPriceOptions.reduce((acc, item) => {
+    const priceId = String(item?.priceId || '').trim()
+    if (priceId && !acc[priceId])
+      acc[priceId] = item
+    return acc
+  }, {})
 
-  let selectedPrice = null
-  if (requestedPriceId)
-    selectedPrice = prices.find(price => price.id === requestedPriceId) || null
-
-  if (!selectedPrice) {
-    const rankedPrices = [...prices].sort((a, b) => {
-      const aRecurring = Boolean(a?.recurring)
-      const bRecurring = Boolean(b?.recurring)
-      if (aRecurring !== bRecurring)
-        return aRecurring ? -1 : 1
-
-      const recurringRank = (price) => {
-        const interval = String(price?.recurring?.interval || '').trim()
-        if (interval === 'month')
-          return 0
-        if (interval === 'year')
-          return 1
-        if (interval)
-          return 2
-        return 3
+  let prices = []
+  if (configuredPriceIds.length) {
+    const retrieved = await Promise.all(configuredPriceIds.map(async (priceId) => {
+      try {
+        const price = await stripe.prices.retrieve(priceId)
+        return (price && price.active) ? price : null
       }
-
-      const aIntervalRank = recurringRank(a)
-      const bIntervalRank = recurringRank(b)
-      if (aIntervalRank !== bIntervalRank)
-        return aIntervalRank - bIntervalRank
-
-      const aAmount = Number.isFinite(Number(a?.unit_amount)) ? Number(a.unit_amount) : Number.MAX_SAFE_INTEGER
-      const bAmount = Number.isFinite(Number(b?.unit_amount)) ? Number(b.unit_amount) : Number.MAX_SAFE_INTEGER
-      if (aAmount !== bAmount)
-        return aAmount - bAmount
-
-      return String(a?.id || '').localeCompare(String(b?.id || ''))
+      catch (error) {
+        return null
+      }
+    }))
+    prices = retrieved.filter(Boolean)
+    if (!prices.length)
+      throw new HttpsError('failed-precondition', 'No active Stripe prices were found for this rule.')
+  }
+  else {
+    if (!rule.registrationStripeProductId)
+      throw new HttpsError('failed-precondition', 'This rule does not have Stripe prices configured.')
+    const pricesResponse = await stripe.prices.list({
+      product: rule.registrationStripeProductId,
+      active: true,
+      limit: 100,
     })
-    selectedPrice = rankedPrices[0] || null
+    prices = Array.isArray(pricesResponse.data) ? pricesResponse.data.filter(Boolean) : []
+    if (!prices.length)
+      throw new HttpsError('failed-precondition', 'No active Stripe prices were found for this product.')
   }
 
+  const selectedPrice = prices.find(price => price.id === requestedPriceId) || null
+
   if (!selectedPrice)
-    throw new HttpsError('failed-precondition', 'No eligible Stripe price could be selected for this product.')
+    throw new HttpsError('failed-precondition', 'Selected priceId is not active or not configured for this rule.')
 
   let customerId = String(audienceUser.billingStripeCustomerId || '').trim()
   if (!customerId) {
@@ -3270,6 +3276,9 @@ exports.restrictedContentCreateStripeLink = onCall({ timeoutSeconds: 180 }, asyn
     now: Date.now(),
   }), { merge: true })
 
+  const selectedPriceConfig = configuredPriceLookup[selectedPrice.id] || null
+  const resolvedStripeProductId = String(rule.registrationStripeProductId || selectedPrice?.product || '').trim()
+
   const session = await stripe.checkout.sessions.create({
     mode: selectedPrice.recurring ? 'subscription' : 'payment',
     customer: customerId,
@@ -3287,8 +3296,9 @@ exports.restrictedContentCreateStripeLink = onCall({ timeoutSeconds: 180 }, asyn
       audienceUserId,
       memberId: audienceUserId,
       uid: request.auth.uid,
-      stripeProductId: rule.registrationStripeProductId,
+      stripeProductId: resolvedStripeProductId,
       stripePriceId: selectedPrice.id,
+      stripePriceTitle: String(selectedPriceConfig?.title || '').trim(),
       quantity: String(quantity),
     },
     subscription_data: selectedPrice.recurring
@@ -3300,8 +3310,9 @@ exports.restrictedContentCreateStripeLink = onCall({ timeoutSeconds: 180 }, asyn
             audienceUserId,
             memberId: audienceUserId,
             uid: request.auth.uid,
-            stripeProductId: rule.registrationStripeProductId,
+            stripeProductId: resolvedStripeProductId,
             stripePriceId: selectedPrice.id,
+            stripePriceTitle: String(selectedPriceConfig?.title || '').trim(),
             quantity: String(quantity),
           },
         }
@@ -3315,8 +3326,9 @@ exports.restrictedContentCreateStripeLink = onCall({ timeoutSeconds: 180 }, asyn
             audienceUserId,
             memberId: audienceUserId,
             uid: request.auth.uid,
-            stripeProductId: rule.registrationStripeProductId,
+            stripeProductId: resolvedStripeProductId,
             stripePriceId: selectedPrice.id,
+            stripePriceTitle: String(selectedPriceConfig?.title || '').trim(),
             quantity: String(quantity),
           },
         }
@@ -3329,6 +3341,13 @@ exports.restrictedContentCreateStripeLink = onCall({ timeoutSeconds: 180 }, asyn
     url: session.url,
     customerId,
     price: buildStripePriceSummary(selectedPrice),
+    priceConfig: selectedPriceConfig
+      ? {
+          priceId: selectedPrice.id,
+          title: String(selectedPriceConfig.title || '').trim(),
+          description: String(selectedPriceConfig.description || '').trim(),
+        }
+      : null,
   }
 })
 

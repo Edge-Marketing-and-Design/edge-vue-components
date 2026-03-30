@@ -1,6 +1,6 @@
 <script setup>
 import { toTypedSchema } from '@vee-validate/zod'
-import { LockKeyhole, RefreshCw, Search, Settings2, ShieldCheck, Trash2, UserRoundCheck, Users } from 'lucide-vue-next'
+import { ArrowDown, ArrowUp, LockKeyhole, Plus, RefreshCw, Search, Settings2, ShieldCheck, Trash2, UserRoundCheck, Users } from 'lucide-vue-next'
 import * as z from 'zod'
 
 const props = defineProps({
@@ -21,6 +21,23 @@ const edgeFirebase = inject('edgeFirebase')
 const { createRestrictedContentDefaults } = useSiteSettingsTemplate()
 
 const MEMBER_STATUSES = ['active', 'paused', 'revoked']
+const createRulePriceOption = (value = {}) => {
+  const normalizedValue = (value && typeof value === 'object') ? value : {}
+  return {
+    priceId: String(normalizedValue.priceId || normalizedValue.id || '').trim(),
+    title: String(normalizedValue.title || '').trim(),
+    description: String(normalizedValue.description || '').trim(),
+  }
+}
+
+const normalizeRulePriceOptions = (value = []) => {
+  if (!Array.isArray(value))
+    return []
+  return value
+    .map(item => createRulePriceOption(item))
+    .filter(item => item.priceId)
+}
+
 const normalizeObject = (value) => {
   if (Array.isArray(value))
     return value.map(item => normalizeObject(item))
@@ -56,6 +73,7 @@ const createRuleDoc = (value = {}, fallbackId = '') => {
     registrationMode: 'paid',
     currency: 'USD',
     registrationStripeProductId: String(normalizedValue.registrationStripeProductId || normalizedValue.stripeProductId || '').trim(),
+    registrationStripePrices: normalizeRulePriceOptions(normalizedValue.registrationStripePrices || normalizedValue.stripePrices || []),
   }
 }
 
@@ -426,6 +444,7 @@ const normalizeRuleForSite = (value = {}) => {
   nextRule.protected = true
   nextRule.allowRegistration = true
   nextRule.registrationMode = 'paid'
+  nextRule.registrationStripePrices = normalizeRulePriceOptions(nextRule.registrationStripePrices)
   return nextRule
 }
 
@@ -615,8 +634,35 @@ const openNewRule = async () => {
     allowRegistration: true,
     registrationMode: 'paid',
     registrationStripeProductId: '',
+    registrationStripePrices: [],
   })
   state.ruleError = ''
+}
+
+const addRulePriceOption = () => {
+  if (!Array.isArray(state.ruleWorkingDoc.registrationStripePrices))
+    state.ruleWorkingDoc.registrationStripePrices = []
+  state.ruleWorkingDoc.registrationStripePrices.push(createRulePriceOption())
+}
+
+const removeRulePriceOption = (index) => {
+  if (!Array.isArray(state.ruleWorkingDoc.registrationStripePrices))
+    return
+  if (index < 0 || index >= state.ruleWorkingDoc.registrationStripePrices.length)
+    return
+  state.ruleWorkingDoc.registrationStripePrices.splice(index, 1)
+}
+
+const moveRulePriceOption = (index, direction) => {
+  if (!Array.isArray(state.ruleWorkingDoc.registrationStripePrices))
+    return
+  const targetIndex = index + direction
+  if (targetIndex < 0 || targetIndex >= state.ruleWorkingDoc.registrationStripePrices.length)
+    return
+  const next = [...state.ruleWorkingDoc.registrationStripePrices]
+  const [moved] = next.splice(index, 1)
+  next.splice(targetIndex, 0, moved)
+  state.ruleWorkingDoc.registrationStripePrices = next
 }
 
 const openRule = async (docId) => {
@@ -656,6 +702,10 @@ const saveRule = async () => {
   })
   if (!nextRule.name) {
     state.ruleError = 'Plan name is required.'
+    return
+  }
+  if (!Array.isArray(nextRule.registrationStripePrices) || !nextRule.registrationStripePrices.length) {
+    state.ruleError = 'Add at least one Stripe price option.'
     return
   }
   state.ruleSubmitting = true
@@ -1203,7 +1253,6 @@ onBeforeUnmount(async () => {
                     <edge-shad-form
                       :initial-values="{
                         'restricted-rule-name': state.ruleWorkingDoc.name,
-                        'restricted-rule-stripe-product-id': state.ruleWorkingDoc.registrationStripeProductId,
                       }"
                     >
                       <div class="space-y-4 px-6 pb-6 pt-6">
@@ -1216,14 +1265,92 @@ onBeforeUnmount(async () => {
                         <div v-if="state.ruleError" class="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-700 dark:bg-red-950/30 dark:text-red-200">
                           {{ state.ruleError }}
                         </div>
-                        <edge-shad-input
-                          v-model="state.ruleWorkingDoc.registrationStripeProductId"
-                          name="restricted-rule-stripe-product-id"
-                          type="text"
-                          label="Stripe Product ID"
-                          placeholder="prod_..."
-                          description="Use the Stripe product for this offer so buyers can choose from that product's available pricing options."
-                        />
+                        <div class="space-y-3 rounded-lg border border-border/60 bg-muted/20 p-4">
+                          <div class="flex items-center justify-between gap-3">
+                            <div>
+                              <div class="text-sm font-semibold text-foreground">
+                                Stripe Price Options
+                              </div>
+                              <p class="text-xs text-muted-foreground">
+                                Add one or more Stripe price IDs. Drag order with arrows to control display order.
+                              </p>
+                            </div>
+                            <edge-shad-button type="button" class="h-8 gap-2 bg-slate-800 text-white hover:bg-slate-700" @click="addRulePriceOption">
+                              <Plus class="h-4 w-4" />
+                              Add Price
+                            </edge-shad-button>
+                          </div>
+
+                          <div v-if="Array.isArray(state.ruleWorkingDoc.registrationStripePrices) && state.ruleWorkingDoc.registrationStripePrices.length" class="space-y-3">
+                            <div
+                              v-for="(priceOption, index) in state.ruleWorkingDoc.registrationStripePrices"
+                              :key="`price-${index}`"
+                              class="rounded-lg border border-border/60 bg-background p-3"
+                            >
+                              <div class="mb-3 flex items-center justify-between gap-2">
+                                <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                  Option {{ index + 1 }}
+                                </div>
+                                <div class="flex items-center gap-1">
+                                  <edge-shad-button
+                                    type="button"
+                                    size="icon"
+                                    variant="ghost"
+                                    class="h-7 w-7"
+                                    :disabled="index === 0"
+                                    @click="moveRulePriceOption(index, -1)"
+                                  >
+                                    <ArrowUp class="h-4 w-4" />
+                                  </edge-shad-button>
+                                  <edge-shad-button
+                                    type="button"
+                                    size="icon"
+                                    variant="ghost"
+                                    class="h-7 w-7"
+                                    :disabled="index === state.ruleWorkingDoc.registrationStripePrices.length - 1"
+                                    @click="moveRulePriceOption(index, 1)"
+                                  >
+                                    <ArrowDown class="h-4 w-4" />
+                                  </edge-shad-button>
+                                  <edge-shad-button
+                                    type="button"
+                                    size="icon"
+                                    variant="ghost"
+                                    class="h-7 w-7 text-red-600 hover:text-red-500"
+                                    @click="removeRulePriceOption(index)"
+                                  >
+                                    <Trash2 class="h-4 w-4" />
+                                  </edge-shad-button>
+                                </div>
+                              </div>
+
+                              <div class="space-y-3">
+                                <edge-shad-input
+                                  v-model="priceOption.priceId"
+                                  :name="`restricted-rule-price-id-${index}`"
+                                  label="Stripe Price ID"
+                                  placeholder="price_..."
+                                />
+                                <edge-shad-input
+                                  v-model="priceOption.title"
+                                  :name="`restricted-rule-price-title-${index}`"
+                                  label="Title"
+                                  placeholder="Pro Plan"
+                                />
+                                <edge-shad-textarea
+                                  v-model="priceOption.description"
+                                  :name="`restricted-rule-price-description-${index}`"
+                                  label="Description"
+                                  placeholder="Describe what this option includes."
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          <div v-else class="rounded-lg border border-dashed border-border/70 px-4 py-8 text-center text-sm text-muted-foreground">
+                            No Stripe prices added yet.
+                          </div>
+                        </div>
                       </div>
                     </edge-shad-form>
                   </div>
