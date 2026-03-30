@@ -3201,16 +3201,41 @@ exports.restrictedContentCreateStripeLink = onCall({ timeoutSeconds: 180 }, asyn
   if (requestedPriceId)
     selectedPrice = prices.find(price => price.id === requestedPriceId) || null
 
-  if (!selectedPrice && prices.length === 1)
-    selectedPrice = prices[0]
-
   if (!selectedPrice) {
-    return {
-      success: false,
-      requiresPriceSelection: true,
-      prices: prices.map(buildStripePriceSummary).filter(Boolean),
-    }
+    const rankedPrices = [...prices].sort((a, b) => {
+      const aRecurring = Boolean(a?.recurring)
+      const bRecurring = Boolean(b?.recurring)
+      if (aRecurring !== bRecurring)
+        return aRecurring ? -1 : 1
+
+      const recurringRank = (price) => {
+        const interval = String(price?.recurring?.interval || '').trim()
+        if (interval === 'month')
+          return 0
+        if (interval === 'year')
+          return 1
+        if (interval)
+          return 2
+        return 3
+      }
+
+      const aIntervalRank = recurringRank(a)
+      const bIntervalRank = recurringRank(b)
+      if (aIntervalRank !== bIntervalRank)
+        return aIntervalRank - bIntervalRank
+
+      const aAmount = Number.isFinite(Number(a?.unit_amount)) ? Number(a.unit_amount) : Number.MAX_SAFE_INTEGER
+      const bAmount = Number.isFinite(Number(b?.unit_amount)) ? Number(b.unit_amount) : Number.MAX_SAFE_INTEGER
+      if (aAmount !== bAmount)
+        return aAmount - bAmount
+
+      return String(a?.id || '').localeCompare(String(b?.id || ''))
+    })
+    selectedPrice = rankedPrices[0] || null
   }
+
+  if (!selectedPrice)
+    throw new HttpsError('failed-precondition', 'No eligible Stripe price could be selected for this product.')
 
   let customerId = String(audienceUser.billingStripeCustomerId || '').trim()
   if (!customerId) {
