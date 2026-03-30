@@ -1,6 +1,6 @@
 <script setup>
 import { toTypedSchema } from '@vee-validate/zod'
-import { ArrowDown, ArrowUp, LockKeyhole, Plus, RefreshCw, Search, Settings2, ShieldCheck, Trash2, UserRoundCheck, Users } from 'lucide-vue-next'
+import { GripVertical, LockKeyhole, Plus, RefreshCw, Search, Settings2, ShieldCheck, Trash2, UserRoundCheck, Users } from 'lucide-vue-next'
 import * as z from 'zod'
 
 const props = defineProps({
@@ -169,6 +169,11 @@ const state = reactive({
   memberDeleteDialogOpen: false,
   memberDeleteDocId: '',
   memberDeleteSubmitting: false,
+  rulePriceDialogOpen: false,
+  rulePriceDialogIndex: -1,
+  rulePriceDialogDraft: createRulePriceOption(),
+  rulePriceDeleteDialogOpen: false,
+  rulePriceDeleteIndex: -1,
 })
 
 const memberSchema = toTypedSchema(z.object({
@@ -639,12 +644,6 @@ const openNewRule = async () => {
   state.ruleError = ''
 }
 
-const addRulePriceOption = () => {
-  if (!Array.isArray(state.ruleWorkingDoc.registrationStripePrices))
-    state.ruleWorkingDoc.registrationStripePrices = []
-  state.ruleWorkingDoc.registrationStripePrices.push(createRulePriceOption())
-}
-
 const removeRulePriceOption = (index) => {
   if (!Array.isArray(state.ruleWorkingDoc.registrationStripePrices))
     return
@@ -653,16 +652,65 @@ const removeRulePriceOption = (index) => {
   state.ruleWorkingDoc.registrationStripePrices.splice(index, 1)
 }
 
-const moveRulePriceOption = (index, direction) => {
+const openDeleteRulePriceOptionDialog = (index) => {
   if (!Array.isArray(state.ruleWorkingDoc.registrationStripePrices))
     return
-  const targetIndex = index + direction
-  if (targetIndex < 0 || targetIndex >= state.ruleWorkingDoc.registrationStripePrices.length)
+  if (index < 0 || index >= state.ruleWorkingDoc.registrationStripePrices.length)
     return
-  const next = [...state.ruleWorkingDoc.registrationStripePrices]
-  const [moved] = next.splice(index, 1)
-  next.splice(targetIndex, 0, moved)
-  state.ruleWorkingDoc.registrationStripePrices = next
+  state.rulePriceDeleteIndex = index
+  state.rulePriceDeleteDialogOpen = true
+}
+
+const closeDeleteRulePriceOptionDialog = () => {
+  state.rulePriceDeleteDialogOpen = false
+  state.rulePriceDeleteIndex = -1
+}
+
+const confirmDeleteRulePriceOption = () => {
+  if (state.rulePriceDeleteIndex < 0) {
+    closeDeleteRulePriceOptionDialog()
+    return
+  }
+  removeRulePriceOption(state.rulePriceDeleteIndex)
+  closeDeleteRulePriceOptionDialog()
+}
+
+const openNewRulePriceOptionDialog = () => {
+  state.rulePriceDialogIndex = -1
+  state.rulePriceDialogDraft = createRulePriceOption()
+  state.rulePriceDialogOpen = true
+}
+
+const openEditRulePriceOptionDialog = (index) => {
+  if (!Array.isArray(state.ruleWorkingDoc.registrationStripePrices))
+    return
+  if (index < 0 || index >= state.ruleWorkingDoc.registrationStripePrices.length)
+    return
+  state.rulePriceDialogIndex = index
+  state.rulePriceDialogDraft = createRulePriceOption(state.ruleWorkingDoc.registrationStripePrices[index])
+  state.rulePriceDialogOpen = true
+}
+
+const closeRulePriceOptionDialog = () => {
+  state.rulePriceDialogOpen = false
+  state.rulePriceDialogIndex = -1
+  state.rulePriceDialogDraft = createRulePriceOption()
+}
+
+const saveRulePriceOptionDialog = () => {
+  const nextOption = createRulePriceOption(state.rulePriceDialogDraft)
+  if (!nextOption.priceId)
+    return
+  if (!Array.isArray(state.ruleWorkingDoc.registrationStripePrices))
+    state.ruleWorkingDoc.registrationStripePrices = []
+
+  if (state.rulePriceDialogIndex >= 0 && state.rulePriceDialogIndex < state.ruleWorkingDoc.registrationStripePrices.length) {
+    state.ruleWorkingDoc.registrationStripePrices[state.rulePriceDialogIndex] = nextOption
+  }
+  else {
+    state.ruleWorkingDoc.registrationStripePrices.push(nextOption)
+  }
+  closeRulePriceOptionDialog()
 }
 
 const openRule = async (docId) => {
@@ -949,6 +997,66 @@ onBeforeUnmount(async () => {
           </edge-shad-button>
           <edge-shad-button class="bg-red-700 text-white hover:bg-red-600" :disabled="state.memberDeleteSubmitting" @click="deleteMember()">
             Delete Member
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
+    <edge-shad-dialog v-model="state.rulePriceDialogOpen">
+      <DialogContent class="pt-8">
+        <DialogHeader>
+          <DialogTitle class="text-left">
+            {{ state.rulePriceDialogIndex >= 0 ? 'Edit Stripe Price Option' : 'Add Stripe Price Option' }}
+          </DialogTitle>
+          <DialogDescription class="text-left">
+            Set the Stripe price id and the display copy shown to users.
+          </DialogDescription>
+        </DialogHeader>
+        <div class="space-y-3">
+          <edge-shad-input
+            v-model="state.rulePriceDialogDraft.priceId"
+            name="restricted-rule-price-dialog-id"
+            label="Stripe Price ID"
+            placeholder="price_..."
+          />
+          <edge-shad-input
+            v-model="state.rulePriceDialogDraft.title"
+            name="restricted-rule-price-dialog-title"
+            label="Title"
+            placeholder="Pro Plan"
+          />
+          <edge-shad-textarea
+            v-model="state.rulePriceDialogDraft.description"
+            name="restricted-rule-price-dialog-description"
+            label="Description"
+            placeholder="Describe what this option includes."
+          />
+        </div>
+        <DialogFooter class="flex justify-between pt-2">
+          <edge-shad-button variant="outline" @click="closeRulePriceOptionDialog">
+            Cancel
+          </edge-shad-button>
+          <edge-shad-button class="bg-slate-800 text-white hover:bg-slate-700" :disabled="!String(state.rulePriceDialogDraft.priceId || '').trim()" @click="saveRulePriceOptionDialog">
+            Save Option
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
+    <edge-shad-dialog v-model="state.rulePriceDeleteDialogOpen">
+      <DialogContent class="pt-8">
+        <DialogHeader>
+          <DialogTitle class="text-left">
+            Delete Stripe Price Option?
+          </DialogTitle>
+          <DialogDescription class="text-left">
+            This removes the option from this paid access plan.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter class="flex justify-between pt-2">
+          <edge-shad-button variant="outline" @click="closeDeleteRulePriceOptionDialog">
+            Cancel
+          </edge-shad-button>
+          <edge-shad-button class="bg-red-700 text-white hover:bg-red-600" @click="confirmDeleteRulePriceOption">
+            Delete Option
           </edge-shad-button>
         </DialogFooter>
       </DialogContent>
@@ -1272,79 +1380,43 @@ onBeforeUnmount(async () => {
                                 Stripe Price Options
                               </div>
                               <p class="text-xs text-muted-foreground">
-                                Add one or more Stripe price IDs. Drag order with arrows to control display order.
+                                Add one or more Stripe price IDs. Drag to control display order.
                               </p>
                             </div>
-                            <edge-shad-button type="button" class="h-8 gap-2 bg-slate-800 text-white hover:bg-slate-700" @click="addRulePriceOption">
+                            <edge-shad-button type="button" class="h-8 gap-2 bg-slate-800 text-white hover:bg-slate-700" @click="openNewRulePriceOptionDialog">
                               <Plus class="h-4 w-4" />
                               Add Price
                             </edge-shad-button>
                           </div>
 
                           <div v-if="Array.isArray(state.ruleWorkingDoc.registrationStripePrices) && state.ruleWorkingDoc.registrationStripePrices.length" class="space-y-3">
-                            <div
-                              v-for="(priceOption, index) in state.ruleWorkingDoc.registrationStripePrices"
-                              :key="`price-${index}`"
-                              class="rounded-lg border border-border/60 bg-background p-3"
+                            <draggable
+                              v-model="state.ruleWorkingDoc.registrationStripePrices"
+                              item-key="priceId"
+                              handle=".handle"
+                              class="space-y-2"
                             >
-                              <div class="mb-3 flex items-center justify-between gap-2">
-                                <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                                  Option {{ index + 1 }}
+                              <template #item="{ element, index }">
+                                <div class="flex items-center justify-between gap-2 rounded-lg border border-border/60 bg-background p-3">
+                                  <div class="flex min-w-0 items-center gap-2">
+                                    <button type="button" class="handle inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted">
+                                      <GripVertical class="h-4 w-4" />
+                                    </button>
+                                    <button type="button" class="min-w-0 truncate text-left text-sm font-medium text-foreground hover:underline" @click="openEditRulePriceOptionDialog(index)">
+                                      {{ String(element?.title || '').trim() || String(element?.priceId || '').trim() || `Option ${index + 1}` }}
+                                    </button>
+                                  </div>
+                                  <div class="flex items-center gap-1">
+                                    <edge-shad-button type="button" size="icon" variant="ghost" class="h-7 w-7" @click="openEditRulePriceOptionDialog(index)">
+                                      <Settings2 class="h-4 w-4" />
+                                    </edge-shad-button>
+                                    <edge-shad-button type="button" size="icon" variant="ghost" class="h-7 w-7 text-red-600 hover:text-red-500" @click="openDeleteRulePriceOptionDialog(index)">
+                                      <Trash2 class="h-4 w-4" />
+                                    </edge-shad-button>
+                                  </div>
                                 </div>
-                                <div class="flex items-center gap-1">
-                                  <edge-shad-button
-                                    type="button"
-                                    size="icon"
-                                    variant="ghost"
-                                    class="h-7 w-7"
-                                    :disabled="index === 0"
-                                    @click="moveRulePriceOption(index, -1)"
-                                  >
-                                    <ArrowUp class="h-4 w-4" />
-                                  </edge-shad-button>
-                                  <edge-shad-button
-                                    type="button"
-                                    size="icon"
-                                    variant="ghost"
-                                    class="h-7 w-7"
-                                    :disabled="index === state.ruleWorkingDoc.registrationStripePrices.length - 1"
-                                    @click="moveRulePriceOption(index, 1)"
-                                  >
-                                    <ArrowDown class="h-4 w-4" />
-                                  </edge-shad-button>
-                                  <edge-shad-button
-                                    type="button"
-                                    size="icon"
-                                    variant="ghost"
-                                    class="h-7 w-7 text-red-600 hover:text-red-500"
-                                    @click="removeRulePriceOption(index)"
-                                  >
-                                    <Trash2 class="h-4 w-4" />
-                                  </edge-shad-button>
-                                </div>
-                              </div>
-
-                              <div class="space-y-3">
-                                <edge-shad-input
-                                  v-model="priceOption.priceId"
-                                  :name="`restricted-rule-price-id-${index}`"
-                                  label="Stripe Price ID"
-                                  placeholder="price_..."
-                                />
-                                <edge-shad-input
-                                  v-model="priceOption.title"
-                                  :name="`restricted-rule-price-title-${index}`"
-                                  label="Title"
-                                  placeholder="Pro Plan"
-                                />
-                                <edge-shad-textarea
-                                  v-model="priceOption.description"
-                                  :name="`restricted-rule-price-description-${index}`"
-                                  label="Description"
-                                  placeholder="Describe what this option includes."
-                                />
-                              </div>
-                            </div>
+                              </template>
+                            </draggable>
                           </div>
 
                           <div v-else class="rounded-lg border border-dashed border-border/70 px-4 py-8 text-center text-sm text-muted-foreground">
