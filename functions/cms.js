@@ -577,6 +577,33 @@ const cleanupOwnedPublishedSiteDomains = async (sitePath, { orgId, siteId } = {}
   await batch.commit()
 }
 
+const shouldSyncFirebaseAuthDomain = (domain) => {
+  const normalized = normalizeDomain(domain)
+  if (!normalized)
+    return false
+  if (isIpAddress(normalized))
+    return false
+  if (normalized === 'localhost' || normalized.endsWith('.localhost'))
+    return false
+  return true
+}
+
+const extractFirebaseAuthDomainsFromRawDomains = (rawDomains = []) => {
+  const normalizedDomains = Array.isArray(rawDomains) ? rawDomains : []
+  return Array.from(new Set(
+    normalizedDomains
+      .map(domain => normalizeDomain(domain))
+      .filter(Boolean)
+      .flatMap((domain) => {
+        const apexDomain = getCloudflareApexDomain(domain)
+        const wwwDomain = getCloudflarePagesDomain(apexDomain)
+        return [apexDomain, wwwDomain]
+      })
+      .map(domain => normalizeDomain(domain))
+      .filter(domain => domain && shouldSyncFirebaseAuthDomain(domain)),
+  ))
+}
+
 const getFirebaseProjectId = () => {
   return String(
     process.env.GCLOUD_PROJECT
@@ -597,19 +624,21 @@ const getAdminAccessToken = async () => {
   return accessToken
 }
 
-const addDomainsToFirebaseAuthorizedDomains = async (domains = [], context = {}) => {
-  const normalizedDomains = Array.from(new Set(
-    (Array.isArray(domains) ? domains : [])
-      .map(domain => normalizeDomain(domain))
-      .filter(Boolean),
-  ))
-  if (!normalizedDomains.length)
-    return { ok: true, added: [], total: 0 }
+const syncFirebaseAuthorizedDomainsForMembership = async ({
+  addDomains = [],
+  removeDomains = [],
+  context = {},
+} = {}) => {
+  const domainsToAdd = Array.from(new Set((Array.isArray(addDomains) ? addDomains : []).map(domain => normalizeDomain(domain)).filter(domain => domain && shouldSyncFirebaseAuthDomain(domain))))
+  const domainsToRemoveCandidates = Array.from(new Set((Array.isArray(removeDomains) ? removeDomains : []).map(domain => normalizeDomain(domain)).filter(domain => domain && shouldSyncFirebaseAuthDomain(domain))))
+
+  if (!domainsToAdd.length && !domainsToRemoveCandidates.length)
+    return { ok: true, added: [], removed: [], total: 0 }
 
   const projectId = getFirebaseProjectId()
   if (!projectId) {
-    logger.warn('Skipping Firebase Auth authorized domain sync: missing project id', context)
-    return { ok: false, added: [], total: 0, error: 'Missing Firebase project id.' }
+    logger.warn('Skipping Firebase Auth authorized domain membership sync: missing project id', context)
+    return { ok: false, added: [], removed: [], total: 0, error: 'Missing Firebase project id.' }
   }
 
   const accessToken = await getAdminAccessToken()
@@ -623,25 +652,37 @@ const addDomainsToFirebaseAuthorizedDomains = async (domains = [], context = {})
   const currentAuthorizedDomains = Array.isArray(currentResponse?.data?.authorizedDomains)
     ? currentResponse.data.authorizedDomains.map(value => String(value || '').trim()).filter(Boolean)
     : []
+  const nextSet = new Set(currentAuthorizedDomains)
 
-  const nextAuthorizedDomains = Array.from(new Set(currentAuthorizedDomains.concat(normalizedDomains))).sort((a, b) => a.localeCompare(b))
-  const addedDomains = normalizedDomains.filter(domain => !currentAuthorizedDomains.includes(domain))
-  if (!addedDomains.length)
-    return { ok: true, added: [], total: nextAuthorizedDomains.length }
+  domainsToAdd.forEach(domain => nextSet.add(domain))
+
+  const removableDomains = domainsToRemoveCandidates
+  removableDomains.forEach(domain => nextSet.delete(domain))
+
+  const nextAuthorizedDomains = Array.from(nextSet).sort((a, b) => a.localeCompare(b))
+  const changed = nextAuthorizedDomains.length !== currentAuthorizedDomains.length
+    || nextAuthorizedDomains.some((domain, index) => domain !== currentAuthorizedDomains[index])
+
+  if (!changed)
+    return { ok: true, added: [], removed: [], total: nextAuthorizedDomains.length }
 
   await axios.patch(`${configUrl}?updateMask=authorizedDomains`, {
     authorizedDomains: nextAuthorizedDomains,
   }, { headers })
 
-  logger.log('Updated Firebase Auth authorized domains', {
+  const addedDomains = domainsToAdd.filter(domain => !currentAuthorizedDomains.includes(domain))
+  const removedDomains = removableDomains.filter(domain => currentAuthorizedDomains.includes(domain))
+  logger.log('Synced Firebase Auth authorized domains for memberships', {
     ...context,
     addedDomains,
+    removedDomains,
     totalAuthorizedDomains: nextAuthorizedDomains.length,
   })
 
   return {
     ok: true,
     added: addedDomains,
+    removed: removedDomains,
     total: nextAuthorizedDomains.length,
   }
 }
@@ -3806,6 +3847,7 @@ exports.ensurePublishedSiteDomains = onDocumentWritten(
     const siteRef = change.after.ref
     const siteData = change.after.data() || {}
     const beforeData = change.before?.data?.() || {}
+    const membershipEnabled = Boolean(siteData?.restrictedContent?.enabled)
     const rawDomains = Array.isArray(siteData.domains) ? siteData.domains : []
     const normalizedDomains = Array.from(new Set(rawDomains.map(normalizeDomain).filter(Boolean)))
     const beforeRawDomains = Array.isArray(beforeData.domains) ? beforeData.domains : []
@@ -3838,6 +3880,7 @@ exports.ensurePublishedSiteDomains = onDocumentWritten(
             orgId,
             siteId,
             sitePath: siteRef.path,
+            authEnabled: membershipEnabled,
             updatedAt: Firestore.FieldValue.serverTimestamp(),
           })
           return
@@ -3850,6 +3893,7 @@ exports.ensurePublishedSiteDomains = onDocumentWritten(
             orgId,
             siteId,
             sitePath: siteRef.path,
+            authEnabled: membershipEnabled,
             updatedAt: Firestore.FieldValue.serverTimestamp(),
           }, { merge: true })
           return
@@ -3902,30 +3946,6 @@ exports.ensurePublishedSiteDomains = onDocumentWritten(
       }
       existingPlan.domains.add(domain)
       syncPlanMap.set(apexDomain, existingPlan)
-    }
-
-    const authDomainsToAdd = Array.from(new Set(
-      filteredDomains
-        .flatMap((domain) => {
-          const apexDomain = getCloudflareApexDomain(domain)
-          const wwwDomain = getCloudflarePagesDomain(apexDomain)
-          return [apexDomain, wwwDomain]
-        })
-        .map(domain => normalizeDomain(domain))
-        .filter(domain => domain && shouldDisplayDomainDnsRecords(domain)),
-    ))
-    if (authDomainsToAdd.length) {
-      try {
-        await addDomainsToFirebaseAuthorizedDomains(authDomainsToAdd, { orgId, siteId })
-      }
-      catch (error) {
-        logger.error('Failed to sync Firebase Auth authorized domains', {
-          orgId,
-          siteId,
-          domains: authDomainsToAdd,
-          message: error?.message || String(error),
-        })
-      }
     }
 
     const syncPlans = Array.from(syncPlanMap.values())
@@ -4009,6 +4029,7 @@ exports.ensurePublishedSiteDomains = onDocumentWritten(
           orgId,
           siteId,
           sitePath: siteRef.path,
+          authEnabled: membershipEnabled,
           updatedAt: Firestore.FieldValue.serverTimestamp(),
           apexDomain: value.apexDomain || '',
           wwwDomain: value.wwwDomain || '',
@@ -4044,6 +4065,50 @@ exports.ensurePublishedSiteDomains = onDocumentWritten(
       : cloudflareMessage
     if (siteData.domainError !== combinedMessage) {
       await siteRef.set({ domainError: combinedMessage }, { merge: true })
+    }
+  },
+)
+
+exports.syncFirebaseAuthDomainsFromDomainRegistry = onDocumentWritten(
+  { document: `${DOMAIN_REGISTRY_COLLECTION}/{domain}`, timeoutSeconds: 180 },
+  async (event) => {
+    const change = event.data
+    const beforeData = change?.before?.data?.() || {}
+    const afterData = change?.after?.data?.() || {}
+
+    const beforeDomain = normalizeDomain(beforeData.domain || event.params.domain || '')
+    const afterDomain = normalizeDomain(afterData.domain || event.params.domain || '')
+    const beforeAuthEnabled = Boolean(beforeData.authEnabled)
+    const afterAuthEnabled = Boolean(afterData.authEnabled)
+
+    const beforeAuthDomains = beforeAuthEnabled ? extractFirebaseAuthDomainsFromRawDomains([beforeDomain]) : []
+    const afterAuthDomains = afterAuthEnabled ? extractFirebaseAuthDomainsFromRawDomains([afterDomain]) : []
+    const addDomains = afterAuthDomains.filter(domain => !beforeAuthDomains.includes(domain))
+    const removeDomains = beforeAuthDomains.filter(domain => !afterAuthDomains.includes(domain))
+
+    if (!addDomains.length && !removeDomains.length)
+      return
+
+    try {
+      await syncFirebaseAuthorizedDomainsForMembership({
+        addDomains,
+        removeDomains,
+        context: {
+          trigger: 'domain-registry-write',
+          domainDoc: event.params.domain,
+          beforeAuthEnabled,
+          afterAuthEnabled,
+        },
+      })
+    }
+    catch (error) {
+      logger.error('Failed to sync Firebase Auth domains from domain registry', {
+        domainDoc: event.params.domain,
+        addDomains,
+        removeDomains,
+        message: error?.message || String(error),
+      })
+      throw error
     }
   },
 )
