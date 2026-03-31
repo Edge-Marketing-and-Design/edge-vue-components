@@ -168,6 +168,20 @@ const buildUpdateDiff = (current = {}, next = {}) => {
   return update
 }
 
+const normalizeForStableCompare = (value) => {
+  if (Array.isArray(value))
+    return value.map(item => normalizeForStableCompare(item))
+  if (value && typeof value === 'object') {
+    return Object.keys(value).sort().reduce((acc, key) => {
+      acc[key] = normalizeForStableCompare(value[key])
+      return acc
+    }, {})
+  }
+  return value
+}
+
+const stableSerialize = value => JSON.stringify(normalizeForStableCompare(value))
+
 const resolveStagedUserRef = async (userIdOrDocId) => {
   if (!userIdOrDocId)
     return null
@@ -2714,6 +2728,10 @@ const normalizeRestrictedRuleForFunction = (value = {}, fallbackId = '') => {
   const registrationStripePrices = Array.isArray(normalizedValue.registrationStripePrices)
     ? normalizedValue.registrationStripePrices
     : (Array.isArray(normalizedValue.stripePrices) ? normalizedValue.stripePrices : [])
+  const normalizeInterval = (value) => {
+    const normalized = String(value || '').trim().toLowerCase()
+    return ['day', 'week', 'month', 'year'].includes(normalized) ? normalized : 'month'
+  }
   return {
     id,
     name: String(normalizedValue.name || '').trim(),
@@ -2721,6 +2739,7 @@ const normalizeRestrictedRuleForFunction = (value = {}, fallbackId = '') => {
     allowRegistration: Boolean(normalizedValue.allowRegistration),
     registrationMode: normalizedValue.registrationMode === 'paid' ? 'paid' : 'free',
     registrationStripeProductId: String(normalizedValue.registrationStripeProductId || normalizedValue.stripeProductId || '').trim(),
+    registrationStripeImage: String(normalizedValue.registrationStripeImage || normalizedValue.stripeImage || '').trim(),
     registrationStripePrices: registrationStripePrices
       .map((item) => {
         const normalizedItem = (item && typeof item === 'object') ? item : {}
@@ -2728,9 +2747,19 @@ const normalizeRestrictedRuleForFunction = (value = {}, fallbackId = '') => {
           priceId: String(normalizedItem.priceId || normalizedItem.id || '').trim(),
           title: String(normalizedItem.title || '').trim(),
           description: String(normalizedItem.description || '').trim(),
+          amount: Number.isFinite(Number(normalizedItem.amount ?? normalizedItem.unitAmount))
+            ? Number(normalizedItem.amount ?? normalizedItem.unitAmount)
+            : 0,
+          currency: String(normalizedItem.currency || 'usd').trim().toLowerCase() || 'usd',
+          interval: normalizeInterval(normalizedItem.interval || normalizedItem.recurringInterval),
+          intervalCount: Number.isFinite(Number(normalizedItem.intervalCount || normalizedItem.recurringIntervalCount))
+            ? Math.max(1, Math.trunc(Number(normalizedItem.intervalCount || normalizedItem.recurringIntervalCount)))
+            : 1,
+          seats: Number.isFinite(Number(normalizedItem.seats || normalizedItem.quantity))
+            ? Math.max(1, Math.trunc(Number(normalizedItem.seats || normalizedItem.quantity)))
+            : 1,
         }
-      })
-      .filter(item => item.priceId),
+      }),
   }
 }
 
@@ -2780,7 +2809,7 @@ const buildRestrictedMemberPayload = ({
   now = Date.now(),
 }) => {
   const existingAccessRuleIds = Array.isArray(existingMember?.accessRuleIds) ? existingMember.accessRuleIds : []
-  const accessRuleIds = Array.from(new Set(existingAccessRuleIds.concat(ruleId).filter(Boolean)))
+  let accessRuleIds = [...existingAccessRuleIds]
   const existingPaidAccessRuleIds = Array.isArray(existingMember?.paidAccessRuleIds) ? existingMember.paidAccessRuleIds : []
   const existingPendingPaymentRuleIds = Array.isArray(existingMember?.pendingPaymentRuleIds) ? existingMember.pendingPaymentRuleIds : []
   let paidAccessRuleIds = [...existingPaidAccessRuleIds]
@@ -2790,6 +2819,11 @@ const buildRestrictedMemberPayload = ({
     paidAccessRuleIds.push(ruleId)
   if (clearPaid && ruleId)
     paidAccessRuleIds = paidAccessRuleIds.filter(item => item !== ruleId)
+
+  if (markPaid && ruleId && !accessRuleIds.includes(ruleId))
+    accessRuleIds.push(ruleId)
+  if (clearPaid && ruleId)
+    accessRuleIds = accessRuleIds.filter(item => item !== ruleId)
 
   if (markPending && ruleId && !pendingPaymentRuleIds.includes(ruleId))
     pendingPaymentRuleIds.push(ruleId)
@@ -2916,6 +2950,56 @@ const buildStripePriceSummary = (price) => {
   }
 }
 
+const STRIPE_CMS_MANAGED_METADATA_KEY = 'cmsManaged'
+const STRIPE_CMS_ORG_METADATA_KEY = 'cmsOrgId'
+const STRIPE_CMS_SITE_METADATA_KEY = 'cmsSiteId'
+const STRIPE_CMS_RULE_METADATA_KEY = 'cmsRuleId'
+
+const isStripeObjectManagedForSite = (metadata = {}, orgId, siteId) => {
+  if (!metadata || typeof metadata !== 'object')
+    return false
+  return String(metadata[STRIPE_CMS_MANAGED_METADATA_KEY] || '').toLowerCase() === 'true'
+    && String(metadata[STRIPE_CMS_ORG_METADATA_KEY] || '').trim() === String(orgId || '').trim()
+    && String(metadata[STRIPE_CMS_SITE_METADATA_KEY] || '').trim() === String(siteId || '').trim()
+}
+
+const isStripeObjectManagedForRule = (metadata = {}, orgId, siteId, ruleId) => {
+  return isStripeObjectManagedForSite(metadata, orgId, siteId)
+    && String(metadata[STRIPE_CMS_RULE_METADATA_KEY] || '').trim() === String(ruleId || '').trim()
+}
+
+const getStripeClientForSite = async (orgId, siteId) => {
+  const { privateStripeRef } = getRestrictedSiteRefs(orgId, siteId)
+  const stripeSnap = await privateStripeRef.get()
+  if (!stripeSnap.exists)
+    throw new HttpsError('failed-precondition', 'Stripe is not configured for this site.')
+
+  const stripeConfig = stripeSnap.data() || {}
+  const stripeSecretKey = String(stripeConfig.secretKey || '').trim()
+  if (!stripeSecretKey)
+    throw new HttpsError('failed-precondition', 'Stripe secret key is missing for this site.')
+  return new Stripe(stripeSecretKey)
+}
+
+const ensureRestrictedSiteWritePermission = async (uid, orgId, siteId) => {
+  const allowed = await permissionCheck(uid, 'write', `organizations/${orgId}/sites/${siteId}`)
+  if (!allowed)
+    throw new HttpsError('permission-denied', 'Not allowed to manage restricted content for this site.')
+}
+
+const upsertManagedStripeMetadata = async ({ stripe, orgId, siteId, ruleId, productId, priceId }) => {
+  const metadataPatch = {
+    [STRIPE_CMS_MANAGED_METADATA_KEY]: 'true',
+    [STRIPE_CMS_ORG_METADATA_KEY]: String(orgId || ''),
+    [STRIPE_CMS_SITE_METADATA_KEY]: String(siteId || ''),
+    [STRIPE_CMS_RULE_METADATA_KEY]: String(ruleId || ''),
+  }
+  if (productId)
+    await stripe.products.update(productId, { metadata: metadataPatch })
+  if (priceId)
+    await stripe.prices.update(priceId, { metadata: metadataPatch })
+}
+
 const getStripeMetadata = (object = {}) => {
   if (object?.metadata && typeof object.metadata === 'object' && Object.keys(object.metadata).length)
     return object.metadata
@@ -2924,6 +3008,22 @@ const getStripeMetadata = (object = {}) => {
     return object.subscription_details.metadata
 
   return {}
+}
+
+const resolveRuleStripeImage = (rule = {}, siteData = {}) => {
+  const explicit = String(rule?.registrationStripeImage || '').trim()
+  if (explicit)
+    return explicit
+
+  const siteLogo = String(siteData?.logo || '').trim()
+  if (siteLogo)
+    return siteLogo
+
+  const siteLogoLight = String(siteData?.logoLight || '').trim()
+  if (siteLogoLight)
+    return siteLogoLight
+
+  return ''
 }
 
 const updateRestrictedMemberPaymentState = async ({
@@ -3129,13 +3229,15 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
       const status = String(refreshedMember.status || '').trim().toLowerCase() || 'inactive'
       const blocked = status === 'revoked' || status === 'paused'
       const accessRuleIds = Array.isArray(refreshedMember.accessRuleIds) ? refreshedMember.accessRuleIds.filter(Boolean) : []
+      const manualAccessRuleIds = Array.isArray(refreshedMember.manualAccessRuleIds) ? refreshedMember.manualAccessRuleIds.filter(Boolean) : []
       const paidRuleIds = Array.isArray(refreshedMember.paidAccessRuleIds) ? refreshedMember.paidAccessRuleIds.filter(Boolean) : []
       const pendingRuleIds = Array.isArray(refreshedMember.pendingPaymentRuleIds) ? refreshedMember.pendingPaymentRuleIds.filter(Boolean) : []
       const activeRuleId = hasRuleId && effectiveRegistrationMode === 'paid' ? String(rule?.id || '').trim() : ''
       const isAssigned = activeRuleId ? accessRuleIds.includes(activeRuleId) : false
+      const isManualOverride = activeRuleId ? manualAccessRuleIds.includes(activeRuleId) : false
       const isPaid = activeRuleId ? paidRuleIds.includes(activeRuleId) : false
       const paymentPending = activeRuleId ? pendingRuleIds.includes(activeRuleId) : false
-      const hasAccess = !blocked && isAssigned && !paymentPending
+      const hasAccess = !blocked && (isPaid || isManualOverride || (isAssigned && !paymentPending))
 
       const response = {
         success: true,
@@ -3151,6 +3253,7 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
           requiresPayment: true,
           hasAccess,
           isPaid,
+          isManualOverride,
           paymentPending,
           status,
         }
@@ -3234,20 +3337,29 @@ exports.restrictedContentGetUserRuleAccess = onCall(async (request) => {
   const status = String(memberData.status || '').trim().toLowerCase() || 'inactive'
   const registrationPaymentStatus = String(memberData.registrationPaymentStatus || '').trim().toLowerCase() || 'not_required'
   const rawRuleIds = Array.isArray(memberData.accessRuleIds) ? memberData.accessRuleIds.filter(Boolean) : []
+  const manualRuleIdsRaw = Array.isArray(memberData.manualAccessRuleIds) ? memberData.manualAccessRuleIds.filter(Boolean) : []
   const paidRuleIdsRaw = Array.isArray(memberData.paidAccessRuleIds) ? memberData.paidAccessRuleIds.filter(Boolean) : []
   const pendingRuleIdsRaw = Array.isArray(memberData.pendingPaymentRuleIds) ? memberData.pendingPaymentRuleIds.filter(Boolean) : []
   const paidSet = new Set(paidRuleIdsRaw)
   const pendingSet = new Set(pendingRuleIdsRaw)
   const blocked = status === 'revoked' || status === 'paused'
   const filteredRawRuleIds = rawRuleIds.filter(ruleId => configuredRuleIds.has(ruleId))
-  const ruleIds = blocked ? [] : filteredRawRuleIds.filter(ruleId => !pendingSet.has(ruleId))
+  const manualRuleIds = manualRuleIdsRaw.filter(ruleId => configuredRuleIds.has(ruleId))
+  const legacyAssignedRuleIds = filteredRawRuleIds.filter(ruleId => !pendingSet.has(ruleId))
+  const grantedRuleIds = Array.from(new Set([
+    ...manualRuleIds,
+    ...paidRuleIdsRaw.filter(ruleId => configuredRuleIds.has(ruleId)),
+    ...legacyAssignedRuleIds,
+  ]))
+  const ruleIds = blocked ? [] : grantedRuleIds
   const paidRuleIds = filteredRawRuleIds.filter(ruleId => paidSet.has(ruleId))
   const pendingPaymentRuleIds = filteredRawRuleIds.filter(ruleId => pendingSet.has(ruleId))
   const rules = {}
-  filteredRawRuleIds.forEach((ruleId) => {
+  Array.from(new Set([...filteredRawRuleIds, ...manualRuleIds])).forEach((ruleId) => {
     rules[ruleId] = {
       hasAccess: ruleIds.includes(ruleId),
       isPaid: paidSet.has(ruleId),
+      isManualOverride: manualRuleIds.includes(ruleId),
       paymentPending: pendingSet.has(ruleId),
     }
   })
@@ -3259,9 +3371,435 @@ exports.restrictedContentGetUserRuleAccess = onCall(async (request) => {
     status,
     registrationPaymentStatus,
     ruleIds,
+    manualAccessRuleIds: manualRuleIds,
     paidRuleIds,
     pendingPaymentRuleIds,
     rules,
+  }
+})
+
+exports.restrictedContentGetStripeCatalog = onCall({ timeoutSeconds: 180 }, async (request) => {
+  assertCallableUser(request)
+  const data = request.data || {}
+  const orgId = String(data.orgId || '').trim()
+  const siteId = String(data.siteId || '').trim()
+  if (!orgId || !siteId)
+    throw new HttpsError('invalid-argument', 'Missing orgId or siteId.')
+
+  await ensureRestrictedSiteWritePermission(request.auth.uid, orgId, siteId)
+  const stripe = await getStripeClientForSite(orgId, siteId)
+
+  const productsResponse = await stripe.products.list({ limit: 100, active: true })
+  const products = Array.isArray(productsResponse?.data) ? productsResponse.data : []
+  const catalog = await Promise.all(products.map(async (product) => {
+    const pricesResponse = await stripe.prices.list({ product: product.id, limit: 100, active: true })
+    const prices = Array.isArray(pricesResponse?.data) ? pricesResponse.data : []
+    return {
+      productId: String(product.id || '').trim(),
+      name: String(product.name || '').trim(),
+      description: String(product.description || '').trim(),
+      image: Array.isArray(product.images) && product.images.length ? String(product.images[0] || '').trim() : '',
+      managed: isStripeObjectManagedForSite(product.metadata, orgId, siteId),
+      prices: prices.map((price) => {
+        const summary = buildStripePriceSummary(price) || {}
+        return {
+          ...summary,
+          managed: isStripeObjectManagedForSite(price.metadata, orgId, siteId),
+        }
+      }).filter(price => price?.id),
+    }
+  }))
+
+  return {
+    success: true,
+    products: catalog
+      .filter(item => item.productId && item.prices.length)
+      .sort((a, b) => String(a.name || a.productId).localeCompare(String(b.name || b.productId))),
+  }
+})
+
+exports.restrictedContentImportStripeCatalog = onCall({ timeoutSeconds: 180 }, async (request) => {
+  assertCallableUser(request)
+  const data = request.data || {}
+  const orgId = String(data.orgId || '').trim()
+  const siteId = String(data.siteId || '').trim()
+  const selections = Array.isArray(data.selections) ? data.selections : []
+  if (!orgId || !siteId)
+    throw new HttpsError('invalid-argument', 'Missing orgId or siteId.')
+  if (!selections.length)
+    return { success: true, imported: 0, rules: [] }
+
+  await ensureRestrictedSiteWritePermission(request.auth.uid, orgId, siteId)
+  const stripe = await getStripeClientForSite(orgId, siteId)
+  const { siteRef, siteData, restrictedContent } = await getRestrictedSiteContext(orgId, siteId)
+  const existingRules = (Array.isArray(restrictedContent.rules) ? restrictedContent.rules : [])
+    .map((item, index) => normalizeRestrictedRuleForFunction(item, `rule-${index + 1}`))
+    .filter(item => item.id)
+
+  const rulesById = existingRules.reduce((acc, rule) => {
+    acc[rule.id] = rule
+    return acc
+  }, {})
+
+  let imported = 0
+  for (const selection of selections) {
+    const productId = String(selection?.productId || '').trim()
+    const selectedPriceIds = Array.isArray(selection?.priceIds)
+      ? selection.priceIds.map(item => String(item || '').trim()).filter(Boolean)
+      : []
+    if (!productId || !selectedPriceIds.length)
+      continue
+
+    const product = await stripe.products.retrieve(productId)
+    if (!product || product.deleted)
+      continue
+
+    const existingRule = existingRules.find(rule => String(rule.registrationStripeProductId || '').trim() === productId)
+    const ruleId = String(selection?.ruleId || existingRule?.id || productId || `rule-${Date.now()}`).trim()
+    const ruleName = String(existingRule?.name || selection?.name || product?.name || '').trim() || ruleId
+
+    const nextPriceOptions = []
+    for (const priceId of selectedPriceIds) {
+      let price
+      try {
+        price = await stripe.prices.retrieve(priceId)
+      }
+      catch {
+        continue
+      }
+      if (!price || price.deleted || !price.active)
+        continue
+      if (String(price.product || '').trim() !== productId)
+        continue
+      const existingPriceOption = Array.isArray(existingRule?.registrationStripePrices)
+        ? existingRule.registrationStripePrices.find(item => String(item?.priceId || '').trim() === priceId)
+        : null
+      nextPriceOptions.push({
+        priceId,
+        title: String(existingPriceOption?.title || price?.nickname || ruleName).trim(),
+        description: String(existingPriceOption?.description || '').trim(),
+        amount: Number.isFinite(Number(existingPriceOption?.amount))
+          ? Number(existingPriceOption.amount)
+          : Number(price?.unit_amount || 0) / 100,
+        currency: String(existingPriceOption?.currency || price?.currency || 'usd').trim().toLowerCase() || 'usd',
+        interval: ['day', 'week', 'month', 'year'].includes(String(existingPriceOption?.interval || price?.recurring?.interval || '').toLowerCase())
+          ? String(existingPriceOption?.interval || price?.recurring?.interval || '').toLowerCase()
+          : 'month',
+        intervalCount: Number.isFinite(Number(existingPriceOption?.intervalCount))
+          ? Math.max(1, Math.trunc(Number(existingPriceOption.intervalCount)))
+          : Math.max(1, Math.trunc(Number(price?.recurring?.interval_count || 1))),
+        seats: Number.isFinite(Number(existingPriceOption?.seats || existingPriceOption?.quantity))
+          ? Math.max(1, Math.trunc(Number(existingPriceOption.seats || existingPriceOption.quantity)))
+          : 1,
+      })
+      await upsertManagedStripeMetadata({ stripe, orgId, siteId, ruleId, priceId })
+    }
+
+    if (!nextPriceOptions.length)
+      continue
+
+    await upsertManagedStripeMetadata({ stripe, orgId, siteId, ruleId, productId })
+
+    rulesById[ruleId] = {
+      ...(rulesById[ruleId] || {}),
+      id: ruleId,
+      name: ruleName,
+      protected: true,
+      allowRegistration: true,
+      registrationMode: 'paid',
+      registrationStripeProductId: productId,
+      registrationStripeImage: String(existingRule?.registrationStripeImage || '').trim()
+        || (Array.isArray(product.images) && product.images.length ? String(product.images[0] || '').trim() : ''),
+      registrationStripePrices: nextPriceOptions,
+    }
+    imported++
+  }
+
+  const nextRules = Object.values(rulesById)
+    .map((item) => normalizeRestrictedRuleForFunction(item, item.id))
+    .filter(item => item.id)
+    .sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id)))
+
+  const nextRestrictedContent = {
+    ...(restrictedContent || {}),
+    rules: nextRules,
+  }
+  const nextVersion = Number.isFinite(Number(siteData?.version))
+    ? Math.max(0, Math.trunc(Number(siteData.version))) + 1
+    : 1
+  await siteRef.set({
+    restrictedContent: nextRestrictedContent,
+    version: nextVersion,
+  }, { merge: true })
+
+  return {
+    success: true,
+    imported,
+    rules: nextRules,
+  }
+})
+
+exports.restrictedContentSyncStripeRule = onCall({ timeoutSeconds: 180 }, async (request) => {
+  assertCallableUser(request)
+  const data = request.data || {}
+  const orgId = String(data.orgId || '').trim()
+  const siteId = String(data.siteId || '').trim()
+  const ruleId = String(data.ruleId || '').trim()
+  if (!orgId || !siteId || !ruleId)
+    throw new HttpsError('invalid-argument', 'Missing orgId, siteId, or ruleId.')
+
+  await ensureRestrictedSiteWritePermission(request.auth.uid, orgId, siteId)
+  const stripe = await getStripeClientForSite(orgId, siteId)
+  const { siteRef, siteData, restrictedContent } = await getRestrictedSiteContext(orgId, siteId)
+
+  const rules = (Array.isArray(restrictedContent.rules) ? restrictedContent.rules : [])
+    .map((item, index) => normalizeRestrictedRuleForFunction(item, `rule-${index + 1}`))
+    .filter(item => item.id)
+  const existingRule = rules.find(item => item.id === ruleId)
+  if (!existingRule)
+    throw new HttpsError('not-found', 'Paid access plan was not found.')
+  if (existingRule.registrationMode !== 'paid')
+    throw new HttpsError('failed-precondition', 'Only paid access plans can be synced to Stripe.')
+
+  const ruleName = String(existingRule.name || existingRule.id || '').trim() || existingRule.id
+  const ruleImage = resolveRuleStripeImage(existingRule, siteData)
+  let productId = String(existingRule.registrationStripeProductId || '').trim()
+  let createdProduct = false
+  let product = null
+
+  if (productId) {
+    try {
+      product = await stripe.products.retrieve(productId)
+      if (product?.deleted)
+        product = null
+    }
+    catch {
+      product = null
+    }
+  }
+
+  if (!product) {
+    const created = await stripe.products.create({
+      name: ruleName,
+      ...(ruleImage ? { images: [ruleImage] } : {}),
+      metadata: {
+        [STRIPE_CMS_MANAGED_METADATA_KEY]: 'true',
+        [STRIPE_CMS_ORG_METADATA_KEY]: String(orgId || ''),
+        [STRIPE_CMS_SITE_METADATA_KEY]: String(siteId || ''),
+        [STRIPE_CMS_RULE_METADATA_KEY]: String(ruleId || ''),
+      },
+    })
+    productId = String(created?.id || '').trim()
+    if (!productId)
+      throw new HttpsError('internal', 'Stripe product could not be created.')
+    createdProduct = true
+  }
+  else {
+    const updatePayload = {
+      name: ruleName,
+      metadata: {
+        [STRIPE_CMS_MANAGED_METADATA_KEY]: 'true',
+        [STRIPE_CMS_ORG_METADATA_KEY]: String(orgId || ''),
+        [STRIPE_CMS_SITE_METADATA_KEY]: String(siteId || ''),
+        [STRIPE_CMS_RULE_METADATA_KEY]: String(ruleId || ''),
+      },
+    }
+    if (ruleImage)
+      updatePayload.images = [ruleImage]
+    await stripe.products.update(productId, updatePayload)
+  }
+
+  const nextPriceOptions = Array.isArray(existingRule.registrationStripePrices)
+    ? existingRule.registrationStripePrices
+    : []
+  const invalidPriceIds = []
+  const syncedPriceOptions = []
+  for (const option of nextPriceOptions) {
+    let priceId = String(option?.priceId || '').trim()
+    const amount = Number(option?.amount || 0)
+    const intervalCount = Math.max(1, Number(option?.intervalCount || 1) || 1)
+    const interval = ['day', 'week', 'month', 'year'].includes(String(option?.interval || '').toLowerCase())
+      ? String(option?.interval || '').toLowerCase()
+      : 'month'
+    const currency = String(option?.currency || 'usd').trim().toLowerCase() || 'usd'
+    const title = String(option?.title || '').trim()
+    const description = String(option?.description || '').trim()
+    const seats = Number.isFinite(Number(option?.seats || option?.quantity))
+      ? Math.max(1, Math.trunc(Number(option.seats || option.quantity)))
+      : 1
+
+    let price
+    if (priceId) {
+      try {
+        price = await stripe.prices.retrieve(priceId)
+      }
+      catch {
+        invalidPriceIds.push(priceId)
+      }
+    }
+
+    if (!price || price.deleted || String(price.product || '').trim() !== productId) {
+      const unitAmount = Math.round(amount * 100)
+      if (!Number.isFinite(unitAmount) || unitAmount <= 0)
+        continue
+      const createdPrice = await stripe.prices.create({
+        product: productId,
+        currency,
+        unit_amount: unitAmount,
+        recurring: {
+          interval,
+          interval_count: intervalCount,
+        },
+        ...(title ? { nickname: title } : {}),
+        metadata: {
+          [STRIPE_CMS_MANAGED_METADATA_KEY]: 'true',
+          [STRIPE_CMS_ORG_METADATA_KEY]: String(orgId || ''),
+          [STRIPE_CMS_SITE_METADATA_KEY]: String(siteId || ''),
+          [STRIPE_CMS_RULE_METADATA_KEY]: String(ruleId || ''),
+        },
+      })
+      priceId = String(createdPrice?.id || '').trim()
+      price = createdPrice
+    }
+
+    if (!priceId || !price || price.deleted || String(price.product || '').trim() !== productId)
+      continue
+
+    await upsertManagedStripeMetadata({ stripe, orgId, siteId, ruleId, priceId })
+    syncedPriceOptions.push({
+      priceId,
+      title,
+      description,
+      amount: Number.isFinite(amount) ? amount : 0,
+      currency,
+      interval,
+      intervalCount,
+      seats,
+    })
+  }
+
+  await upsertManagedStripeMetadata({ stripe, orgId, siteId, ruleId, productId })
+
+  const updatedRule = normalizeRestrictedRuleForFunction({
+    ...existingRule,
+    registrationStripeProductId: productId,
+    registrationStripeImage: ruleImage,
+    registrationStripePrices: syncedPriceOptions,
+  }, existingRule.id)
+
+  const nextRules = rules.map((item) => {
+    if (item.id !== ruleId)
+      return item
+    return updatedRule
+  })
+
+  const nextVersion = Number.isFinite(Number(siteData?.version))
+    ? Math.max(0, Math.trunc(Number(siteData.version))) + 1
+    : 1
+
+  await siteRef.set({
+    restrictedContent: {
+      ...(restrictedContent || {}),
+      rules: nextRules,
+    },
+    version: nextVersion,
+  }, { merge: true })
+
+  return {
+    success: true,
+    createdProduct,
+    rule: updatedRule,
+    invalidPriceIds,
+  }
+})
+
+exports.restrictedContentDeleteStripeRule = onCall({ timeoutSeconds: 180 }, async (request) => {
+  assertCallableUser(request)
+  const data = request.data || {}
+  const orgId = String(data.orgId || '').trim()
+  const siteId = String(data.siteId || '').trim()
+  const ruleId = String(data.ruleId || '').trim()
+  if (!orgId || !siteId || !ruleId)
+    throw new HttpsError('invalid-argument', 'Missing orgId, siteId, or ruleId.')
+
+  await ensureRestrictedSiteWritePermission(request.auth.uid, orgId, siteId)
+  const { restrictedContent } = await getRestrictedSiteContext(orgId, siteId)
+  const rules = (Array.isArray(restrictedContent.rules) ? restrictedContent.rules : [])
+    .map((item, index) => normalizeRestrictedRuleForFunction(item, `rule-${index + 1}`))
+    .filter(item => item.id)
+  const existingRule = rules.find(item => item.id === ruleId)
+  if (!existingRule) {
+    return {
+      success: true,
+      skipped: true,
+      archivedProduct: false,
+      archivedPriceIds: [],
+      invalidPriceIds: [],
+    }
+  }
+
+  let stripe = null
+  try {
+    stripe = await getStripeClientForSite(orgId, siteId)
+  }
+  catch (error) {
+    if (error instanceof HttpsError && error.code === 'failed-precondition') {
+      return {
+        success: true,
+        skipped: true,
+        archivedProduct: false,
+        archivedPriceIds: [],
+        invalidPriceIds: [],
+      }
+    }
+    throw error
+  }
+
+  const archivedPriceIds = []
+  const invalidPriceIds = []
+  const priceOptions = Array.isArray(existingRule.registrationStripePrices)
+    ? existingRule.registrationStripePrices
+    : []
+
+  for (const option of priceOptions) {
+    const priceId = String(option?.priceId || '').trim()
+    if (!priceId)
+      continue
+    let price = null
+    try {
+      price = await stripe.prices.retrieve(priceId)
+    }
+    catch {
+      invalidPriceIds.push(priceId)
+      continue
+    }
+    if (!price || price.deleted || !isStripeObjectManagedForRule(price.metadata, orgId, siteId, ruleId))
+      continue
+    await stripe.prices.update(priceId, { active: false })
+    archivedPriceIds.push(priceId)
+  }
+
+  let archivedProduct = false
+  const productId = String(existingRule.registrationStripeProductId || '').trim()
+  if (productId) {
+    try {
+      const product = await stripe.products.retrieve(productId)
+      if (product && !product.deleted && isStripeObjectManagedForRule(product.metadata, orgId, siteId, ruleId)) {
+        await stripe.products.update(productId, { active: false })
+        archivedProduct = true
+      }
+    }
+    catch {
+      // no-op
+    }
+  }
+
+  return {
+    success: true,
+    archivedProduct,
+    archivedPriceIds,
+    invalidPriceIds,
+    skipped: !archivedProduct && !archivedPriceIds.length,
   }
 })
 
@@ -3274,7 +3812,6 @@ exports.restrictedContentCreateStripeLink = onCall({ timeoutSeconds: 180 }, asyn
   const requestedPriceId = String(data.priceId || '').trim()
   const successUrl = String(data.successUrl || data.returnUrl || '').trim()
   const cancelUrl = String(data.cancelUrl || data.returnUrl || '').trim()
-  const quantity = Math.max(1, Math.trunc(Number(data.quantity || 1) || 1))
 
   if (!orgId || !siteId || !ruleId)
     throw new HttpsError('invalid-argument', 'Missing orgId, siteId, or ruleId.')
@@ -3388,6 +3925,9 @@ exports.restrictedContentCreateStripeLink = onCall({ timeoutSeconds: 180 }, asyn
 
   const selectedPriceConfig = configuredPriceLookup[selectedPrice.id] || null
   const resolvedStripeProductId = String(rule.registrationStripeProductId || selectedPrice?.product || '').trim()
+  const quantity = Number.isFinite(Number(selectedPriceConfig?.seats || selectedPriceConfig?.quantity))
+    ? Math.max(1, Math.trunc(Number(selectedPriceConfig.seats || selectedPriceConfig.quantity)))
+    : Math.max(1, Math.trunc(Number(data.quantity || 1) || 1))
 
   const session = await stripe.checkout.sessions.create({
     mode: selectedPrice.recurring ? 'subscription' : 'payment',
@@ -3457,6 +3997,7 @@ exports.restrictedContentCreateStripeLink = onCall({ timeoutSeconds: 180 }, asyn
           priceId: selectedPrice.id,
           title: String(selectedPriceConfig.title || '').trim(),
           description: String(selectedPriceConfig.description || '').trim(),
+          seats: quantity,
         }
       : null,
   }
@@ -3828,6 +4369,34 @@ exports.syncUserMetaFromPublishedSiteSettings = onDocumentWritten(
       userId: userRef.id,
       fields: Object.keys(updatePayload),
     })
+  },
+)
+
+exports.syncPublishedRestrictedContentFromSite = onDocumentWritten(
+  { document: 'organizations/{orgId}/sites/{siteId}', timeoutSeconds: 180 },
+  async (event) => {
+    const change = event.data
+    if (!change?.after?.exists)
+      return
+
+    const orgId = event.params.orgId
+    const siteId = event.params.siteId
+    if (!orgId || !siteId || siteId === 'templates')
+      return
+
+    const beforeRestricted = change.before?.data()?.restrictedContent
+    const afterRestricted = change.after.data()?.restrictedContent
+    if (stableSerialize(beforeRestricted) === stableSerialize(afterRestricted))
+      return
+
+    const publishedRef = db.collection('organizations').doc(orgId).collection('published-site-settings').doc(siteId)
+    const publishedSnap = await publishedRef.get()
+    if (!publishedSnap.exists)
+      return
+
+    await publishedRef.set({
+      restrictedContent: (afterRestricted && typeof afterRestricted === 'object') ? afterRestricted : {},
+    }, { merge: true })
   },
 )
 

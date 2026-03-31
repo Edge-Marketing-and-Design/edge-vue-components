@@ -21,21 +21,53 @@ const edgeFirebase = inject('edgeFirebase')
 const { createRestrictedContentDefaults } = useSiteSettingsTemplate()
 
 const MEMBER_STATUSES = ['active', 'paused', 'revoked']
+const STRIPE_INTERVAL_OPTIONS = [
+  { value: 'day', label: 'Daily' },
+  { value: 'week', label: 'Weekly' },
+  { value: 'month', label: 'Monthly' },
+  { value: 'year', label: 'Yearly' },
+]
+const STRIPE_USD_MONEY_MASK = {
+  preProcess: val => String(val || '').replace(/[$,]/g, ''),
+  postProcess: (val) => {
+    if (!val)
+      return ''
+    const sub = 3 - (String(val).includes('.') ? String(val).length - String(val).indexOf('.') : 0)
+    return Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+    }).format(val).slice(0, sub ? -sub : undefined)
+  },
+}
+const createRulePriceClientId = () => globalThis.crypto?.randomUUID?.() || `price-opt-${Date.now()}-${Math.random().toString(16).slice(2)}`
 const createRulePriceOption = (value = {}) => {
   const normalizedValue = (value && typeof value === 'object') ? value : {}
+  const rawAmount = normalizedValue.amount ?? normalizedValue.unitAmount
+  const amount = Number.isFinite(Number(rawAmount)) ? Number(rawAmount) : 0
+  const interval = String(normalizedValue.interval || normalizedValue.recurringInterval || 'month').trim().toLowerCase()
+  const intervalCount = Number.isFinite(Number(normalizedValue.intervalCount || normalizedValue.recurringIntervalCount))
+    ? Math.max(1, Math.trunc(Number(normalizedValue.intervalCount || normalizedValue.recurringIntervalCount)))
+    : 1
+  const seats = Number.isFinite(Number(normalizedValue.seats || normalizedValue.quantity))
+    ? Math.max(1, Math.trunc(Number(normalizedValue.seats || normalizedValue.quantity)))
+    : 1
   return {
+    _cid: String(normalizedValue._cid || normalizedValue.clientId || createRulePriceClientId()),
     priceId: String(normalizedValue.priceId || normalizedValue.id || '').trim(),
     title: String(normalizedValue.title || '').trim(),
     description: String(normalizedValue.description || '').trim(),
+    amount,
+    currency: String(normalizedValue.currency || 'usd').trim().toLowerCase() || 'usd',
+    interval: ['day', 'week', 'month', 'year'].includes(interval) ? interval : 'month',
+    intervalCount,
+    seats,
   }
 }
 
 const normalizeRulePriceOptions = (value = []) => {
   if (!Array.isArray(value))
     return []
-  return value
-    .map(item => createRulePriceOption(item))
-    .filter(item => item.priceId)
+  return value.map(item => createRulePriceOption(item))
 }
 
 const normalizeObject = (value) => {
@@ -73,6 +105,7 @@ const createRuleDoc = (value = {}, fallbackId = '') => {
     registrationMode: 'paid',
     currency: 'USD',
     registrationStripeProductId: String(normalizedValue.registrationStripeProductId || normalizedValue.stripeProductId || '').trim(),
+    registrationStripeImage: String(normalizedValue.registrationStripeImage || normalizedValue.stripeImage || '').trim(),
     registrationStripePrices: normalizeRulePriceOptions(normalizedValue.registrationStripePrices || normalizedValue.stripePrices || []),
   }
 }
@@ -112,6 +145,7 @@ const pagesCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationD
 const postsCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.siteId}/posts`)
 const audienceUsersCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.siteId}/audience-users`)
 const stripeIntegrationCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.siteId}/private-integrations`)
+const publishedSiteSettingsCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`)
 
 const pickStripeIntegrationDoc = (value = {}) => {
   const normalized = (value && typeof value === 'object') ? value : {}
@@ -172,8 +206,18 @@ const state = reactive({
   rulePriceDialogOpen: false,
   rulePriceDialogIndex: -1,
   rulePriceDialogDraft: createRulePriceOption(),
+  rulePriceDialogAmountInput: '',
+  rulePriceDialogPriceIdReadonly: false,
   rulePriceDeleteDialogOpen: false,
   rulePriceDeleteIndex: -1,
+  stripeCatalogDialogOpen: false,
+  stripeCatalogLoading: false,
+  stripeCatalogProducts: [],
+  stripeCatalogSelections: {},
+  stripeCatalogImporting: false,
+  ruleStripeSyncing: false,
+  ruleStripeSyncError: '',
+  ruleImagePickerOpen: false,
 })
 
 const memberSchema = toTypedSchema(z.object({
@@ -189,7 +233,7 @@ const memberDocSchema = {
   email: { value: '' },
   audienceUserId: { value: '' },
   status: { value: 'active' },
-  accessRuleIds: { value: [] },
+  manualAccessRuleIds: { value: [] },
   notes: { value: '' },
 }
 
@@ -232,6 +276,9 @@ const normalizeMemberRow = (member = {}) => {
     audienceUserId: String(member?.audienceUserId || docId).trim(),
     status: String(member?.status || 'active').trim() || 'active',
     accessRuleIds: Array.isArray(member?.accessRuleIds) ? member.accessRuleIds : [],
+    manualAccessRuleIds: Array.isArray(member?.manualAccessRuleIds) ? member.manualAccessRuleIds : [],
+    paidAccessRuleIds: Array.isArray(member?.paidAccessRuleIds) ? member.paidAccessRuleIds : [],
+    pendingPaymentRuleIds: Array.isArray(member?.pendingPaymentRuleIds) ? member.pendingPaymentRuleIds : [],
     notes: String(member?.notes || '').trim(),
     authUid: String(member?.authUid || '').trim(),
     stagedUserId: String(member?.stagedUserId || '').trim(),
@@ -423,7 +470,7 @@ const filteredMembers = computed(() => {
       const haystack = [
         item?.audienceUserId,
         getAudienceUserLabel(item?.audienceUserId),
-        ...(Array.isArray(item?.accessRuleIds) ? item.accessRuleIds.map(ruleId => getRuleLabel(ruleId)) : []),
+        ...(Array.isArray(item?.manualAccessRuleIds) ? item.manualAccessRuleIds.map(ruleId => getRuleLabel(ruleId)) : []),
         item?.status,
       ].map(value => String(value || '').toLowerCase()).join(' ')
       return haystack.includes(filter)
@@ -444,15 +491,6 @@ const stripeDirty = computed(() => {
   return JSON.stringify(normalizeObject(buildStripeIntegration(state.stripeIntegration))) !== JSON.stringify(normalizeObject(currentStripeIntegration.value))
 })
 
-const normalizeRuleForSite = (value = {}) => {
-  const nextRule = createRuleDoc(value, value?.id || value?.docId || '')
-  nextRule.protected = true
-  nextRule.allowRegistration = true
-  nextRule.registrationMode = 'paid'
-  nextRule.registrationStripePrices = normalizeRulePriceOptions(nextRule.registrationStripePrices)
-  return nextRule
-}
-
 const statusClass = (status) => {
   const normalized = String(status || '').toLowerCase()
   if (normalized === 'revoked')
@@ -471,15 +509,29 @@ const syncStripeIntegrationFromDoc = () => {
 }
 
 const persistRestrictedSettings = async (nextSettings, options = {}) => {
+  const normalizedNextSettings = buildRestrictedSettings(nextSettings)
   const nextVersion = Number.isFinite(Number(props.siteDoc?.version))
     ? Math.max(0, Math.trunc(Number(props.siteDoc.version))) + 1
     : 1
   await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.siteId, {
-    restrictedContent: buildRestrictedSettings(nextSettings),
+    restrictedContent: normalizedNextSettings,
     version: nextVersion,
   })
+
+  try {
+    const publishedDoc = await edgeFirebase.getDocData(publishedSiteSettingsCollectionPath.value, props.siteId)
+    if (publishedDoc?.docId) {
+      await edgeFirebase.changeDoc(publishedSiteSettingsCollectionPath.value, props.siteId, {
+        restrictedContent: normalizedNextSettings,
+      })
+    }
+  }
+  catch (error) {
+    console.warn('persistRestrictedSettings published rules sync skipped', error)
+  }
+
   if (options?.syncState !== false)
-    state.settings = buildRestrictedSettings(nextSettings)
+    state.settings = normalizedNextSettings
 }
 
 const saveSettings = async () => {
@@ -521,6 +573,7 @@ const saveStripeIntegration = async () => {
       throw new Error(String(result?.message || 'Unable to save Stripe settings right now.'))
     state.stripeIntegration = buildStripeIntegration(payload)
     edgeFirebase?.toast?.success?.('Stripe settings saved.')
+    await openStripeCatalogImportDialog()
   }
   catch (error) {
     console.error('saveStripeIntegration failed', error)
@@ -533,6 +586,128 @@ const saveStripeIntegration = async () => {
 
 const resetStripeIntegration = () => {
   syncStripeIntegrationFromDoc()
+}
+
+const getStripeCatalogSelectionState = (productId) => {
+  const key = String(productId || '').trim()
+  if (!key)
+    return { selected: false, prices: {} }
+  if (!state.stripeCatalogSelections[key])
+    state.stripeCatalogSelections[key] = { selected: false, prices: {} }
+  return state.stripeCatalogSelections[key]
+}
+
+const setStripeCatalogDefaults = (products = []) => {
+  const nextSelections = {}
+  products.forEach((product) => {
+    const productId = String(product?.productId || '').trim()
+    if (!productId)
+      return
+    const priceSelections = {}
+    ;(Array.isArray(product?.prices) ? product.prices : []).forEach((price) => {
+      const priceId = String(price?.id || '').trim()
+      if (!priceId)
+        return
+      priceSelections[priceId] = Boolean(price?.managed)
+    })
+    nextSelections[productId] = {
+      selected: Boolean(product?.managed),
+      prices: priceSelections,
+    }
+  })
+  state.stripeCatalogSelections = nextSelections
+}
+
+const openStripeCatalogImportDialog = async () => {
+  state.stripeCatalogLoading = true
+  try {
+    const uid = String(edgeFirebase?.user?.uid || edgeFirebase?.user?.firebaseUser?.uid || '').trim()
+    const orgId = String(edgeGlobal?.edgeState?.currentOrganization || '').trim()
+    if (!uid || !orgId || !props.siteId)
+      return
+    const response = await edgeFirebase.runFunction('cms-restrictedContentGetStripeCatalog', {
+      uid,
+      orgId,
+      siteId: props.siteId,
+    })
+    const result = response?.data || response || {}
+    const products = Array.isArray(result?.products) ? result.products : []
+    state.stripeCatalogProducts = products
+    setStripeCatalogDefaults(products)
+    state.stripeCatalogDialogOpen = true
+  }
+  catch (error) {
+    console.error('openStripeCatalogImportDialog failed', error)
+    edgeFirebase?.toast?.error?.(String(error?.message || 'Unable to fetch Stripe catalog right now.'))
+  }
+  finally {
+    state.stripeCatalogLoading = false
+  }
+}
+
+const toggleStripeCatalogProduct = (productId, checked) => {
+  const selection = getStripeCatalogSelectionState(productId)
+  selection.selected = Boolean(checked)
+}
+
+const toggleStripeCatalogPrice = (productId, priceId, checked) => {
+  const selection = getStripeCatalogSelectionState(productId)
+  selection.prices[String(priceId || '').trim()] = Boolean(checked)
+}
+
+const importSelectedStripeCatalog = async () => {
+  if (state.stripeCatalogImporting)
+    return
+  const selections = (state.stripeCatalogProducts || []).map((product) => {
+    const productId = String(product?.productId || '').trim()
+    const selection = getStripeCatalogSelectionState(productId)
+    const selectedPriceIds = (Array.isArray(product?.prices) ? product.prices : [])
+      .map(price => String(price?.id || '').trim())
+      .filter(priceId => priceId && selection.prices[priceId] === true)
+    if (!selection.selected || !productId || !selectedPriceIds.length)
+      return null
+    return {
+      productId,
+      name: String(product?.name || '').trim(),
+      priceIds: selectedPriceIds,
+    }
+  }).filter(Boolean)
+
+  if (!selections.length) {
+    state.stripeCatalogDialogOpen = false
+    return
+  }
+
+  state.stripeCatalogImporting = true
+  try {
+    const uid = String(edgeFirebase?.user?.uid || edgeFirebase?.user?.firebaseUser?.uid || '').trim()
+    const orgId = String(edgeGlobal?.edgeState?.currentOrganization || '').trim()
+    const response = await edgeFirebase.runFunction('cms-restrictedContentImportStripeCatalog', {
+      uid,
+      orgId,
+      siteId: props.siteId,
+      selections,
+    })
+    const result = response?.data || response || {}
+    const importedRules = Array.isArray(result?.rules) ? result.rules : []
+    if (importedRules.length) {
+      const nextSettings = buildRestrictedSettings({
+        ...state.settings,
+        rules: importedRules,
+      })
+      state.settings = nextSettings
+      await persistRestrictedSettings(nextSettings)
+    }
+    state.stripeCatalogDialogOpen = false
+    edgeFirebase?.toast?.success?.(`Imported ${Number(result?.imported || 0)} Stripe products.`)
+  }
+  catch (error) {
+    console.error('importSelectedStripeCatalog failed', error)
+    edgeFirebase?.toast?.error?.(String(error?.message || 'Unable to import Stripe catalog right now.'))
+  }
+  finally {
+    state.stripeCatalogImporting = false
+  }
 }
 
 const loadInitialMembers = async () => {
@@ -639,9 +814,12 @@ const openNewRule = async () => {
     allowRegistration: true,
     registrationMode: 'paid',
     registrationStripeProductId: '',
+    registrationStripeImage: '',
     registrationStripePrices: [],
   })
   state.ruleError = ''
+  state.ruleStripeSyncError = ''
+  state.ruleImagePickerOpen = false
 }
 
 const removeRulePriceOption = (index) => {
@@ -678,6 +856,8 @@ const confirmDeleteRulePriceOption = () => {
 const openNewRulePriceOptionDialog = () => {
   state.rulePriceDialogIndex = -1
   state.rulePriceDialogDraft = createRulePriceOption()
+  state.rulePriceDialogAmountInput = ''
+  state.rulePriceDialogPriceIdReadonly = false
   state.rulePriceDialogOpen = true
 }
 
@@ -688,6 +868,10 @@ const openEditRulePriceOptionDialog = (index) => {
     return
   state.rulePriceDialogIndex = index
   state.rulePriceDialogDraft = createRulePriceOption(state.ruleWorkingDoc.registrationStripePrices[index])
+  state.rulePriceDialogAmountInput = Number(state.rulePriceDialogDraft.amount || 0) > 0
+    ? Number(state.rulePriceDialogDraft.amount).toFixed(2)
+    : ''
+  state.rulePriceDialogPriceIdReadonly = Boolean(String(state.rulePriceDialogDraft.priceId || '').trim())
   state.rulePriceDialogOpen = true
 }
 
@@ -695,12 +879,43 @@ const closeRulePriceOptionDialog = () => {
   state.rulePriceDialogOpen = false
   state.rulePriceDialogIndex = -1
   state.rulePriceDialogDraft = createRulePriceOption()
+  state.rulePriceDialogAmountInput = ''
+  state.rulePriceDialogPriceIdReadonly = false
+}
+
+const parseRulePriceAmountInput = (value) => {
+  const parsed = Number(String(value || '')
+    .replace(/[^0-9.]/g, '')
+    .replace(/^(\d*\.?\d*).*$/, '$1'))
+  return Number.isFinite(parsed) ? parsed : 0
 }
 
 const saveRulePriceOptionDialog = () => {
   const nextOption = createRulePriceOption(state.rulePriceDialogDraft)
-  if (!nextOption.priceId)
+  nextOption.amount = parseRulePriceAmountInput(state.rulePriceDialogAmountInput)
+  nextOption.currency = 'usd'
+  if (!nextOption.title) {
+    state.ruleError = 'Price option title is required.'
     return
+  }
+  if (!Number.isFinite(Number(nextOption.amount)) || Number(nextOption.amount) <= 0) {
+    state.ruleError = 'Price option amount must be greater than 0.'
+    return
+  }
+  if (!Number.isFinite(Number(nextOption.seats)) || Number(nextOption.seats) < 1) {
+    state.ruleError = 'Seats must be at least 1.'
+    return
+  }
+  state.ruleError = ''
+  if (!nextOption._cid)
+    nextOption._cid = createRulePriceClientId()
+
+  if (state.rulePriceDialogPriceIdReadonly)
+    nextOption.priceId = String(state.rulePriceDialogDraft.priceId || '').trim()
+
+  if (state.rulePriceDialogIndex >= 0 && state.rulePriceDialogIndex < (state.ruleWorkingDoc.registrationStripePrices || []).length)
+    nextOption._cid = state.ruleWorkingDoc.registrationStripePrices[state.rulePriceDialogIndex]?._cid || nextOption._cid
+
   if (!Array.isArray(state.ruleWorkingDoc.registrationStripePrices))
     state.ruleWorkingDoc.registrationStripePrices = []
 
@@ -719,12 +934,16 @@ const openRule = async (docId) => {
   state.selectedRuleId = docId
   state.ruleWorkingDoc = createRuleDoc(currentRules.value.find(item => item.id === docId), docId)
   state.ruleError = ''
+  state.ruleStripeSyncError = ''
+  state.ruleImagePickerOpen = false
 }
 
 const closeRuleEditor = () => {
   state.selectedRuleId = ''
   state.ruleWorkingDoc = createRuleDoc()
   state.ruleError = ''
+  state.ruleStripeSyncError = ''
+  state.ruleImagePickerOpen = false
 }
 
 const openDeleteRuleDialog = async (docId) => {
@@ -739,6 +958,50 @@ const closeDeleteRuleDialog = () => {
     return
   state.ruleDeleteDialogOpen = false
   state.ruleDeleteDocId = ''
+}
+
+const formatRulePriceSummary = (priceOption = {}) => {
+  const amount = Number(priceOption?.amount || 0)
+  const currency = String(priceOption?.currency || 'usd').toUpperCase()
+  const interval = String(priceOption?.interval || 'month').toLowerCase()
+  const intervalCount = Math.max(1, Number(priceOption?.intervalCount || 1) || 1)
+  const amountLabel = Number.isFinite(amount) ? amount.toFixed(2) : '0.00'
+  const intervalLabel = intervalCount > 1 ? `${intervalCount} ${interval}s` : interval
+  const seats = Math.max(1, Number(priceOption?.seats || 1) || 1)
+  const seatsLabel = seats === 1 ? '1 seat' : `${seats} seats`
+  return `${amountLabel} ${currency} / ${intervalLabel} · ${seatsLabel}`
+}
+
+const normalizePriceOptionForSave = (option = {}) => {
+  const normalized = createRulePriceOption(option)
+  return {
+    priceId: String(normalized.priceId || '').trim(),
+    title: String(normalized.title || '').trim(),
+    description: String(normalized.description || '').trim(),
+    amount: Number.isFinite(Number(normalized.amount)) ? Number(normalized.amount) : 0,
+    currency: 'usd',
+    interval: ['day', 'week', 'month', 'year'].includes(String(normalized.interval || '').toLowerCase())
+      ? String(normalized.interval || '').toLowerCase()
+      : 'month',
+    intervalCount: Number.isFinite(Number(normalized.intervalCount))
+      ? Math.max(1, Math.trunc(Number(normalized.intervalCount)))
+      : 1,
+    seats: Number.isFinite(Number(normalized.seats))
+      ? Math.max(1, Math.trunc(Number(normalized.seats)))
+      : 1,
+  }
+}
+
+const normalizeRuleForSite = (value = {}) => {
+  const nextRule = createRuleDoc(value, value?.id || value?.docId || '')
+  nextRule.protected = true
+  nextRule.allowRegistration = true
+  nextRule.registrationMode = 'paid'
+  nextRule.registrationStripeImage = String(nextRule.registrationStripeImage || '').trim()
+  nextRule.registrationStripePrices = Array.isArray(nextRule.registrationStripePrices)
+    ? nextRule.registrationStripePrices.map(item => normalizePriceOptionForSave(item))
+    : []
+  return nextRule
 }
 
 const saveRule = async () => {
@@ -758,6 +1021,7 @@ const saveRule = async () => {
   }
   state.ruleSubmitting = true
   state.ruleError = ''
+  state.ruleStripeSyncError = ''
   try {
     const nextRules = normalizeRestrictedRules(currentRules.value.filter(item => item.id !== nextRule.id).concat(nextRule))
     const nextSettings = buildRestrictedSettings({
@@ -765,8 +1029,11 @@ const saveRule = async () => {
       rules: nextRules,
     })
     await persistRestrictedSettings(nextSettings)
+    await syncRuleToStripe(nextRule.id, { showToast: false })
     state.selectedRuleId = nextRule.id
-    state.ruleWorkingDoc = createRuleDoc(nextRule, nextRule.id)
+    const savedRule = currentRules.value.find(item => item.id === nextRule.id) || nextRule
+    state.ruleWorkingDoc = createRuleDoc(savedRule, nextRule.id)
+    edgeFirebase?.toast?.success?.('Plan saved and synced to Stripe.')
   }
   catch (error) {
     state.ruleError = String(error?.message || 'Unable to save this plan right now.')
@@ -776,12 +1043,79 @@ const saveRule = async () => {
   }
 }
 
+async function syncRuleToStripe(ruleId, { showToast = true } = {}) {
+  const normalizedRuleId = String(ruleId || '').trim()
+  if (!normalizedRuleId || normalizedRuleId === 'new')
+    return null
+  state.ruleStripeSyncing = true
+  state.ruleStripeSyncError = ''
+  try {
+    const uid = String(edgeFirebase?.user?.uid || edgeFirebase?.user?.firebaseUser?.uid || '').trim()
+    const orgId = String(edgeGlobal?.edgeState?.currentOrganization || '').trim()
+    if (!uid || !orgId || !props.siteId)
+      throw new Error('Missing context required to sync this plan.')
+
+    const response = await edgeFirebase.runFunction('cms-restrictedContentSyncStripeRule', {
+      uid,
+      orgId,
+      siteId: props.siteId,
+      ruleId: normalizedRuleId,
+    })
+    const result = response?.data || response || {}
+    const syncedRule = createRuleDoc(result?.rule || {}, normalizedRuleId)
+    if (!syncedRule.id)
+      throw new Error('Stripe sync succeeded but returned an invalid rule.')
+
+    const nextRules = normalizeRestrictedRules(currentRules.value.map((item) => {
+      if (item.id !== syncedRule.id)
+        return item
+      return syncedRule
+    }))
+    state.settings = buildRestrictedSettings({
+      ...state.settings,
+      rules: nextRules,
+    })
+    if (state.selectedRuleId === syncedRule.id)
+      state.ruleWorkingDoc = createRuleDoc(syncedRule, syncedRule.id)
+
+    const invalidCount = Array.isArray(result?.invalidPriceIds) ? result.invalidPriceIds.length : 0
+    if (showToast) {
+      if (invalidCount)
+        edgeFirebase?.toast?.error?.(`Synced plan, but ${invalidCount} price IDs were invalid or not on this product.`)
+      else
+        edgeFirebase?.toast?.success?.(result?.createdProduct ? 'Stripe product created and synced.' : 'Stripe product synced.')
+    }
+    return result
+  }
+  catch (error) {
+    console.error('syncRuleToStripe failed', error)
+    state.ruleStripeSyncError = String(error?.message || 'Unable to sync this plan to Stripe right now.')
+    if (showToast)
+      edgeFirebase?.toast?.error?.(state.ruleStripeSyncError)
+    throw error
+  }
+  finally {
+    state.ruleStripeSyncing = false
+  }
+}
+
 const deleteRule = async () => {
   const docId = String(state.ruleDeleteDocId || '').trim()
   if (!docId || state.ruleDeleteSubmitting)
     return
   state.ruleDeleteSubmitting = true
   try {
+    const uid = String(edgeFirebase?.user?.uid || edgeFirebase?.user?.firebaseUser?.uid || '').trim()
+    const orgId = String(edgeGlobal?.edgeState?.currentOrganization || '').trim()
+    if (uid && orgId && props.siteId) {
+      await edgeFirebase.runFunction('cms-restrictedContentDeleteStripeRule', {
+        uid,
+        orgId,
+        siteId: props.siteId,
+        ruleId: docId,
+      })
+    }
+
     const pageUpdates = Object.values(sitePages.value || {})
       .filter(item => item?.docId)
       .flatMap((page) => {
@@ -807,10 +1141,23 @@ const deleteRule = async () => {
       })
 
     const loadedMemberUpdates = filteredMembers.value
-      .filter(item => Array.isArray(item?.accessRuleIds) && item.accessRuleIds.includes(docId))
+      .filter((item) => {
+        return (Array.isArray(item?.accessRuleIds) && item.accessRuleIds.includes(docId))
+          || (Array.isArray(item?.manualAccessRuleIds) && item.manualAccessRuleIds.includes(docId))
+          || (Array.isArray(item?.paidAccessRuleIds) && item.paidAccessRuleIds.includes(docId))
+          || (Array.isArray(item?.pendingPaymentRuleIds) && item.pendingPaymentRuleIds.includes(docId))
+      })
       .map((member) => {
         const nextAccessRuleIds = member.accessRuleIds.filter(ruleId => ruleId !== docId)
-        return edgeFirebase.changeDoc(membersCollectionPath.value, member.docId, { accessRuleIds: nextAccessRuleIds })
+        const nextManualAccessRuleIds = (Array.isArray(member.manualAccessRuleIds) ? member.manualAccessRuleIds : []).filter(ruleId => ruleId !== docId)
+        const nextPaidAccessRuleIds = (Array.isArray(member.paidAccessRuleIds) ? member.paidAccessRuleIds : []).filter(ruleId => ruleId !== docId)
+        const nextPendingPaymentRuleIds = (Array.isArray(member.pendingPaymentRuleIds) ? member.pendingPaymentRuleIds : []).filter(ruleId => ruleId !== docId)
+        return edgeFirebase.changeDoc(membersCollectionPath.value, member.docId, {
+          accessRuleIds: nextAccessRuleIds,
+          manualAccessRuleIds: nextManualAccessRuleIds,
+          paidAccessRuleIds: nextPaidAccessRuleIds,
+          pendingPaymentRuleIds: nextPendingPaymentRuleIds,
+        })
       })
 
     if (pageUpdates.length || postUpdates.length || loadedMemberUpdates.length)
@@ -826,8 +1173,10 @@ const deleteRule = async () => {
       state.selectedRuleId = ''
     state.ruleWorkingDoc = createRuleDoc()
     state.ruleError = ''
+    state.ruleStripeSyncError = ''
     state.ruleDeleteDialogOpen = false
     state.ruleDeleteDocId = ''
+    edgeFirebase?.toast?.success?.('Plan deleted and synced to Stripe.')
   }
   finally {
     state.ruleDeleteSubmitting = false
@@ -1008,22 +1357,54 @@ onBeforeUnmount(async () => {
             {{ state.rulePriceDialogIndex >= 0 ? 'Edit Stripe Price Option' : 'Add Stripe Price Option' }}
           </DialogTitle>
           <DialogDescription class="text-left">
-            Set the Stripe price id and the display copy shown to users.
+            Configure plan pricing here. Stripe price id is generated during plan save sync.
           </DialogDescription>
         </DialogHeader>
         <div class="space-y-3">
-          <edge-shad-input
-            v-model="state.rulePriceDialogDraft.priceId"
-            name="restricted-rule-price-dialog-id"
-            label="Stripe Price ID"
-            placeholder="price_..."
-          />
+          <div v-if="state.rulePriceDialogIndex >= 0 && String(state.rulePriceDialogDraft.priceId || '').trim()" class="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            Stripe Price ID: <span class="font-medium text-foreground">{{ state.rulePriceDialogDraft.priceId }}</span>
+          </div>
           <edge-shad-input
             v-model="state.rulePriceDialogDraft.title"
             name="restricted-rule-price-dialog-title"
             label="Title"
             placeholder="Pro Plan"
           />
+          <edge-shad-input
+            v-model="state.rulePriceDialogAmountInput"
+            name="restricted-rule-price-dialog-amount"
+            label="Amount (USD)"
+            placeholder="10.00"
+            description="Enter what the member pays (for example 10 or 10.99)."
+            :mask-options="STRIPE_USD_MONEY_MASK"
+          />
+          <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_140px_140px]">
+            <edge-shad-select
+              v-model="state.rulePriceDialogDraft.interval"
+              name="restricted-rule-price-dialog-interval"
+              label="Billing Interval"
+              :items="STRIPE_INTERVAL_OPTIONS"
+              item-title="label"
+              item-value="value"
+            />
+            <edge-shad-input
+              v-model.number="state.rulePriceDialogDraft.intervalCount"
+              name="restricted-rule-price-dialog-interval-count"
+              type="number"
+              label="Interval Count"
+              placeholder="1"
+            />
+            <edge-shad-input
+              v-model.number="state.rulePriceDialogDraft.seats"
+              name="restricted-rule-price-dialog-seats"
+              type="number"
+              label="Seats"
+              placeholder="1"
+            />
+          </div>
+          <div class="text-xs text-muted-foreground">
+            Interval Count controls how many intervals per charge. Seats controls checkout quantity for this option (for example 5 seats or 10 seats).
+          </div>
           <edge-shad-textarea
             v-model="state.rulePriceDialogDraft.description"
             name="restricted-rule-price-dialog-description"
@@ -1035,7 +1416,7 @@ onBeforeUnmount(async () => {
           <edge-shad-button variant="outline" @click="closeRulePriceOptionDialog">
             Cancel
           </edge-shad-button>
-          <edge-shad-button class="bg-slate-800 text-white hover:bg-slate-700" :disabled="!String(state.rulePriceDialogDraft.priceId || '').trim()" @click="saveRulePriceOptionDialog">
+          <edge-shad-button class="bg-slate-800 text-white hover:bg-slate-700" :disabled="!String(state.rulePriceDialogDraft.title || '').trim() || parseRulePriceAmountInput(state.rulePriceDialogAmountInput) <= 0" @click="saveRulePriceOptionDialog">
             Save Option
           </edge-shad-button>
         </DialogFooter>
@@ -1057,6 +1438,80 @@ onBeforeUnmount(async () => {
           </edge-shad-button>
           <edge-shad-button class="bg-red-700 text-white hover:bg-red-600" @click="confirmDeleteRulePriceOption">
             Delete Option
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
+    <edge-shad-dialog v-model="state.stripeCatalogDialogOpen">
+      <DialogContent class="max-w-4xl pt-8">
+        <DialogHeader>
+          <DialogTitle class="text-left">
+            Import Stripe Products & Prices
+          </DialogTitle>
+          <DialogDescription class="text-left">
+            Choose which Stripe products and prices should be added to Paid Access Plans.
+          </DialogDescription>
+        </DialogHeader>
+        <div class="max-h-[60vh] overflow-y-auto">
+          <div v-if="state.stripeCatalogLoading" class="py-8 text-sm text-muted-foreground">
+            Loading Stripe catalog...
+          </div>
+          <div v-else-if="!state.stripeCatalogProducts.length" class="py-8 text-sm text-muted-foreground">
+            No Stripe products with active prices were found.
+          </div>
+          <div v-else class="space-y-3">
+            <div
+              v-for="product in state.stripeCatalogProducts"
+              :key="product.productId"
+              class="rounded-lg border border-border/60 bg-background p-3"
+            >
+              <label class="flex cursor-pointer items-start gap-2">
+                <input
+                  type="checkbox"
+                  :checked="Boolean(getStripeCatalogSelectionState(product.productId).selected)"
+                  class="mt-1"
+                  @change="toggleStripeCatalogProduct(product.productId, $event.target?.checked)"
+                >
+                <div class="min-w-0">
+                  <div class="truncate text-sm font-semibold text-foreground">
+                    {{ product.name || product.productId }}
+                  </div>
+                  <div class="truncate text-xs text-muted-foreground">
+                    {{ product.productId }}
+                  </div>
+                </div>
+              </label>
+              <div class="mt-2 space-y-2 pl-6">
+                <label
+                  v-for="price in (Array.isArray(product.prices) ? product.prices : [])"
+                  :key="price.id"
+                  class="flex cursor-pointer items-start gap-2 rounded border border-border/50 p-2"
+                >
+                  <input
+                    type="checkbox"
+                    :checked="Boolean(getStripeCatalogSelectionState(product.productId).prices[String(price.id || '').trim()])"
+                    class="mt-1"
+                    @change="toggleStripeCatalogPrice(product.productId, price.id, $event.target?.checked)"
+                  >
+                  <div class="min-w-0">
+                    <div class="truncate text-xs font-semibold text-foreground">
+                      {{ price.nickname || price.id }}
+                    </div>
+                    <div class="truncate text-[11px] text-muted-foreground">
+                      {{ price.id }} · {{ (Number(price.unitAmount || 0) / 100).toFixed(2) }} {{ String(price.currency || 'usd').toUpperCase() }}
+                    </div>
+                  </div>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+        <DialogFooter class="flex justify-between pt-2">
+          <edge-shad-button variant="outline" :disabled="state.stripeCatalogImporting" @click="state.stripeCatalogDialogOpen = false">
+            Skip
+          </edge-shad-button>
+          <edge-shad-button class="bg-slate-800 text-white hover:bg-slate-700" :disabled="state.stripeCatalogImporting" @click="importSelectedStripeCatalog">
+            Import Selected
           </edge-shad-button>
         </DialogFooter>
       </DialogContent>
@@ -1195,10 +1650,17 @@ onBeforeUnmount(async () => {
                       Stripe Settings
                     </div>
                   </div>
-                  <div class="flex items-center gap-2">
-                    <edge-shad-button
-                      variant="outline"
-                      :disabled="!stripeDirty || state.stripeSaving"
+                <div class="flex items-center gap-2">
+                  <edge-shad-button
+                    variant="outline"
+                    :disabled="state.stripeSaving || state.stripeCatalogLoading"
+                    @click="openStripeCatalogImportDialog"
+                  >
+                    Import from Stripe
+                  </edge-shad-button>
+                  <edge-shad-button
+                    variant="outline"
+                    :disabled="!stripeDirty || state.stripeSaving"
                       @click="resetStripeIntegration"
                     >
                       Reset Stripe
@@ -1315,6 +1777,9 @@ onBeforeUnmount(async () => {
                       <div class="truncate font-semibold text-foreground">
                         {{ item.name || item.id }}
                       </div>
+                      <div v-if="item.registrationStripeProductId" class="mt-1 truncate text-[11px] text-muted-foreground">
+                        {{ item.registrationStripeProductId }}
+                      </div>
                     </div>
                     <edge-shad-button
                       size="icon"
@@ -1336,9 +1801,14 @@ onBeforeUnmount(async () => {
               <CardContent class="h-full min-h-0 overflow-hidden p-0">
                 <div v-if="state.selectedRuleId" class="flex h-full min-h-0 flex-col">
                   <div class="flex items-center justify-between border-b border-border/60 px-6 py-4">
-                    <div class="flex min-w-0 items-center text-sm font-semibold text-foreground">
-                      <ShieldCheck class="mr-2 h-4 w-4" />
-                      <span class="truncate">{{ state.selectedRuleId === 'new' ? 'New Plan' : (state.ruleWorkingDoc.name || 'Edit Plan') }}</span>
+                    <div class="min-w-0">
+                      <div class="flex min-w-0 items-center text-sm font-semibold text-foreground">
+                        <ShieldCheck class="mr-2 h-4 w-4" />
+                        <span class="truncate">{{ state.selectedRuleId === 'new' ? 'New Plan' : (state.ruleWorkingDoc.name || 'Edit Plan') }}</span>
+                      </div>
+                      <div v-if="state.ruleWorkingDoc.registrationStripeProductId" class="mt-1 truncate text-[11px] text-muted-foreground">
+                        Stripe Product ID: {{ state.ruleWorkingDoc.registrationStripeProductId }}
+                      </div>
                     </div>
                     <div class="flex items-center gap-2">
                       <edge-shad-button
@@ -1359,6 +1829,7 @@ onBeforeUnmount(async () => {
                   </div>
                   <div class="min-h-0 flex-1 overflow-y-auto">
                     <edge-shad-form
+                      :key="`rule-form-${state.selectedRuleId || 'none'}`"
                       :initial-values="{
                         'restricted-rule-name': state.ruleWorkingDoc.name,
                       }"
@@ -1367,11 +1838,64 @@ onBeforeUnmount(async () => {
                         <edge-shad-input
                           v-model="state.ruleWorkingDoc.name"
                           name="restricted-rule-name"
-                          label="Plan Name"
-                          description="Use one plan for any pages and posts that should share the same access."
+                          label="Name"
+                          description="This is the same rule name used everywhere else in the system."
                         />
+                        <div class="space-y-2 rounded-lg border border-border/60 bg-muted/20 p-4">
+                          <label class="text-sm font-semibold text-foreground flex items-center justify-between">
+                            Stripe Product Image
+                            <edge-shad-button
+                              v-if="props.siteId"
+                              type="button"
+                              variant="link"
+                              class="h-auto px-0 text-sm"
+                              @click="state.ruleImagePickerOpen = !state.ruleImagePickerOpen"
+                            >
+                              {{ state.ruleImagePickerOpen ? 'Hide picker' : 'Select image' }}
+                            </edge-shad-button>
+                          </label>
+                          <div class="flex items-center gap-3">
+                            <img
+                              v-if="state.ruleWorkingDoc.registrationStripeImage"
+                              :src="state.ruleWorkingDoc.registrationStripeImage"
+                              alt="Stripe product image"
+                              class="h-14 w-14 rounded-md border border-border object-cover"
+                            >
+                            <div class="min-w-0 flex-1 text-xs text-muted-foreground">
+                              {{ state.ruleWorkingDoc.registrationStripeImage || 'No image selected. If blank, sync uses site logo when available.' }}
+                            </div>
+                            <edge-shad-button
+                              v-if="state.ruleWorkingDoc.registrationStripeImage"
+                              type="button"
+                              variant="ghost"
+                              class="h-8"
+                              @click="state.ruleWorkingDoc.registrationStripeImage = ''"
+                            >
+                              Remove
+                            </edge-shad-button>
+                          </div>
+                          <edge-shad-input
+                            v-model="state.ruleWorkingDoc.registrationStripeImage"
+                            name="restricted-rule-image"
+                            label="Image URL"
+                            placeholder="https://..."
+                          />
+                          <div v-if="state.ruleImagePickerOpen && props.siteId" class="rounded-lg border border-dashed border-border/70 p-2">
+                            <edge-cms-media-manager
+                              :site="props.siteId"
+                              :select-mode="true"
+                              @select="(url) => {
+                                state.ruleWorkingDoc.registrationStripeImage = String(url || '').trim()
+                                state.ruleImagePickerOpen = false
+                              }"
+                            />
+                          </div>
+                        </div>
                         <div v-if="state.ruleError" class="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-700 dark:bg-red-950/30 dark:text-red-200">
                           {{ state.ruleError }}
+                        </div>
+                        <div v-if="state.ruleStripeSyncError" class="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200">
+                          {{ state.ruleStripeSyncError }}
                         </div>
                         <div class="space-y-3 rounded-lg border border-border/60 bg-muted/20 p-4">
                           <div class="flex items-center justify-between gap-3">
@@ -1380,7 +1904,7 @@ onBeforeUnmount(async () => {
                                 Stripe Price Options
                               </div>
                               <p class="text-xs text-muted-foreground">
-                                Add one or more Stripe price IDs. Drag to control display order.
+                                Add one or more app-defined price options. Stripe price ids are generated on save.
                               </p>
                             </div>
                             <edge-shad-button type="button" class="h-8 gap-2 bg-slate-800 text-white hover:bg-slate-700" @click="openNewRulePriceOptionDialog">
@@ -1392,7 +1916,7 @@ onBeforeUnmount(async () => {
                           <div v-if="Array.isArray(state.ruleWorkingDoc.registrationStripePrices) && state.ruleWorkingDoc.registrationStripePrices.length" class="space-y-3">
                             <draggable
                               v-model="state.ruleWorkingDoc.registrationStripePrices"
-                              item-key="priceId"
+                              item-key="_cid"
                               handle=".handle"
                               class="space-y-2"
                             >
@@ -1402,9 +1926,15 @@ onBeforeUnmount(async () => {
                                     <button type="button" class="handle inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted">
                                       <GripVertical class="h-4 w-4" />
                                     </button>
-                                    <button type="button" class="min-w-0 truncate text-left text-sm font-medium text-foreground hover:underline" @click="openEditRulePriceOptionDialog(index)">
-                                      {{ String(element?.title || '').trim() || String(element?.priceId || '').trim() || `Option ${index + 1}` }}
-                                    </button>
+                                    <div class="min-w-0">
+                                      <button type="button" class="min-w-0 truncate text-left text-sm font-medium text-foreground hover:underline" @click="openEditRulePriceOptionDialog(index)">
+                                        {{ String(element?.title || '').trim() || `Option ${index + 1}` }}
+                                      </button>
+                                      <div class="truncate text-[11px] text-muted-foreground">
+                                        {{ formatRulePriceSummary(element) }}
+                                        <span v-if="String(element?.priceId || '').trim()"> · {{ element.priceId }}</span>
+                                      </div>
+                                    </div>
                                   </div>
                                   <div class="flex items-center gap-1">
                                     <edge-shad-button type="button" size="icon" variant="ghost" class="h-7 w-7" @click="openEditRulePriceOptionDialog(index)">
@@ -1538,11 +2068,11 @@ onBeforeUnmount(async () => {
                         {{ item.name || item.email || getAudienceUserLabel(item.audienceUserId) || item.docId }}
                       </div>
                       <div class="mt-1 text-xs text-muted-foreground">
-                        {{ Array.isArray(item.accessRuleIds) ? item.accessRuleIds.length : 0 }} assigned plan{{ (Array.isArray(item.accessRuleIds) ? item.accessRuleIds.length : 0) === 1 ? '' : 's' }}
+                        {{ Array.isArray(item.manualAccessRuleIds) ? item.manualAccessRuleIds.length : 0 }} manual override plan{{ (Array.isArray(item.manualAccessRuleIds) ? item.manualAccessRuleIds.length : 0) === 1 ? '' : 's' }}
                       </div>
-                      <div v-if="Array.isArray(item.accessRuleIds) && item.accessRuleIds.length" class="mt-2 flex flex-wrap gap-1">
+                      <div v-if="Array.isArray(item.manualAccessRuleIds) && item.manualAccessRuleIds.length" class="mt-2 flex flex-wrap gap-1">
                         <span
-                          v-for="ruleId in item.accessRuleIds.slice(0, 3)"
+                          v-for="ruleId in item.manualAccessRuleIds.slice(0, 3)"
                           :key="ruleId"
                           class="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-800 dark:bg-slate-800 dark:text-slate-200"
                         >
@@ -1622,7 +2152,7 @@ onBeforeUnmount(async () => {
                         'restricted-member-name': slotProps.workingDoc.name,
                         'restricted-member-email': slotProps.workingDoc.email,
                         'restricted-member-status': slotProps.workingDoc.status,
-                        'restricted-member-rule-ids': slotProps.workingDoc.accessRuleIds,
+                        'restricted-member-rule-ids': slotProps.workingDoc.manualAccessRuleIds,
                         'restricted-member-notes': slotProps.workingDoc.notes,
                       }"
                     >
@@ -1655,15 +2185,18 @@ onBeforeUnmount(async () => {
                           {{ getAudienceUserLabel(slotProps.workingDoc.audienceUserId) }}
                         </div>
                         <edge-shad-select-tags
-                          v-model="slotProps.workingDoc.accessRuleIds"
+                          v-model="slotProps.workingDoc.manualAccessRuleIds"
                           name="restricted-member-rule-ids"
-                          label="Assigned Plans"
+                          label="Manual Plan Access Override"
                           placeholder="Select plans"
                           :items="ruleTagItems"
                           item-title="label"
                           item-value="value"
                           :allow-additions="false"
                         />
+                        <div class="text-xs text-muted-foreground">
+                          Use this to manually grant plan access regardless of payment state.
+                        </div>
                         <edge-shad-textarea
                           v-model="slotProps.workingDoc.notes"
                           name="restricted-member-notes"
