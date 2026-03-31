@@ -3391,6 +3391,7 @@ exports.restrictedContentCreateStripeLink = onCall({ timeoutSeconds: 180 }, asyn
 
   const session = await stripe.checkout.sessions.create({
     mode: selectedPrice.recurring ? 'subscription' : 'payment',
+    allow_promotion_codes: true,
     customer: customerId,
     line_items: [{
       price: selectedPrice.id,
