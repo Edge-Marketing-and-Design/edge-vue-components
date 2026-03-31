@@ -2981,6 +2981,94 @@ const getStripeClientForSite = async (orgId, siteId) => {
   return new Stripe(stripeSecretKey)
 }
 
+const deriveFileNameFromUrl = (url, fallback = 'site-logo') => {
+  try {
+    const pathname = String(new URL(url).pathname || '')
+    const base = pathname.split('/').pop() || ''
+    const clean = String(base).trim()
+    if (clean)
+      return clean
+  }
+  catch {}
+  return fallback
+}
+
+const ensureImageFileExtension = (name, contentType = '') => {
+  const normalizedName = String(name || '').trim() || 'site-logo'
+  if (/\.[A-Za-z0-9]+$/.test(normalizedName))
+    return normalizedName
+  const normalizedType = String(contentType || '').trim().toLowerCase()
+  if (normalizedType.includes('image/png'))
+    return `${normalizedName}.png`
+  if (normalizedType.includes('image/jpeg') || normalizedType.includes('image/jpg'))
+    return `${normalizedName}.jpg`
+  if (normalizedType.includes('image/webp'))
+    return `${normalizedName}.webp`
+  if (normalizedType.includes('image/gif'))
+    return `${normalizedName}.gif`
+  return `${normalizedName}.png`
+}
+
+const syncStripeBrandingLogoForSite = async ({ stripe, siteData }) => {
+  const logoUrl = String(siteData?.logo || siteData?.logoLight || '').trim()
+  if (!logoUrl) {
+    return {
+      applied: false,
+      reason: 'no-site-logo',
+      logoUrl: '',
+    }
+  }
+
+  const response = await fetch(logoUrl)
+  if (!response.ok) {
+    throw new HttpsError('failed-precondition', `Unable to download site logo (${response.status}).`)
+  }
+
+  const contentType = String(response.headers.get('content-type') || '').toLowerCase()
+  if (!contentType.startsWith('image/')) {
+    throw new HttpsError('failed-precondition', 'Site logo URL is not an image.')
+  }
+
+  const arrayBuffer = await response.arrayBuffer()
+  const buffer = Buffer.from(arrayBuffer)
+  if (!buffer.length) {
+    throw new HttpsError('failed-precondition', 'Site logo file is empty.')
+  }
+
+  const logoFile = await stripe.files.create({
+    purpose: 'business_logo',
+    file: {
+      data: buffer,
+      name: ensureImageFileExtension(deriveFileNameFromUrl(logoUrl), contentType),
+      type: contentType || 'image/png',
+    },
+  })
+  const logoFileId = String(logoFile?.id || '').trim()
+  if (!logoFileId)
+    throw new HttpsError('internal', 'Stripe branding logo upload failed.')
+
+  const account = await stripe.accounts.retrieve()
+  const accountId = String(account?.id || '').trim()
+  if (!accountId)
+    throw new HttpsError('internal', 'Unable to resolve Stripe account for branding update.')
+
+  await stripe.accounts.update(accountId, {
+    settings: {
+      branding: {
+        logo: logoFileId,
+      },
+    },
+  })
+
+  return {
+    applied: true,
+    reason: '',
+    logoUrl,
+    logoFileId,
+    accountId,
+  }
+}
+
 const ensureRestrictedSiteWritePermission = async (uid, orgId, siteId) => {
   const allowed = await permissionCheck(uid, 'write', `organizations/${orgId}/sites/${siteId}`)
   if (!allowed)
@@ -3010,18 +3098,10 @@ const getStripeMetadata = (object = {}) => {
   return {}
 }
 
-const resolveRuleStripeImage = (rule = {}, siteData = {}) => {
+const resolveRuleStripeImage = (rule = {}) => {
   const explicit = String(rule?.registrationStripeImage || '').trim()
   if (explicit)
     return explicit
-
-  const siteLogo = String(siteData?.logo || '').trim()
-  if (siteLogo)
-    return siteLogo
-
-  const siteLogoLight = String(siteData?.logoLight || '').trim()
-  if (siteLogoLight)
-    return siteLogoLight
 
   return ''
 }
@@ -3415,6 +3495,28 @@ exports.restrictedContentGetStripeCatalog = onCall({ timeoutSeconds: 180 }, asyn
     products: catalog
       .filter(item => item.productId && item.prices.length)
       .sort((a, b) => String(a.name || a.productId).localeCompare(String(b.name || b.productId))),
+  }
+})
+
+exports.restrictedContentSyncStripeBranding = onCall({ timeoutSeconds: 180 }, async (request) => {
+  assertCallableUser(request)
+  const data = request.data || {}
+  const orgId = String(data.orgId || '').trim()
+  const siteId = String(data.siteId || '').trim()
+  if (!orgId || !siteId)
+    throw new HttpsError('invalid-argument', 'Missing orgId or siteId.')
+
+  await ensureRestrictedSiteWritePermission(request.auth.uid, orgId, siteId)
+  const { siteRef } = getRestrictedSiteRefs(orgId, siteId)
+  const siteSnap = await siteRef.get()
+  if (!siteSnap.exists)
+    throw new HttpsError('not-found', 'Site not found.')
+  const siteData = siteSnap.data() || {}
+  const stripe = await getStripeClientForSite(orgId, siteId)
+  const result = await syncStripeBrandingLogoForSite({ stripe, siteData })
+  return {
+    success: true,
+    ...result,
   }
 })
 

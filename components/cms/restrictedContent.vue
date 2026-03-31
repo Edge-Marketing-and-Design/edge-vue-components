@@ -572,7 +572,29 @@ const saveStripeIntegration = async () => {
     if (result?.success === false)
       throw new Error(String(result?.message || 'Unable to save Stripe settings right now.'))
     state.stripeIntegration = buildStripeIntegration(payload)
-    edgeFirebase?.toast?.success?.('Stripe settings saved.')
+    const orgId = String(edgeGlobal?.edgeState?.currentOrganization || '').trim()
+    if (uid && orgId && props.siteId) {
+      try {
+        const brandingResponse = await edgeFirebase.runFunction('cms-restrictedContentSyncStripeBranding', {
+          uid,
+          orgId,
+          siteId: props.siteId,
+        })
+        const brandingResult = brandingResponse?.data || brandingResponse || {}
+        if (brandingResult?.applied === true)
+          edgeFirebase?.toast?.success?.('Stripe settings saved and Stripe branding logo synced from site logo.')
+        else
+          edgeFirebase?.toast?.success?.('Stripe settings saved.')
+      }
+      catch (brandingError) {
+        console.error('saveStripeIntegration branding sync failed', brandingError)
+        edgeFirebase?.toast?.success?.('Stripe settings saved.')
+        edgeFirebase?.toast?.error?.(String(brandingError?.message || 'Stripe branding logo sync failed.'))
+      }
+    }
+    else {
+      edgeFirebase?.toast?.success?.('Stripe settings saved.')
+    }
     await openStripeCatalogImportDialog()
   }
   catch (error) {
@@ -1862,7 +1884,7 @@ onBeforeUnmount(async () => {
                               class="h-14 w-14 rounded-md border border-border object-cover"
                             >
                             <div class="min-w-0 flex-1 text-xs text-muted-foreground">
-                              {{ state.ruleWorkingDoc.registrationStripeImage || 'No image selected. If blank, sync uses site logo when available.' }}
+                              {{ state.ruleWorkingDoc.registrationStripeImage || 'No image selected. If blank, no product image is sent to Stripe.' }}
                             </div>
                             <edge-shad-button
                               v-if="state.ruleWorkingDoc.registrationStripeImage"
