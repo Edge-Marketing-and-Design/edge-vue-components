@@ -1,6 +1,6 @@
 <script setup>
 import { toTypedSchema } from '@vee-validate/zod'
-import { GripVertical, LockKeyhole, Plus, RefreshCw, Search, Settings2, ShieldCheck, Trash2, UserRoundCheck, Users } from 'lucide-vue-next'
+import { ChevronDown, GripVertical, LockKeyhole, Plus, RefreshCw, Search, Settings2, ShieldCheck, Trash2, UserRoundCheck, Users } from 'lucide-vue-next'
 import * as z from 'zod'
 
 const props = defineProps({
@@ -27,6 +27,14 @@ const STRIPE_INTERVAL_OPTIONS = [
   { value: 'month', label: 'Monthly' },
   { value: 'year', label: 'Yearly' },
 ]
+const STRIPE_COUPON_DISCOUNT_TYPE_OPTIONS = [
+  { value: 'percent', label: 'Percent (%)' },
+  { value: 'amount', label: 'Fixed Amount ($)' },
+]
+const STRIPE_COUPON_EXPIRY_OPTIONS = [
+  { value: 'never', label: 'Never Expires' },
+  { value: 'date', label: 'Expires on Date' },
+]
 const STRIPE_USD_MONEY_MASK = {
   preProcess: val => String(val || '').replace(/[$,]/g, ''),
   postProcess: (val) => {
@@ -40,6 +48,7 @@ const STRIPE_USD_MONEY_MASK = {
   },
 }
 const createRulePriceClientId = () => globalThis.crypto?.randomUUID?.() || `price-opt-${Date.now()}-${Math.random().toString(16).slice(2)}`
+const createRuleCouponClientId = () => globalThis.crypto?.randomUUID?.() || `coupon-opt-${Date.now()}-${Math.random().toString(16).slice(2)}`
 const createRulePriceOption = (value = {}) => {
   const normalizedValue = (value && typeof value === 'object') ? value : {}
   const rawAmount = normalizedValue.amount ?? normalizedValue.unitAmount
@@ -68,6 +77,34 @@ const normalizeRulePriceOptions = (value = []) => {
   if (!Array.isArray(value))
     return []
   return value.map(item => createRulePriceOption(item))
+}
+
+const createRuleCouponOption = (value = {}) => {
+  const normalizedValue = (value && typeof value === 'object') ? value : {}
+  const discountType = String(normalizedValue.discountType || '').trim().toLowerCase()
+  const expiresMode = String(normalizedValue.expiresMode || '').trim().toLowerCase()
+  return {
+    _cid: String(normalizedValue._cid || normalizedValue.clientId || createRuleCouponClientId()),
+    couponId: String(normalizedValue.couponId || normalizedValue.id || '').trim(),
+    promotionCodeId: String(normalizedValue.promotionCodeId || '').trim(),
+    promoCode: String(normalizedValue.promoCode || normalizedValue.promotionCode || normalizedValue.code || '').trim(),
+    title: String(normalizedValue.title || '').trim(),
+    discountType: ['percent', 'amount'].includes(discountType) ? discountType : 'percent',
+    percentOff: Number.isFinite(Number(normalizedValue.percentOff))
+      ? Number(normalizedValue.percentOff)
+      : 10,
+    amountOff: Number.isFinite(Number(normalizedValue.amountOff))
+      ? Number(normalizedValue.amountOff)
+      : 0,
+    expiresMode: ['never', 'date'].includes(expiresMode) ? expiresMode : 'never',
+    expiresAt: String(normalizedValue.expiresAt || '').trim(),
+  }
+}
+
+const normalizeRuleCouponOptions = (value = []) => {
+  if (!Array.isArray(value))
+    return []
+  return value.map(item => createRuleCouponOption(item))
 }
 
 const normalizeObject = (value) => {
@@ -107,6 +144,7 @@ const createRuleDoc = (value = {}, fallbackId = '') => {
     registrationStripeProductId: String(normalizedValue.registrationStripeProductId || normalizedValue.stripeProductId || '').trim(),
     registrationStripeImage: String(normalizedValue.registrationStripeImage || normalizedValue.stripeImage || '').trim(),
     registrationStripePrices: normalizeRulePriceOptions(normalizedValue.registrationStripePrices || normalizedValue.stripePrices || []),
+    registrationStripeCoupons: normalizeRuleCouponOptions(normalizedValue.registrationStripeCoupons || normalizedValue.stripeCoupons || []),
   }
 }
 
@@ -137,6 +175,15 @@ const isStripeIntegrationEmpty = (value = {}) => {
   return !String(normalized.publishableKey || '').trim()
     && !String(normalized.secretKey || '').trim()
     && !String(normalized.webhookSecret || '').trim()
+}
+
+const isStripeIntegrationConfigured = (value = {}) => {
+  const normalized = buildStripeIntegration(value)
+  return Boolean(
+    String(normalized.publishableKey || '').trim()
+    && String(normalized.secretKey || '').trim()
+    && String(normalized.webhookSecret || '').trim()
+  )
 }
 
 const membersCollection = computed(() => `sites/${props.siteId}/audience-users`)
@@ -210,6 +257,12 @@ const state = reactive({
   rulePriceDialogPriceIdReadonly: false,
   rulePriceDeleteDialogOpen: false,
   rulePriceDeleteIndex: -1,
+  ruleCouponDialogOpen: false,
+  ruleCouponDialogIndex: -1,
+  ruleCouponDialogDraft: createRuleCouponOption(),
+  ruleCouponDialogAmountInput: '',
+  ruleCouponDeleteDialogOpen: false,
+  ruleCouponDeleteIndex: -1,
   stripeCatalogDialogOpen: false,
   stripeCatalogLoading: false,
   stripeCatalogProducts: [],
@@ -218,6 +271,8 @@ const state = reactive({
   ruleStripeSyncing: false,
   ruleStripeSyncError: '',
   ruleImagePickerOpen: false,
+  stripeSettingsOpen: true,
+  stripeSettingsTouched: false,
 })
 
 const memberSchema = toTypedSchema(z.object({
@@ -506,6 +561,8 @@ const syncSettingsFromSiteDoc = () => {
 
 const syncStripeIntegrationFromDoc = () => {
   state.stripeIntegration = buildStripeIntegration(currentStripeIntegration.value)
+  if (!state.stripeSettingsTouched)
+    state.stripeSettingsOpen = !isStripeIntegrationConfigured(state.stripeIntegration)
 }
 
 const persistRestrictedSettings = async (nextSettings, options = {}) => {
@@ -608,6 +665,11 @@ const saveStripeIntegration = async () => {
 
 const resetStripeIntegration = () => {
   syncStripeIntegrationFromDoc()
+}
+
+const toggleStripeSettingsOpen = () => {
+  state.stripeSettingsTouched = true
+  state.stripeSettingsOpen = !state.stripeSettingsOpen
 }
 
 const getStripeCatalogSelectionState = (productId) => {
@@ -838,6 +900,7 @@ const openNewRule = async () => {
     registrationStripeProductId: '',
     registrationStripeImage: '',
     registrationStripePrices: [],
+    registrationStripeCoupons: [],
   })
   state.ruleError = ''
   state.ruleStripeSyncError = ''
@@ -912,6 +975,36 @@ const parseRulePriceAmountInput = (value) => {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+const getRuleCouponDialogValidation = (draft = state.ruleCouponDialogDraft) => {
+  const coupon = createRuleCouponOption(draft)
+  const amountOff = parseRulePriceAmountInput(state.ruleCouponDialogAmountInput)
+  const errors = {
+    title: '',
+    promoCode: '',
+    percentOff: '',
+    amountOff: '',
+    expiresAt: '',
+  }
+  if (!String(coupon.title || '').trim())
+    errors.title = 'Title is required.'
+  if (!String(coupon.promoCode || '').trim())
+    errors.promoCode = 'Promo code is required.'
+  if (coupon.discountType === 'percent') {
+    if (!Number.isFinite(Number(coupon.percentOff)) || Number(coupon.percentOff) <= 0 || Number(coupon.percentOff) > 100)
+      errors.percentOff = 'Enter a percent between 0 and 100.'
+  }
+  else if (!Number.isFinite(Number(amountOff)) || Number(amountOff) <= 0) {
+    errors.amountOff = 'Enter an amount greater than 0.'
+  }
+  if (coupon.expiresMode === 'date' && !String(coupon.expiresAt || '').trim())
+    errors.expiresAt = 'Expiration date is required.'
+
+  return {
+    errors,
+    hasError: Object.values(errors).some(Boolean),
+  }
+}
+
 const saveRulePriceOptionDialog = () => {
   const nextOption = createRulePriceOption(state.rulePriceDialogDraft)
   nextOption.amount = parseRulePriceAmountInput(state.rulePriceDialogAmountInput)
@@ -948,6 +1041,84 @@ const saveRulePriceOptionDialog = () => {
     state.ruleWorkingDoc.registrationStripePrices.push(nextOption)
   }
   closeRulePriceOptionDialog()
+}
+
+const removeRuleCouponOption = (index) => {
+  if (!Array.isArray(state.ruleWorkingDoc.registrationStripeCoupons))
+    return
+  if (index < 0 || index >= state.ruleWorkingDoc.registrationStripeCoupons.length)
+    return
+  state.ruleWorkingDoc.registrationStripeCoupons.splice(index, 1)
+}
+
+const openDeleteRuleCouponDialog = (index) => {
+  if (!Array.isArray(state.ruleWorkingDoc.registrationStripeCoupons))
+    return
+  if (index < 0 || index >= state.ruleWorkingDoc.registrationStripeCoupons.length)
+    return
+  state.ruleCouponDeleteIndex = index
+  state.ruleCouponDeleteDialogOpen = true
+}
+
+const closeDeleteRuleCouponDialog = () => {
+  state.ruleCouponDeleteDialogOpen = false
+  state.ruleCouponDeleteIndex = -1
+}
+
+const confirmDeleteRuleCouponDialog = () => {
+  if (state.ruleCouponDeleteIndex < 0) {
+    closeDeleteRuleCouponDialog()
+    return
+  }
+  removeRuleCouponOption(state.ruleCouponDeleteIndex)
+  closeDeleteRuleCouponDialog()
+}
+
+const openNewRuleCouponDialog = () => {
+  state.ruleCouponDialogIndex = -1
+  state.ruleCouponDialogDraft = createRuleCouponOption()
+  state.ruleCouponDialogAmountInput = ''
+  state.ruleCouponDialogOpen = true
+}
+
+const openEditRuleCouponDialog = (index) => {
+  if (!Array.isArray(state.ruleWorkingDoc.registrationStripeCoupons))
+    return
+  if (index < 0 || index >= state.ruleWorkingDoc.registrationStripeCoupons.length)
+    return
+  state.ruleCouponDialogIndex = index
+  state.ruleCouponDialogDraft = createRuleCouponOption(state.ruleWorkingDoc.registrationStripeCoupons[index])
+  state.ruleCouponDialogAmountInput = Number(state.ruleCouponDialogDraft.amountOff || 0) > 0
+    ? Number(state.ruleCouponDialogDraft.amountOff).toFixed(2)
+    : ''
+  state.ruleCouponDialogOpen = true
+}
+
+const closeRuleCouponDialog = () => {
+  state.ruleCouponDialogOpen = false
+  state.ruleCouponDialogIndex = -1
+  state.ruleCouponDialogDraft = createRuleCouponOption()
+  state.ruleCouponDialogAmountInput = ''
+}
+
+const saveRuleCouponDialog = () => {
+  const validation = getRuleCouponDialogValidation()
+  if (validation.hasError)
+    return
+  const nextCoupon = createRuleCouponOption(state.ruleCouponDialogDraft)
+  nextCoupon.amountOff = parseRulePriceAmountInput(state.ruleCouponDialogAmountInput)
+
+  if (!Array.isArray(state.ruleWorkingDoc.registrationStripeCoupons))
+    state.ruleWorkingDoc.registrationStripeCoupons = []
+
+  if (state.ruleCouponDialogIndex >= 0 && state.ruleCouponDialogIndex < state.ruleWorkingDoc.registrationStripeCoupons.length) {
+    nextCoupon._cid = state.ruleWorkingDoc.registrationStripeCoupons[state.ruleCouponDialogIndex]?._cid || nextCoupon._cid
+    state.ruleWorkingDoc.registrationStripeCoupons[state.ruleCouponDialogIndex] = nextCoupon
+  }
+  else {
+    state.ruleWorkingDoc.registrationStripeCoupons.push(nextCoupon)
+  }
+  closeRuleCouponDialog()
 }
 
 const openRule = async (docId) => {
@@ -1014,6 +1185,25 @@ const normalizePriceOptionForSave = (option = {}) => {
   }
 }
 
+const normalizeCouponOptionForSave = (option = {}) => {
+  const normalized = createRuleCouponOption(option)
+  return {
+    couponId: String(normalized.couponId || '').trim(),
+    promotionCodeId: String(normalized.promotionCodeId || '').trim(),
+    promoCode: String(normalized.promoCode || '').trim(),
+    title: String(normalized.title || '').trim(),
+    discountType: normalized.discountType === 'amount' ? 'amount' : 'percent',
+    percentOff: Number.isFinite(Number(normalized.percentOff))
+      ? Number(normalized.percentOff)
+      : 10,
+    amountOff: Number.isFinite(Number(normalized.amountOff))
+      ? Number(normalized.amountOff)
+      : 0,
+    expiresMode: normalized.expiresMode === 'date' ? 'date' : 'never',
+    expiresAt: String(normalized.expiresAt || '').trim(),
+  }
+}
+
 const normalizeRuleForSite = (value = {}) => {
   const nextRule = createRuleDoc(value, value?.id || value?.docId || '')
   nextRule.protected = true
@@ -1022,6 +1212,9 @@ const normalizeRuleForSite = (value = {}) => {
   nextRule.registrationStripeImage = String(nextRule.registrationStripeImage || '').trim()
   nextRule.registrationStripePrices = Array.isArray(nextRule.registrationStripePrices)
     ? nextRule.registrationStripePrices.map(item => normalizePriceOptionForSave(item))
+    : []
+  nextRule.registrationStripeCoupons = Array.isArray(nextRule.registrationStripeCoupons)
+    ? nextRule.registrationStripeCoupons.map(item => normalizeCouponOptionForSave(item))
     : []
   return nextRule
 }
@@ -1101,9 +1294,19 @@ async function syncRuleToStripe(ruleId, { showToast = true } = {}) {
       state.ruleWorkingDoc = createRuleDoc(syncedRule, syncedRule.id)
 
     const invalidCount = Array.isArray(result?.invalidPriceIds) ? result.invalidPriceIds.length : 0
+    const invalidCouponCount = Array.isArray(result?.invalidCouponIds) ? result.invalidCouponIds.length : 0
+    const invalidPromotionCodeCount = Array.isArray(result?.invalidPromotionCodeIds) ? result.invalidPromotionCodeIds.length : 0
     if (showToast) {
-      if (invalidCount)
-        edgeFirebase?.toast?.error?.(`Synced plan, but ${invalidCount} price IDs were invalid or not on this product.`)
+      if (invalidCount || invalidCouponCount || invalidPromotionCodeCount) {
+        const parts = []
+        if (invalidCount)
+          parts.push(`${invalidCount} price ID${invalidCount === 1 ? '' : 's'}`)
+        if (invalidCouponCount)
+          parts.push(`${invalidCouponCount} coupon ID${invalidCouponCount === 1 ? '' : 's'}`)
+        if (invalidPromotionCodeCount)
+          parts.push(`${invalidPromotionCodeCount} promotion code${invalidPromotionCodeCount === 1 ? '' : 's'}`)
+        edgeFirebase?.toast?.error?.(`Synced plan, but ${parts.join(' and ')} were invalid.`)
+      }
       else
         edgeFirebase?.toast?.success?.(result?.createdProduct ? 'Stripe product created and synced.' : 'Stripe product synced.')
     }
@@ -1258,9 +1461,16 @@ watch(() => props.canManage, async (allowed) => {
     await loadInitialMembers()
     return
   }
+  state.stripeSettingsTouched = false
+  state.stripeSettingsOpen = true
   state.selectedRuleId = ''
   state.selectedMemberId = ''
   await stopSnapshots()
+}, { immediate: true })
+
+watch(() => props.siteId, () => {
+  state.stripeSettingsTouched = false
+  state.stripeSettingsOpen = !isStripeIntegrationConfigured(currentStripeIntegration.value)
 }, { immediate: true })
 
 watch(() => props.siteDoc?.restrictedContent, (_nextValue, previousValue) => {
@@ -1425,7 +1635,7 @@ onBeforeUnmount(async () => {
             />
           </div>
           <div class="text-xs text-muted-foreground">
-            Interval Count controls how many intervals per charge. Seats controls checkout quantity for this option (for example 5 seats or 10 seats).
+            Interval Count is how often Stripe bills for this price. Example: Monthly + 1 bills every month, Monthly + 3 bills every 3 months. Seats is how many units are charged at checkout.
           </div>
           <edge-shad-textarea
             v-model="state.rulePriceDialogDraft.description"
@@ -1460,6 +1670,125 @@ onBeforeUnmount(async () => {
           </edge-shad-button>
           <edge-shad-button class="bg-red-700 text-white hover:bg-red-600" @click="confirmDeleteRulePriceOption">
             Delete Option
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
+    <edge-shad-dialog v-model="state.ruleCouponDialogOpen">
+      <DialogContent class="pt-8">
+        <DialogHeader>
+          <DialogTitle class="text-left">
+            {{ state.ruleCouponDialogIndex >= 0 ? 'Edit Stripe Coupon' : 'Add Stripe Coupon' }}
+          </DialogTitle>
+          <DialogDescription class="text-left">
+            Configure discount type and expiration. Stripe coupon id is generated on save.
+          </DialogDescription>
+        </DialogHeader>
+        <div class="space-y-3">
+          <div v-if="state.ruleCouponDialogIndex >= 0 && String(state.ruleCouponDialogDraft.couponId || '').trim()" class="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            Stripe Coupon ID: <span class="font-medium text-foreground">{{ state.ruleCouponDialogDraft.couponId }}</span>
+          </div>
+          <div v-if="state.ruleCouponDialogIndex >= 0 && String(state.ruleCouponDialogDraft.promotionCodeId || '').trim()" class="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            Stripe Promotion Code ID: <span class="font-medium text-foreground">{{ state.ruleCouponDialogDraft.promotionCodeId }}</span>
+          </div>
+          <edge-shad-input
+            v-model="state.ruleCouponDialogDraft.title"
+            name="restricted-rule-coupon-dialog-title"
+            label="Title"
+            placeholder="Spring Promo"
+          />
+          <div v-if="getRuleCouponDialogValidation().errors.title" class="text-xs text-red-600">
+            {{ getRuleCouponDialogValidation().errors.title }}
+          </div>
+          <edge-shad-input
+            v-model="state.ruleCouponDialogDraft.promoCode"
+            name="restricted-rule-coupon-dialog-promo-code"
+            label="Promo Code"
+            placeholder="SPRING25"
+          />
+          <div v-if="getRuleCouponDialogValidation().errors.promoCode" class="text-xs text-red-600">
+            {{ getRuleCouponDialogValidation().errors.promoCode }}
+          </div>
+          <div class="grid gap-3 md:grid-cols-2">
+            <edge-shad-select
+              v-model="state.ruleCouponDialogDraft.discountType"
+              name="restricted-rule-coupon-dialog-discount-type"
+              label="Discount Type"
+              :items="STRIPE_COUPON_DISCOUNT_TYPE_OPTIONS"
+              item-title="label"
+              item-value="value"
+            />
+            <edge-shad-select
+              v-model="state.ruleCouponDialogDraft.expiresMode"
+              name="restricted-rule-coupon-dialog-expires-mode"
+              label="Expiration"
+              :items="STRIPE_COUPON_EXPIRY_OPTIONS"
+              item-title="label"
+              item-value="value"
+            />
+          </div>
+          <div v-if="state.ruleCouponDialogDraft.discountType === 'percent'">
+            <edge-shad-input
+              v-model.number="state.ruleCouponDialogDraft.percentOff"
+              name="restricted-rule-coupon-dialog-percent-off"
+              type="number"
+              label="Percent Off"
+              placeholder="10"
+            />
+            <div v-if="getRuleCouponDialogValidation().errors.percentOff" class="text-xs text-red-600">
+              {{ getRuleCouponDialogValidation().errors.percentOff }}
+            </div>
+          </div>
+          <div v-else>
+            <edge-shad-input
+              v-model="state.ruleCouponDialogAmountInput"
+              name="restricted-rule-coupon-dialog-amount-off"
+              label="Amount Off (USD)"
+              placeholder="10.00"
+              :mask-options="STRIPE_USD_MONEY_MASK"
+            />
+            <div v-if="getRuleCouponDialogValidation().errors.amountOff" class="text-xs text-red-600">
+              {{ getRuleCouponDialogValidation().errors.amountOff }}
+            </div>
+          </div>
+          <div v-if="state.ruleCouponDialogDraft.expiresMode === 'date'">
+            <edge-shad-input
+              v-model="state.ruleCouponDialogDraft.expiresAt"
+              name="restricted-rule-coupon-dialog-expires-at"
+              type="date"
+              label="Expires On"
+            />
+            <div v-if="getRuleCouponDialogValidation().errors.expiresAt" class="text-xs text-red-600">
+              {{ getRuleCouponDialogValidation().errors.expiresAt }}
+            </div>
+          </div>
+        </div>
+        <DialogFooter class="flex justify-between pt-2">
+          <edge-shad-button variant="outline" @click="closeRuleCouponDialog">
+            Cancel
+          </edge-shad-button>
+          <edge-shad-button class="bg-slate-800 text-white hover:bg-slate-700" :disabled="getRuleCouponDialogValidation().hasError" @click="saveRuleCouponDialog">
+            Save Coupon
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
+    <edge-shad-dialog v-model="state.ruleCouponDeleteDialogOpen">
+      <DialogContent class="pt-8">
+        <DialogHeader>
+          <DialogTitle class="text-left">
+            Delete Stripe Coupon?
+          </DialogTitle>
+          <DialogDescription class="text-left">
+            This removes the coupon from this paid access plan.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter class="flex justify-between pt-2">
+          <edge-shad-button variant="outline" @click="closeDeleteRuleCouponDialog">
+            Cancel
+          </edge-shad-button>
+          <edge-shad-button class="bg-red-700 text-white hover:bg-red-600" @click="confirmDeleteRuleCouponDialog">
+            Delete Coupon
           </edge-shad-button>
         </DialogFooter>
       </DialogContent>
@@ -1672,17 +2001,17 @@ onBeforeUnmount(async () => {
                       Stripe Settings
                     </div>
                   </div>
-                <div class="flex items-center gap-2">
-                  <edge-shad-button
-                    variant="outline"
-                    :disabled="state.stripeSaving || state.stripeCatalogLoading"
-                    @click="openStripeCatalogImportDialog"
-                  >
-                    Import from Stripe
-                  </edge-shad-button>
-                  <edge-shad-button
-                    variant="outline"
-                    :disabled="!stripeDirty || state.stripeSaving"
+                  <div class="flex items-center gap-2">
+                    <edge-shad-button
+                      variant="outline"
+                      :disabled="state.stripeSaving || state.stripeCatalogLoading"
+                      @click="openStripeCatalogImportDialog"
+                    >
+                      Import from Stripe
+                    </edge-shad-button>
+                    <edge-shad-button
+                      variant="outline"
+                      :disabled="!stripeDirty || state.stripeSaving"
                       @click="resetStripeIntegration"
                     >
                       Reset Stripe
@@ -1694,9 +2023,17 @@ onBeforeUnmount(async () => {
                     >
                       Save Stripe
                     </edge-shad-button>
+                    <edge-shad-button
+                      variant="ghost"
+                      class="h-8 gap-1 px-2 text-xs"
+                      @click="toggleStripeSettingsOpen"
+                    >
+                      <ChevronDown class="h-4 w-4 transition-transform" :class="state.stripeSettingsOpen ? '' : '-rotate-90'" />
+                      {{ state.stripeSettingsOpen ? 'Collapse' : 'Expand' }}
+                    </edge-shad-button>
                   </div>
                 </div>
-                <div class="grid gap-3 lg:grid-cols-3">
+                <div v-if="state.stripeSettingsOpen" class="grid gap-3 lg:grid-cols-3">
                   <edge-shad-input
                     v-model="state.stripeIntegration.publishableKey"
                     name="restricted-content-stripe-publishable-key"
@@ -1742,7 +2079,7 @@ onBeforeUnmount(async () => {
                     }"
                   />
                 </div>
-                <div class="rounded-lg border border-dashed border-border/70 bg-muted/20 p-3 text-xs text-muted-foreground">
+                <div v-if="state.stripeSettingsOpen" class="rounded-lg border border-dashed border-border/70 bg-muted/20 p-3 text-xs text-muted-foreground">
                   <div class="font-semibold text-foreground">
                     Webhook setup help
                   </div>
@@ -1752,6 +2089,9 @@ onBeforeUnmount(async () => {
                   <div class="mt-1">
                     <code>checkout.session.completed</code>, <code>checkout.session.async_payment_succeeded</code>, <code>checkout.session.async_payment_failed</code>, <code>customer.subscription.updated</code>, and <code>customer.subscription.deleted</code>.
                   </div>
+                </div>
+                <div v-else class="rounded-lg border border-dashed border-border/70 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                  {{ isStripeIntegrationConfigured(state.stripeIntegration) ? 'Stripe is configured.' : 'Stripe setup is incomplete. Expand to finish setup.' }}
                 </div>
               </CardContent>
             </Card>
@@ -1863,116 +2203,168 @@ onBeforeUnmount(async () => {
                           label="Name"
                           description="This is the same rule name used everywhere else in the system."
                         />
-                        <div class="space-y-2 rounded-lg border border-border/60 bg-muted/20 p-4">
-                          <label class="text-sm font-semibold text-foreground flex items-center justify-between">
-                            Stripe Product Image
-                            <edge-shad-button
-                              v-if="props.siteId"
-                              type="button"
-                              variant="link"
-                              class="h-auto px-0 text-sm"
-                              @click="state.ruleImagePickerOpen = !state.ruleImagePickerOpen"
-                            >
-                              {{ state.ruleImagePickerOpen ? 'Hide picker' : 'Select image' }}
-                            </edge-shad-button>
-                          </label>
-                          <div class="flex items-center gap-3">
-                            <img
-                              v-if="state.ruleWorkingDoc.registrationStripeImage"
-                              :src="state.ruleWorkingDoc.registrationStripeImage"
-                              alt="Stripe product image"
-                              class="h-14 w-14 rounded-md border border-border object-cover"
-                            >
-                            <div class="min-w-0 flex-1 text-xs text-muted-foreground">
-                              {{ state.ruleWorkingDoc.registrationStripeImage || 'No image selected. If blank, no product image is sent to Stripe.' }}
-                            </div>
-                            <edge-shad-button
-                              v-if="state.ruleWorkingDoc.registrationStripeImage"
-                              type="button"
-                              variant="ghost"
-                              class="h-8"
-                              @click="state.ruleWorkingDoc.registrationStripeImage = ''"
-                            >
-                              Remove
-                            </edge-shad-button>
-                          </div>
-                          <edge-shad-input
-                            v-model="state.ruleWorkingDoc.registrationStripeImage"
-                            name="restricted-rule-image"
-                            label="Image URL"
-                            placeholder="https://..."
-                          />
-                          <div v-if="state.ruleImagePickerOpen && props.siteId" class="rounded-lg border border-dashed border-border/70 p-2">
-                            <edge-cms-media-manager
-                              :site="props.siteId"
-                              :select-mode="true"
-                              @select="(url) => {
-                                state.ruleWorkingDoc.registrationStripeImage = String(url || '').trim()
-                                state.ruleImagePickerOpen = false
-                              }"
-                            />
-                          </div>
-                        </div>
                         <div v-if="state.ruleError" class="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-700 dark:bg-red-950/30 dark:text-red-200">
                           {{ state.ruleError }}
                         </div>
                         <div v-if="state.ruleStripeSyncError" class="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-200">
                           {{ state.ruleStripeSyncError }}
                         </div>
-                        <div class="space-y-3 rounded-lg border border-border/60 bg-muted/20 p-4">
-                          <div class="flex items-center justify-between gap-3">
-                            <div>
-                              <div class="text-sm font-semibold text-foreground">
-                                Stripe Price Options
+                        <div class="grid gap-4 lg:grid-cols-3">
+                          <div class="space-y-3 rounded-lg border border-border/60 bg-muted/20 p-4">
+                            <div class="flex items-center justify-between gap-3">
+                              <div>
+                                <div class="text-sm font-semibold text-foreground">
+                                  Stripe Price Options
+                                </div>
+                                <p class="text-xs text-muted-foreground">
+                                  Add one or more app-defined price options. Stripe price ids are generated on save.
+                                </p>
                               </div>
-                              <p class="text-xs text-muted-foreground">
-                                Add one or more app-defined price options. Stripe price ids are generated on save.
-                              </p>
+                              <edge-shad-button type="button" class="h-8 gap-2 bg-slate-800 text-white hover:bg-slate-700" @click="openNewRulePriceOptionDialog">
+                                <Plus class="h-4 w-4" />
+                                Add Price
+                              </edge-shad-button>
                             </div>
-                            <edge-shad-button type="button" class="h-8 gap-2 bg-slate-800 text-white hover:bg-slate-700" @click="openNewRulePriceOptionDialog">
-                              <Plus class="h-4 w-4" />
-                              Add Price
-                            </edge-shad-button>
-                          </div>
 
-                          <div v-if="Array.isArray(state.ruleWorkingDoc.registrationStripePrices) && state.ruleWorkingDoc.registrationStripePrices.length" class="space-y-3">
-                            <draggable
-                              v-model="state.ruleWorkingDoc.registrationStripePrices"
-                              item-key="_cid"
-                              handle=".handle"
-                              class="space-y-2"
-                            >
-                              <template #item="{ element, index }">
-                                <div class="flex items-center justify-between gap-2 rounded-lg border border-border/60 bg-background p-3">
-                                  <div class="flex min-w-0 items-center gap-2">
-                                    <button type="button" class="handle inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted">
-                                      <GripVertical class="h-4 w-4" />
-                                    </button>
-                                    <div class="min-w-0">
-                                      <button type="button" class="min-w-0 truncate text-left text-sm font-medium text-foreground hover:underline" @click="openEditRulePriceOptionDialog(index)">
-                                        {{ String(element?.title || '').trim() || `Option ${index + 1}` }}
+                            <div v-if="Array.isArray(state.ruleWorkingDoc.registrationStripePrices) && state.ruleWorkingDoc.registrationStripePrices.length" class="space-y-3">
+                              <draggable
+                                v-model="state.ruleWorkingDoc.registrationStripePrices"
+                                item-key="_cid"
+                                handle=".handle"
+                                class="space-y-2"
+                              >
+                                <template #item="{ element, index }">
+                                  <div class="flex items-center justify-between gap-2 rounded-lg border border-border/60 bg-background p-3">
+                                    <div class="flex min-w-0 items-center gap-2">
+                                      <button type="button" class="handle inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted">
+                                        <GripVertical class="h-4 w-4" />
                                       </button>
-                                      <div class="truncate text-[11px] text-muted-foreground">
-                                        {{ formatRulePriceSummary(element) }}
-                                        <span v-if="String(element?.priceId || '').trim()"> · {{ element.priceId }}</span>
+                                      <div class="min-w-0">
+                                        <button type="button" class="min-w-0 truncate text-left text-sm font-medium text-foreground hover:underline" @click="openEditRulePriceOptionDialog(index)">
+                                          {{ String(element?.title || '').trim() || `Option ${index + 1}` }}
+                                        </button>
+                                        <div class="truncate text-[11px] text-muted-foreground">
+                                          {{ formatRulePriceSummary(element) }}
+                                          <span v-if="String(element?.priceId || '').trim()"> · {{ element.priceId }}</span>
+                                        </div>
                                       </div>
                                     </div>
+                                    <div class="flex items-center gap-1">
+                                      <edge-shad-button type="button" size="icon" variant="ghost" class="h-7 w-7" @click="openEditRulePriceOptionDialog(index)">
+                                        <Settings2 class="h-4 w-4" />
+                                      </edge-shad-button>
+                                      <edge-shad-button type="button" size="icon" variant="ghost" class="h-7 w-7 text-red-600 hover:text-red-500" @click="openDeleteRulePriceOptionDialog(index)">
+                                        <Trash2 class="h-4 w-4" />
+                                      </edge-shad-button>
+                                    </div>
                                   </div>
-                                  <div class="flex items-center gap-1">
-                                    <edge-shad-button type="button" size="icon" variant="ghost" class="h-7 w-7" @click="openEditRulePriceOptionDialog(index)">
-                                      <Settings2 class="h-4 w-4" />
-                                    </edge-shad-button>
-                                    <edge-shad-button type="button" size="icon" variant="ghost" class="h-7 w-7 text-red-600 hover:text-red-500" @click="openDeleteRulePriceOptionDialog(index)">
-                                      <Trash2 class="h-4 w-4" />
-                                    </edge-shad-button>
-                                  </div>
-                                </div>
-                              </template>
-                            </draggable>
+                                </template>
+                              </draggable>
+                            </div>
+
+                            <div v-else class="rounded-lg border border-dashed border-border/70 px-4 py-8 text-center text-sm text-muted-foreground">
+                              No Stripe prices added yet.
+                            </div>
                           </div>
 
-                          <div v-else class="rounded-lg border border-dashed border-border/70 px-4 py-8 text-center text-sm text-muted-foreground">
-                            No Stripe prices added yet.
+                          <div class="space-y-2 rounded-lg border border-border/60 bg-muted/20 p-4">
+                            <label class="text-sm font-semibold text-foreground flex items-center justify-between">
+                              Stripe Product Image
+                              <edge-shad-button
+                                v-if="props.siteId"
+                                type="button"
+                                variant="link"
+                                class="h-auto px-0 text-sm"
+                                @click="state.ruleImagePickerOpen = !state.ruleImagePickerOpen"
+                              >
+                                {{ state.ruleImagePickerOpen ? 'Hide picker' : 'Select image' }}
+                              </edge-shad-button>
+                            </label>
+                            <div class="flex items-center gap-3">
+                              <img
+                                v-if="state.ruleWorkingDoc.registrationStripeImage"
+                                :src="state.ruleWorkingDoc.registrationStripeImage"
+                                alt="Stripe product image"
+                                class="h-14 w-14 rounded-md border border-border object-cover"
+                              >
+                              <div class="min-w-0 flex-1 text-xs text-muted-foreground">
+                                {{ state.ruleWorkingDoc.registrationStripeImage || 'No image selected. If blank, Stripe product image is cleared.' }}
+                              </div>
+                              <edge-shad-button
+                                v-if="state.ruleWorkingDoc.registrationStripeImage"
+                                type="button"
+                                variant="ghost"
+                                class="h-8"
+                                @click="state.ruleWorkingDoc.registrationStripeImage = ''"
+                              >
+                                Remove
+                              </edge-shad-button>
+                            </div>
+                            <edge-shad-input
+                              v-model="state.ruleWorkingDoc.registrationStripeImage"
+                              name="restricted-rule-image"
+                              label="Image URL"
+                              placeholder="https://..."
+                            />
+                            <div v-if="state.ruleImagePickerOpen && props.siteId" class="rounded-lg border border-dashed border-border/70 p-2">
+                              <edge-cms-media-manager
+                                :site="props.siteId"
+                                :select-mode="true"
+                                @select="(url) => {
+                                  state.ruleWorkingDoc.registrationStripeImage = String(url || '').trim()
+                                  state.ruleImagePickerOpen = false
+                                }"
+                              />
+                            </div>
+                          </div>
+
+                          <div class="space-y-3 rounded-lg border border-border/60 bg-muted/20 p-4">
+                            <div class="flex items-center justify-between gap-3">
+                              <div>
+                                <div class="text-sm font-semibold text-foreground">
+                                  Stripe Coupons
+                                </div>
+                                <p class="text-xs text-muted-foreground">
+                                  Add optional coupon codes or IDs linked to this plan.
+                                </p>
+                              </div>
+                              <edge-shad-button type="button" class="h-8 gap-2 bg-slate-800 text-white hover:bg-slate-700" @click="openNewRuleCouponDialog">
+                                <Plus class="h-4 w-4" />
+                                Add Coupon
+                              </edge-shad-button>
+                            </div>
+
+                            <div v-if="Array.isArray(state.ruleWorkingDoc.registrationStripeCoupons) && state.ruleWorkingDoc.registrationStripeCoupons.length" class="space-y-2">
+                              <div
+                                v-for="(coupon, index) in state.ruleWorkingDoc.registrationStripeCoupons"
+                                :key="coupon._cid || `${coupon.couponId}-${index}`"
+                                class="flex items-center justify-between gap-2 rounded-lg border border-border/60 bg-background p-3"
+                              >
+                                <div class="min-w-0">
+                                  <button type="button" class="min-w-0 truncate text-left text-sm font-medium text-foreground hover:underline" @click="openEditRuleCouponDialog(index)">
+                                    {{ String(coupon?.title || '').trim() || `Coupon ${index + 1}` }}
+                                  </button>
+                                  <div class="truncate text-[11px] text-muted-foreground">
+                                    {{ coupon.discountType === 'amount' ? `${Number(coupon.amountOff || 0).toFixed(2)} USD off` : `${Number(coupon.percentOff || 0)}% off` }}
+                                    <span> · {{ coupon.expiresMode === 'date' ? `Expires ${coupon.expiresAt || '-'}` : 'No expiration' }}</span>
+                                    <span v-if="String(coupon?.promoCode || '').trim()"> · Code: {{ coupon.promoCode }}</span>
+                                    <span v-if="String(coupon?.couponId || '').trim()"> · Coupon: {{ coupon.couponId }}</span>
+                                  </div>
+                                </div>
+                                <div class="flex items-center gap-1">
+                                  <edge-shad-button type="button" size="icon" variant="ghost" class="h-7 w-7" @click="openEditRuleCouponDialog(index)">
+                                    <Settings2 class="h-4 w-4" />
+                                  </edge-shad-button>
+                                  <edge-shad-button type="button" size="icon" variant="ghost" class="h-7 w-7 text-red-600 hover:text-red-500" @click="openDeleteRuleCouponDialog(index)">
+                                    <Trash2 class="h-4 w-4" />
+                                  </edge-shad-button>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div v-else class="rounded-lg border border-dashed border-border/70 px-4 py-8 text-center text-sm text-muted-foreground">
+                              No coupons added yet.
+                            </div>
                           </div>
                         </div>
                       </div>
