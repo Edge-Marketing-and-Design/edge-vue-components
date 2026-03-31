@@ -577,6 +577,75 @@ const cleanupOwnedPublishedSiteDomains = async (sitePath, { orgId, siteId } = {}
   await batch.commit()
 }
 
+const getFirebaseProjectId = () => {
+  return String(
+    process.env.GCLOUD_PROJECT
+    || process.env.GCP_PROJECT
+    || admin.app()?.options?.projectId
+    || '',
+  ).trim()
+}
+
+const getAdminAccessToken = async () => {
+  const credential = admin.app()?.options?.credential
+  if (!credential || typeof credential.getAccessToken !== 'function')
+    throw new Error('Admin credential does not support getAccessToken().')
+  const tokenResult = await credential.getAccessToken()
+  const accessToken = String(tokenResult?.access_token || tokenResult?.accessToken || '').trim()
+  if (!accessToken)
+    throw new Error('Unable to obtain Google API access token from admin credential.')
+  return accessToken
+}
+
+const addDomainsToFirebaseAuthorizedDomains = async (domains = [], context = {}) => {
+  const normalizedDomains = Array.from(new Set(
+    (Array.isArray(domains) ? domains : [])
+      .map(domain => normalizeDomain(domain))
+      .filter(Boolean),
+  ))
+  if (!normalizedDomains.length)
+    return { ok: true, added: [], total: 0 }
+
+  const projectId = getFirebaseProjectId()
+  if (!projectId) {
+    logger.warn('Skipping Firebase Auth authorized domain sync: missing project id', context)
+    return { ok: false, added: [], total: 0, error: 'Missing Firebase project id.' }
+  }
+
+  const accessToken = await getAdminAccessToken()
+  const configUrl = `https://identitytoolkit.googleapis.com/admin/v2/projects/${projectId}/config`
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    'Content-Type': 'application/json',
+  }
+
+  const currentResponse = await axios.get(configUrl, { headers })
+  const currentAuthorizedDomains = Array.isArray(currentResponse?.data?.authorizedDomains)
+    ? currentResponse.data.authorizedDomains.map(value => String(value || '').trim()).filter(Boolean)
+    : []
+
+  const nextAuthorizedDomains = Array.from(new Set(currentAuthorizedDomains.concat(normalizedDomains))).sort((a, b) => a.localeCompare(b))
+  const addedDomains = normalizedDomains.filter(domain => !currentAuthorizedDomains.includes(domain))
+  if (!addedDomains.length)
+    return { ok: true, added: [], total: nextAuthorizedDomains.length }
+
+  await axios.patch(`${configUrl}?updateMask=authorizedDomains`, {
+    authorizedDomains: nextAuthorizedDomains,
+  }, { headers })
+
+  logger.log('Updated Firebase Auth authorized domains', {
+    ...context,
+    addedDomains,
+    totalAuthorizedDomains: nextAuthorizedDomains.length,
+  })
+
+  return {
+    ok: true,
+    added: addedDomains,
+    total: nextAuthorizedDomains.length,
+  }
+}
+
 const collectFormEntries = (data) => {
   if (!data || typeof data !== 'object')
     return []
@@ -3833,6 +3902,30 @@ exports.ensurePublishedSiteDomains = onDocumentWritten(
       }
       existingPlan.domains.add(domain)
       syncPlanMap.set(apexDomain, existingPlan)
+    }
+
+    const authDomainsToAdd = Array.from(new Set(
+      filteredDomains
+        .flatMap((domain) => {
+          const apexDomain = getCloudflareApexDomain(domain)
+          const wwwDomain = getCloudflarePagesDomain(apexDomain)
+          return [apexDomain, wwwDomain]
+        })
+        .map(domain => normalizeDomain(domain))
+        .filter(domain => domain && shouldDisplayDomainDnsRecords(domain)),
+    ))
+    if (authDomainsToAdd.length) {
+      try {
+        await addDomainsToFirebaseAuthorizedDomains(authDomainsToAdd, { orgId, siteId })
+      }
+      catch (error) {
+        logger.error('Failed to sync Firebase Auth authorized domains', {
+          orgId,
+          siteId,
+          domains: authDomainsToAdd,
+          message: error?.message || String(error),
+        })
+      }
     }
 
     const syncPlans = Array.from(syncPlanMap.values())
