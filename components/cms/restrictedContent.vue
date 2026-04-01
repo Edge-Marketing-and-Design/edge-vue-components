@@ -256,6 +256,7 @@ const state = reactive({
   memberStripeActionMemberName: '',
   memberStripeActionRuleId: '',
   memberStripeActionDate: '',
+  memberStripeActionNoEnd: false,
   memberStripeActionSubmitting: false,
   memberStripeActionError: '',
   rulePriceDialogOpen: false,
@@ -348,6 +349,7 @@ const normalizeMemberRow = (member = {}) => {
     memberSource: String(member?.memberSource || member?.source || '').trim(),
     billingStripeCustomerId: String(member?.billingStripeCustomerId || '').trim(),
     registrationPaymentStatus: String(member?.registrationPaymentStatus || '').trim().toLowerCase(),
+    registrationPaymentPaused: member?.registrationPaymentPaused === true,
     registrationStripePriceId: String(member?.registrationStripePriceId || '').trim(),
     registrationStripeSubscriptionId: String(member?.registrationStripeSubscriptionId || '').trim(),
     registrationCouponCode: String(member?.registrationCouponCode || '').trim(),
@@ -357,6 +359,12 @@ const normalizeMemberRow = (member = {}) => {
     registrationPaymentIntervalCount: Number.isFinite(Number(member?.registrationPaymentIntervalCount))
       ? Math.max(1, Math.trunc(Number(member.registrationPaymentIntervalCount)))
       : 1,
+    registrationStripeCurrentPeriodEnd: Number.isFinite(Number(member?.registrationStripeCurrentPeriodEnd))
+      ? Math.max(0, Math.trunc(Number(member.registrationStripeCurrentPeriodEnd)))
+      : 0,
+    registrationStripeCancelAt: Number.isFinite(Number(member?.registrationStripeCancelAt))
+      ? Math.max(0, Math.trunc(Number(member.registrationStripeCancelAt)))
+      : 0,
     registrationPaymentQuantity: Number.isFinite(Number(member?.registrationPaymentQuantity))
       ? Math.max(1, Math.trunc(Number(member.registrationPaymentQuantity)))
       : 1,
@@ -388,11 +396,32 @@ const formatRegistrationPaymentStatus = (value) => {
   return labels[status] || status.replace(/_/g, ' ')
 }
 
+const isStripeBillingPaused = (member = {}) => {
+  return member?.registrationPaymentPaused === true
+    || String(member?.registrationPaymentStatus || '').trim().toLowerCase() === 'paused'
+}
+
+const isStripeSubscriptionCancelled = (member = {}) => {
+  return String(member?.registrationPaymentStatus || '').trim().toLowerCase() === 'cancelled'
+    || String(member?.registrationPaymentStatus || '').trim().toLowerCase() === 'canceled'
+}
+
 const getDateInputToday = () => {
   const now = new Date()
   const year = now.getFullYear()
   const month = String(now.getMonth() + 1).padStart(2, '0')
   const day = String(now.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const getDateInputFromUnix = (unixValue) => {
+  const unix = Number(unixValue || 0)
+  if (!Number.isFinite(unix) || unix <= 0)
+    return ''
+  const date = new Date(unix * 1000)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
 }
 
@@ -435,6 +464,30 @@ const formatStripeMoneyFromCents = (amountCents = 0, currency = 'usd') => {
   }
 }
 
+const formatStripeUnixDate = (value) => {
+  const unix = Number(value || 0)
+  if (!Number.isFinite(unix) || unix <= 0)
+    return ''
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    }).format(new Date(unix * 1000))
+  }
+  catch {
+    return ''
+  }
+}
+
+const getStripeCurrentDurationLabel = (member = {}) => {
+  return formatStripeUnixDate(member?.registrationStripeCurrentPeriodEnd)
+}
+
+const getStripeScheduledDurationLabel = (member = {}) => {
+  return formatStripeUnixDate(member?.registrationStripeCancelAt)
+}
+
 const formatStripeBillingCycle = (member = {}) => {
   const amountCents = Number(member?.registrationPaymentAmountCents || 0)
   const currency = String(member?.registrationPaymentCurrency || 'usd').trim()
@@ -474,7 +527,11 @@ const openMemberStripeActionDialog = ({ action, member, ruleId }) => {
   state.memberStripeActionRuleId = normalizedRuleId
   state.memberStripeActionAudienceUserId = audienceUserId
   state.memberStripeActionMemberName = getMemberDisplayName(member)
-  state.memberStripeActionDate = normalizedAction === 'update_duration' ? getDateInputToday() : ''
+  const existingCancelAt = Number(member?.registrationStripeCancelAt || 0)
+  state.memberStripeActionNoEnd = normalizedAction === 'update_duration' ? existingCancelAt <= 0 : false
+  state.memberStripeActionDate = normalizedAction === 'update_duration'
+    ? (existingCancelAt > 0 ? getDateInputFromUnix(existingCancelAt) : getDateInputToday())
+    : ''
   state.memberStripeActionError = ''
   state.memberStripeActionDialogOpen = true
 }
@@ -488,6 +545,7 @@ const closeMemberStripeActionDialog = (force = false) => {
   state.memberStripeActionAudienceUserId = ''
   state.memberStripeActionMemberName = ''
   state.memberStripeActionDate = ''
+  state.memberStripeActionNoEnd = false
   state.memberStripeActionError = ''
 }
 
@@ -518,7 +576,7 @@ const canSubmitMemberStripeAction = computed(() => {
   if (!state.memberStripeActionAudienceUserId || !state.memberStripeActionRuleId || !state.memberStripeActionType)
     return false
   if (state.memberStripeActionType === 'update_duration')
-    return Boolean(String(state.memberStripeActionDate || '').trim())
+    return state.memberStripeActionNoEnd || Boolean(String(state.memberStripeActionDate || '').trim())
   return true
 })
 
@@ -541,8 +599,11 @@ const submitMemberStripeAction = async () => {
       ruleId: state.memberStripeActionRuleId,
       action: state.memberStripeActionType,
     }
-    if (state.memberStripeActionType === 'update_duration')
-      payload.effectiveDate = String(state.memberStripeActionDate || '').trim()
+    if (state.memberStripeActionType === 'update_duration') {
+      payload.noEnd = state.memberStripeActionNoEnd === true
+      if (!payload.noEnd)
+        payload.effectiveDate = String(state.memberStripeActionDate || '').trim()
+    }
 
     const response = await edgeFirebase.runFunction('cms-restrictedContentManageStripeSubscription', payload)
     const result = response?.data || response || {}
@@ -563,9 +624,19 @@ const submitMemberStripeAction = async () => {
 }
 
 const hasStripeMemberInfo = (member = {}) => {
+  const paymentStatus = String(member?.registrationPaymentStatus || '').trim().toLowerCase()
+  const hasMeaningfulPaymentStatus = Boolean(paymentStatus && paymentStatus !== 'not_required')
   return Boolean(
     String(member?.billingStripeCustomerId || '').trim()
-    || String(member?.registrationPaymentStatus || '').trim()
+    || hasMeaningfulPaymentStatus
+    || String(member?.registrationStripeSubscriptionId || '').trim()
+    || String(member?.registrationStripePriceId || '').trim()
+    || Number(member?.registrationPaymentAmountCents || 0) > 0
+    || Number(member?.registrationPaymentDiscountAmountCents || 0) > 0
+    || Number(member?.registrationStripeCurrentPeriodEnd || 0) > 0
+    || Number(member?.registrationStripeCancelAt || 0) > 0
+    || String(member?.registrationCouponCode || '').trim()
+    || String(member?.registrationCouponLabel || '').trim()
     || (Array.isArray(member?.paidAccessRuleIds) && member.paidAccessRuleIds.length)
     || (Array.isArray(member?.pendingPaymentRuleIds) && member.pendingPaymentRuleIds.length)
   )
@@ -1826,15 +1897,22 @@ onBeforeUnmount(async () => {
           <span class="font-semibold text-foreground">{{ state.memberStripeActionMemberName || state.memberStripeActionAudienceUserId }}</span>
         </div>
         <div v-if="state.memberStripeActionType === 'update_duration'" class="space-y-2">
-          <edge-shad-input
+          <label class="flex items-center gap-2 text-sm text-foreground">
+            <input
+              v-model="state.memberStripeActionNoEnd"
+              type="checkbox"
+            >
+            No end date
+          </label>
+          <edge-shad-datepicker
+            v-if="!state.memberStripeActionNoEnd"
             v-model="state.memberStripeActionDate"
             name="restricted-member-stripe-action-date"
-            type="date"
             label="End Date"
-            :min="getDateInputToday()"
           />
           <div class="text-xs text-muted-foreground">
-            Stripe cancels this subscription at the end of the selected date.
+            <span v-if="state.memberStripeActionNoEnd">This keeps the subscription ongoing with no scheduled end.</span>
+            <span v-else>Stripe cancels this subscription at the end of the selected date.</span>
           </div>
         </div>
         <div v-if="state.memberStripeActionError" class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-800 dark:bg-red-950/20 dark:text-red-200">
@@ -2761,20 +2839,6 @@ onBeforeUnmount(async () => {
                           {{ getRuleLabel(ruleId) }}
                         </span>
                       </div>
-                      <div v-if="hasStripeMemberInfo(item)" class="mt-2 rounded-md border border-border/60 bg-muted/30 px-2 py-2 text-[11px] text-muted-foreground">
-                        <div v-if="item.registrationPaymentStatus" class="truncate">
-                          Stripe status: {{ formatRegistrationPaymentStatus(item.registrationPaymentStatus) }}
-                        </div>
-                        <div v-if="formatStripeBillingCycle(item)" class="truncate">
-                          Per cycle: {{ formatStripeBillingCycle(item) }}
-                        </div>
-                        <div v-if="formatStripeCouponSummary(item)" class="truncate">
-                          Coupon: {{ formatStripeCouponSummary(item) }}
-                        </div>
-                        <div v-if="item.billingStripeCustomerId" class="truncate">
-                          Customer: {{ item.billingStripeCustomerId }}
-                        </div>
-                      </div>
                     </div>
                     <div class="flex shrink-0 items-center gap-2">
                       <span class="rounded-full px-2 py-1 text-[10px] font-semibold uppercase" :class="statusClass(item.status)">
@@ -2788,6 +2852,35 @@ onBeforeUnmount(async () => {
                       >
                         <Trash2 class="h-4 w-4" />
                       </edge-shad-button>
+                    </div>
+                  </div>
+                  <div v-if="hasStripeMemberInfo(item)" class="mt-2 w-full rounded-md border border-border/60 bg-muted/30 px-2 py-2 text-[11px] text-muted-foreground">
+                    <div
+                      v-if="Array.isArray(item.paidAccessRuleIds) && item.paidAccessRuleIds.length"
+                      class="truncate"
+                    >
+                      Paid plan:
+                      <span class="font-medium text-foreground">
+                        {{ item.paidAccessRuleIds.map(ruleId => getRuleLabel(ruleId)).join(', ') }}
+                      </span>
+                    </div>
+                    <div v-if="isStripeBillingPaused(item)" class="truncate">
+                      Billing: <span class="font-semibold text-amber-700 dark:text-amber-300">Paused</span>
+                    </div>
+                    <div v-if="isStripeSubscriptionCancelled(item)" class="truncate">
+                      Subscription: <span class="font-semibold text-red-700 dark:text-red-300">Cancelled</span>
+                    </div>
+                    <div v-if="getStripeCurrentDurationLabel(item)" class="truncate">
+                      Current period ends: {{ getStripeCurrentDurationLabel(item) }}
+                    </div>
+                    <div v-if="getStripeScheduledDurationLabel(item)" class="truncate">
+                      Scheduled end date: {{ getStripeScheduledDurationLabel(item) }}
+                    </div>
+                    <div v-if="formatStripeBillingCycle(item)" class="truncate">
+                      Per cycle: {{ formatStripeBillingCycle(item) }}
+                    </div>
+                    <div v-if="item.billingStripeCustomerId" class="truncate">
+                      Customer: {{ item.billingStripeCustomerId }}
                     </div>
                   </div>
                 </button>
@@ -2889,6 +2982,18 @@ onBeforeUnmount(async () => {
                           </div>
                           <div v-if="slotProps.workingDoc.registrationPaymentStatus" class="text-xs text-muted-foreground">
                             Payment Status: <span class="font-medium text-foreground">{{ formatRegistrationPaymentStatus(slotProps.workingDoc.registrationPaymentStatus) }}</span>
+                          </div>
+                          <div v-if="isStripeBillingPaused(slotProps.workingDoc)" class="text-xs text-muted-foreground">
+                            Billing: <span class="font-semibold text-amber-700 dark:text-amber-300">Paused</span>
+                          </div>
+                          <div v-if="isStripeSubscriptionCancelled(slotProps.workingDoc)" class="text-xs text-muted-foreground">
+                            Subscription: <span class="font-semibold text-red-700 dark:text-red-300">Cancelled</span>
+                          </div>
+                          <div v-if="getStripeCurrentDurationLabel(slotProps.workingDoc)" class="text-xs text-muted-foreground">
+                            Current Period Ends: <span class="font-medium text-foreground">{{ getStripeCurrentDurationLabel(slotProps.workingDoc) }}</span>
+                          </div>
+                          <div v-if="getStripeScheduledDurationLabel(slotProps.workingDoc)" class="text-xs text-muted-foreground">
+                            Scheduled End Date: <span class="font-medium text-foreground">{{ getStripeScheduledDurationLabel(slotProps.workingDoc) }}</span>
                           </div>
                           <div v-if="formatStripeBillingCycle(slotProps.workingDoc)" class="text-xs text-muted-foreground">
                             Per Cycle: <span class="font-medium text-foreground">{{ formatStripeBillingCycle(slotProps.workingDoc) }}</span>

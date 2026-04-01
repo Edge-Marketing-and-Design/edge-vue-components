@@ -658,7 +658,7 @@ const syncFirebaseAuthorizedDomainsForMembership = async ({
   const accessToken = await getAdminAccessToken()
   const configUrl = `https://identitytoolkit.googleapis.com/admin/v2/projects/${projectId}/config`
   const headers = {
-    Authorization: `Bearer ${accessToken}`,
+    'Authorization': `Bearer ${accessToken}`,
     'Content-Type': 'application/json',
   }
 
@@ -2697,6 +2697,72 @@ const getRestrictedSiteRefs = (orgId, siteId) => {
   }
 }
 
+const buildRestrictedRegistrationEmailIndexDocId = (email) => {
+  const normalizedEmail = normalizeEmail(email)
+  if (!normalizedEmail)
+    return ''
+  return encodeURIComponent(normalizedEmail)
+}
+
+const getRestrictedRegistrationEmailIndexRef = (orgId, siteId, email) => {
+  const emailDocId = buildRestrictedRegistrationEmailIndexDocId(email)
+  if (!emailDocId)
+    return null
+  return db.collection('organizations').doc(orgId)
+    .collection('sites').doc(siteId)
+    .collection('private-restricted-registration-email-index')
+    .doc(emailDocId)
+}
+
+const reserveRestrictedRegistrationDocId = async ({
+  orgId,
+  siteId,
+  email,
+  preferredDocId = '',
+}) => {
+  const normalizedOrgId = String(orgId || '').trim()
+  const normalizedSiteId = String(siteId || '').trim()
+  const normalizedEmail = normalizeEmail(email)
+  const normalizedPreferredDocId = String(preferredDocId || '').trim()
+  if (!normalizedOrgId || !normalizedSiteId || !normalizedEmail)
+    return normalizedPreferredDocId
+
+  const emailIndexRef = getRestrictedRegistrationEmailIndexRef(normalizedOrgId, normalizedSiteId, normalizedEmail)
+  if (!emailIndexRef)
+    return normalizedPreferredDocId
+
+  if (normalizedPreferredDocId) {
+    await emailIndexRef.set({
+      email: normalizedEmail,
+      docId: normalizedPreferredDocId,
+      last_updated: Date.now(),
+    }, { merge: true })
+    return normalizedPreferredDocId
+  }
+
+  return db.runTransaction(async (transaction) => {
+    const now = Date.now()
+    const indexSnap = await transaction.get(emailIndexRef)
+    const indexedDocId = String(indexSnap.data()?.docId || '').trim()
+    if (indexedDocId) {
+      transaction.set(emailIndexRef, {
+        email: normalizedEmail,
+        last_updated: now,
+      }, { merge: true })
+      return indexedDocId
+    }
+
+    const nextDocId = db.collection('staged-users').doc().id
+    transaction.set(emailIndexRef, {
+      email: normalizedEmail,
+      docId: nextDocId,
+      doc_created_at: now,
+      last_updated: now,
+    }, { merge: true })
+    return nextDocId
+  })
+}
+
 const getRestrictedSiteContext = async (orgId, siteId) => {
   const normalizedOrgId = String(orgId || '').trim()
   const normalizedSiteId = String(siteId || '').trim()
@@ -2872,6 +2938,7 @@ const buildRestrictedMemberPayload = ({
     paidAccessRuleIds,
     pendingPaymentRuleIds,
     registrationPaymentStatus: paymentStatus,
+    registrationPaymentPaused: existingMember?.registrationPaymentPaused === true,
     doc_created_at: Number(existingMember?.doc_created_at || now),
     last_updated: now,
   }
@@ -3383,6 +3450,8 @@ const buildStripeSubscriptionBillingSnapshot = (subscription = {}) => {
   return {
     registrationStripeSubscriptionId: String(subscription?.id || '').trim(),
     registrationStripePriceId: String(price?.id || '').trim(),
+    registrationStripeCurrentPeriodEnd: Number(subscription?.current_period_end || 0) || 0,
+    registrationStripeCancelAt: Number(subscription?.cancel_at || 0) || 0,
     registrationPaymentCurrency: String(price?.currency || 'usd').trim().toLowerCase() || 'usd',
     registrationPaymentInterval: String(price?.recurring?.interval || '').trim().toLowerCase(),
     registrationPaymentIntervalCount: Number.isFinite(Number(price?.recurring?.interval_count))
@@ -3440,10 +3509,24 @@ const buildStripeCheckoutBillingSnapshot = async ({ stripe, session = {}, metada
   const discountAmountCents = toStripeAmountCents(session?.total_details?.amount_discount || 0)
   const totalFromSession = toStripeAmountCents(session?.amount_total || session?.total || 0)
   const paymentAmountCents = totalFromSession > 0 ? totalFromSession : Math.max(0, baseAmountCents - discountAmountCents)
+  const subscriptionId = String(session?.subscription || '').trim()
+  let subscription = null
+  if (subscriptionId) {
+    try {
+      subscription = await stripe.subscriptions.retrieve(subscriptionId, {
+        expand: ['items.data.price'],
+      })
+    }
+    catch {}
+  }
+  const subscriptionPeriodEnd = Number(subscription?.current_period_end || 0) || 0
+  const subscriptionCancelAt = Number(subscription?.cancel_at || 0) || 0
 
   return {
-    registrationStripeSubscriptionId: String(session?.subscription || '').trim(),
+    registrationStripeSubscriptionId: subscriptionId,
     registrationStripePriceId: priceId,
+    registrationStripeCurrentPeriodEnd: subscriptionPeriodEnd,
+    registrationStripeCancelAt: subscriptionCancelAt,
     registrationPaymentCurrency: currency,
     registrationPaymentInterval: String(price?.recurring?.interval || '').trim().toLowerCase(),
     registrationPaymentIntervalCount: Number.isFinite(Number(price?.recurring?.interval_count))
@@ -3468,6 +3551,7 @@ exports.restrictedContentManageStripeSubscription = onCall({ timeoutSeconds: 180
   const ruleId = String(data.ruleId || '').trim()
   const action = String(data.action || '').trim().toLowerCase()
   const effectiveDate = String(data.effectiveDate || '').trim()
+  const noEnd = data.noEnd === true
 
   if (!orgId || !siteId || !audienceUserId || !ruleId || !action)
     throw new HttpsError('invalid-argument', 'Missing orgId, siteId, audienceUserId, ruleId, or action.')
@@ -3501,7 +3585,7 @@ exports.restrictedContentManageStripeSubscription = onCall({ timeoutSeconds: 180
   const rulePriceIds = new Set(
     (Array.isArray(rule.registrationStripePrices) ? rule.registrationStripePrices : [])
       .map(item => String(item?.priceId || '').trim())
-      .filter(Boolean)
+      .filter(Boolean),
   )
   const ruleProductId = String(rule.registrationStripeProductId || '').trim()
   const subscription = pickSubscriptionForRule(subscriptions, {
@@ -3527,6 +3611,12 @@ exports.restrictedContentManageStripeSubscription = onCall({ timeoutSeconds: 180
       grantPaidAccess: false,
       revokePaidAccess: true,
     })
+    await memberRef.set({
+      registrationPaymentPaused: false,
+      registrationStripeCancelAt: Number(updatedSubscription?.cancel_at || 0) || 0,
+      registrationStripeCurrentPeriodEnd: Number(updatedSubscription?.current_period_end || 0) || 0,
+      last_updated: Date.now(),
+    }, { merge: true })
     message = 'Stripe subscription cancelled.'
   }
   else if (action === 'pause') {
@@ -3544,20 +3634,42 @@ exports.restrictedContentManageStripeSubscription = onCall({ timeoutSeconds: 180
       grantPaidAccess: true,
       revokePaidAccess: false,
     })
+    await memberRef.set({
+      registrationPaymentPaused: true,
+      registrationStripeCancelAt: Number(updatedSubscription?.cancel_at || 0) || 0,
+      registrationStripeCurrentPeriodEnd: Number(updatedSubscription?.current_period_end || 0) || 0,
+      last_updated: Date.now(),
+    }, { merge: true })
     message = 'Stripe subscription billing paused.'
   }
   else if (action === 'update_duration') {
-    const cancelAt = parseStripeActionDateToUnix(effectiveDate)
-    if (!cancelAt)
-      throw new HttpsError('invalid-argument', 'Invalid effectiveDate. Use YYYY-MM-DD.')
-    if (cancelAt <= Math.floor(Date.now() / 1000))
-      throw new HttpsError('invalid-argument', 'End date must be in the future.')
+    if (noEnd) {
+      updatedSubscription = await stripe.subscriptions.update(subscription.id, {
+        cancel_at: null,
+        cancel_at_period_end: false,
+      })
+    }
+    else {
+      const cancelAt = parseStripeActionDateToUnix(effectiveDate)
+      if (!cancelAt)
+        throw new HttpsError('invalid-argument', 'Invalid effectiveDate. Use YYYY-MM-DD.')
+      if (cancelAt <= Math.floor(Date.now() / 1000))
+        throw new HttpsError('invalid-argument', 'End date must be in the future.')
 
-    updatedSubscription = await stripe.subscriptions.update(subscription.id, {
-      cancel_at: cancelAt,
-      cancel_at_period_end: false,
-    })
-    message = `Stripe subscription end date set to ${effectiveDate}.`
+      updatedSubscription = await stripe.subscriptions.update(subscription.id, {
+        cancel_at: cancelAt,
+        cancel_at_period_end: false,
+      })
+    }
+    await memberRef.set({
+      registrationPaymentPaused: Boolean(updatedSubscription?.pause_collection && typeof updatedSubscription.pause_collection === 'object'),
+      registrationStripeCancelAt: Number(updatedSubscription?.cancel_at || 0) || 0,
+      registrationStripeCurrentPeriodEnd: Number(updatedSubscription?.current_period_end || 0) || 0,
+      last_updated: Date.now(),
+    }, { merge: true })
+    message = noEnd
+      ? 'Stripe subscription end date cleared.'
+      : `Stripe subscription end date set to ${effectiveDate}.`
   }
 
   return {
@@ -3570,6 +3682,7 @@ exports.restrictedContentManageStripeSubscription = onCall({ timeoutSeconds: 180
       id: String(updatedSubscription?.id || subscription.id || '').trim(),
       status: String(updatedSubscription?.status || '').trim().toLowerCase(),
       cancelAt: Number(updatedSubscription?.cancel_at || 0) || null,
+      currentPeriodEnd: Number(updatedSubscription?.current_period_end || 0) || null,
       pauseCollection: updatedSubscription?.pause_collection || null,
     },
   }
@@ -3625,8 +3738,14 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
     if (!docId && restrictedContent.allowSelfRegistration === false)
       return fail('no-self-registration', 'Self registration is not allowed for this site.')
 
+    docId = await reserveRestrictedRegistrationDocId({
+      orgId,
+      siteId,
+      email,
+      preferredDocId: docId,
+    })
     if (!docId)
-      docId = db.collection('staged-users').doc().id
+      return fail('internal', 'Unable to reserve registration record for this email.')
 
     const stagedUserRef = db.collection('staged-users').doc(docId)
     const stagedUserSnap = await stagedUserRef.get()
@@ -3686,7 +3805,10 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
       }, { merge: true })
     }
 
-    const existingAudienceUser = audienceUserSnap?.exists ? (audienceUserSnap.data() || {}) : {}
+    const audienceUserDocSnap = await audienceUsersRef.doc(docId).get()
+    const existingAudienceUser = audienceUserDocSnap.exists
+      ? (audienceUserDocSnap.data() || {})
+      : (audienceUserSnap?.exists ? (audienceUserSnap.data() || {}) : {})
     const existingAudienceAuthUid = String(existingAudienceUser.authUid || '').trim()
     await audienceUsersRef.doc(docId).set({
       docId,
@@ -4053,7 +4175,7 @@ exports.restrictedContentImportStripeCatalog = onCall({ timeoutSeconds: 180 }, a
   }
 
   const nextRules = Object.values(rulesById)
-    .map((item) => normalizeRestrictedRuleForFunction(item, item.id))
+    .map(item => normalizeRestrictedRuleForFunction(item, item.id))
     .filter(item => item.id)
     .sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id)))
 
@@ -4297,7 +4419,7 @@ exports.restrictedContentSyncStripeRule = onCall({ timeoutSeconds: 180 }, async 
       couponId,
       orgId,
       siteId,
-      ruleId
+      ruleId,
     )
 
     if (needsPromotionCode) {
@@ -4793,6 +4915,7 @@ exports.restrictedContentStripeWebhook = onRequest(async (req, res) => {
         if (Object.keys(billingSnapshot).length) {
           await audienceUsersRef.doc(audienceUserId).set({
             ...billingSnapshot,
+            registrationPaymentPaused: false,
             last_updated: Date.now(),
           }, { merge: true })
         }
@@ -4815,6 +4938,7 @@ exports.restrictedContentStripeWebhook = onRequest(async (req, res) => {
         if (Object.keys(billingSnapshot).length) {
           await audienceUsersRef.doc(audienceUserId).set({
             ...billingSnapshot,
+            registrationPaymentPaused: isPaused,
             last_updated: Date.now(),
           }, { merge: true })
         }
@@ -4830,6 +4954,10 @@ exports.restrictedContentStripeWebhook = onRequest(async (req, res) => {
           grantPaidAccess: false,
           revokePaidAccess: true,
         })
+        await audienceUsersRef.doc(audienceUserId).set({
+          registrationPaymentPaused: false,
+          last_updated: Date.now(),
+        }, { merge: true })
       }
     }
 
