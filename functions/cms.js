@@ -658,7 +658,7 @@ const syncFirebaseAuthorizedDomainsForMembership = async ({
   const accessToken = await getAdminAccessToken()
   const configUrl = `https://identitytoolkit.googleapis.com/admin/v2/projects/${projectId}/config`
   const headers = {
-    'Authorization': `Bearer ${accessToken}`,
+    Authorization: `Bearer ${accessToken}`,
     'Content-Type': 'application/json',
   }
 
@@ -2714,6 +2714,69 @@ const getRestrictedRegistrationEmailIndexRef = (orgId, siteId, email) => {
     .doc(emailDocId)
 }
 
+const getGlobalRestrictedRegistrationEmailIndexRef = (email) => {
+  const emailDocId = buildRestrictedRegistrationEmailIndexDocId(email)
+  if (!emailDocId)
+    return null
+  return db.collection('private-restricted-registration-email-index').doc(emailDocId)
+}
+
+const getGlobalRestrictedRegistrationAuthIndexRef = (uid) => {
+  const normalizedUid = String(uid || '').trim()
+  if (!normalizedUid)
+    return null
+  return db.collection('private-restricted-registration-auth-index').doc(normalizedUid)
+}
+
+const reserveGlobalRestrictedRegistrationDocId = async ({
+  email,
+  authUid = '',
+  preferredDocId = '',
+}) => {
+  const normalizedEmail = normalizeEmail(email)
+  const normalizedAuthUid = String(authUid || '').trim()
+  const normalizedPreferredDocId = String(preferredDocId || '').trim()
+  if (!normalizedEmail)
+    return normalizedPreferredDocId
+
+  const emailIndexRef = getGlobalRestrictedRegistrationEmailIndexRef(normalizedEmail)
+  const authIndexRef = getGlobalRestrictedRegistrationAuthIndexRef(normalizedAuthUid)
+  if (!emailIndexRef)
+    return normalizedPreferredDocId
+
+  return db.runTransaction(async (transaction) => {
+    const now = Date.now()
+    const emailIndexSnap = await transaction.get(emailIndexRef)
+    const authIndexSnap = authIndexRef ? await transaction.get(authIndexRef) : null
+
+    const emailIndexedDocId = String(emailIndexSnap.data()?.docId || '').trim()
+    const authIndexedDocId = String(authIndexSnap?.data()?.docId || '').trim()
+
+    let nextDocId = normalizedPreferredDocId || authIndexedDocId || emailIndexedDocId
+    if (!nextDocId)
+      nextDocId = db.collection('staged-users').doc().id
+
+    transaction.set(emailIndexRef, {
+      email: normalizedEmail,
+      docId: nextDocId,
+      doc_created_at: Number(emailIndexSnap.data()?.doc_created_at || now),
+      last_updated: now,
+    }, { merge: true })
+
+    if (authIndexRef) {
+      transaction.set(authIndexRef, {
+        uid: normalizedAuthUid,
+        email: normalizedEmail,
+        docId: nextDocId,
+        doc_created_at: Number(authIndexSnap?.data()?.doc_created_at || now),
+        last_updated: now,
+      }, { merge: true })
+    }
+
+    return nextDocId
+  })
+}
+
 const reserveRestrictedRegistrationDocId = async ({
   orgId,
   siteId,
@@ -3585,7 +3648,7 @@ exports.restrictedContentManageStripeSubscription = onCall({ timeoutSeconds: 180
   const rulePriceIds = new Set(
     (Array.isArray(rule.registrationStripePrices) ? rule.registrationStripePrices : [])
       .map(item => String(item?.priceId || '').trim())
-      .filter(Boolean),
+      .filter(Boolean)
   )
   const ruleProductId = String(rule.registrationStripeProductId || '').trim()
   const subscription = pickSubscriptionForRule(subscriptions, {
@@ -3737,6 +3800,20 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
 
     if (!docId && restrictedContent.allowSelfRegistration === false)
       return fail('no-self-registration', 'Self registration is not allowed for this site.')
+
+    if (!docId && linkedAuthUid) {
+      const stagedRefByAuth = await resolveStagedUserRef(linkedAuthUid)
+      if (stagedRefByAuth?.id)
+        docId = String(stagedRefByAuth.id || '').trim()
+    }
+
+    docId = await reserveGlobalRestrictedRegistrationDocId({
+      email,
+      authUid: linkedAuthUid,
+      preferredDocId: docId,
+    })
+    if (!docId)
+      return fail('internal', 'Unable to reserve global staged user record for this email.')
 
     docId = await reserveRestrictedRegistrationDocId({
       orgId,
@@ -4175,7 +4252,7 @@ exports.restrictedContentImportStripeCatalog = onCall({ timeoutSeconds: 180 }, a
   }
 
   const nextRules = Object.values(rulesById)
-    .map(item => normalizeRestrictedRuleForFunction(item, item.id))
+    .map((item) => normalizeRestrictedRuleForFunction(item, item.id))
     .filter(item => item.id)
     .sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id)))
 
@@ -4419,7 +4496,7 @@ exports.restrictedContentSyncStripeRule = onCall({ timeoutSeconds: 180 }, async 
       couponId,
       orgId,
       siteId,
-      ruleId,
+      ruleId
     )
 
     if (needsPromotionCode) {
