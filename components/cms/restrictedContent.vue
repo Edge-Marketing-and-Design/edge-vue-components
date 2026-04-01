@@ -250,6 +250,14 @@ const state = reactive({
   memberDeleteDialogOpen: false,
   memberDeleteDocId: '',
   memberDeleteSubmitting: false,
+  memberStripeActionDialogOpen: false,
+  memberStripeActionType: '',
+  memberStripeActionAudienceUserId: '',
+  memberStripeActionMemberName: '',
+  memberStripeActionRuleId: '',
+  memberStripeActionDate: '',
+  memberStripeActionSubmitting: false,
+  memberStripeActionError: '',
   rulePriceDialogOpen: false,
   rulePriceDialogIndex: -1,
   rulePriceDialogDraft: createRulePriceOption(),
@@ -338,8 +346,229 @@ const normalizeMemberRow = (member = {}) => {
     authUid: String(member?.authUid || '').trim(),
     stagedUserId: String(member?.stagedUserId || '').trim(),
     memberSource: String(member?.memberSource || member?.source || '').trim(),
+    billingStripeCustomerId: String(member?.billingStripeCustomerId || '').trim(),
+    registrationPaymentStatus: String(member?.registrationPaymentStatus || '').trim().toLowerCase(),
+    registrationStripePriceId: String(member?.registrationStripePriceId || '').trim(),
+    registrationStripeSubscriptionId: String(member?.registrationStripeSubscriptionId || '').trim(),
+    registrationCouponCode: String(member?.registrationCouponCode || '').trim(),
+    registrationCouponLabel: String(member?.registrationCouponLabel || '').trim(),
+    registrationPaymentCurrency: String(member?.registrationPaymentCurrency || 'usd').trim().toLowerCase() || 'usd',
+    registrationPaymentInterval: String(member?.registrationPaymentInterval || '').trim().toLowerCase(),
+    registrationPaymentIntervalCount: Number.isFinite(Number(member?.registrationPaymentIntervalCount))
+      ? Math.max(1, Math.trunc(Number(member.registrationPaymentIntervalCount)))
+      : 1,
+    registrationPaymentQuantity: Number.isFinite(Number(member?.registrationPaymentQuantity))
+      ? Math.max(1, Math.trunc(Number(member.registrationPaymentQuantity)))
+      : 1,
+    registrationPaymentBaseAmountCents: Number.isFinite(Number(member?.registrationPaymentBaseAmountCents))
+      ? Math.max(0, Math.round(Number(member.registrationPaymentBaseAmountCents)))
+      : 0,
+    registrationPaymentDiscountAmountCents: Number.isFinite(Number(member?.registrationPaymentDiscountAmountCents))
+      ? Math.max(0, Math.round(Number(member.registrationPaymentDiscountAmountCents)))
+      : 0,
+    registrationPaymentAmountCents: Number.isFinite(Number(member?.registrationPaymentAmountCents))
+      ? Math.max(0, Math.round(Number(member.registrationPaymentAmountCents)))
+      : 0,
     manual: member?.manual === true,
   }
+}
+
+const formatRegistrationPaymentStatus = (value) => {
+  const status = String(value || '').trim().toLowerCase()
+  if (!status)
+    return ''
+  const labels = {
+    paid: 'Paid',
+    pending: 'Pending Payment',
+    failed: 'Payment Failed',
+    paused: 'Paused',
+    cancelled: 'Cancelled',
+    not_required: 'Not Required',
+  }
+  return labels[status] || status.replace(/_/g, ' ')
+}
+
+const getDateInputToday = () => {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const normalizeMemberStripeActionType = (value) => {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (['cancel', 'pause', 'update_duration'].includes(normalized))
+    return normalized
+  return ''
+}
+
+const getMemberStripeActionRuleLabel = (ruleId) => {
+  const normalizedRuleId = String(ruleId || '').trim()
+  if (!normalizedRuleId)
+    return ''
+  const item = currentRules.value.find(candidate => candidate.id === normalizedRuleId)
+  return item?.name || normalizedRuleId
+}
+
+const getMemberDisplayName = (member = {}) => {
+  const name = String(member?.name || '').trim()
+  if (name)
+    return name
+  const email = String(member?.email || '').trim()
+  if (email)
+    return email
+  const audienceUserId = String(member?.audienceUserId || member?.docId || '').trim()
+  if (audienceUserId)
+    return getAudienceUserLabel(audienceUserId) || audienceUserId
+  return 'Member'
+}
+
+const formatStripeMoneyFromCents = (amountCents = 0, currency = 'usd') => {
+  const amount = Number(amountCents || 0) / 100
+  const normalizedCurrency = String(currency || 'usd').trim().toUpperCase() || 'USD'
+  try {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: normalizedCurrency }).format(amount)
+  }
+  catch {
+    return `$${amount.toFixed(2)}`
+  }
+}
+
+const formatStripeBillingCycle = (member = {}) => {
+  const amountCents = Number(member?.registrationPaymentAmountCents || 0)
+  const currency = String(member?.registrationPaymentCurrency || 'usd').trim()
+  const interval = String(member?.registrationPaymentInterval || '').trim().toLowerCase()
+  const intervalCount = Number.isFinite(Number(member?.registrationPaymentIntervalCount))
+    ? Math.max(1, Math.trunc(Number(member.registrationPaymentIntervalCount)))
+    : 1
+  if (!amountCents || !interval)
+    return ''
+  const amountLabel = formatStripeMoneyFromCents(amountCents, currency)
+  const suffix = intervalCount > 1 ? `${intervalCount} ${interval}s` : interval
+  return `${amountLabel} / ${suffix}`
+}
+
+const formatStripeCouponSummary = (member = {}) => {
+  const discountCents = Number(member?.registrationPaymentDiscountAmountCents || 0)
+  if (!discountCents)
+    return ''
+  const currency = String(member?.registrationPaymentCurrency || 'usd').trim()
+  const code = String(member?.registrationCouponCode || '').trim()
+  const label = String(member?.registrationCouponLabel || '').trim()
+  const discountLabel = formatStripeMoneyFromCents(discountCents, currency)
+  if (code)
+    return `${code} (${discountLabel} off)`
+  if (label)
+    return `${label} (${discountLabel} off)`
+  return `${discountLabel} off`
+}
+
+const openMemberStripeActionDialog = ({ action, member, ruleId }) => {
+  const normalizedAction = normalizeMemberStripeActionType(action)
+  const normalizedRuleId = String(ruleId || '').trim()
+  const audienceUserId = String(member?.audienceUserId || member?.docId || '').trim()
+  if (!normalizedAction || !normalizedRuleId || !audienceUserId)
+    return
+  state.memberStripeActionType = normalizedAction
+  state.memberStripeActionRuleId = normalizedRuleId
+  state.memberStripeActionAudienceUserId = audienceUserId
+  state.memberStripeActionMemberName = getMemberDisplayName(member)
+  state.memberStripeActionDate = normalizedAction === 'update_duration' ? getDateInputToday() : ''
+  state.memberStripeActionError = ''
+  state.memberStripeActionDialogOpen = true
+}
+
+const closeMemberStripeActionDialog = (force = false) => {
+  if (state.memberStripeActionSubmitting && !force)
+    return
+  state.memberStripeActionDialogOpen = false
+  state.memberStripeActionType = ''
+  state.memberStripeActionRuleId = ''
+  state.memberStripeActionAudienceUserId = ''
+  state.memberStripeActionMemberName = ''
+  state.memberStripeActionDate = ''
+  state.memberStripeActionError = ''
+}
+
+const memberStripeActionDialogTitle = computed(() => {
+  if (state.memberStripeActionType === 'cancel')
+    return 'Cancel Stripe Subscription?'
+  if (state.memberStripeActionType === 'pause')
+    return 'Pause Stripe Subscription?'
+  if (state.memberStripeActionType === 'update_duration')
+    return 'Update Subscription End Date?'
+  return 'Confirm Stripe Action'
+})
+
+const memberStripeActionDialogDescription = computed(() => {
+  const label = getMemberStripeActionRuleLabel(state.memberStripeActionRuleId)
+  if (state.memberStripeActionType === 'cancel')
+    return `This cancels billing now for ${label}. Access will be removed when Stripe confirms cancellation.`
+  if (state.memberStripeActionType === 'pause')
+    return `This pauses billing for ${label} on Stripe until you resume it there.`
+  if (state.memberStripeActionType === 'update_duration')
+    return `Set an end date for ${label}. Stripe will cancel the subscription on that date.`
+  return 'Continue with this Stripe update?'
+})
+
+const canSubmitMemberStripeAction = computed(() => {
+  if (state.memberStripeActionSubmitting)
+    return false
+  if (!state.memberStripeActionAudienceUserId || !state.memberStripeActionRuleId || !state.memberStripeActionType)
+    return false
+  if (state.memberStripeActionType === 'update_duration')
+    return Boolean(String(state.memberStripeActionDate || '').trim())
+  return true
+})
+
+const submitMemberStripeAction = async () => {
+  if (!canSubmitMemberStripeAction.value)
+    return
+  const uid = String(edgeFirebase?.user?.uid || edgeFirebase?.user?.firebaseUser?.uid || '').trim()
+  const orgId = String(edgeGlobal?.edgeState?.currentOrganization || '').trim()
+  if (!uid || !orgId || !props.siteId)
+    return
+
+  state.memberStripeActionSubmitting = true
+  state.memberStripeActionError = ''
+  try {
+    const payload = {
+      uid,
+      orgId,
+      siteId: props.siteId,
+      audienceUserId: state.memberStripeActionAudienceUserId,
+      ruleId: state.memberStripeActionRuleId,
+      action: state.memberStripeActionType,
+    }
+    if (state.memberStripeActionType === 'update_duration')
+      payload.effectiveDate = String(state.memberStripeActionDate || '').trim()
+
+    const response = await edgeFirebase.runFunction('cms-restrictedContentManageStripeSubscription', payload)
+    const result = response?.data || response || {}
+    if (result?.success === false)
+      throw new Error(String(result?.message || 'Unable to update Stripe subscription right now.'))
+
+    edgeFirebase?.toast?.success?.(String(result?.message || 'Stripe subscription updated.'))
+    await loadInitialMembers()
+    closeMemberStripeActionDialog(true)
+  }
+  catch (error) {
+    state.memberStripeActionError = String(error?.message || 'Unable to update Stripe subscription right now.')
+    edgeFirebase?.toast?.error?.(state.memberStripeActionError)
+  }
+  finally {
+    state.memberStripeActionSubmitting = false
+  }
+}
+
+const hasStripeMemberInfo = (member = {}) => {
+  return Boolean(
+    String(member?.billingStripeCustomerId || '').trim()
+    || String(member?.registrationPaymentStatus || '').trim()
+    || (Array.isArray(member?.paidAccessRuleIds) && member.paidAccessRuleIds.length)
+    || (Array.isArray(member?.pendingPaymentRuleIds) && member.pendingPaymentRuleIds.length)
+  )
 }
 
 const getAudienceUserLabel = (audienceUserId) => {
@@ -1582,6 +1811,45 @@ onBeforeUnmount(async () => {
         </DialogFooter>
       </DialogContent>
     </edge-shad-dialog>
+    <edge-shad-dialog v-model="state.memberStripeActionDialogOpen">
+      <DialogContent class="pt-8">
+        <DialogHeader>
+          <DialogTitle class="text-left">
+            {{ memberStripeActionDialogTitle }}
+          </DialogTitle>
+          <DialogDescription class="text-left">
+            {{ memberStripeActionDialogDescription }}
+          </DialogDescription>
+        </DialogHeader>
+        <div class="text-sm text-muted-foreground">
+          Member:
+          <span class="font-semibold text-foreground">{{ state.memberStripeActionMemberName || state.memberStripeActionAudienceUserId }}</span>
+        </div>
+        <div v-if="state.memberStripeActionType === 'update_duration'" class="space-y-2">
+          <edge-shad-input
+            v-model="state.memberStripeActionDate"
+            name="restricted-member-stripe-action-date"
+            type="date"
+            label="End Date"
+            :min="getDateInputToday()"
+          />
+          <div class="text-xs text-muted-foreground">
+            Stripe cancels this subscription at the end of the selected date.
+          </div>
+        </div>
+        <div v-if="state.memberStripeActionError" class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-800 dark:bg-red-950/20 dark:text-red-200">
+          {{ state.memberStripeActionError }}
+        </div>
+        <DialogFooter class="flex justify-between pt-2">
+          <edge-shad-button variant="outline" :disabled="state.memberStripeActionSubmitting" @click="closeMemberStripeActionDialog">
+            Cancel
+          </edge-shad-button>
+          <edge-shad-button class="bg-slate-800 text-white hover:bg-slate-700" :disabled="!canSubmitMemberStripeAction" @click="submitMemberStripeAction">
+            Confirm
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
     <edge-shad-dialog v-model="state.rulePriceDialogOpen">
       <DialogContent class="pt-8">
         <DialogHeader>
@@ -2493,6 +2761,20 @@ onBeforeUnmount(async () => {
                           {{ getRuleLabel(ruleId) }}
                         </span>
                       </div>
+                      <div v-if="hasStripeMemberInfo(item)" class="mt-2 rounded-md border border-border/60 bg-muted/30 px-2 py-2 text-[11px] text-muted-foreground">
+                        <div v-if="item.registrationPaymentStatus" class="truncate">
+                          Stripe status: {{ formatRegistrationPaymentStatus(item.registrationPaymentStatus) }}
+                        </div>
+                        <div v-if="formatStripeBillingCycle(item)" class="truncate">
+                          Per cycle: {{ formatStripeBillingCycle(item) }}
+                        </div>
+                        <div v-if="formatStripeCouponSummary(item)" class="truncate">
+                          Coupon: {{ formatStripeCouponSummary(item) }}
+                        </div>
+                        <div v-if="item.billingStripeCustomerId" class="truncate">
+                          Customer: {{ item.billingStripeCustomerId }}
+                        </div>
+                      </div>
                     </div>
                     <div class="flex shrink-0 items-center gap-2">
                       <span class="rounded-full px-2 py-1 text-[10px] font-semibold uppercase" :class="statusClass(item.status)">
@@ -2597,6 +2879,65 @@ onBeforeUnmount(async () => {
                           class="rounded-lg border border-dashed border-border/70 bg-muted/20 p-3 text-sm text-muted-foreground"
                         >
                           {{ getAudienceUserLabel(slotProps.workingDoc.audienceUserId) }}
+                        </div>
+                        <div
+                          v-if="hasStripeMemberInfo(slotProps.workingDoc)"
+                          class="space-y-2 rounded-lg border border-border/60 bg-muted/20 p-3 text-sm"
+                        >
+                          <div class="text-xs font-semibold uppercase tracking-wide text-foreground">
+                            Stripe
+                          </div>
+                          <div v-if="slotProps.workingDoc.registrationPaymentStatus" class="text-xs text-muted-foreground">
+                            Payment Status: <span class="font-medium text-foreground">{{ formatRegistrationPaymentStatus(slotProps.workingDoc.registrationPaymentStatus) }}</span>
+                          </div>
+                          <div v-if="formatStripeBillingCycle(slotProps.workingDoc)" class="text-xs text-muted-foreground">
+                            Per Cycle: <span class="font-medium text-foreground">{{ formatStripeBillingCycle(slotProps.workingDoc) }}</span>
+                          </div>
+                          <div v-if="formatStripeCouponSummary(slotProps.workingDoc)" class="text-xs text-muted-foreground">
+                            Coupon: <span class="font-medium text-foreground">{{ formatStripeCouponSummary(slotProps.workingDoc) }}</span>
+                          </div>
+                          <div v-if="slotProps.workingDoc.billingStripeCustomerId" class="text-xs text-muted-foreground break-all">
+                            Customer ID: <span class="font-medium text-foreground">{{ slotProps.workingDoc.billingStripeCustomerId }}</span>
+                          </div>
+                          <div v-if="Array.isArray(slotProps.workingDoc.paidAccessRuleIds) && slotProps.workingDoc.paidAccessRuleIds.length" class="space-y-2">
+                            <div class="text-[11px] font-medium text-foreground">
+                              Paid Access Plans
+                            </div>
+                            <div class="space-y-2">
+                              <div
+                                v-for="ruleId in slotProps.workingDoc.paidAccessRuleIds"
+                                :key="`paid-${ruleId}`"
+                                class="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/60 bg-background/70 p-2"
+                              >
+                                <span class="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-semibold text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200">
+                                  {{ getRuleLabel(ruleId) }}
+                                </span>
+                                <div class="flex flex-wrap items-center gap-1">
+                                  <edge-shad-button
+                                    variant="outline"
+                                    class="h-7 px-2 text-[11px]"
+                                    @click="openMemberStripeActionDialog({ action: 'cancel', member: slotProps.workingDoc, ruleId })"
+                                  >
+                                    Cancel
+                                  </edge-shad-button>
+                                  <edge-shad-button
+                                    variant="outline"
+                                    class="h-7 px-2 text-[11px]"
+                                    @click="openMemberStripeActionDialog({ action: 'pause', member: slotProps.workingDoc, ruleId })"
+                                  >
+                                    Pause Payment
+                                  </edge-shad-button>
+                                  <edge-shad-button
+                                    variant="outline"
+                                    class="h-7 px-2 text-[11px]"
+                                    @click="openMemberStripeActionDialog({ action: 'update_duration', member: slotProps.workingDoc, ruleId })"
+                                  >
+                                    Update Duration
+                                  </edge-shad-button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
                         </div>
                         <edge-shad-select-tags
                           v-model="slotProps.workingDoc.manualAccessRuleIds"

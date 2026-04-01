@@ -658,7 +658,7 @@ const syncFirebaseAuthorizedDomainsForMembership = async ({
   const accessToken = await getAdminAccessToken()
   const configUrl = `https://identitytoolkit.googleapis.com/admin/v2/projects/${projectId}/config`
   const headers = {
-    'Authorization': `Bearer ${accessToken}`,
+    Authorization: `Bearer ${accessToken}`,
     'Content-Type': 'application/json',
   }
 
@@ -3266,6 +3266,315 @@ const updateRestrictedMemberPaymentState = async ({
   }), { merge: true })
 }
 
+const subscriptionStatusRank = (status) => {
+  const normalized = String(status || '').trim().toLowerCase()
+  const ranking = {
+    active: 0,
+    trialing: 1,
+    past_due: 2,
+    unpaid: 3,
+    incomplete: 4,
+    incomplete_expired: 5,
+    canceled: 6,
+  }
+  if (Number.isInteger(ranking[normalized]))
+    return ranking[normalized]
+  return 99
+}
+
+const subscriptionMatchesRule = (subscription = {}, { orgId, siteId, ruleId, rulePriceIds, ruleProductId }) => {
+  if (!subscription || !subscription.id)
+    return false
+
+  const metadata = (subscription.metadata && typeof subscription.metadata === 'object') ? subscription.metadata : {}
+  if (isStripeObjectManagedForRule(metadata, orgId, siteId, ruleId))
+    return true
+
+  if (
+    String(metadata.orgId || '').trim() === String(orgId || '').trim()
+    && String(metadata.siteId || '').trim() === String(siteId || '').trim()
+    && String(metadata.ruleId || '').trim() === String(ruleId || '').trim()
+  ) {
+    return true
+  }
+
+  const items = Array.isArray(subscription?.items?.data) ? subscription.items.data : []
+  for (const item of items) {
+    const priceId = String(item?.price?.id || '').trim()
+    if (priceId && rulePriceIds.has(priceId))
+      return true
+
+    const productId = String(item?.price?.product || '').trim()
+    if (productId && ruleProductId && productId === ruleProductId)
+      return true
+  }
+
+  return false
+}
+
+const pickSubscriptionForRule = (subscriptions = [], context = {}) => {
+  if (!Array.isArray(subscriptions) || !subscriptions.length)
+    return null
+  const matches = subscriptions
+    .filter(item => subscriptionMatchesRule(item, context))
+    .sort((a, b) => {
+      const rankDiff = subscriptionStatusRank(a?.status) - subscriptionStatusRank(b?.status)
+      if (rankDiff !== 0)
+        return rankDiff
+
+      const aEnds = Number(a?.current_period_end || 0)
+      const bEnds = Number(b?.current_period_end || 0)
+      if (aEnds !== bEnds)
+        return bEnds - aEnds
+
+      const aCreated = Number(a?.created || 0)
+      const bCreated = Number(b?.created || 0)
+      return bCreated - aCreated
+    })
+  return matches[0] || null
+}
+
+const parseStripeActionDateToUnix = (value) => {
+  const normalized = String(value || '').trim()
+  if (!normalized)
+    return 0
+  const timestamp = Date.parse(`${normalized}T23:59:59.000Z`)
+  if (!Number.isFinite(timestamp))
+    return 0
+  return Math.floor(timestamp / 1000)
+}
+
+const toStripeAmountCents = (value) => {
+  const amount = Number(value || 0)
+  if (!Number.isFinite(amount))
+    return 0
+  return Math.max(0, Math.round(amount))
+}
+
+const computeSubscriptionDiscountCents = (subscription = {}, baseAmountCents = 0) => {
+  const discount = (subscription?.discount && typeof subscription.discount === 'object') ? subscription.discount : null
+  const coupon = (discount?.coupon && typeof discount.coupon === 'object') ? discount.coupon : null
+  if (!coupon)
+    return 0
+
+  const amountOff = toStripeAmountCents(coupon.amount_off)
+  if (amountOff > 0)
+    return Math.min(baseAmountCents, amountOff)
+
+  const percentOff = Number(coupon.percent_off || 0)
+  if (!Number.isFinite(percentOff) || percentOff <= 0)
+    return 0
+
+  return Math.min(baseAmountCents, Math.round(baseAmountCents * (percentOff / 100)))
+}
+
+const buildStripeSubscriptionBillingSnapshot = (subscription = {}) => {
+  const firstItem = Array.isArray(subscription?.items?.data) ? subscription.items.data[0] : null
+  const price = firstItem?.price || null
+  const quantity = Number.isFinite(Number(firstItem?.quantity))
+    ? Math.max(1, Math.trunc(Number(firstItem.quantity)))
+    : 1
+  const unitAmountCents = toStripeAmountCents(price?.unit_amount)
+  const baseAmountCents = unitAmountCents * quantity
+  const discountAmountCents = computeSubscriptionDiscountCents(subscription, baseAmountCents)
+  const paymentAmountCents = Math.max(0, baseAmountCents - discountAmountCents)
+  const coupon = subscription?.discount?.coupon || null
+
+  return {
+    registrationStripeSubscriptionId: String(subscription?.id || '').trim(),
+    registrationStripePriceId: String(price?.id || '').trim(),
+    registrationPaymentCurrency: String(price?.currency || 'usd').trim().toLowerCase() || 'usd',
+    registrationPaymentInterval: String(price?.recurring?.interval || '').trim().toLowerCase(),
+    registrationPaymentIntervalCount: Number.isFinite(Number(price?.recurring?.interval_count))
+      ? Math.max(1, Math.trunc(Number(price.recurring.interval_count)))
+      : 1,
+    registrationPaymentQuantity: quantity,
+    registrationPaymentBaseAmountCents: baseAmountCents,
+    registrationPaymentDiscountAmountCents: discountAmountCents,
+    registrationPaymentAmountCents: paymentAmountCents,
+    registrationCouponCode: '',
+    registrationCouponLabel: String(coupon?.name || coupon?.id || '').trim(),
+  }
+}
+
+const buildStripeCheckoutBillingSnapshot = async ({ stripe, session = {}, metadata = {} }) => {
+  const quantity = Number.isFinite(Number(metadata?.quantity))
+    ? Math.max(1, Math.trunc(Number(metadata.quantity)))
+    : 1
+  const priceId = String(metadata?.stripePriceId || '').trim()
+  const promotionCodeId = String(session?.total_details?.breakdown?.discounts?.[0]?.discount?.promotion_code || '').trim()
+  const couponId = String(session?.total_details?.breakdown?.discounts?.[0]?.discount?.coupon || '').trim()
+  let couponCode = ''
+  let couponLabel = ''
+  if (promotionCodeId) {
+    try {
+      const promotionCode = await stripe.promotionCodes.retrieve(promotionCodeId)
+      couponCode = String(promotionCode?.code || '').trim()
+      if (!couponLabel)
+        couponLabel = String(promotionCode?.code || '').trim()
+    }
+    catch {}
+  }
+  if (couponId) {
+    try {
+      const coupon = await stripe.coupons.retrieve(couponId)
+      if (!couponLabel)
+        couponLabel = String(coupon?.name || coupon?.id || '').trim()
+    }
+    catch {}
+  }
+
+  let price = null
+  if (priceId) {
+    try {
+      price = await stripe.prices.retrieve(priceId)
+    }
+    catch {}
+  }
+
+  const currency = String(price?.currency || session?.currency || 'usd').trim().toLowerCase() || 'usd'
+  const unitAmountCents = toStripeAmountCents(price?.unit_amount)
+  const baseAmountCents = unitAmountCents > 0
+    ? unitAmountCents * quantity
+    : toStripeAmountCents(session?.amount_subtotal || session?.subtotal || 0)
+  const discountAmountCents = toStripeAmountCents(session?.total_details?.amount_discount || 0)
+  const totalFromSession = toStripeAmountCents(session?.amount_total || session?.total || 0)
+  const paymentAmountCents = totalFromSession > 0 ? totalFromSession : Math.max(0, baseAmountCents - discountAmountCents)
+
+  return {
+    registrationStripeSubscriptionId: String(session?.subscription || '').trim(),
+    registrationStripePriceId: priceId,
+    registrationPaymentCurrency: currency,
+    registrationPaymentInterval: String(price?.recurring?.interval || '').trim().toLowerCase(),
+    registrationPaymentIntervalCount: Number.isFinite(Number(price?.recurring?.interval_count))
+      ? Math.max(1, Math.trunc(Number(price.recurring.interval_count)))
+      : 1,
+    registrationPaymentQuantity: quantity,
+    registrationPaymentBaseAmountCents: baseAmountCents,
+    registrationPaymentDiscountAmountCents: discountAmountCents,
+    registrationPaymentAmountCents: paymentAmountCents,
+    registrationCouponCode: couponCode,
+    registrationCouponLabel: couponLabel,
+  }
+}
+
+exports.restrictedContentManageStripeSubscription = onCall({ timeoutSeconds: 180 }, async (request) => {
+  assertCallableUser(request)
+  const data = request.data || {}
+  const uid = String(request.auth.uid || '').trim()
+  const orgId = String(data.orgId || '').trim()
+  const siteId = String(data.siteId || '').trim()
+  const audienceUserId = String(data.audienceUserId || '').trim()
+  const ruleId = String(data.ruleId || '').trim()
+  const action = String(data.action || '').trim().toLowerCase()
+  const effectiveDate = String(data.effectiveDate || '').trim()
+
+  if (!orgId || !siteId || !audienceUserId || !ruleId || !action)
+    throw new HttpsError('invalid-argument', 'Missing orgId, siteId, audienceUserId, ruleId, or action.')
+  if (!['cancel', 'pause', 'update_duration'].includes(action))
+    throw new HttpsError('invalid-argument', 'Invalid action for Stripe subscription update.')
+
+  await ensureRestrictedSiteWritePermission(uid, orgId, siteId)
+  const { rule, effectiveRegistrationMode } = await getRestrictedRuleContext(orgId, siteId, ruleId, { requireAllowRegistration: false })
+  if (effectiveRegistrationMode !== 'paid')
+    throw new HttpsError('failed-precondition', 'Only paid plans can be managed in Stripe.')
+
+  const { audienceUsersRef } = getRestrictedSiteRefs(orgId, siteId)
+  const memberRef = audienceUsersRef.doc(audienceUserId)
+  const memberSnap = await memberRef.get()
+  if (!memberSnap.exists)
+    throw new HttpsError('not-found', 'Member not found.')
+
+  const memberData = memberSnap.data() || {}
+  const customerId = String(data.customerId || memberData.billingStripeCustomerId || '').trim()
+  if (!customerId)
+    throw new HttpsError('failed-precondition', 'Member does not have a Stripe customer id.')
+
+  const stripe = await getStripeClientForSite(orgId, siteId)
+  const subscriptionsResponse = await stripe.subscriptions.list({
+    customer: customerId,
+    status: 'all',
+    limit: 100,
+    expand: ['data.items.data.price'],
+  })
+  const subscriptions = Array.isArray(subscriptionsResponse?.data) ? subscriptionsResponse.data : []
+  const rulePriceIds = new Set(
+    (Array.isArray(rule.registrationStripePrices) ? rule.registrationStripePrices : [])
+      .map(item => String(item?.priceId || '').trim())
+      .filter(Boolean)
+  )
+  const ruleProductId = String(rule.registrationStripeProductId || '').trim()
+  const subscription = pickSubscriptionForRule(subscriptions, {
+    orgId,
+    siteId,
+    ruleId,
+    rulePriceIds,
+    ruleProductId,
+  })
+  if (!subscription)
+    throw new HttpsError('not-found', 'No Stripe subscription found for this member and plan.')
+
+  let updatedSubscription = subscription
+  let message = 'Stripe subscription updated.'
+  if (action === 'cancel') {
+    updatedSubscription = await stripe.subscriptions.cancel(subscription.id)
+    await updateRestrictedMemberPaymentState({
+      orgId,
+      siteId,
+      audienceUserId,
+      ruleId,
+      paymentStatus: 'cancelled',
+      grantPaidAccess: false,
+      revokePaidAccess: true,
+    })
+    message = 'Stripe subscription cancelled.'
+  }
+  else if (action === 'pause') {
+    updatedSubscription = await stripe.subscriptions.update(subscription.id, {
+      pause_collection: {
+        behavior: 'mark_uncollectible',
+      },
+    })
+    await updateRestrictedMemberPaymentState({
+      orgId,
+      siteId,
+      audienceUserId,
+      ruleId,
+      paymentStatus: 'paused',
+      grantPaidAccess: true,
+      revokePaidAccess: false,
+    })
+    message = 'Stripe subscription billing paused.'
+  }
+  else if (action === 'update_duration') {
+    const cancelAt = parseStripeActionDateToUnix(effectiveDate)
+    if (!cancelAt)
+      throw new HttpsError('invalid-argument', 'Invalid effectiveDate. Use YYYY-MM-DD.')
+    if (cancelAt <= Math.floor(Date.now() / 1000))
+      throw new HttpsError('invalid-argument', 'End date must be in the future.')
+
+    updatedSubscription = await stripe.subscriptions.update(subscription.id, {
+      cancel_at: cancelAt,
+      cancel_at_period_end: false,
+    })
+    message = `Stripe subscription end date set to ${effectiveDate}.`
+  }
+
+  return {
+    success: true,
+    message,
+    audienceUserId,
+    ruleId,
+    action,
+    subscription: {
+      id: String(updatedSubscription?.id || subscription.id || '').trim(),
+      status: String(updatedSubscription?.status || '').trim().toLowerCase(),
+      cancelAt: Number(updatedSubscription?.cancel_at || 0) || null,
+      pauseCollection: updatedSubscription?.pause_collection || null,
+    },
+  }
+})
+
 exports.restrictedContentBeginRegistration = onCall(async (request) => {
   const fail = (errorCode, message) => ({
     success: false,
@@ -3744,7 +4053,7 @@ exports.restrictedContentImportStripeCatalog = onCall({ timeoutSeconds: 180 }, a
   }
 
   const nextRules = Object.values(rulesById)
-    .map(item => normalizeRestrictedRuleForFunction(item, item.id))
+    .map((item) => normalizeRestrictedRuleForFunction(item, item.id))
     .filter(item => item.id)
     .sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id)))
 
@@ -3988,7 +4297,7 @@ exports.restrictedContentSyncStripeRule = onCall({ timeoutSeconds: 180 }, async 
       couponId,
       orgId,
       siteId,
-      ruleId,
+      ruleId
     )
 
     if (needsPromotionCode) {
@@ -4476,20 +4785,39 @@ exports.restrictedContentStripeWebhook = onRequest(async (req, res) => {
           grantPaidAccess: shouldGrant,
           revokePaidAccess: false,
         })
+        const billingSnapshot = await buildStripeCheckoutBillingSnapshot({
+          stripe,
+          session: object,
+          metadata,
+        })
+        if (Object.keys(billingSnapshot).length) {
+          await audienceUsersRef.doc(audienceUserId).set({
+            ...billingSnapshot,
+            last_updated: Date.now(),
+          }, { merge: true })
+        }
       }
 
       if (event.type === 'customer.subscription.updated' || event.type === 'customer.subscription.deleted') {
         const subscriptionStatus = String(object.status || '').trim().toLowerCase()
-        const isActive = ['active', 'trialing'].includes(subscriptionStatus)
+        const isPaused = Boolean(object.pause_collection && typeof object.pause_collection === 'object')
+        const isActive = ['active', 'trialing'].includes(subscriptionStatus) && !isPaused
         await updateRestrictedMemberPaymentState({
           orgId: metadataOrgId,
           siteId: metadataSiteId,
           audienceUserId,
           ruleId,
-          paymentStatus: isActive ? 'paid' : (subscriptionStatus || 'cancelled'),
-          grantPaidAccess: isActive,
-          revokePaidAccess: !isActive,
+          paymentStatus: isPaused ? 'paused' : (isActive ? 'paid' : (subscriptionStatus || 'cancelled')),
+          grantPaidAccess: isPaused || isActive,
+          revokePaidAccess: !isPaused && !isActive,
         })
+        const billingSnapshot = buildStripeSubscriptionBillingSnapshot(object)
+        if (Object.keys(billingSnapshot).length) {
+          await audienceUsersRef.doc(audienceUserId).set({
+            ...billingSnapshot,
+            last_updated: Date.now(),
+          }, { merge: true })
+        }
       }
 
       if (event.type === 'invoice.payment_failed') {
