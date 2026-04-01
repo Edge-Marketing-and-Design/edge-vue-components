@@ -3618,7 +3618,7 @@ exports.restrictedContentManageStripeSubscription = onCall({ timeoutSeconds: 180
 
   if (!orgId || !siteId || !audienceUserId || !ruleId || !action)
     throw new HttpsError('invalid-argument', 'Missing orgId, siteId, audienceUserId, ruleId, or action.')
-  if (!['cancel', 'pause', 'update_duration'].includes(action))
+  if (!['cancel', 'pause', 'resume', 'update_duration'].includes(action))
     throw new HttpsError('invalid-argument', 'Invalid action for Stripe subscription update.')
 
   await ensureRestrictedSiteWritePermission(uid, orgId, siteId)
@@ -3704,6 +3704,29 @@ exports.restrictedContentManageStripeSubscription = onCall({ timeoutSeconds: 180
       last_updated: Date.now(),
     }, { merge: true })
     message = 'Stripe subscription billing paused.'
+  }
+  else if (action === 'resume') {
+    updatedSubscription = await stripe.subscriptions.update(subscription.id, {
+      pause_collection: null,
+    })
+    const resumedStatus = String(updatedSubscription?.status || '').trim().toLowerCase()
+    const isActive = ['active', 'trialing'].includes(resumedStatus)
+    await updateRestrictedMemberPaymentState({
+      orgId,
+      siteId,
+      audienceUserId,
+      ruleId,
+      paymentStatus: isActive ? 'paid' : (resumedStatus || 'pending'),
+      grantPaidAccess: isActive,
+      revokePaidAccess: !isActive,
+    })
+    await memberRef.set({
+      registrationPaymentPaused: false,
+      registrationStripeCancelAt: Number(updatedSubscription?.cancel_at || 0) || 0,
+      registrationStripeCurrentPeriodEnd: Number(updatedSubscription?.current_period_end || 0) || 0,
+      last_updated: Date.now(),
+    }, { merge: true })
+    message = 'Stripe subscription billing resumed.'
   }
   else if (action === 'update_duration') {
     if (noEnd) {

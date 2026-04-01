@@ -427,7 +427,7 @@ const getDateInputFromUnix = (unixValue) => {
 
 const normalizeMemberStripeActionType = (value) => {
   const normalized = String(value || '').trim().toLowerCase()
-  if (['cancel', 'pause', 'update_duration'].includes(normalized))
+  if (['cancel', 'pause', 'resume', 'update_duration'].includes(normalized))
     return normalized
   return ''
 }
@@ -554,6 +554,8 @@ const memberStripeActionDialogTitle = computed(() => {
     return 'Cancel Stripe Subscription?'
   if (state.memberStripeActionType === 'pause')
     return 'Pause Stripe Subscription?'
+  if (state.memberStripeActionType === 'resume')
+    return 'Resume Stripe Subscription?'
   if (state.memberStripeActionType === 'update_duration')
     return 'Update Subscription End Date?'
   return 'Confirm Stripe Action'
@@ -565,6 +567,8 @@ const memberStripeActionDialogDescription = computed(() => {
     return `This cancels billing now for ${label}. Access will be removed when Stripe confirms cancellation.`
   if (state.memberStripeActionType === 'pause')
     return `This pauses billing for ${label} on Stripe until you resume it there.`
+  if (state.memberStripeActionType === 'resume')
+    return `This resumes billing for ${label} on Stripe.`
   if (state.memberStripeActionType === 'update_duration')
     return `Set an end date for ${label}. Stripe will cancel the subscription on that date.`
   return 'Continue with this Stripe update?'
@@ -3028,9 +3032,9 @@ onBeforeUnmount(async () => {
                                   <edge-shad-button
                                     variant="outline"
                                     class="h-7 px-2 text-[11px]"
-                                    @click="openMemberStripeActionDialog({ action: 'pause', member: slotProps.workingDoc, ruleId })"
+                                    @click="openMemberStripeActionDialog({ action: isStripeBillingPaused(slotProps.workingDoc) ? 'resume' : 'pause', member: slotProps.workingDoc, ruleId })"
                                   >
-                                    Pause Payment
+                                    {{ isStripeBillingPaused(slotProps.workingDoc) ? 'Resume Payment' : 'Pause Payment' }}
                                   </edge-shad-button>
                                   <edge-shad-button
                                     variant="outline"
