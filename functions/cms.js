@@ -658,7 +658,7 @@ const syncFirebaseAuthorizedDomainsForMembership = async ({
   const accessToken = await getAdminAccessToken()
   const configUrl = `https://identitytoolkit.googleapis.com/admin/v2/projects/${projectId}/config`
   const headers = {
-    Authorization: `Bearer ${accessToken}`,
+    'Authorization': `Bearer ${accessToken}`,
     'Content-Type': 'application/json',
   }
 
@@ -2725,9 +2725,13 @@ const getRestrictedSiteContext = async (orgId, siteId) => {
 const normalizeRestrictedRuleForFunction = (value = {}, fallbackId = '') => {
   const normalizedValue = (value && typeof value === 'object') ? value : {}
   const id = String(normalizedValue.id || normalizedValue.docId || fallbackId || '').trim()
+  const stripeSource = String(normalizedValue.stripeSource || normalizedValue.registrationStripeSource || '').trim().toLowerCase()
   const registrationStripePrices = Array.isArray(normalizedValue.registrationStripePrices)
     ? normalizedValue.registrationStripePrices
     : (Array.isArray(normalizedValue.stripePrices) ? normalizedValue.stripePrices : [])
+  const registrationStripeCoupons = Array.isArray(normalizedValue.registrationStripeCoupons)
+    ? normalizedValue.registrationStripeCoupons
+    : (Array.isArray(normalizedValue.stripeCoupons) ? normalizedValue.stripeCoupons : [])
   const normalizeInterval = (value) => {
     const normalized = String(value || '').trim().toLowerCase()
     return ['day', 'week', 'month', 'year'].includes(normalized) ? normalized : 'month'
@@ -2738,6 +2742,7 @@ const normalizeRestrictedRuleForFunction = (value = {}, fallbackId = '') => {
     protected: normalizedValue.protected !== false,
     allowRegistration: Boolean(normalizedValue.allowRegistration),
     registrationMode: normalizedValue.registrationMode === 'paid' ? 'paid' : 'free',
+    stripeSource: ['imported', 'managed'].includes(stripeSource) ? stripeSource : '',
     registrationStripeProductId: String(normalizedValue.registrationStripeProductId || normalizedValue.stripeProductId || '').trim(),
     registrationStripeImage: String(normalizedValue.registrationStripeImage || normalizedValue.stripeImage || '').trim(),
     registrationStripePrices: registrationStripePrices
@@ -2759,6 +2764,34 @@ const normalizeRestrictedRuleForFunction = (value = {}, fallbackId = '') => {
             ? Math.max(1, Math.trunc(Number(normalizedItem.seats || normalizedItem.quantity)))
             : 1,
         }
+      }),
+    registrationStripeCoupons: registrationStripeCoupons
+      .map((item) => {
+        const normalizedItem = (item && typeof item === 'object') ? item : {}
+        const discountType = String(normalizedItem.discountType || '').trim().toLowerCase()
+        const expiresMode = String(normalizedItem.expiresMode || '').trim().toLowerCase()
+        return {
+          couponId: String(normalizedItem.couponId || normalizedItem.id || '').trim(),
+          promotionCodeId: String(normalizedItem.promotionCodeId || '').trim(),
+          promoCode: String(normalizedItem.promoCode || normalizedItem.promotionCode || normalizedItem.code || '').trim(),
+          title: String(normalizedItem.title || '').trim(),
+          discountType: discountType === 'amount' ? 'amount' : 'percent',
+          percentOff: Number.isFinite(Number(normalizedItem.percentOff))
+            ? Number(normalizedItem.percentOff)
+            : 10,
+          amountOff: Number.isFinite(Number(normalizedItem.amountOff))
+            ? Number(normalizedItem.amountOff)
+            : 0,
+          expiresMode: expiresMode === 'date' ? 'date' : 'never',
+          expiresAt: String(normalizedItem.expiresAt || '').trim(),
+        }
+      })
+      .filter((item) => {
+        if (item.couponId || item.promoCode)
+          return true
+        if (item.discountType === 'amount')
+          return Number(item.amountOff || 0) > 0
+        return Number(item.percentOff || 0) > 0
       }),
   }
 }
@@ -3075,7 +3108,7 @@ const ensureRestrictedSiteWritePermission = async (uid, orgId, siteId) => {
     throw new HttpsError('permission-denied', 'Not allowed to manage restricted content for this site.')
 }
 
-const upsertManagedStripeMetadata = async ({ stripe, orgId, siteId, ruleId, productId, priceId }) => {
+const upsertManagedStripeMetadata = async ({ stripe, orgId, siteId, ruleId, productId, priceId, couponId, promotionCodeId }) => {
   const metadataPatch = {
     [STRIPE_CMS_MANAGED_METADATA_KEY]: 'true',
     [STRIPE_CMS_ORG_METADATA_KEY]: String(orgId || ''),
@@ -3086,6 +3119,10 @@ const upsertManagedStripeMetadata = async ({ stripe, orgId, siteId, ruleId, prod
     await stripe.products.update(productId, { metadata: metadataPatch })
   if (priceId)
     await stripe.prices.update(priceId, { metadata: metadataPatch })
+  if (couponId)
+    await stripe.coupons.update(couponId, { metadata: metadataPatch })
+  if (promotionCodeId)
+    await stripe.promotionCodes.update(promotionCodeId, { metadata: metadataPatch })
 }
 
 const getStripeMetadata = (object = {}) => {
@@ -3098,12 +3135,100 @@ const getStripeMetadata = (object = {}) => {
   return {}
 }
 
+const extractStripeMetadataFromRawWebhookBody = (req) => {
+  try {
+    const rawBody = Buffer.isBuffer(req?.rawBody)
+      ? req.rawBody.toString('utf8')
+      : (typeof req?.rawBody === 'string' ? req.rawBody : '')
+    const parsed = rawBody ? JSON.parse(rawBody) : (req?.body && typeof req.body === 'object' ? req.body : null)
+    if (!parsed || typeof parsed !== 'object')
+      return {}
+    const object = parsed?.data?.object || {}
+    return getStripeMetadata(object)
+  }
+  catch {
+    return {}
+  }
+}
+
 const resolveRuleStripeImage = (rule = {}) => {
   const explicit = String(rule?.registrationStripeImage || '').trim()
   if (explicit)
     return explicit
 
   return ''
+}
+
+const toStripeCouponRedeemBy = (expiresAt) => {
+  const normalized = String(expiresAt || '').trim()
+  if (!normalized)
+    return null
+  const millis = Date.parse(`${normalized}T23:59:59.000Z`)
+  if (!Number.isFinite(millis))
+    return null
+  return Math.floor(millis / 1000)
+}
+
+const normalizeCouponConfigForStripe = (option = {}) => {
+  const discountType = String(option?.discountType || '').trim().toLowerCase() === 'amount' ? 'amount' : 'percent'
+  const percentOff = Number(option?.percentOff || 0)
+  const amountOff = Number(option?.amountOff || 0)
+  const expiresMode = String(option?.expiresMode || '').trim().toLowerCase() === 'date' ? 'date' : 'never'
+  const expiresAt = String(option?.expiresAt || '').trim()
+  const promoCode = String(option?.promoCode || '').trim()
+  const redeemBy = expiresMode === 'date' ? toStripeCouponRedeemBy(expiresAt) : null
+  return {
+    discountType,
+    percentOff: Number.isFinite(percentOff) ? percentOff : 0,
+    amountOff: Number.isFinite(amountOff) ? amountOff : 0,
+    expiresMode,
+    expiresAt,
+    promoCode,
+    redeemBy,
+  }
+}
+
+const stripeCouponMatchesConfig = (coupon = {}, config = {}) => {
+  if (!coupon || coupon.deleted)
+    return false
+  if (config.discountType === 'amount') {
+    const expectedAmountOff = Math.round(Number(config.amountOff || 0) * 100)
+    if (!Number.isFinite(expectedAmountOff) || expectedAmountOff <= 0)
+      return false
+    if (Number(coupon.amount_off || 0) !== expectedAmountOff)
+      return false
+    if (String(coupon.currency || '').toLowerCase() !== 'usd')
+      return false
+  }
+  else {
+    const expectedPercent = Number(config.percentOff || 0)
+    if (!Number.isFinite(expectedPercent) || expectedPercent <= 0 || expectedPercent > 100)
+      return false
+    if (Number(coupon.percent_off || 0) !== expectedPercent)
+      return false
+  }
+  if (String(coupon.duration || '') !== 'forever')
+    return false
+  if (config.redeemBy) {
+    if (Number(coupon.redeem_by || 0) !== Number(config.redeemBy))
+      return false
+  }
+  else if (coupon.redeem_by !== null && coupon.redeem_by !== undefined) {
+    return false
+  }
+  return true
+}
+
+const stripePromotionCodeMatchesConfig = (promotionCode = {}, config = {}, couponId, orgId, siteId, ruleId) => {
+  if (!promotionCode || !promotionCode.id)
+    return false
+  if (promotionCode.active !== true)
+    return false
+  if (String(promotionCode.coupon?.id || promotionCode.coupon || '').trim() !== String(couponId || '').trim())
+    return false
+  if (String(promotionCode.code || '').trim().toLowerCase() !== String(config.promoCode || '').trim().toLowerCase())
+    return false
+  return isStripeObjectManagedForRule(promotionCode.metadata, orgId, siteId, ruleId)
 }
 
 const updateRestrictedMemberPaymentState = async ({
@@ -3594,13 +3719,10 @@ exports.restrictedContentImportStripeCatalog = onCall({ timeoutSeconds: 180 }, a
           ? Math.max(1, Math.trunc(Number(existingPriceOption.seats || existingPriceOption.quantity)))
           : 1,
       })
-      await upsertManagedStripeMetadata({ stripe, orgId, siteId, ruleId, priceId })
     }
 
     if (!nextPriceOptions.length)
       continue
-
-    await upsertManagedStripeMetadata({ stripe, orgId, siteId, ruleId, productId })
 
     rulesById[ruleId] = {
       ...(rulesById[ruleId] || {}),
@@ -3609,16 +3731,20 @@ exports.restrictedContentImportStripeCatalog = onCall({ timeoutSeconds: 180 }, a
       protected: true,
       allowRegistration: true,
       registrationMode: 'paid',
+      stripeSource: 'imported',
       registrationStripeProductId: productId,
       registrationStripeImage: String(existingRule?.registrationStripeImage || '').trim()
         || (Array.isArray(product.images) && product.images.length ? String(product.images[0] || '').trim() : ''),
       registrationStripePrices: nextPriceOptions,
+      registrationStripeCoupons: Array.isArray(existingRule?.registrationStripeCoupons)
+        ? existingRule.registrationStripeCoupons
+        : [],
     }
     imported++
   }
 
   const nextRules = Object.values(rulesById)
-    .map((item) => normalizeRestrictedRuleForFunction(item, item.id))
+    .map(item => normalizeRestrictedRuleForFunction(item, item.id))
     .filter(item => item.id)
     .sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id)))
 
@@ -3699,6 +3825,9 @@ exports.restrictedContentSyncStripeRule = onCall({ timeoutSeconds: 180 }, async 
   else {
     const updatePayload = {
       name: ruleName,
+      // Stripe treats an empty string as "clear this field".
+      // Empty arrays can be dropped by request serialization.
+      images: ruleImage ? [ruleImage] : '',
       metadata: {
         [STRIPE_CMS_MANAGED_METADATA_KEY]: 'true',
         [STRIPE_CMS_ORG_METADATA_KEY]: String(orgId || ''),
@@ -3706,8 +3835,6 @@ exports.restrictedContentSyncStripeRule = onCall({ timeoutSeconds: 180 }, async 
         [STRIPE_CMS_RULE_METADATA_KEY]: String(ruleId || ''),
       },
     }
-    if (ruleImage)
-      updatePayload.images = [ruleImage]
     await stripe.products.update(productId, updatePayload)
   }
 
@@ -3780,13 +3907,149 @@ exports.restrictedContentSyncStripeRule = onCall({ timeoutSeconds: 180 }, async 
     })
   }
 
+  const nextCouponOptions = Array.isArray(existingRule.registrationStripeCoupons)
+    ? existingRule.registrationStripeCoupons
+    : []
+  const invalidCouponIds = []
+  const invalidPromotionCodeIds = []
+  const syncedCouponOptions = []
+  for (const option of nextCouponOptions) {
+    const normalizedOption = normalizeCouponConfigForStripe(option)
+    if (!normalizedOption.promoCode)
+      continue
+    let couponId = String(option?.couponId || '').trim()
+    let coupon = null
+    if (couponId) {
+      try {
+        coupon = await stripe.coupons.retrieve(couponId)
+      }
+      catch {
+        invalidCouponIds.push(couponId)
+      }
+    }
+
+    const shouldCreateCoupon = !coupon
+      || coupon.deleted
+      || !isStripeObjectManagedForRule(coupon.metadata, orgId, siteId, ruleId)
+      || !stripeCouponMatchesConfig(coupon, normalizedOption)
+
+    if (shouldCreateCoupon) {
+      const createPayload = {
+        duration: 'forever',
+        ...(String(option?.title || '').trim() ? { name: String(option.title || '').trim() } : {}),
+        metadata: {
+          [STRIPE_CMS_MANAGED_METADATA_KEY]: 'true',
+          [STRIPE_CMS_ORG_METADATA_KEY]: String(orgId || ''),
+          [STRIPE_CMS_SITE_METADATA_KEY]: String(siteId || ''),
+          [STRIPE_CMS_RULE_METADATA_KEY]: String(ruleId || ''),
+        },
+      }
+      if (normalizedOption.discountType === 'amount') {
+        const amountOff = Math.round(Number(normalizedOption.amountOff || 0) * 100)
+        if (!Number.isFinite(amountOff) || amountOff <= 0)
+          continue
+        createPayload.amount_off = amountOff
+        createPayload.currency = 'usd'
+      }
+      else {
+        const percentOff = Number(normalizedOption.percentOff || 0)
+        if (!Number.isFinite(percentOff) || percentOff <= 0 || percentOff > 100)
+          continue
+        createPayload.percent_off = percentOff
+      }
+      if (normalizedOption.redeemBy)
+        createPayload.redeem_by = normalizedOption.redeemBy
+
+      const createdCoupon = await stripe.coupons.create(createPayload)
+      couponId = String(createdCoupon?.id || '').trim()
+      coupon = createdCoupon
+    }
+    else if (couponId) {
+      await upsertManagedStripeMetadata({ stripe, orgId, siteId, ruleId, couponId })
+    }
+
+    if (!couponId)
+      continue
+
+    let promotionCodeId = String(option?.promotionCodeId || '').trim()
+    let promotionCode = null
+    if (promotionCodeId) {
+      try {
+        promotionCode = await stripe.promotionCodes.retrieve(promotionCodeId)
+      }
+      catch {
+        invalidPromotionCodeIds.push(promotionCodeId)
+      }
+    }
+
+    const needsPromotionCode = !stripePromotionCodeMatchesConfig(
+      promotionCode,
+      normalizedOption,
+      couponId,
+      orgId,
+      siteId,
+      ruleId,
+    )
+
+    if (needsPromotionCode) {
+      if (promotionCode && promotionCode.id && promotionCode.active === true && isStripeObjectManagedForRule(promotionCode.metadata, orgId, siteId, ruleId)) {
+        try {
+          await stripe.promotionCodes.update(String(promotionCode.id || '').trim(), { active: false })
+        }
+        catch {
+          // no-op
+        }
+      }
+      try {
+        const createdPromotionCode = await stripe.promotionCodes.create({
+          coupon: couponId,
+          code: normalizedOption.promoCode,
+          ...(normalizedOption.redeemBy ? { expires_at: normalizedOption.redeemBy } : {}),
+          metadata: {
+            [STRIPE_CMS_MANAGED_METADATA_KEY]: 'true',
+            [STRIPE_CMS_ORG_METADATA_KEY]: String(orgId || ''),
+            [STRIPE_CMS_SITE_METADATA_KEY]: String(siteId || ''),
+            [STRIPE_CMS_RULE_METADATA_KEY]: String(ruleId || ''),
+          },
+        })
+        promotionCodeId = String(createdPromotionCode?.id || '').trim()
+        promotionCode = createdPromotionCode
+      }
+      catch {
+        invalidPromotionCodeIds.push(normalizedOption.promoCode)
+        continue
+      }
+    }
+    else if (promotionCodeId) {
+      await upsertManagedStripeMetadata({ stripe, orgId, siteId, ruleId, promotionCodeId })
+    }
+
+    syncedCouponOptions.push({
+      couponId,
+      promotionCodeId,
+      promoCode: normalizedOption.promoCode,
+      title: String(option?.title || coupon?.name || '').trim(),
+      discountType: normalizedOption.discountType,
+      percentOff: normalizedOption.discountType === 'percent'
+        ? Number(normalizedOption.percentOff || 0)
+        : 0,
+      amountOff: normalizedOption.discountType === 'amount'
+        ? Number(normalizedOption.amountOff || 0)
+        : 0,
+      expiresMode: normalizedOption.redeemBy ? 'date' : 'never',
+      expiresAt: normalizedOption.redeemBy ? String(normalizedOption.expiresAt || '').trim() : '',
+    })
+  }
+
   await upsertManagedStripeMetadata({ stripe, orgId, siteId, ruleId, productId })
 
   const updatedRule = normalizeRestrictedRuleForFunction({
     ...existingRule,
+    stripeSource: 'managed',
     registrationStripeProductId: productId,
     registrationStripeImage: ruleImage,
     registrationStripePrices: syncedPriceOptions,
+    registrationStripeCoupons: syncedCouponOptions,
   }, existingRule.id)
 
   const nextRules = rules.map((item) => {
@@ -3812,6 +4075,8 @@ exports.restrictedContentSyncStripeRule = onCall({ timeoutSeconds: 180 }, async 
     createdProduct,
     rule: updatedRule,
     invalidPriceIds,
+    invalidCouponIds,
+    invalidPromotionCodeIds,
   }
 })
 
@@ -3839,6 +4104,17 @@ exports.restrictedContentDeleteStripeRule = onCall({ timeoutSeconds: 180 }, asyn
       invalidPriceIds: [],
     }
   }
+  if (existingRule.stripeSource === 'imported') {
+    return {
+      success: true,
+      skipped: true,
+      localOnly: true,
+      archivedProduct: false,
+      archivedPriceIds: [],
+      invalidPriceIds: [],
+      archiveErrors: [],
+    }
+  }
 
   let stripe = null
   try {
@@ -3859,6 +4135,8 @@ exports.restrictedContentDeleteStripeRule = onCall({ timeoutSeconds: 180 }, asyn
 
   const archivedPriceIds = []
   const invalidPriceIds = []
+  const archiveErrors = []
+  let encounteredDefaultPriceConstraint = false
   const priceOptions = Array.isArray(existingRule.registrationStripePrices)
     ? existingRule.registrationStripePrices
     : []
@@ -3877,8 +4155,20 @@ exports.restrictedContentDeleteStripeRule = onCall({ timeoutSeconds: 180 }, asyn
     }
     if (!price || price.deleted || !isStripeObjectManagedForRule(price.metadata, orgId, siteId, ruleId))
       continue
-    await stripe.prices.update(priceId, { active: false })
-    archivedPriceIds.push(priceId)
+    try {
+      await stripe.prices.update(priceId, { active: false })
+      archivedPriceIds.push(priceId)
+    }
+    catch (error) {
+      const message = String(error?.raw?.message || error?.message || '').trim()
+      if (message.toLowerCase().includes('default price of its product'))
+        encounteredDefaultPriceConstraint = true
+      archiveErrors.push({
+        type: 'price',
+        id: priceId,
+        message,
+      })
+    }
   }
 
   let archivedProduct = false
@@ -3887,12 +4177,19 @@ exports.restrictedContentDeleteStripeRule = onCall({ timeoutSeconds: 180 }, asyn
     try {
       const product = await stripe.products.retrieve(productId)
       if (product && !product.deleted && isStripeObjectManagedForRule(product.metadata, orgId, siteId, ruleId)) {
-        await stripe.products.update(productId, { active: false })
-        archivedProduct = true
+        if (!encounteredDefaultPriceConstraint) {
+          await stripe.products.update(productId, { active: false })
+          archivedProduct = true
+        }
       }
     }
-    catch {
-      // no-op
+    catch (error) {
+      const message = String(error?.raw?.message || error?.message || '').trim()
+      archiveErrors.push({
+        type: 'product',
+        id: productId,
+        message,
+      })
     }
   }
 
@@ -3901,6 +4198,7 @@ exports.restrictedContentDeleteStripeRule = onCall({ timeoutSeconds: 180 }, asyn
     archivedProduct,
     archivedPriceIds,
     invalidPriceIds,
+    archiveErrors,
     skipped: !archivedProduct && !archivedPriceIds.length,
   }
 })
@@ -4111,15 +4409,19 @@ exports.restrictedContentStripeWebhook = onRequest(async (req, res) => {
     return
   }
 
-  const orgId = String(req.query.orgId || req.query.org || '').trim()
-  const siteId = String(req.query.siteId || req.query.site || '').trim()
-  if (!orgId || !siteId) {
+  const queryOrgId = String(req.query.orgId || req.query.org || '').trim()
+  const querySiteId = String(req.query.siteId || req.query.site || '').trim()
+  const rawMetadata = extractStripeMetadataFromRawWebhookBody(req)
+  const routeOrgId = queryOrgId || String(rawMetadata.orgId || '').trim()
+  const routeSiteId = querySiteId || String(rawMetadata.siteId || '').trim()
+
+  if (!routeOrgId || !routeSiteId) {
     res.status(400).send('Missing orgId or siteId.')
     return
   }
 
   try {
-    const { privateStripeRef, audienceUsersRef } = getRestrictedSiteRefs(orgId, siteId)
+    const { privateStripeRef } = getRestrictedSiteRefs(routeOrgId, routeSiteId)
     const stripeSnap = await privateStripeRef.get()
     if (!stripeSnap.exists) {
       res.status(404).send('Stripe config not found.')
@@ -4147,8 +4449,9 @@ exports.restrictedContentStripeWebhook = onRequest(async (req, res) => {
 
     const object = event.data?.object || {}
     const metadata = getStripeMetadata(object)
-    const metadataOrgId = String(metadata.orgId || '').trim() || orgId
-    const metadataSiteId = String(metadata.siteId || '').trim() || siteId
+    const metadataOrgId = String(metadata.orgId || '').trim() || routeOrgId
+    const metadataSiteId = String(metadata.siteId || '').trim() || routeSiteId
+    const { audienceUsersRef } = getRestrictedSiteRefs(metadataOrgId, metadataSiteId)
     const audienceUserId = String(metadata.audienceUserId || '').trim()
     const ruleId = String(metadata.ruleId || '').trim()
     const customerId = String(object.customer || '').trim()
