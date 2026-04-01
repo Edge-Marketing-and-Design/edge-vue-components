@@ -3877,6 +3877,104 @@ exports.restrictedContentCreateStripePortalLink = onCall({ timeoutSeconds: 180 }
   }
 })
 
+exports.restrictedContentUpdateAudienceMemberProfile = onCall({ timeoutSeconds: 180 }, async (request) => {
+  assertCallableUser(request)
+  const data = request.data || {}
+  const callerUid = String(request.auth.uid || '').trim()
+  const orgId = String(data.orgId || '').trim()
+  const siteId = String(data.siteId || '').trim()
+  const requestedAudienceUserId = String(data.audienceUserId || '').trim()
+  const nextName = String(data.name || '').trim()
+
+  if (!orgId || !siteId)
+    throw new HttpsError('invalid-argument', 'Missing orgId or siteId.')
+  if (!nextName)
+    throw new HttpsError('invalid-argument', 'Missing name.')
+  if (nextName.length > 120)
+    throw new HttpsError('invalid-argument', 'Name is too long.')
+
+  const { audienceUsersRef } = getRestrictedSiteRefs(orgId, siteId)
+  let audienceUserId = requestedAudienceUserId
+  let audienceSnap = null
+  if (audienceUserId) {
+    audienceSnap = await audienceUsersRef.doc(audienceUserId).get()
+    if (!audienceSnap.exists)
+      throw new HttpsError('not-found', 'Audience member not found.')
+  }
+  else {
+    audienceSnap = await resolveAudienceUserForAuth(orgId, siteId, callerUid)
+    if (!audienceSnap?.exists)
+      throw new HttpsError('not-found', 'Audience member not found for current user.')
+    audienceUserId = String(audienceSnap.id || '').trim()
+  }
+
+  const audienceUser = audienceSnap.data() || {}
+  const targetAuthUid = String(audienceUser.authUid || '').trim()
+  const targetUserDocId = String(audienceUser.userId || '').trim()
+  const isSelfUpdate = Boolean(
+    (targetAuthUid && targetAuthUid === callerUid)
+    || (targetUserDocId && targetUserDocId === callerUid)
+  )
+  if (!isSelfUpdate)
+    await ensureRestrictedSiteWritePermission(callerUid, orgId, siteId)
+
+  const now = Date.now()
+  const stagedDocId = String(
+    audienceUser.stagedUserId
+    || audienceUser.docId
+    || audienceUserId
+    || ''
+  ).trim()
+  let stagedUserData = {}
+  if (stagedDocId) {
+    const stagedSnap = await db.collection('staged-users').doc(stagedDocId).get()
+    if (stagedSnap.exists)
+      stagedUserData = stagedSnap.data() || {}
+  }
+  const fallbackAuthUid = String(stagedUserData.userId || stagedUserData.uid || '').trim()
+  const resolvedAuthUid = targetAuthUid || targetUserDocId || fallbackAuthUid
+
+  await audienceUsersRef.doc(audienceUserId).set({
+    name: nextName,
+    last_updated: now,
+  }, { merge: true })
+
+  if (stagedDocId) {
+    const stagedRef = db.collection('staged-users').doc(stagedDocId)
+    await stagedRef.set({
+      meta: {
+        ...(stagedUserData.meta || {}),
+        name: nextName,
+      },
+      last_updated: now,
+    }, { merge: true })
+  }
+
+  if (resolvedAuthUid) {
+    const userRef = db.collection('users').doc(resolvedAuthUid)
+    const userSnap = await userRef.get()
+    const userData = userSnap.exists ? (userSnap.data() || {}) : {}
+    await userRef.set({
+      userId: resolvedAuthUid,
+      meta: {
+        ...(userData.meta || {}),
+        name: nextName,
+      },
+      last_updated: now,
+    }, { merge: true })
+  }
+
+  return {
+    success: true,
+    audienceUserId,
+    authUid: resolvedAuthUid,
+    stagedUserId: stagedDocId,
+    name: nextName,
+    updatedBy: callerUid,
+    selfUpdate: isSelfUpdate,
+  }
+})
+
 exports.restrictedContentDeleteAudienceMemberAccount = onCall({ timeoutSeconds: 180 }, async (request) => {
   assertCallableUser(request)
   const data = request.data || {}
