@@ -249,6 +249,7 @@ const state = reactive({
   ruleDeleteSubmitting: false,
   memberDeleteDialogOpen: false,
   memberDeleteDocId: '',
+  memberDeleteDisplayName: '',
   memberDeleteSubmitting: false,
   memberStripeActionDialogOpen: false,
   memberStripeActionType: '',
@@ -1730,6 +1731,8 @@ const openDeleteMemberDialog = (docId) => {
   const normalizedDocId = String(docId || '').trim()
   if (!normalizedDocId)
     return
+  const member = filteredMembers.value.find(item => String(item?.docId || '').trim() === normalizedDocId)
+  state.memberDeleteDisplayName = getMemberDisplayName(member || { docId: normalizedDocId })
   state.memberDeleteDocId = normalizedDocId
   state.memberDeleteDialogOpen = true
 }
@@ -1739,6 +1742,7 @@ const closeDeleteMemberDialog = () => {
     return
   state.memberDeleteDialogOpen = false
   state.memberDeleteDocId = ''
+  state.memberDeleteDisplayName = ''
 }
 
 const deleteMember = async (docId) => {
@@ -1747,12 +1751,31 @@ const deleteMember = async (docId) => {
     return
   state.memberDeleteSubmitting = true
   try {
-    await edgeFirebase.removeDoc(audienceUsersCollectionPath.value, normalizedDocId)
+    const uid = String(edgeFirebase?.user?.uid || edgeFirebase?.user?.firebaseUser?.uid || '').trim()
+    const orgId = String(edgeGlobal?.edgeState?.currentOrganization || '').trim()
+    if (!uid || !orgId || !props.siteId)
+      throw new Error('Missing user or organization context.')
+
+    const response = await edgeFirebase.runFunction('cms-restrictedContentDeleteAudienceMemberAccount', {
+      uid,
+      orgId,
+      siteId: props.siteId,
+      audienceUserId: normalizedDocId,
+    })
+    const result = response?.data || response || {}
+    if (result?.success === false)
+      throw new Error(String(result?.message || 'Unable to delete this member account.'))
+
     if (state.selectedMemberId === normalizedDocId)
       state.selectedMemberId = ''
     await loadInitialMembers()
     state.memberDeleteDialogOpen = false
     state.memberDeleteDocId = ''
+    state.memberDeleteDisplayName = ''
+    edgeFirebase?.toast?.success?.('Member removed from this site. Site Stripe subscriptions were cancelled and site access paths were removed.')
+  }
+  catch (error) {
+    edgeFirebase?.toast?.error?.(String(error?.message || 'Unable to delete this member account.'))
   }
   finally {
     state.memberDeleteSubmitting = false
@@ -1870,18 +1893,29 @@ onBeforeUnmount(async () => {
       <DialogContent class="pt-10">
         <DialogHeader>
           <DialogTitle class="text-left">
-            Delete Member?
+            Remove Member From This Site?
           </DialogTitle>
           <DialogDescription class="text-left">
-            This will permanently remove this member from the site.
+            This removes this member from this site and cannot be undone.
           </DialogDescription>
         </DialogHeader>
+        <div class="space-y-2 rounded-md border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
+          <div>
+            Member:
+            <span class="font-semibold">{{ state.memberDeleteDisplayName || state.memberDeleteDocId }}</span>
+          </div>
+          <div>Stripe subscriptions for this site will be cancelled when available.</div>
+          <div>The audience member record for this site will be deleted.</div>
+          <div>Site access paths will be removed from staged/user documents.</div>
+          <div>The global user account and memberships on other sites are kept.</div>
+          <div>This action is irreversible.</div>
+        </div>
         <DialogFooter class="flex justify-between pt-2">
           <edge-shad-button variant="outline" :disabled="state.memberDeleteSubmitting" @click="closeDeleteMemberDialog">
             Cancel
           </edge-shad-button>
           <edge-shad-button class="bg-red-700 text-white hover:bg-red-600" :disabled="state.memberDeleteSubmitting" @click="deleteMember()">
-            Delete Member
+            Delete Account
           </edge-shad-button>
         </DialogFooter>
       </DialogContent>

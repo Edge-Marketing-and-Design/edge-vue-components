@@ -658,7 +658,7 @@ const syncFirebaseAuthorizedDomainsForMembership = async ({
   const accessToken = await getAdminAccessToken()
   const configUrl = `https://identitytoolkit.googleapis.com/admin/v2/projects/${projectId}/config`
   const headers = {
-    Authorization: `Bearer ${accessToken}`,
+    'Authorization': `Bearer ${accessToken}`,
     'Content-Type': 'application/json',
   }
 
@@ -3604,6 +3604,52 @@ const buildStripeCheckoutBillingSnapshot = async ({ stripe, session = {}, metada
   }
 }
 
+const cancelStripeCustomerSubscriptionsForSite = async ({ stripe, customerId, orgId, siteId }) => {
+  const normalizedCustomerId = String(customerId || '').trim()
+  const normalizedOrgId = String(orgId || '').trim()
+  const normalizedSiteId = String(siteId || '').trim()
+  if (!stripe || !normalizedCustomerId)
+    return { cancelledIds: [], attemptedIds: [] }
+
+  const response = await stripe.subscriptions.list({
+    customer: normalizedCustomerId,
+    status: 'all',
+    limit: 100,
+  })
+  const subscriptions = Array.isArray(response?.data) ? response.data : []
+  const attemptedIds = []
+  const cancelledIds = []
+  for (const subscription of subscriptions) {
+    const subscriptionId = String(subscription?.id || '').trim()
+    if (!subscriptionId)
+      continue
+    const status = String(subscription?.status || '').trim().toLowerCase()
+    if (['canceled', 'incomplete_expired'].includes(status))
+      continue
+
+    const metadata = (subscription?.metadata && typeof subscription.metadata === 'object') ? subscription.metadata : {}
+    const subscriptionOrgId = String(metadata.orgId || '').trim()
+    const subscriptionSiteId = String(metadata.siteId || '').trim()
+    if (normalizedOrgId && normalizedSiteId && (subscriptionOrgId !== normalizedOrgId || subscriptionSiteId !== normalizedSiteId))
+      continue
+
+    attemptedIds.push(subscriptionId)
+    try {
+      const cancelled = await stripe.subscriptions.cancel(subscriptionId)
+      if (String(cancelled?.status || '').trim().toLowerCase() === 'canceled')
+        cancelledIds.push(subscriptionId)
+    }
+    catch (error) {
+      logger.warn('cancelStripeCustomerSubscriptions failed for one subscription', {
+        customerId: normalizedCustomerId,
+        subscriptionId,
+        message: error?.message || String(error),
+      })
+    }
+  }
+  return { cancelledIds, attemptedIds }
+}
+
 exports.restrictedContentManageStripeSubscription = onCall({ timeoutSeconds: 180 }, async (request) => {
   assertCallableUser(request)
   const data = request.data || {}
@@ -3648,7 +3694,7 @@ exports.restrictedContentManageStripeSubscription = onCall({ timeoutSeconds: 180
   const rulePriceIds = new Set(
     (Array.isArray(rule.registrationStripePrices) ? rule.registrationStripePrices : [])
       .map(item => String(item?.priceId || '').trim())
-      .filter(Boolean)
+      .filter(Boolean),
   )
   const ruleProductId = String(rule.registrationStripeProductId || '').trim()
   const subscription = pickSubscriptionForRule(subscriptions, {
@@ -3771,6 +3817,203 @@ exports.restrictedContentManageStripeSubscription = onCall({ timeoutSeconds: 180
       currentPeriodEnd: Number(updatedSubscription?.current_period_end || 0) || null,
       pauseCollection: updatedSubscription?.pause_collection || null,
     },
+  }
+})
+
+exports.restrictedContentCreateStripePortalLink = onCall({ timeoutSeconds: 180 }, async (request) => {
+  assertCallableUser(request)
+  const data = request.data || {}
+  const callerUid = String(request.auth.uid || '').trim()
+  const orgId = String(data.orgId || '').trim()
+  const siteId = String(data.siteId || '').trim()
+  const requestedAudienceUserId = String(data.audienceUserId || '').trim()
+  const returnUrl = String(data.returnUrl || '').trim()
+
+  if (!orgId || !siteId)
+    throw new HttpsError('invalid-argument', 'Missing orgId or siteId.')
+  if (!returnUrl)
+    throw new HttpsError('invalid-argument', 'Missing returnUrl.')
+
+  const { audienceUsersRef } = getRestrictedSiteRefs(orgId, siteId)
+  let audienceUserId = requestedAudienceUserId
+  let audienceSnap = null
+  if (audienceUserId) {
+    audienceSnap = await audienceUsersRef.doc(audienceUserId).get()
+    if (!audienceSnap.exists)
+      throw new HttpsError('not-found', 'Audience member not found.')
+  }
+  else {
+    audienceSnap = await resolveAudienceUserForAuth(orgId, siteId, callerUid)
+    if (!audienceSnap?.exists)
+      throw new HttpsError('not-found', 'Audience member not found for current user.')
+    audienceUserId = String(audienceSnap.id || '').trim()
+  }
+
+  const audienceUser = audienceSnap.data() || {}
+  const targetAuthUid = String(audienceUser.authUid || '').trim()
+  const targetUserDocId = String(audienceUser.userId || '').trim()
+  const isSelfRequest = Boolean(
+    (targetAuthUid && targetAuthUid === callerUid)
+    || (targetUserDocId && targetUserDocId === callerUid),
+  )
+  if (!isSelfRequest)
+    await ensureRestrictedSiteWritePermission(callerUid, orgId, siteId)
+
+  const stripeCustomerId = String(audienceUser.billingStripeCustomerId || '').trim()
+  if (!stripeCustomerId)
+    throw new HttpsError('failed-precondition', 'No Stripe customer is associated with this audience member.')
+
+  const stripe = await getStripeClientForSite(orgId, siteId)
+  const session = await stripe.billingPortal.sessions.create({
+    customer: stripeCustomerId,
+    return_url: returnUrl,
+  })
+
+  return {
+    success: true,
+    url: session.url,
+    audienceUserId,
+    stripeCustomerId,
+  }
+})
+
+exports.restrictedContentDeleteAudienceMemberAccount = onCall({ timeoutSeconds: 180 }, async (request) => {
+  assertCallableUser(request)
+  const data = request.data || {}
+  const callerUid = String(request.auth.uid || '').trim()
+  const orgId = String(data.orgId || '').trim()
+  const siteId = String(data.siteId || '').trim()
+  const requestedAudienceUserId = String(data.audienceUserId || '').trim()
+
+  if (!orgId || !siteId)
+    throw new HttpsError('invalid-argument', 'Missing orgId or siteId.')
+
+  const { audienceUsersRef } = getRestrictedSiteRefs(orgId, siteId)
+  let audienceUserId = requestedAudienceUserId
+  let audienceSnap = null
+  if (audienceUserId) {
+    audienceSnap = await audienceUsersRef.doc(audienceUserId).get()
+    if (!audienceSnap.exists)
+      throw new HttpsError('not-found', 'Audience member not found.')
+  }
+  else {
+    audienceSnap = await resolveAudienceUserForAuth(orgId, siteId, callerUid)
+    if (!audienceSnap?.exists)
+      throw new HttpsError('not-found', 'Audience member not found for current user.')
+    audienceUserId = String(audienceSnap.id || '').trim()
+  }
+
+  const audienceUser = audienceSnap.data() || {}
+  const targetAuthUid = String(audienceUser.authUid || '').trim()
+  const targetUserDocId = String(audienceUser.userId || '').trim()
+  const isSelfDelete = Boolean(
+    (targetAuthUid && targetAuthUid === callerUid)
+    || (targetUserDocId && targetUserDocId === callerUid),
+  )
+  if (!isSelfDelete)
+    await ensureRestrictedSiteWritePermission(callerUid, orgId, siteId)
+
+  const stagedDocId = String(
+    audienceUser.stagedUserId
+    || audienceUser.docId
+    || audienceUserId
+    || '',
+  ).trim()
+  let stagedUserData = {}
+  if (stagedDocId) {
+    const stagedSnap = await db.collection('staged-users').doc(stagedDocId).get()
+    if (stagedSnap.exists)
+      stagedUserData = stagedSnap.data() || {}
+  }
+
+  const fallbackAuthUid = String(stagedUserData.userId || stagedUserData.uid || '').trim()
+  const resolvedAuthUid = targetAuthUid || targetUserDocId || fallbackAuthUid
+  const normalizedAudienceEmail = normalizeEmail(audienceUser.email || stagedUserData?.meta?.email || '')
+  const stripeCustomerId = String(audienceUser.billingStripeCustomerId || '').trim()
+  const audienceUserDocPermissionPath = `organizations-${orgId}-sites-${siteId}-audience-users-${audienceUserId}`
+
+  let stripeCancelledSubscriptions = []
+  let stripeAttemptedSubscriptions = []
+  if (stripeCustomerId) {
+    try {
+      const stripe = await getStripeClientForSite(orgId, siteId)
+      const cancelResult = await cancelStripeCustomerSubscriptionsForSite({
+        stripe,
+        customerId: stripeCustomerId,
+        orgId,
+        siteId,
+      })
+      stripeCancelledSubscriptions = cancelResult.cancelledIds
+      stripeAttemptedSubscriptions = cancelResult.attemptedIds
+    }
+    catch (stripeError) {
+      logger.error('restrictedContentDeleteAudienceMemberAccount Stripe cleanup failed', {
+        orgId,
+        siteId,
+        audienceUserId,
+        stripeCustomerId,
+        message: stripeError?.message || String(stripeError),
+      })
+    }
+  }
+
+  await audienceUsersRef.doc(audienceUserId).delete()
+
+  if (stagedDocId) {
+    const stagedRef = db.collection('staged-users').doc(stagedDocId)
+    const stagedSnap = await stagedRef.get()
+    if (stagedSnap.exists) {
+      const staged = stagedSnap.data() || {}
+      const nextRoles = (staged.roles && typeof staged.roles === 'object' && !Array.isArray(staged.roles))
+        ? { ...staged.roles }
+        : {}
+      if (audienceUserDocPermissionPath in nextRoles)
+        delete nextRoles[audienceUserDocPermissionPath]
+      const nextCollectionPaths = (Array.isArray(staged.collectionPaths) ? staged.collectionPaths : [])
+        .filter(path => String(path || '').trim() !== audienceUserDocPermissionPath)
+      await stagedRef.set({
+        roles: nextRoles,
+        collectionPaths: nextCollectionPaths,
+        last_updated: Date.now(),
+      }, { merge: true })
+    }
+  }
+
+  if (resolvedAuthUid) {
+    const userRef = db.collection('users').doc(resolvedAuthUid)
+    const userSnap = await userRef.get()
+    if (userSnap.exists) {
+      const userData = userSnap.data() || {}
+      const nextRoles = (userData.roles && typeof userData.roles === 'object' && !Array.isArray(userData.roles))
+        ? { ...userData.roles }
+        : {}
+      if (audienceUserDocPermissionPath in nextRoles)
+        delete nextRoles[audienceUserDocPermissionPath]
+      const nextCollectionPaths = (Array.isArray(userData.collectionPaths) ? userData.collectionPaths : [])
+        .filter(path => String(path || '').trim() !== audienceUserDocPermissionPath)
+      await userRef.set({
+        roles: nextRoles,
+        collectionPaths: nextCollectionPaths,
+        last_updated: Date.now(),
+      }, { merge: true })
+    }
+  }
+
+  const siteEmailIndexRef = getRestrictedRegistrationEmailIndexRef(orgId, siteId, normalizedAudienceEmail)
+  if (siteEmailIndexRef)
+    await siteEmailIndexRef.delete().catch(() => {})
+
+  return {
+    success: true,
+    audienceUserId,
+    stagedUserId: stagedDocId,
+    authUid: resolvedAuthUid,
+    stripeCustomerId,
+    stripeAttemptedSubscriptions,
+    stripeCancelledSubscriptions,
+    removedPermissionPath: audienceUserDocPermissionPath,
+    deletedBy: callerUid,
+    selfDelete: isSelfDelete,
   }
 })
 
@@ -4275,7 +4518,7 @@ exports.restrictedContentImportStripeCatalog = onCall({ timeoutSeconds: 180 }, a
   }
 
   const nextRules = Object.values(rulesById)
-    .map((item) => normalizeRestrictedRuleForFunction(item, item.id))
+    .map(item => normalizeRestrictedRuleForFunction(item, item.id))
     .filter(item => item.id)
     .sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id)))
 
@@ -4519,7 +4762,7 @@ exports.restrictedContentSyncStripeRule = onCall({ timeoutSeconds: 180 }, async 
       couponId,
       orgId,
       siteId,
-      ruleId
+      ruleId,
     )
 
     if (needsPromotionCode) {
