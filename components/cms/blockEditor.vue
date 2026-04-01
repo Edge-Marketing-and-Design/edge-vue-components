@@ -3059,6 +3059,7 @@ const exportCurrentBlock = async () => {
                     <div class="text-sm text-foreground space-y-1">
                       <div><code>.cms-login-button</code> or <code>[data-cms-login-button]</code>: marks a login CTA.</div>
                       <div><code>.cms-logout-button</code> or <code>[data-cms-logout-button]</code>: marks a logout CTA.</div>
+                      <div><code>.cms-account-button</code> or <code>[data-cms-account-button]</code>: marks a My Account CTA so frontend can open a My Account dialog.</div>
                       <div>Runtime adds <code>data-cms-auth-action="login|logout"</code> plus <code>data-cms-interactive="true"</code> so frontend can open login UI or trigger logout.</div>
                     </div>
                   </section>
@@ -3083,6 +3084,10 @@ const exportCurrentBlock = async () => {
                     <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;div class="flex items-center gap-3"&gt;
   &lt;button type="button" class="cms-login-button cms-show-logged-out inline-flex items-center rounded-md bg-black px-4 py-2 text-white"&gt;
     Log In
+  &lt;/button&gt;
+
+  &lt;button type="button" class="cms-account-button cms-show-logged-in inline-flex items-center rounded-md border px-4 py-2"&gt;
+    My Account
   &lt;/button&gt;
 
   &lt;button type="button" class="cms-logout-button cms-show-logged-in inline-flex items-center rounded-md border px-4 py-2"&gt;
