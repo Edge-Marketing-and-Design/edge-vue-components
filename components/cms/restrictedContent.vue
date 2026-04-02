@@ -1904,11 +1904,10 @@ onBeforeUnmount(async () => {
             Member:
             <span class="font-semibold">{{ state.memberDeleteDisplayName || state.memberDeleteDocId }}</span>
           </div>
-          <div>Stripe subscriptions for this site will be cancelled when available.</div>
-          <div>The audience member record for this site will be deleted.</div>
-          <div>Site access paths will be removed from staged/user documents.</div>
-          <div>The global user account and memberships on other sites are kept.</div>
-          <div>This action is irreversible.</div>
+          <div>If this member has a Stripe subscription for this site, it will be cancelled.</div>
+          <div>This member will lose access to paid and restricted content on this site.</div>
+          <div>Their account and memberships on other sites will stay active.</div>
+          <div>This action cannot be undone.</div>
         </div>
         <DialogFooter class="flex justify-between pt-2">
           <edge-shad-button variant="outline" :disabled="state.memberDeleteSubmitting" @click="closeDeleteMemberDialog">
