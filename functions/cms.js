@@ -4128,6 +4128,7 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
   const siteId = String(data.siteId || '').trim()
   const ruleId = String(data.ruleId || '').trim()
   const name = String(data.name || '').trim()
+  const hasProvidedName = Boolean(name)
   const email = normalizeEmail(data.email)
 
   if (!orgId || !siteId || !email)
@@ -4217,7 +4218,7 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
         uid: linkedAuthUid || '',
         userId: linkedAuthUid || '',
         meta: {
-          name,
+          ...(hasProvidedName ? { name } : {}),
           email,
         },
         roles: stagedRoles,
@@ -4231,7 +4232,7 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
       await stagedUserRef.set({
         meta: {
           ...(stagedUserData.meta || {}),
-          name,
+          ...(hasProvidedName ? { name } : {}),
           email,
         },
         ...(linkedAuthUid && !stagedUserId
@@ -4253,7 +4254,7 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
     const existingAudienceAuthUid = String(existingAudienceUser.authUid || '').trim()
     await audienceUsersRef.doc(docId).set({
       docId,
-      name,
+      ...(hasProvidedName ? { name } : {}),
       email,
       authUid: linkedAuthUid || existingAudienceAuthUid,
       userId: linkedAuthUid || String(existingAudienceUser.userId || '').trim(),
