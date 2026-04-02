@@ -3000,8 +3000,6 @@ const buildRestrictedMemberPayload = ({
     notes: String(existingMember?.notes || '').trim(),
     paidAccessRuleIds,
     pendingPaymentRuleIds,
-    registrationPaymentStatus: paymentStatus,
-    registrationPaymentPaused: existingMember?.registrationPaymentPaused === true,
     doc_created_at: Number(existingMember?.doc_created_at || now),
     last_updated: now,
   }
@@ -3094,6 +3092,251 @@ const resolveAudienceUserForAuth = async (orgId, siteId, authUid) => {
   }
 
   return null
+}
+
+const buildSeatOwnerKey = (ownerAudienceUserId, ruleId) => {
+  const ownerId = String(ownerAudienceUserId || '').trim()
+  const normalizedRuleId = String(ruleId || '').trim()
+  if (!ownerId || !normalizedRuleId)
+    return ''
+  return `${ownerId}:${normalizedRuleId}`
+}
+
+const normalizeSeatOwnersByRule = (member = {}) => {
+  const next = {}
+  const raw = (member?.seatOwnersByRule && typeof member.seatOwnersByRule === 'object' && !Array.isArray(member.seatOwnersByRule))
+    ? member.seatOwnersByRule
+    : {}
+  Object.keys(raw).forEach((ruleId) => {
+    const normalizedRuleId = String(ruleId || '').trim()
+    if (!normalizedRuleId)
+      return
+    const item = raw[ruleId]
+    if (!item || typeof item !== 'object' || Array.isArray(item))
+      return
+    const ownerAudienceUserId = String(item.ownerAudienceUserId || item.seatOwnerAudienceUserId || '').trim()
+    if (!ownerAudienceUserId)
+      return
+    next[normalizedRuleId] = {
+      ownerAudienceUserId,
+      ownerAuthUid: String(item.ownerAuthUid || item.seatOwnerAuthUid || '').trim(),
+      ownerName: String(item.ownerName || item.seatOwnerName || '').trim(),
+      ownerEmail: String(item.ownerEmail || item.seatOwnerEmail || '').trim(),
+      assignedAt: Number(item.assignedAt || 0) || 0,
+    }
+  })
+
+  const legacyRuleId = String(member?.seatOwnerRuleId || '').trim()
+  const legacyOwnerAudienceUserId = String(member?.seatOwnerAudienceUserId || '').trim()
+  if (legacyRuleId && legacyOwnerAudienceUserId && !next[legacyRuleId]) {
+    next[legacyRuleId] = {
+      ownerAudienceUserId: legacyOwnerAudienceUserId,
+      ownerAuthUid: String(member?.seatOwnerAuthUid || '').trim(),
+      ownerName: String(member?.seatOwnerName || '').trim(),
+      ownerEmail: String(member?.seatOwnerEmail || '').trim(),
+      assignedAt: 0,
+    }
+  }
+
+  return next
+}
+
+const getSeatOwnerForRule = (member = {}, ruleId = '') => {
+  const normalizedRuleId = String(ruleId || '').trim()
+  if (!normalizedRuleId)
+    return null
+  const map = normalizeSeatOwnersByRule(member)
+  return map[normalizedRuleId] || null
+}
+
+const getSeatOwnerKeys = (member = {}) => {
+  const byRule = normalizeSeatOwnersByRule(member)
+  const keys = Object.keys(byRule)
+    .map(ruleId => buildSeatOwnerKey(byRule[ruleId]?.ownerAudienceUserId, ruleId))
+    .filter(Boolean)
+  const explicitKeys = Array.isArray(member?.seatOwnerKeys)
+    ? member.seatOwnerKeys.map(item => String(item || '').trim()).filter(Boolean)
+    : []
+  return Array.from(new Set([...keys, ...explicitKeys]))
+}
+
+const getRestrictedSeatContextFromMember = (member = {}, preferredRuleId = '') => {
+  const paidRuleIds = Array.isArray(member?.paidAccessRuleIds)
+    ? member.paidAccessRuleIds.map(item => String(item || '').trim()).filter(Boolean)
+    : []
+  const normalizedPreferredRuleId = String(preferredRuleId || '').trim()
+  const ownershipMap = normalizeSeatOwnersByRule(member)
+  const candidateRuleIds = normalizedPreferredRuleId
+    ? [normalizedPreferredRuleId]
+    : paidRuleIds
+  const manageableRuleId = candidateRuleIds.find((ruleId) => {
+    const ownerForRule = ownershipMap[ruleId]
+    const isSeatChildForRule = Boolean(ownerForRule?.ownerAudienceUserId)
+    if (isSeatChildForRule)
+      return false
+    const planState = getPlanStateForRule(member, ruleId)
+    const quantity = Number.isFinite(Number(planState?.quantity))
+      ? Math.max(1, Math.trunc(Number(planState.quantity)))
+      : 1
+    const paymentStatus = String(planState?.paymentStatus || '').trim().toLowerCase()
+    const paymentPaused = planState?.paymentPaused === true
+    const effectivePaymentStatus = paymentPaused && paymentStatus === 'paid'
+      ? 'paused'
+      : (paymentStatus || 'not_required')
+    return quantity > 1 && ['paid', 'paused'].includes(effectivePaymentStatus)
+  }) || ''
+  const seatRuleId = manageableRuleId || normalizedPreferredRuleId || paidRuleIds[0] || ''
+  const planState = getPlanStateForRule(member, seatRuleId)
+  const ownerForRule = getSeatOwnerForRule(member, seatRuleId)
+  const isSeatChild = Boolean(ownerForRule?.ownerAudienceUserId)
+  const seatLimit = Number.isFinite(Number(planState?.quantity))
+    ? Math.max(1, Math.trunc(Number(planState.quantity)))
+    : (Number.isFinite(Number(member?.registrationPaymentQuantity))
+        ? Math.max(1, Math.trunc(Number(member.registrationPaymentQuantity)))
+        : 1)
+  const paymentStatus = String(planState?.paymentStatus || '').trim().toLowerCase()
+    || String(member?.registrationPaymentStatus || '').trim().toLowerCase()
+  const paymentPaused = planState?.paymentPaused === true || member?.registrationPaymentPaused === true
+  const effectivePaymentStatus = paymentPaused && paymentStatus === 'paid'
+    ? 'paused'
+    : (paymentStatus || 'not_required')
+  const hasPaidAccessForRule = Boolean(seatRuleId && paidRuleIds.includes(seatRuleId))
+  const canManageSeats = seatLimit > 1
+    && hasPaidAccessForRule
+    && !isSeatChild
+    && ['paid', 'paused'].includes(effectivePaymentStatus)
+
+  return {
+    seatRuleId,
+    seatLimit,
+    paymentStatus: effectivePaymentStatus,
+    isSeatChild,
+    canManageSeats,
+  }
+}
+
+const buildRestrictedPlanArray = async ({
+  rules = [],
+  memberData = {},
+  blocked = false,
+  audienceUsersRef = null,
+  audienceUserId = '',
+}) => {
+  const paidRules = (Array.isArray(rules) ? rules : [])
+    .map((item, index) => normalizeRestrictedRuleForFunction(item, `rule-${index + 1}`))
+    .filter(item => item.id && item.registrationMode === 'paid')
+  if (!paidRules.length)
+    return []
+
+  const accessRuleIds = new Set(Array.isArray(memberData?.accessRuleIds) ? memberData.accessRuleIds.filter(Boolean) : [])
+  const manualAccessRuleIds = new Set(Array.isArray(memberData?.manualAccessRuleIds) ? memberData.manualAccessRuleIds.filter(Boolean) : [])
+  const paidAccessRuleIds = new Set(Array.isArray(memberData?.paidAccessRuleIds) ? memberData.paidAccessRuleIds.filter(Boolean) : [])
+  const pendingPaymentRuleIds = new Set(Array.isArray(memberData?.pendingPaymentRuleIds) ? memberData.pendingPaymentRuleIds.filter(Boolean) : [])
+
+  const ownerId = String(audienceUserId || '').trim()
+  const relatedRules = paidRules.filter((rule) => {
+    const ruleId = String(rule.id || '').trim()
+    if (!ruleId)
+      return false
+    const isAssigned = accessRuleIds.has(ruleId)
+    const isManualOverride = manualAccessRuleIds.has(ruleId)
+    const isPaid = paidAccessRuleIds.has(ruleId)
+    const paymentPending = pendingPaymentRuleIds.has(ruleId)
+    if (isPaid || isManualOverride || (isAssigned && !paymentPending))
+      return true
+    const planState = getPlanStateForRule(memberData, ruleId)
+    const planStatus = String(planState?.paymentStatus || '').trim().toLowerCase()
+    return ['paid', 'paused'].includes(planStatus)
+  })
+  if (!relatedRules.length)
+    return []
+
+  return Promise.all(relatedRules.map(async (rule) => {
+    const ruleId = String(rule.id || '').trim()
+    const planState = getPlanStateForRule(memberData, ruleId)
+    const isAssigned = accessRuleIds.has(ruleId)
+    const isManualOverride = manualAccessRuleIds.has(ruleId)
+    const isPaid = paidAccessRuleIds.has(ruleId)
+    const paymentPending = pendingPaymentRuleIds.has(ruleId)
+    const hasAccess = !blocked && (isPaid || isManualOverride || (isAssigned && !paymentPending))
+    const paymentStatus = String(planState.paymentStatus || (isPaid ? 'paid' : (paymentPending ? 'pending' : 'not_required'))).trim().toLowerCase()
+    const seatLimit = Number.isFinite(Number(planState.quantity))
+      ? Math.max(1, Math.trunc(Number(planState.quantity)))
+      : 1
+    const ownerKey = buildSeatOwnerKey(ownerId, ruleId)
+    let planSeatMembers = []
+    if (audienceUsersRef && ownerKey) {
+      const seatChildrenSnap = await audienceUsersRef.where('seatOwnerKeys', 'array-contains', ownerKey).get()
+      planSeatMembers = seatChildrenSnap.docs
+        .filter(doc => doc.id !== ownerId)
+        .map((doc) => {
+          const item = doc.data() || {}
+          const childPlanState = getPlanStateForRule(item, ruleId)
+          return {
+            audienceUserId: doc.id,
+            docId: doc.id,
+            name: String(item.name || '').trim(),
+            email: String(item.email || '').trim(),
+            status: String(item.status || '').trim().toLowerCase() || 'inactive',
+            registrationPaymentStatus: String(childPlanState?.paymentStatus || '').trim().toLowerCase(),
+            seatOwnerRuleId: ruleId,
+          }
+        })
+        .sort((a, b) => String(a.name || a.email || a.docId).localeCompare(String(b.name || b.email || b.docId)))
+    }
+    const activePlanSeatMembers = planSeatMembers.filter((item) => {
+      const childStatus = String(item.status || '').trim().toLowerCase()
+      return childStatus !== 'revoked'
+    })
+    const isSeatChild = Boolean(getSeatOwnerForRule(memberData, ruleId)?.ownerAudienceUserId)
+    const canManageSeats = !isSeatChild
+      && isPaid
+      && seatLimit > 1
+      && ['paid', 'paused'].includes(paymentStatus)
+    const seatsUsed = seatLimit > 1
+      ? (1 + activePlanSeatMembers.length)
+      : 1
+
+    return {
+      ruleId,
+      ruleName: String(rule.name || ruleId).trim(),
+      requiresPayment: true,
+      hasAccess,
+      isAssigned,
+      isPaid,
+      isManualOverride,
+      paymentPending,
+      paymentStatus,
+      paymentPaused: planState.paymentPaused === true,
+      stripeSubscriptionId: String(planState.stripeSubscriptionId || '').trim(),
+      stripePriceId: String(planState.stripePriceId || '').trim(),
+      currentPeriodEnd: Number(planState.currentPeriodEnd || 0) || 0,
+      cancelAt: Number(planState.cancelAt || 0) || 0,
+      currency: String(planState.currency || '').trim().toLowerCase(),
+      interval: String(planState.interval || '').trim().toLowerCase(),
+      intervalCount: Number(planState.intervalCount || 0) || 0,
+      quantity: Number(planState.quantity || 0) || 0,
+      baseAmountCents: Number(planState.baseAmountCents || 0) || 0,
+      discountAmountCents: Number(planState.discountAmountCents || 0) || 0,
+      amountCents: Number(planState.amountCents || 0) || 0,
+      couponCode: String(planState.couponCode || '').trim(),
+      couponLabel: String(planState.couponLabel || '').trim(),
+      canManageSeats,
+      seatLimit,
+      seatsUsed,
+      seatMembers: planSeatMembers,
+    }
+  }))
+}
+
+const listSeatChildrenForOwner = async ({ audienceUsersRef, ownerAudienceUserId, seatRuleId = '' }) => {
+  const ownerId = String(ownerAudienceUserId || '').trim()
+  const normalizedSeatRuleId = String(seatRuleId || '').trim()
+  if (!ownerId || !normalizedSeatRuleId)
+    return []
+  const ownerKey = buildSeatOwnerKey(ownerId, normalizedSeatRuleId)
+  const snap = await audienceUsersRef.where('seatOwnerKeys', 'array-contains', ownerKey).get()
+  return snap.docs.filter(doc => doc.id !== ownerId)
 }
 
 const buildStripePriceSummary = (price) => {
@@ -3367,6 +3610,8 @@ const updateRestrictedMemberPaymentState = async ({
   audienceUserId,
   ruleId,
   paymentStatus,
+  billingSnapshot = null,
+  paymentPaused,
   grantPaidAccess = false,
   revokePaidAccess = false,
 }) => {
@@ -3381,19 +3626,41 @@ const updateRestrictedMemberPaymentState = async ({
   const memberRef = audienceUsersRef.doc(normalizedAudienceUserId)
   const memberSnap = await memberRef.get()
   const memberData = memberSnap.exists ? (memberSnap.data() || {}) : {}
+  const normalizedPaymentStatus = String(paymentStatus || '').trim().toLowerCase()
+  const now = Date.now()
 
-  await memberRef.set(buildRestrictedMemberPayload({
-    existingMember: memberData,
-    audienceUserId: normalizedAudienceUserId,
-    ruleId: normalizedRuleId,
-    status: String(memberData.status || '').trim() || 'active',
-    paymentStatus,
-    markPaid: grantPaidAccess,
-    markPending: !grantPaidAccess && !revokePaidAccess && paymentStatus === 'pending',
-    clearPending: grantPaidAccess || revokePaidAccess,
-    clearPaid: revokePaidAccess,
-    now: Date.now(),
-  }), { merge: true })
+  const registrationPlanStates = getRegistrationPlanStates(memberData)
+  const existingPlanState = getPlanStateForRule(memberData, normalizedRuleId)
+  const snapshotPatch = (billingSnapshot && typeof billingSnapshot === 'object' && !Array.isArray(billingSnapshot))
+    ? buildPlanStateFromBillingSnapshot(billingSnapshot)
+    : {}
+  const nextPlanState = {
+    ...existingPlanState,
+    ...snapshotPatch,
+    paymentStatus: normalizedPaymentStatus || String(existingPlanState.paymentStatus || '').trim().toLowerCase() || 'pending',
+    paymentPaused: typeof paymentPaused === 'boolean'
+      ? paymentPaused
+      : (existingPlanState.paymentPaused === true),
+    lastUpdated: now,
+  }
+  registrationPlanStates[normalizedRuleId] = nextPlanState
+
+  await memberRef.set({
+    ...buildRestrictedMemberPayload({
+      existingMember: memberData,
+      audienceUserId: normalizedAudienceUserId,
+      ruleId: normalizedRuleId,
+      status: String(memberData.status || '').trim() || 'active',
+      paymentStatus: normalizedPaymentStatus,
+      markPaid: grantPaidAccess,
+      markPending: !grantPaidAccess && !revokePaidAccess && normalizedPaymentStatus === 'pending',
+      clearPending: grantPaidAccess || revokePaidAccess,
+      clearPaid: revokePaidAccess,
+      now,
+    }),
+    registrationPlanStates,
+    last_updated: now,
+  }, { merge: true })
 }
 
 const subscriptionStatusRank = (status) => {
@@ -3604,6 +3871,123 @@ const buildStripeCheckoutBillingSnapshot = async ({ stripe, session = {}, metada
   }
 }
 
+const getRegistrationPlanStates = (member = {}) => {
+  const raw = (member?.registrationPlanStates && typeof member.registrationPlanStates === 'object' && !Array.isArray(member.registrationPlanStates))
+    ? member.registrationPlanStates
+    : {}
+  const next = {}
+  Object.keys(raw).forEach((ruleId) => {
+    const normalizedRuleId = String(ruleId || '').trim()
+    if (!normalizedRuleId)
+      return
+    const item = raw[ruleId]
+    if (!item || typeof item !== 'object' || Array.isArray(item))
+      return
+    next[normalizedRuleId] = { ...item }
+  })
+  return next
+}
+
+const buildPlanStateFromBillingSnapshot = (billingSnapshot = {}) => ({
+  stripeSubscriptionId: String(billingSnapshot.registrationStripeSubscriptionId || '').trim(),
+  stripePriceId: String(billingSnapshot.registrationStripePriceId || '').trim(),
+  currentPeriodEnd: Number(billingSnapshot.registrationStripeCurrentPeriodEnd || 0) || 0,
+  cancelAt: Number(billingSnapshot.registrationStripeCancelAt || 0) || 0,
+  currency: String(billingSnapshot.registrationPaymentCurrency || '').trim().toLowerCase(),
+  interval: String(billingSnapshot.registrationPaymentInterval || '').trim().toLowerCase(),
+  intervalCount: Number(billingSnapshot.registrationPaymentIntervalCount || 0) || 0,
+  quantity: Number(billingSnapshot.registrationPaymentQuantity || 0) || 0,
+  baseAmountCents: Number(billingSnapshot.registrationPaymentBaseAmountCents || 0) || 0,
+  discountAmountCents: Number(billingSnapshot.registrationPaymentDiscountAmountCents || 0) || 0,
+  amountCents: Number(billingSnapshot.registrationPaymentAmountCents || 0) || 0,
+  couponCode: String(billingSnapshot.registrationCouponCode || '').trim(),
+  couponLabel: String(billingSnapshot.registrationCouponLabel || '').trim(),
+})
+
+const getPlanStateForRule = (member = {}, ruleId = '') => {
+  const normalizedRuleId = String(ruleId || '').trim()
+  if (!normalizedRuleId)
+    return {}
+  const states = getRegistrationPlanStates(member)
+  if (states[normalizedRuleId] && typeof states[normalizedRuleId] === 'object')
+    return { ...states[normalizedRuleId] }
+
+  const legacyRuleId = String(member?.registrationRuleId || '').trim()
+  if (legacyRuleId !== normalizedRuleId)
+    return {}
+
+  return {
+    paymentStatus: String(member?.registrationPaymentStatus || '').trim().toLowerCase(),
+    paymentPaused: member?.registrationPaymentPaused === true,
+    ...buildPlanStateFromBillingSnapshot(member),
+  }
+}
+
+const syncSeatMembersFromOwner = async ({
+  orgId,
+  siteId,
+  ownerAudienceUserId,
+  ownerRuleId,
+  paymentStatus,
+  grantPaidAccess,
+  revokePaidAccess,
+  registrationPaymentPaused,
+  ownerDataPatch = {},
+}) => {
+  const normalizedOwnerAudienceUserId = String(ownerAudienceUserId || '').trim()
+  const normalizedOwnerRuleId = String(ownerRuleId || '').trim()
+  if (!normalizedOwnerAudienceUserId || !normalizedOwnerRuleId)
+    return 0
+
+  const { audienceUsersRef } = getRestrictedSiteRefs(orgId, siteId)
+  const seatChildrenDocs = await listSeatChildrenForOwner({
+    audienceUsersRef,
+    ownerAudienceUserId: normalizedOwnerAudienceUserId,
+    seatRuleId: normalizedOwnerRuleId,
+  })
+  if (!seatChildrenDocs.length)
+    return 0
+
+  const now = Date.now()
+  const statusValue = String(paymentStatus || '').trim().toLowerCase()
+  const updates = seatChildrenDocs.map(async (docSnap) => {
+    const member = docSnap.data() || {}
+    const billingSnapshot = (ownerDataPatch && typeof ownerDataPatch === 'object' && !Array.isArray(ownerDataPatch))
+      ? ownerDataPatch
+      : {}
+    const childPlanStates = getRegistrationPlanStates(member)
+    const existingPlanState = getPlanStateForRule(member, normalizedOwnerRuleId)
+    childPlanStates[normalizedOwnerRuleId] = {
+      ...existingPlanState,
+      ...buildPlanStateFromBillingSnapshot(billingSnapshot),
+      paymentStatus: statusValue || String(existingPlanState.paymentStatus || '').trim().toLowerCase() || 'pending',
+      paymentPaused: registrationPaymentPaused === true,
+      lastUpdated: now,
+    }
+    const basePayload = buildRestrictedMemberPayload({
+      existingMember: member,
+      audienceUserId: docSnap.id,
+      ruleId: normalizedOwnerRuleId,
+      status: String(member.status || '').trim() || 'active',
+      paymentStatus: statusValue || String(existingPlanState.paymentStatus || '').trim().toLowerCase() || 'pending',
+      markPaid: grantPaidAccess === true,
+      markPending: false,
+      clearPending: true,
+      clearPaid: revokePaidAccess === true,
+      now,
+    })
+    await docSnap.ref.set({
+      ...basePayload,
+      billingStripeCustomerId: String(ownerDataPatch?.billingStripeCustomerId || member.billingStripeCustomerId || '').trim(),
+      registrationPlanStates: childPlanStates,
+      last_updated: now,
+    }, { merge: true })
+  })
+
+  await Promise.all(updates)
+  return seatChildrenDocs.length
+}
+
 const cancelStripeCustomerSubscriptionsForSite = async ({ stripe, customerId, orgId, siteId }) => {
   const normalizedCustomerId = String(customerId || '').trim()
   const normalizedOrgId = String(orgId || '').trim()
@@ -3711,21 +4095,18 @@ exports.restrictedContentManageStripeSubscription = onCall({ timeoutSeconds: 180
   let message = 'Stripe subscription updated.'
   if (action === 'cancel') {
     updatedSubscription = await stripe.subscriptions.cancel(subscription.id)
+    const billingSnapshot = buildStripeSubscriptionBillingSnapshot(updatedSubscription)
     await updateRestrictedMemberPaymentState({
       orgId,
       siteId,
       audienceUserId,
       ruleId,
       paymentStatus: 'cancelled',
+      billingSnapshot,
+      paymentPaused: false,
       grantPaidAccess: false,
       revokePaidAccess: true,
     })
-    await memberRef.set({
-      registrationPaymentPaused: false,
-      registrationStripeCancelAt: Number(updatedSubscription?.cancel_at || 0) || 0,
-      registrationStripeCurrentPeriodEnd: Number(updatedSubscription?.current_period_end || 0) || 0,
-      last_updated: Date.now(),
-    }, { merge: true })
     message = 'Stripe subscription cancelled.'
   }
   else if (action === 'pause') {
@@ -3734,21 +4115,18 @@ exports.restrictedContentManageStripeSubscription = onCall({ timeoutSeconds: 180
         behavior: 'mark_uncollectible',
       },
     })
+    const billingSnapshot = buildStripeSubscriptionBillingSnapshot(updatedSubscription)
     await updateRestrictedMemberPaymentState({
       orgId,
       siteId,
       audienceUserId,
       ruleId,
       paymentStatus: 'paused',
+      billingSnapshot,
+      paymentPaused: true,
       grantPaidAccess: true,
       revokePaidAccess: false,
     })
-    await memberRef.set({
-      registrationPaymentPaused: true,
-      registrationStripeCancelAt: Number(updatedSubscription?.cancel_at || 0) || 0,
-      registrationStripeCurrentPeriodEnd: Number(updatedSubscription?.current_period_end || 0) || 0,
-      last_updated: Date.now(),
-    }, { merge: true })
     message = 'Stripe subscription billing paused.'
   }
   else if (action === 'resume') {
@@ -3757,21 +4135,18 @@ exports.restrictedContentManageStripeSubscription = onCall({ timeoutSeconds: 180
     })
     const resumedStatus = String(updatedSubscription?.status || '').trim().toLowerCase()
     const isActive = ['active', 'trialing'].includes(resumedStatus)
+    const billingSnapshot = buildStripeSubscriptionBillingSnapshot(updatedSubscription)
     await updateRestrictedMemberPaymentState({
       orgId,
       siteId,
       audienceUserId,
       ruleId,
       paymentStatus: isActive ? 'paid' : (resumedStatus || 'pending'),
+      billingSnapshot,
+      paymentPaused: false,
       grantPaidAccess: isActive,
       revokePaidAccess: !isActive,
     })
-    await memberRef.set({
-      registrationPaymentPaused: false,
-      registrationStripeCancelAt: Number(updatedSubscription?.cancel_at || 0) || 0,
-      registrationStripeCurrentPeriodEnd: Number(updatedSubscription?.current_period_end || 0) || 0,
-      last_updated: Date.now(),
-    }, { merge: true })
     message = 'Stripe subscription billing resumed.'
   }
   else if (action === 'update_duration') {
@@ -3793,12 +4168,20 @@ exports.restrictedContentManageStripeSubscription = onCall({ timeoutSeconds: 180
         cancel_at_period_end: false,
       })
     }
-    await memberRef.set({
-      registrationPaymentPaused: Boolean(updatedSubscription?.pause_collection && typeof updatedSubscription.pause_collection === 'object'),
-      registrationStripeCancelAt: Number(updatedSubscription?.cancel_at || 0) || 0,
-      registrationStripeCurrentPeriodEnd: Number(updatedSubscription?.current_period_end || 0) || 0,
-      last_updated: Date.now(),
-    }, { merge: true })
+    const billingSnapshot = buildStripeSubscriptionBillingSnapshot(updatedSubscription)
+    const currentPlanState = getPlanStateForRule(memberData, ruleId)
+    const resolvedStatus = String(currentPlanState.paymentStatus || '').trim().toLowerCase() || 'paid'
+    await updateRestrictedMemberPaymentState({
+      orgId,
+      siteId,
+      audienceUserId,
+      ruleId,
+      paymentStatus: resolvedStatus,
+      billingSnapshot,
+      paymentPaused: Boolean(updatedSubscription?.pause_collection && typeof updatedSubscription.pause_collection === 'object'),
+      grantPaidAccess: false,
+      revokePaidAccess: false,
+    })
     message = noEnd
       ? 'Stripe subscription end date cleared.'
       : `Stripe subscription end date set to ${effectiveDate}.`
@@ -3850,6 +4233,8 @@ exports.restrictedContentCreateStripePortalLink = onCall({ timeoutSeconds: 180 }
   }
 
   const audienceUser = audienceSnap.data() || {}
+  if (getSeatOwnerKeys(audienceUser).length)
+    throw new HttpsError('failed-precondition', 'Seat-assigned users cannot manage billing. Billing is managed by the original purchaser.')
   const targetAuthUid = String(audienceUser.authUid || '').trim()
   const targetUserDocId = String(audienceUser.userId || '').trim()
   const isSelfRequest = Boolean(
@@ -3913,7 +4298,7 @@ exports.restrictedContentUpdateAudienceMemberProfile = onCall({ timeoutSeconds: 
   const targetUserDocId = String(audienceUser.userId || '').trim()
   const isSelfUpdate = Boolean(
     (targetAuthUid && targetAuthUid === callerUid)
-    || (targetUserDocId && targetUserDocId === callerUid)
+    || (targetUserDocId && targetUserDocId === callerUid),
   )
   if (!isSelfUpdate)
     await ensureRestrictedSiteWritePermission(callerUid, orgId, siteId)
@@ -3923,7 +4308,7 @@ exports.restrictedContentUpdateAudienceMemberProfile = onCall({ timeoutSeconds: 
     audienceUser.stagedUserId
     || audienceUser.docId
     || audienceUserId
-    || ''
+    || '',
   ).trim()
   let stagedUserData = {}
   if (stagedDocId) {
@@ -3972,6 +4357,309 @@ exports.restrictedContentUpdateAudienceMemberProfile = onCall({ timeoutSeconds: 
     name: nextName,
     updatedBy: callerUid,
     selfUpdate: isSelfUpdate,
+  }
+})
+
+exports.restrictedContentListSeatMembers = onCall({ timeoutSeconds: 180 }, async (request) => {
+  assertCallableUser(request)
+  const data = request.data || {}
+  const callerUid = String(request.auth.uid || '').trim()
+  const orgId = String(data.orgId || '').trim()
+  const siteId = String(data.siteId || '').trim()
+  const requestedOwnerAudienceUserId = String(data.ownerAudienceUserId || data.audienceUserId || '').trim()
+  const requestedRuleId = String(data.ruleId || '').trim()
+
+  if (!orgId || !siteId)
+    throw new HttpsError('invalid-argument', 'Missing orgId or siteId.')
+
+  const { audienceUsersRef } = getRestrictedSiteRefs(orgId, siteId)
+  let ownerAudienceUserId = requestedOwnerAudienceUserId
+  let ownerSnap = null
+  if (ownerAudienceUserId) {
+    ownerSnap = await audienceUsersRef.doc(ownerAudienceUserId).get()
+    if (!ownerSnap.exists)
+      throw new HttpsError('not-found', 'Seat owner not found.')
+  }
+  else {
+    ownerSnap = await resolveAudienceUserForAuth(orgId, siteId, callerUid)
+    if (!ownerSnap?.exists)
+      throw new HttpsError('not-found', 'Audience member not found for current user.')
+    ownerAudienceUserId = String(ownerSnap.id || '').trim()
+  }
+
+  const ownerData = ownerSnap.data() || {}
+  const ownerAuthUid = String(ownerData.authUid || ownerData.userId || '').trim()
+  const isSelfRequest = Boolean(ownerAuthUid && ownerAuthUid === callerUid)
+  if (!isSelfRequest)
+    await ensureRestrictedSiteWritePermission(callerUid, orgId, siteId)
+
+  const seatContext = getRestrictedSeatContextFromMember(ownerData, requestedRuleId)
+  const seatChildrenDocs = await listSeatChildrenForOwner({
+    audienceUsersRef,
+    ownerAudienceUserId,
+    seatRuleId: seatContext.seatRuleId,
+  })
+  const seatMembers = seatChildrenDocs.map((doc) => {
+    const item = doc.data() || {}
+    return {
+      audienceUserId: doc.id,
+      docId: doc.id,
+      name: String(item.name || '').trim(),
+      email: String(item.email || '').trim(),
+      status: String(item.status || '').trim().toLowerCase() || 'inactive',
+      registrationPaymentStatus: String(item.registrationPaymentStatus || '').trim().toLowerCase() || '',
+      paidAccessRuleIds: Array.isArray(item.paidAccessRuleIds) ? item.paidAccessRuleIds.filter(Boolean) : [],
+      seatOwnerAudienceUserId: String(getSeatOwnerForRule(item, seatContext.seatRuleId)?.ownerAudienceUserId || '').trim(),
+      seatOwnerRuleId: seatContext.seatRuleId,
+      last_updated: Number(item.last_updated || 0) || 0,
+    }
+  })
+  const activeSeatMembers = seatMembers.filter((item) => {
+    const status = String(item.status || '').trim().toLowerCase()
+    return status !== 'revoked'
+  })
+  const seatsUsed = 1 + activeSeatMembers.length
+
+  return {
+    success: true,
+    owner: {
+      audienceUserId: ownerAudienceUserId,
+      name: String(ownerData.name || '').trim(),
+      email: String(ownerData.email || '').trim(),
+      authUid: ownerAuthUid,
+      seatRuleId: seatContext.seatRuleId,
+      seatLimit: seatContext.seatLimit,
+      seatsUsed,
+      canManageSeats: seatContext.canManageSeats,
+      paymentStatus: seatContext.paymentStatus,
+    },
+    seatMembers,
+  }
+})
+
+exports.restrictedContentAddSeatMember = onCall({ timeoutSeconds: 180 }, async (request) => {
+  assertCallableUser(request)
+  const data = request.data || {}
+  const callerUid = String(request.auth.uid || '').trim()
+  const orgId = String(data.orgId || '').trim()
+  const siteId = String(data.siteId || '').trim()
+  const requestedOwnerAudienceUserId = String(data.ownerAudienceUserId || data.audienceUserId || '').trim()
+  const name = String(data.name || '').trim()
+  const email = normalizeEmail(data.email)
+
+  if (!orgId || !siteId)
+    throw new HttpsError('invalid-argument', 'Missing orgId or siteId.')
+  if (!name || !email)
+    throw new HttpsError('invalid-argument', 'Missing name or email.')
+  if (name.length > 120)
+    throw new HttpsError('invalid-argument', 'Name is too long.')
+
+  const { audienceUsersRef } = getRestrictedSiteRefs(orgId, siteId)
+  let ownerAudienceUserId = requestedOwnerAudienceUserId
+  let ownerSnap = null
+  if (ownerAudienceUserId) {
+    ownerSnap = await audienceUsersRef.doc(ownerAudienceUserId).get()
+    if (!ownerSnap.exists)
+      throw new HttpsError('not-found', 'Seat owner not found.')
+  }
+  else {
+    ownerSnap = await resolveAudienceUserForAuth(orgId, siteId, callerUid)
+    if (!ownerSnap?.exists)
+      throw new HttpsError('not-found', 'Audience member not found for current user.')
+    ownerAudienceUserId = String(ownerSnap.id || '').trim()
+  }
+
+  const ownerData = ownerSnap.data() || {}
+  const ownerAuthUid = String(ownerData.authUid || ownerData.userId || '').trim()
+  const isSelfRequest = Boolean(ownerAuthUid && ownerAuthUid === callerUid)
+  if (!isSelfRequest)
+    await ensureRestrictedSiteWritePermission(callerUid, orgId, siteId)
+  if (getSeatOwnerKeys(ownerData).length) {
+    throw new HttpsError('failed-precondition', 'Only the original purchaser can assign seat members.')
+  }
+
+  const seatContext = getRestrictedSeatContextFromMember(ownerData)
+  if (!seatContext.canManageSeats || !seatContext.seatRuleId)
+    throw new HttpsError('failed-precondition', 'This member does not have extra paid seats available to assign.')
+
+  const ownerStripeCustomerId = String(ownerData.billingStripeCustomerId || '').trim()
+  if (!ownerStripeCustomerId)
+    throw new HttpsError('failed-precondition', 'Owner does not have an active Stripe customer for seat management.')
+
+  const seatChildrenDocs = await listSeatChildrenForOwner({
+    audienceUsersRef,
+    ownerAudienceUserId,
+    seatRuleId: seatContext.seatRuleId,
+  })
+  const activeChildrenCount = seatChildrenDocs.filter((doc) => {
+    const member = doc.data() || {}
+    return String(member.status || '').trim().toLowerCase() !== 'revoked'
+  }).length
+
+  const existingAudienceSnapByEmail = await findAudienceUserByEmail(audienceUsersRef, email)
+  const existingAudience = existingAudienceSnapByEmail?.exists ? (existingAudienceSnapByEmail.data() || {}) : {}
+  const existingAudienceUserId = String(existingAudienceSnapByEmail?.id || '').trim()
+  const existingSeatOwner = getSeatOwnerForRule(existingAudience, seatContext.seatRuleId)
+  const existingSeatOwnerId = String(existingSeatOwner?.ownerAudienceUserId || '').trim()
+  const existingSeatRuleId = String(existingSeatOwner ? seatContext.seatRuleId : '').trim()
+  const isAlreadyOwnedByThisSeat = Boolean(
+    existingAudienceUserId
+    && existingSeatOwnerId === ownerAudienceUserId
+    && existingSeatRuleId === seatContext.seatRuleId,
+  )
+
+  if (!isAlreadyOwnedByThisSeat) {
+    const seatsUsed = 1 + activeChildrenCount
+    if (seatsUsed >= seatContext.seatLimit) {
+      throw new HttpsError('failed-precondition', `Seat limit reached (${seatContext.seatLimit}). Remove someone before adding another member.`)
+    }
+  }
+
+  const existingPaidRuleIds = Array.isArray(existingAudience.paidAccessRuleIds) ? existingAudience.paidAccessRuleIds : []
+  const existingCustomerId = String(existingAudience.billingStripeCustomerId || '').trim()
+  const hasIndependentPaidPlan = Boolean(
+    existingAudienceUserId
+    && (
+      existingPaidRuleIds.includes(seatContext.seatRuleId)
+      || (existingCustomerId && existingCustomerId !== ownerStripeCustomerId)
+    )
+    && !isAlreadyOwnedByThisSeat,
+  )
+  if (hasIndependentPaidPlan) {
+    throw new HttpsError('already-exists', 'This email already has its own paid subscription. Ask them to cancel it before assigning this seat.')
+  }
+
+  const existingAuthUidByEmail = await resolveAuthUserUidByEmail(email)
+  const linkedAuthUid = existingAuthUidByEmail
+    || String(existingAudience.authUid || existingAudience.userId || '').trim()
+
+  let docId = existingAudienceUserId
+  docId = await reserveGlobalRestrictedRegistrationDocId({
+    email,
+    authUid: linkedAuthUid,
+    preferredDocId: docId,
+  })
+  if (!docId)
+    throw new HttpsError('internal', 'Unable to reserve global registration record for this email.')
+
+  docId = await reserveRestrictedRegistrationDocId({
+    orgId,
+    siteId,
+    email,
+    preferredDocId: docId,
+  })
+  if (!docId)
+    throw new HttpsError('internal', 'Unable to reserve registration record for this email.')
+
+  const now = Date.now()
+  const audienceUserDocPermissionPath = `organizations-${orgId}-sites-${siteId}-audience-users-${docId}`
+  const stagedUserRef = db.collection('staged-users').doc(docId)
+  const stagedUserSnap = await stagedUserRef.get()
+  const stagedUserData = stagedUserSnap.exists ? (stagedUserSnap.data() || {}) : {}
+  const stagedRoles = (stagedUserData.roles && typeof stagedUserData.roles === 'object' && !Array.isArray(stagedUserData.roles))
+    ? { ...stagedUserData.roles }
+    : {}
+  stagedRoles[audienceUserDocPermissionPath] = {
+    collectionPath: audienceUserDocPermissionPath,
+    role: 'user',
+  }
+  const stagedCollectionPaths = Array.isArray(stagedUserData.collectionPaths)
+    ? [...stagedUserData.collectionPaths]
+    : []
+  if (!stagedCollectionPaths.includes(audienceUserDocPermissionPath))
+    stagedCollectionPaths.push(audienceUserDocPermissionPath)
+
+  await stagedUserRef.set({
+    docId,
+    ...(linkedAuthUid
+      ? {
+          uid: linkedAuthUid,
+          userId: linkedAuthUid,
+        }
+      : {}),
+    meta: {
+      ...(stagedUserData.meta || {}),
+      name,
+      email,
+    },
+    roles: stagedRoles,
+    collectionPaths: stagedCollectionPaths,
+    specialPermissions: (stagedUserData.specialPermissions && typeof stagedUserData.specialPermissions === 'object')
+      ? stagedUserData.specialPermissions
+      : {},
+    doc_created_at: Number(stagedUserData.doc_created_at || now),
+    last_updated: now,
+  }, { merge: true })
+
+  const memberRef = audienceUsersRef.doc(docId)
+  const memberSnap = await memberRef.get()
+  const memberData = memberSnap.exists ? (memberSnap.data() || {}) : existingAudience
+  const childSeatOwnersByRule = normalizeSeatOwnersByRule(memberData)
+  childSeatOwnersByRule[seatContext.seatRuleId] = {
+    ownerAudienceUserId,
+    ownerAuthUid,
+    ownerName: String(ownerData.name || '').trim(),
+    ownerEmail: String(ownerData.email || '').trim(),
+    assignedAt: now,
+  }
+  const childSeatOwnerKeys = Object.keys(childSeatOwnersByRule)
+    .map(ruleId => buildSeatOwnerKey(childSeatOwnersByRule[ruleId]?.ownerAudienceUserId, ruleId))
+    .filter(Boolean)
+  const childPlanStates = getRegistrationPlanStates(memberData)
+  const ownerPlanState = getPlanStateForRule(ownerData, seatContext.seatRuleId)
+  childPlanStates[seatContext.seatRuleId] = {
+    ...ownerPlanState,
+    paymentStatus: String(ownerPlanState.paymentStatus || seatContext.paymentStatus || 'paid').trim().toLowerCase(),
+    paymentPaused: ownerPlanState.paymentPaused === true,
+    quantity: Number(ownerPlanState.quantity || seatContext.seatLimit || 1) || 1,
+    lastUpdated: now,
+  }
+  const ownerPlanStateSnapshot = childPlanStates[seatContext.seatRuleId]
+  await memberRef.set({
+    docId,
+    stagedUserId: docId,
+    name,
+    email,
+    authUid: linkedAuthUid || String(memberData.authUid || '').trim(),
+    userId: linkedAuthUid || String(memberData.userId || '').trim(),
+    status: String(memberData.status || '').trim() || 'active',
+    seatOwnersByRule: childSeatOwnersByRule,
+    seatOwnerKeys: childSeatOwnerKeys,
+    billingStripeCustomerId: ownerStripeCustomerId,
+    registrationPlanStates: childPlanStates,
+    doc_created_at: Number(memberData.doc_created_at || now),
+    last_updated: now,
+  }, { merge: true })
+
+  await memberRef.set(buildRestrictedMemberPayload({
+    existingMember: memberData,
+    audienceUserId: docId,
+    ruleId: seatContext.seatRuleId,
+    status: String(memberData.status || '').trim() || 'active',
+    paymentStatus: seatContext.paymentStatus || 'paid',
+    markPaid: true,
+    markPending: false,
+    clearPending: true,
+    clearPaid: false,
+    now,
+  }), { merge: true })
+
+  if (linkedAuthUid) {
+    await grantRestrictedAudiencePathToUser({
+      uid: linkedAuthUid,
+      permissionPath: audienceUserDocPermissionPath,
+      email,
+    })
+  }
+
+  return {
+    success: true,
+    audienceUserId: docId,
+    ownerAudienceUserId,
+    seatRuleId: seatContext.seatRuleId,
+    seatLimit: seatContext.seatLimit,
+    seatsUsed: isAlreadyOwnedByThisSeat ? (1 + activeChildrenCount) : (2 + activeChildrenCount),
+    alreadyManaged: isAlreadyOwnedByThisSeat,
   }
 })
 
@@ -4136,6 +4824,9 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
 
   try {
     const { restrictedContent } = await getRestrictedSiteContext(orgId, siteId)
+    const normalizedRules = (Array.isArray(restrictedContent.rules) ? restrictedContent.rules : [])
+      .map((item, index) => normalizeRestrictedRuleForFunction(item, `rule-${index + 1}`))
+      .filter(item => item.id)
     const hasRuleId = Boolean(ruleId)
     const { rule, effectiveRegistrationMode } = hasRuleId
       ? await getRestrictedRuleContext(orgId, siteId, ruleId, { requireAllowRegistration: false })
@@ -4316,6 +5007,13 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
       const isPaid = activeRuleId ? paidRuleIds.includes(activeRuleId) : false
       const paymentPending = activeRuleId ? pendingRuleIds.includes(activeRuleId) : false
       const hasAccess = !blocked && (isPaid || isManualOverride || (isAssigned && !paymentPending))
+      const planArray = await buildRestrictedPlanArray({
+        rules: normalizedRules,
+        memberData: refreshedMember,
+        blocked,
+        audienceUsersRef,
+        audienceUserId: docId,
+      })
 
       const response = {
         success: true,
@@ -4323,6 +5021,7 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
         memberId: docId,
         registrationMode: effectiveRegistrationMode,
         status,
+        planArray,
       }
 
       if (activeRuleId) {
@@ -4346,6 +5045,7 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
       audienceUserId: docId,
       memberId: docId,
       registrationMode: effectiveRegistrationMode,
+      planArray: [],
     }
   }
   catch (error) {
@@ -4413,7 +5113,25 @@ exports.restrictedContentGetUserRuleAccess = onCall(async (request) => {
 
   const memberData = audienceUserSnap.data() || {}
   const status = String(memberData.status || '').trim().toLowerCase() || 'inactive'
-  const registrationPaymentStatus = String(memberData.registrationPaymentStatus || '').trim().toLowerCase() || 'not_required'
+  const registrationPlanStates = getRegistrationPlanStates(memberData)
+  const registrationPaymentStatus = (() => {
+    const statuses = Object.values(registrationPlanStates)
+      .map(item => String(item?.paymentStatus || '').trim().toLowerCase())
+      .filter(Boolean)
+    if (!statuses.length)
+      return 'not_required'
+    if (statuses.includes('paid'))
+      return 'paid'
+    if (statuses.includes('paused'))
+      return 'paused'
+    if (statuses.includes('pending'))
+      return 'pending'
+    if (statuses.includes('failed'))
+      return 'failed'
+    if (statuses.includes('cancelled') || statuses.includes('canceled'))
+      return 'cancelled'
+    return statuses[0]
+  })()
   const rawRuleIds = Array.isArray(memberData.accessRuleIds) ? memberData.accessRuleIds.filter(Boolean) : []
   const manualRuleIdsRaw = Array.isArray(memberData.manualAccessRuleIds) ? memberData.manualAccessRuleIds.filter(Boolean) : []
   const paidRuleIdsRaw = Array.isArray(memberData.paidAccessRuleIds) ? memberData.paidAccessRuleIds.filter(Boolean) : []
@@ -5201,6 +5919,25 @@ exports.restrictedContentCreateStripeLink = onCall({ timeoutSeconds: 180 }, asyn
   const quantity = Number.isFinite(Number(selectedPriceConfig?.seats || selectedPriceConfig?.quantity))
     ? Math.max(1, Math.trunc(Number(selectedPriceConfig.seats || selectedPriceConfig.quantity)))
     : Math.max(1, Math.trunc(Number(data.quantity || 1) || 1))
+  const pendingPlanStates = getRegistrationPlanStates(memberData)
+  const existingPendingPlanState = getPlanStateForRule(memberData, rule.id)
+  pendingPlanStates[rule.id] = {
+    ...existingPendingPlanState,
+    paymentStatus: 'pending',
+    paymentPaused: false,
+    stripePriceId: selectedPrice.id,
+    quantity,
+    interval: String(selectedPrice?.recurring?.interval || '').trim().toLowerCase(),
+    intervalCount: Number.isFinite(Number(selectedPrice?.recurring?.interval_count))
+      ? Math.max(1, Math.trunc(Number(selectedPrice.recurring.interval_count)))
+      : 1,
+    currency: String(selectedPrice?.currency || 'usd').trim().toLowerCase(),
+    lastUpdated: Date.now(),
+  }
+  await memberRef.set({
+    registrationPlanStates: pendingPlanStates,
+    last_updated: Date.now(),
+  }, { merge: true })
 
   const session = await stripe.checkout.sessions.create({
     mode: selectedPrice.recurring ? 'subscription' : 'payment',
@@ -5340,50 +6077,70 @@ exports.restrictedContentStripeWebhook = onRequest(async (req, res) => {
       if (event.type === 'checkout.session.completed') {
         const paymentStatus = String(object.payment_status || '').trim().toLowerCase()
         const shouldGrant = paymentStatus === 'paid' || String(object.mode || '').trim() === 'subscription'
-        await updateRestrictedMemberPaymentState({
-          orgId: metadataOrgId,
-          siteId: metadataSiteId,
-          audienceUserId,
-          ruleId,
-          paymentStatus: shouldGrant ? 'paid' : (paymentStatus || 'pending'),
-          grantPaidAccess: shouldGrant,
-          revokePaidAccess: false,
-        })
+        const resolvedPaymentStatus = shouldGrant ? 'paid' : (paymentStatus || 'pending')
         const billingSnapshot = await buildStripeCheckoutBillingSnapshot({
           stripe,
           session: object,
           metadata,
         })
-        if (Object.keys(billingSnapshot).length) {
-          await audienceUsersRef.doc(audienceUserId).set({
+        await updateRestrictedMemberPaymentState({
+          orgId: metadataOrgId,
+          siteId: metadataSiteId,
+          audienceUserId,
+          ruleId,
+          paymentStatus: resolvedPaymentStatus,
+          billingSnapshot,
+          paymentPaused: false,
+          grantPaidAccess: shouldGrant,
+          revokePaidAccess: false,
+        })
+        await syncSeatMembersFromOwner({
+          orgId: metadataOrgId,
+          siteId: metadataSiteId,
+          ownerAudienceUserId: audienceUserId,
+          ownerRuleId: ruleId,
+          paymentStatus: resolvedPaymentStatus,
+          grantPaidAccess: shouldGrant,
+          revokePaidAccess: false,
+          registrationPaymentPaused: false,
+          ownerDataPatch: {
             ...billingSnapshot,
-            registrationPaymentPaused: false,
-            last_updated: Date.now(),
-          }, { merge: true })
-        }
+            billingStripeCustomerId: customerId,
+          },
+        })
       }
 
       if (event.type === 'customer.subscription.updated' || event.type === 'customer.subscription.deleted') {
         const subscriptionStatus = String(object.status || '').trim().toLowerCase()
         const isPaused = Boolean(object.pause_collection && typeof object.pause_collection === 'object')
         const isActive = ['active', 'trialing'].includes(subscriptionStatus) && !isPaused
+        const resolvedPaymentStatus = isPaused ? 'paused' : (isActive ? 'paid' : (subscriptionStatus || 'cancelled'))
+        const billingSnapshot = buildStripeSubscriptionBillingSnapshot(object)
         await updateRestrictedMemberPaymentState({
           orgId: metadataOrgId,
           siteId: metadataSiteId,
           audienceUserId,
           ruleId,
-          paymentStatus: isPaused ? 'paused' : (isActive ? 'paid' : (subscriptionStatus || 'cancelled')),
+          paymentStatus: resolvedPaymentStatus,
+          billingSnapshot,
+          paymentPaused: isPaused,
           grantPaidAccess: isPaused || isActive,
           revokePaidAccess: !isPaused && !isActive,
         })
-        const billingSnapshot = buildStripeSubscriptionBillingSnapshot(object)
-        if (Object.keys(billingSnapshot).length) {
-          await audienceUsersRef.doc(audienceUserId).set({
+        await syncSeatMembersFromOwner({
+          orgId: metadataOrgId,
+          siteId: metadataSiteId,
+          ownerAudienceUserId: audienceUserId,
+          ownerRuleId: ruleId,
+          paymentStatus: resolvedPaymentStatus,
+          grantPaidAccess: isPaused || isActive,
+          revokePaidAccess: !isPaused && !isActive,
+          registrationPaymentPaused: isPaused,
+          ownerDataPatch: {
             ...billingSnapshot,
-            registrationPaymentPaused: isPaused,
-            last_updated: Date.now(),
-          }, { merge: true })
-        }
+            billingStripeCustomerId: customerId,
+          },
+        })
       }
 
       if (event.type === 'invoice.payment_failed') {
@@ -5393,13 +6150,23 @@ exports.restrictedContentStripeWebhook = onRequest(async (req, res) => {
           audienceUserId,
           ruleId,
           paymentStatus: 'failed',
+          paymentPaused: false,
           grantPaidAccess: false,
           revokePaidAccess: true,
         })
-        await audienceUsersRef.doc(audienceUserId).set({
+        await syncSeatMembersFromOwner({
+          orgId: metadataOrgId,
+          siteId: metadataSiteId,
+          ownerAudienceUserId: audienceUserId,
+          ownerRuleId: ruleId,
+          paymentStatus: 'failed',
+          grantPaidAccess: false,
+          revokePaidAccess: true,
           registrationPaymentPaused: false,
-          last_updated: Date.now(),
-        }, { merge: true })
+          ownerDataPatch: {
+            billingStripeCustomerId: customerId,
+          },
+        })
       }
     }
 
