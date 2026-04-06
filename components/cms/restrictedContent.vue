@@ -2027,6 +2027,34 @@ const addSeatManagedMember = async (ownerMember = {}) => {
   }
 }
 
+const copyCouponPromoCode = async (coupon = {}) => {
+  const code = String(coupon?.promoCode || '').trim()
+  if (!code) {
+    edgeFirebase?.toast?.error?.('No promo code to copy.')
+    return
+  }
+  try {
+    if (globalThis?.navigator?.clipboard?.writeText) {
+      await globalThis.navigator.clipboard.writeText(code)
+    }
+    else {
+      const textarea = document.createElement('textarea')
+      textarea.value = code
+      textarea.setAttribute('readonly', '')
+      textarea.style.position = 'absolute'
+      textarea.style.left = '-9999px'
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+    }
+    edgeFirebase?.toast?.success?.(`Promo code copied: ${code}`)
+  }
+  catch (error) {
+    edgeFirebase?.toast?.error?.(String(error?.message || 'Unable to copy promo code.'))
+  }
+}
+
 watch(() => props.canManage, async (allowed) => {
   if (allowed) {
     await startSnapshots()
@@ -3044,8 +3072,18 @@ onBeforeUnmount(async () => {
                                   <div class="truncate text-[11px] text-muted-foreground">
                                     {{ coupon.discountType === 'amount' ? `${Number(coupon.amountOff || 0).toFixed(2)} USD off` : `${Number(coupon.percentOff || 0)}% off` }}
                                     <span> · {{ coupon.expiresMode === 'date' ? `Expires ${coupon.expiresAt || '-'}` : 'No expiration' }}</span>
-                                    <span v-if="String(coupon?.promoCode || '').trim()"> · Code: {{ coupon.promoCode }}</span>
                                     <span v-if="String(coupon?.couponId || '').trim()"> · Coupon: {{ coupon.couponId }}</span>
+                                  </div>
+                                  <div v-if="String(coupon?.promoCode || '').trim()" class="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+                                    <span class="rounded bg-muted px-1.5 py-0.5 font-mono text-foreground">{{ coupon.promoCode }}</span>
+                                    <edge-shad-button
+                                      type="button"
+                                      variant="ghost"
+                                      class="h-6 px-2 text-[10px]"
+                                      @click.stop="copyCouponPromoCode(coupon)"
+                                    >
+                                      Copy
+                                    </edge-shad-button>
                                   </div>
                                 </div>
                                 <div class="flex items-center gap-1">
