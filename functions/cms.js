@@ -4010,7 +4010,6 @@ const syncSeatMembersFromOwner = async ({
     })
     await docSnap.ref.set({
       ...basePayload,
-      billingStripeCustomerId: String(ownerDataPatch?.billingStripeCustomerId || member.billingStripeCustomerId || '').trim(),
       registrationPlanStates: childPlanStates,
       last_updated: now,
     }, { merge: true })
@@ -4548,12 +4547,10 @@ exports.restrictedContentAddSeatMember = onCall({ timeoutSeconds: 180 }, async (
   }
 
   const existingPaidRuleIds = Array.isArray(existingAudience.paidAccessRuleIds) ? existingAudience.paidAccessRuleIds : []
-  const existingCustomerId = String(existingAudience.billingStripeCustomerId || '').trim()
   const hasIndependentPaidPlan = Boolean(
     existingAudienceUserId
     && (
       existingPaidRuleIds.includes(seatContext.seatRuleId)
-      || (existingCustomerId && existingCustomerId !== ownerStripeCustomerId)
     )
     && !isAlreadyOwnedByThisSeat,
   )
@@ -4657,7 +4654,7 @@ exports.restrictedContentAddSeatMember = onCall({ timeoutSeconds: 180 }, async (
     status: String(memberData.status || '').trim() || 'active',
     seatOwnersByRule: childSeatOwnersByRule,
     seatOwnerKeys: childSeatOwnerKeys,
-    billingStripeCustomerId: ownerStripeCustomerId,
+    billingStripeCustomerId: String(memberData.billingStripeCustomerId || '').trim(),
     registrationPlanStates: childPlanStates,
     doc_created_at: Number(memberData.doc_created_at || now),
     last_updated: now,
@@ -4808,6 +4805,18 @@ exports.restrictedContentDeleteAudienceMemberAccount = onCall({ timeoutSeconds: 
       if (ruleId in currentPlanStates)
         delete currentPlanStates[ruleId]
     })
+    const ruleContextIds = Array.from(new Set([
+      ...nextAccessRuleIds,
+      ...nextPaidAccessRuleIds,
+      ...nextPendingPaymentRuleIds,
+      ...Object.keys(currentPlanStates),
+    ]))
+    const hasAnyNonSeatOwnedRule = ruleContextIds.some((ruleId) => {
+      const normalizedRuleId = String(ruleId || '').trim()
+      if (!normalizedRuleId)
+        return false
+      return !String(nextSeatOwnersByRule?.[normalizedRuleId]?.ownerAudienceUserId || '').trim()
+    })
 
     await audienceUsersRef.doc(audienceUserId).set({
       accessRuleIds: Array.from(new Set(nextAccessRuleIds)),
@@ -4816,6 +4825,9 @@ exports.restrictedContentDeleteAudienceMemberAccount = onCall({ timeoutSeconds: 
       seatOwnersByRule: nextSeatOwnersByRule,
       seatOwnerKeys: Array.from(new Set(nextSeatOwnerKeys)),
       registrationPlanStates: currentPlanStates,
+      billingStripeCustomerId: hasAnyNonSeatOwnedRule
+        ? String(audienceUser.billingStripeCustomerId || '').trim()
+        : '',
       last_updated: Date.now(),
     }, { merge: true })
 
