@@ -267,6 +267,8 @@ const state = reactive({
   stripePlanDetailsDialogOpen: false,
   stripePlanDetailsAudienceUserId: '',
   stripePlanDetailsRuleId: '',
+  stripePlanDetailsRemoving: false,
+  stripePlanDetailsError: '',
   rulePriceDialogOpen: false,
   rulePriceDialogIndex: -1,
   rulePriceDialogDraft: createRulePriceOption(),
@@ -513,6 +515,7 @@ const openStripePlanDetailsDialog = (member = {}, ruleId = '') => {
     return
   state.stripePlanDetailsAudienceUserId = audienceUserId
   state.stripePlanDetailsRuleId = normalizedRuleId
+  state.stripePlanDetailsError = ''
   state.stripePlanDetailsDialogOpen = true
 }
 
@@ -520,6 +523,7 @@ const closeStripePlanDetailsDialog = () => {
   state.stripePlanDetailsDialogOpen = false
   state.stripePlanDetailsAudienceUserId = ''
   state.stripePlanDetailsRuleId = ''
+  state.stripePlanDetailsError = ''
 }
 
 const refreshSelectedMemberEditor = async () => {
@@ -539,6 +543,16 @@ const stripePlanDetailsMember = computed(() => {
 })
 
 const stripePlanDetailsRuleLabel = computed(() => getRuleLabel(state.stripePlanDetailsRuleId))
+const stripePlanDetailsIsSeatManaged = computed(() => Boolean(
+  stripePlanDetailsMember.value
+  && state.stripePlanDetailsRuleId
+  && getSeatOwnerForMemberRule(stripePlanDetailsMember.value, state.stripePlanDetailsRuleId)?.ownerAudienceUserId,
+))
+const stripePlanDetailsSeatOwnerLabel = computed(() => {
+  if (!stripePlanDetailsMember.value || !state.stripePlanDetailsRuleId)
+    return ''
+  return getSeatOwnerLabelForRule(stripePlanDetailsMember.value, state.stripePlanDetailsRuleId)
+})
 
 const formatStripeMoneyFromCents = (amountCents = 0, currency = 'usd') => {
   const amount = Number(amountCents || 0) / 100
@@ -720,6 +734,44 @@ const submitMemberStripeAction = async () => {
   }
 }
 
+const removeSeatManagedMemberPlan = async (member = {}, ruleId = '') => {
+  const audienceUserId = String(member?.audienceUserId || member?.docId || '').trim()
+  const normalizedRuleId = String(ruleId || '').trim()
+  if (!audienceUserId || !normalizedRuleId || !isSeatManagedPlanForMemberRule(member, normalizedRuleId))
+    return
+  const uid = String(edgeFirebase?.user?.uid || edgeFirebase?.user?.firebaseUser?.uid || '').trim()
+  const orgId = String(edgeGlobal?.edgeState?.currentOrganization || '').trim()
+  if (!uid || !orgId || !props.siteId)
+    return
+
+  state.stripePlanDetailsRemoving = true
+  state.stripePlanDetailsError = ''
+  try {
+    const response = await edgeFirebase.runFunction('cms-restrictedContentDeleteAudienceMemberAccount', {
+      uid,
+      orgId,
+      siteId: props.siteId,
+      audienceUserId,
+      ruleId: normalizedRuleId,
+    })
+    const result = response?.data || response || {}
+    if (result?.success === false)
+      throw new Error(String(result?.message || 'Unable to remove this seat-managed plan.'))
+
+    await loadInitialMembers()
+    await refreshSelectedMemberEditor()
+    closeStripePlanDetailsDialog()
+    edgeFirebase?.toast?.success?.('Member was removed from this seat-managed plan.')
+  }
+  catch (error) {
+    state.stripePlanDetailsError = String(error?.message || 'Unable to remove this seat-managed plan.')
+    edgeFirebase?.toast?.error?.(state.stripePlanDetailsError)
+  }
+  finally {
+    state.stripePlanDetailsRemoving = false
+  }
+}
+
 const hasStripeMemberInfo = (member = {}) => {
   const paidRuleIds = Array.isArray(member?.paidAccessRuleIds) ? member.paidAccessRuleIds.filter(Boolean) : []
   return Boolean(
@@ -780,6 +832,10 @@ const getSeatOwnerForMemberRule = (member = {}, ruleId = '') => {
     return null
   const ownershipMap = getSeatOwnersByRule(member)
   return ownershipMap[normalizedRuleId] || null
+}
+
+const isSeatManagedPlanForMemberRule = (member = {}, ruleId = '') => {
+  return Boolean(getSeatOwnerForMemberRule(member, ruleId)?.ownerAudienceUserId)
 }
 
 const getSeatOwnerAudienceUserIdForMember = (member = {}) => {
@@ -846,6 +902,27 @@ const getSeatOwnerLabel = (member = {}) => {
     return ''
   const owner = (state.memberRows || []).find(item => getAudienceUserDocId(item) === ownerId)
   return owner ? getMemberDisplayName(owner) : (String(ownerForRule?.ownerName || '').trim() || ownerId)
+}
+
+const getSeatOwnerLabelForRule = (member = {}, ruleId = '') => {
+  const normalizedRuleId = String(ruleId || '').trim()
+  if (!normalizedRuleId)
+    return ''
+  const ownerForRule = getSeatOwnerForMemberRule(member, normalizedRuleId)
+  const ownerId = String(ownerForRule?.ownerAudienceUserId || '').trim()
+  if (!ownerId)
+    return ''
+  const owner = (state.memberRows || []).find(item => getAudienceUserDocId(item) === ownerId)
+  return owner ? getMemberDisplayName(owner) : (String(ownerForRule?.ownerName || '').trim() || ownerId)
+}
+
+const getMemberPaidPlanStatusLabel = (member = {}, plan = {}) => {
+  const ruleId = String(plan?.ruleId || '').trim()
+  if (ruleId && isSeatManagedPlanForMemberRule(member, ruleId)) {
+    const ownerLabel = getSeatOwnerLabelForRule(member, ruleId)
+    return ownerLabel ? `Paid by ${ownerLabel}` : 'Paid by Seat Owner'
+  }
+  return formatRegistrationPaymentStatus(plan?.paymentStatus) || 'Paid'
 }
 
 const getMemberHeaderTitle = (workingDoc = {}, fallbackTitle = '') => {
@@ -2264,13 +2341,21 @@ onBeforeUnmount(async () => {
           <div class="text-sm font-medium text-foreground">
             {{ getMemberDisplayName(stripePlanDetailsMember) }}
           </div>
-          <div v-if="stripePlanDetailsMember.billingStripeCustomerId" class="break-all">
+          <div v-if="stripePlanDetailsIsSeatManaged" class="break-all">
+            Paid By:
+            <span class="font-medium text-foreground">{{ stripePlanDetailsSeatOwnerLabel || 'Seat Owner' }}</span>
+          </div>
+          <div v-if="!stripePlanDetailsIsSeatManaged && stripePlanDetailsMember.billingStripeCustomerId" class="break-all">
             Customer ID: <span class="font-medium text-foreground">{{ stripePlanDetailsMember.billingStripeCustomerId }}</span>
           </div>
           <div>
             Payment Status:
             <span class="font-medium text-foreground">
-              {{ formatRegistrationPaymentStatus(getPlanStateForMemberRule(stripePlanDetailsMember, state.stripePlanDetailsRuleId)?.paymentStatus) || 'Unknown' }}
+              {{
+                stripePlanDetailsIsSeatManaged
+                  ? (stripePlanDetailsSeatOwnerLabel ? `Paid by ${stripePlanDetailsSeatOwnerLabel}` : 'Paid by Seat Owner')
+                  : (formatRegistrationPaymentStatus(getPlanStateForMemberRule(stripePlanDetailsMember, state.stripePlanDetailsRuleId)?.paymentStatus) || 'Unknown')
+              }}
             </span>
           </div>
           <div v-if="getStripeCurrentDurationLabel(stripePlanDetailsMember, state.stripePlanDetailsRuleId)">
@@ -2290,9 +2375,12 @@ onBeforeUnmount(async () => {
             <span class="font-medium text-foreground">{{ formatStripeCouponSummary(stripePlanDetailsMember, state.stripePlanDetailsRuleId) }}</span>
           </div>
         </div>
+        <div v-if="state.stripePlanDetailsError" class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-800 dark:bg-red-950/20 dark:text-red-200">
+          {{ state.stripePlanDetailsError }}
+        </div>
         <DialogFooter class="gap-2">
           <edge-shad-button
-            v-if="stripePlanDetailsMember"
+            v-if="stripePlanDetailsMember && !stripePlanDetailsIsSeatManaged"
             type="button"
             variant="outline"
             @click="openMemberStripeActionDialog({ action: 'cancel', member: stripePlanDetailsMember, ruleId: state.stripePlanDetailsRuleId })"
@@ -2300,7 +2388,7 @@ onBeforeUnmount(async () => {
             Cancel Subscription
           </edge-shad-button>
           <edge-shad-button
-            v-if="stripePlanDetailsMember"
+            v-if="stripePlanDetailsMember && !stripePlanDetailsIsSeatManaged"
             type="button"
             variant="outline"
             @click="openMemberStripeActionDialog({ action: isStripeBillingPaused(stripePlanDetailsMember, state.stripePlanDetailsRuleId) ? 'resume' : 'pause', member: stripePlanDetailsMember, ruleId: state.stripePlanDetailsRuleId })"
@@ -2308,12 +2396,21 @@ onBeforeUnmount(async () => {
             {{ isStripeBillingPaused(stripePlanDetailsMember, state.stripePlanDetailsRuleId) ? 'Resume Payment' : 'Pause Payment' }}
           </edge-shad-button>
           <edge-shad-button
-            v-if="stripePlanDetailsMember"
+            v-if="stripePlanDetailsMember && !stripePlanDetailsIsSeatManaged"
             type="button"
             variant="outline"
             @click="openMemberStripeActionDialog({ action: 'update_duration', member: stripePlanDetailsMember, ruleId: state.stripePlanDetailsRuleId })"
           >
             Update Duration
+          </edge-shad-button>
+          <edge-shad-button
+            v-if="stripePlanDetailsMember && stripePlanDetailsIsSeatManaged"
+            type="button"
+            class="bg-red-700 text-white hover:bg-red-600"
+            :disabled="state.stripePlanDetailsRemoving"
+            @click="removeSeatManagedMemberPlan(stripePlanDetailsMember, state.stripePlanDetailsRuleId)"
+          >
+            {{ state.stripePlanDetailsRemoving ? 'Removing...' : 'Remove from Seat Owner' }}
           </edge-shad-button>
         </DialogFooter>
       </DialogContent>
@@ -3387,7 +3484,7 @@ onBeforeUnmount(async () => {
                                     {{ plan.ruleLabel }}
                                   </div>
                                   <div class="truncate text-muted-foreground">
-                                    {{ formatRegistrationPaymentStatus(plan.paymentStatus) || 'Paid' }}
+                                    {{ getMemberPaidPlanStatusLabel(slotProps.workingDoc, plan) }}
                                   </div>
                                 </div>
                                 <edge-shad-button
