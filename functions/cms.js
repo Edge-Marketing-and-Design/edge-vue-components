@@ -3475,8 +3475,40 @@ const syncStripeBrandingLogoForSite = async ({ stripe, siteData }) => {
   }
 }
 
+const restrictedContentManageRoles = new Set(['admin', 'manager'])
+
+const canManageRestrictedContentForSite = async (uid, orgId, siteId) => {
+  const normalizedUid = String(uid || '').trim()
+  const normalizedOrgId = String(orgId || '').trim()
+  const normalizedSiteId = String(siteId || '').trim()
+  if (!normalizedUid || !normalizedOrgId || !normalizedSiteId)
+    return false
+
+  const targetCollectionPath = `organizations-${normalizedOrgId}-sites-${normalizedSiteId}`
+  const userSnap = await db.collection('users').doc(normalizedUid).get()
+  if (!userSnap.exists)
+    return false
+
+  const userData = userSnap.data() || {}
+  const roleEntries = (userData.roles && typeof userData.roles === 'object' && !Array.isArray(userData.roles))
+    ? Object.values(userData.roles)
+    : []
+
+  return roleEntries.some((roleEntry) => {
+    if (!roleEntry || typeof roleEntry !== 'object')
+      return false
+
+    const roleCollectionPath = String(roleEntry.collectionPath || '').trim()
+    if (!roleCollectionPath || !targetCollectionPath.startsWith(roleCollectionPath))
+      return false
+
+    const roleName = String(roleEntry.role || '').trim().toLowerCase()
+    return restrictedContentManageRoles.has(roleName)
+  })
+}
+
 const ensureRestrictedSiteWritePermission = async (uid, orgId, siteId) => {
-  const allowed = await permissionCheck(uid, 'write', `organizations/${orgId}/sites/${siteId}`)
+  const allowed = await canManageRestrictedContentForSite(uid, orgId, siteId)
   if (!allowed)
     throw new HttpsError('permission-denied', 'Not allowed to manage restricted content for this site.')
 }
