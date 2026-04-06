@@ -4728,8 +4728,37 @@ exports.restrictedContentDeleteAudienceMemberAccount = onCall({ timeoutSeconds: 
     (targetAuthUid && targetAuthUid === callerUid)
     || (targetUserDocId && targetUserDocId === callerUid),
   )
-  if (!isSelfDelete)
-    await ensureRestrictedSiteWritePermission(callerUid, orgId, siteId)
+  if (!isSelfDelete) {
+    const callerAudienceSnap = await resolveAudienceUserForAuth(orgId, siteId, callerUid)
+    if (!callerAudienceSnap?.exists)
+      throw new HttpsError('permission-denied', 'Not allowed to manage restricted content for this site.')
+
+    const callerAudienceUserId = String(callerAudienceSnap.id || '').trim()
+    const callerAudienceData = callerAudienceSnap.data() || {}
+    const targetSeatOwnersByRule = normalizeSeatOwnersByRule(audienceUser)
+    let isSeatOwnerDelete = Object.values(targetSeatOwnersByRule).some((owner) => {
+      const ownerAudienceUserId = String(owner?.ownerAudienceUserId || '').trim()
+      const ownerAuthUid = String(owner?.ownerAuthUid || '').trim()
+      return (
+        (ownerAudienceUserId && callerAudienceUserId && ownerAudienceUserId === callerAudienceUserId)
+        || (ownerAuthUid && ownerAuthUid === callerUid)
+      )
+    })
+
+    if (!isSeatOwnerDelete) {
+      const callerPaidRuleIds = Array.isArray(callerAudienceData.paidAccessRuleIds)
+        ? callerAudienceData.paidAccessRuleIds.map(item => String(item || '').trim()).filter(Boolean)
+        : []
+      const callerOwnerKeys = callerPaidRuleIds
+        .map(ruleId => buildSeatOwnerKey(callerAudienceUserId, ruleId))
+        .filter(Boolean)
+      const targetSeatOwnerKeys = getSeatOwnerKeys(audienceUser)
+      isSeatOwnerDelete = callerOwnerKeys.some(key => targetSeatOwnerKeys.includes(key))
+    }
+
+    if (!isSeatOwnerDelete)
+      throw new HttpsError('permission-denied', 'Not allowed to manage restricted content for this site.')
+  }
 
   const stagedDocId = String(
     audienceUser.stagedUserId
