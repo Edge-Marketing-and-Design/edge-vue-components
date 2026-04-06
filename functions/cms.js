@@ -4728,36 +4728,106 @@ exports.restrictedContentDeleteAudienceMemberAccount = onCall({ timeoutSeconds: 
     (targetAuthUid && targetAuthUid === callerUid)
     || (targetUserDocId && targetUserDocId === callerUid),
   )
+  const requestedRuleId = String(data.ruleId || '').trim()
+  const canManageSiteRestrictedContent = await canManageRestrictedContentForSite(callerUid, orgId, siteId)
+  let seatOwnerRuleIdsToRemove = []
+  let isSeatOwnerDelete = false
+  let isFullDelete = isSelfDelete || canManageSiteRestrictedContent
   if (!isSelfDelete) {
-    const callerAudienceSnap = await resolveAudienceUserForAuth(orgId, siteId, callerUid)
-    if (!callerAudienceSnap?.exists)
-      throw new HttpsError('permission-denied', 'Not allowed to manage restricted content for this site.')
+    if (!canManageSiteRestrictedContent) {
+      const callerAudienceSnap = await resolveAudienceUserForAuth(orgId, siteId, callerUid)
+      if (!callerAudienceSnap?.exists)
+        throw new HttpsError('permission-denied', 'Not allowed to manage restricted content for this site.')
 
-    const callerAudienceUserId = String(callerAudienceSnap.id || '').trim()
-    const callerAudienceData = callerAudienceSnap.data() || {}
-    const targetSeatOwnersByRule = normalizeSeatOwnersByRule(audienceUser)
-    let isSeatOwnerDelete = Object.values(targetSeatOwnersByRule).some((owner) => {
-      const ownerAudienceUserId = String(owner?.ownerAudienceUserId || '').trim()
-      const ownerAuthUid = String(owner?.ownerAuthUid || '').trim()
-      return (
-        (ownerAudienceUserId && callerAudienceUserId && ownerAudienceUserId === callerAudienceUserId)
-        || (ownerAuthUid && ownerAuthUid === callerUid)
-      )
-    })
-
-    if (!isSeatOwnerDelete) {
-      const callerPaidRuleIds = Array.isArray(callerAudienceData.paidAccessRuleIds)
-        ? callerAudienceData.paidAccessRuleIds.map(item => String(item || '').trim()).filter(Boolean)
-        : []
-      const callerOwnerKeys = callerPaidRuleIds
-        .map(ruleId => buildSeatOwnerKey(callerAudienceUserId, ruleId))
+      const callerAudienceUserId = String(callerAudienceSnap.id || '').trim()
+      const callerAudienceData = callerAudienceSnap.data() || {}
+      const targetSeatOwnersByRule = normalizeSeatOwnersByRule(audienceUser)
+      seatOwnerRuleIdsToRemove = Object.entries(targetSeatOwnersByRule)
+        .filter(([, owner]) => {
+          const ownerAudienceUserId = String(owner?.ownerAudienceUserId || '').trim()
+          const ownerAuthUid = String(owner?.ownerAuthUid || '').trim()
+          return (
+            (ownerAudienceUserId && callerAudienceUserId && ownerAudienceUserId === callerAudienceUserId)
+            || (ownerAuthUid && ownerAuthUid === callerUid)
+          )
+        })
+        .map(([ruleId]) => String(ruleId || '').trim())
         .filter(Boolean)
-      const targetSeatOwnerKeys = getSeatOwnerKeys(audienceUser)
-      isSeatOwnerDelete = callerOwnerKeys.some(key => targetSeatOwnerKeys.includes(key))
+
+      if (!seatOwnerRuleIdsToRemove.length) {
+        const callerPaidRuleIds = Array.isArray(callerAudienceData.paidAccessRuleIds)
+          ? callerAudienceData.paidAccessRuleIds.map(item => String(item || '').trim()).filter(Boolean)
+          : []
+        const callerOwnerKeys = callerPaidRuleIds
+          .map(ruleId => buildSeatOwnerKey(callerAudienceUserId, ruleId))
+          .filter(Boolean)
+        const targetSeatOwnerKeys = getSeatOwnerKeys(audienceUser)
+        seatOwnerRuleIdsToRemove = targetSeatOwnerKeys
+          .filter(key => callerOwnerKeys.includes(key))
+          .map((key) => {
+            const value = String(key || '')
+            const separatorIndex = value.indexOf(':')
+            if (separatorIndex < 0)
+              return ''
+            return String(value.slice(separatorIndex + 1) || '').trim()
+          })
+          .filter(Boolean)
+      }
+
+      if (requestedRuleId)
+        seatOwnerRuleIdsToRemove = seatOwnerRuleIdsToRemove.filter(ruleId => ruleId === requestedRuleId)
+
+      seatOwnerRuleIdsToRemove = Array.from(new Set(seatOwnerRuleIdsToRemove))
+      isSeatOwnerDelete = seatOwnerRuleIdsToRemove.length > 0
+      isFullDelete = false
     }
 
-    if (!isSeatOwnerDelete)
+    if (!canManageSiteRestrictedContent && !isSeatOwnerDelete)
       throw new HttpsError('permission-denied', 'Not allowed to manage restricted content for this site.')
+  }
+
+  if (isSeatOwnerDelete && !isFullDelete && !isSelfDelete) {
+    const nextAccessRuleIds = (Array.isArray(audienceUser.accessRuleIds) ? audienceUser.accessRuleIds : [])
+      .map(item => String(item || '').trim())
+      .filter(ruleId => ruleId && !seatOwnerRuleIdsToRemove.includes(ruleId))
+    const nextPaidAccessRuleIds = (Array.isArray(audienceUser.paidAccessRuleIds) ? audienceUser.paidAccessRuleIds : [])
+      .map(item => String(item || '').trim())
+      .filter(ruleId => ruleId && !seatOwnerRuleIdsToRemove.includes(ruleId))
+    const nextPendingPaymentRuleIds = (Array.isArray(audienceUser.pendingPaymentRuleIds) ? audienceUser.pendingPaymentRuleIds : [])
+      .map(item => String(item || '').trim())
+      .filter(ruleId => ruleId && !seatOwnerRuleIdsToRemove.includes(ruleId))
+    const nextSeatOwnersByRule = normalizeSeatOwnersByRule(audienceUser)
+    seatOwnerRuleIdsToRemove.forEach((ruleId) => {
+      delete nextSeatOwnersByRule[ruleId]
+    })
+    const nextSeatOwnerKeys = Object.keys(nextSeatOwnersByRule)
+      .map(ruleId => buildSeatOwnerKey(nextSeatOwnersByRule[ruleId]?.ownerAudienceUserId, ruleId))
+      .filter(Boolean)
+    const currentPlanStates = getRegistrationPlanStates(audienceUser)
+    seatOwnerRuleIdsToRemove.forEach((ruleId) => {
+      if (ruleId in currentPlanStates)
+        delete currentPlanStates[ruleId]
+    })
+
+    await audienceUsersRef.doc(audienceUserId).set({
+      accessRuleIds: Array.from(new Set(nextAccessRuleIds)),
+      paidAccessRuleIds: Array.from(new Set(nextPaidAccessRuleIds)),
+      pendingPaymentRuleIds: Array.from(new Set(nextPendingPaymentRuleIds)),
+      seatOwnersByRule: nextSeatOwnersByRule,
+      seatOwnerKeys: Array.from(new Set(nextSeatOwnerKeys)),
+      registrationPlanStates: currentPlanStates,
+      last_updated: Date.now(),
+    }, { merge: true })
+
+    return {
+      success: true,
+      audienceUserId,
+      selfDelete: false,
+      fullDelete: false,
+      removalMode: 'seat_unassign',
+      removedRuleIds: seatOwnerRuleIdsToRemove,
+      deletedBy: callerUid,
+    }
   }
 
   const stagedDocId = String(

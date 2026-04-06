@@ -249,6 +249,7 @@ const state = reactive({
   ruleDeleteSubmitting: false,
   memberDeleteDialogOpen: false,
   memberDeleteDocId: '',
+  memberDeleteRuleId: '',
   memberDeleteDisplayName: '',
   memberDeleteSubmitting: false,
   seatMemberName: '',
@@ -1924,13 +1925,15 @@ const closeMemberEditor = () => {
   state.selectedMemberId = ''
 }
 
-const openDeleteMemberDialog = (docId) => {
-  const normalizedDocId = String(docId || '').trim()
+const openDeleteMemberDialog = (memberOrDocId) => {
+  const member = (memberOrDocId && typeof memberOrDocId === 'object') ? memberOrDocId : null
+  const normalizedDocId = String(member?.docId || memberOrDocId || '').trim()
   if (!normalizedDocId)
     return
-  const member = filteredMembers.value.find(item => String(item?.docId || '').trim() === normalizedDocId)
-  state.memberDeleteDisplayName = getMemberDisplayName(member || { docId: normalizedDocId })
+  const resolvedMember = member || filteredMembers.value.find(item => String(item?.docId || '').trim() === normalizedDocId)
+  state.memberDeleteDisplayName = getMemberDisplayName(resolvedMember || { docId: normalizedDocId })
   state.memberDeleteDocId = normalizedDocId
+  state.memberDeleteRuleId = String(getSeatRuleIdForMember(resolvedMember || {}) || '').trim()
   state.memberDeleteDialogOpen = true
 }
 
@@ -1939,6 +1942,7 @@ const closeDeleteMemberDialog = () => {
     return
   state.memberDeleteDialogOpen = false
   state.memberDeleteDocId = ''
+  state.memberDeleteRuleId = ''
   state.memberDeleteDisplayName = ''
 }
 
@@ -1958,6 +1962,9 @@ const deleteMember = async (docId) => {
       orgId,
       siteId: props.siteId,
       audienceUserId: normalizedDocId,
+      ...(state.memberDeleteRuleId
+        ? { ruleId: state.memberDeleteRuleId }
+        : {}),
     })
     const result = response?.data || response || {}
     if (result?.success === false)
@@ -1968,8 +1975,12 @@ const deleteMember = async (docId) => {
     await loadInitialMembers()
     state.memberDeleteDialogOpen = false
     state.memberDeleteDocId = ''
+    state.memberDeleteRuleId = ''
     state.memberDeleteDisplayName = ''
-    edgeFirebase?.toast?.success?.('Member removed from this site. Site Stripe subscriptions were cancelled and site access paths were removed.')
+    if (String(result?.removalMode || '').trim() === 'seat_unassign')
+      edgeFirebase?.toast?.success?.('Member was removed from this seat-managed plan.')
+    else
+      edgeFirebase?.toast?.success?.('Member removed from this site. Site Stripe subscriptions were cancelled and site access paths were removed.')
   }
   catch (error) {
     edgeFirebase?.toast?.error?.(String(error?.message || 'Unable to delete this member account.'))
@@ -3237,7 +3248,7 @@ onBeforeUnmount(async () => {
                         size="icon"
                         variant="ghost"
                         class="h-8 w-8 text-muted-foreground hover:text-destructive"
-                        @click.stop="openDeleteMemberDialog(item.docId)"
+                        @click.stop="openDeleteMemberDialog(item)"
                       >
                         <Trash2 class="h-4 w-4" />
                       </edge-shad-button>
