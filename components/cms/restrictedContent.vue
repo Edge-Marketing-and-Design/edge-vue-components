@@ -226,6 +226,40 @@ const currentStripeIntegration = computed(() => buildStripeIntegration({
   ...stripeIntegrationDoc.value,
 }))
 
+const normalizeDomain = (value) => {
+  if (!value)
+    return ''
+  let normalized = String(value).trim().toLowerCase()
+  if (!normalized)
+    return ''
+  if (normalized.includes('://')) {
+    try {
+      normalized = new URL(normalized).host
+    }
+    catch {
+      normalized = normalized.split('://').pop() || normalized
+    }
+  }
+  normalized = normalized.split('/')[0] || ''
+  return normalized.replace(/\.+$/g, '')
+}
+
+const firstValidDomain = (domains) => {
+  if (!Array.isArray(domains))
+    return ''
+  for (const domain of domains) {
+    const normalized = normalizeDomain(domain)
+    if (normalized)
+      return normalized
+  }
+  return ''
+}
+
+const membersStripeWebhookUrl = computed(() => {
+  const host = firstValidDomain(props.siteDoc?.domains)
+  return host ? `https://${host}/api/members-stripe` : ''
+})
+
 const state = reactive({
   activeTab: 'members',
   settings: buildRestrictedSettings(),
@@ -2206,6 +2240,34 @@ const copyCouponPromoCode = async (coupon = {}) => {
   }
 }
 
+const copyMembersStripeWebhookUrl = async () => {
+  const url = String(membersStripeWebhookUrl.value || '').trim()
+  if (!url) {
+    edgeFirebase?.toast?.error?.('Add a site domain to generate the webhook URL.')
+    return
+  }
+  try {
+    if (globalThis?.navigator?.clipboard?.writeText) {
+      await globalThis.navigator.clipboard.writeText(url)
+    }
+    else {
+      const textarea = document.createElement('textarea')
+      textarea.value = url
+      textarea.setAttribute('readonly', '')
+      textarea.style.position = 'absolute'
+      textarea.style.left = '-9999px'
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+    }
+    edgeFirebase?.toast?.success?.('Webhook URL copied.')
+  }
+  catch (error) {
+    edgeFirebase?.toast?.error?.(String(error?.message || 'Unable to copy webhook URL.'))
+  }
+}
+
 watch(() => props.canManage, async (allowed) => {
   if (allowed) {
     await startSnapshots()
@@ -2890,6 +2952,25 @@ onBeforeUnmount(async () => {
                       'data-1p-ignore': 'true',
                     }"
                   />
+                </div>
+                <div v-if="state.stripeSettingsOpen" class="rounded-lg border border-border/60 bg-background/60 p-3">
+                  <div class="text-xs font-semibold text-foreground">
+                    Members Stripe Webhook URL
+                  </div>
+                  <div class="mt-2 flex items-center gap-2">
+                    <code class="min-w-0 flex-1 truncate rounded border border-border/60 bg-muted/30 px-2 py-1 text-[11px] text-foreground">
+                      {{ membersStripeWebhookUrl || 'Add a site domain to generate this URL.' }}
+                    </code>
+                    <edge-shad-button
+                      type="button"
+                      variant="outline"
+                      class="h-7 px-2 text-xs"
+                      :disabled="!membersStripeWebhookUrl"
+                      @click="copyMembersStripeWebhookUrl"
+                    >
+                      Copy
+                    </edge-shad-button>
+                  </div>
                 </div>
                 <div v-if="state.stripeSettingsOpen" class="rounded-lg border border-dashed border-border/70 bg-muted/20 p-3 text-xs text-muted-foreground">
                   <div class="font-semibold text-foreground">
