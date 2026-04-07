@@ -1,6 +1,6 @@
 <script setup>
 import { toTypedSchema } from '@vee-validate/zod'
-import { ChevronDown, GripVertical, LockKeyhole, Plus, RefreshCw, Search, Settings2, ShieldCheck, Trash2, UserRoundCheck, Users } from 'lucide-vue-next'
+import { Check, ChevronDown, GripVertical, LockKeyhole, Plus, RefreshCw, Search, Settings2, ShieldCheck, Trash2, UserRoundCheck, Users } from 'lucide-vue-next'
 import * as z from 'zod'
 
 const props = defineProps({
@@ -232,6 +232,9 @@ const state = reactive({
   stripeIntegration: createStripeIntegrationDefaults(),
   ruleFilter: '',
   memberFilter: '',
+  memberPage: 1,
+  memberPageRows: {},
+  memberIsLastPage: false,
   selectedRuleId: '',
   selectedMemberId: '',
   settingsSaving: false,
@@ -1088,31 +1091,25 @@ const ruleDirty = computed(() => {
   return JSON.stringify(normalizeObject(createRuleDoc(state.ruleWorkingDoc, state.ruleWorkingDoc.id))) !== JSON.stringify(normalizeObject(selectedRuleSavedDoc.value))
 })
 
-const filteredMembers = computed(() => {
-  const filter = String(state.memberFilter || '').trim().toLowerCase()
-  const mergedMembers = (state.memberRows || [])
-
-  return mergedMembers
-    .filter((item) => {
-      if (!item?.docId)
-        return false
-      if (!filter)
-        return true
-      const haystack = [
-        item?.audienceUserId,
-        getAudienceUserLabel(item?.audienceUserId),
-        ...(Array.isArray(item?.manualAccessRuleIds) ? item.manualAccessRuleIds.map(ruleId => getRuleLabel(ruleId)) : []),
-        item?.status,
-      ].map(value => String(value || '').toLowerCase()).join(' ')
-      return haystack.includes(filter)
-    })
-    .sort((a, b) => getAudienceUserLabel(a?.audienceUserId).localeCompare(getAudienceUserLabel(b?.audienceUserId)))
+const memberPageSize = 10
+const currentMemberPageRows = computed(() => {
+  const rows = state.memberPageRows?.[state.memberPage]
+  return Array.isArray(rows) ? rows : []
 })
-
+const allLoadedMembers = computed(() => {
+  return (state.memberRows || []).filter(item => item?.docId)
+})
 const memberTotal = computed(() => {
-  return (state.memberRows || []).length
+  return allLoadedMembers.value.length
 })
-const canLoadMoreMembers = computed(() => false)
+const canGoToPreviousMemberPage = computed(() => state.memberPage > 1)
+const canGoToNextMemberPage = computed(() => {
+  if (Array.isArray(state.memberPageRows?.[state.memberPage + 1]))
+    return true
+  if (state.memberIsLastPage)
+    return false
+  return currentMemberPageRows.value.length >= memberPageSize
+})
 
 const settingsDirty = computed(() => {
   return JSON.stringify(normalizeObject(buildRestrictedSettings(state.settings))) !== JSON.stringify(normalizeObject(currentSettings.value))
@@ -1167,20 +1164,33 @@ const persistRestrictedSettings = async (nextSettings, options = {}) => {
     state.settings = normalizedNextSettings
 }
 
-const saveSettings = async () => {
+const updateMembershipSetting = async (field, value) => {
   if (!props.canManage || state.settingsSaving)
     return
+
+  const normalizedValue = value === true
+  const currentValue = state.settings?.[field] === true
+  if (normalizedValue === currentValue)
+    return
+
+  const previousSettings = buildRestrictedSettings(state.settings)
+  const nextSettings = buildRestrictedSettings({
+    ...state.settings,
+    [field]: normalizedValue,
+  })
+
+  state.settings = nextSettings
   state.settingsSaving = true
   try {
-    await persistRestrictedSettings(state.settings)
+    await persistRestrictedSettings(nextSettings, { syncState: false })
+  }
+  catch (error) {
+    state.settings = previousSettings
+    edgeFirebase?.toast?.error?.(String(error?.message || 'Unable to save membership settings right now.'))
   }
   finally {
     state.settingsSaving = false
   }
-}
-
-const resetSettings = () => {
-  syncSettingsFromSiteDoc()
 }
 
 const saveStripeIntegration = async () => {
@@ -1370,14 +1380,19 @@ const importSelectedStripeCatalog = async () => {
   }
 }
 
-const loadInitialMembers = async () => {
+const loadInitialMembers = async (options = {}) => {
   if (!props.canManage)
     return
-  state.membersLoading = true
+  const showLoading = options?.showLoading !== false
+  if (showLoading)
+    state.membersLoading = true
+  else
+    state.membersLoadingMore = true
   try {
     const queryText = String(state.memberFilter || '').trim()
-    const limit = 250
+    const limit = memberPageSize
     const collectionPath = audienceUsersCollectionPath.value
+    const filterField = queryText.includes('@') ? 'email' : 'name'
     const buildPrefixFilters = field => (queryText
       ? [
           { field, operator: '>=', value: queryText },
@@ -1385,39 +1400,87 @@ const loadInitialMembers = async () => {
         ]
       : [])
 
-    const staticSearches = []
-    const querySets = queryText
-      ? [
-          [{ field: 'status', operator: '!=', value: 'invited' }, ...buildPrefixFilters('name')],
-          [{ field: 'status', operator: '!=', value: 'invited' }, ...buildPrefixFilters('email')],
-        ]
-      : [
-          [{ field: 'status', operator: '!=', value: 'invited' }],
-        ]
+    const query = [
+      { field: 'status', operator: 'in', value: MEMBER_STATUSES },
+      ...buildPrefixFilters(filterField),
+    ]
+    const sortField = queryText ? filterField : 'name'
+    const sort = [{ field: sortField, direction: 'asc' }]
+    const staticSearch = new edgeFirebase.SearchStaticData()
+    await staticSearch.getData(collectionPath, query, sort, limit)
+    const rows = Object.values(staticSearch?.results?.data || {})
+      .map(normalizeMemberRow)
+      .filter(item => item?.docId)
 
-    const merged = {}
-    for (const query of querySets) {
-      const staticSearch = new edgeFirebase.SearchStaticData()
-      staticSearches.push(staticSearch)
-      await staticSearch.getData(collectionPath, query, [], limit)
-      const rows = Object.values(staticSearch?.results?.data || {})
-      rows.forEach((row) => {
-        const normalized = normalizeMemberRow(row)
-        if (normalized?.docId)
-          merged[normalized.docId] = normalized
-      })
-    }
-    state.memberSearch = staticSearches[0] || null
-    state.memberRows = Object.values(merged)
-      .sort((a, b) => getAudienceUserLabel(a?.docId).localeCompare(getAudienceUserLabel(b?.docId)))
+    state.memberSearch = staticSearch
+    state.memberPage = 1
+    state.memberPageRows = { 1: rows }
+    state.memberRows = rows
+    const staticIsLastPage = staticSearch?.results?.staticIsLastPage
+    state.memberIsLastPage = typeof staticIsLastPage === 'boolean'
+      ? staticIsLastPage
+      : rows.length < memberPageSize
   }
   finally {
-    state.membersLoading = false
+    if (showLoading)
+      state.membersLoading = false
+    else
+      state.membersLoadingMore = false
   }
 }
 
-const loadMoreMembers = async () => {
-  return
+const goToPreviousMemberPage = () => {
+  if (!canGoToPreviousMemberPage.value)
+    return
+  state.memberPage = Math.max(1, state.memberPage - 1)
+}
+
+const goToNextMemberPage = async () => {
+  if (!canGoToNextMemberPage.value || state.membersLoadingMore || state.membersLoading)
+    return
+
+  const cachedNextPage = state.memberPageRows?.[state.memberPage + 1]
+  if (Array.isArray(cachedNextPage)) {
+    state.memberPage = state.memberPage + 1
+    return
+  }
+
+  if (!state.memberSearch || state.memberIsLastPage)
+    return
+
+  state.membersLoadingMore = true
+  try {
+    await state.memberSearch.next()
+    const rows = Object.values(state.memberSearch?.results?.data || {})
+      .map(normalizeMemberRow)
+      .filter(item => item?.docId)
+
+    if (!rows.length) {
+      state.memberIsLastPage = true
+      return
+    }
+
+    const nextPage = state.memberPage + 1
+    state.memberPageRows = {
+      ...(state.memberPageRows || {}),
+      [nextPage]: rows,
+    }
+
+    const merged = {}
+    ;[...allLoadedMembers.value, ...rows].forEach((row) => {
+      if (row?.docId)
+        merged[row.docId] = row
+    })
+    state.memberRows = Object.values(merged)
+    state.memberPage = nextPage
+    const staticIsLastPage = state.memberSearch?.results?.staticIsLastPage
+    state.memberIsLastPage = typeof staticIsLastPage === 'boolean'
+      ? staticIsLastPage
+      : rows.length < memberPageSize
+  }
+  finally {
+    state.membersLoadingMore = false
+  }
 }
 
 const handleMemberSaved = ({ docId, data }) => {
@@ -1941,7 +2004,7 @@ const deleteRule = async () => {
         return [edgeFirebase.changeDoc(postsCollectionPath.value, post.docId, { content: contentResult.blocks })]
       })
 
-    const loadedMemberUpdates = filteredMembers.value
+    const loadedMemberUpdates = allLoadedMembers.value
       .filter((item) => {
         return (Array.isArray(item?.accessRuleIds) && item.accessRuleIds.includes(docId))
           || (Array.isArray(item?.manualAccessRuleIds) && item.manualAccessRuleIds.includes(docId))
@@ -2007,7 +2070,7 @@ const openDeleteMemberDialog = (memberOrDocId) => {
   const normalizedDocId = String(member?.docId || memberOrDocId || '').trim()
   if (!normalizedDocId)
     return
-  const resolvedMember = member || filteredMembers.value.find(item => String(item?.docId || '').trim() === normalizedDocId)
+  const resolvedMember = member || allLoadedMembers.value.find(item => String(item?.docId || '').trim() === normalizedDocId)
   state.memberDeleteDisplayName = getMemberDisplayName(resolvedMember || { docId: normalizedDocId })
   state.memberDeleteDocId = normalizedDocId
   state.memberDeleteRuleId = String(getSeatRuleIdForMember(resolvedMember || {}) || '').trim()
@@ -2190,11 +2253,13 @@ watch(stripeIntegrationCollectionPath, async (nextPath, previousPath) => {
 
 watch(membersCollectionPath, async () => {
   state.selectedMemberId = ''
+  state.memberPage = 1
   if (props.canManage)
     await loadInitialMembers()
 })
 
 watch(() => state.memberFilter, () => {
+  state.memberPage = 1
   if (state.memberSearchDebounce)
     clearTimeout(state.memberSearchDebounce)
   state.memberSearchDebounce = setTimeout(() => {
@@ -2721,102 +2786,16 @@ onBeforeUnmount(async () => {
       </div>
 
       <Tabs v-model="state.activeTab" class="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <TabsList class="sticky top-0 z-10 grid w-full shrink-0 grid-cols-3 rounded-lg border border-slate-300 bg-slate-100 p-1 dark:border-slate-700 dark:bg-slate-900">
+        <TabsList class="sticky top-0 z-10 grid w-full shrink-0 grid-cols-2 rounded-lg border border-slate-300 bg-slate-100 p-1 dark:border-slate-700 dark:bg-slate-900">
           <TabsTrigger value="members" class="gap-2">
             <Users class="h-4 w-4" />
             Members
-          </TabsTrigger>
-          <TabsTrigger value="settings" class="gap-2">
-            <Settings2 class="h-4 w-4" />
-            Settings
           </TabsTrigger>
           <TabsTrigger value="rules" class="gap-2">
             <ShieldCheck class="h-4 w-4" />
             Paid Access Plans
           </TabsTrigger>
         </TabsList>
-
-        <TabsContent value="settings" class="mt-4 min-h-0 flex flex-1 overflow-y-auto">
-          <Card class="min-h-0 flex flex-1 flex-col border border-border/60 bg-card">
-            <CardHeader>
-              <div class="flex items-start justify-between gap-4">
-                <div>
-                  <CardTitle>Restriction Settings</CardTitle>
-                  <CardDescription>
-                    Set the default access options for this site here. Individual plans are managed in the Paid Access Plans tab.
-                  </CardDescription>
-                </div>
-                <div class="flex items-center gap-2">
-                  <edge-shad-button
-                    variant="outline"
-                    :disabled="!settingsDirty || state.settingsSaving"
-                    @click="resetSettings"
-                  >
-                    Reset
-                  </edge-shad-button>
-                  <edge-shad-button
-                    class="bg-slate-800 text-white hover:bg-slate-700"
-                    :disabled="!settingsDirty || state.settingsSaving"
-                    @click="saveSettings"
-                  >
-                    Save Settings
-                  </edge-shad-button>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent class="min-h-0 flex-1 space-y-4 overflow-y-auto">
-              <edge-shad-form
-                :initial-values="{
-                  'restricted-content-enabled': state.settings.enabled,
-                  'restricted-content-allow-self-registration': state.settings.allowSelfRegistration,
-                  'restricted-content-terms-url': state.settings.registrationTermsUrl,
-                  'restricted-content-login-help': state.settings.loginHelpText,
-                  'restricted-content-success-message': state.settings.registrationSuccessMessage,
-                }"
-              >
-                <div class="space-y-4 rounded-lg border border-border/60 bg-background/70 p-4">
-                  <div>
-                    <div class="text-sm font-semibold text-foreground">
-                      Site Defaults
-                    </div>
-                    <p class="mt-1 text-sm text-muted-foreground">
-                      These settings control how sign-up works across this site.
-                    </p>
-                  </div>
-                  <edge-cms-boolean-card
-                    v-model="state.settings.allowSelfRegistration"
-                    name="restricted-content-allow-self-registration"
-                    label="Allow visitors to self register"
-                    class="w-full"
-                    checked-label="Allowed"
-                    unchecked-label="Disabled"
-                  >
-                    When this is off, visitors cannot self register and must be added manually. Manual member emails must match the email they use to sign up.
-                  </edge-cms-boolean-card>
-                  <edge-shad-input
-                    v-model="state.settings.registrationTermsUrl"
-                    name="restricted-content-terms-url"
-                    label="Registration Terms URL"
-                    placeholder="https://example.com/terms"
-                  />
-                  <edge-shad-textarea
-                    v-model="state.settings.loginHelpText"
-                    name="restricted-content-login-help"
-                    label="Login Help Text"
-                  />
-                  <edge-shad-textarea
-                    v-model="state.settings.registrationSuccessMessage"
-                    name="restricted-content-success-message"
-                    label="Registration Success Message"
-                  />
-                  <div class="rounded-lg border border-dashed border-border/70 bg-muted/20 p-4 text-sm text-muted-foreground">
-                    General access settings are saved with the site.
-                  </div>
-                </div>
-              </edge-shad-form>
-            </CardContent>
-          </Card>
-        </TabsContent>
 
         <TabsContent value="rules" class="mt-4 min-h-0 flex flex-1 flex-col overflow-hidden">
           <edge-shad-form
@@ -2932,16 +2911,16 @@ onBeforeUnmount(async () => {
 
           <div class="grid min-h-0 flex-1 gap-4 overflow-hidden lg:grid-cols-[340px_minmax(0,1fr)]">
             <Card class="min-h-0 h-full border border-border/60 bg-card flex flex-col overflow-hidden">
-              <CardHeader class="shrink-0 space-y-3">
-                <div class="flex items-center justify-between gap-3">
+              <CardHeader class="shrink-0 space-y-1.5 pb-2">
+                <div class="flex items-center justify-between gap-2">
                   <div>
-                    <CardTitle class="text-base">
+                    <CardTitle class="text-sm">
                       Paid Access Plans
                     </CardTitle>
-                    <CardDescription>{{ filteredRules.length }} plans</CardDescription>
+                    <CardDescription class="text-[11px]">{{ filteredRules.length }} plans</CardDescription>
                   </div>
-                  <edge-shad-button class="gap-2 bg-slate-800 text-white hover:bg-slate-700" @click="openNewRule">
-                    <ShieldCheck class="h-4 w-4" />
+                  <edge-shad-button class="h-7 gap-1.5 bg-slate-800 px-2 text-xs text-white hover:bg-slate-700" @click="openNewRule">
+                    <ShieldCheck class="h-3.5 w-3.5" />
                     Add Plan
                   </edge-shad-button>
                 </div>
@@ -2953,7 +2932,7 @@ onBeforeUnmount(async () => {
                     placeholder="Search plans..."
                   >
                     <template #icon>
-                      <Search class="h-4 w-4" />
+                      <Search class="h-3.5 w-3.5" />
                     </template>
                   </edge-shad-input>
                 </edge-shad-form>
@@ -3233,62 +3212,83 @@ onBeforeUnmount(async () => {
           </div>
         </TabsContent>
 
-        <TabsContent value="members" class="mt-4 min-h-0 flex flex-1 flex-col overflow-hidden">
-          <Card class="mb-4 shrink-0 border border-border/60 bg-card">
-            <CardContent class="space-y-2 p-3">
-              <edge-cms-boolean-card
-                v-model="state.settings.enabled"
-                name="restricted-content-enabled"
-                label="Enable Site Membership"
-                class="w-full"
-                checked-label="Enabled"
-                unchecked-label="Disabled"
-              >
-                When this is enabled, site login is enabled and blocks can be restricted to logged-in users.
-              </edge-cms-boolean-card>
-              <div class="flex justify-end gap-2">
-                <edge-shad-button
-                  variant="outline"
-                  class="h-8"
-                  :disabled="!settingsDirty || state.settingsSaving"
-                  @click="resetSettings"
+        <TabsContent value="members" class="mt-4 min-h-0 flex flex-1 flex-col overflow-hidden pb-2">
+          <div class="grid min-h-0 flex-1 gap-4 overflow-hidden pb-1 lg:grid-cols-[340px_minmax(0,1fr)]">
+            <div class="min-h-0 flex flex-col gap-1.5">
+              <div class="space-y-1.5">
+                <button
+                  type="button"
+                  class="flex w-full items-center justify-between gap-2 rounded border border-border/60 bg-background px-2 py-1 text-left hover:border-primary/50 hover:bg-muted/40"
+                  :disabled="state.settingsSaving"
+                  @click="updateMembershipSetting('enabled', !state.settings.enabled)"
                 >
-                  Reset
-                </edge-shad-button>
-                <edge-shad-button
-                  class="h-8 bg-slate-800 text-white hover:bg-slate-700"
-                  :disabled="!settingsDirty || state.settingsSaving"
-                  @click="saveSettings"
+                  <span class="truncate text-[11px] font-semibold text-foreground">
+                    Enable Site Membership
+                  </span>
+                  <div class="flex shrink-0 items-center gap-1.5">
+                    <span class="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase" :class="state.settings.enabled ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200' : 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200'">
+                      {{ state.settings.enabled ? 'Enabled' : 'Disabled' }}
+                    </span>
+                    <Checkbox
+                      :model-value="state.settings.enabled"
+                      :disabled="state.settingsSaving"
+                      class="h-3.5 w-3.5 rounded border border-slate-400 bg-white data-[state=checked]:border-slate-900 data-[state=checked]:bg-slate-900 data-[state=checked]:text-white dark:border-slate-500 dark:bg-slate-950 dark:data-[state=checked]:border-slate-100 dark:data-[state=checked]:bg-slate-100 dark:data-[state=checked]:text-slate-900"
+                      @click.stop
+                      @update:model-value="value => updateMembershipSetting('enabled', value)"
+                    >
+                      <Check class="h-3 w-3" />
+                    </Checkbox>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  class="flex w-full items-center justify-between gap-2 rounded border border-border/60 bg-background px-2 py-1 text-left hover:border-primary/50 hover:bg-muted/40"
+                  :disabled="state.settingsSaving"
+                  @click="updateMembershipSetting('allowSelfRegistration', !state.settings.allowSelfRegistration)"
                 >
-                  Save Membership
-                </edge-shad-button>
+                  <span class="truncate text-[11px] font-semibold text-foreground">
+                    Allow self registration
+                  </span>
+                  <div class="flex shrink-0 items-center gap-1.5">
+                    <span class="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase" :class="state.settings.allowSelfRegistration ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200' : 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200'">
+                      {{ state.settings.allowSelfRegistration ? 'Allowed' : 'Disabled' }}
+                    </span>
+                    <Checkbox
+                      :model-value="state.settings.allowSelfRegistration"
+                      :disabled="state.settingsSaving"
+                      class="h-3.5 w-3.5 rounded border border-slate-400 bg-white data-[state=checked]:border-slate-900 data-[state=checked]:bg-slate-900 data-[state=checked]:text-white dark:border-slate-500 dark:bg-slate-950 dark:data-[state=checked]:border-slate-100 dark:data-[state=checked]:bg-slate-100 dark:data-[state=checked]:text-slate-900"
+                      @click.stop
+                      @update:model-value="value => updateMembershipSetting('allowSelfRegistration', value)"
+                    >
+                      <Check class="h-3 w-3" />
+                    </Checkbox>
+                  </div>
+                </button>
               </div>
-            </CardContent>
-          </Card>
-          <div class="grid min-h-0 flex-1 gap-4 overflow-hidden lg:grid-cols-[340px_minmax(0,1fr)]">
-            <Card class="min-h-0 h-full border border-border/60 bg-card flex flex-col overflow-hidden">
-              <CardHeader class="shrink-0 space-y-3">
-                <div class="flex items-center justify-between gap-3">
+
+              <Card class="min-h-0 flex-1 border border-border/60 bg-card flex flex-col overflow-hidden">
+              <CardHeader class="shrink-0 space-y-1.5 pb-2">
+                <div class="flex items-center justify-between gap-2">
                   <div>
-                    <CardTitle class="text-base">
+                    <CardTitle class="text-sm">
                       Site Memberships
                     </CardTitle>
-                    <CardDescription>
-                      {{ filteredMembers.length }} shown of {{ memberTotal }} members
+                    <CardDescription class="text-[11px]">
+                      Page {{ state.memberPage }} · {{ currentMemberPageRows.length }} shown ({{ memberTotal }} loaded)
                     </CardDescription>
                   </div>
-                  <edge-shad-button class="gap-2 bg-slate-800 text-white hover:bg-slate-700" @click="openNewMember">
-                    <UserRoundCheck class="h-4 w-4" />
+                  <edge-shad-button class="h-7 gap-1.5 bg-slate-800 px-2 text-xs text-white hover:bg-slate-700" @click="openNewMember">
+                    <UserRoundCheck class="h-3.5 w-3.5" />
                     Add Member
                   </edge-shad-button>
                 </div>
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-1.5">
                   <edge-shad-form :initial-values="{ 'restricted-member-filter': state.memberFilter }" class="min-w-0 flex-1">
                     <edge-shad-input
                       v-model="state.memberFilter"
                       name="restricted-member-filter"
                       label=""
-                      placeholder="Filter loaded members..."
+                      placeholder="Search members..."
                     >
                       <template #icon>
                         <Search class="h-4 w-4" />
@@ -3299,89 +3299,103 @@ onBeforeUnmount(async () => {
                     type="button"
                     size="icon"
                     variant="outline"
-                    class="h-9 w-9 shrink-0"
+                    class="h-7 w-7 shrink-0"
                     :disabled="state.membersLoading || state.membersLoadingMore"
-                    @click="loadInitialMembers"
+                    @click="loadInitialMembers({ showLoading: false })"
                   >
-                    <RefreshCw class="h-4 w-4" :class="state.membersLoading ? 'animate-spin' : ''" />
+                    <RefreshCw class="h-3.5 w-3.5" :class="(state.membersLoading || state.membersLoadingMore) ? 'animate-spin' : ''" />
                   </edge-shad-button>
                 </div>
               </CardHeader>
-              <CardContent class="min-h-0 flex-1 space-y-2 overflow-y-auto">
-                <div v-if="state.membersLoading" class="rounded-lg border border-dashed border-border/70 px-4 py-10 text-center text-sm text-muted-foreground">
-                  Loading members...
-                </div>
-                <button
-                  v-for="item in filteredMembers"
-                  :key="item.docId"
-                  type="button"
-                  class="w-full rounded-lg border p-3 text-left transition hover:border-primary/60 hover:bg-muted/60"
-                  :class="state.selectedMemberId === item.docId ? 'border-primary/70 bg-muted/70 shadow-sm' : 'border-border/60 bg-background'"
-                  @click="openMember(item.docId)"
-                >
-                  <div class="flex items-start justify-between gap-2">
-                    <div class="min-w-0">
-                      <div class="truncate font-semibold text-foreground">
-                        {{ item.name || item.email || getAudienceUserLabel(item.audienceUserId) || item.docId }}
+              <CardContent class="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
+                  <div v-if="state.membersLoading" class="rounded-lg border border-dashed border-border/70 px-4 py-10 text-center text-sm text-muted-foreground">
+                    Loading members...
+                  </div>
+                  <button
+                    v-for="item in currentMemberPageRows"
+                    :key="item.docId"
+                    type="button"
+                    class="w-full rounded-lg border p-3 text-left transition hover:border-primary/60 hover:bg-muted/60"
+                    :class="state.selectedMemberId === item.docId ? 'border-primary/70 bg-muted/70 shadow-sm' : 'border-border/60 bg-background'"
+                    @click="openMember(item.docId)"
+                  >
+                    <div class="flex items-start justify-between gap-2">
+                      <div class="min-w-0">
+                        <div class="truncate font-semibold text-foreground">
+                          {{ item.name || item.email || getAudienceUserLabel(item.audienceUserId) || item.docId }}
+                        </div>
+                        <div class="mt-1 text-xs text-muted-foreground">
+                          {{ Array.isArray(item.manualAccessRuleIds) ? item.manualAccessRuleIds.length : 0 }} manual override plan{{ (Array.isArray(item.manualAccessRuleIds) ? item.manualAccessRuleIds.length : 0) === 1 ? '' : 's' }}
+                        </div>
+                        <div v-if="Array.isArray(item.manualAccessRuleIds) && item.manualAccessRuleIds.length" class="mt-2 flex flex-wrap gap-1">
+                          <span
+                            v-for="ruleId in item.manualAccessRuleIds.slice(0, 3)"
+                            :key="ruleId"
+                            class="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-800 dark:bg-slate-800 dark:text-slate-200"
+                          >
+                            {{ getRuleLabel(ruleId) }}
+                          </span>
+                        </div>
                       </div>
-                      <div class="mt-1 text-xs text-muted-foreground">
-                        {{ Array.isArray(item.manualAccessRuleIds) ? item.manualAccessRuleIds.length : 0 }} manual override plan{{ (Array.isArray(item.manualAccessRuleIds) ? item.manualAccessRuleIds.length : 0) === 1 ? '' : 's' }}
-                      </div>
-                      <div v-if="Array.isArray(item.manualAccessRuleIds) && item.manualAccessRuleIds.length" class="mt-2 flex flex-wrap gap-1">
-                        <span
-                          v-for="ruleId in item.manualAccessRuleIds.slice(0, 3)"
-                          :key="ruleId"
-                          class="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-800 dark:bg-slate-800 dark:text-slate-200"
+                      <div class="flex shrink-0 items-center gap-2">
+                        <span class="rounded-full px-2 py-1 text-[10px] font-semibold uppercase" :class="statusClass(item.status)">
+                          {{ item.status || 'active' }}
+                        </span>
+                        <edge-shad-button
+                          size="icon"
+                          variant="ghost"
+                          class="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          @click.stop="openDeleteMemberDialog(item)"
                         >
-                          {{ getRuleLabel(ruleId) }}
+                          <Trash2 class="h-4 w-4" />
+                        </edge-shad-button>
+                      </div>
+                    </div>
+                    <div v-if="hasStripeMemberInfo(item)" class="mt-2 w-full rounded-md border border-border/60 bg-muted/30 px-2 py-2 text-[11px] text-muted-foreground">
+                      <div class="truncate">
+                        Paid Plans:
+                        <span class="font-medium text-foreground">
+                          {{
+                            getMemberPaidPlanEntries(item).length
+                              ? getMemberPaidPlanEntries(item).map(plan => plan.ruleLabel).join(', ')
+                              : 'None'
+                          }}
                         </span>
                       </div>
+                      <div v-if="item.billingStripeCustomerId" class="truncate">
+                        Customer: <span class="font-medium text-foreground">{{ item.billingStripeCustomerId }}</span>
+                      </div>
                     </div>
-                    <div class="flex shrink-0 items-center gap-2">
-                      <span class="rounded-full px-2 py-1 text-[10px] font-semibold uppercase" :class="statusClass(item.status)">
-                        {{ item.status || 'active' }}
-                      </span>
-                      <edge-shad-button
-                        size="icon"
-                        variant="ghost"
-                        class="h-8 w-8 text-muted-foreground hover:text-destructive"
-                        @click.stop="openDeleteMemberDialog(item)"
-                      >
-                        <Trash2 class="h-4 w-4" />
-                      </edge-shad-button>
-                    </div>
+                  </button>
+                  <div v-if="!state.membersLoading && !currentMemberPageRows.length" class="rounded-lg border border-dashed border-border/70 px-4 py-10 text-center text-sm text-muted-foreground">
+                    {{ state.memberFilter ? 'No loaded members match this search yet.' : 'No members have been added to this site yet.' }}
                   </div>
-                  <div v-if="hasStripeMemberInfo(item)" class="mt-2 w-full rounded-md border border-border/60 bg-muted/30 px-2 py-2 text-[11px] text-muted-foreground">
-                    <div class="truncate">
-                      Paid Plans:
-                      <span class="font-medium text-foreground">
-                        {{
-                          getMemberPaidPlanEntries(item).length
-                            ? getMemberPaidPlanEntries(item).map(plan => plan.ruleLabel).join(', ')
-                            : 'None'
-                        }}
-                      </span>
-                    </div>
-                    <div v-if="item.billingStripeCustomerId" class="truncate">
-                      Customer: <span class="font-medium text-foreground">{{ item.billingStripeCustomerId }}</span>
-                    </div>
-                  </div>
-                </button>
-                <div v-if="!state.membersLoading && !filteredMembers.length" class="rounded-lg border border-dashed border-border/70 px-4 py-10 text-center text-sm text-muted-foreground">
-                  {{ state.memberFilter ? 'No loaded members match this search yet.' : 'No members have been added to this site yet.' }}
-                </div>
-                <div v-if="canLoadMoreMembers" class="pt-2">
+              </CardContent>
+              <div v-if="currentMemberPageRows.length || state.memberPage > 1" class="shrink-0 border-t border-border/60 bg-card px-3 py-3">
+                <div class="flex items-center justify-between gap-2">
                   <edge-shad-button
                     variant="outline"
-                    class="w-full"
-                    :disabled="state.membersLoadingMore"
-                    @click="loadMoreMembers"
+                    class="h-8"
+                    :disabled="!canGoToPreviousMemberPage"
+                    @click="goToPreviousMemberPage"
                   >
-                    {{ state.membersLoadingMore ? 'Loading More...' : 'Load More Members' }}
+                    Previous
+                  </edge-shad-button>
+                  <div class="text-xs text-muted-foreground">
+                    Page {{ state.memberPage }}
+                  </div>
+                  <edge-shad-button
+                    variant="outline"
+                    class="h-8"
+                    :disabled="!canGoToNextMemberPage || state.membersLoadingMore"
+                    @click="goToNextMemberPage"
+                  >
+                    {{ state.membersLoadingMore ? 'Loading...' : 'Next' }}
                   </edge-shad-button>
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+              </Card>
+            </div>
 
             <Card class="min-h-0 h-full border border-border/60 bg-card flex flex-col overflow-hidden">
               <CardContent class="h-full min-h-0 overflow-y-auto p-0">
@@ -3539,7 +3553,7 @@ onBeforeUnmount(async () => {
                                 label="Email"
                                 placeholder="jane@example.com"
                               />
-                              <div class="flex items-end">
+                              <div class="flex items-start pt-6">
                                 <edge-shad-button
                                   type="button"
                                   class="h-8 bg-slate-800 px-3 text-white hover:bg-slate-700"
