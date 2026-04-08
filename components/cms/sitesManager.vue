@@ -2,10 +2,13 @@
 import { Loader2 } from 'lucide-vue-next'
 
 const edgeFirebase = inject('edgeFirebase')
+const route = useRoute()
+const router = useRouter()
 const isAiBusy = status => status === 'queued' || status === 'running'
 
 const state = reactive({
   filter: '',
+  autoOpenedSingleSite: false,
 })
 const cmsMultiOrg = useState('cmsMultiOrg', () => false)
 
@@ -45,6 +48,32 @@ const queryOperator = computed(() => {
   }
   return ''
 })
+
+const forceListView = computed(() => {
+  const value = String(route.query.forceList || '').trim().toLowerCase()
+  return value === '1' || value === 'true' || value === 'yes'
+})
+
+const maybeAutoOpenSingleSite = (items = []) => {
+  if (state.autoOpenedSingleSite)
+    return false
+  if (forceListView.value)
+    return false
+  if (String(state.filter || '').trim())
+    return false
+  if (!Array.isArray(items) || items.length !== 1)
+    return false
+
+  const onlySite = items[0]
+  if (!onlySite?.docId || isAiBusy(onlySite.aiBootstrapStatus))
+    return false
+
+  state.autoOpenedSingleSite = true
+  nextTick(() => {
+    router.replace(`/app/dashboard/sites/${onlySite.docId}`)
+  })
+  return true
+}
 </script>
 
 <template>
@@ -67,6 +96,7 @@ const queryOperator = computed(() => {
       <div v-else class="hidden" />
     </template>
     <template #list="slotProps">
+      <div v-if="maybeAutoOpenSingleSite(slotProps.filtered)" class="hidden" />
       <template v-for="item in slotProps.filtered" :key="item.docId">
         <edge-shad-button
           variant="text"

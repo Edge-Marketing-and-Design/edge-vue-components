@@ -67,6 +67,10 @@ const props = defineProps({
     type: String,
     default: 'name',
   },
+  newTitleOverride: {
+    type: String,
+    default: '',
+  },
 })
 
 const emit = defineEmits(['unsavedChanges', 'workingDoc', 'error', 'saved'])
@@ -283,6 +287,9 @@ const title = computed(() => {
     return capitalizeFirstLetter(`${state.collectionData[props.docId][props.titleField]}`)
   }
   else {
+    if (props.newTitleOverride) {
+      return props.newTitleOverride
+    }
     return `New ${toTitleCase(singularize(props.collection)).replace('-', ' ')}`
   }
 })
@@ -313,7 +320,8 @@ const onSubmit = async () => {
     state.workingDoc.docId = state.workingDoc[props.customDocId]
   }
   // console.log('saving', state.workingDoc)
-  const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`, state.workingDoc)
+  const savePath = `${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`
+  const result = await edgeFirebase.storeDoc(savePath, state.workingDoc)
   state.workingDoc.docId = result.meta.docId
   emit('saved', {
     collection: props.collection,

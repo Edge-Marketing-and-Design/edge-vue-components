@@ -2,10 +2,22 @@ import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTem
 
 export const useSiteSettingsTemplate = () => {
   const { buildSiteStructuredData } = useStructuredDataTemplates()
+  const createRestrictedContentDefaults = () => ({
+    enabled: false,
+    allowSelfRegistration: true,
+    registrationPricing: 'free',
+    provider: 'stripe',
+    defaultCurrency: 'USD',
+    registrationTermsUrl: '',
+    loginHelpText: '',
+    registrationSuccessMessage: '',
+    rules: [],
+  })
   const createDefaults = () => ({
     name: '',
     theme: '',
     allowedThemes: [],
+    showMembersTab: false,
     logo: '',
     logoLight: '',
     logoText: '',
@@ -32,6 +44,7 @@ export const useSiteSettingsTemplate = () => {
     socialYouTube: '',
     socialTikTok: '',
     users: [],
+    restrictedContent: createRestrictedContentDefaults(),
     aiAgentUserId: '',
     aiInstructions: '',
   })
@@ -42,6 +55,7 @@ export const useSiteSettingsTemplate = () => {
       name: { bindings: { 'field-type': 'text', 'label': 'Name' }, cols: '12', value: defaults.name },
       theme: { bindings: { 'field-type': 'collection', 'label': 'Themes', 'collection-path': 'themes' }, cols: '12', value: defaults.theme },
       allowedThemes: { bindings: { 'field-type': 'tags', 'label': 'Allowed Themes' }, cols: '12', value: defaults.allowedThemes },
+      showMembersTab: { bindings: { 'field-type': 'boolean', 'label': 'Show Members Tab' }, cols: '12', value: defaults.showMembersTab },
       logo: { bindings: { 'field-type': 'text', 'label': 'Dark logo' }, cols: '12', value: defaults.logo },
       logoLight: { bindings: { 'field-type': 'text', 'label': 'Logo Light' }, cols: '12', value: defaults.logoLight },
       logoText: { bindings: { 'field-type': 'text', 'label': 'Logo Text' }, cols: '12', value: defaults.logoText },
@@ -77,6 +91,7 @@ export const useSiteSettingsTemplate = () => {
 
   return {
     createDefaults,
+    createRestrictedContentDefaults,
     createNewDocSchema,
     settingsKeys,
   }

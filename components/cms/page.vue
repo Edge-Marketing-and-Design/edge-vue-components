@@ -26,6 +26,14 @@ const router = useRouter()
 const { buildPageStructuredData } = useStructuredDataTemplates()
 const cmsMultiOrg = useState('cmsMultiOrg', () => true)
 const isAdmin = computed(() => edgeGlobal.isAdminGlobal(edgeFirebase).value)
+const currentOrgRoleName = computed(() => {
+  return String(edgeGlobal.getRoleName(edgeFirebase?.user?.roles || [], edgeGlobal.edgeState.currentOrganization) || '').toLowerCase()
+})
+const canManageRestrictionAssignments = computed(() => {
+  if (!cmsMultiOrg.value)
+    return currentOrgRoleName.value === 'admin'
+  return currentOrgRoleName.value === 'admin' || currentOrgRoleName.value === 'site admin'
+})
 const isDevModeEnabled = computed(() => process.dev || Boolean(edgeGlobal.edgeState.devOverride))
 const canOpenPreviewBlockContentEditor = computed(() => {
   if (!isAdmin.value)
@@ -66,6 +74,7 @@ const state = reactive({
   importErrorMessage: '',
   previewViewport: 'full',
   previewScale: '100',
+  previewAuthLoggedIn: true,
   previewPageView: 'list',
   newRowLayout: '6',
   newPostRowLayout: '6',
@@ -111,6 +120,9 @@ const state = reactive({
   renamePageSubmitting: false,
   deletePageDialogOpen: false,
   deletePageSubmitting: false,
+  pageSettingsRestrictionRuleId: '',
+  pageSettingsPostRestrictionRuleId: '',
+  savingPageRuleAssignments: false,
 })
 
 const pageImportInputRef = ref(null)
@@ -158,6 +170,7 @@ const previewScaleValue = computed(() => {
   return parsed
 })
 const previewScaleMultiplier = computed(() => previewScaleValue.value / 100)
+const previewAuthClass = computed(() => state.previewAuthLoggedIn ? 'cms-auth-preview-logged-in' : 'cms-auth-preview-logged-out')
 
 const previewViewportStyle = computed(() => {
   const selected = selectedPreviewViewport.value
@@ -191,6 +204,77 @@ const buildScaledPreviewSurfaceStyle = (baseHeight) => {
       ? normalizedHeight
       : `calc((${normalizedHeight}) / ${previewScaleMultiplier.value})`,
   }
+}
+
+const normalizeSiteRestrictionRules = (value = []) => {
+  if (!Array.isArray(value))
+    return []
+  return value
+    .map((item, index) => {
+      const normalizedItem = (item && typeof item === 'object') ? item : {}
+      const id = String(normalizedItem.id || normalizedItem.docId || `rule-${index + 1}`).trim()
+      return {
+        id,
+        name: String(normalizedItem.name || '').trim(),
+      }
+    })
+    .filter(item => item.id)
+}
+
+const normalizeRestrictedPageRuleAssignments = (value = {}) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return {}
+  return Object.entries(value).reduce((acc, [key, ruleId]) => {
+    const normalizedKey = String(key || '').trim()
+    const normalizedRuleId = String(ruleId || '').trim()
+    if (normalizedKey && normalizedRuleId)
+      acc[normalizedKey] = normalizedRuleId
+    return acc
+  }, {})
+}
+
+const restrictedRules = computed(() => {
+  return normalizeSiteRestrictionRules(siteDoc.value?.restrictedContent?.rules)
+})
+const restrictedPageRuleAssignments = computed(() => {
+  return normalizeRestrictedPageRuleAssignments(siteDoc.value?.restrictedContent?.pageRuleAssignments)
+})
+const NO_RESTRICTION_RULE_VALUE = '__no_restriction_rule__'
+const restrictionRuleOptions = computed(() => {
+  const options = restrictedRules.value
+    .map(item => ({
+      value: item.id,
+      label: item.name || item.id,
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label))
+
+  return [{ value: NO_RESTRICTION_RULE_VALUE, label: 'No rule selected' }, ...options]
+})
+const availableRestrictionRuleCount = computed(() => Math.max(0, restrictionRuleOptions.value.length - 1))
+const isRestrictedContentEnabled = computed(() => Boolean(siteDoc.value?.restrictedContent?.enabled))
+const showRestrictionRulePicker = computed(() => {
+  return false
+})
+
+const getRestrictionRuleLabel = (ruleId) => {
+  const normalizedRuleId = String(ruleId || '').trim()
+  if (!normalizedRuleId)
+    return 'No rule selected'
+  return restrictedRules.value.find(item => item.id === normalizedRuleId)?.name || normalizedRuleId
+}
+
+const getPageRestrictionAssignmentKey = (pageId, isDetail = false) => {
+  const normalizedPageId = String(pageId || '').trim()
+  if (!normalizedPageId)
+    return ''
+  return isDetail ? `${normalizedPageId}-details` : normalizedPageId
+}
+
+const getPageRestrictionAssignment = (pageId, isDetail = false) => {
+  const key = getPageRestrictionAssignmentKey(pageId, isDetail)
+  if (!key)
+    return ''
+  return String(restrictedPageRuleAssignments.value?.[key] || '').trim()
 }
 
 const previewSurfaceRefEntries = computed(() => ([
@@ -240,6 +324,10 @@ const hasPostView = (workingDoc) => {
 
 const setPreviewPageView = (view) => {
   state.previewPageView = view === 'post' ? 'post' : 'list'
+}
+
+const setPreviewAuthMode = (loggedIn) => {
+  state.previewAuthLoggedIn = loggedIn === true
 }
 
 const previewViewportMode = computed(() => {
@@ -619,7 +707,6 @@ const ensurePreviewSnapshots = async () => {
   const sitesPath = `organizations/${orgId}/sites`
   const blocksPath = `organizations/${orgId}/blocks`
   const publishedSiteSettingsPath = `organizations/${orgId}/published-site-settings`
-
   // Non-blocking bootstrap: never hold page render on snapshot latency.
   try {
     if (!edgeFirebase.data?.[themesPath]) {
@@ -655,9 +742,14 @@ const getNextVersion = (value) => {
 }
 
 const editorDocUpdates = (workingDoc) => {
+  if (workingDoc && Object.prototype.hasOwnProperty.call(workingDoc, 'restrictionRuleId'))
+    delete workingDoc.restrictionRuleId
+  if (workingDoc && Object.prototype.hasOwnProperty.call(workingDoc, 'postRestrictionRuleId'))
+    delete workingDoc.postRestrictionRuleId
   ensureStructureDefaults(workingDoc, false)
   if (workingDoc?.post || (Array.isArray(workingDoc?.postContent) && workingDoc.postContent.length > 0) || Array.isArray(workingDoc?.postStructure))
     ensureStructureDefaults(workingDoc, true)
+  Object.assign(state.workingDoc, buildPageWorkingDocOverrides(workingDoc))
   if (props.isTemplateSite) {
     const normalizedTypes = normalizeTemplatePageTypeSelections(workingDoc?.type, { fallback: ['Page'], excludePost: Boolean(workingDoc?.post) })
     if (JSON.stringify(workingDoc?.type || []) !== JSON.stringify(normalizedTypes))
@@ -1717,6 +1809,10 @@ function resolveSyncedPageBlock(block) {
   if (!isObjectRecord(currentBlockDoc))
     return resolvedBlock
 
+  const instanceProtection = isObjectRecord(resolvedBlock.protection)
+    ? edgeGlobal.dupObject(resolvedBlock.protection)
+    : null
+
   return {
     ...edgeGlobal.dupObject(currentBlockDoc),
     id: resolvedBlock.id,
@@ -1724,6 +1820,7 @@ function resolveSyncedPageBlock(block) {
     synced: resolvedBlock.synced ?? currentBlockDoc.synced ?? false,
     values: edgeGlobal.dupObject(resolvedBlock.values || {}),
     meta: mergeSyncedBlockMeta(currentBlockDoc.meta, resolvedBlock.meta),
+    ...(instanceProtection ? { protection: instanceProtection } : {}),
   }
 }
 
@@ -1767,6 +1864,7 @@ function buildComparablePageBlock(block) {
       synced: block.synced ?? currentBlockDoc.synced ?? false,
       values: edgeGlobal.dupObject(block.values || {}),
       meta: comparableMeta,
+      protection: isObjectRecord(block.protection) ? edgeGlobal.dupObject(block.protection) : {},
     }
   }
 
@@ -2388,6 +2486,8 @@ const openRenamePageDialog = () => {
 const openCurrentPageSettings = async () => {
   if (!currentPage.value || !props.page || props.page === 'new')
     return
+  state.pageSettingsRestrictionRuleId = getPageRestrictionAssignment(props.page, false)
+  state.pageSettingsPostRestrictionRuleId = getPageRestrictionAssignment(props.page, true)
   state.pageSettingsOpen = true
 }
 
@@ -2476,7 +2576,17 @@ const deleteCurrentPage = async () => {
   try {
     if (!props.isTemplateSite) {
       const nextMenus = removePageFromMenus(siteDoc.value?.menus, props.page)
-      await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, { menus: nextMenus })
+      const nextAssignments = { ...normalizeRestrictedPageRuleAssignments(siteDoc.value?.restrictedContent?.pageRuleAssignments) }
+      delete nextAssignments[getPageRestrictionAssignmentKey(props.page, false)]
+      delete nextAssignments[getPageRestrictionAssignmentKey(props.page, true)]
+      const nextRestrictedContent = {
+        ...((siteDoc.value?.restrictedContent && typeof siteDoc.value.restrictedContent === 'object') ? siteDoc.value.restrictedContent : {}),
+        pageRuleAssignments: nextAssignments,
+      }
+      await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, {
+        menus: nextMenus,
+        restrictedContent: nextRestrictedContent,
+      })
       if (isPagePublished(props.page))
         await edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`, props.page)
     }
@@ -2617,6 +2727,72 @@ const unPublishCurrentPage = async () => {
   }
 }
 
+const persistPageRestrictionAssignments = async (pageId = props.page) => {
+  const normalizedPageId = String(pageId || '').trim()
+  if (!normalizedPageId || props.isTemplateSite)
+    return
+
+  const currentAssignments = normalizeRestrictedPageRuleAssignments(siteDoc.value?.restrictedContent?.pageRuleAssignments)
+  const nextAssignments = { ...currentAssignments }
+  const listAssignment = String(state.pageSettingsRestrictionRuleId || '').trim()
+  const detailAssignment = String(state.pageSettingsPostRestrictionRuleId || '').trim()
+  const listKey = getPageRestrictionAssignmentKey(normalizedPageId, false)
+  const detailKey = getPageRestrictionAssignmentKey(normalizedPageId, true)
+
+  if (listAssignment)
+    nextAssignments[listKey] = listAssignment
+  else
+    delete nextAssignments[listKey]
+
+  if (detailAssignment)
+    nextAssignments[detailKey] = detailAssignment
+  else
+    delete nextAssignments[detailKey]
+
+  if (JSON.stringify(currentAssignments) === JSON.stringify(nextAssignments))
+    return
+
+  state.savingPageRuleAssignments = true
+  try {
+    const nextRestrictedContent = {
+      ...((siteDoc.value?.restrictedContent && typeof siteDoc.value.restrictedContent === 'object') ? siteDoc.value.restrictedContent : {}),
+      pageRuleAssignments: nextAssignments,
+    }
+    await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, {
+      restrictedContent: nextRestrictedContent,
+    })
+  }
+  finally {
+    state.savingPageRuleAssignments = false
+  }
+}
+
+const handlePageSettingsUpdate = async (submit) => {
+  if (state.savingPageRuleAssignments)
+    return
+
+  try {
+    if (!props.isTemplateSite && props.page && props.page !== 'new')
+      await persistPageRestrictionAssignments(props.page)
+    await submit()
+    state.pageSettingsOpen = false
+  }
+  catch (error) {
+    console.error('Failed to update page settings', error)
+    notifyError('Failed to update page settings.')
+  }
+}
+
+const handlePageSaved = async ({ docId }) => {
+  try {
+    await persistPageRestrictionAssignments(docId || props.page)
+  }
+  catch (error) {
+    console.error('Failed to save page restriction assignments', error)
+    edgeFirebase?.toast?.error?.('Page saved, but the restriction setting could not be updated.')
+  }
+}
+
 const _triggerPageImport = () => {
   pageImportInputRef.value?.click()
 }
@@ -2712,6 +2888,13 @@ watch (currentPage, (newPage) => {
   state.workingDoc.metaTitle = newPage?.metaTitle
   state.workingDoc.metaDescription = newPage?.metaDescription
   state.workingDoc.structuredData = newPage?.structuredData
+}, { immediate: true, deep: true })
+
+watch([() => props.page, restrictedPageRuleAssignments], () => {
+  if (!state.pageSettingsOpen) {
+    state.pageSettingsRestrictionRuleId = getPageRestrictionAssignment(props.page, false)
+    state.pageSettingsPostRestrictionRuleId = getPageRestrictionAssignment(props.page, true)
+  }
 }, { immediate: true, deep: true })
 
 watch(selectedHistoryEntry, (entry) => {
@@ -3228,6 +3411,7 @@ const hasUnsavedChanges = (changes) => {
     :working-doc-overrides="state.workingDoc"
     @working-doc="editorDocUpdates"
     @unsaved-changes="hasUnsavedChanges"
+    @saved="handlePageSaved"
   >
     <template #header="slotProps">
       <div class="rounded-none relative flex flex-col gap-2 p-2 top-0 z-50 rounded border border-stone-300 bg-stone-100 text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100">
@@ -3368,6 +3552,16 @@ const hasUnsavedChanges = (changes) => {
               >
                 <component :is="option.icon" class="w-3.5 h-3.5" />
               </edge-shad-button>
+            </div>
+            <div v-if="!state.editMode && isRestrictedContentEnabled" class="flex shrink-0 items-center gap-2 px-1">
+              <label class="inline-flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded-md border border-slate-300 bg-white/90 px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:bg-slate-800">
+                <Checkbox
+                  :model-value="!state.previewAuthLoggedIn"
+                  aria-label="Page preview logged out"
+                  @update:model-value="setPreviewAuthMode(!Boolean($event))"
+                />
+                Preview logged out
+              </label>
             </div>
             <div v-if="hasPostView(slotProps.workingDoc)" class="flex shrink-0 items-center gap-1 px-1">
               <edge-shad-button
@@ -3658,6 +3852,17 @@ const hasUnsavedChanges = (changes) => {
                           label="Meta Description"
                           name="page-settings-metaDescription"
                         />
+                        <edge-shad-select
+                          v-if="showRestrictionRulePicker"
+                          :model-value="state.pageSettingsRestrictionRuleId || NO_RESTRICTION_RULE_VALUE"
+                          :items="restrictionRuleOptions"
+                          item-title="label"
+                          item-value="value"
+                          label="Restriction Rule"
+                          name="page-settings-restrictionRuleId"
+                          description="Choose which access rule should protect this page."
+                          @update:model-value="value => state.pageSettingsRestrictionRuleId = value === NO_RESTRICTION_RULE_VALUE ? '' : value"
+                        />
                         <div class="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
                           CMS tokens in double curly braces are replaced on the front end.
                           Example: <span v-pre class="font-semibold text-foreground">"{{cms-site}}"</span> for the site URL,
@@ -3691,6 +3896,17 @@ const hasUnsavedChanges = (changes) => {
                           label="Meta Description"
                           name="page-settings-postMetaDescription"
                         />
+                        <edge-shad-select
+                          v-if="showRestrictionRulePicker"
+                          :model-value="state.pageSettingsPostRestrictionRuleId || NO_RESTRICTION_RULE_VALUE"
+                          :items="restrictionRuleOptions"
+                          item-title="label"
+                          item-value="value"
+                          label="Restriction Rule"
+                          name="page-settings-postRestrictionRuleId"
+                          description="Choose which access rule should protect each detail page."
+                          @update:model-value="value => state.pageSettingsPostRestrictionRuleId = value === NO_RESTRICTION_RULE_VALUE ? '' : value"
+                        />
                         <div class="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
                           CMS tokens in double curly braces are replaced on the front end.
                           Example: <span v-pre class="font-semibold text-foreground">"{{cms-site}}"</span> for the site URL,
@@ -3716,10 +3932,10 @@ const hasUnsavedChanges = (changes) => {
                   Cancel
                 </edge-shad-button>
                 <edge-shad-button
-                  type="submit"
+                  type="button"
                   class="bg-slate-800 hover:bg-slate-400 w-full"
-                  :disabled="slotProps.submitting || hasStructuredDataErrors(slotProps.workingDoc)"
-                  @click="state.pageSettingsOpen = false"
+                  :disabled="slotProps.submitting || state.savingPageRuleAssignments || hasStructuredDataErrors(slotProps.workingDoc)"
+                  @click="handlePageSettingsUpdate(slotProps.onSubmit)"
                 >
                   <Loader2 v-if="slotProps.submitting" class="h-4 w-4 animate-spin" />
                   <span v-else>Update</span>
@@ -3735,7 +3951,7 @@ const hasUnsavedChanges = (changes) => {
                 data-cms-preview-surface="page"
                 :data-cms-preview-mode="state.editMode ? 'edit' : 'preview'"
                 class="w-full h-[calc(100vh-220px)]  mt-2 overflow-y-auto mx-auto bg-card border border-border shadow-sm md:shadow-md p-0 space-y-6"
-                :class="[{ 'transition-all duration-300': !state.editMode }, state.editMode ? 'rounded-lg' : 'rounded-none']"
+                :class="[{ 'transition-all duration-300': !state.editMode }, state.editMode ? 'rounded-lg' : 'rounded-none', !state.editMode ? previewAuthClass : '']"
                 :style="buildScaledPreviewSurfaceStyle('calc(100vh - 220px)')"
               >
                 <edge-button-divider v-if="state.editMode" class="my-2">
@@ -3885,8 +4101,10 @@ const hasUnsavedChanges = (changes) => {
                                       :allow-preview-content-edit="!state.editMode && canOpenPreviewBlockContentEditor"
                                       :contain-fixed="state.editMode"
                                       :viewport-mode="previewViewportMode"
+                                      :preview-auth-logged-in="state.previewAuthLoggedIn"
                                       :block-id="blockId"
                                       :theme="theme"
+                                      :allow-protection-editor="isRestrictedContentEnabled"
                                       @delete="(block) => deleteBlock(block, slotProps)"
                                     />
                                     <div
@@ -3993,7 +4211,7 @@ const hasUnsavedChanges = (changes) => {
                 data-cms-preview-surface="page"
                 :data-cms-preview-mode="state.editMode ? 'edit' : 'preview'"
                 class="w-full  h-[calc(100vh-180px)]  mt-2 overflow-y-auto mx-auto bg-card border border-border shadow-sm md:shadow-md p-0 space-y-6"
-                :class="[{ 'transition-all duration-300': !state.editMode }, state.editMode ? 'rounded-lg' : 'rounded-none']"
+                :class="[{ 'transition-all duration-300': !state.editMode }, state.editMode ? 'rounded-lg' : 'rounded-none', !state.editMode ? previewAuthClass : '']"
                 :style="buildScaledPreviewSurfaceStyle('calc(100vh - 180px)')"
               >
                 <edge-button-divider v-if="state.editMode" class="my-2">
@@ -4142,10 +4360,12 @@ const hasUnsavedChanges = (changes) => {
                                       :allow-preview-content-edit="!state.editMode && canOpenPreviewBlockContentEditor"
                                       :contain-fixed="state.editMode"
                                       :viewport-mode="previewViewportMode"
+                                      :preview-auth-logged-in="state.previewAuthLoggedIn"
                                       :block-id="blockId"
                                       :theme="theme"
                                       :site-id="selectedPreviewContextSiteId"
                                       :route-last-segment="previewRouteLastSegment"
+                                      :allow-protection-editor="isRestrictedContentEnabled"
                                       @delete="(block) => deleteBlock(block, slotProps, true)"
                                     />
                                     <div
@@ -5030,5 +5250,19 @@ const hasUnsavedChanges = (changes) => {
 
 .cms-page-preview-mode :deep([data-cms-preview-surface]) {
   color: initial !important;
+}
+
+.cms-auth-preview-logged-in :deep(.cms-show-logged-out),
+.cms-auth-preview-logged-in :deep([data-cms-show-logged-out]),
+.cms-auth-preview-logged-in :deep(.cms-hide-logged-in),
+.cms-auth-preview-logged-in :deep([data-cms-hide-logged-in]) {
+  display: none !important;
+}
+
+.cms-auth-preview-logged-out :deep(.cms-show-logged-in),
+.cms-auth-preview-logged-out :deep([data-cms-show-logged-in]),
+.cms-auth-preview-logged-out :deep(.cms-hide-logged-out),
+.cms-auth-preview-logged-out :deep([data-cms-hide-logged-out]) {
+  display: none !important;
 }
 </style>

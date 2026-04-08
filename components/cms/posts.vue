@@ -30,6 +30,14 @@ let copiedPostUrlResetTimer = null
 const edgeFirebase = inject('edgeFirebase')
 const cmsMultiOrg = useState('cmsMultiOrg', () => true)
 const isAdmin = computed(() => edgeGlobal.isAdminGlobal(edgeFirebase).value)
+const currentOrgRoleName = computed(() => {
+  return String(edgeGlobal.getRoleName(edgeFirebase?.user?.roles || [], edgeGlobal.edgeState.currentOrganization) || '').toLowerCase()
+})
+const canManageRestrictionAssignments = computed(() => {
+  if (!cmsMultiOrg.value)
+    return currentOrgRoleName.value === 'admin'
+  return currentOrgRoleName.value === 'admin' || currentOrgRoleName.value === 'site admin'
+})
 const isDevModeEnabled = computed(() => process.dev || Boolean(edgeGlobal.edgeState.devOverride))
 const showDevOnlyActions = computed(() => edgeGlobal.allowMenuItem({ devOnly: true }, isAdmin.value))
 const canOpenPreviewBlockContentEditor = computed(() => {
@@ -223,6 +231,7 @@ const postDocComparable = (post) => {
     blurb: post?.blurb || '',
     tags: Array.isArray(post?.tags) ? post.tags : [],
     featuredImage: post?.featuredImage || '',
+    restrictionRuleId: post?.restrictionRuleId || '',
     content: Array.isArray(post?.content) ? post.content : (typeof post?.content === 'string' ? post.content : ''),
     structure: Array.isArray(post?.structure) ? post.structure : [],
     type: normalizePostType(post?.type),
@@ -347,6 +356,7 @@ const schemas = {
     content: z.union([z.array(z.any()), z.string()]).optional(),
     structure: z.array(z.any()).optional(),
     featuredImages: z.array(z.string()).optional(),
+    restrictionRuleId: z.string().optional(),
     publishAt: z.string().optional(),
     publishAtTimezone: z.string().optional(),
     type: z.enum(['post', 'event']).optional(),
@@ -514,6 +524,16 @@ const lastPublishedTime = (postId) => {
   return date.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })
 }
 
+const getDefaultPublishAtIso = (postId, draftPostOverride = null) => {
+  if (!postId)
+    return ''
+  const draftPost = draftPostOverride || posts.value?.[postId] || null
+  const scheduledPublishAt = String(draftPost?.publishAt || '').trim()
+  if (scheduledPublishAt)
+    return scheduledPublishAt
+  return String(publishedPosts.value?.[postId]?.publishedAt || draftPost?.publishedAt || '').trim()
+}
+
 const state = reactive({
   editMode: false,
   sheetOpen: false,
@@ -539,6 +559,7 @@ const state = reactive({
   listTypeFilter: 'all',
   reindexPublishedPostsLoading: false,
   publishAtInput: '',
+  publishAtDirty: false,
   historyDialogOpen: false,
   historyLoading: false,
   historyRestoring: false,
@@ -602,6 +623,9 @@ const state = reactive({
           'description': 'Enter image URLs or storage paths',
         },
       },
+      restrictionRuleId: {
+        value: '',
+      },
       publishAt: {
         value: '',
       },
@@ -647,6 +671,20 @@ onBeforeMount(async () => {
 
 const posts = computed(() => edgeFirebase.data?.[collectionKey.value] || {})
 const siteDoc = computed(() => edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site] || null)
+const restrictedRules = computed(() => {
+  if (!Array.isArray(siteDoc.value?.restrictedContent?.rules))
+    return []
+  return siteDoc.value.restrictedContent.rules
+    .map((item, index) => {
+      const normalizedItem = (item && typeof item === 'object') ? item : {}
+      const id = String(normalizedItem.id || normalizedItem.docId || `rule-${index + 1}`).trim()
+      return {
+        id,
+        name: String(normalizedItem.name || '').trim(),
+      }
+    })
+    .filter(item => item.id)
+})
 const sitePages = computed(() => edgeFirebase.data?.[sitePagesCollectionKey.value] || {})
 const publishedSiteSettingsDoc = computed(() => edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`]?.[props.site] || null)
 const postTemplateCollectionKey = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/templates/pages`)
@@ -763,6 +801,30 @@ const postTemplateFilterOptions = computed(() => {
     ...tagOptions,
   ]
 })
+
+const NO_RESTRICTION_RULE_VALUE = '__no_restriction_rule__'
+const restrictionRuleOptions = computed(() => {
+  const options = restrictedRules.value
+    .map(item => ({
+      value: item.id,
+      label: item.name || item.id,
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label))
+
+  return [{ value: NO_RESTRICTION_RULE_VALUE, label: 'No rule selected' }, ...options]
+})
+const availableRestrictionRuleCount = computed(() => Math.max(0, restrictionRuleOptions.value.length - 1))
+const isRestrictedContentEnabled = computed(() => Boolean(siteDoc.value?.restrictedContent?.enabled))
+const showRestrictionRulePicker = computed(() => {
+  return false
+})
+
+const getRestrictionRuleLabel = (ruleId) => {
+  const normalizedRuleId = String(ruleId || '').trim()
+  if (!normalizedRuleId)
+    return 'No rule selected'
+  return restrictedRules.value.find(item => item.id === normalizedRuleId)?.name || normalizedRuleId
+}
 
 const postTemplateFilterMatches = (template, filterValue) => {
   if (template.docId === blankPostTemplateTile.docId)
@@ -1183,6 +1245,10 @@ const resolveSyncedPostBlock = (block) => {
   if (!isPlainObject(currentBlockDoc))
     return resolvedBlock
 
+  const instanceProtection = isPlainObject(resolvedBlock.protection)
+    ? edgeGlobal.dupObject(resolvedBlock.protection)
+    : null
+
   return {
     ...edgeGlobal.dupObject(currentBlockDoc),
     id: resolvedBlock.id,
@@ -1190,6 +1256,7 @@ const resolveSyncedPostBlock = (block) => {
     synced: resolvedBlock.synced ?? currentBlockDoc.synced ?? false,
     values: edgeGlobal.dupObject(resolvedBlock.values || {}),
     meta: mergeSyncedBlockMeta(currentBlockDoc.meta, resolvedBlock.meta),
+    ...(instanceProtection ? { protection: instanceProtection } : {}),
   }
 }
 
@@ -1228,6 +1295,7 @@ const buildComparablePostBlock = (block) => {
       synced: block.synced ?? currentBlockDoc.synced ?? false,
       values: edgeGlobal.dupObject(block.values || {}),
       meta: comparableMeta,
+      protection: isPlainObject(block.protection) ? edgeGlobal.dupObject(block.protection) : {},
     }
   }
 
@@ -1246,6 +1314,7 @@ const buildComparablePostDiffDoc = (doc) => {
     blurb: normalizedDoc?.blurb || '',
     tags: Array.isArray(normalizedDoc?.tags) ? normalizedDoc.tags : [],
     featuredImage: normalizedDoc?.featuredImage || '',
+    restrictionRuleId: normalizedDoc?.restrictionRuleId || '',
     content: Array.isArray(normalizedDoc?.content) ? normalizedDoc.content.map(buildComparablePostBlock) : [],
     structure: Array.isArray(normalizedDoc?.structure) ? normalizedDoc.structure : [],
     type: normalizePostType(normalizedDoc?.type),
@@ -1407,10 +1476,31 @@ const parseDateTimeLocalToUtcIso = (value) => {
   return date.toISOString()
 }
 
+const syncPublishAtInputFromPost = (postId, draftPostOverride = null) => {
+  const publishAtIso = getDefaultPublishAtIso(postId, draftPostOverride)
+  state.publishAtInput = formatIsoToDateTimeLocalInput(publishAtIso) || nowDateTimeLocalInput()
+  state.publishAtDirty = false
+}
+
+const handlePublishAtInputUpdate = (value) => {
+  state.publishAtInput = value
+  state.publishAtDirty = true
+}
+
+const resolvePublishNowTimestampIso = (postId, draftPostOverride = null) => {
+  const defaultPublishAtIso = getDefaultPublishAtIso(postId, draftPostOverride)
+  if (state.publishAtDirty) {
+    const overriddenPublishAtIso = parseDateTimeLocalToUtcIso(state.publishAtInput)
+    if (overriddenPublishAtIso)
+      return overriddenPublishAtIso
+  }
+  return defaultPublishAtIso || new Date().toISOString()
+}
+
 watch(
-  () => activePost.value?.publishAt,
-  (publishAt) => {
-    state.publishAtInput = formatIsoToDateTimeLocalInput(publishAt) || nowDateTimeLocalInput()
+  () => [state.activePostId, activePost.value?.publishAt, publishedActivePost.value?.publishedAt],
+  () => {
+    syncPublishAtInputFromPost(state.activePostId, activePost.value)
   },
   { immediate: true },
 )
@@ -2068,6 +2158,7 @@ const buildPostChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel }
   compareField('blurb', 'Blurb', val => summarizeChangeValue(val, true))
   compareField('tags', 'Tags', val => summarizeChangeValue(val, true))
   compareField('featuredImage', 'Featured Image', val => summarizeChangeValue(val, true))
+  compareField('restrictionRuleId', 'Restriction rule', val => getRestrictionRuleLabel(val))
   compareField('type', 'Post Type')
   compareField('publishAt', 'Publish At', val => summarizeChangeValue(val, true))
   compareField('publishAtTimezone', 'Publish Timezone')
@@ -2339,6 +2430,9 @@ const createNewPostDocSchema = (postDoc = {}) => {
         'label': 'Featured Images',
         'description': 'Enter image URLs or storage paths',
       },
+    },
+    restrictionRuleId: {
+      value: String(postDoc?.restrictionRuleId || '').trim(),
     },
     publishAt: {
       value: String(postDoc?.publishAt || '').trim(),
@@ -2789,15 +2883,17 @@ const publishPost = async (postId) => {
   const post = posts.value?.[postId]
   if (!post)
     return
-  const publishBlockedReason = getPublishBlockedReason(postId, post)
+  const publishedAtIso = resolvePublishNowTimestampIso(postId, post)
+  const publishedAtMillis = Date.parse(publishedAtIso)
+  const publishBlockedReason = getPublishBlockedReason(postId, post, {
+    publishAtMs: Number.isFinite(publishedAtMillis) ? publishedAtMillis : Date.now(),
+  })
   if (publishBlockedReason) {
     edgeFirebase?.toast?.error?.(publishBlockedReason)
     return
   }
   emit('updating', true)
   try {
-    const publishedAtIso = new Date().toISOString()
-    const publishedAtMillis = Date.parse(publishedAtIso)
     const publishedPost = edgeGlobal.dupObject(post || {})
     delete publishedPost.publishAt
     publishedPost.doc_created_at = Number.isFinite(publishedAtMillis) ? publishedAtMillis : Date.now()
@@ -2810,9 +2906,14 @@ const publishPost = async (postId) => {
     if (typeof post?.publishAt === 'string' && post.publishAt.trim()) {
       draftPublishUpdate.publishAt = ''
       draftPublishUpdate.publishAtTimezone = ''
-      state.publishAtInput = ''
     }
     await edgeFirebase.changeDoc(collectionKey.value, postId, draftPublishUpdate)
+    syncPublishAtInputFromPost(postId, {
+      ...post,
+      publishAt: '',
+      publishAtTimezone: '',
+      publishedAt: publishedAtIso,
+    })
   }
   catch (error) {
     console.error('Failed to publish post:', error)
@@ -2830,15 +2931,17 @@ const publishPostAt = async (postId, publishedAtIso) => {
   if (!post)
     return
 
-  const publishBlockedReason = getPublishBlockedReason(postId, post)
-  if (publishBlockedReason) {
-    edgeFirebase?.toast?.error?.(publishBlockedReason)
-    return
-  }
-
   const publishedAtMillis = Date.parse(publishedAtIso)
   if (!Number.isFinite(publishedAtMillis)) {
     edgeFirebase?.toast?.error?.('Publish At must be a valid date/time.')
+    return
+  }
+
+  const publishBlockedReason = getPublishBlockedReason(postId, post, {
+    publishAtMs: publishedAtMillis,
+  })
+  if (publishBlockedReason) {
+    edgeFirebase?.toast?.error?.(publishBlockedReason)
     return
   }
 
@@ -2856,7 +2959,12 @@ const publishPostAt = async (postId, publishedAtIso) => {
       publishAtTimezone: '',
       publishAtError: '',
     })
-    state.publishAtInput = ''
+    syncPublishAtInputFromPost(postId, {
+      ...post,
+      publishAt: '',
+      publishAtTimezone: '',
+      publishedAt: publishedAtIso,
+    })
   }
   catch (error) {
     console.error('Failed to publish post:', error)
@@ -2899,6 +3007,7 @@ const schedulePostPublish = async (postId) => {
       publishAt: publishAtIso,
       publishAtTimezone: CURRENT_USER_TIMEZONE,
     })
+    state.publishAtDirty = false
     edgeFirebase?.toast?.success?.(`Scheduled publish for ${new Date(publishAtIso).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}.`)
   }
   catch (error) {
@@ -2913,6 +3022,7 @@ const schedulePostPublish = async (postId) => {
 const clearScheduledPublish = async (postId) => {
   if (!postId)
     return
+  const post = posts.value?.[postId]
   emit('updating', true)
   try {
     await edgeFirebase.changeDoc(collectionKey.value, postId, {
@@ -2920,7 +3030,11 @@ const clearScheduledPublish = async (postId) => {
       publishAtTimezone: '',
       publishAtError: '',
     })
-    state.publishAtInput = nowDateTimeLocalInput()
+    syncPublishAtInputFromPost(postId, {
+      ...post,
+      publishAt: '',
+      publishAtTimezone: '',
+    })
     edgeFirebase?.toast?.success?.('Scheduled publish cleared.')
   }
   catch (error) {
@@ -4056,7 +4170,7 @@ const reindexPublishedPostsToKv = async () => {
                     {{ activePostPublishStatus.publishBlockedReason }}
                   </div>
                   <edge-shad-datetime
-                    v-model="state.publishAtInput"
+                    :model-value="state.publishAtInput"
                     name="publish-at"
                     label="Publish At"
                     trigger-class="border-slate-300 bg-white text-slate-900 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
@@ -4066,6 +4180,7 @@ const reindexPublishedPostsToKv = async () => {
                     done-button-class="border-slate-300 bg-slate-200 text-slate-900 hover:bg-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
                     calendar-class="edge-cms-calendar-slate"
                     :disabled="slotProps.submitting || slotProps.unsavedChanges || !state.activePostId || state.activePostId === 'new'"
+                    @update:model-value="handlePublishAtInputUpdate"
                   />
                   <div class="text-xs text-muted-foreground">
                     Pick date/time for scheduled publish. Use Publish Now to publish immediately.
@@ -4410,6 +4525,7 @@ const reindexPublishedPostsToKv = async () => {
                                   :contain-fixed="true"
                                   :block-id="blockId"
                                   :theme="theme"
+                                  :allow-protection-editor="false"
                                   @delete="() => deletePostBlock(slotProps.workingDoc, blockId)"
                                 />
                                 <div v-if="state.editMode" class="block-drag-handle pointer-events-none absolute inset-x-0 top-2 flex justify-center opacity-0 transition group-hover:opacity-100 z-30">
@@ -4683,6 +4799,7 @@ const reindexPublishedPostsToKv = async () => {
                             :contain-fixed="true"
                             :block-id="blockId"
                             :theme="theme"
+                            :allow-protection-editor="false"
                             @delete="() => deletePostBlock(slotProps.workingDoc, blockId)"
                           />
                           <div v-if="state.editMode" class="block-drag-handle pointer-events-none absolute inset-x-0 top-2 flex justify-center opacity-0 transition group-hover:opacity-100 z-30">
