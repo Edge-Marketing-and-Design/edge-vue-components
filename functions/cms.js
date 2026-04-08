@@ -6909,33 +6909,29 @@ exports.syncSiteSettingsFromUserMeta = onDocumentWritten(
     if (!Object.keys(metaDiff).length)
       return
 
-    const stagedId = event.params.stagedId
-    const authUserId = change.after.data()?.userId
-    const userIds = Array.from(new Set([stagedId, authUserId].filter(Boolean)))
-    if (!userIds.length)
+    const authUserId = String(change.after.data()?.userId || '').trim()
+    if (!authUserId)
       return
 
     const matchedSites = new Map()
-    for (const userId of userIds) {
-      const snap = await db.collectionGroup('sites')
-        .where('users', 'array-contains', userId)
-        .get()
+    const snap = await db.collectionGroup('sites')
+      .where('users', 'array-contains', authUserId)
+      .get()
 
-      if (snap.empty)
-        continue
-
+    if (!snap.empty) {
       for (const doc of snap.docs) {
-        matchedSites.set(doc.ref.path, { doc, userId })
+        matchedSites.set(doc.ref.path, { doc, matchedUserIds: new Set([authUserId]) })
       }
     }
 
     if (!matchedSites.size)
       return
 
-    for (const { doc, userId } of matchedSites.values()) {
+    for (const { doc, matchedUserIds } of matchedSites.values()) {
       const siteData = doc.data() || {}
       const users = Array.isArray(siteData.users) ? siteData.users : []
-      if (!users.length || users[0] !== userId)
+      const primaryUserId = users[0]
+      if (!primaryUserId || !matchedUserIds.has(primaryUserId))
         continue
 
       const siteUpdate = buildUpdateDiff(siteData, pickSyncFields(afterMeta))
@@ -6958,7 +6954,7 @@ exports.syncSiteSettingsFromUserMeta = onDocumentWritten(
       logger.log('syncSiteSettingsFromUserMeta: updated site settings from user meta', {
         siteId,
         orgId: orgId || '',
-        userId,
+        userId: primaryUserId,
         fields: Object.keys(siteUpdate),
       })
     }
