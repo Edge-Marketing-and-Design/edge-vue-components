@@ -148,6 +148,7 @@ const schemas = {
       required_error: 'Theme is required',
     }).min(1, { message: 'Theme is required' }),
     allowedThemes: z.array(z.string()).optional(),
+    showMembersTab: z.boolean().optional(),
     logo: z.string().optional(),
     logoLight: z.string().optional(),
     logoText: z.string().optional(),
@@ -226,7 +227,6 @@ const cmsTabAccess = computed(() => {
 const canViewPagesTab = computed(() => cmsTabAccess.value.pages)
 const canViewPostsTab = computed(() => cmsTabAccess.value.posts)
 const canViewInboxTab = computed(() => cmsTabAccess.value.inbox)
-const canViewRestrictedTab = computed(() => !isTemplateSite.value && canManageRestrictedContent.value)
 const hidePublishStatusAndActions = computed(() => cmsMultiOrg.value && !canViewPagesTab.value)
 const defaultViewMode = computed(() => {
   if (canViewPagesTab.value)
@@ -242,6 +242,14 @@ const defaultViewMode = computed(() => {
 
 const siteData = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site] || {}
+})
+const showMembersTab = computed(() => Boolean(siteData.value?.showMembersTab))
+const canViewRestrictedTab = computed(() => {
+  if (isTemplateSite.value || !showMembersTab.value)
+    return false
+  if (!cmsMultiOrg.value)
+    return true
+  return canManageRestrictedContent.value
 })
 const restrictedContentEnabled = computed(() => Boolean(siteData.value?.restrictedContent?.enabled))
 const publishedSiteSettings = computed(() => {
@@ -3618,7 +3626,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                 :has-users="Object.keys(orgUsers).length > 0"
                 :show-users="!cmsMultiOrg"
                 :show-theme-fields="true"
-                :is-admin="isAdmin"
+                :is-admin="isOrgAdmin"
                 :enable-media-picker="true"
                 :site-id="props.site"
                 :domain-error="domainError"

@@ -362,10 +362,10 @@ watch(() => props.settings?.forwardApex, (value) => {
         SEO
       </TabsTrigger>
       <TabsTrigger value="tracking" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
-        Tracking Pixels
+        Tracking
       </TabsTrigger>
       <TabsTrigger value="social" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
-        Social Media
+        Socials
       </TabsTrigger>
     </TabsList>
     <TabsContent value="general" class="pt-4 space-y-4">
@@ -404,6 +404,17 @@ watch(() => props.settings?.forwardApex, (value) => {
         class="w-full"
         :multiple="true"
       />
+      <edge-cms-boolean-card
+        v-if="props.isAdmin"
+        v-model="props.settings.showMembersTab"
+        name="showMembersTab"
+        label="Show Members Tab"
+        class="w-full"
+        checked-label="Visible"
+        unchecked-label="Hidden"
+      >
+        Show or hide the Members tab for this site.
+      </edge-cms-boolean-card>
       <p v-else-if="props.showUsers" class="text-sm text-muted-foreground">
         No organization users available for this site.
       </p>
