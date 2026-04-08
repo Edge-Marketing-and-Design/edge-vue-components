@@ -256,6 +256,9 @@ const firstValidDomain = (domains) => {
 }
 
 const membersStripeWebhookUrl = computed(() => {
+  const browserOrigin = typeof window !== 'undefined' ? String(window.location.origin || '').trim().replace(/\/+$/, '') : ''
+  if (browserOrigin)
+    return `${browserOrigin}/api/members-stripe`
   const host = firstValidDomain(props.siteDoc?.domains)
   return host ? `https://${host}/api/members-stripe` : ''
 })
