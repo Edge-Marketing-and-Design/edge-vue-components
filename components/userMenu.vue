@@ -138,16 +138,6 @@ const firstPart = computed(() => {
           Members
           <Check v-if="currentRoutePath === `${firstPart}/account/organization-members`" class="h-3 w-3 mr-2 ml-auto" />
         </DropdownMenuItem>
-        <DropdownMenuItem
-          v-if="canManageAudienceUsers"
-          class="cursor-pointer"
-          :class="{ 'bg-accent': currentRoutePath === `${firstPart}/account/audience-users` }"
-          @click="goTo(`${firstPart}/account/audience-users`)"
-        >
-          <UserRoundCheck class="h-4 w-4 mr-2" />
-          Audience Users
-          <Check v-if="currentRoutePath === `${firstPart}/account/audience-users`" class="h-3 w-3 mr-2 ml-auto" />
-        </DropdownMenuItem>
       </template>
       <DropdownMenuSeparator />
       <DropdownMenuLabel class="text-xs text-muted-foreground">
