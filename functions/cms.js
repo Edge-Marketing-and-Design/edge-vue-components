@@ -19,6 +19,7 @@ const {
 } = require('./config.js')
 
 const { createKvMirrorHandler } = require('./kv/kvMirror')
+const kv = require('./kv/kvClient')
 
 const SITE_AI_TOPIC = 'site-ai-bootstrap'
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || ''
@@ -327,6 +328,30 @@ const normalizeDomain = (value) => {
     normalized = normalized.split(':')[0] || ''
   }
   return normalized.replace(/\.+$/g, '')
+}
+
+const collectCorsAllowedDomains = async () => {
+  const snap = await db.collection(DOMAIN_REGISTRY_COLLECTION).get()
+  if (snap.empty)
+    return []
+
+  const allowed = new Set()
+  for (const doc of snap.docs) {
+    const data = doc.data() || {}
+    const candidates = [
+      doc.id,
+      data.domain,
+      data.apexDomain,
+      data.wwwDomain,
+    ]
+    for (const candidate of candidates) {
+      const normalized = normalizeDomain(candidate)
+      if (normalized)
+        allowed.add(normalized)
+    }
+  }
+
+  return Array.from(allowed).sort()
 }
 
 const stripIpv6Brackets = (value) => {
@@ -6889,6 +6914,27 @@ exports.syncFirebaseAuthDomainsFromDomainRegistry = onDocumentWritten(
         domainDoc: event.params.domain,
         addDomains,
         removeDomains,
+        message: error?.message || String(error),
+      })
+      throw error
+    }
+  },
+)
+
+exports.syncCorsAllowedFromDomainRegistry = onDocumentWritten(
+  { document: `${DOMAIN_REGISTRY_COLLECTION}/{domain}`, timeoutSeconds: 180 },
+  async (event) => {
+    try {
+      const domains = await collectCorsAllowedDomains()
+      await kv.putJson('cors:allowed', domains)
+      logger.log('Synced KV cors:allowed from domain registry', {
+        domainDoc: event.params.domain,
+        totalDomains: domains.length,
+      })
+    }
+    catch (error) {
+      logger.error('Failed to sync KV cors:allowed from domain registry', {
+        domainDoc: event.params.domain,
         message: error?.message || String(error),
       })
       throw error
