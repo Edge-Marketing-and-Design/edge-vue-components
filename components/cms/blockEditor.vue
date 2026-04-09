@@ -15,6 +15,7 @@ const edgeFirebase = inject('edgeFirebase')
 const { saveJsonFile } = useJsonFileSave()
 const { blocks: blockNewDocSchema } = useCmsNewDocs()
 const blockEditorPostPreviewCache = useState('edge-cms-block-editor-post-preview-cache', () => ({}))
+const BLOCK_INSTRUCTIONS_FIELD_KEY = 'Instructions'
 
 const state = reactive({
   filter: '',
@@ -50,6 +51,14 @@ const state = reactive({
   historySelectedId: '',
   historyPreviewBlock: null,
   showHistoryDiffDialog: false,
+  instructionsDialogOpen: false,
+})
+const isGlobalAdmin = computed(() => edgeGlobal.isAdminGlobal(edgeFirebase).value)
+const instructionsEnabledToggles = computed(() => {
+  const baseToggles = ['bold', 'italic', 'strike', 'bulletlist', 'orderedlist', 'underline', 'link']
+  if (isGlobalAdmin.value)
+    return [...baseToggles, 'source']
+  return baseToggles
 })
 
 const blockSchema = toTypedSchema(z.object({
@@ -1497,29 +1506,41 @@ const exportCurrentBlock = async () => {
                 @line-click="payload => handleEditorLineClick(payload, slotProps.workingDoc)"
               >
                 <template #end-actions>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger as-child>
-                      <edge-shad-button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        class="h-8 px-3 text-[11px] uppercase tracking-wide rounded border border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100"
-                      >
-                        Dynamic Content
-                      </edge-shad-button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" class="w-72">
-                      <DropdownMenuItem
-                        v-for="snippet in BLOCK_CONTENT_SNIPPETS"
-                        :key="snippet.label"
-                        class="cursor-pointer flex-col items-start gap-0.5"
-                        @click="insertBlockContentSnippet(snippet.snippet)"
-                      >
-                        <span class="text-sm font-medium">{{ snippet.label }}</span>
-                        <span class="text-xs text-muted-foreground whitespace-normal">{{ snippet.description }}</span>
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                  <div class="flex items-center gap-2">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger as-child>
+                        <edge-shad-button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          class="h-8 px-3 text-[11px] uppercase tracking-wide rounded border border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100"
+                        >
+                          Dynamic Content
+                        </edge-shad-button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" class="w-72">
+                        <DropdownMenuItem
+                          v-for="snippet in BLOCK_CONTENT_SNIPPETS"
+                          :key="snippet.label"
+                          class="cursor-pointer flex-col items-start gap-0.5"
+                          @click="insertBlockContentSnippet(snippet.snippet)"
+                        >
+                          <span class="text-sm font-medium">{{ snippet.label }}</span>
+                          <span class="text-xs text-muted-foreground whitespace-normal">{{ snippet.description }}</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                    <edge-shad-button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      class="h-8 px-3 text-[11px] uppercase tracking-wide rounded border border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100"
+                      @click="state.instructionsDialogOpen = true"
+                    >
+                      <HelpCircle class="mr-1 h-3.5 w-3.5" />
+                      Instructions
+                    </edge-shad-button>
+                  </div>
                   <edge-shad-button
                     type="button"
                     size="sm"
@@ -1532,6 +1553,28 @@ const exportCurrentBlock = async () => {
                   </edge-shad-button>
                 </template>
               </edge-cms-code-editor>
+              <edge-shad-dialog v-model="state.instructionsDialogOpen">
+                <DialogContent class="max-w-[760px]">
+                  <DialogHeader>
+                    <DialogTitle>Block Instructions</DialogTitle>
+                    <DialogDescription>
+                      Add usage guidance for this block. This helps users understand how to use the block and appears in the Edit Block screen above the field inputs.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <edge-shad-html
+                    v-model="slotProps.workingDoc[BLOCK_INSTRUCTIONS_FIELD_KEY]"
+                    :enabled-toggles="instructionsEnabledToggles"
+                    :enable-links="true"
+                    name="blockInstructions"
+                    label="Instructions"
+                  />
+                  <DialogFooter class="pt-4 flex justify-between">
+                    <edge-shad-button type="button" variant="destructive" class="text-white" @click="state.instructionsDialogOpen = false">
+                      Close
+                    </edge-shad-button>
+                  </DialogFooter>
+                </DialogContent>
+              </edge-shad-dialog>
             </div>
             <div class="w-1/2 space-y-2">
               <div class="flex items-center gap-2">

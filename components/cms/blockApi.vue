@@ -116,7 +116,9 @@ const fetchAllArrays = async (meta, baseValues) => {
       if (!cfg || cfg.type !== 'array' || !cfg.api)
         return
 
-      const url = buildUrlWithQuery(String(cfg.api), String(cfg.apiQuery || ''), cfg.queryItems || {})
+      const hasRuntimeQueryOptions = Array.isArray(cfg.queryOptions) && cfg.queryOptions.length > 0
+      const runtimeQueryItems = hasRuntimeQueryOptions ? (cfg.queryItems || {}) : {}
+      const url = buildUrlWithQuery(String(cfg.api), String(cfg.apiQuery || ''), runtimeQueryItems)
       // use $fetch for SSR-friendly HTTP
       const json = await $fetch(url, { method: 'GET' })
 

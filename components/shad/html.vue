@@ -1,6 +1,7 @@
 <script setup>
 // import { Extension } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
+import Link from '@tiptap/extension-link'
 import TextStyle from '@tiptap/extension-text-style'
 import Underline from '@tiptap/extension-underline'
 import ImageExt from '@tiptap/extension-image'
@@ -81,6 +82,11 @@ const props = defineProps({
     type: Array,
     required: false,
     default: () => ['bold', 'italic', 'strike', 'underline', 'code', 'codeBlock', 'heading1', 'heading2', 'heading3', 'heading4', 'heading5', 'heading6', 'bulletlist', 'orderedlist', 'blockquote', 'horizontalrule', 'hardbreak', 'image'],
+  },
+  enableLinks: {
+    type: Boolean,
+    required: false,
+    default: false,
   },
   heightClass: {
     type: String,
@@ -181,6 +187,12 @@ const sourceFormatting = ref(false)
 const sourceLineNumberText = computed(() => {
   const lineCount = Math.max(1, String(sourceValue.value || '').split('\n').length)
   return Array.from({ length: lineCount }, (_item, index) => String(index + 1)).join('\n')
+})
+const linkControlsEnabled = computed(() => props.enableLinks === true && props.enabledToggles.includes('link'))
+const activeLinkOpensInNewTab = computed(() => {
+  if (!editor.value || !editor.value.isActive('link'))
+    return false
+  return String(editor.value.getAttributes('link')?.target || '').toLowerCase() === '_blank'
 })
 
 const appliedHeightClasses = ref([])
@@ -315,14 +327,25 @@ const formatSourceHtml = async () => {
 }) */
 
 onMounted(() => {
+  const extensions = [
+    StarterKit,
+    TextStyle,
+    EdgeImage,
+    Underline,
+  ]
+  if (props.enableLinks) {
+    extensions.push(
+      Link.configure({
+        openOnClick: false,
+        autolink: false,
+        linkOnPaste: false,
+      }),
+    )
+  }
+
   editor.value = new Editor({
-    extensions: [
-      StarterKit,
-      TextStyle,
-      EdgeImage,
-      Underline,
-      // PreventEnterSubmit,
-    ],
+    extensions,
+    // PreventEnterSubmit,
     /*     onCreate({ editor }) {
     // DOM olay dinleyicisi ekleme
       console.log(editor)
@@ -440,6 +463,57 @@ const removeImage = () => {
     return
   editor.value.chain().focus().deleteSelection().run()
   updateImageState()
+}
+
+const setLink = () => {
+  if (!editor.value || !linkControlsEnabled.value)
+    return
+  const currentHref = String(editor.value.getAttributes('link')?.href || '')
+  const raw = window.prompt('Enter link URL', currentHref)
+  if (raw === null)
+    return
+  const trimmed = raw.trim()
+  if (!trimmed) {
+    editor.value.chain().focus().extendMarkRange('link').unsetLink().run()
+    return
+  }
+  const href = /^(https?:\/\/|mailto:|tel:|\/|#)/i.test(trimmed) ? trimmed : `https://${trimmed}`
+  editor.value
+    .chain()
+    .focus()
+    .extendMarkRange('link')
+    .setLink({
+      href,
+      target: '_blank',
+      rel: 'noopener noreferrer',
+    })
+    .run()
+}
+
+const unsetLink = () => {
+  if (!editor.value || !linkControlsEnabled.value)
+    return
+  editor.value.chain().focus().extendMarkRange('link').unsetLink().run()
+}
+
+const toggleLinkTargetBlank = () => {
+  if (!editor.value || !linkControlsEnabled.value || !editor.value.isActive('link'))
+    return
+  const attrs = editor.value.getAttributes('link') || {}
+  const href = String(attrs.href || '').trim()
+  if (!href)
+    return
+  const nextOpensInNewTab = !activeLinkOpensInNewTab.value
+  editor.value
+    .chain()
+    .focus()
+    .extendMarkRange('link')
+    .setLink({
+      href,
+      target: nextOpensInNewTab ? '_blank' : null,
+      rel: nextOpensInNewTab ? 'noopener noreferrer' : null,
+    })
+    .run()
 }
 
 defineExpose({
@@ -632,6 +706,37 @@ defineExpose({
                     @click.prevent="addImage"
                   >
                     <Image :size="16" />
+                  </Button>
+                  <Button
+                    v-if="linkControlsEnabled"
+                    variant="outline"
+                    :class="toolbarToggleClass"
+                    :data-state="editor.isActive('link') ? 'on' : 'off'"
+                    title="Add / Edit Link"
+                    @click.prevent="setLink"
+                  >
+                    Link
+                  </Button>
+                  <Button
+                    v-if="linkControlsEnabled"
+                    variant="outline"
+                    :class="toolbarToggleClass"
+                    :data-state="activeLinkOpensInNewTab ? 'on' : 'off'"
+                    title="Toggle opening current link in a new tab"
+                    :disabled="!editor.isActive('link')"
+                    @click.prevent="toggleLinkTargetBlank"
+                  >
+                    New Tab
+                  </Button>
+                  <Button
+                    v-if="linkControlsEnabled"
+                    variant="outline"
+                    :class="toolbarControlClass"
+                    title="Remove Link"
+                    :disabled="!editor.isActive('link')"
+                    @click.prevent="unsetLink"
+                  >
+                    Unlink
                   </Button>
 
                   <ToggleGroup type="single">

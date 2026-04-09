@@ -755,6 +755,14 @@ const openBulkDeleteDialog = () => {
   state.bulkDeleteDialogOpen = true
 }
 
+const openSingleDeleteDialog = (docId) => {
+  const normalizedDocId = normalizeDocId(docId)
+  if (!normalizedDocId)
+    return
+  state.selectedBlockDocIds = [normalizedDocId]
+  state.bulkDeleteDialogOpen = true
+}
+
 const bulkDeleteAction = async () => {
   if (state.bulkDeleting || !selectedBlockCount.value) {
     state.bulkDeleteDialogOpen = false
@@ -1336,7 +1344,7 @@ const handleBlockImport = async (event) => {
                       size="icon"
                       variant="ghost"
                       class="h-8 w-8 text-slate-600 hover:text-slate-900 hover:bg-slate-200 dark:text-slate-300 dark:hover:text-slate-100 dark:hover:bg-slate-800"
-                      @click.stop="slotProps.deleteItem(item.docId)"
+                      @click.stop="openSingleDeleteDialog(item.docId)"
                     >
                       <Trash class="h-4 w-4" />
                     </edge-shad-button>

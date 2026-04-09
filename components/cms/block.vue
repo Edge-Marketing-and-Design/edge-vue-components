@@ -78,6 +78,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:modelValue', 'delete'])
 const edgeFirebase = inject('edgeFirebase')
+const BLOCK_INSTRUCTIONS_FIELD_KEY = 'Instructions'
 const PROTECTION_ACCESS_MODES = [
   { name: 'loggedIn', title: 'Any Logged-In User' },
   { name: 'paidPlan', title: 'Paid Access Plan' },
@@ -717,6 +718,11 @@ const sanitizeQueryItems = (meta) => {
   const cleaned = JSON.parse(JSON.stringify(meta || {}))
   for (const key of Object.keys(cleaned)) {
     const cfg = cleaned[key]
+    const hasQueryOptions = Array.isArray(cfg?.queryOptions) && cfg.queryOptions.length > 0
+    if (cfg?.api && !hasQueryOptions && cfg?.queryItems && typeof cfg.queryItems === 'object') {
+      delete cfg.queryItems
+      continue
+    }
     if (!cfg?.queryItems || typeof cfg.queryItems !== 'object')
       continue
 
@@ -861,6 +867,18 @@ const blockContentSourceDoc = computed(() => {
     return null
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[blockDocId] || null
 })
+
+const editorInstructionsHtml = computed(() => {
+  const fromInstance = String(modelValue.value?.[BLOCK_INSTRUCTIONS_FIELD_KEY] || '').trim()
+  if (fromInstance)
+    return fromInstance
+  const fromTemplate = String(blockContentSourceDoc.value?.[BLOCK_INSTRUCTIONS_FIELD_KEY] || '').trim()
+  if (fromTemplate)
+    return fromTemplate
+  return ''
+})
+
+const hasEditorInstructions = computed(() => String(editorInstructionsHtml.value || '').trim().length > 0)
 
 const sitePostsCollectionPath = computed(() => {
   const siteId = String(props.siteId || '').trim()
@@ -1535,8 +1553,9 @@ const hasEditableArrayControls = (entry) => {
   const queryOptions = Array.isArray(entry.meta?.queryOptions) ? entry.meta.queryOptions : []
   const hasQueryOptions = supportsQueryControls && queryOptions.length > 0
   const hasLimitControl = supportsQueryControls && hasAuthoredLimit(entry.field) && !isLimitOne(entry.field)
+  const hasApiQueryControl = Boolean(entry.meta?.api) && queryOptions.length === 0
 
-  return hasQueryOptions || hasLimitControl
+  return hasQueryOptions || hasLimitControl || hasApiQueryControl
 }
 
 const editableMetaEntries = computed(() => {
@@ -2207,6 +2226,12 @@ const getTagsFromPosts = computed(() => {
                       </template>
                     </div>
                   </div>
+                  <Alert v-if="hasEditorInstructions" variant="info">
+                    <AlertTitle>Block Instructions</AlertTitle>
+                    <AlertDescription class="text-sm">
+                      <div class="prose prose-sm max-w-none" v-html="editorInstructionsHtml" />
+                    </AlertDescription>
+                  </Alert>
                   <Alert v-if="editableMetaEntries.length === 0" variant="info" :class="props.editMode ? 'mb-4' : 'mt-4 mb-4'">
                     <AlertTitle>No editable fields found</AlertTitle>
                     <AlertDescription class="text-sm">
@@ -2394,8 +2419,15 @@ const getTagsFromPosts = computed(() => {
                       <div v-else>
                         <template v-if="entry.meta?.queryOptions">
                           <div v-for="option in entry.meta.queryOptions" :key="option.field" class="mb-2">
+                            <edge-shad-input
+                              v-if="option?.input === 'text'"
+                              v-model="state.meta[entry.field].queryItems[option.field]"
+                              :name="option.field"
+                              :label="genTitleFromField(option)"
+                              :placeholder="option?.placeholder || ''"
+                            />
                             <edge-shad-select-tags
-                              v-if="entry.meta?.collection?.path === 'posts' && option.field === 'tags'"
+                              v-else-if="entry.meta?.collection?.path === 'posts' && option.field === 'tags'"
                               v-model="state.meta[entry.field].queryItems[option.field]"
                               :items="getTagsFromPosts"
                               :label="`${genTitleFromField(option)}`"
@@ -2411,6 +2443,13 @@ const getTagsFromPosts = computed(() => {
                             />
                           </div>
                         </template>
+                        <edge-shad-input
+                          v-if="entry.meta?.api && (!entry.meta?.queryOptions || entry.meta.queryOptions.length === 0)"
+                          v-model="state.meta[entry.field].apiQuery"
+                          name="apiQuery"
+                          label="Query"
+                          placeholder="?limit=10&sort=-list_date"
+                        />
                         <edge-shad-number
                           v-if="entry.meta?.collection?.path !== 'post' && hasAuthoredLimit(entry.field) && !isLimitOne(entry.field)"
                           v-model="state.meta[entry.field].limit"

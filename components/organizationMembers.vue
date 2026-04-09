@@ -296,6 +296,10 @@ const sortedFilteredUsers = computed(() => {
       return lastA.localeCompare(lastB)
     })
 })
+const shownCount = computed(() => sortedFilteredUsers.value.length)
+const visibleCount = computed(() => usersByRoleFilter.value.length)
+const totalLoadedCount = computed(() => users.value.length)
+const hiddenBySearchCount = computed(() => Math.max(visibleCount.value - shownCount.value, 0))
 
 const detailViewKey = computed(() => {
   if (!state.dialog)
@@ -643,6 +647,12 @@ onBeforeMount(async () => {
                 No members found.
               </div>
             </SidebarMenu>
+          </div>
+          <div class="shrink-0 border-t border-sidebar-border bg-sidebar/90 px-3 py-2">
+            <div class="flex items-center justify-between text-[11px] text-muted-foreground">
+              <span>{{ shownCount }} shown / {{ totalLoadedCount }} loaded</span>
+              <span>{{ hiddenBySearchCount }} hidden by search</span>
+            </div>
           </div>
         </div>
       </ResizablePanel>
