@@ -294,6 +294,7 @@ const state = reactive({
   imageOpen: false,
   imageOpenByField: {},
   aiDialogOpen: false,
+  aiDialogSession: 0,
   aiInstructions: '',
   aiSelectedFields: {},
   aiGenerating: false,
@@ -1720,6 +1721,7 @@ const resetAiSelections = () => {
 const openAiDialog = () => {
   state.aiError = ''
   state.aiInstructions = ''
+  state.aiDialogSession += 1
   resetAiSelections()
   state.aiDialogOpen = true
 }
@@ -2587,10 +2589,12 @@ const getTagsFromPosts = computed(() => {
               </DialogHeader>
               <div class="space-y-4">
                 <edge-shad-textarea
+                  :key="`ai-dialog-instructions-${state.aiDialogSession}`"
                   v-model="state.aiInstructions"
-                  name="aiInstructions"
-                  label="Instructions (Optional)"
+                  name="aiInstructionsInput"
+                  label="Additional Instructions (Optional)"
                   placeholder="Share tone, audience, and any details the AI should include."
+                  autocomplete="off"
                 />
                 <div class="space-y-2">
                   <div class="flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-muted-foreground">
