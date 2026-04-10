@@ -79,6 +79,7 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue', 'delete'])
 const edgeFirebase = inject('edgeFirebase')
 const BLOCK_INSTRUCTIONS_FIELD_KEY = 'Instructions'
+const BLOCK_AI_INSTRUCTIONS_FIELD_KEY = 'aiInstructions'
 const PROTECTION_ACCESS_MODES = [
   { name: 'loggedIn', title: 'Any Logged-In User' },
   { name: 'paidPlan', title: 'Paid Access Plan' },
@@ -880,6 +881,45 @@ const editorInstructionsHtml = computed(() => {
 
 const hasEditorInstructions = computed(() => String(editorInstructionsHtml.value || '').trim().length > 0)
 
+const extractAiInstructionText = (value) => {
+  const raw = String(value || '').trim()
+  if (!raw)
+    return ''
+  if (typeof document === 'undefined')
+    return raw
+
+  const container = document.createElement('div')
+  container.innerHTML = raw
+  return String(container.textContent || container.innerText || '').trim()
+}
+
+const aiInstructionsText = computed(() => {
+  const fromInstance = extractAiInstructionText(modelValue.value?.[BLOCK_AI_INSTRUCTIONS_FIELD_KEY])
+  if (fromInstance)
+    return fromInstance
+  const fromTemplate = extractAiInstructionText(blockContentSourceDoc.value?.[BLOCK_AI_INSTRUCTIONS_FIELD_KEY])
+  if (fromTemplate)
+    return fromTemplate
+  return ''
+})
+
+const aiBlockInstructions = computed(() => {
+  const normalized = aiInstructionsText.value
+  return normalized.length > 4000 ? normalized.slice(0, 4000) : normalized
+})
+
+const buildAiInstructions = () => {
+  const parts = []
+  if (aiBlockInstructions.value)
+    parts.push(`Block AI Instructions:\n${aiBlockInstructions.value}`)
+  const visibleBlockInstructions = extractAiInstructionText(editorInstructionsHtml.value)
+  if (visibleBlockInstructions)
+    parts.push(`Block Instructions:\n${visibleBlockInstructions}`)
+  if (String(state.aiInstructions || '').trim())
+    parts.push(`User Instructions:\n${String(state.aiInstructions || '').trim()}`)
+  return parts.join('\n\n')
+}
+
 const sitePostsCollectionPath = computed(() => {
   const siteId = String(props.siteId || '').trim()
   if (!siteId)
@@ -1553,9 +1593,8 @@ const hasEditableArrayControls = (entry) => {
   const queryOptions = Array.isArray(entry.meta?.queryOptions) ? entry.meta.queryOptions : []
   const hasQueryOptions = supportsQueryControls && queryOptions.length > 0
   const hasLimitControl = supportsQueryControls && hasAuthoredLimit(entry.field) && !isLimitOne(entry.field)
-  const hasApiQueryControl = Boolean(entry.meta?.api) && queryOptions.length === 0
 
-  return hasQueryOptions || hasLimitControl || hasApiQueryControl
+  return hasQueryOptions || hasLimitControl
 }
 
 const editableMetaEntries = computed(() => {
@@ -1718,7 +1757,7 @@ const generateWithAi = async () => {
       blockId: modelValue.value?.blockId || props.blockId,
       blockName: modelValue.value?.name || '',
       content: modelValue.value?.content || '',
-      instructions: state.aiInstructions || '',
+      instructions: buildAiInstructions(),
       fields,
       currentValues,
       meta,
@@ -2443,13 +2482,6 @@ const getTagsFromPosts = computed(() => {
                             />
                           </div>
                         </template>
-                        <edge-shad-input
-                          v-if="entry.meta?.api && (!entry.meta?.queryOptions || entry.meta.queryOptions.length === 0)"
-                          v-model="state.meta[entry.field].apiQuery"
-                          name="apiQuery"
-                          label="Query"
-                          placeholder="?limit=10&sort=-list_date"
-                        />
                         <edge-shad-number
                           v-if="entry.meta?.collection?.path !== 'post' && hasAuthoredLimit(entry.field) && !isLimitOne(entry.field)"
                           v-model="state.meta[entry.field].limit"

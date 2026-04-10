@@ -16,6 +16,7 @@ const { saveJsonFile } = useJsonFileSave()
 const { blocks: blockNewDocSchema } = useCmsNewDocs()
 const blockEditorPostPreviewCache = useState('edge-cms-block-editor-post-preview-cache', () => ({}))
 const BLOCK_INSTRUCTIONS_FIELD_KEY = 'Instructions'
+const BLOCK_AI_INSTRUCTIONS_FIELD_KEY = 'aiInstructions'
 
 const state = reactive({
   filter: '',
@@ -52,6 +53,7 @@ const state = reactive({
   historyPreviewBlock: null,
   showHistoryDiffDialog: false,
   instructionsDialogOpen: false,
+  aiInstructionsDialogOpen: false,
 })
 const isGlobalAdmin = computed(() => edgeGlobal.isAdminGlobal(edgeFirebase).value)
 const instructionsEnabledToggles = computed(() => {
@@ -1540,6 +1542,16 @@ const exportCurrentBlock = async () => {
                       <HelpCircle class="mr-1 h-3.5 w-3.5" />
                       Instructions
                     </edge-shad-button>
+                    <edge-shad-button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      class="h-8 px-3 text-[11px] uppercase tracking-wide rounded border border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100"
+                      @click="state.aiInstructionsDialogOpen = true"
+                    >
+                      <HelpCircle class="mr-1 h-3.5 w-3.5" />
+                      AI Instructions
+                    </edge-shad-button>
                   </div>
                   <edge-shad-button
                     type="button"
@@ -1570,6 +1582,27 @@ const exportCurrentBlock = async () => {
                   />
                   <DialogFooter class="pt-4 flex justify-between">
                     <edge-shad-button type="button" variant="destructive" class="text-white" @click="state.instructionsDialogOpen = false">
+                      Close
+                    </edge-shad-button>
+                  </DialogFooter>
+                </DialogContent>
+              </edge-shad-dialog>
+              <edge-shad-dialog v-model="state.aiInstructionsDialogOpen">
+                <DialogContent class="max-w-[760px]">
+                  <DialogHeader>
+                    <DialogTitle>AI Instructions</DialogTitle>
+                    <DialogDescription>
+                      Add private guidance used only for block AI generation. This is not shown in the block edit UI for end users.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <edge-shad-textarea
+                    v-model="slotProps.workingDoc[BLOCK_AI_INSTRUCTIONS_FIELD_KEY]"
+                    name="blockAiInstructions"
+                    label="AI Instructions"
+                    placeholder="Share tone, audience, and generation constraints for this block."
+                  />
+                  <DialogFooter class="pt-4 flex justify-between">
+                    <edge-shad-button type="button" variant="destructive" class="text-white" @click="state.aiInstructionsDialogOpen = false">
                       Close
                     </edge-shad-button>
                   </DialogFooter>
