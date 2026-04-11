@@ -290,6 +290,17 @@ const formatSubmissionValue = (value) => {
   }
 }
 
+const formatSendgridLog = (sendgrid) => {
+  if (!sendgrid || typeof sendgrid !== 'object')
+    return ''
+  try {
+    return JSON.stringify(sendgrid, null, 2)
+  }
+  catch {
+    return String(sendgrid)
+  }
+}
+
 const collectSubmissionEntries = (data) => {
   if (!data || typeof data !== 'object')
     return []
@@ -3152,8 +3163,8 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                             </CardDescription>
                           </div>
                           <div class="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                            <span>
-                              {{ selectedSubmission.data?.pageName || selectedSubmission.data?.pageId || 'Site submission' }}
+                            <span class="normal-case font-mono">
+                              {{ selectedSubmission.uuid || selectedSubmission.data?.uuid || 'Site submission' }}
                             </span>
                             <edge-shad-button
                               v-if="isSubmissionUnread(selectedSubmission)"
@@ -3199,6 +3210,15 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                             </div>
                           </div>
                         </div>
+                        <details
+                          v-if="selectedSubmission.sendgrid"
+                          class="rounded-lg border border-border/60 bg-background p-3"
+                        >
+                          <summary class="cursor-pointer select-none text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            SendGrid Log
+                          </summary>
+                          <pre class="mt-2 max-h-64 overflow-auto rounded-md bg-muted/40 p-3 text-xs text-foreground whitespace-pre-wrap break-words">{{ formatSendgridLog(selectedSubmission.sendgrid) }}</pre>
+                        </details>
                       </CardContent>
                     </Card>
                     <Card v-else class="border border-dashed border-border/80 bg-muted/30">
