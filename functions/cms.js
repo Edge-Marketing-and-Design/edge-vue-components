@@ -876,11 +876,20 @@ const sendContactFormEmail = async ({
 }) => {
   if (!SENDGRID_API_KEY || !SENDGRID_FROM_EMAIL) {
     logger.error('SendGrid config missing')
-    return
+    return {
+      ok: false,
+      status: null,
+      message: 'SendGrid config missing',
+    }
   }
   const recipients = normalizeEmailList(to)
-  if (!recipients.length)
-    return
+  if (!recipients.length) {
+    return {
+      ok: false,
+      status: null,
+      message: 'No valid recipients',
+    }
+  }
 
   const fieldLines = entries.length
     ? entries.map(entry => `- ${entry.key}: ${formatValue(entry.value)}`)
@@ -899,20 +908,41 @@ const sendContactFormEmail = async ({
     </div>
   `
 
-  await axios.post('https://api.sendgrid.com/v3/mail/send', {
-    personalizations: [{ to: recipients.map(email => ({ email })), subject: subject || DEFAULT_CONTACT_FORM_SUBJECT }],
-    from: { email: SENDGRID_FROM_EMAIL },
-    reply_to: { email: replyTo || SENDGRID_FROM_EMAIL },
-    content: [
-      { type: 'text/plain', value: textBody },
-      { type: 'text/html', value: htmlBody },
-    ],
-  }, {
-    headers: {
-      'Authorization': `Bearer ${SENDGRID_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-  })
+  try {
+    const response = await axios.post('https://api.sendgrid.com/v3/mail/send', {
+      personalizations: [{ to: recipients.map(email => ({ email })), subject: subject || DEFAULT_CONTACT_FORM_SUBJECT }],
+      from: { email: SENDGRID_FROM_EMAIL },
+      reply_to: { email: replyTo || SENDGRID_FROM_EMAIL },
+      content: [
+        { type: 'text/plain', value: textBody },
+        { type: 'text/html', value: htmlBody },
+      ],
+    }, {
+      headers: {
+        'Authorization': `Bearer ${SENDGRID_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+    })
+
+    return {
+      ok: true,
+      status: response?.status ?? 202,
+      message: 'accepted',
+      recipients,
+    }
+  }
+  catch (error) {
+    const responseStatus = error?.response?.status ?? null
+    const responseData = error?.response?.data || {}
+    const responseErrors = Array.isArray(responseData?.errors) ? responseData.errors : []
+    const firstMessage = String(responseErrors?.[0]?.message || error?.message || 'SendGrid request failed')
+    return {
+      ok: false,
+      status: responseStatus,
+      message: firstMessage,
+      errors: responseErrors,
+    }
+  }
 }
 
 exports.trackHistory = onRequest(async (req, res) => {
@@ -1017,8 +1047,9 @@ exports.trackHistory = onRequest(async (req, res) => {
         logger.error('Failed to sync audience history_uuid', error)
       }
     }
+    let leadActionRef = null
     if (siteId) {
-      await db.collection('organizations').doc(orgId)
+      leadActionRef = await db.collection('organizations').doc(orgId)
         .collection('sites').doc(siteId)
         .collection('lead-actions')
         .add({
@@ -1048,9 +1079,19 @@ exports.trackHistory = onRequest(async (req, res) => {
 
           if (!emailTo.length) {
             logger.warn('Contact form email not found', { orgId, siteId, pageId, blockId })
+            if (leadActionRef) {
+              await leadActionRef.set({
+                sendgrid: {
+                  ok: false,
+                  status: null,
+                  message: 'No destination email configured',
+                },
+                sendgridUpdatedAt: Firestore.FieldValue.serverTimestamp(),
+              }, { merge: true })
+            }
           }
           else {
-            await sendContactFormEmail({
+            const sendgrid = await sendContactFormEmail({
               to: emailTo,
               replyTo,
               subject,
@@ -1060,10 +1101,28 @@ exports.trackHistory = onRequest(async (req, res) => {
               pageId,
               blockId,
             })
+            if (leadActionRef) {
+              await leadActionRef.set({
+                sendgrid,
+                sendgridUpdatedAt: Firestore.FieldValue.serverTimestamp(),
+              }, { merge: true })
+            }
+            if (!sendgrid?.ok)
+              logger.error('Contact form email failed', sendgrid)
           }
         }
         catch (err) {
-          logger.error('Contact form email failed', err)
+          logger.error('Contact form email workflow failed', err)
+          if (leadActionRef) {
+            await leadActionRef.set({
+              sendgrid: {
+                ok: false,
+                status: null,
+                message: String(err?.message || 'Contact form email workflow failed'),
+              },
+              sendgridUpdatedAt: Firestore.FieldValue.serverTimestamp(),
+            }, { merge: true })
+          }
         }
       }
     }
