@@ -651,12 +651,15 @@ const selectedExistingPage = computed(() => {
   return existingPagesList.value.find(page => page.docId === state.selectedExistingPageId) || null
 })
 
-watch(existingPagesList, (pages) => {
+const existingPageIds = computed(() => {
+  return existingPagesList.value.map(page => String(page?.docId || '').trim()).filter(Boolean)
+})
+
+watch(existingPageIds, (ids) => {
   const selectedPageId = String(state.selectedExistingPageId || '').trim()
-  const hasSelectedPageId = pages.some(page => page.docId === selectedPageId)
-  if (!selectedPageId || !hasSelectedPageId)
-    state.selectedExistingPageId = pages?.[0]?.docId || ''
-}, { immediate: true, deep: true })
+  if (!selectedPageId || !ids.includes(selectedPageId))
+    state.selectedExistingPageId = ids[0] || ''
+}, { immediate: true })
 
 const hasValidNewPageName = computed(() => !!(state.newPageName && state.newPageName.trim().length))
 
@@ -664,21 +667,24 @@ const blocksCollection = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`] || {}
 })
 
+const EMPTY_PREVIEW_VALUES = {}
+const EMPTY_PREVIEW_META = {}
+
 const resolveBlockForPreview = (block) => {
   if (!block)
     return null
   if (block.content)
     return {
       content: block.content,
-      values: block.values || {},
-      meta: block.meta || {},
+      values: block.values || EMPTY_PREVIEW_VALUES,
+      meta: block.meta || EMPTY_PREVIEW_META,
     }
   if (block.blockId && blocksCollection.value?.[block.blockId]) {
     const libraryBlock = blocksCollection.value[block.blockId]
     return {
       content: libraryBlock.content,
-      values: block.values || libraryBlock.values || {},
-      meta: block.meta || libraryBlock.meta || {},
+      values: block.values || libraryBlock.values || EMPTY_PREVIEW_VALUES,
+      meta: block.meta || libraryBlock.meta || EMPTY_PREVIEW_META,
     }
   }
   return null
@@ -1699,7 +1705,7 @@ const theme = computed(() => {
                                     v-for="(blockRef, blockIdx) in column.blocks || []"
                                     :key="`${existingPage.docId}-row-${row.id || rowIndex}-col-${column.id || colIndex}-block-${blockIdx}`"
                                   >
-                                    <edge-cms-block-api
+                                    <edge-cms-block-render
                                       v-if="resolveTemplateBlockForPreview(existingPage, blockRef)"
                                       :content="resolveTemplateBlockForPreview(existingPage, blockRef).content"
                                       :values="resolveTemplateBlockForPreview(existingPage, blockRef).values"

@@ -100,6 +100,8 @@ const state = reactive({
   exportDialogTotal: 0,
   exportDialogCurrentItem: '',
   exportCancelRequested: false,
+  orphanDeleteDialogOpen: false,
+  orphanDeleteTarget: null,
   importPageDocIdDialogOpen: false,
   importPageDocIdValue: '',
   importPageConflictDialogOpen: false,
@@ -1459,22 +1461,25 @@ const resolveTemplateBlockSource = (pageDoc, blockRef) => {
   return templateBlocks.find(block => block?.id === lookupId || block?.blockId === lookupId) || null
 }
 
+const EMPTY_PREVIEW_VALUES = {}
+const EMPTY_PREVIEW_META = {}
+
 const resolveBlockForPreview = (block) => {
   if (!block)
     return null
   if (block.content) {
     return {
       content: block.content,
-      values: block.values || {},
-      meta: block.meta || {},
+      values: block.values || EMPTY_PREVIEW_VALUES,
+      meta: block.meta || EMPTY_PREVIEW_META,
     }
   }
   if (block.blockId && blocksCollection.value?.[block.blockId]) {
     const libraryBlock = blocksCollection.value[block.blockId]
     return {
       content: libraryBlock.content,
-      values: block.values || libraryBlock.values || {},
-      meta: block.meta || libraryBlock.meta || {},
+      values: block.values || libraryBlock.values || EMPTY_PREVIEW_VALUES,
+      meta: block.meta || libraryBlock.meta || EMPTY_PREVIEW_META,
     }
   }
   return null
@@ -1624,16 +1629,17 @@ const sitePageGridItems = computed(() => {
     if (!normalizedDocId || seenDocIds.has(normalizedDocId))
       continue
     seenDocIds.add(normalizedDocId)
-    orderedPages.push({
-      docId: normalizedDocId,
-      ...pageDoc,
-      name: displaySitePageName({}, pageDoc, normalizedDocId),
-      menuPath: 'Not In Menu',
-      menuEntry: {
-        name: pageDoc?.name || normalizedDocId,
-        item: normalizedDocId,
-        menuName: 'Not In Menu',
-        index: -1,
+      orderedPages.push({
+        docId: normalizedDocId,
+        ...pageDoc,
+        name: displaySitePageName({}, pageDoc, normalizedDocId),
+        menuPath: 'Orphaned',
+        isOrphaned: true,
+        menuEntry: {
+          name: pageDoc?.name || normalizedDocId,
+          item: normalizedDocId,
+          menuName: 'Not In Menu',
+          index: -1,
       },
       lastUpdated: pageDoc?.last_updated || pageDoc?.doc_created_at || 0,
       description: String(pageDoc?.metaDescription || '').trim(),
@@ -1674,6 +1680,12 @@ const openSitePageRename = (item) => {
 }
 
 const openSitePageDelete = (item) => {
+  if (!item)
+    return
+  if (item.isOrphaned) {
+    openDeleteOrphanSitePage(item)
+    return
+  }
   if (!item?.menuEntry)
     return
   pageMenuRef.value?.openDeletePageDialog?.(item.menuEntry)
@@ -1715,7 +1727,58 @@ const getSitePageLiveUrl = (item) => {
 
 const isSitePagePublished = item => !!pageMenuRef.value?.isPublishedPage?.(item?.docId)
 const isSitePageRenameDisabled = item => !!pageMenuRef.value?.isRenameDisabled?.(item?.menuEntry)
-const isSitePageDeleteDisabled = item => !!pageMenuRef.value?.isDeleteDisabled?.(item?.menuEntry)
+const isSitePageDeleteDisabled = (item) => {
+  if (item?.isOrphaned)
+    return edgeGlobal.edgeState.cmsPageWithUnsavedChanges === item?.docId
+  return !!pageMenuRef.value?.isDeleteDisabled?.(item?.menuEntry)
+}
+
+const getSitePageMenuBadgeClass = (item) => {
+  if (item?.isOrphaned) {
+    return 'rounded-full border border-red-300 bg-red-100 px-2 py-0.5 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300'
+  }
+  return 'rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 dark:border-slate-700 dark:bg-slate-800'
+}
+
+const getSitePageMenuLabel = item => (item?.isOrphaned ? 'Orphaned' : String(item?.menuPath || '').trim() || 'Site Menu')
+
+const openDeleteOrphanSitePage = (item) => {
+  const docId = String(item?.docId || '').trim()
+  if (!docId)
+    return
+  if (edgeGlobal.edgeState.cmsPageWithUnsavedChanges === docId)
+    return
+  state.orphanDeleteTarget = {
+    docId,
+    name: String(item?.name || docId).trim() || docId,
+  }
+  state.orphanDeleteDialogOpen = true
+}
+
+const closeDeleteOrphanSitePageDialog = () => {
+  state.orphanDeleteDialogOpen = false
+  state.orphanDeleteTarget = null
+}
+
+const confirmDeleteOrphanSitePage = async () => {
+  const docId = String(state.orphanDeleteTarget?.docId || '').trim()
+  if (!docId) {
+    closeDeleteOrphanSitePageDialog()
+    return
+  }
+  try {
+    if (props.page === docId)
+      router.replace(pageRouteBase.value)
+    await edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`, docId)
+    await edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`, docId)
+  }
+  catch (error) {
+    console.error('Failed to delete orphaned page', error)
+  }
+  finally {
+    closeDeleteOrphanSitePageDialog()
+  }
+}
 
 const _templatePageItems = computed(() => {
   return Object.entries(pages.value || {})
@@ -3308,14 +3371,14 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                                 {{ item.name }}
                               </p>
                               <div class="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                                <span class="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 dark:border-slate-700 dark:bg-slate-800">
-                                  {{ item.menuPath }}
+                                <span :class="getSitePageMenuBadgeClass(item)">
+                                  {{ getSitePageMenuLabel(item) }}
                                 </span>
                                 <span
                                   v-if="item.post"
                                   class="rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-amber-800 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-200"
                                 >
-                                  Post Page
+                                  Index + Detail
                                 </span>
                               </div>
                             </div>
@@ -3500,6 +3563,26 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
       @cancel="cancelPagesExport"
       @update:model-value="closePagesExportDialog"
     />
+    <edge-shad-dialog v-model="state.orphanDeleteDialogOpen">
+      <DialogContent class="pt-8">
+        <DialogHeader>
+          <DialogTitle class="text-left">
+            Delete Orphaned Page "{{ state.orphanDeleteTarget?.name || state.orphanDeleteTarget?.docId || 'Page' }}"?
+          </DialogTitle>
+          <DialogDescription class="text-left">
+            This page is not referenced in any menu and will be permanently deleted.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter class="pt-2 flex justify-between">
+          <edge-shad-button variant="outline" @click="closeDeleteOrphanSitePageDialog">
+            Cancel
+          </edge-shad-button>
+          <edge-shad-button variant="destructive" class="text-white" @click="confirmDeleteOrphanSitePage">
+            Delete Page
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
     <edge-shad-dialog v-model="state.showSiteSettingsDiffDialog">
       <DialogContent class="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
         <DialogHeader>
