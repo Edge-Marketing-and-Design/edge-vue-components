@@ -2474,9 +2474,12 @@ const exportCurrentBlock = async () => {
 {{{#else}}}
   <div>Contact for pricing</div>
 {{{/if}}}</code></pre>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#if {"cond":"item contains 'thing'"} }}}
+  <div>Contains thing</div>
+{{{/if}}}</code></pre>
                     <div class="text-sm text-foreground space-y-1">
                       <div><code>cond</code> works with <code>item.*</code> inside array and subarray templates.</div>
-                      <div>Supported operators are <code>==</code>, <code>!=</code>, <code>&gt;</code>, <code>&lt;</code>, <code>&gt;=</code>, and <code>&lt;=</code>.</div>
+                      <div>Supported operators are <code>==</code>, <code>!=</code>, <code>&gt;</code>, <code>&lt;</code>, <code>&gt;=</code>, <code>&lt;=</code>, and <code>contains</code>.</div>
                     </div>
                   </section>
 
