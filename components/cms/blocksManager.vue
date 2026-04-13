@@ -644,8 +644,25 @@ const applyTypeSelectionFilter = (items = []) => {
   })
 }
 
+const applyThemeSelectionFilter = (items = []) => {
+  const selectedThemes = (Array.isArray(state.themesFilter) ? state.themesFilter : [])
+    .map(themeId => String(themeId || '').trim())
+    .filter(Boolean)
+  if (!selectedThemes.length)
+    return items
+
+  return items.filter((item) => {
+    const blockThemes = (Array.isArray(item?.themes) ? item.themes : [])
+      .map(themeId => String(themeId || '').trim())
+      .filter(Boolean)
+    if (!blockThemes.length)
+      return false
+    return blockThemes.some(themeId => selectedThemes.includes(themeId))
+  })
+}
+
 const applyListSelectionFilters = (items = []) => {
-  return applyTagSelectionFilter(applyTypeSelectionFilter(items))
+  return applyThemeSelectionFilter(applyTagSelectionFilter(applyTypeSelectionFilter(items)))
 }
 
 const blockCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/blocks`)
