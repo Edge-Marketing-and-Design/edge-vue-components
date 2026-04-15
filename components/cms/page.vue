@@ -88,6 +88,16 @@ const state = reactive({
       gap: '4',
       verticalAlign: 'start',
       background: 'transparent',
+      mobileOrder: 'normal',
+      marginXMode: 'auto',
+      paddingTop: 0,
+      paddingRight: 0,
+      paddingBottom: 0,
+      paddingLeft: 0,
+      marginTop: 0,
+      marginRight: 0,
+      marginBottom: 0,
+      marginLeft: 0,
     },
   },
   addRowPopoverOpen: {
@@ -382,6 +392,11 @@ const ROW_VERTICAL_ALIGN_OPTIONS = [
   { name: 'center', title: 'Middle' },
   { name: 'end', title: 'Bottom' },
   { name: 'stretch', title: 'Stretch' },
+]
+
+const ROW_MARGIN_X_MODE_OPTIONS = [
+  { name: 'auto', title: 'Auto (recommended)' },
+  { name: 'custom', title: 'Custom' },
 ]
 
 const normalizeForCompare = (value) => {
@@ -1118,6 +1133,29 @@ const themeColorOptions = computed(() => {
   return [{ name: 'transparent', title: 'Transparent' }, ...options]
 })
 
+const normalizeSpacingValue = (value) => {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 0)
+    return 0
+  return Math.round(parsed)
+}
+
+const normalizeMarginXMode = (value) => {
+  return value === 'custom' ? 'custom' : 'auto'
+}
+
+const resolveMarginXMode = (row) => {
+  const explicitMode = normalizeMarginXMode(String(row?.marginXMode || '').trim())
+  if (String(row?.marginXMode || '').trim())
+    return explicitMode
+  const legacyX = normalizeSpacingValue(row?.marginX)
+  const left = normalizeSpacingValue(row?.marginLeft)
+  const right = normalizeSpacingValue(row?.marginRight)
+  if (legacyX > 0 || left > 0 || right > 0)
+    return 'custom'
+  return 'auto'
+}
+
 const getOptionTitle = (options = [], value, fallback = '—') => {
   const normalizedValue = String(value ?? '').trim()
   if (!normalizedValue)
@@ -1134,8 +1172,12 @@ const getRowLayoutValueLabel = (field, value) => {
     return getOptionTitle(ROW_VERTICAL_ALIGN_OPTIONS, value, 'Top')
   if (field === 'mobileOrder')
     return getOptionTitle(ROW_MOBILE_STACK_OPTIONS, value, 'Left first')
+  if (field === 'marginXMode')
+    return getOptionTitle(ROW_MARGIN_X_MODE_OPTIONS, value, 'Auto (recommended)')
   if (field === 'background')
     return getOptionTitle(themeColorOptions.value, value || 'transparent', 'Transparent')
+  if (['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'marginTop', 'marginRight', 'marginBottom', 'marginLeft'].includes(field))
+    return `${normalizeSpacingValue(value)}px`
   return String(value ?? '—')
 }
 
@@ -1214,6 +1256,15 @@ const buildLayoutChangeDetails = (baseRows = [], compareRows = []) => {
       ['verticalAlign', 'Vertical Alignment'],
       ['mobileOrder', 'Stack Order'],
       ['background', 'Background'],
+      ['marginXMode', 'Margin X Mode'],
+      ['paddingTop', 'Padding Top'],
+      ['paddingRight', 'Padding Right'],
+      ['paddingBottom', 'Padding Bottom'],
+      ['paddingLeft', 'Padding Left'],
+      ['marginTop', 'Margin Top'],
+      ['marginRight', 'Margin Right'],
+      ['marginBottom', 'Margin Bottom'],
+      ['marginLeft', 'Margin Left'],
     ]
 
     fieldPairs.forEach(([field, label]) => {
@@ -1263,6 +1314,29 @@ const rowBackgroundStyle = (bgKey) => {
   if (/^[0-9A-Fa-f]{6}$/.test(color))
     color = `#${color}`
   return { backgroundColor: color }
+}
+
+const rowSpacingStyle = (row) => {
+  const marginXMode = resolveMarginXMode(row)
+  const paddingLeft = normalizeSpacingValue(row?.paddingLeft ?? row?.paddingX)
+  const paddingRight = normalizeSpacingValue(row?.paddingRight ?? row?.paddingX)
+  const paddingTop = normalizeSpacingValue(row?.paddingTop ?? row?.paddingY)
+  const paddingBottom = normalizeSpacingValue(row?.paddingBottom ?? row?.paddingY)
+  const marginLeft = normalizeSpacingValue(row?.marginLeft ?? row?.marginX)
+  const marginRight = normalizeSpacingValue(row?.marginRight ?? row?.marginX)
+  const marginTop = normalizeSpacingValue(row?.marginTop ?? row?.marginY)
+  const marginBottom = normalizeSpacingValue(row?.marginBottom ?? row?.marginY)
+
+  return {
+    paddingLeft: `${paddingLeft}px`,
+    paddingRight: `${paddingRight}px`,
+    paddingTop: `${paddingTop}px`,
+    paddingBottom: `${paddingBottom}px`,
+    marginLeft: marginXMode === 'auto' ? 'auto' : `${marginLeft}px`,
+    marginRight: marginXMode === 'auto' ? 'auto' : `${marginRight}px`,
+    marginTop: `${marginTop}px`,
+    marginBottom: `${marginBottom}px`,
+  }
 }
 
 const layoutSpansFromString = (value, fallback = [6]) => {
@@ -1406,6 +1480,15 @@ const resetRowSettingsDraft = (row) => {
     verticalAlign: row?.verticalAlign || 'start',
     background: row?.background || 'transparent',
     mobileOrder: row?.mobileOrder || 'normal',
+    marginXMode: resolveMarginXMode(row),
+    paddingTop: normalizeSpacingValue(row?.paddingTop ?? row?.paddingY),
+    paddingRight: normalizeSpacingValue(row?.paddingRight ?? row?.paddingX),
+    paddingBottom: normalizeSpacingValue(row?.paddingBottom ?? row?.paddingY),
+    paddingLeft: normalizeSpacingValue(row?.paddingLeft ?? row?.paddingX),
+    marginTop: normalizeSpacingValue(row?.marginTop ?? row?.marginY),
+    marginRight: normalizeSpacingValue(row?.marginRight ?? row?.marginX),
+    marginBottom: normalizeSpacingValue(row?.marginBottom ?? row?.marginY),
+    marginLeft: normalizeSpacingValue(row?.marginLeft ?? row?.marginX),
   }
 }
 
@@ -1429,6 +1512,15 @@ const saveRowSettings = () => {
   row.verticalAlign = draft.verticalAlign || 'start'
   row.background = draft.background || 'transparent'
   row.mobileOrder = draft.mobileOrder || 'normal'
+  row.marginXMode = normalizeMarginXMode(draft.marginXMode)
+  row.paddingTop = normalizeSpacingValue(draft.paddingTop)
+  row.paddingRight = normalizeSpacingValue(draft.paddingRight)
+  row.paddingBottom = normalizeSpacingValue(draft.paddingBottom)
+  row.paddingLeft = normalizeSpacingValue(draft.paddingLeft)
+  row.marginTop = normalizeSpacingValue(draft.marginTop)
+  row.marginRight = normalizeSpacingValue(draft.marginRight)
+  row.marginBottom = normalizeSpacingValue(draft.marginBottom)
+  row.marginLeft = normalizeSpacingValue(draft.marginLeft)
   refreshRowTailwindClasses(row)
   state.rowSettings.open = false
 }
@@ -1510,6 +1602,15 @@ function createRowFromLayout(spans) {
     background: 'transparent',
     verticalAlign: 'start',
     mobileOrder: 'normal',
+    marginXMode: 'auto',
+    paddingTop: 0,
+    paddingRight: 0,
+    paddingBottom: 0,
+    paddingLeft: 0,
+    marginTop: 0,
+    marginRight: 0,
+    marginBottom: 0,
+    marginLeft: 0,
     columns: buildColumnsFromSpans(safeSpans),
   }
   refreshRowTailwindClasses(row)
@@ -4065,7 +4166,7 @@ const hasUnsavedChanges = (changes) => {
                       <div
                         class="mx-auto"
                         :class="[rowWidthClass(row.width), backgroundClass(row.background), state.editMode ? 'shadow-sm border border-gray-200/70 p-4' : 'shadow-none border-0 p-0']"
-                        :style="rowBackgroundStyle(row.background)"
+                        :style="{ ...rowBackgroundStyle(row.background), ...rowSpacingStyle(row) }"
                       >
                         <div :class="[rowGridClass(row), rowVerticalAlignClass(row)]" :style="rowGridStyle(row)">
                           <div
@@ -4325,7 +4426,7 @@ const hasUnsavedChanges = (changes) => {
                       <div
                         class="mx-auto"
                         :class="[rowWidthClass(row.width), backgroundClass(row.background), state.editMode ? 'shadow-sm border border-gray-200/70 p-4' : 'shadow-none border-0 p-0']"
-                        :style="rowBackgroundStyle(row.background)"
+                        :style="{ ...rowBackgroundStyle(row.background), ...rowSpacingStyle(row) }"
                       >
                         <div :class="[rowGridClass(row), rowVerticalAlignClass(row)]" :style="rowGridStyle(row)">
                           <div
@@ -4525,6 +4626,89 @@ const hasUnsavedChanges = (changes) => {
                 placeholder="Background"
               />
             </div>
+            <details class="rounded-md border border-gray-200 bg-white/70 p-3">
+              <summary class="cursor-pointer text-sm font-medium text-slate-900">
+                Padding
+              </summary>
+              <div class="mt-3 space-y-2">
+                <edge-shad-number
+                  v-model="state.rowSettings.draft.paddingTop"
+                  label="Padding Top"
+                  name="row-padding-top-setting"
+                  :min="0"
+                  :step="1"
+                />
+                <edge-shad-number
+                  v-model="state.rowSettings.draft.paddingRight"
+                  label="Padding Right"
+                  name="row-padding-right-setting"
+                  :min="0"
+                  :step="1"
+                />
+                <edge-shad-number
+                  v-model="state.rowSettings.draft.paddingBottom"
+                  label="Padding Bottom"
+                  name="row-padding-bottom-setting"
+                  :min="0"
+                  :step="1"
+                />
+                <edge-shad-number
+                  v-model="state.rowSettings.draft.paddingLeft"
+                  label="Padding Left"
+                  name="row-padding-left-setting"
+                  :min="0"
+                  :step="1"
+                />
+              </div>
+            </details>
+            <details class="rounded-md border border-gray-200 bg-white/70 p-3">
+              <summary class="cursor-pointer text-sm font-medium text-slate-900">
+                Margin
+              </summary>
+              <div class="mt-3 space-y-2">
+                <edge-shad-select
+                  v-model="state.rowSettings.draft.marginXMode"
+                  label="Horizontal Margin"
+                  name="row-margin-x-mode-setting"
+                  :items="ROW_MARGIN_X_MODE_OPTIONS"
+                  class="w-full"
+                  placeholder="Horizontal margin mode"
+                />
+                <edge-shad-number
+                  v-model="state.rowSettings.draft.marginTop"
+                  label="Margin Top"
+                  name="row-margin-top-setting"
+                  :min="0"
+                  :step="1"
+                />
+                <edge-shad-number
+                  v-model="state.rowSettings.draft.marginBottom"
+                  label="Margin Bottom"
+                  name="row-margin-bottom-setting"
+                  :min="0"
+                  :step="1"
+                />
+                <template v-if="state.rowSettings.draft.marginXMode === 'custom'">
+                  <div class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                    Custom horizontal margins can produce undesired layout results, especially with responsive row widths.
+                  </div>
+                  <edge-shad-number
+                    v-model="state.rowSettings.draft.marginRight"
+                    label="Margin Right"
+                    name="row-margin-right-setting"
+                    :min="0"
+                    :step="1"
+                  />
+                  <edge-shad-number
+                    v-model="state.rowSettings.draft.marginLeft"
+                    label="Margin Left"
+                    name="row-margin-left-setting"
+                    :min="0"
+                    :step="1"
+                  />
+                </template>
+              </div>
+            </details>
           </div>
           <SheetFooter class="pt-2 flex justify-between mt-auto">
             <edge-shad-button variant="destructive" class="text-white" @click="state.rowSettings.open = false">
@@ -4692,7 +4876,7 @@ const hasUnsavedChanges = (changes) => {
                 <div
                   class="mx-auto shadow-none border-0 p-0"
                   :class="[rowWidthClass(row.width), backgroundClass(row.background)]"
-                  :style="rowBackgroundStyle(row.background)"
+                  :style="{ ...rowBackgroundStyle(row.background), ...rowSpacingStyle(row) }"
                 >
                   <div :class="[rowGridClass(row), rowVerticalAlignClass(row)]" :style="rowGridStyle(row)">
                     <div
@@ -4745,7 +4929,7 @@ const hasUnsavedChanges = (changes) => {
                 <div
                   class="mx-auto shadow-none border-0 p-0"
                   :class="[rowWidthClass(row.width), backgroundClass(row.background)]"
-                  :style="rowBackgroundStyle(row.background)"
+                  :style="{ ...rowBackgroundStyle(row.background), ...rowSpacingStyle(row) }"
                 >
                   <div :class="[rowGridClass(row), rowVerticalAlignClass(row)]" :style="rowGridStyle(row)">
                     <div
