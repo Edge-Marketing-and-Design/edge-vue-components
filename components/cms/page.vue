@@ -4639,16 +4639,16 @@ const hasUnsavedChanges = (changes) => {
                   :step="1"
                 />
                 <edge-shad-number
-                  v-model="state.rowSettings.draft.paddingRight"
-                  label="Padding Right"
-                  name="row-padding-right-setting"
+                  v-model="state.rowSettings.draft.paddingBottom"
+                  label="Padding Bottom"
+                  name="row-padding-bottom-setting"
                   :min="0"
                   :step="1"
                 />
                 <edge-shad-number
-                  v-model="state.rowSettings.draft.paddingBottom"
-                  label="Padding Bottom"
-                  name="row-padding-bottom-setting"
+                  v-model="state.rowSettings.draft.paddingRight"
+                  label="Padding Right"
+                  name="row-padding-right-setting"
                   :min="0"
                   :step="1"
                 />
