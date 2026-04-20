@@ -1,5 +1,5 @@
 <script setup>
-import { ImagePlus, Loader2, Square, SquareCheckBig } from 'lucide-vue-next'
+import { FileText, ImagePlus, Loader2, Square, SquareCheckBig } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 const props = defineProps({
@@ -23,6 +23,16 @@ const props = defineProps({
     required: false,
     default: () => [],
   },
+  includeFiles: {
+    type: Boolean,
+    required: false,
+    default: false,
+  },
+  filesOnly: {
+    type: Boolean,
+    required: false,
+    default: false,
+  },
 })
 
 // const edgeGlobal = inject('edgeGlobal')
@@ -30,8 +40,50 @@ const props = defineProps({
 const emits = defineEmits(['select'])
 
 const edgeFirebase = inject('edgeFirebase')
-const route = useRoute()
-const router = useRouter()
+const allowedFileExtensions = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'ppt', 'pptx', 'txt', 'rtf', 'zip', 'odt', 'ods', 'odp']
+const allowedFileMimeTypes = [
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/csv',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'text/plain',
+  'application/rtf',
+  'text/rtf',
+  'application/zip',
+  'application/x-zip-compressed',
+  'application/vnd.oasis.opendocument.text',
+  'application/vnd.oasis.opendocument.spreadsheet',
+  'application/vnd.oasis.opendocument.presentation',
+]
+const imageMimeTypes = ['image/jpg', 'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml', 'image/avif']
+const getMediaExtension = (item) => {
+  const fileName = String(item?.fileName || item?.name || '').toLowerCase()
+  const fileNameMatch = fileName.match(/\.([a-z0-9]+)$/i)
+  if (fileNameMatch?.[1])
+    return fileNameMatch[1].toLowerCase()
+  const r2Url = String(item?.r2URL || item?.r2Url || '').toLowerCase()
+  const sanitizedPath = r2Url.split('?')[0]
+  const pathMatch = sanitizedPath.match(/\.([a-z0-9]+)$/i)
+  return pathMatch?.[1] ? pathMatch[1].toLowerCase() : ''
+}
+const isImageMediaItem = (item) => {
+  const contentType = String(item?.contentType || '').toLowerCase()
+  if (contentType.startsWith('image/'))
+    return true
+  const ext = getMediaExtension(item)
+  return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'avif'].includes(ext)
+}
+const isAllowedFileItem = (item) => {
+  if (isImageMediaItem(item))
+    return false
+  const contentType = String(item?.contentType || '').toLowerCase()
+  const ext = getMediaExtension(item)
+  return allowedFileMimeTypes.includes(contentType) || allowedFileExtensions.includes(ext)
+}
 
 const state = reactive({
   filter: '',
@@ -54,19 +106,128 @@ const state = reactive({
   },
   clearingTags: false,
   showUpload: false,
+  initialMediaLoadDone: false,
+  loaderHold: true,
+})
+
+let mediaEmptyFallbackTimer = null
+let mediaLoaderHoldTimer = null
+
+const startInitialMediaFallbackTimer = (delay = 2500) => {
+  if (mediaEmptyFallbackTimer)
+    return
+  mediaEmptyFallbackTimer = setTimeout(() => {
+    state.initialMediaLoadDone = true
+    mediaEmptyFallbackTimer = null
+  }, delay)
+}
+
+const resetMediaLoadState = () => {
+  state.initialMediaLoadDone = false
+  state.loaderHold = true
+  if (mediaLoaderHoldTimer) {
+    clearTimeout(mediaLoaderHoldTimer)
+    mediaLoaderHoldTimer = null
+  }
+  mediaLoaderHoldTimer = setTimeout(() => {
+    state.loaderHold = false
+    mediaLoaderHoldTimer = null
+  }, 450)
+}
+
+const filesPath = computed(() => {
+  const orgPath = String(edgeGlobal.edgeState.organizationDocPath || '').trim()
+  if (!orgPath)
+    return ''
+  return `${orgPath}/files`
 })
 
 const files = computed(() => {
-  return edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/files`]
+  if (!filesPath.value)
+    return undefined
+  return edgeFirebase.data?.[filesPath.value]
+})
+
+const mediaSnapshotReady = computed(() => {
+  if (!filesPath.value)
+    return false
+  return Object.prototype.hasOwnProperty.call(edgeFirebase.data || {}, filesPath.value)
+})
+
+const shouldIncludeItemByMode = (item) => {
+  if (props.filesOnly)
+    return isAllowedFileItem(item)
+  if (props.includeFiles)
+    return isImageMediaItem(item) || isAllowedFileItem(item)
+  return isImageMediaItem(item)
+}
+
+const getModeFilteredItems = (items) => {
+  return (items || []).filter(item => shouldIncludeItemByMode(item))
+}
+const hasModeFilteredItems = items => getModeFilteredItems(items).length > 0
+const modeFilteredFiles = computed(() => {
+  const list = Object.values(files.value || {})
+  return getModeFilteredItems(list)
 })
 
 const filteredFiles = computed(() => {
   const list = Object.values(files.value || {})
   return list
+    .filter(item => shouldIncludeItemByMode(item))
     .filter(m =>
       !state.filter || m.name?.toLowerCase().includes(state.filter.toLowerCase()),
     )
     .sort((a, b) => (b.uploadTime || 0) - (a.uploadTime || 0))
+})
+
+const uploadAcceptTypes = computed(() => {
+  if (props.filesOnly)
+    return [...allowedFileMimeTypes]
+  if (props.includeFiles)
+    return [...imageMimeTypes, ...allowedFileMimeTypes]
+  return [...imageMimeTypes]
+})
+
+const mediaLoading = computed(() => {
+  if (state.loaderHold)
+    return true
+  if (!edgeGlobal.edgeState.organizationDocPath)
+    return true
+  return !state.initialMediaLoadDone
+})
+
+const showEmptyMediaState = computed(() => {
+  return mediaSnapshotReady.value
+    && state.initialMediaLoadDone
+    && filteredFiles.value.length === 0
+})
+
+const mediaPickerShellClass = computed(() => {
+  if (!props.selectMode)
+    return 'w-full mx-auto bg-background text-foreground rounded-[9.96px] px-0 border border-border/70 shadow-sm'
+  return 'w-full mx-auto bg-background text-foreground rounded-[9.96px] px-0 border border-border/70 shadow-sm flex flex-col h-[calc(80vh-3.5rem)] min-h-[520px]'
+})
+
+const mediaPlaceholderClass = computed(() => {
+  const base = 'w-full rounded-lg border border-dashed border-border/70 bg-background/60 flex flex-col items-center justify-center gap-3 text-muted-foreground px-6 text-center'
+  if (props.selectMode)
+    return `${base} min-h-[calc(80vh-17rem)]`
+  return `${base} min-h-[360px]`
+})
+const uploadActionLabel = computed(() => {
+  if (props.filesOnly)
+    return 'Upload Files'
+  if (props.includeFiles)
+    return 'Upload Media'
+  return 'Upload Images'
+})
+const emptyStateHint = computed(() => {
+  if (props.filesOnly)
+    return 'Upload files to get started.'
+  if (props.includeFiles)
+    return 'Upload media to get started.'
+  return 'Upload images to get started.'
 })
 
 const selectAll = computed(() => {
@@ -104,13 +265,11 @@ const deleteSelected = async () => {
 }
 const getTagsFromMedia = computed(() => {
   const tagsSet = new Set()
-  Object.values(files.value || {}).forEach((file) => {
-    console.log('File meta tags:', file.meta?.tags)
+  modeFilteredFiles.value.forEach((file) => {
     if (file.meta?.tags && Array.isArray(file.meta.tags)) {
       file.meta.tags.forEach(tag => tagsSet.add(tag))
     }
   })
-  console.log('Unique tags from media:', Array.from(tagsSet))
   return Array.from(tagsSet).map(tag => ({ name: tag, title: tag }))
 })
 const schemas = {
@@ -146,6 +305,45 @@ onBeforeMount(() => {
   }
 })
 
+watch(
+  () => [mediaSnapshotReady.value, filteredFiles.value.length],
+  ([ready, count]) => {
+    if (count > 0) {
+      state.initialMediaLoadDone = true
+      if (mediaEmptyFallbackTimer) {
+        clearTimeout(mediaEmptyFallbackTimer)
+        mediaEmptyFallbackTimer = null
+      }
+      return
+    }
+    if (state.initialMediaLoadDone || mediaEmptyFallbackTimer || !ready)
+      return
+    startInitialMediaFallbackTimer(2500)
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(() => {
+  if (mediaEmptyFallbackTimer) {
+    clearTimeout(mediaEmptyFallbackTimer)
+    mediaEmptyFallbackTimer = null
+  }
+  if (mediaLoaderHoldTimer) {
+    clearTimeout(mediaLoaderHoldTimer)
+    mediaLoaderHoldTimer = null
+  }
+})
+
+onMounted(() => {
+  resetMediaLoadState()
+  startInitialMediaFallbackTimer(8000)
+})
+
+onActivated(() => {
+  resetMediaLoadState()
+  startInitialMediaFallbackTimer(8000)
+})
+
 const canDeleteMedia = (item) => {
   if (!props.site)
     return true
@@ -157,7 +355,10 @@ const canDeleteMedia = (item) => {
 
 const itemClick = (item) => {
   if (props.selectMode) {
-    emits('select', edgeGlobal.getImage(item, 'public') || '')
+    const selectedUrl = isImageMediaItem(item)
+      ? (edgeGlobal.getImage(item, 'public') || item?.r2URL || item?.r2Url || '')
+      : (item?.r2URL || item?.r2Url || edgeGlobal.getImage(item, 'public') || '')
+    emits('select', selectedUrl)
   }
   else {
     state.editMedia = true
@@ -172,6 +373,7 @@ const isLightName = (name) => {
 }
 
 const previewBackgroundClass = computed(() => (isLightName(state.workingDoc?.name) ? 'bg-neutral-900/90' : 'bg-neutral-100'))
+const workingDocIsImage = computed(() => isImageMediaItem(state.workingDoc))
 
 const siteQueryValue = computed(() => {
   if (!props.site)
@@ -183,7 +385,7 @@ const siteQueryValue = computed(() => {
 <template>
   <div
     v-if="edgeGlobal.edgeState.organizationDocPath"
-    class="w-full mx-auto bg-background text-foreground rounded-[9.96px] px-0 border border-border/70 shadow-sm"
+    :class="mediaPickerShellClass"
   >
     <Sheet v-model:open="state.showUpload">
       <SheetContent side="top" class="w-full max-w-none sm:max-w-none max-w-2xl bg-card text-foreground border border-border">
@@ -206,7 +408,7 @@ const siteQueryValue = computed(() => {
             v-model="state.file"
             name="file"
             :multiple="true"
-            :accept="['image/jpg', 'image/jpeg', 'image/png', 'image/gif']"
+            :accept="uploadAcceptTypes"
             file-path="images"
             :r2="true"
             :disabled="state.tags.length === 0"
@@ -231,7 +433,7 @@ const siteQueryValue = computed(() => {
             </template>
             <template #description>
               <edge-shad-button class="bg-secondary mt-3 text-primary shadow-sm">
-                Upload
+                {{ uploadActionLabel }}
               </edge-shad-button>
               <div class="hidden" />
             </template>
@@ -258,7 +460,7 @@ const siteQueryValue = computed(() => {
       :query-value="siteQueryValue"
       query-operator="array-contains-any"
       header-class=""
-      sort-direction="desc" class="w-full flex-1 border-none shadow-none bg-background"
+      sort-direction="desc" class="w-full flex-1 border-none shadow-none bg-background min-h-0"
       collection="files"
     >
       <template #header>
@@ -276,7 +478,7 @@ const siteQueryValue = computed(() => {
                       @click="state.showUpload = true"
                     >
                       <ImagePlus class="h-5 w-5 mr-2" />
-                      Upload Media
+                      {{ uploadActionLabel }}
                     </edge-shad-button>
                   </div>
                   <div class="md:flex-1 md:min-w-[220px]">
@@ -316,38 +518,54 @@ const siteQueryValue = computed(() => {
             {{ state.selected.length }} selected
           </div>
           <div class="flex items-center gap-2">
-          <edge-shad-button
-            class="w-[140px] h-[30px] rounded bg-slate-900 text-white hover:bg-slate-800 focus-visible:ring-2 focus-visible:ring-slate-500 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
-            @click="state.selectAll = !state.selectAll"
-          >
-            <Square v-if="!state.selectAll" class="h-5 w-5" />
-            <SquareCheckBig v-else class="h-5 w-5" />
-            {{ state.selectAll ? 'Deselect All' : 'Select All' }}
-          </edge-shad-button>
-          <edge-shad-button
-            variant="destructive"
-            :disabled="state.deleting || state.selected.length === 0"
-            class="h-[30px]"
-            @click="deleteSelected"
-          >
-            <Loader2 v-if="state.deleting" class="animate-spin h-5 w-5 mr-2" />
-            Delete Selected
-          </edge-shad-button>
+            <edge-shad-button
+              class="w-[140px] h-[30px] rounded bg-slate-900 text-white hover:bg-slate-800 focus-visible:ring-2 focus-visible:ring-slate-500 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
+              @click="state.selectAll = !state.selectAll"
+            >
+              <Square v-if="!state.selectAll" class="h-5 w-5" />
+              <SquareCheckBig v-else class="h-5 w-5" />
+              {{ state.selectAll ? 'Deselect All' : 'Select All' }}
+            </edge-shad-button>
+            <edge-shad-button
+              variant="destructive"
+              :disabled="state.deleting || state.selected.length === 0"
+              class="h-[30px]"
+              @click="deleteSelected"
+            >
+              <Loader2 v-if="state.deleting" class="animate-spin h-5 w-5 mr-2" />
+              Delete Selected
+            </edge-shad-button>
           </div>
         </div>
       </template>
       <template #list="slotProps">
-        <div class="mx-auto px-0 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-          <div v-for="item in slotProps.filtered" :key="item.docId" class="w-full cursor-pointer" @click="itemClick(item)">
-            <edge-cms-media-card
-              :item="item"
-              :selected="state.selected.includes(item.docId)"
-              class="block w-full h-full"
-              :select-mode="props.selectMode"
-              :can-delete="canDeleteMedia(item)"
-              @select="(checked, docId) => handleCheckboxChange(checked, docId)"
-              @delete="(docId) => slotProps.deleteItem(docId)"
-            />
+        <div class="w-full h-full min-h-full">
+          <div v-if="mediaLoading" :class="mediaPlaceholderClass">
+            <Loader2 class="h-7 w-7 animate-spin" />
+            <div class="text-sm font-medium">
+              Loading media...
+            </div>
+          </div>
+          <div v-else-if="showEmptyMediaState || !hasModeFilteredItems(slotProps.filtered)" :class="mediaPlaceholderClass">
+            <div class="text-sm font-medium">
+              No media found
+            </div>
+            <div class="text-xs">
+              {{ emptyStateHint }}
+            </div>
+          </div>
+          <div v-else class="mx-auto px-0 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+            <div v-for="item in getModeFilteredItems(slotProps.filtered)" :key="item.docId" class="w-full cursor-pointer" @click="itemClick(item)">
+              <edge-cms-media-card
+                :item="item"
+                :selected="state.selected.includes(item.docId)"
+                class="block w-full h-full"
+                :select-mode="props.selectMode"
+                :can-delete="canDeleteMedia(item)"
+                @select="(checked, docId) => handleCheckboxChange(checked, docId)"
+                @delete="(docId) => slotProps.deleteItem(docId)"
+              />
+            </div>
           </div>
         </div>
       </template>
@@ -359,10 +577,12 @@ const siteQueryValue = computed(() => {
           <SheetDescription>
             <div class="h-[450px] rounded-lg mb-4 flex items-center justify-center overflow-hidden" :class="previewBackgroundClass">
               <img
+                v-if="workingDocIsImage"
                 :src="edgeGlobal.getImage(state.workingDoc, 'public')"
                 alt=""
                 class="max-h-full max-w-full h-auto w-auto object-contain"
               >
+              <FileText v-else class="h-20 w-20 text-slate-500 dark:text-slate-300" />
             </div>
             Original Name: <span class="font-semibold">{{ state.workingDoc?.fileName }}</span>, Size: <span class="font-semibold">{{ (state.workingDoc?.fileSize / 1024).toFixed(2) }} KB</span>
           </SheetDescription>

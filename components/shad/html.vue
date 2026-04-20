@@ -14,6 +14,7 @@ import {
   AlignRight,
   Bold,
   Code,
+  FileText,
   Heading1,
   Heading2,
   Heading3,
@@ -22,6 +23,7 @@ import {
   Heading6,
   Image,
   Italic,
+  Link2,
   List,
   ListOrdered,
   ListTree,
@@ -94,7 +96,7 @@ const props = defineProps({
     default: '',
   },
 })
-const emits = defineEmits(['update:modelValue', 'request-image'])
+const emits = defineEmits(['update:modelValue', 'requestImage', 'requestFile'])
 const DEFAULT_IMAGE_WIDTH = 33
 const DEFAULT_HEIGHT_CLASS = 'edge-editor-height-default'
 const sizeWidths = {
@@ -189,18 +191,21 @@ const sourceLineNumberText = computed(() => {
   return Array.from({ length: lineCount }, (_item, index) => String(index + 1)).join('\n')
 })
 const linkControlsEnabled = computed(() => props.enableLinks === true && props.enabledToggles.includes('link'))
-const activeLinkOpensInNewTab = computed(() => {
-  if (!editor.value || !editor.value.isActive('link'))
-    return false
-  return String(editor.value.getAttributes('link')?.target || '').toLowerCase() === '_blank'
+const linkDialogOpen = ref(false)
+const linkDialogState = reactive({
+  href: '',
+  openInNewTab: true,
 })
+const canSaveLink = computed(() => String(linkDialogState.href || '').trim().length > 0)
 
 const appliedHeightClasses = ref([])
-const toolbarControlClass = 'border border-slate-300 bg-white text-slate-700 shadow-sm hover:border-slate-400 hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-slate-400 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-50 dark:focus-visible:ring-slate-500 dark:disabled:border-slate-800 dark:disabled:bg-slate-950 dark:disabled:text-slate-600'
+const toolbarControlClass = 'h-7 min-w-7 px-1.5 text-xs border border-slate-300 bg-white text-slate-700 shadow-sm hover:border-slate-400 hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-slate-400 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-50 dark:focus-visible:ring-slate-500 dark:disabled:border-slate-800 dark:disabled:bg-slate-950 dark:disabled:text-slate-600'
 const toolbarToggleClass = `${toolbarControlClass} data-[state=on]:border-slate-900 data-[state=on]:bg-slate-900 data-[state=on]:text-white dark:data-[state=on]:border-slate-100 dark:data-[state=on]:bg-slate-100 dark:data-[state=on]:text-slate-900`
 
 const resolveHeightClasses = () => {
   const raw = (props.heightClass || '').trim()
+  if (raw === 'none')
+    return []
   if (!raw)
     return [DEFAULT_HEIGHT_CLASS]
   return raw.split(/\s+/).filter(Boolean)
@@ -395,7 +400,18 @@ watch(sourceMode, async (enabled) => {
 })
 
 const addImage = () => {
-  emits('request-image')
+  emits('requestImage')
+}
+
+const addFile = () => {
+  emits('requestFile')
+}
+
+const normalizeHref = (value) => {
+  const trimmed = String(value || '').trim()
+  if (!trimmed)
+    return ''
+  return /^(https?:\/\/|mailto:|tel:|\/|#)/i.test(trimmed) ? trimmed : `https://${trimmed}`
 }
 
 const insertImage = (url) => {
@@ -409,6 +425,34 @@ const insertImage = (url) => {
     width: DEFAULT_IMAGE_WIDTH,
   }).run()
   updateImageState()
+}
+
+const insertFile = (url) => {
+  if (!url || !editor.value)
+    return
+  const href = normalizeHref(url)
+  if (!href)
+    return
+  const { from, to, empty } = editor.value.state.selection
+  if (empty) {
+    editor.value
+      .chain()
+      .focus()
+      .insertContent(`<a href="${href}" target="_blank" rel="noopener noreferrer">File</a>`)
+      .run()
+    return
+  }
+  editor.value
+    .chain()
+    .focus()
+    .setTextSelection({ from, to })
+    .extendMarkRange('link')
+    .setLink({
+      href,
+      target: '_blank',
+      rel: 'noopener noreferrer',
+    })
+    .run()
 }
 
 const setImageSize = (size) => {
@@ -465,59 +509,46 @@ const removeImage = () => {
   updateImageState()
 }
 
-const setLink = () => {
+const openLinkDialog = () => {
   if (!editor.value || !linkControlsEnabled.value)
     return
   const currentHref = String(editor.value.getAttributes('link')?.href || '')
-  const raw = window.prompt('Enter link URL', currentHref)
-  if (raw === null)
+  const currentTarget = String(editor.value.getAttributes('link')?.target || '').toLowerCase()
+  linkDialogState.href = currentHref
+  linkDialogState.openInNewTab = currentHref ? currentTarget === '_blank' : true
+  linkDialogOpen.value = true
+}
+
+const saveLinkFromDialog = () => {
+  if (!editor.value || !linkControlsEnabled.value)
     return
-  const trimmed = raw.trim()
-  if (!trimmed) {
-    editor.value.chain().focus().extendMarkRange('link').unsetLink().run()
+  const trimmed = String(linkDialogState.href || '').trim()
+  if (!trimmed)
     return
-  }
-  const href = /^(https?:\/\/|mailto:|tel:|\/|#)/i.test(trimmed) ? trimmed : `https://${trimmed}`
+  const href = normalizeHref(trimmed)
   editor.value
     .chain()
     .focus()
     .extendMarkRange('link')
     .setLink({
       href,
-      target: '_blank',
-      rel: 'noopener noreferrer',
+      target: linkDialogState.openInNewTab ? '_blank' : null,
+      rel: linkDialogState.openInNewTab ? 'noopener noreferrer' : null,
     })
     .run()
+  linkDialogOpen.value = false
 }
 
-const unsetLink = () => {
+const removeLinkFromDialog = () => {
   if (!editor.value || !linkControlsEnabled.value)
     return
   editor.value.chain().focus().extendMarkRange('link').unsetLink().run()
-}
-
-const toggleLinkTargetBlank = () => {
-  if (!editor.value || !linkControlsEnabled.value || !editor.value.isActive('link'))
-    return
-  const attrs = editor.value.getAttributes('link') || {}
-  const href = String(attrs.href || '').trim()
-  if (!href)
-    return
-  const nextOpensInNewTab = !activeLinkOpensInNewTab.value
-  editor.value
-    .chain()
-    .focus()
-    .extendMarkRange('link')
-    .setLink({
-      href,
-      target: nextOpensInNewTab ? '_blank' : null,
-      rel: nextOpensInNewTab ? 'noopener noreferrer' : null,
-    })
-    .run()
+  linkDialogOpen.value = false
 }
 
 defineExpose({
   insertImage,
+  insertFile,
 })
 </script>
 
@@ -533,7 +564,7 @@ defineExpose({
         </FormLabel>
         <FormControl>
           <div v-if="editor" class="relative w-full  items-center">
-            <div class="flex flex-col w-full py-2 border border-secondary">
+            <div class="flex flex-col w-full py-2 border border-secondary px-2">
               <div class="button-group w-full flex flex-wrap gap-2">
                 <ToggleGroup v-if="enabledToggles.includes('source')" type="single">
                   <ToggleGroupItem
@@ -541,10 +572,10 @@ defineExpose({
                     :data-state="sourceMode ? 'on' : 'off'"
                     :class="`edge-html-source-toggle ${toolbarToggleClass}`"
                     title="Toggle HTML source"
+                    aria-label="Toggle HTML source"
                     @click.prevent="toggleSourceMode"
                   >
                     <Code :size="16" />
-                    <span>HTML</span>
                   </ToggleGroupItem>
                 </ToggleGroup>
                 <Button
@@ -708,35 +739,25 @@ defineExpose({
                     <Image :size="16" />
                   </Button>
                   <Button
+                    v-if="enabledToggles.includes('files') || enabledToggles.includes('pdf')"
+                    variant="outline"
+                    :class="toolbarControlClass"
+                    title="Insert File Link"
+                    aria-label="Insert file link"
+                    @click.prevent="addFile"
+                  >
+                    <FileText :size="16" />
+                  </Button>
+                  <Button
                     v-if="linkControlsEnabled"
                     variant="outline"
                     :class="toolbarToggleClass"
                     :data-state="editor.isActive('link') ? 'on' : 'off'"
                     title="Add / Edit Link"
-                    @click.prevent="setLink"
+                    aria-label="Add or edit link"
+                    @click.prevent="openLinkDialog"
                   >
-                    Link
-                  </Button>
-                  <Button
-                    v-if="linkControlsEnabled"
-                    variant="outline"
-                    :class="toolbarToggleClass"
-                    :data-state="activeLinkOpensInNewTab ? 'on' : 'off'"
-                    title="Toggle opening current link in a new tab"
-                    :disabled="!editor.isActive('link')"
-                    @click.prevent="toggleLinkTargetBlank"
-                  >
-                    New Tab
-                  </Button>
-                  <Button
-                    v-if="linkControlsEnabled"
-                    variant="outline"
-                    :class="toolbarControlClass"
-                    title="Remove Link"
-                    :disabled="!editor.isActive('link')"
-                    @click.prevent="unsetLink"
-                  >
-                    Unlink
+                    <Link2 :size="16" />
                   </Button>
 
                   <ToggleGroup type="single">
@@ -830,6 +851,7 @@ defineExpose({
                     :class="toolbarToggleClass"
                     :data-state="imageState.size === 'small' ? 'on' : 'off'"
                     title="Small image"
+                    :disabled="!imageState.active"
                     @click.prevent="setImageSize('small')"
                   >
                     S
@@ -839,6 +861,7 @@ defineExpose({
                     :class="toolbarToggleClass"
                     :data-state="imageState.size === 'medium' ? 'on' : 'off'"
                     title="Medium image"
+                    :disabled="!imageState.active"
                     @click.prevent="setImageSize('medium')"
                   >
                     M
@@ -848,6 +871,7 @@ defineExpose({
                     :class="toolbarToggleClass"
                     :data-state="imageState.size === 'large' ? 'on' : 'off'"
                     title="Large image"
+                    :disabled="!imageState.active"
                     @click.prevent="setImageSize('large')"
                   >
                     L
@@ -857,6 +881,7 @@ defineExpose({
                     :class="toolbarToggleClass"
                     :data-state="imageState.size === 'full' ? 'on' : 'off'"
                     title="Full width image"
+                    :disabled="!imageState.active"
                     @click.prevent="setImageSize('full')"
                   >
                     F
@@ -868,6 +893,7 @@ defineExpose({
                     :class="toolbarToggleClass"
                     :data-state="imageState.float === 'left' ? 'on' : 'off'"
                     title="Float left"
+                    :disabled="!imageState.active"
                     @click.prevent="setImageFloat('left')"
                   >
                     <AlignLeft :size="16" />
@@ -877,6 +903,7 @@ defineExpose({
                     :class="toolbarToggleClass"
                     :data-state="imageState.float === 'none' ? 'on' : 'off'"
                     title="No float"
+                    :disabled="!imageState.active"
                     @click.prevent="setImageFloat('none')"
                   >
                     <AlignCenter :size="16" />
@@ -886,6 +913,7 @@ defineExpose({
                     :class="toolbarToggleClass"
                     :data-state="imageState.float === 'right' ? 'on' : 'off'"
                     title="Float right"
+                    :disabled="!imageState.active"
                     @click.prevent="setImageFloat('right')"
                   >
                     <AlignRight :size="16" />
@@ -901,6 +929,7 @@ defineExpose({
                     max="100"
                     step="1"
                     class="h-2 w-32 cursor-pointer"
+                    :disabled="!imageState.active"
                     :value="imageState.width"
                     @input="setImageWidth(Number(($event.target).value))"
                   >
@@ -912,6 +941,7 @@ defineExpose({
                   variant="outline"
                   :class="toolbarControlClass"
                   title="Remove image"
+                  :disabled="!imageState.active"
                   @click.prevent="removeImage"
                 >
                   <Trash2 :size="16" />
@@ -920,7 +950,7 @@ defineExpose({
             </div>
             <EditorContent
               v-if="!sourceMode"
-              class="border border-secondary bg-background"
+              class="border border-secondary bg-background px-2"
               :editor="editor"
               v-bind="componentField"
             />
@@ -938,6 +968,45 @@ defineExpose({
               <slot name="icon" />
             </span>
           </div>
+          <edge-shad-dialog v-model="linkDialogOpen">
+            <DialogContent class="max-w-[560px]">
+              <DialogHeader>
+                <DialogTitle>Edit Link</DialogTitle>
+                <DialogDescription>
+                  Enter a URL and choose whether it opens in a new tab.
+                </DialogDescription>
+              </DialogHeader>
+              <div class="space-y-3">
+                <edge-shad-input
+                  v-model="linkDialogState.href"
+                  name="editor-link-url"
+                  label="URL"
+                  placeholder="https://example.com"
+                />
+                <edge-shad-checkbox v-model="linkDialogState.openInNewTab" name="editor-link-new-tab">
+                  Open in new tab
+                </edge-shad-checkbox>
+              </div>
+              <DialogFooter class="pt-2 flex justify-between gap-2">
+                <edge-shad-button
+                  type="button"
+                  variant="outline"
+                  :disabled="!editor?.isActive('link')"
+                  @click="removeLinkFromDialog"
+                >
+                  Remove Link
+                </edge-shad-button>
+                <div class="flex items-center gap-2">
+                  <edge-shad-button type="button" variant="outline" @click="linkDialogOpen = false">
+                    Cancel
+                  </edge-shad-button>
+                  <edge-shad-button type="button" :disabled="!canSaveLink" @click="saveLinkFromDialog">
+                    Save Link
+                  </edge-shad-button>
+                </div>
+              </DialogFooter>
+            </DialogContent>
+          </edge-shad-dialog>
         </FormControl>
         <FormDescription>
           {{ props.description }}
@@ -953,6 +1022,7 @@ defineExpose({
 /* Basic editor styles */
 .tiptap {
   overflow-y: auto;
+  outline: none;
 
   :first-child {
     margin-top: 0;
@@ -1016,6 +1086,19 @@ defineExpose({
     font-size: 1rem;
   }
 
+  a {
+    color: inherit;
+    text-decoration-line: underline;
+    text-decoration-style: dotted;
+    text-decoration-thickness: 1.5px;
+    text-underline-offset: 2px;
+  }
+
+  a:hover,
+  a:focus-visible {
+    text-decoration-style: solid;
+  }
+
   /* Code and preformatted text styles */
   code {
     background-color: var(--purple-light);
@@ -1060,7 +1143,6 @@ defineExpose({
   }
 
   img.edge-editor-image {
-    border-radius: 0.375rem;
     display: inline-block;
     height: auto;
     max-width: 100%;
@@ -1113,6 +1195,14 @@ defineExpose({
     margin-left: 0;
     margin-right: 0;
   }
+}
+
+.tiptap:focus,
+.tiptap:focus-visible,
+.ProseMirror:focus,
+.ProseMirror:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 .tiptap.edge-editor-height-default {

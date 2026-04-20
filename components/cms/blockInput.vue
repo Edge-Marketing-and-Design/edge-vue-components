@@ -29,15 +29,28 @@ const props = defineProps({
     required: false,
     default: '',
   },
+  showRichtextImageToggle: {
+    type: Boolean,
+    required: false,
+    default: false,
+  },
+  richtextAutoHeight: {
+    type: Boolean,
+    required: false,
+    default: false,
+  },
 })
 
 const emit = defineEmits(['update:modelValue', 'delete'])
 
 const modelValue = useVModel(props, 'modelValue', emit)
+const richtextEditorRef = ref(null)
 const edgeFirebase = inject('edgeFirebase')
 const isGlobalAdmin = computed(() => edgeGlobal.isAdminGlobal(edgeFirebase).value)
 const richtextEnabledToggles = computed(() => {
-  const baseToggles = ['bold', 'italic', 'strike', 'bulletlist', 'orderedlist', 'underline']
+  const baseToggles = ['bold', 'italic', 'strike', 'bulletlist', 'orderedlist', 'underline', 'link', 'files']
+  if (props.showRichtextImageToggle)
+    baseToggles.push('image')
   if (isGlobalAdmin.value)
     return [...baseToggles, 'source']
   return baseToggles
@@ -46,6 +59,8 @@ const richtextEnabledToggles = computed(() => {
 const state = reactive({
   mounted: false,
   imageOpen: false,
+  richtextImageOpen: false,
+  richtextFileOpen: false,
 })
 
 const hasImageTags = computed(() => {
@@ -79,6 +94,30 @@ const selectImage = async (url) => {
   state.imageOpen = false
 }
 
+const openRichtextImagePicker = () => {
+  state.richtextImageOpen = true
+}
+
+const openRichtextFilePicker = () => {
+  state.richtextFileOpen = true
+}
+
+const selectRichtextImage = async (url) => {
+  const normalizedUrl = normalizeSelectedImageUrl(url)
+  if (normalizedUrl)
+    richtextEditorRef.value?.insertImage?.(normalizedUrl)
+  await nextTick()
+  state.richtextImageOpen = false
+}
+
+const selectRichtextFile = async (url) => {
+  const normalizedUrl = normalizeSelectedImageUrl(url)
+  if (normalizedUrl)
+    richtextEditorRef.value?.insertFile?.(normalizedUrl)
+  await nextTick()
+  state.richtextFileOpen = false
+}
+
 onBeforeMount(async () => {
   if (props.type === 'option' && !modelValue.value) {
     modelValue.value = props.schema.value
@@ -91,7 +130,63 @@ onBeforeMount(async () => {
 <template>
   <div v-if="state.mounted">
     <div v-if="props.type === 'richtext'">
-      <edge-shad-html v-model="modelValue" :enabled-toggles="richtextEnabledToggles" :name="field" :label="label" />
+      <edge-shad-html
+        ref="richtextEditorRef"
+        v-model="modelValue"
+        :enabled-toggles="richtextEnabledToggles"
+        :enable-links="true"
+        :height-class="props.richtextAutoHeight ? 'none' : ''"
+        :name="field"
+        :label="label"
+        @request-image="openRichtextImagePicker"
+        @request-file="openRichtextFilePicker"
+      />
+      <edge-shad-dialog v-model="state.richtextImageOpen">
+        <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Select Image</DialogTitle>
+            <DialogDescription />
+          </DialogHeader>
+          <edge-cms-media-manager
+            v-if="hasImageTags"
+            :site="props.site"
+            :select-mode="true"
+            :default-tags="props.schema.tags"
+            @select="selectRichtextImage"
+          />
+          <edge-cms-media-manager
+            v-else
+            :site="props.site"
+            :select-mode="true"
+            @select="selectRichtextImage"
+          />
+        </DialogContent>
+      </edge-shad-dialog>
+      <edge-shad-dialog v-model="state.richtextFileOpen">
+        <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Select File</DialogTitle>
+            <DialogDescription />
+          </DialogHeader>
+          <edge-cms-media-manager
+            v-if="hasImageTags"
+            :site="props.site"
+            :select-mode="true"
+            :include-files="true"
+            :files-only="true"
+            :default-tags="props.schema.tags"
+            @select="selectRichtextFile"
+          />
+          <edge-cms-media-manager
+            v-else
+            :site="props.site"
+            :select-mode="true"
+            :include-files="true"
+            :files-only="true"
+            @select="selectRichtextFile"
+          />
+        </DialogContent>
+      </edge-shad-dialog>
     </div>
     <div v-else-if="props.type === 'textarea'">
       <edge-shad-textarea v-model="modelValue" :name="field" :label="label" />

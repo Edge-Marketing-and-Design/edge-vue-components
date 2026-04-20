@@ -20,7 +20,7 @@ onMounted(() => {
   <div
     v-if="edgeGlobal.edgeState.organizationDocPath && state.mounted"
   >
-    <edge-cms-media-manager />
+    <edge-cms-media-manager :include-files="true" />
   </div>
 </template>
 

@@ -1,7 +1,7 @@
 <script setup>
 import { useVModel } from '@vueuse/core'
 import { renderTemplate } from '@edgedev/template-engine'
-import { ChevronDown, ImagePlus, Loader2, LockKeyhole, LockOpen, Maximize2, Monitor, Plus, Smartphone, Sparkles, Tablet, X } from 'lucide-vue-next'
+import { ChevronDown, GripVertical, ImagePlus, Loader2, LockKeyhole, LockOpen, Maximize2, Monitor, Plus, Smartphone, Sparkles, Tablet, X } from 'lucide-vue-next'
 const props = defineProps({
   modelValue: {
     type: Object,
@@ -71,6 +71,10 @@ const props = defineProps({
     type: Boolean,
     default: true,
   },
+  allowRichtextImageTools: {
+    type: Boolean,
+    default: false,
+  },
   previewAuthLoggedIn: {
     type: Boolean,
     default: true,
@@ -89,6 +93,16 @@ const PROTECTION_UNAUTH_BEHAVIORS = [
   { name: 'showLogin', title: 'Show Login' },
   { name: 'blurWithLoginPrompt', title: 'Blur + Login Prompt' },
 ]
+const showRichtextImageToggle = computed(() => props.allowRichtextImageTools === true)
+const BLOCK_EDITOR_PANEL_STORAGE_KEYS = {
+  page: 'edge-cms-block-editor-panel-width:page',
+  post: 'edge-cms-block-editor-panel-width:post',
+}
+const BLOCK_EDITOR_PANEL_DEFAULTS = {
+  page: 26,
+  post: 34,
+}
+const BLOCK_EDITOR_PANEL_MIN = 20
 
 const createBlockProtectionDefaults = () => ({
   enabled: false,
@@ -272,8 +286,13 @@ const modelValue = useVModel(props, 'modelValue', emit)
 const blockFormRef = ref(null)
 const previewContentEditorRef = ref(null)
 const fieldEditorPreviewRef = ref(null)
+const editorSplitContainerRef = ref(null)
 const activePreviewField = ref('')
 const fieldEditorPreviewLoadedTick = ref(0)
+const editorPanelRightWidth = ref(BLOCK_EDITOR_PANEL_DEFAULTS.page)
+const editorPanelResizing = ref(false)
+const editorPanelPointerMove = ref(null)
+const editorPanelPointerUp = ref(null)
 
 const state = reactive({
   open: false,
@@ -307,6 +326,85 @@ const state = reactive({
   blockContentUpdating: false,
   blockContentError: '',
 })
+
+const isPostEditorContext = computed(() => props.allowRichtextImageTools === true)
+const editorPanelStorageKey = computed(() => isPostEditorContext.value
+  ? BLOCK_EDITOR_PANEL_STORAGE_KEYS.post
+  : BLOCK_EDITOR_PANEL_STORAGE_KEYS.page)
+const editorPanelDefaultWidth = computed(() => isPostEditorContext.value
+  ? BLOCK_EDITOR_PANEL_DEFAULTS.post
+  : BLOCK_EDITOR_PANEL_DEFAULTS.page)
+const editorPanelMaxByLeftMin = computed(() => 100 - BLOCK_EDITOR_PANEL_MIN)
+const effectiveEditorPanelMaxWidth = computed(() => editorPanelMaxByLeftMin.value)
+const editorPanelGridTemplateColumns = computed(() => {
+  const numeric = Number(editorPanelRightWidth.value) || editorPanelDefaultWidth.value
+  const minClamped = Math.max(BLOCK_EDITOR_PANEL_MIN, numeric)
+  const right = Math.min(effectiveEditorPanelMaxWidth.value, minClamped)
+  return `minmax(0, 1fr) 12px minmax(320px, ${right}%)`
+})
+
+const clampEditorPanelRightWidth = (value) => {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric))
+    return editorPanelDefaultWidth.value
+  const minClamped = Math.max(BLOCK_EDITOR_PANEL_MIN, numeric)
+  return Math.min(effectiveEditorPanelMaxWidth.value, minClamped)
+}
+
+const persistEditorPanelWidth = () => {
+  if (typeof window === 'undefined')
+    return
+  window.localStorage.setItem(editorPanelStorageKey.value, String(clampEditorPanelRightWidth(editorPanelRightWidth.value)))
+}
+
+const loadEditorPanelWidth = () => {
+  if (typeof window === 'undefined') {
+    editorPanelRightWidth.value = editorPanelDefaultWidth.value
+    return
+  }
+  const raw = window.localStorage.getItem(editorPanelStorageKey.value)
+  if (!raw) {
+    editorPanelRightWidth.value = editorPanelDefaultWidth.value
+    return
+  }
+  editorPanelRightWidth.value = clampEditorPanelRightWidth(Number.parseFloat(raw))
+}
+
+const nudgeEditorPanelWidth = (delta) => {
+  editorPanelRightWidth.value = clampEditorPanelRightWidth(editorPanelRightWidth.value + delta)
+  persistEditorPanelWidth()
+}
+
+const startEditorPanelResize = (event) => {
+  if (!props.editMode)
+    return
+  const container = editorSplitContainerRef.value
+  if (!container)
+    return
+  event.preventDefault()
+  const rect = container.getBoundingClientRect()
+  if (!rect.width)
+    return
+  editorPanelResizing.value = true
+  const onMove = (moveEvent) => {
+    const relativeX = moveEvent.clientX - rect.left
+    const leftPercent = (relativeX / rect.width) * 100
+    const rightPercent = 100 - leftPercent
+    editorPanelRightWidth.value = clampEditorPanelRightWidth(rightPercent)
+  }
+  const onUp = () => {
+    editorPanelResizing.value = false
+    persistEditorPanelWidth()
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
+    editorPanelPointerMove.value = null
+    editorPanelPointerUp.value = null
+  }
+  editorPanelPointerMove.value = onMove
+  editorPanelPointerUp.value = onUp
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', onUp)
+}
 
 const INTERACTIVE_CLICK_SELECTOR = [
   '[data-cms-interactive]',
@@ -990,6 +1088,12 @@ const fieldEditorPreviewBlock = computed(() => {
   }
 })
 
+const isSingleRichtextOnlyFieldEditor = computed(() => {
+  const meta = fieldEditorPreviewBlock.value?.meta || {}
+  const entries = Object.entries(meta).filter(([_field, cfg]) => cfg && !shouldIgnoreMeta(cfg))
+  return entries.length === 1 && entries[0]?.[1]?.type === 'richtext'
+})
+
 const fieldEditorRenderValues = computed(() => {
   const baseValues = fieldEditorPreviewBlock.value?.values || {}
   if (!props.renderContext || typeof props.renderContext !== 'object' || Array.isArray(props.renderContext))
@@ -1166,6 +1270,8 @@ const wrapTextMatchesInPreview = (root, target) => {
         return NodeFilter.FILTER_REJECT
       if (node.parentElement?.closest?.('script,style,noscript'))
         return NodeFilter.FILTER_REJECT
+      if (node.parentElement?.closest?.('[contenteditable="true"],.ProseMirror,.tiptap,.edge-shad-html-content'))
+        return NodeFilter.FILTER_REJECT
       return NodeFilter.FILTER_ACCEPT
     },
   })
@@ -1209,6 +1315,8 @@ const highlightElementTextMatches = (root, targets) => {
   const elements = Array.from(root.querySelectorAll('*')).filter((el) => {
     if (el.closest('script,style,noscript'))
       return false
+    if (el.closest('[contenteditable="true"],.ProseMirror,.tiptap,.edge-shad-html-content'))
+      return false
     const text = normalizeHighlightText(el.textContent)
     return text.length >= 2
   })
@@ -1242,6 +1350,8 @@ const highlightPreviewMediaMatches = (root, targets) => {
     return matches
 
   root.querySelectorAll('img, source, video, iframe, [style]').forEach((el) => {
+    if (el.closest('[contenteditable="true"],.ProseMirror,.tiptap,.edge-shad-html-content'))
+      return
     const src = String(el.getAttribute('src') || '').trim()
     const srcset = String(el.getAttribute('srcset') || '').trim()
     const style = String(el.getAttribute('style') || '').trim()
@@ -1258,6 +1368,8 @@ const syncActivePreviewHighlight = () => {
   clearActivePreviewHighlights()
 
   if (typeof document === 'undefined')
+    return
+  if (isSingleRichtextOnlyFieldEditor.value)
     return
 
   const field = String(activePreviewField.value || '').trim()
@@ -1299,12 +1411,21 @@ const syncActivePreviewHighlight = () => {
 }
 
 const setActivePreviewField = (field) => {
+  if (isSingleRichtextOnlyFieldEditor.value) {
+    activePreviewField.value = ''
+    clearActivePreviewHighlights()
+    return
+  }
   activePreviewField.value = String(field || '').trim()
 }
 
 const handleFieldEditorPreviewLoaded = () => {
   fieldEditorPreviewLoadedTick.value++
 }
+
+watch(editorPanelStorageKey, () => {
+  loadEditorPanelWidth()
+}, { immediate: true })
 
 watch(
   () => [activePreviewField.value, fieldEditorPreviewLoadedTick.value, state.open, state.editorMode, props.editMode, state.draft],
@@ -1327,6 +1448,10 @@ watch(() => state.open, (open) => {
 })
 
 onBeforeUnmount(() => {
+  if (editorPanelPointerMove.value)
+    window.removeEventListener('pointermove', editorPanelPointerMove.value)
+  if (editorPanelPointerUp.value)
+    window.removeEventListener('pointerup', editorPanelPointerUp.value)
   clearActivePreviewHighlights()
 })
 
@@ -2013,25 +2138,25 @@ const getTagsFromPosts = computed(() => {
                   <span class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Live Preview</span>
                   <div class="ml-auto flex shrink-0 items-center gap-2">
                     <div class="flex shrink-0 items-center gap-1 flex-nowrap">
-                    <edge-shad-select
-                      v-model="state.previewScale"
-                      :items="previewScaleOptions"
-                      placeholder="%"
-                      class="w-[84px] shrink-0"
-                      trigger-class="!h-7 min-h-7 px-2 py-1 text-xs"
-                    />
-                    <edge-shad-button
-                      v-for="option in previewViewportOptions"
-                      :key="option.id"
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      class="h-7 w-7 shrink-0 text-xs border transition-colors"
-                      :class="state.previewViewport === option.id ? 'bg-slate-700 text-white border-slate-700 shadow-sm dark:bg-slate-200 dark:text-slate-900 dark:border-slate-200' : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700 dark:hover:bg-slate-800'"
-                      @click="setPreviewViewport(option.id)"
-                    >
-                      <component :is="option.icon" class="w-3.5 h-3.5" />
-                    </edge-shad-button>
+                      <edge-shad-select
+                        v-model="state.previewScale"
+                        :items="previewScaleOptions"
+                        placeholder="%"
+                        class="w-[84px] shrink-0"
+                        trigger-class="!h-7 min-h-7 px-2 py-1 text-xs"
+                      />
+                      <edge-shad-button
+                        v-for="option in previewViewportOptions"
+                        :key="option.id"
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        class="h-7 w-7 shrink-0 text-xs border transition-colors"
+                        :class="state.previewViewport === option.id ? 'bg-slate-700 text-white border-slate-700 shadow-sm dark:bg-slate-200 dark:text-slate-900 dark:border-slate-200' : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700 dark:hover:bg-slate-800'"
+                        @click="setPreviewViewport(option.id)"
+                      >
+                        <component :is="option.icon" class="w-3.5 h-3.5" />
+                      </edge-shad-button>
                     </div>
                     <label v-if="previewAuthToggleVisible" class="inline-flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded-md border border-slate-300 bg-white/90 px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:bg-slate-800">
                       <Checkbox
@@ -2112,31 +2237,35 @@ const getTagsFromPosts = computed(() => {
           </SheetHeader>
 
           <edge-shad-form ref="blockFormRef" :class="props.editMode ? 'flex min-h-0 flex-1 flex-col' : ''">
-            <div :class="props.editMode ? 'grid min-h-0 flex-1 gap-4 overflow-hidden px-6 pb-4 pt-3 xl:grid-cols-[minmax(0,1fr)_minmax(320px,26vw)]' : ''">
+            <div
+              ref="editorSplitContainerRef"
+              :class="props.editMode ? 'grid min-h-0 flex-1 overflow-hidden px-6 pb-4 pt-3' : ''"
+              :style="props.editMode ? { gridTemplateColumns: editorPanelGridTemplateColumns } : undefined"
+            >
               <div v-if="props.editMode" class="min-h-0 rounded-md border border-border bg-card overflow-hidden flex flex-col">
                 <div class="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/40">
                   <span class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Live Preview</span>
                   <div class="ml-auto flex shrink-0 items-center gap-2">
                     <div class="flex shrink-0 items-center gap-1 flex-nowrap">
-                    <edge-shad-select
-                      v-model="state.previewScale"
-                      :items="previewScaleOptions"
-                      placeholder="%"
-                      class="w-[84px] shrink-0"
-                      trigger-class="!h-7 min-h-7 px-2 py-1 text-xs"
-                    />
-                    <edge-shad-button
-                      v-for="option in previewViewportOptions"
-                      :key="option.id"
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      class="h-7 w-7 shrink-0 text-xs border transition-colors"
-                      :class="state.previewViewport === option.id ? 'bg-slate-700 text-white border-slate-700 shadow-sm dark:bg-slate-200 dark:text-slate-900 dark:border-slate-200' : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700 dark:hover:bg-slate-800'"
-                      @click="setPreviewViewport(option.id)"
-                    >
-                      <component :is="option.icon" class="w-3.5 h-3.5" />
-                    </edge-shad-button>
+                      <edge-shad-select
+                        v-model="state.previewScale"
+                        :items="previewScaleOptions"
+                        placeholder="%"
+                        class="w-[84px] shrink-0"
+                        trigger-class="!h-7 min-h-7 px-2 py-1 text-xs"
+                      />
+                      <edge-shad-button
+                        v-for="option in previewViewportOptions"
+                        :key="option.id"
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        class="h-7 w-7 shrink-0 text-xs border transition-colors"
+                        :class="state.previewViewport === option.id ? 'bg-slate-700 text-white border-slate-700 shadow-sm dark:bg-slate-200 dark:text-slate-900 dark:border-slate-200' : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700 dark:hover:bg-slate-800'"
+                        @click="setPreviewViewport(option.id)"
+                      >
+                        <component :is="option.icon" class="w-3.5 h-3.5" />
+                      </edge-shad-button>
                     </div>
                     <label v-if="previewAuthToggleVisible" class="inline-flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded-md border border-slate-300 bg-white/90 px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:bg-slate-800">
                       <Checkbox
@@ -2165,6 +2294,22 @@ const getTagsFromPosts = computed(() => {
                       />
                     </div>
                   </div>
+                </div>
+              </div>
+              <div
+                v-if="props.editMode"
+                class="relative flex h-full items-center justify-center cursor-col-resize"
+                role="separator"
+                aria-label="Resize editor panels"
+                aria-orientation="vertical"
+                tabindex="0"
+                @pointerdown="startEditorPanelResize"
+                @keydown.left.prevent="nudgeEditorPanelWidth(1)"
+                @keydown.right.prevent="nudgeEditorPanelWidth(-1)"
+              >
+                <div class="h-full w-px bg-border/80" />
+                <div class="absolute z-10 flex h-8 w-5 items-center justify-center rounded-md border border-border bg-card shadow-sm">
+                  <GripVertical class="h-3.5 w-3.5 text-muted-foreground" />
                 </div>
               </div>
               <div :class="props.editMode ? 'min-h-0 flex flex-col overflow-hidden rounded-md border border-border bg-card' : ''">
@@ -2323,6 +2468,7 @@ const getTagsFromPosts = computed(() => {
                                               :field="schemaItem.field"
                                               :schema="schemaItem"
                                               :site="props.siteId"
+                                              :show-richtext-image-toggle="showRichtextImageToggle"
                                               :label="genTitleFromField(schemaItem)"
                                             />
                                           </template>
@@ -2425,6 +2571,7 @@ const getTagsFromPosts = computed(() => {
                                                 :schema="schemaItem"
                                                 :field="`${schemaItem.field}-${index}-entry`"
                                                 :site="props.siteId"
+                                                :show-richtext-image-toggle="showRichtextImageToggle"
                                                 :label="genTitleFromField(schemaItem)"
                                               />
                                             </Card>
@@ -2454,6 +2601,8 @@ const getTagsFromPosts = computed(() => {
                           :type="entry.meta.type"
                           :field="entry.field"
                           :site="props.siteId"
+                          :richtext-auto-height="editableMetaEntries.length === 1 && entry.meta?.type === 'richtext'"
+                          :show-richtext-image-toggle="showRichtextImageToggle"
                           :label="genTitleFromField(entry)"
                         />
                       </div>
@@ -2552,6 +2701,8 @@ const getTagsFromPosts = computed(() => {
                         :type="entry.meta.type"
                         :field="entry.field"
                         :site="props.siteId"
+                        :richtext-auto-height="editableMetaEntries.length === 1 && entry.meta?.type === 'richtext'"
+                        :show-richtext-image-toggle="showRichtextImageToggle"
                         :label="genTitleFromField(entry)"
                       />
                     </div>
