@@ -58,6 +58,10 @@ const props = defineProps({
     type: Object,
     default: () => ({}),
   },
+  extraMetaResolver: {
+    type: Function,
+    default: null,
+  },
 })
 
 const emits = defineEmits(['update:modelValue'])
@@ -111,13 +115,25 @@ const uploadFiles = async () => {
         }
         else {
           state.currentUploadFile = `Uploading: ${file.name}`
+          const resolvedExtraMeta = props.extraMetaResolver
+            ? props.extraMetaResolver(file)
+            : {}
+          const safeResolvedExtraMeta = (
+            resolvedExtraMeta
+            && typeof resolvedExtraMeta === 'object'
+          )
+            ? resolvedExtraMeta
+            : {}
           const result = await edgeFirebase.uploadFile(
             edgeGlobal.edgeState.currentOrganization,
             file.file,
             props.filePath,
             props.public,
             props.r2,
-            props.extraMeta,
+            {
+              ...props.extraMeta,
+              ...safeResolvedExtraMeta,
+            },
           )
           results.push(result)
           state.uploadProgress = ((index + 1) / state.files.length) * 100

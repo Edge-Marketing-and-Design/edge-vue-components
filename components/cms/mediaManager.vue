@@ -33,6 +33,11 @@ const props = defineProps({
     required: false,
     default: false,
   },
+  markPdfAsFlipbook: {
+    type: Boolean,
+    required: false,
+    default: false,
+  },
 })
 
 // const edgeGlobal = inject('edgeGlobal')
@@ -60,6 +65,19 @@ const allowedFileMimeTypes = [
   'application/vnd.oasis.opendocument.presentation',
 ]
 const imageMimeTypes = ['image/jpg', 'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml', 'image/avif']
+const isPdfUpload = (file) => {
+  const mimeType = String(file?.type || file?.file?.type || '').toLowerCase()
+  if (mimeType === 'application/pdf')
+    return true
+
+  const fileName = String(file?.name || file?.file?.name || '').toLowerCase()
+  return fileName.endsWith('.pdf')
+}
+const resolveUploadExtraMeta = (file) => {
+  if (!props.markPdfAsFlipbook)
+    return {}
+  return isPdfUpload(file) ? { flipbook: true } : {}
+}
 const getMediaExtension = (item) => {
   const fileName = String(item?.fileName || item?.name || '').toLowerCase()
   const fileNameMatch = fileName.match(/\.([a-z0-9]+)$/i)
@@ -415,6 +433,7 @@ const siteQueryValue = computed(() => {
             disabled-text="Tags are required"
             class="w-full mx-auto border-dashed border-slate-300/70 bg-gradient-to-br from-slate-900/90 via-slate-800/70 to-slate-700/50 dark:from-slate-900/70 dark:via-slate-800/70 dark:to-slate-700/70 border text-white dark:text-white/90 py-10 rounded-[20px] my-3 shadow-lg shadow-slate-900/30"
             :extra-meta="{ tags: state.tags, cmsmedia: true, cmssite: [props.site] }"
+            :extra-meta-resolver="resolveUploadExtraMeta"
           >
             <template #title>
               <div class="flex items-center gap-2 justify-center gap-5 text-white dark:text-slate-100 drop-shadow">
