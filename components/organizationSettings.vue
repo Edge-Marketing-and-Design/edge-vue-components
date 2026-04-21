@@ -9,7 +9,7 @@ const props = defineProps({
     default: () => [],
   },
   orgFields: {
-    type: Object,
+    type: [Array, Object],
     required: true,
   },
   title: {
@@ -23,6 +23,22 @@ const props = defineProps({
   formSchema: {
     type: Object,
     required: true,
+  },
+  fieldSections: {
+    type: Array,
+    default: () => [],
+  },
+  sectionDisplay: {
+    type: String,
+    default: 'none', // none | cards | tabs
+  },
+  sectionHeader: {
+    type: String,
+    default: '',
+  },
+  renderUnsectionedFieldsWhenSectioned: {
+    type: Boolean,
+    default: false,
   },
 })
 const { toast } = useToast()
@@ -39,6 +55,96 @@ const state = reactive({
   successMessage: '',
   snackColor: 'success',
   loading: false,
+  activeSectionKey: '',
+})
+
+const normalizedOrgFields = computed(() => {
+  if (Array.isArray(props.orgFields))
+    return props.orgFields
+  if (props.orgFields && typeof props.orgFields === 'object')
+    return Object.values(props.orgFields)
+  return []
+})
+
+const fieldByName = computed(() => {
+  const map = new Map()
+  normalizedOrgFields.value.forEach((field, index) => {
+    if (!field || typeof field !== 'object')
+      return
+    const key = String(field.field || `field-${index}`).trim()
+    if (!key)
+      return
+    map.set(key, field)
+  })
+  return map
+})
+
+const resolvedFieldSections = computed(() => {
+  const sections = Array.isArray(props.fieldSections) ? props.fieldSections : []
+  if (!sections.length)
+    return []
+  return sections
+    .map((section, index) => {
+      const key = String(section?.key || section?.value || section?.label || `section-${index}`).trim()
+      const fieldDefs = Array.isArray(section?.fields) ? section.fields : []
+      const fields = fieldDefs
+        .map((entry) => {
+          if (typeof entry === 'string')
+            return fieldByName.value.get(entry)
+          if (entry && typeof entry === 'object')
+            return entry
+          return null
+        })
+        .filter(Boolean)
+      if (!key || !fields.length)
+        return null
+      return {
+        key,
+        label: section?.label || key,
+        description: section?.description || '',
+        fields,
+      }
+    })
+    .filter(Boolean)
+})
+
+const useSectionCards = computed(() => props.sectionDisplay === 'cards' && resolvedFieldSections.value.length > 0)
+const useSectionTabs = computed(() => props.sectionDisplay === 'tabs' && resolvedFieldSections.value.length > 0)
+const sectionFieldNames = computed(() => {
+  const names = new Set()
+  resolvedFieldSections.value.forEach((section) => {
+    section.fields.forEach((field) => {
+      const key = String(field?.field || '').trim()
+      if (key)
+        names.add(key)
+    })
+  })
+  return names
+})
+const unsectionedOrgFields = computed(() => {
+  return normalizedOrgFields.value.filter((field) => {
+    const key = String(field?.field || '').trim()
+    if (!key)
+      return false
+    return !sectionFieldNames.value.has(key)
+  })
+})
+const shouldRenderUnsectionedBeforeSections = computed(() =>
+  props.renderUnsectionedFieldsWhenSectioned
+  && (useSectionTabs.value || useSectionCards.value)
+  && unsectionedOrgFields.value.length > 0,
+)
+const sectionTabGridClass = computed(() => {
+  const count = Math.min(Math.max(resolvedFieldSections.value.length, 1), 6)
+  const map = {
+    1: 'grid-cols-1',
+    2: 'grid-cols-2',
+    3: 'grid-cols-3',
+    4: 'grid-cols-4',
+    5: 'grid-cols-5',
+    6: 'grid-cols-6',
+  }
+  return map[count] || 'grid-cols-1'
 })
 
 const onSubmit = async () => {
@@ -72,7 +178,7 @@ const currentOrgData = computed(() => {
 
 const loadStateData = () => {
   state.data = edgeGlobal.dupObject(currentOrgData.value)
-  for (const field of props.orgFields) {
+  for (const field of normalizedOrgFields.value) {
     if (edgeGlobal.objHas(state.data, field.field) === false) {
       if (field.type === 'section') {
         state.data[field.field] = {}
@@ -91,6 +197,8 @@ const loadStateData = () => {
 
 onBeforeMount(() => {
   loadStateData()
+  if (!state.activeSectionKey && resolvedFieldSections.value.length > 0)
+    state.activeSectionKey = resolvedFieldSections.value[0].key
   state.loaded = true
 })
 watch(currentOrgData, async () => {
@@ -100,6 +208,20 @@ watch(currentOrgData, async () => {
   await nextTick()
   state.loaded = true
 })
+
+watch(
+  resolvedFieldSections,
+  (sections) => {
+    const keys = sections.map(section => section.key)
+    if (!keys.length) {
+      state.activeSectionKey = ''
+      return
+    }
+    if (!keys.includes(state.activeSectionKey))
+      state.activeSectionKey = keys[0]
+  },
+  { immediate: true },
+)
 
 const navigateToBilling = async () => {
   state.loading = true
@@ -192,7 +314,213 @@ const route = useRoute()
         </edge-menu>
       </slot>
       <CardContent v-if="state.loaded" class="p-3 w-full  overflow-y-auto scroll-area">
-        <template v-for="field in props.orgFields" :key="field.field">
+        <template v-if="useSectionTabs">
+          <template v-if="shouldRenderUnsectionedBeforeSections">
+            <template v-for="field in unsectionedOrgFields" :key="`unsectioned-tabs-${field.field}`">
+              <Card v-if="field.type === 'section'" class="mb-2">
+                <CardHeader>
+                  <CardTitle>
+                    {{ field.label }}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div class="grid gap-2">
+                    <template v-for="subField in field.fields" :key="subField.field">
+                      <edge-g-input
+                        v-model="state.data[field.field][subField.field]"
+                        :name="`${field.field}.${subField.field}`"
+                        :label="subField.label"
+                        :field-type="subField.type"
+                        :hint="subField.hint"
+                        persistent-hint
+                      />
+                    </template>
+                  </div>
+                </CardContent>
+              </Card>
+              <edge-g-input
+                v-else-if="edgeGlobal.objHas(field, 'bindings')"
+                v-model="state.data[field.field]"
+                :name="field.field"
+                v-bind="field.bindings"
+                :parent-tracker-id="`org-settings-${field.field}`"
+              />
+              <edge-g-input
+                v-else
+                v-model="state.data[field.field]"
+                :name="field.field"
+                :field-type="field.type"
+                :label="field.label"
+                parent-tracker-id="org-settings"
+                :hint="field.hint"
+                persistent-hint
+              />
+            </template>
+          </template>
+          <div v-if="props.sectionHeader" class="mt-3 mb-2 text-sm font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+            {{ props.sectionHeader }}
+          </div>
+          <Tabs class="w-full" :model-value="state.activeSectionKey" @update:model-value="state.activeSectionKey = $event">
+            <TabsList class="w-full mb-3 grid gap-1 border border-border bg-muted/40 p-1" :class="sectionTabGridClass">
+              <TabsTrigger
+                v-for="section in resolvedFieldSections"
+                :key="`tabs-trigger-${section.key}`"
+                :value="section.key"
+                class="w-full text-foreground/70 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm"
+              >
+                {{ section.label }}
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent
+              v-for="section in resolvedFieldSections"
+              :key="`tabs-content-${section.key}`"
+              :value="section.key"
+              class="space-y-2"
+            >
+              <p v-if="section.description" class="text-sm text-muted-foreground">
+                {{ section.description }}
+              </p>
+              <template v-for="field in section.fields" :key="`section-field-${section.key}-${field.field}`">
+                <Card v-if="field.type === 'section'" class="mb-2">
+                  <CardHeader>
+                    <CardTitle>
+                      {{ field.label }}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div class="grid gap-2">
+                      <template v-for="subField in field.fields" :key="subField.field">
+                        <edge-g-input
+                          v-model="state.data[field.field][subField.field]"
+                          :name="`${field.field}.${subField.field}`"
+                          :label="subField.label"
+                          :field-type="subField.type"
+                          :hint="subField.hint"
+                          persistent-hint
+                        />
+                      </template>
+                    </div>
+                  </CardContent>
+                </Card>
+                <edge-g-input
+                  v-else-if="edgeGlobal.objHas(field, 'bindings')"
+                  v-model="state.data[field.field]"
+                  :name="field.field"
+                  v-bind="field.bindings"
+                  :parent-tracker-id="`org-settings-${field.field}`"
+                />
+                <edge-g-input
+                  v-else
+                  v-model="state.data[field.field]"
+                  :name="field.field"
+                  :field-type="field.type"
+                  :label="field.label"
+                  parent-tracker-id="org-settings"
+                  :hint="field.hint"
+                  persistent-hint
+                />
+              </template>
+            </TabsContent>
+          </Tabs>
+        </template>
+        <template v-else-if="useSectionCards">
+          <template v-if="shouldRenderUnsectionedBeforeSections">
+            <template v-for="field in unsectionedOrgFields" :key="`unsectioned-cards-${field.field}`">
+              <Card v-if="field.type === 'section'" class="mb-2">
+                <CardHeader>
+                  <CardTitle>
+                    {{ field.label }}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div class="grid gap-2">
+                    <template v-for="subField in field.fields" :key="subField.field">
+                      <edge-g-input
+                        v-model="state.data[field.field][subField.field]"
+                        :name="`${field.field}.${subField.field}`"
+                        :label="subField.label"
+                        :field-type="subField.type"
+                        :hint="subField.hint"
+                        persistent-hint
+                      />
+                    </template>
+                  </div>
+                </CardContent>
+              </Card>
+              <edge-g-input
+                v-else-if="edgeGlobal.objHas(field, 'bindings')"
+                v-model="state.data[field.field]"
+                :name="field.field"
+                v-bind="field.bindings"
+                :parent-tracker-id="`org-settings-${field.field}`"
+              />
+              <edge-g-input
+                v-else
+                v-model="state.data[field.field]"
+                :name="field.field"
+                :field-type="field.type"
+                :label="field.label"
+                parent-tracker-id="org-settings"
+                :hint="field.hint"
+                persistent-hint
+              />
+            </template>
+          </template>
+          <div v-if="props.sectionHeader" class="mt-3 mb-2 text-sm font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+            {{ props.sectionHeader }}
+          </div>
+          <Card v-for="section in resolvedFieldSections" :key="`cards-section-${section.key}`" class="mb-3">
+            <CardHeader>
+              <CardTitle>{{ section.label }}</CardTitle>
+              <p v-if="section.description" class="text-sm text-muted-foreground">
+                {{ section.description }}
+              </p>
+            </CardHeader>
+            <CardContent>
+              <template v-for="field in section.fields" :key="`section-field-${section.key}-${field.field}`">
+                <Card v-if="field.type === 'section'" class="mb-2">
+                  <CardHeader>
+                    <CardTitle>
+                      {{ field.label }}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div class="grid gap-2">
+                      <template v-for="subField in field.fields" :key="subField.field">
+                        <edge-g-input
+                          v-model="state.data[field.field][subField.field]"
+                          :name="`${field.field}.${subField.field}`"
+                          :label="subField.label"
+                          :field-type="subField.type"
+                          :hint="subField.hint"
+                          persistent-hint
+                        />
+                      </template>
+                    </div>
+                  </CardContent>
+                </Card>
+                <edge-g-input
+                  v-else-if="edgeGlobal.objHas(field, 'bindings')"
+                  v-model="state.data[field.field]"
+                  :name="field.field"
+                  v-bind="field.bindings"
+                  :parent-tracker-id="`org-settings-${field.field}`"
+                />
+                <edge-g-input
+                  v-else
+                  v-model="state.data[field.field]"
+                  :name="field.field"
+                  :field-type="field.type"
+                  :label="field.label"
+                  parent-tracker-id="org-settings"
+                  :hint="field.hint"
+                  persistent-hint
+                />
+              </template>
+            </CardContent>
+          </Card>
+        </template>
+        <template v-for="field in normalizedOrgFields" v-else :key="field.field">
           <Card v-if="field.type === 'section'" class="mb-2">
             <CardHeader>
               <CardTitle>

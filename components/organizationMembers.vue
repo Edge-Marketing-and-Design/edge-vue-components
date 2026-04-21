@@ -565,28 +565,30 @@ onBeforeMount(async () => {
                 Invite
               </edge-shad-button>
             </div>
-            <div class="mt-3 flex items-center gap-2">
-              <div class="w-1/2 min-w-0">
-                <edge-shad-combobox
-                  v-model="state.roleFilter"
-                  :items="roleFilterOptions"
-                  name="roleFilter"
-                  item-title="name"
-                  item-value="docId"
-                  placeholder="Select role"
-                  class="w-full !h-8"
-                />
+            <edge-shad-form>
+              <div class="mt-3 flex items-center gap-2">
+                <div class="w-1/2 min-w-0">
+                  <edge-shad-combobox
+                    v-model="state.roleFilter"
+                    :items="roleFilterOptions"
+                    name="roleFilter"
+                    item-title="name"
+                    item-value="docId"
+                    placeholder="Select role"
+                    class="w-full !h-8"
+                  />
+                </div>
+                <div class="w-1/2 min-w-0">
+                  <edge-shad-input
+                    v-model="state.filter"
+                    label=""
+                    name="filter"
+                    class="h-8 w-full"
+                    placeholder="Filter members..."
+                  />
+                </div>
               </div>
-              <div class="w-1/2 min-w-0">
-                <edge-shad-input
-                  v-model="state.filter"
-                  label=""
-                  name="filter"
-                  class="h-8 w-full"
-                  placeholder="Filter members..."
-                />
-              </div>
-            </div>
+            </edge-shad-form>
           </div>
           <div class="flex-1 overflow-y-auto">
             <SidebarMenu class="px-2 py-2 space-y-0">

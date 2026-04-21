@@ -169,6 +169,14 @@ const buildUpdateDiff = (current = {}, next = {}) => {
   return update
 }
 
+const isBlankSyncValue = (value) => {
+  if (value === null || value === undefined)
+    return true
+  if (typeof value === 'string')
+    return value.trim().length === 0
+  return false
+}
+
 const normalizeForStableCompare = (value) => {
   if (Array.isArray(value))
     return value.map(item => normalizeForStableCompare(item))
@@ -6671,6 +6679,53 @@ exports.siteAiBootstrapEnqueue = onDocumentCreated(
     await siteRef.set({ aiBootstrapStatus: 'queued' }, { merge: true })
     await pubsub.topic(SITE_AI_TOPIC).publishMessage({ json: { orgId, siteId, attempt: 0 } })
     logger.info('Enqueued AI bootstrap for site', { orgId, siteId })
+  },
+)
+
+exports.populateSiteContactFromPrimaryUserOnCreate = onDocumentCreated(
+  { document: 'organizations/{orgId}/sites/{siteId}', timeoutSeconds: 180 },
+  async (event) => {
+    const { orgId, siteId } = event.params
+    if (!orgId || !siteId || siteId === 'templates')
+      return
+
+    const siteRef = event.data?.ref
+    const siteData = event.data?.data() || {}
+    const users = Array.isArray(siteData.users) ? siteData.users : []
+    const primaryUser = String(users[0] || '').trim()
+    if (!primaryUser)
+      return
+
+    const userRef = await resolveStagedUserRef(primaryUser)
+    if (!userRef) {
+      logger.log('populateSiteContactFromPrimaryUserOnCreate: no staged user found', { orgId, siteId, primaryUser })
+      return
+    }
+
+    const userSnap = await userRef.get()
+    const userData = userSnap.data() || {}
+    const sourceMeta = pickSyncFields(userData.meta || {})
+    const siteMeta = pickSyncFields(siteData)
+    const siteUpdate = {}
+
+    for (const field of SITE_USER_META_FIELDS) {
+      if (!isBlankSyncValue(siteMeta[field]))
+        continue
+      if (isBlankSyncValue(sourceMeta[field]))
+        continue
+      siteUpdate[field] = sourceMeta[field]
+    }
+
+    if (!Object.keys(siteUpdate).length)
+      return
+
+    await siteRef.set(siteUpdate, { merge: true })
+    logger.log('populateSiteContactFromPrimaryUserOnCreate: hydrated site settings from primary user', {
+      orgId,
+      siteId,
+      primaryUser,
+      fields: Object.keys(siteUpdate),
+    })
   },
 )
 
