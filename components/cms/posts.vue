@@ -54,6 +54,7 @@ const collectionKey = computed(() => `${edgeGlobal.edgeState.organizationDocPath
 const publishedCollection = computed(() => `sites/${props.site}/published_posts`)
 const publishedCollectionKey = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/${publishedCollection.value}`)
 const sitePagesCollectionKey = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`)
+const organizationDocPath = computed(() => String(edgeGlobal.edgeState.organizationDocPath || '').trim())
 
 const normalizeForCompare = (value) => {
   if (Array.isArray(value))
@@ -642,31 +643,29 @@ const state = reactive({
   },
 })
 
+const ensurePostsSnapshots = async () => {
+  if (!organizationDocPath.value || !String(props.site || '').trim())
+    return
+
+  const snapshotPaths = [
+    collectionKey.value,
+    publishedCollectionKey.value,
+    `${organizationDocPath.value}/sites`,
+    sitePagesCollectionKey.value,
+    `${organizationDocPath.value}/published-site-settings`,
+    `${organizationDocPath.value}/themes`,
+    `${organizationDocPath.value}/blocks`,
+    `${organizationDocPath.value}/sites/templates/pages`,
+  ].filter(Boolean)
+
+  for (const path of [...new Set(snapshotPaths)]) {
+    if (!edgeFirebase.data?.[path])
+      await edgeFirebase.startSnapshot(path)
+  }
+}
+
 onBeforeMount(async () => {
-  if (!edgeFirebase.data?.[collectionKey.value]) {
-    await edgeFirebase.startSnapshot(collectionKey.value)
-  }
-  if (!edgeFirebase.data?.[publishedCollectionKey.value]) {
-    await edgeFirebase.startSnapshot(publishedCollectionKey.value)
-  }
-  if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]) {
-    await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/sites`)
-  }
-  if (!edgeFirebase.data?.[sitePagesCollectionKey.value]) {
-    await edgeFirebase.startSnapshot(sitePagesCollectionKey.value)
-  }
-  if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`]) {
-    await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`)
-  }
-  if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`]) {
-    await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/themes`)
-  }
-  if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]) {
-    await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/blocks`)
-  }
-  if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/templates/pages`]) {
-    await edgeFirebase.startSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/sites/templates/pages`)
-  }
+  await ensurePostsSnapshots()
 })
 
 const posts = computed(() => edgeFirebase.data?.[collectionKey.value] || {})
@@ -2650,7 +2649,8 @@ const resetEditorTracking = () => {
   state.lastAutoSlug = ''
 }
 
-const openNewPost = () => {
+const openNewPost = async () => {
+  await ensurePostsSnapshots()
   openNewPostDialog()
 }
 
@@ -2765,8 +2765,9 @@ watch(
 )
 
 watch(
-  [() => edgeGlobal.edgeState.currentOrganization, () => props.site],
+  [() => organizationDocPath.value, () => props.site, () => edgeGlobal.edgeState.currentOrganization],
   async () => {
+    await ensurePostsSnapshots()
     await loadPostTemplatePreviewContext()
   },
   { immediate: true },
