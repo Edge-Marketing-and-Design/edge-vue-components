@@ -54,12 +54,54 @@ const isAudienceStagedUser = (stagedUser = {}) => {
   return paths.some(path => path.includes('-audience-users-'))
 }
 
+const getOrgIdFromCollectionPath = (value) => {
+  const path = String(value || '').trim()
+  if (!path)
+    return ''
+
+  // Supports slash style paths like: organizations/{orgId}/users
+  if (path.startsWith('organizations/')) {
+    const parts = path.split('/')
+    return String(parts[1] || '').trim()
+  }
+
+  // Supports dash style paths like: organizations-{orgId}-sites-{siteId}-audience-users-{uid}
+  if (!path.startsWith('organizations-'))
+    return ''
+
+  const rest = path.slice('organizations-'.length)
+  if (!rest)
+    return ''
+
+  const segmentDelimiters = [
+    '-sites-',
+    '-users-',
+    '-files-',
+    '-offices-',
+    '-forms-',
+    '-resources-',
+    '-listings-',
+    '-agent-credentials-',
+    '-announcements-',
+    '-audience-users-',
+  ]
+
+  let cutoff = rest.length
+  for (const delimiter of segmentDelimiters) {
+    const idx = rest.indexOf(delimiter)
+    if (idx >= 0 && idx < cutoff)
+      cutoff = idx
+  }
+
+  return String(rest.slice(0, cutoff)).trim()
+}
+
 const getOrgIdFromStagedUser = (stagedUser = {}) => {
   const paths = getCollectionPaths(stagedUser)
   for (const path of paths) {
-    const parts = String(path || '').split('-')
-    if (parts[0] === 'organizations' && parts[1])
-      return parts[1]
+    const orgId = getOrgIdFromCollectionPath(path)
+    if (orgId)
+      return orgId
   }
   return ''
 }
