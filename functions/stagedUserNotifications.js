@@ -2,7 +2,7 @@ const axios = require('axios')
 const {
   logger,
   db,
-  onDocumentCreated,
+  onDocumentWritten,
   Firestore,
 } = require('./config.js')
 
@@ -31,12 +31,20 @@ const getCollectionPaths = (stagedUser = {}) => {
   const fromCollectionPaths = Array.isArray(stagedUser.collectionPaths)
     ? stagedUser.collectionPaths.map(item => String(item || '').trim()).filter(Boolean)
     : []
-  const fromRoles = (stagedUser.roles && typeof stagedUser.roles === 'object' && !Array.isArray(stagedUser.roles))
-    ? Object.values(stagedUser.roles)
+  const rolesObject = (stagedUser.roles && typeof stagedUser.roles === 'object' && !Array.isArray(stagedUser.roles))
+    ? stagedUser.roles
+    : null
+  const fromRoleValues = rolesObject
+    ? Object.values(rolesObject)
       .map(role => String(role?.collectionPath || '').trim())
       .filter(Boolean)
     : []
-  return [...new Set([...fromCollectionPaths, ...fromRoles])]
+  const fromRoleKeys = rolesObject
+    ? Object.keys(rolesObject)
+      .map(key => String(key || '').trim())
+      .filter(Boolean)
+    : []
+  return [...new Set([...fromCollectionPaths, ...fromRoleValues, ...fromRoleKeys])]
 }
 
 const isTemplateStagedUser = (stagedId, stagedUser = {}) => {
@@ -47,6 +55,10 @@ const isTemplateStagedUser = (stagedId, stagedUser = {}) => {
   if (String(stagedId || '').trim() === 'organization-registration-template')
     return true
   return false
+}
+
+const isRegisteredStagedUser = (stagedUser = {}) => {
+  return Boolean(String(stagedUser?.userId || '').trim())
 }
 
 const isAudienceStagedUser = (stagedUser = {}) => {
@@ -65,35 +77,14 @@ const getOrgIdFromCollectionPath = (value) => {
     return String(parts[1] || '').trim()
   }
 
-  // Supports dash style paths like: organizations-{orgId}-sites-{siteId}-audience-users-{uid}
+  // Supports dash style paths like:
+  // - organizations-{orgId}
+  // - organizations-{orgId}-blah-blah
   if (!path.startsWith('organizations-'))
     return ''
 
-  const rest = path.slice('organizations-'.length)
-  if (!rest)
-    return ''
-
-  const segmentDelimiters = [
-    '-sites-',
-    '-users-',
-    '-files-',
-    '-offices-',
-    '-forms-',
-    '-resources-',
-    '-listings-',
-    '-agent-credentials-',
-    '-announcements-',
-    '-audience-users-',
-  ]
-
-  let cutoff = rest.length
-  for (const delimiter of segmentDelimiters) {
-    const idx = rest.indexOf(delimiter)
-    if (idx >= 0 && idx < cutoff)
-      cutoff = idx
-  }
-
-  return String(rest.slice(0, cutoff)).trim()
+  const match = path.match(/^organizations-([^-\/]+)(?:-|$)/)
+  return String(match?.[1] || '').trim()
 }
 
 const getOrgIdFromStagedUser = (stagedUser = {}) => {
@@ -151,14 +142,14 @@ const sendStagedUserInviteEmail = async ({ to, orgName, signupUrl }) => {
   const textBody = [
     `A new account has been created for you on "${safeOrgName}".`,
     '',
-    'Complete your registration using the link below:',
+    'Click here to complete your registration:',
     signupUrl,
   ].join('\n')
 
   const htmlBody = `
     <div>
       <p>A new account has been created for you on <strong>${safeOrgNameHtml}</strong>.</p>
-      <p><a href="${safeSignupUrlHtml}">Complete your registration</a></p>
+      <p><a href="${safeSignupUrlHtml}">Click here to complete your registration</a></p>
     </div>
   `
 
@@ -201,17 +192,23 @@ const sendStagedUserInviteEmail = async ({ to, orgName, signupUrl }) => {
   }
 }
 
-exports.stagedUserInviteEmailOnCreate = onDocumentCreated(
+exports.stagedUserInviteEmailOnCreate = onDocumentWritten(
   { document: 'staged-users/{stagedId}', timeoutSeconds: 180 },
   async (event) => {
-    const stagedSnap = event.data
+    const stagedSnap = event.data?.after
     if (!stagedSnap?.exists)
       return
 
     const stagedId = String(event.params?.stagedId || '').trim()
     const stagedUser = stagedSnap.data() || {}
+    const priorInviteEmail = stagedUser?.inviteEmail || {}
+    if (priorInviteEmail?.sentAt || priorInviteEmail?.attemptedAt)
+      return
 
     if (isTemplateStagedUser(stagedId, stagedUser))
+      return
+
+    if (isRegisteredStagedUser(stagedUser))
       return
 
     if (isAudienceStagedUser(stagedUser))
@@ -228,6 +225,10 @@ exports.stagedUserInviteEmailOnCreate = onDocumentCreated(
     }
 
     const orgId = getOrgIdFromStagedUser(stagedUser)
+    if (!orgId) {
+      logger.log('stagedUserInviteEmailOnCreate: waiting for org path on staged user', { stagedId })
+      return
+    }
     const orgName = await resolveOrganizationName(orgId)
     const sendgrid = await sendStagedUserInviteEmail({ to: email, orgName, signupUrl })
 
