@@ -142,7 +142,7 @@ onBeforeMount(async () => {
         @request-file="openRichtextFilePicker"
       />
       <edge-shad-dialog v-model="state.richtextImageOpen">
-        <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-y-auto">
+        <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
           <DialogHeader>
             <DialogTitle>Select Image</DialogTitle>
             <DialogDescription />
@@ -163,7 +163,7 @@ onBeforeMount(async () => {
         </DialogContent>
       </edge-shad-dialog>
       <edge-shad-dialog v-model="state.richtextFileOpen">
-        <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-y-auto">
+        <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
           <DialogHeader>
             <DialogTitle>Select File</DialogTitle>
             <DialogDescription />
@@ -225,7 +225,7 @@ onBeforeMount(async () => {
               </edge-shad-button>
             </div>
           </DialogTrigger>
-          <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-y-auto">
+          <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
             <DialogHeader>
               <DialogTitle>Select Image</DialogTitle>
               <DialogDescription />

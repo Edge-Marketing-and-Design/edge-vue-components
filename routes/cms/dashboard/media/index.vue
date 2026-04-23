@@ -20,7 +20,11 @@ onMounted(() => {
   <div
     v-if="edgeGlobal.edgeState.organizationDocPath && state.mounted"
   >
-    <edge-cms-media-manager :include-files="true" :mark-pdf-as-flipbook="true" />
+    <edge-cms-media-manager
+      :include-files="true"
+      :mark-pdf-as-flipbook="true"
+      media-type-default="images"
+    />
   </div>
 </template>
 

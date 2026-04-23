@@ -1,7 +1,7 @@
 <script setup lang="js">
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { CircleAlert, Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePenLine, FileStack, FileUp, FileX, FolderCog, FolderDown, FolderUp, FolderX, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload, Users, X } from 'lucide-vue-next'
+import { CircleAlert, Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePenLine, FileStack, FileUp, FileX, FolderCog, FolderDown, FolderUp, FolderX, ImagePlus, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload, Users, X } from 'lucide-vue-next'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
 
 const props = defineProps({
@@ -229,6 +229,7 @@ const cmsTabAccess = computed(() => {
 const canViewPagesTab = computed(() => cmsTabAccess.value.pages)
 const canViewPostsTab = computed(() => cmsTabAccess.value.posts)
 const canViewInboxTab = computed(() => cmsTabAccess.value.inbox)
+const canViewMediaTab = computed(() => !isTemplateSite.value)
 const hidePublishStatusAndActions = computed(() => cmsMultiOrg.value && !canViewPagesTab.value)
 const defaultViewMode = computed(() => {
   if (canViewPagesTab.value)
@@ -239,6 +240,8 @@ const defaultViewMode = computed(() => {
     return 'submissions'
   if (canViewRestrictedTab.value)
     return 'restricted'
+  if (canViewMediaTab.value)
+    return 'media'
   return 'pages'
 })
 
@@ -1629,17 +1632,17 @@ const sitePageGridItems = computed(() => {
     if (!normalizedDocId || seenDocIds.has(normalizedDocId))
       continue
     seenDocIds.add(normalizedDocId)
-      orderedPages.push({
-        docId: normalizedDocId,
-        ...pageDoc,
-        name: displaySitePageName({}, pageDoc, normalizedDocId),
-        menuPath: 'Orphaned',
-        isOrphaned: true,
-        menuEntry: {
-          name: pageDoc?.name || normalizedDocId,
-          item: normalizedDocId,
-          menuName: 'Not In Menu',
-          index: -1,
+    orderedPages.push({
+      docId: normalizedDocId,
+      ...pageDoc,
+      name: displaySitePageName({}, pageDoc, normalizedDocId),
+      menuPath: 'Orphaned',
+      isOrphaned: true,
+      menuEntry: {
+        name: pageDoc?.name || normalizedDocId,
+        item: normalizedDocId,
+        menuName: 'Not In Menu',
+        index: -1,
       },
       lastUpdated: pageDoc?.last_updated || pageDoc?.doc_created_at || 0,
       description: String(pageDoc?.metaDescription || '').trim(),
@@ -2206,6 +2209,8 @@ const ensureValidViewMode = () => {
     nextMode = defaultViewMode.value
   if (nextMode === 'restricted' && !canViewRestrictedTab.value)
     nextMode = defaultViewMode.value
+  if (nextMode === 'media' && !canViewMediaTab.value)
+    nextMode = defaultViewMode.value
 
   if (state.viewMode !== nextMode)
     state.viewMode = nextMode
@@ -2229,6 +2234,8 @@ const setViewMode = (mode) => {
   if (mode === 'submissions' && !canViewInboxTab.value)
     return
   if (mode === 'restricted' && !canViewRestrictedTab.value)
+    return
+  if (mode === 'media' && !canViewMediaTab.value)
     return
   if (state.viewMode === mode)
     return
@@ -2520,7 +2527,7 @@ const getPageRestrictionAssignmentKey = (pageId, isDetail = false) => {
 }
 
 const persistSitePageRuleAssignments = async (_pageId, _restrictionRuleId = '', _postRestrictionRuleId = '') => {
-  return
+
 }
 
 const pageSettingsUpdated = async (pageData) => {
@@ -2973,7 +2980,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
           </span>
         </div>
         <div class="flex justify-center">
-          <div v-if="!isTemplateSite && (canViewPagesTab || canViewPostsTab || canViewInboxTab || canViewRestrictedTab)" class="flex items-center rounded-full border border-slate-300 bg-white p-1 shadow-sm dark:border-slate-600 dark:bg-slate-950">
+          <div v-if="!isTemplateSite && (canViewPagesTab || canViewPostsTab || canViewInboxTab || canViewRestrictedTab || canViewMediaTab)" class="flex items-center rounded-full border border-slate-300 bg-white p-1 shadow-sm dark:border-slate-600 dark:bg-slate-950">
             <edge-shad-button
               v-if="canViewPagesTab"
               variant="ghost"
@@ -2999,6 +3006,19 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
             >
               <FilePenLine class="h-4 w-4" />
               Posts
+            </edge-shad-button>
+            <edge-shad-button
+              v-if="canViewMediaTab"
+              variant="ghost"
+              size="sm"
+              class="h-8 px-4 text-xs gap-2 rounded-full"
+              :class="state.viewMode === 'media'
+                ? 'bg-gradient-to-r from-slate-900 to-slate-700 text-white hover:text-white shadow-sm dark:bg-gradient-to-r dark:from-slate-200 dark:to-slate-400 dark:text-slate-900 dark:hover:text-slate-900'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100'"
+              @click="setViewMode('media')"
+            >
+              <ImagePlus class="h-4 w-4" />
+              Media
             </edge-shad-button>
             <edge-shad-button
               v-if="canViewInboxTab"
@@ -3301,6 +3321,17 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
               :can-manage="canManageRestrictedContent"
               @open-usage-target="handleRestrictedUsageTarget"
             />
+          </div>
+          <div v-else-if="state.viewMode === 'media' && canViewMediaTab" class="flex-1 min-h-0 !h-[calc(100vh-110px)] overflow-hidden p-6">
+            <div class="w-full h-full min-h-0">
+              <edge-cms-media-manager
+                :site="props.site"
+                :include-files="true"
+                :mark-pdf-as-flipbook="true"
+                cms-site-filter-default="current"
+                class="h-full min-h-0"
+              />
+            </div>
           </div>
           <div v-else-if="isEditingPost" class="w-full h-full">
             <edge-cms-posts

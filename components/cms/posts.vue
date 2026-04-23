@@ -4390,7 +4390,7 @@ const reindexPublishedPostsToKv = async () => {
                             Select Image
                           </edge-shad-button>
                         </DialogTrigger>
-                        <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-y-auto">
+                        <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
                           <DialogHeader>
                             <DialogTitle>Select Image</DialogTitle>
                             <DialogDescription />
@@ -4665,7 +4665,7 @@ const reindexPublishedPostsToKv = async () => {
                       Select Image
                     </edge-shad-button>
                   </DialogTrigger>
-                  <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-y-auto">
+                  <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
                     <DialogHeader>
                       <DialogTitle>Select Image</DialogTitle>
                       <DialogDescription />

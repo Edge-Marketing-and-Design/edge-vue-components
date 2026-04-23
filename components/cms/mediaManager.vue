@@ -33,6 +33,21 @@ const props = defineProps({
     required: false,
     default: false,
   },
+  mediaTypeDefault: {
+    type: String,
+    required: false,
+    default: 'both',
+  },
+  fileTypeDefault: {
+    type: String,
+    required: false,
+    default: 'all',
+  },
+  cmsSiteFilterDefault: {
+    type: String,
+    required: false,
+    default: 'all',
+  },
   markPdfAsFlipbook: {
     type: Boolean,
     required: false,
@@ -46,6 +61,7 @@ const emits = defineEmits(['select'])
 
 const edgeFirebase = inject('edgeFirebase')
 const allowedFileExtensions = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'ppt', 'pptx', 'txt', 'rtf', 'zip', 'odt', 'ods', 'odp']
+const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'avif']
 const allowedFileMimeTypes = [
   'application/pdf',
   'application/msword',
@@ -93,7 +109,7 @@ const isImageMediaItem = (item) => {
   if (contentType.startsWith('image/'))
     return true
   const ext = getMediaExtension(item)
-  return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'avif'].includes(ext)
+  return imageExtensions.includes(ext)
 }
 const isAllowedFileItem = (item) => {
   if (isImageMediaItem(item))
@@ -126,6 +142,9 @@ const state = reactive({
   showUpload: false,
   initialMediaLoadDone: false,
   loaderHold: true,
+  mediaTypeFilter: 'both',
+  fileTypeFilter: 'all',
+  cmsSiteFilter: 'all',
 })
 
 let mediaEmptyFallbackTimer = null
@@ -172,18 +191,181 @@ const mediaSnapshotReady = computed(() => {
   return Object.prototype.hasOwnProperty.call(edgeFirebase.data || {}, filesPath.value)
 })
 
+const normalizeMediaTypeFilter = (value) => {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (['both', 'images', 'files'].includes(normalized))
+    return normalized
+  return 'both'
+}
+const normalizeFileTypeFilter = (value) => {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (normalized === 'all')
+    return 'all'
+  if ([...imageExtensions, ...allowedFileExtensions].includes(normalized))
+    return normalized
+  return 'all'
+}
+const showMediaTypeFilter = computed(() => props.includeFiles && !props.filesOnly)
+const mediaTypeFilterItems = [
+  { title: 'IMAGES & FILES', name: 'both' },
+  { title: 'Images Only', name: 'images' },
+  { title: 'Files Only', name: 'files' },
+]
+const activeMediaScope = computed(() => {
+  if (props.filesOnly)
+    return 'files'
+  if (!props.includeFiles)
+    return 'images'
+  const mediaTypeFilter = normalizeMediaTypeFilter(state.mediaTypeFilter)
+  if (mediaTypeFilter === 'images')
+    return 'images'
+  if (mediaTypeFilter === 'files')
+    return 'files'
+  return 'both'
+})
+const fileTypeExtensionsForScope = computed(() => {
+  const allowedByScope = activeMediaScope.value === 'images'
+    ? new Set(imageExtensions)
+    : (activeMediaScope.value === 'files'
+        ? new Set(allowedFileExtensions)
+        : new Set([...imageExtensions, ...allowedFileExtensions]))
+
+  const query = String(state.filter || '').toLowerCase().trim()
+  const activeTags = Array.isArray(state.filterTags)
+    ? state.filterTags.map(tag => String(tag || '').trim()).filter(Boolean)
+    : []
+
+  const present = new Set()
+  Object.values(files.value || {}).forEach((item) => {
+    const includeByScope = activeMediaScope.value === 'images'
+      ? isImageMediaItem(item)
+      : (activeMediaScope.value === 'files' ? isAllowedFileItem(item) : (isImageMediaItem(item) || isAllowedFileItem(item)))
+    if (!includeByScope)
+      return
+
+    if (query) {
+      const name = String(item?.name || '').toLowerCase()
+      const fileName = String(item?.fileName || '').toLowerCase()
+      if (!name.includes(query) && !fileName.includes(query))
+        return
+    }
+
+    if (activeTags.length) {
+      const itemTags = Array.isArray(item?.meta?.tags)
+        ? item.meta.tags.map(tag => String(tag || '').trim())
+        : []
+      const hasAnyTag = activeTags.some(tag => itemTags.includes(tag))
+      if (!hasAnyTag)
+        return
+    }
+
+    const ext = getMediaExtension(item)
+    if (allowedByScope.has(ext))
+      present.add(ext)
+  })
+
+  const ordered = [...allowedByScope].filter(ext => present.has(ext))
+  return ordered
+})
+const fileTypeFilterItems = computed(() => [
+  { title: 'All Types', name: 'all' },
+  ...fileTypeExtensionsForScope.value.map(ext => ({
+    title: ext.toUpperCase(),
+    name: ext,
+  })),
+])
+const resolveCmsSiteScopeValues = () => {
+  if (!props.site)
+    return []
+  const raw = props.includeCmsAll ? ['all', props.site] : [props.site]
+  return Array.from(new Set(raw.map(item => String(item || '').trim()).filter(Boolean)))
+}
+const resolveCmsSiteFilterDefault = () => {
+  const normalized = String(props.cmsSiteFilterDefault || '').trim().toLowerCase()
+  const currentSite = String(props.site || '').trim()
+  if (normalized === 'current' || normalized === 'site' || normalized === 'current-site')
+    return currentSite || '__all__'
+  if (normalized === 'shared')
+    return 'all'
+  return '__all__'
+}
+const showCmsSiteFilter = computed(() => {
+  const siteId = String(props.site || '').trim()
+  if (!siteId || siteId === 'all')
+    return false
+  return resolveCmsSiteScopeValues().length > 1
+})
+const cmsSiteFilterItems = computed(() => {
+  const siteId = String(props.site || '').trim()
+  if (!siteId || siteId === 'all')
+    return [{ title: 'All Sources', name: '__all__' }]
+  const items = [
+    { title: 'All Sources', name: '__all__' },
+    { title: 'Current Site', name: siteId },
+  ]
+  if (resolveCmsSiteScopeValues().includes('all'))
+    items.push({ title: 'Shared Media', name: 'all' })
+  return items
+})
+const shouldIncludeItemByCmsSiteFilter = (item) => {
+  if (!showCmsSiteFilter.value)
+    return true
+  const selected = String(state.cmsSiteFilter || 'all').trim()
+  if (!selected || selected === '__all__')
+    return true
+  const cmsSites = Array.isArray(item?.meta?.cmssite)
+    ? item.meta.cmssite.map(entry => String(entry || '').trim()).filter(Boolean)
+    : []
+  return cmsSites.includes(selected)
+}
+
 const shouldIncludeItemByMode = (item) => {
   if (props.filesOnly)
     return isAllowedFileItem(item)
-  if (props.includeFiles)
+  if (props.includeFiles) {
+    const mediaTypeFilter = normalizeMediaTypeFilter(state.mediaTypeFilter)
+    if (mediaTypeFilter === 'images')
+      return isImageMediaItem(item)
+    if (mediaTypeFilter === 'files')
+      return isAllowedFileItem(item)
     return isImageMediaItem(item) || isAllowedFileItem(item)
+  }
   return isImageMediaItem(item)
 }
+const shouldIncludeItemByFileType = (item) => {
+  const fileTypeFilter = normalizeFileTypeFilter(state.fileTypeFilter)
+  if (fileTypeFilter === 'all')
+    return true
+  return getMediaExtension(item) === fileTypeFilter
+}
+const shouldIncludeItemBySearchAndTags = (item) => {
+  const query = String(state.filter || '').toLowerCase().trim()
+  if (query) {
+    const name = String(item?.name || '').toLowerCase()
+    const fileName = String(item?.fileName || '').toLowerCase()
+    if (!name.includes(query) && !fileName.includes(query))
+      return false
+  }
 
+  if (Array.isArray(state.filterTags) && state.filterTags.length) {
+    const itemTags = Array.isArray(item?.meta?.tags)
+      ? item.meta.tags.map(tag => String(tag || '').trim())
+      : []
+    const hasAnyTag = state.filterTags.some(tag => itemTags.includes(String(tag || '').trim()))
+    if (!hasAnyTag)
+      return false
+  }
+
+  return true
+}
 const getModeFilteredItems = (items) => {
-  return (items || []).filter(item => shouldIncludeItemByMode(item))
+  return (items || [])
+    .filter(item => shouldIncludeItemByCmsSiteFilter(item))
+    .filter(item => shouldIncludeItemByMode(item))
+    .filter(item => shouldIncludeItemByFileType(item))
 }
 const hasModeFilteredItems = items => getModeFilteredItems(items).length > 0
+const showFileTypeFilter = computed(() => true)
 const modeFilteredFiles = computed(() => {
   const list = Object.values(files.value || {})
   return getModeFilteredItems(list)
@@ -191,11 +373,8 @@ const modeFilteredFiles = computed(() => {
 
 const filteredFiles = computed(() => {
   const list = Object.values(files.value || {})
-  return list
-    .filter(item => shouldIncludeItemByMode(item))
-    .filter(m =>
-      !state.filter || m.name?.toLowerCase().includes(state.filter.toLowerCase()),
-    )
+  return getModeFilteredItems(list)
+    .filter(m => shouldIncludeItemBySearchAndTags(m))
     .sort((a, b) => (b.uploadTime || 0) - (a.uploadTime || 0))
 })
 
@@ -220,10 +399,11 @@ const showEmptyMediaState = computed(() => {
     && state.initialMediaLoadDone
     && filteredFiles.value.length === 0
 })
+const isDialogOpen = computed(() => state.showUpload || state.editMedia)
 
 const mediaPickerShellClass = computed(() => {
   if (!props.selectMode)
-    return 'w-full mx-auto bg-background text-foreground rounded-[9.96px] px-0 border border-border/70 shadow-sm'
+    return 'w-full h-full min-h-0 flex flex-col mx-auto bg-background text-foreground rounded-[9.96px] px-0 border border-border/70 shadow-sm overflow-hidden'
   return 'w-full mx-auto bg-background text-foreground rounded-[9.96px] px-0 border border-border/70 shadow-sm flex flex-col h-[calc(80vh-3.5rem)] min-h-[520px]'
 })
 
@@ -254,7 +434,9 @@ const selectAll = computed(() => {
 
 watch(selectAll, (newValue) => {
   if (newValue) {
-    state.selected = filteredFiles.value.map(item => item.docId)
+    state.selected = filteredFiles.value
+      .filter(item => canDeleteMedia(item))
+      .map(item => item.docId)
   }
   else {
     state.selected = []
@@ -263,6 +445,9 @@ watch(selectAll, (newValue) => {
 
 const handleCheckboxChange = (checked, docId) => {
   console.log('Checkbox changed:', checked, docId)
+  const item = files.value?.[docId]
+  if (!canDeleteMedia(item))
+    return
   if (checked && !state.selected.includes(docId)) {
     state.selected.push(docId)
   }
@@ -274,7 +459,11 @@ const handleCheckboxChange = (checked, docId) => {
 const deleteSelected = async () => {
   console.log('Deleting selected files:', state.selected)
   state.deleting = true
-  for (const docId of state.selected) {
+  const deletableIds = state.selected.filter((docId) => {
+    const item = files.value?.[docId]
+    return canDeleteMedia(item)
+  })
+  for (const docId of deletableIds) {
     await edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/files`, docId)
   }
   state.selected = []
@@ -316,12 +505,31 @@ const clearTags = async () => {
   state.clearingTags = false
 }
 onBeforeMount(() => {
+  state.mediaTypeFilter = normalizeMediaTypeFilter(props.mediaTypeDefault)
+  state.fileTypeFilter = normalizeFileTypeFilter(props.fileTypeDefault)
+  state.cmsSiteFilter = showCmsSiteFilter.value ? resolveCmsSiteFilterDefault() : '__all__'
   console.log('Default tags prop:', props.defaultTags)
   if (props.defaultTags && Array.isArray(props.defaultTags) && props.defaultTags.length > 0) {
     state.filterTags = [...props.defaultTags]
     state.tags = [...props.defaultTags]
   }
 })
+watch(
+  () => [showCmsSiteFilter.value, props.site, props.cmsSiteFilterDefault],
+  () => {
+    state.cmsSiteFilter = showCmsSiteFilter.value ? resolveCmsSiteFilterDefault() : '__all__'
+  },
+  { immediate: false },
+)
+watch(fileTypeExtensionsForScope, (extensions) => {
+  const normalized = normalizeFileTypeFilter(state.fileTypeFilter)
+  if (normalized === 'all')
+    return
+  if (!extensions.length)
+    return
+  if (!extensions.includes(normalized))
+    state.fileTypeFilter = 'all'
+}, { immediate: true })
 
 watch(
   () => [mediaSnapshotReady.value, filteredFiles.value.length],
@@ -362,7 +570,7 @@ onActivated(() => {
   startInitialMediaFallbackTimer(8000)
 })
 
-const canDeleteMedia = (item) => {
+function canDeleteMedia(item) {
   if (!props.site)
     return true
   if (item?.meta?.cmssite && Array.isArray(item.meta.cmssite)) {
@@ -370,6 +578,7 @@ const canDeleteMedia = (item) => {
   }
   return false
 }
+const canEditWorkingDoc = computed(() => canDeleteMedia(state.workingDoc))
 
 const itemClick = (item) => {
   if (props.selectMode) {
@@ -430,6 +639,14 @@ const workingDocPdfPages = computed(() => {
     })
 })
 const pdfPageIndex = ref(0)
+const pdfThumbnailVisible = ref(false)
+const loadedPdfThumbnailUrls = reactive({})
+const preloadingPdfThumbnailUrls = new Set()
+const loadedPdfPreviewUrls = reactive({})
+const pdfPreviewLoadState = reactive({
+  activeUrl: '',
+  loading: false,
+})
 const normalizedPdfPageIndex = computed(() => {
   if (!workingDocPdfPages.value.length)
     return 0
@@ -440,18 +657,117 @@ const currentPdfPage = computed(() => {
     return null
   return workingDocPdfPages.value[normalizedPdfPageIndex.value] || null
 })
+const pdfPagePickerItems = computed(() => {
+  return workingDocPdfPages.value.map((_, index) => ({
+    name: `Page ${index + 1}`,
+    docId: String(index),
+  }))
+})
+const pdfPagePickerValue = computed({
+  get: () => String(normalizedPdfPageIndex.value),
+  set: (value) => {
+    const next = Number(value)
+    if (!Number.isFinite(next))
+      return
+    if (!workingDocPdfPages.value.length) {
+      pdfPageIndex.value = 0
+      return
+    }
+    const clamped = Math.min(Math.max(Math.trunc(next), 0), workingDocPdfPages.value.length - 1)
+    pdfThumbnailVisible.value = false
+    pdfPageIndex.value = clamped
+  },
+})
 const hasPdfPageNav = computed(() => workingDocPdfPages.value.length > 1)
 const canGoPrevPdfPage = computed(() => normalizedPdfPageIndex.value > 0)
 const canGoNextPdfPage = computed(() => normalizedPdfPageIndex.value < workingDocPdfPages.value.length - 1)
+const hidePdfThumbnail = () => {
+  pdfThumbnailVisible.value = false
+}
+const onPdfThumbnailLoaded = () => {
+  const thumbnailUrl = String(currentPdfPage.value?.thumbnail || '')
+  if (thumbnailUrl)
+    loadedPdfThumbnailUrls[thumbnailUrl] = true
+  pdfThumbnailVisible.value = true
+}
+const onPdfThumbnailErrored = () => {
+  pdfThumbnailVisible.value = false
+}
+const preloadPdfThumbnails = () => {
+  if (typeof window === 'undefined')
+    return
+  if (!state.editMedia || !workingDocIsPdf.value || !workingDocPdfPages.value.length)
+    return
+  workingDocPdfPages.value.forEach((page) => {
+    const url = String(page?.thumbnail || '')
+    if (!url || loadedPdfThumbnailUrls[url] || preloadingPdfThumbnailUrls.has(url))
+      return
+    preloadingPdfThumbnailUrls.add(url)
+    const img = new window.Image()
+    img.onload = () => {
+      loadedPdfThumbnailUrls[url] = true
+      preloadingPdfThumbnailUrls.delete(url)
+    }
+    img.onerror = () => {
+      preloadingPdfThumbnailUrls.delete(url)
+    }
+    img.src = url
+  })
+}
 const goPrevPdfPage = () => {
   if (!canGoPrevPdfPage.value)
     return
+  hidePdfThumbnail()
   pdfPageIndex.value = normalizedPdfPageIndex.value - 1
 }
 const goNextPdfPage = () => {
   if (!canGoNextPdfPage.value)
     return
+  hidePdfThumbnail()
   pdfPageIndex.value = normalizedPdfPageIndex.value + 1
+}
+const currentPdfPreviewLoaded = computed(() => {
+  const previewUrl = String(currentPdfPage.value?.preview || '')
+  if (!previewUrl)
+    return true
+  return Boolean(loadedPdfPreviewUrls[previewUrl])
+})
+const showPdfPreviewLoading = computed(() => {
+  if (!workingDocIsPdf.value)
+    return false
+  const previewUrl = String(currentPdfPage.value?.preview || '')
+  if (!previewUrl)
+    return false
+  return !currentPdfPreviewLoaded.value && pdfPreviewLoadState.activeUrl === previewUrl && pdfPreviewLoadState.loading
+})
+const markPdfPreviewLoaded = (url) => {
+  const normalized = String(url || '').trim()
+  if (!normalized)
+    return
+  loadedPdfPreviewUrls[normalized] = true
+  if (pdfPreviewLoadState.activeUrl === normalized)
+    pdfPreviewLoadState.loading = false
+}
+const normalizePreviewEventUrl = (event) => {
+  const raw = event?.target?.currentSrc || event?.target?.src || ''
+  return String(raw || '').trim()
+}
+const onPdfPreviewLoaded = (event, expectedUrl = '') => {
+  const normalizedExpected = String(expectedUrl || '').trim()
+  const normalizedFromEvent = normalizePreviewEventUrl(event)
+  if (normalizedExpected)
+    markPdfPreviewLoaded(normalizedExpected)
+  if (normalizedFromEvent && normalizedFromEvent !== normalizedExpected)
+    markPdfPreviewLoaded(normalizedFromEvent)
+}
+const onPdfPreviewErrored = (event, expectedUrl = '') => {
+  const normalizedExpected = String(expectedUrl || '').trim()
+  const normalizedFromEvent = normalizePreviewEventUrl(event)
+  const normalized = normalizedExpected || normalizedFromEvent
+  if (!normalized)
+    return
+  if (pdfPreviewLoadState.activeUrl === normalized)
+    pdfPreviewLoadState.loading = false
 }
 const workingDocPreviewUrl = computed(() => {
   if (workingDocIsImage.value)
@@ -461,17 +777,46 @@ const workingDocPreviewUrl = computed(() => {
   return ''
 })
 watch(
+  () => currentPdfPage.value?.preview,
+  (nextPreview) => {
+    const nextUrl = String(nextPreview || '')
+    pdfPreviewLoadState.activeUrl = nextUrl
+    if (!nextUrl) {
+      pdfPreviewLoadState.loading = false
+      return
+    }
+    pdfPreviewLoadState.loading = !loadedPdfPreviewUrls[nextUrl]
+  },
+  { immediate: true },
+)
+watch(
+  () => currentPdfPage.value?.key,
+  () => {
+    hidePdfThumbnail()
+    const thumbnailUrl = String(currentPdfPage.value?.thumbnail || '')
+    if (thumbnailUrl && loadedPdfThumbnailUrls[thumbnailUrl])
+      pdfThumbnailVisible.value = true
+  },
+  { immediate: true },
+)
+watch(
+  () => [state.editMedia, state.workingDoc?.docId, workingDocPdfPages.value.length],
+  () => {
+    preloadPdfThumbnails()
+  },
+  { immediate: true },
+)
+watch(
   () => state.workingDoc?.docId,
   () => {
     pdfPageIndex.value = 0
+    pdfThumbnailVisible.value = false
+    pdfPreviewLoadState.activeUrl = ''
+    pdfPreviewLoadState.loading = false
   },
 )
 
-const siteQueryValue = computed(() => {
-  if (!props.site)
-    return []
-  return props.includeCmsAll ? ['all', props.site] : [props.site]
-})
+const siteQueryValue = computed(() => resolveCmsSiteScopeValues())
 </script>
 
 <template>
@@ -553,93 +898,134 @@ const siteQueryValue = computed(() => {
       :query-value="siteQueryValue"
       query-operator="array-contains-any"
       header-class=""
-      sort-direction="desc" class="w-full flex-1 border-none shadow-none bg-background min-h-0"
+      sort-direction="desc"
+      class="w-full h-full flex-1 min-h-0 overflow-hidden flex flex-col border-none shadow-none bg-background"
       collection="files"
     >
       <template #header>
-        <edge-menu class="bg-transparent text-foreground border-none shadow-none px-2 rounded-none gap-1">
-          <template #start>
-            <div />
-          </template>
-          <template #center>
-            <div class="w-full px-0">
-              <edge-shad-form>
-                <div class="flex flex-col md:flex-row md:items-center gap-2 w-full">
-                  <div class="shrink-0">
-                    <edge-shad-button
-                      class="bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
-                      @click="state.showUpload = true"
-                    >
-                      <ImagePlus class="h-5 w-5 mr-2" />
-                      {{ uploadActionLabel }}
-                    </edge-shad-button>
+        <div class="sticky top-0 z-20 border-b border-border/70 bg-background/95 backdrop-blur-sm pb-2">
+          <edge-menu class="bg-transparent text-foreground border-none shadow-none px-2 rounded-none gap-1">
+            <template #start>
+              <div />
+            </template>
+            <template #center>
+              <div class="w-full px-0">
+                <edge-shad-form>
+                  <div class="flex flex-col md:flex-row md:items-center gap-2 w-full">
+                    <div v-if="showCmsSiteFilter" class="md:w-[190px] md:min-w-[190px]">
+                      <edge-shad-select
+                        v-model="state.cmsSiteFilter"
+                        :items="cmsSiteFilterItems"
+                        item-title="title"
+                        item-value="name"
+                        name="cmsSiteFilter"
+                        class="text-foreground w-full"
+                        placeholder="Source"
+                      />
+                    </div>
+                    <div class="shrink-0">
+                      <edge-shad-button
+                        class="bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
+                        @click="state.showUpload = true"
+                      >
+                        <ImagePlus class="h-5 w-5 mr-2" />
+                        {{ uploadActionLabel }}
+                      </edge-shad-button>
+                    </div>
+                    <div class="md:flex-1 md:min-w-[220px]">
+                      <edge-shad-select
+                        v-if="!state.clearingTags"
+                        v-model="state.filterTags"
+                        :multiple="true"
+                        name="tags"
+                        class="text-foreground w-full"
+                        :items="getTagsFromMedia"
+                        placeholder="Filter Tags"
+                      >
+                        <template v-if="state.filterTags.length > 0" #icon>
+                          <X class="h-5 w-5 text-muted-foreground cursor-pointer" @click="clearTags" />
+                        </template>
+                      </edge-shad-select>
+                    </div>
+                    <div class="md:flex-1 md:min-w-[220px]">
+                      <edge-shad-input
+                        v-model="state.filter"
+                        label=""
+                        name="filter"
+                        class="text-foreground w-full"
+                        placeholder="Search"
+                      />
+                    </div>
+                    <div v-if="showMediaTypeFilter" class="md:w-[170px] md:min-w-[170px]">
+                      <edge-shad-select
+                        v-model="state.mediaTypeFilter"
+                        :items="mediaTypeFilterItems"
+                        item-title="title"
+                        item-value="name"
+                        name="mediaTypeFilter"
+                        class="text-foreground w-full"
+                        placeholder="Media type"
+                      />
+                    </div>
+                    <div v-if="showFileTypeFilter" class="md:w-[170px] md:min-w-[170px]">
+                      <edge-shad-select
+                        v-model="state.fileTypeFilter"
+                        :items="fileTypeFilterItems"
+                        item-title="title"
+                        item-value="name"
+                        class="text-foreground w-full"
+                        placeholder="File type"
+                      />
+                    </div>
                   </div>
-                  <div class="md:flex-1 md:min-w-[220px]">
-                    <edge-shad-select
-                      v-if="!state.clearingTags"
-                      v-model="state.filterTags"
-                      :multiple="true"
-                      name="tags"
-                      class="text-foreground w-full"
-                      :items="getTagsFromMedia"
-                      placeholder="Filter Tags"
-                    >
-                      <template v-if="state.filterTags.length > 0" #icon>
-                        <X class="h-5 w-5 text-muted-foreground cursor-pointer" @click="clearTags" />
-                      </template>
-                    </edge-shad-select>
-                  </div>
-                  <div class="md:flex-1 md:min-w-[220px]">
-                    <edge-shad-input
-                      v-model="state.filter"
-                      label=""
-                      name="filter"
-                      class="text-foreground w-full"
-                      placeholder="Search"
-                    />
-                  </div>
-                </div>
-              </edge-shad-form>
+                </edge-shad-form>
+              </div>
+            </template>
+            <template #end>
+              <div />
+            </template>
+          </edge-menu>
+          <div v-if="!selectMode" class="flex flex-wrap items-center justify-between gap-2 mt-2 px-3">
+            <div class="flex items-center gap-2">
+              <div class="text-xs text-slate-600 dark:text-slate-300">
+                {{ state.selected.length }} selected
+              </div>
             </div>
-          </template>
-          <template #end>
-            <div />
-          </template>
-        </edge-menu>
-        <div v-if="!selectMode" class="flex flex-wrap items-center justify-between gap-2 mt-2 px-3">
-          <div class="text-xs text-slate-600 dark:text-slate-300">
-            {{ state.selected.length }} selected
-          </div>
-          <div class="flex items-center gap-2">
-            <edge-shad-button
-              class="w-[140px] h-[30px] rounded bg-slate-900 text-white hover:bg-slate-800 focus-visible:ring-2 focus-visible:ring-slate-500 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
-              @click="state.selectAll = !state.selectAll"
-            >
-              <Square v-if="!state.selectAll" class="h-5 w-5" />
-              <SquareCheckBig v-else class="h-5 w-5" />
-              {{ state.selectAll ? 'Deselect All' : 'Select All' }}
-            </edge-shad-button>
-            <edge-shad-button
-              variant="destructive"
-              :disabled="state.deleting || state.selected.length === 0"
-              class="h-[30px]"
-              @click="deleteSelected"
-            >
-              <Loader2 v-if="state.deleting" class="animate-spin h-5 w-5 mr-2" />
-              Delete Selected
-            </edge-shad-button>
+            <div class="flex items-center gap-2">
+              <edge-shad-button
+                class="w-[140px] h-[30px] rounded bg-slate-900 text-white hover:bg-slate-800 focus-visible:ring-2 focus-visible:ring-slate-500 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
+                @click="state.selectAll = !state.selectAll"
+              >
+                <Square v-if="!state.selectAll" class="h-5 w-5" />
+                <SquareCheckBig v-else class="h-5 w-5" />
+                {{ state.selectAll ? 'Deselect All' : 'Select All' }}
+              </edge-shad-button>
+              <edge-shad-button
+                variant="destructive"
+                :disabled="state.deleting || state.selected.length === 0"
+                class="h-[30px]"
+                @click="deleteSelected"
+              >
+                <Loader2 v-if="state.deleting" class="animate-spin h-5 w-5 mr-2" />
+                Delete Selected
+              </edge-shad-button>
+            </div>
           </div>
         </div>
       </template>
       <template #list="slotProps">
-        <div class="w-full h-full min-h-full">
+        <div class="w-full h-full min-h-0 pt-3 flex flex-col overflow-hidden">
           <div v-if="mediaLoading" :class="mediaPlaceholderClass">
             <Loader2 class="h-7 w-7 animate-spin" />
             <div class="text-sm font-medium">
               Loading media...
             </div>
           </div>
-          <div v-else-if="showEmptyMediaState || !hasModeFilteredItems(slotProps.filtered)" :class="mediaPlaceholderClass">
+
+          <div
+            v-else-if="showEmptyMediaState || !hasModeFilteredItems(slotProps.filtered)"
+            :class="mediaPlaceholderClass"
+          >
             <div class="text-sm font-medium">
               No media found
             </div>
@@ -647,30 +1033,74 @@ const siteQueryValue = computed(() => {
               {{ emptyStateHint }}
             </div>
           </div>
-          <div v-else class="mx-auto px-0 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-            <div v-for="item in getModeFilteredItems(slotProps.filtered)" :key="item.docId" class="w-full cursor-pointer" @click="itemClick(item)">
-              <edge-cms-media-card
-                :item="item"
-                :selected="state.selected.includes(item.docId)"
-                class="block w-full h-full"
-                :select-mode="props.selectMode"
-                :can-delete="canDeleteMedia(item)"
-                @select="(checked, docId) => handleCheckboxChange(checked, docId)"
-                @delete="(docId) => slotProps.deleteItem(docId)"
-              />
+
+          <div
+            v-else
+            class="flex-1 min-h-0"
+            :class="isDialogOpen ? 'overflow-hidden' : 'overflow-y-auto'"
+          >
+            <div
+              class="mx-auto px-0 pb-3 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5"
+            >
+              <div
+                v-for="item in getModeFilteredItems(slotProps.filtered)"
+                :key="item.docId"
+                class="w-full cursor-pointer"
+                @click="itemClick(item)"
+              >
+                <edge-cms-media-card
+                  :item="item"
+                  :selected="state.selected.includes(item.docId)"
+                  class="block w-full h-full"
+                  :select-mode="props.selectMode"
+                  :can-delete="canDeleteMedia(item)"
+                  @select="(checked, docId) => handleCheckboxChange(checked, docId)"
+                  @delete="(docId) => slotProps.deleteItem(docId)"
+                />
+              </div>
             </div>
           </div>
         </div>
       </template>
     </edge-dashboard>
     <Sheet v-model:open="state.editMedia">
-      <SheetContent class="w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl bg-card text-foreground border border-border">
-        <SheetHeader>
-          <SheetTitle>{{ state.workingDoc?.fileName }}</SheetTitle>
-          <SheetDescription>
-            <div class="h-[450px] rounded-lg mb-4 flex items-center justify-center overflow-hidden relative" :class="previewBackgroundClass">
+      <SheetContent
+        side="right"
+        class="!w-screen !max-w-none sm:!max-w-none md:!max-w-none lg:!max-w-none !h-screen p-0 bg-card text-foreground border-0"
+      >
+        <div class="h-full w-full grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_360px]">
+          <div class="relative h-[46vh] md:h-full border-b md:border-b-0 md:border-r border-border bg-background">
+            <div class="absolute inset-0 flex items-center justify-center overflow-hidden p-4" :class="previewBackgroundClass">
+              <template v-if="workingDocIsPdf && currentPdfPage">
+                <img
+                  v-if="currentPdfPage.thumbnail"
+                  :key="`${currentPdfPage.key}-${currentPdfPage.thumbnail}`"
+                  :src="currentPdfPage.thumbnail"
+                  alt=""
+                  class="absolute inset-0 h-full w-full object-contain transition-opacity duration-150"
+                  :class="pdfThumbnailVisible ? 'opacity-100' : 'opacity-0'"
+                  @load="onPdfThumbnailLoaded"
+                  @error="onPdfThumbnailErrored"
+                >
+                <img
+                  v-if="currentPdfPage.preview"
+                  :key="`${currentPdfPage.key}-${currentPdfPage.preview}`"
+                  :src="currentPdfPage.preview"
+                  alt=""
+                  class="absolute inset-0 h-full w-full object-contain transition-opacity duration-200"
+                  :class="currentPdfPreviewLoaded ? 'opacity-100' : 'opacity-0'"
+                  @load="onPdfPreviewLoaded($event, currentPdfPage.preview)"
+                  @error="onPdfPreviewErrored($event, currentPdfPage.preview)"
+                >
+                <div v-if="showPdfPreviewLoading" class="absolute inset-0 flex items-center justify-center bg-black/10">
+                  <div class="rounded-md bg-black/65 px-3 py-2 text-white flex items-center gap-2 text-xs">
+                    <Loader2 class="h-4 w-4 animate-spin" />
+                    Loading page…
+                  </div>
+                </div>
+              </template>
               <img
-                v-if="workingDocPreviewUrl"
+                v-else-if="workingDocPreviewUrl"
                 :src="workingDocPreviewUrl"
                 alt=""
                 class="max-h-full max-w-full h-auto w-auto object-contain"
@@ -697,61 +1127,91 @@ const siteQueryValue = computed(() => {
                 >
                   <ChevronRight class="h-4 w-4" />
                 </edge-shad-button>
-                <div class="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-md bg-black/70 px-2 py-1 text-[11px] text-white">
-                  Page {{ normalizedPdfPageIndex + 1 }} / {{ workingDocPdfPages.length }}
+                <div class="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-md bg-black/70 px-2 py-1 text-[11px] flex items-center gap-2">
+                  <edge-shad-select
+                    v-if="hasPdfPageNav"
+                    v-model="pdfPagePickerValue"
+                    :items="pdfPagePickerItems"
+                    item-title="name"
+                    item-value="docId"
+                    class="w-[122px]"
+                    placeholder="Page"
+                    trigger-class="h-7 min-h-7 px-2 py-1 text-[11px] bg-white/10 border-white/25 text-white"
+                  />
+                  <span class="text-white">Page {{ normalizedPdfPageIndex + 1 }} / {{ workingDocPdfPages.length }}</span>
                 </div>
               </template>
             </div>
-            Original Name: <span class="font-semibold">{{ state.workingDoc?.fileName }}</span>, Size: <span class="font-semibold">{{ (state.workingDoc?.fileSize / 1024).toFixed(2) }} KB</span>
-          </SheetDescription>
-        </SheetHeader>
-
-        <edge-editor
-          v-if="state.workingDoc"
-          :doc-id="state.workingDoc.docId"
-          collection="files"
-          :new-doc-schema="state.newDocs.media"
-          :schema="schemas.media"
-          :show-footer="false"
-          :show-header="false"
-          class="w-full px-0 mx-0 bg-transparent"
-          :save-function-override="onSubmit"
-          card-content-class="mx-0 px-0"
-        >
-          <template #main="slotProps">
-            <div class="p-6 space-y-4  h-[calc(100vh-628px)] overflow-y-auto">
-              <edge-shad-input
-                v-model="slotProps.workingDoc.name"
-                name="name"
-                label="Display Name"
-                class="w-full mb-4"
-                placeholder="File name"
-              />
-              <edge-shad-select-tags
-                v-model="slotProps.workingDoc.meta.tags"
-                :items="getTagsFromMedia"
-                label="Tags"
-                name="tags"
-                placeholder="Select tags"
-                :allow-additions="true"
-                class="w-full max-w-[800px] mx-auto mb-5 text-foreground"
-              />
+            <div class="absolute left-4 top-4 max-w-[calc(100%-5rem)] rounded-md bg-black/65 px-3 py-2 text-xs text-white">
+              <div class="truncate">
+                Original: <span class="font-semibold">{{ state.workingDoc?.fileName }}</span>
+              </div>
+              <div>Size: <span class="font-semibold">{{ (state.workingDoc?.fileSize / 1024).toFixed(2) }} KB</span></div>
             </div>
-            <SheetFooter class="pt-2 flex justify-between gap-3">
-              <edge-shad-button variant="destructive" class="text-white" @click="state.editMedia = false">
-                Cancel
-              </edge-shad-button>
-              <edge-shad-button
-                :disabled="slotProps.submitting"
-                type="submit"
-                class="w-full bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
-              >
-                <Loader2 v-if="slotProps.submitting" class=" h-4 w-4 animate-spin" />
-                Update
-              </edge-shad-button>
-            </SheetFooter>
-          </template>
-        </edge-editor>
+          </div>
+
+          <div class="h-[54vh] md:h-full flex flex-col bg-card">
+            <div class="shrink-0 border-b border-border px-4 py-3 pr-14">
+              <h3 class="text-sm font-semibold truncate">
+                {{ state.workingDoc?.fileName }}
+              </h3>
+            </div>
+            <edge-editor
+              v-if="state.workingDoc"
+              :doc-id="state.workingDoc.docId"
+              collection="files"
+              :new-doc-schema="state.newDocs.media"
+              :schema="schemas.media"
+              :show-footer="false"
+              :show-header="false"
+              class="w-full px-0 mx-0 bg-transparent flex-1 min-h-0"
+              :save-function-override="onSubmit"
+              card-content-class="mx-0 px-0 h-full"
+            >
+              <template #main="slotProps">
+                <div class="p-4 space-y-4 flex-1 min-h-0 overflow-y-auto">
+                  <div
+                    v-if="!canEditWorkingDoc"
+                    class="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100"
+                  >
+                    View only: this media item is not owned by this site.
+                  </div>
+                  <edge-shad-input
+                    v-model="slotProps.workingDoc.name"
+                    name="name"
+                    label="Display Name"
+                    class="w-full"
+                    placeholder="File name"
+                    :disabled="!canEditWorkingDoc"
+                  />
+                  <edge-shad-select-tags
+                    v-model="slotProps.workingDoc.meta.tags"
+                    :items="getTagsFromMedia"
+                    label="Tags"
+                    name="tags"
+                    placeholder="Select tags"
+                    :allow-additions="true"
+                    class="w-full text-foreground"
+                    :disabled="!canEditWorkingDoc"
+                  />
+                </div>
+                <SheetFooter class="shrink-0 border-t border-border p-4 flex justify-between gap-3">
+                  <edge-shad-button variant="destructive" class="text-white" @click="state.editMedia = false">
+                    Cancel
+                  </edge-shad-button>
+                  <edge-shad-button
+                    :disabled="slotProps.submitting || !canEditWorkingDoc"
+                    :type="canEditWorkingDoc ? 'submit' : 'button'"
+                    class="w-full bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
+                  >
+                    <Loader2 v-if="slotProps.submitting" class=" h-4 w-4 animate-spin" />
+                    {{ canEditWorkingDoc ? 'Update' : 'Read Only' }}
+                  </edge-shad-button>
+                </SheetFooter>
+              </template>
+            </edge-editor>
+          </div>
+        </div>
       </SheetContent>
     </Sheet>
   </div>

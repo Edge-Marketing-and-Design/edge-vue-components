@@ -109,7 +109,7 @@ const clearImage = () => {
   </div>
 
   <Dialog v-model:open="state.dialog">
-    <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-y-auto">
+    <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
       <DialogHeader>
         <DialogTitle>{{ props.dialogTitle }}</DialogTitle>
         <DialogDescription />

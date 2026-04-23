@@ -120,7 +120,7 @@ const mediaCopyUrl = computed(() => {
     <div class="relative w-full h-[200px] flex items-center justify-center" :class="previewBackgroundClass">
       <div class="z-10 absolute w-full flex inset-0 bg-black/10 dark:bg-black/30 justify-between items-start p-2">
         <edge-shad-button
-          v-if="!props.selectMode"
+          v-if="!props.selectMode && props.canDelete"
           size="icon"
           class="bg-slate-900 text-white hover:bg-slate-800 shadow-sm dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
           @click.stop="emits('select', !props.selected, item.docId)"
