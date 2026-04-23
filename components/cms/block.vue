@@ -2890,14 +2890,14 @@ const getTagsFromPosts = computed(() => {
   display: inline-block;
   border-radius: 0.375rem;
   box-shadow: 0 0 0 3px rgb(59 130 246 / 0.95);
-  background: rgb(59 130 246 / 0.08);
+  background-color: rgb(59 130 246 / 0.08);
   padding: 0.08em 0.2em;
 }
 
 :deep([data-cms-preview-highlight='element']) {
   border-radius: 0.375rem;
   box-shadow: 0 0 0 3px rgb(59 130 246 / 0.95);
-  background: rgb(59 130 246 / 0.08);
+  background-color: rgb(59 130 246 / 0.08);
 }
 
 .cms-auth-preview-logged-in :deep(.cms-show-logged-out),
