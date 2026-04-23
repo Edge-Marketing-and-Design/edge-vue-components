@@ -296,7 +296,7 @@ const menuIcon = computed(() => {
             </div>
           </div>
 
-          <div class="rounded-xl border bg-card p-4 space-y-4 shadow-sm">
+          <div v-if="filteredMetaFields.length" class="rounded-xl border bg-card p-4 space-y-4 shadow-sm">
             <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Additional Details
             </div>

@@ -518,6 +518,10 @@ const computedUserSchema = computed(() =>
     : computedUpdateUserSchema.value,
 )
 
+const extraMetaFields = computed(() =>
+  (props.metaFields || []).filter(field => String(field?.field || '').trim() !== 'name'),
+)
+
 const currentOrganization = computed(() => {
   if (edgeGlobal.edgeState.organizations.length > 0) {
     if (edgeGlobal.edgeState.currentOrganization && edgeFirebase?.data[`organizations/${edgeGlobal.edgeState.currentOrganization}`]) {
@@ -781,7 +785,7 @@ onBeforeMount(async () => {
                     </div>
                     <Separator class="my-6" />
                     <div class="grid grid-cols-12 gap-2">
-                      <div v-for="field in props.metaFields" :key="field.field" class="mb-3 col-span-12" :class="numColsToTailwind(field.cols)">
+                      <div v-for="field in extraMetaFields" :key="field.field" class="mb-3 col-span-12" :class="numColsToTailwind(field.cols)">
                         <!-- Use explicit model binding so dotted paths (e.g., "address.street") work -->
                         <edge-image-picker
                           v-if="field?.type === 'imagePicker'"
