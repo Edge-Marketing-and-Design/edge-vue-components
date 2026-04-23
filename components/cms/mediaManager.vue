@@ -145,6 +145,10 @@ const state = reactive({
   mediaTypeFilter: 'both',
   fileTypeFilter: 'all',
   cmsSiteFilter: 'all',
+  deleteConfirmOpen: false,
+  deleteConfirmMode: 'single',
+  deleteConfirmDocId: '',
+  deleteConfirmAcknowledge: false,
 })
 
 let mediaEmptyFallbackTimer = null
@@ -431,6 +435,82 @@ const emptyStateHint = computed(() => {
 const selectAll = computed(() => {
   return state.selectAll
 })
+const getDeletableSelectedIds = () => {
+  return state.selected.filter((docId) => {
+    const item = files.value?.[docId]
+    return canDeleteMedia(item)
+  })
+}
+const deleteConfirmCount = computed(() => {
+  if (state.deleteConfirmMode === 'bulk')
+    return getDeletableSelectedIds().length
+  if (!state.deleteConfirmDocId)
+    return 0
+  const item = files.value?.[state.deleteConfirmDocId]
+  return canDeleteMedia(item) ? 1 : 0
+})
+const canConfirmDelete = computed(() => {
+  return Boolean(
+    deleteConfirmCount.value > 0
+    && state.deleteConfirmAcknowledge,
+  )
+})
+const resetDeleteConfirmationState = () => {
+  state.deleteConfirmAcknowledge = false
+  state.deleteConfirmDocId = ''
+  state.deleteConfirmMode = 'single'
+}
+const openDeleteConfirmSingle = (docId) => {
+  const normalizedDocId = String(docId || '').trim()
+  if (!normalizedDocId)
+    return
+  const item = files.value?.[normalizedDocId]
+  if (!canDeleteMedia(item))
+    return
+  resetDeleteConfirmationState()
+  state.deleteConfirmMode = 'single'
+  state.deleteConfirmDocId = normalizedDocId
+  state.deleteConfirmOpen = true
+}
+const openDeleteConfirmBulk = () => {
+  if (!getDeletableSelectedIds().length)
+    return
+  resetDeleteConfirmationState()
+  state.deleteConfirmMode = 'bulk'
+  state.deleteConfirmOpen = true
+}
+const closeDeleteConfirm = () => {
+  if (state.deleting)
+    return
+  state.deleteConfirmOpen = false
+  resetDeleteConfirmationState()
+}
+const confirmDelete = async () => {
+  if (state.deleting || !canConfirmDelete.value)
+    return
+
+  state.deleting = true
+  const docIds = state.deleteConfirmMode === 'bulk'
+    ? getDeletableSelectedIds()
+    : (state.deleteConfirmDocId ? [state.deleteConfirmDocId] : [])
+
+  try {
+    for (const docId of docIds) {
+      await edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/files`, docId)
+    }
+    state.selected = state.selected.filter(docId => !docIds.includes(docId))
+    if (state.deleteConfirmMode === 'single' && docIds.includes(String(state.workingDoc?.docId || '').trim())) {
+      state.editMedia = false
+      state.workingDoc = null
+    }
+    state.selectAll = false
+    state.deleteConfirmOpen = false
+    resetDeleteConfirmationState()
+  }
+  finally {
+    state.deleting = false
+  }
+}
 
 watch(selectAll, (newValue) => {
   if (newValue) {
@@ -456,20 +536,6 @@ const handleCheckboxChange = (checked, docId) => {
   }
 }
 
-const deleteSelected = async () => {
-  console.log('Deleting selected files:', state.selected)
-  state.deleting = true
-  const deletableIds = state.selected.filter((docId) => {
-    const item = files.value?.[docId]
-    return canDeleteMedia(item)
-  })
-  for (const docId of deletableIds) {
-    await edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/files`, docId)
-  }
-  state.selected = []
-  state.selectAll = false
-  state.deleting = false
-}
 const getTagsFromMedia = computed(() => {
   const tagsSet = new Set()
   modeFilteredFiles.value.forEach((file) => {
@@ -1002,9 +1068,9 @@ const siteQueryValue = computed(() => resolveCmsSiteScopeValues())
               </edge-shad-button>
               <edge-shad-button
                 variant="destructive"
-                :disabled="state.deleting || state.selected.length === 0"
+                :disabled="state.deleting || getDeletableSelectedIds().length === 0"
                 class="h-[30px]"
-                @click="deleteSelected"
+                @click="openDeleteConfirmBulk"
               >
                 <Loader2 v-if="state.deleting" class="animate-spin h-5 w-5 mr-2" />
                 Delete Selected
@@ -1055,7 +1121,7 @@ const siteQueryValue = computed(() => resolveCmsSiteScopeValues())
                   :select-mode="props.selectMode"
                   :can-delete="canDeleteMedia(item)"
                   @select="(checked, docId) => handleCheckboxChange(checked, docId)"
-                  @delete="(docId) => slotProps.deleteItem(docId)"
+                  @delete="(docId) => openDeleteConfirmSingle(docId)"
                 />
               </div>
             </div>
@@ -1063,6 +1129,51 @@ const siteQueryValue = computed(() => resolveCmsSiteScopeValues())
         </div>
       </template>
     </edge-dashboard>
+    <edge-shad-dialog v-model="state.deleteConfirmOpen">
+      <DialogContent class="max-w-lg">
+        <DialogHeader>
+          <DialogTitle class="text-left">
+            Confirm Permanent Media Deletion
+          </DialogTitle>
+          <DialogDescription class="text-left">
+            This action permanently deletes media and cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <div class="space-y-4">
+          <div class="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-700 dark:bg-red-950/40 dark:text-red-100">
+            Deleting media that is currently used in pages, posts, blocks, or settings can break layouts and content.
+            Proceed only if you are sure.
+          </div>
+          <div class="text-sm text-foreground">
+            You are about to delete
+            <span class="font-semibold">{{ deleteConfirmCount }}</span>
+            {{ deleteConfirmCount === 1 ? 'item' : 'items' }}.
+          </div>
+          <label class="flex items-start gap-2 text-sm text-foreground">
+            <input
+              v-model="state.deleteConfirmAcknowledge"
+              type="checkbox"
+              class="mt-0.5 h-4 w-4 rounded border-border"
+            >
+            <span>I understand this may break content where this media is in use.</span>
+          </label>
+        </div>
+        <DialogFooter class="pt-4 flex gap-2">
+          <edge-shad-button variant="outline" :disabled="state.deleting" @click="closeDeleteConfirm">
+            Cancel
+          </edge-shad-button>
+          <edge-shad-button
+            variant="destructive"
+            class="text-white"
+            :disabled="state.deleting || !canConfirmDelete"
+            @click="confirmDelete"
+          >
+            <Loader2 v-if="state.deleting" class="mr-2 h-4 w-4 animate-spin" />
+            Permanently Delete
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
     <Sheet v-model:open="state.editMedia">
       <SheetContent
         side="right"
