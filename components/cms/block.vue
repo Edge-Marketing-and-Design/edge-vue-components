@@ -293,6 +293,8 @@ const editorPanelRightWidth = ref(BLOCK_EDITOR_PANEL_DEFAULTS.page)
 const editorPanelResizing = ref(false)
 const editorPanelPointerMove = ref(null)
 const editorPanelPointerUp = ref(null)
+const aiDialogSpotlightTimer = ref(null)
+const aiGenerateButtonSpotlightTimer = ref(null)
 
 const state = reactive({
   open: false,
@@ -313,6 +315,8 @@ const state = reactive({
   imageOpen: false,
   imageOpenByField: {},
   aiDialogOpen: false,
+  aiDialogSpotlightActive: false,
+  aiGenerateButtonSpotlightActive: false,
   aiDialogSession: 0,
   aiInstructions: '',
   aiSelectedFields: {},
@@ -1423,6 +1427,23 @@ const handleFieldEditorPreviewLoaded = () => {
   fieldEditorPreviewLoadedTick.value++
 }
 
+const clearAiGenerateButtonSpotlight = () => {
+  if (aiGenerateButtonSpotlightTimer.value) {
+    clearTimeout(aiGenerateButtonSpotlightTimer.value)
+    aiGenerateButtonSpotlightTimer.value = null
+  }
+  state.aiGenerateButtonSpotlightActive = false
+}
+
+const triggerAiGenerateButtonSpotlight = () => {
+  clearAiGenerateButtonSpotlight()
+  state.aiGenerateButtonSpotlightActive = true
+  aiGenerateButtonSpotlightTimer.value = setTimeout(() => {
+    state.aiGenerateButtonSpotlightActive = false
+    aiGenerateButtonSpotlightTimer.value = null
+  }, 4000)
+}
+
 watch(editorPanelStorageKey, () => {
   loadEditorPanelWidth()
 }, { immediate: true })
@@ -1447,11 +1468,32 @@ watch(() => state.open, (open) => {
   }
 })
 
+watch(
+  () => [state.open, state.editorMode],
+  ([open, editorMode], [prevOpen, prevEditorMode]) => {
+    const enteringFields = open && editorMode === 'fields' && (!prevOpen || prevEditorMode !== 'fields')
+    if (enteringFields) {
+      triggerAiGenerateButtonSpotlight()
+      return
+    }
+    if (!open || editorMode !== 'fields')
+      clearAiGenerateButtonSpotlight()
+  },
+)
+
 onBeforeUnmount(() => {
   if (editorPanelPointerMove.value)
     window.removeEventListener('pointermove', editorPanelPointerMove.value)
   if (editorPanelPointerUp.value)
     window.removeEventListener('pointerup', editorPanelPointerUp.value)
+  if (aiDialogSpotlightTimer.value) {
+    clearTimeout(aiDialogSpotlightTimer.value)
+    aiDialogSpotlightTimer.value = null
+  }
+  if (aiGenerateButtonSpotlightTimer.value) {
+    clearTimeout(aiGenerateButtonSpotlightTimer.value)
+    aiGenerateButtonSpotlightTimer.value = null
+  }
   clearActivePreviewHighlights()
 })
 
@@ -1843,15 +1885,37 @@ const resetAiSelections = () => {
   state.aiSelectedFields = next
 }
 
+const clearAiDialogSpotlightTimer = () => {
+  if (!aiDialogSpotlightTimer.value)
+    return
+  clearTimeout(aiDialogSpotlightTimer.value)
+  aiDialogSpotlightTimer.value = null
+}
+
+const triggerAiDialogSpotlight = () => {
+  clearAiDialogSpotlightTimer()
+  state.aiDialogSpotlightActive = false
+  requestAnimationFrame(() => {
+    state.aiDialogSpotlightActive = true
+    aiDialogSpotlightTimer.value = setTimeout(() => {
+      state.aiDialogSpotlightActive = false
+      aiDialogSpotlightTimer.value = null
+    }, 2200)
+  })
+}
+
 const openAiDialog = () => {
   state.aiError = ''
   state.aiInstructions = ''
   state.aiDialogSession += 1
   resetAiSelections()
   state.aiDialogOpen = true
+  triggerAiDialogSpotlight()
 }
 
 const closeAiDialog = () => {
+  clearAiDialogSpotlightTimer()
+  state.aiDialogSpotlightActive = false
   state.aiDialogOpen = false
 }
 
@@ -2225,7 +2289,11 @@ const getTagsFromPosts = computed(() => {
               <edge-shad-button
                 type="button"
                 size="sm"
-                class="h-8 gap-2 md:self-start"
+                class="h-8 gap-2 md:self-start ai-generate-button"
+                :class="{
+                  'ai-generate-button--highlight': state.open && state.editorMode === 'fields',
+                  'ai-generate-button--spotlight': state.aiGenerateButtonSpotlightActive,
+                }"
                 variant="outline"
                 :disabled="!aiFieldOptions.length"
                 @click="openAiDialog"
@@ -2731,7 +2799,10 @@ const getTagsFromPosts = computed(() => {
           </edge-shad-form>
 
           <edge-shad-dialog v-model="state.aiDialogOpen">
-            <DialogContent class="max-w-[640px]">
+            <DialogContent
+              class="max-w-[640px] ai-dialog-content"
+              :class="{ 'ai-dialog-content--spotlight': state.aiDialogSpotlightActive }"
+            >
               <DialogHeader>
                 <DialogTitle>Generate with AI</DialogTitle>
                 <DialogDescription>
@@ -2841,5 +2912,147 @@ const getTagsFromPosts = computed(() => {
 .cms-auth-preview-logged-out :deep(.cms-hide-logged-out),
 .cms-auth-preview-logged-out :deep([data-cms-hide-logged-out]) {
   display: none !important;
+}
+
+:deep(.ai-dialog-content) {
+  position: relative;
+  overflow: hidden;
+}
+
+:deep(.ai-dialog-content)::before {
+  content: '';
+  position: absolute;
+  inset: -32%;
+  pointer-events: none;
+  opacity: 0;
+  background:
+    radial-gradient(circle at 16% 12%, rgb(250 204 21 / 0.62) 0%, rgb(250 204 21 / 0) 48%),
+    radial-gradient(circle at 86% 8%, rgb(56 189 248 / 0.45) 0%, rgb(56 189 248 / 0) 44%),
+    radial-gradient(circle at 50% 96%, rgb(34 211 238 / 0.3) 0%, rgb(34 211 238 / 0) 42%);
+}
+
+:deep(.ai-dialog-content--spotlight) {
+  animation: ai-dialog-pop 760ms cubic-bezier(0.2, 0.7, 0.15, 1.05) both;
+  box-shadow:
+    0 0 0 2px rgb(250 204 21 / 0.6),
+    0 0 0 12px rgb(250 204 21 / 0.14),
+    0 30px 80px rgb(15 23 42 / 0.35);
+}
+
+:deep(.ai-dialog-content--spotlight)::before {
+  animation: ai-dialog-spotlight 2400ms ease-out forwards;
+}
+
+@keyframes ai-dialog-pop {
+  0% {
+    transform: scale(0.9);
+    filter: saturate(1.24);
+    box-shadow:
+      0 0 0 0 rgb(250 204 21 / 0),
+      0 0 0 0 rgb(250 204 21 / 0),
+      0 0 0 rgb(15 23 42 / 0);
+  }
+  55% {
+    transform: scale(1.032);
+    box-shadow:
+      0 0 0 2px rgb(250 204 21 / 0.7),
+      0 0 0 14px rgb(250 204 21 / 0.2),
+      0 36px 90px rgb(15 23 42 / 0.38);
+  }
+  100% {
+    transform: scale(1);
+    filter: saturate(1);
+    box-shadow:
+      0 0 0 2px rgb(250 204 21 / 0.58),
+      0 0 0 12px rgb(250 204 21 / 0.14),
+      0 30px 80px rgb(15 23 42 / 0.35);
+  }
+}
+
+@keyframes ai-dialog-spotlight {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0) scale(0.82);
+  }
+  18% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(0, -24px, 0) scale(1.28);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :deep(.ai-dialog-content--spotlight),
+  :deep(.ai-dialog-content--spotlight)::before {
+    animation: none !important;
+  }
+  .ai-generate-button--spotlight,
+  .ai-generate-button--spotlight::after {
+    animation: none !important;
+  }
+}
+
+.ai-generate-button {
+  position: relative;
+  overflow: visible;
+}
+
+.ai-generate-button--highlight {
+  border-color: rgb(250 204 21 / 0.95) !important;
+  box-shadow:
+    0 0 0 1px rgb(250 204 21 / 0.82),
+    0 0 0 6px rgb(250 204 21 / 0.14);
+}
+
+.ai-generate-button::after {
+  content: '';
+  position: absolute;
+  inset: -10px;
+  border-radius: 0.7rem;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(circle at 18% 15%, rgb(250 204 21 / 0.55) 0%, rgb(250 204 21 / 0) 52%);
+}
+
+.ai-generate-button--spotlight {
+  border-color: rgb(250 204 21 / 0.95) !important;
+  box-shadow:
+    0 0 0 2px rgb(250 204 21 / 0.72),
+    0 0 0 8px rgb(250 204 21 / 0.2),
+    0 10px 26px rgb(245 158 11 / 0.35);
+  animation: ai-generate-button-pop 620ms cubic-bezier(0.2, 0.7, 0.15, 1.05) both;
+}
+
+.ai-generate-button--spotlight::after {
+  animation: ai-generate-button-glow 3800ms ease-out forwards;
+}
+
+@keyframes ai-generate-button-pop {
+  0% {
+    transform: scale(0.92);
+  }
+  55% {
+    transform: scale(1.06);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes ai-generate-button-glow {
+  0% {
+    opacity: 0;
+    transform: scale(0.78);
+  }
+  22% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.34);
+  }
 }
 </style>

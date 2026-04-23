@@ -1,5 +1,5 @@
 <script setup>
-import { FileText, ImagePlus, Loader2, Square, SquareCheckBig } from 'lucide-vue-next'
+import { ChevronLeft, ChevronRight, FileText, ImagePlus, Loader2, Square, SquareCheckBig } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 const props = defineProps({
@@ -392,6 +392,80 @@ const isLightName = (name) => {
 
 const previewBackgroundClass = computed(() => (isLightName(state.workingDoc?.name) ? 'bg-neutral-900/90' : 'bg-neutral-100'))
 const workingDocIsImage = computed(() => isImageMediaItem(state.workingDoc))
+const workingDocIsPdf = computed(() => {
+  const contentType = String(state.workingDoc?.contentType || '').toLowerCase()
+  if (contentType === 'application/pdf')
+    return true
+  return getMediaExtension(state.workingDoc) === 'pdf'
+})
+const parsePageNumber = (key) => {
+  const match = String(key || '').match(/^page-(\d+)$/i)
+  return match?.[1] ? Number(match[1]) : Number.POSITIVE_INFINITY
+}
+const resolvePageVariants = (pageData = {}) => {
+  const variants = Array.isArray(pageData?.variants) ? pageData.variants : []
+  const thumbnail = variants.find(variant => String(variant || '').includes('/thumbnail')) || variants[0] || ''
+  const highres = variants.find(variant => String(variant || '').includes('/highres')) || ''
+  const publicVariant = variants.find(variant => String(variant || '').includes('/public')) || ''
+  return {
+    thumbnail: String(thumbnail || ''),
+    highres: String(highres || ''),
+    public: String(publicVariant || ''),
+  }
+}
+const workingDocPdfPages = computed(() => {
+  if (!workingDocIsPdf.value)
+    return []
+  const pageImages = state.workingDoc?.ccState?.cFImages || state.workingDoc?.ccState?.cfImages || {}
+  return Object.entries(pageImages)
+    .filter(([key]) => /^page-\d+$/i.test(String(key || '')))
+    .sort((a, b) => parsePageNumber(a[0]) - parsePageNumber(b[0]))
+    .map(([key, value]) => {
+      const variants = resolvePageVariants(value || {})
+      return {
+        key: String(key),
+        thumbnail: variants.thumbnail,
+        preview: variants.highres || variants.public || variants.thumbnail,
+      }
+    })
+})
+const pdfPageIndex = ref(0)
+const normalizedPdfPageIndex = computed(() => {
+  if (!workingDocPdfPages.value.length)
+    return 0
+  return Math.min(Math.max(pdfPageIndex.value, 0), workingDocPdfPages.value.length - 1)
+})
+const currentPdfPage = computed(() => {
+  if (!workingDocPdfPages.value.length)
+    return null
+  return workingDocPdfPages.value[normalizedPdfPageIndex.value] || null
+})
+const hasPdfPageNav = computed(() => workingDocPdfPages.value.length > 1)
+const canGoPrevPdfPage = computed(() => normalizedPdfPageIndex.value > 0)
+const canGoNextPdfPage = computed(() => normalizedPdfPageIndex.value < workingDocPdfPages.value.length - 1)
+const goPrevPdfPage = () => {
+  if (!canGoPrevPdfPage.value)
+    return
+  pdfPageIndex.value = normalizedPdfPageIndex.value - 1
+}
+const goNextPdfPage = () => {
+  if (!canGoNextPdfPage.value)
+    return
+  pdfPageIndex.value = normalizedPdfPageIndex.value + 1
+}
+const workingDocPreviewUrl = computed(() => {
+  if (workingDocIsImage.value)
+    return String(edgeGlobal.getImage(state.workingDoc, 'public') || '')
+  if (workingDocIsPdf.value)
+    return String(currentPdfPage.value?.preview || currentPdfPage.value?.thumbnail || '')
+  return ''
+})
+watch(
+  () => state.workingDoc?.docId,
+  () => {
+    pdfPageIndex.value = 0
+  },
+)
 
 const siteQueryValue = computed(() => {
   if (!props.site)
@@ -594,14 +668,39 @@ const siteQueryValue = computed(() => {
         <SheetHeader>
           <SheetTitle>{{ state.workingDoc?.fileName }}</SheetTitle>
           <SheetDescription>
-            <div class="h-[450px] rounded-lg mb-4 flex items-center justify-center overflow-hidden" :class="previewBackgroundClass">
+            <div class="h-[450px] rounded-lg mb-4 flex items-center justify-center overflow-hidden relative" :class="previewBackgroundClass">
               <img
-                v-if="workingDocIsImage"
-                :src="edgeGlobal.getImage(state.workingDoc, 'public')"
+                v-if="workingDocPreviewUrl"
+                :src="workingDocPreviewUrl"
                 alt=""
                 class="max-h-full max-w-full h-auto w-auto object-contain"
               >
               <FileText v-else class="h-20 w-20 text-slate-500 dark:text-slate-300" />
+              <template v-if="workingDocIsPdf && workingDocPdfPages.length">
+                <edge-shad-button
+                  v-if="hasPdfPageNav"
+                  size="icon"
+                  variant="secondary"
+                  class="absolute left-3 top-1/2 -translate-y-1/2 h-9 w-9"
+                  :disabled="!canGoPrevPdfPage"
+                  @click="goPrevPdfPage"
+                >
+                  <ChevronLeft class="h-4 w-4" />
+                </edge-shad-button>
+                <edge-shad-button
+                  v-if="hasPdfPageNav"
+                  size="icon"
+                  variant="secondary"
+                  class="absolute right-3 top-1/2 -translate-y-1/2 h-9 w-9"
+                  :disabled="!canGoNextPdfPage"
+                  @click="goNextPdfPage"
+                >
+                  <ChevronRight class="h-4 w-4" />
+                </edge-shad-button>
+                <div class="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-md bg-black/70 px-2 py-1 text-[11px] text-white">
+                  Page {{ normalizedPdfPageIndex + 1 }} / {{ workingDocPdfPages.length }}
+                </div>
+              </template>
             </div>
             Original Name: <span class="font-semibold">{{ state.workingDoc?.fileName }}</span>, Size: <span class="font-semibold">{{ (state.workingDoc?.fileSize / 1024).toFixed(2) }} KB</span>
           </SheetDescription>

@@ -68,6 +68,12 @@ const isImageItem = computed(() => {
     return true
   return imageExtensions.includes(getMediaExtension())
 })
+const isPdfItem = computed(() => {
+  const contentType = String(props.item?.contentType || '').toLowerCase()
+  if (contentType === 'application/pdf')
+    return true
+  return getMediaExtension() === 'pdf'
+})
 const isFileItem = computed(() => !isImageItem.value)
 const fileTypeLabel = computed(() => {
   const ext = getMediaExtension()
@@ -90,9 +96,15 @@ const fileIconComponent = computed(() => {
   return File
 })
 const thumbnailUrl = computed(() => {
-  if (!isImageItem.value)
+  if (isImageItem.value)
+    return edgeGlobal.getImage(props.item, 'thumbnail') || ''
+  if (!isPdfItem.value)
     return ''
-  return edgeGlobal.getImage(props.item, 'thumbnail') || ''
+  const pageImages = props.item?.ccState?.cFImages || props.item?.ccState?.cfImages || {}
+  const pageOne = pageImages?.['page-001'] || {}
+  const variants = Array.isArray(pageOne?.variants) ? pageOne.variants : []
+  const thumbnail = variants.find(variant => String(variant || '').includes('/thumbnail'))
+  return String(thumbnail || variants[0] || '')
 })
 const mediaCopyUrl = computed(() => {
   if (isFileItem.value)
@@ -126,11 +138,8 @@ const mediaCopyUrl = computed(() => {
           <Trash class="!h-5 !w-5" />
         </edge-shad-button>
       </div>
-      <div v-if="isFileItem" class="absolute inset-0 m-auto flex h-full w-full items-center justify-center">
+      <div v-if="isFileItem && !thumbnailUrl" class="absolute inset-0 m-auto flex h-full w-full items-center justify-center">
         <component :is="fileIconComponent" class="h-24 w-24 text-slate-600 dark:text-slate-300" />
-        <div class="absolute bottom-3 right-3 rounded-md bg-red-600 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-white shadow-sm">
-          {{ fileTypeLabel }}
-        </div>
       </div>
       <Loader2
         v-else-if="!thumbnailUrl"
@@ -142,6 +151,9 @@ const mediaCopyUrl = computed(() => {
         alt=""
         class="max-h-full max-w-full h-auto w-auto object-contain transition-transform duration-200 group-hover:scale-[1.02]"
       >
+      <div v-if="isFileItem" class="absolute bottom-3 right-3 rounded-md bg-red-600 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-white shadow-sm">
+        {{ fileTypeLabel }}
+      </div>
     </div>
 
     <!-- Main Content -->
