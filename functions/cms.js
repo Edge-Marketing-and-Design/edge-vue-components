@@ -400,6 +400,22 @@ const normalizeEmailList = (value) => {
   return single ? [single] : []
 }
 
+const extractOrgIdsFromCollectionPaths = (collectionPaths = []) => {
+  if (!Array.isArray(collectionPaths))
+    return []
+  const orgIds = new Set()
+  for (const rawPath of collectionPaths) {
+    const value = String(rawPath || '').trim()
+    if (!value)
+      continue
+    const match = value.match(/^organizations-([^-]+)(?:-|$)/)
+    if (!match?.[1])
+      continue
+    orgIds.add(match[1])
+  }
+  return Array.from(orgIds)
+}
+
 const syncAudienceHistoryUuidForUser = async ({
   orgId,
   siteId,
@@ -7311,17 +7327,23 @@ exports.syncSiteSettingsFromUserMeta = onDocumentWritten(
     if (!Object.keys(metaDiff).length && !profilePhotoChanged)
       return
 
-    const authUserId = String(change.after.data()?.userId || '').trim()
+    const stagedAfter = change.after.data() || {}
+    const authUserId = String(stagedAfter?.userId || '').trim()
     if (!authUserId)
+      return
+    const orgIds = extractOrgIdsFromCollectionPaths(stagedAfter?.collectionPaths || [])
+    if (!orgIds.length)
       return
 
     const matchedSites = new Map()
-    const snap = await db.collectionGroup('sites')
-      .where('users', 'array-contains', authUserId)
-      .get()
-
-    if (!snap.empty) {
+    for (const orgId of orgIds) {
+      const sitesRef = db.collection('organizations').doc(orgId).collection('sites')
+      const snap = await sitesRef.where('users', 'array-contains', authUserId).get()
+      if (snap.empty)
+        continue
       for (const doc of snap.docs) {
+        if (doc.id === 'templates')
+          continue
         const users = Array.isArray(doc.data()?.users) ? doc.data().users : []
         const matchedUserIds = new Set(users
           .map(value => String(value || '').trim())
