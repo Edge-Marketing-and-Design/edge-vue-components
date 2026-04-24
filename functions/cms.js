@@ -211,6 +211,85 @@ const resolveStagedUserRef = async (userIdOrDocId) => {
   return querySnap.docs[0].ref
 }
 
+const stripQueryAndHash = (url) => {
+  const raw = String(url || '').trim()
+  if (!raw)
+    return ''
+  return raw.split('#')[0].split('?')[0]
+}
+
+const unwrapCloudflareCdnImageUrl = (url) => {
+  const raw = String(url || '').trim()
+  if (!raw)
+    return ''
+  const marker = '/cdn-cgi/image/'
+  const markerIndex = raw.indexOf(marker)
+  if (markerIndex === -1)
+    return ''
+  const nextSlash = raw.indexOf('/', markerIndex + marker.length)
+  if (nextSlash === -1)
+    return ''
+  const inner = raw.slice(nextSlash + 1)
+  try {
+    return decodeURIComponent(inner)
+  }
+  catch {
+    return inner
+  }
+}
+
+const buildCandidateMediaUrls = (url) => {
+  const base = stripQueryAndHash(url)
+  if (!base)
+    return []
+  const candidates = new Set([base])
+  const unwrapped = stripQueryAndHash(unwrapCloudflareCdnImageUrl(base))
+  if (unwrapped)
+    candidates.add(unwrapped)
+  return Array.from(candidates).filter(Boolean)
+}
+
+const resolveFileDocFromProfilePhotoUrl = async (orgId, profilePhotoUrl) => {
+  const urls = buildCandidateMediaUrls(profilePhotoUrl)
+  if (!orgId || !urls.length)
+    return null
+
+  const filesRef = db.collection('organizations').doc(orgId).collection('files')
+  for (const url of urls) {
+    const [variantsSnap, r2URLSnap, r2UrlSnap] = await Promise.all([
+      filesRef.where('cloudflareImageVariants', 'array-contains', url).limit(1).get(),
+      filesRef.where('r2URL', '==', url).limit(1).get(),
+      filesRef.where('r2Url', '==', url).limit(1).get(),
+    ])
+    if (!variantsSnap.empty)
+      return variantsSnap.docs[0].ref
+    if (!r2URLSnap.empty)
+      return r2URLSnap.docs[0].ref
+    if (!r2UrlSnap.empty)
+      return r2UrlSnap.docs[0].ref
+  }
+
+  return null
+}
+
+const attachPrimaryUserProfilePhotoToSiteMedia = async ({ orgId, siteId, profilePhotoUrl }) => {
+  if (!orgId || !siteId || !profilePhotoUrl)
+    return false
+
+  const fileRef = await resolveFileDocFromProfilePhotoUrl(orgId, profilePhotoUrl)
+  if (!fileRef)
+    return false
+
+  await fileRef.set({
+    meta: {
+      cmsmedia: true,
+      cmssite: Firestore.FieldValue.arrayUnion(siteId),
+    },
+  }, { merge: true })
+
+  return true
+}
+
 const parseDevice = (ua, headers) => {
   const mobileHint = headers['sec-ch-ua-mobile']
   if (mobileHint === '?1')
@@ -2525,6 +2604,7 @@ const buildFieldsList = (pagesSnap, siteData = {}) => {
             title: cfg.title || field,
             option: cfg.option || null,
             schema: Array.isArray(cfg.schema) ? cfg.schema : null,
+            tags: Array.isArray(cfg.tags) ? cfg.tags : [],
           }
           descriptors.push(descriptor)
           descriptorMap.set(path, descriptor)
@@ -2552,6 +2632,9 @@ const formatFieldPrompt = (descriptor) => {
   if (descriptor.schema?.length) {
     const schemaFields = descriptor.schema.map(s => `${s.field}:${s.type}`).join(', ')
     parts.push(`  array schema: ${schemaFields}`)
+  }
+  if (descriptor.type === 'image' && descriptor.tags?.length) {
+    parts.push(`  default media tags: ${descriptor.tags.join(', ')}`)
   }
   return parts.join('\n')
 }
@@ -2629,6 +2712,12 @@ const callOpenAiForSiteBootstrap = async ({ siteData, agentData, instructions, f
     'For text/richtext/textarea: short, readable copy. For numbers: numeric only.',
     'For arrays without schema: array of short strings. For arrays with schema: array of objects matching the schema fields.',
     'For option fields: return one of the allowed option values (not the label).',
+    'For image fields: return a valid image URL string.',
+    'If an image field includes default media tags, the image must match those tags.',
+    'Never use an agent/profile/headshot image for background/banner/hero/cover fields or for fields tagged "Backgrounds".',
+    'If an image field has no default media tags, choose the image based on page and field context.',
+    'Profile/headshot images are allowed for untagged fields when the section is person-centric (for example agent/about/team sections).',
+    'For logo-related image fields, prefer {{cms-logo}} when appropriate.',
     'If you truly cannot infer a value, return an empty string for that key.',
     'For structuredData fields: return a JSON object matching the provided template shape.',
     'Preserve CMS tokens like {{cms-site}}, {{cms-url}}, and {{cms-logo}} exactly as-is.',
@@ -6716,16 +6805,37 @@ exports.populateSiteContactFromPrimaryUserOnCreate = onDocumentCreated(
       siteUpdate[field] = sourceMeta[field]
     }
 
-    if (!Object.keys(siteUpdate).length)
-      return
+    if (Object.keys(siteUpdate).length) {
+      await siteRef.set(siteUpdate, { merge: true })
+      logger.log('populateSiteContactFromPrimaryUserOnCreate: hydrated site settings from primary user', {
+        orgId,
+        siteId,
+        primaryUser,
+        fields: Object.keys(siteUpdate),
+      })
+    }
 
-    await siteRef.set(siteUpdate, { merge: true })
-    logger.log('populateSiteContactFromPrimaryUserOnCreate: hydrated site settings from primary user', {
-      orgId,
-      siteId,
-      primaryUser,
-      fields: Object.keys(siteUpdate),
-    })
+    const profilePhotoUrl = String(userData?.meta?.profilephoto || '').trim()
+    if (profilePhotoUrl) {
+      try {
+        const linked = await attachPrimaryUserProfilePhotoToSiteMedia({ orgId, siteId, profilePhotoUrl })
+        if (linked) {
+          logger.log('populateSiteContactFromPrimaryUserOnCreate: linked profile photo media to site', {
+            orgId,
+            siteId,
+            primaryUser,
+          })
+        }
+      }
+      catch (error) {
+        logger.warn('populateSiteContactFromPrimaryUserOnCreate: failed linking profile photo media', {
+          orgId,
+          siteId,
+          primaryUser,
+          error: error?.message || String(error),
+        })
+      }
+    }
   },
 )
 
@@ -7113,7 +7223,10 @@ exports.syncSiteSettingsFromUserMeta = onDocumentWritten(
     const beforeMeta = (change.before.data() || {}).meta || {}
     const afterMeta = (change.after.data() || {}).meta || {}
     const metaDiff = buildUpdateDiff(pickSyncFields(beforeMeta), pickSyncFields(afterMeta))
-    if (!Object.keys(metaDiff).length)
+    const beforeProfilePhoto = String(beforeMeta?.profilephoto || '').trim()
+    const afterProfilePhoto = String(afterMeta?.profilephoto || '').trim()
+    const profilePhotoChanged = beforeProfilePhoto !== afterProfilePhoto
+    if (!Object.keys(metaDiff).length && !profilePhotoChanged)
       return
 
     const authUserId = String(change.after.data()?.userId || '').trim()
@@ -7142,28 +7255,53 @@ exports.syncSiteSettingsFromUserMeta = onDocumentWritten(
         continue
 
       const siteUpdate = buildUpdateDiff(siteData, pickSyncFields(afterMeta))
-      if (!Object.keys(siteUpdate).length)
-        continue
-
-      await doc.ref.update(siteUpdate)
-
       const orgDoc = doc.ref.parent.parent
       const orgId = orgDoc?.id
       const siteId = doc.id
-      if (orgId) {
-        const publishedRef = db.collection('organizations').doc(orgId).collection('published-site-settings').doc(siteId)
-        const publishedSnap = await publishedRef.get()
-        if (publishedSnap.exists) {
-          await publishedRef.update(siteUpdate)
+
+      if (Object.keys(siteUpdate).length) {
+        await doc.ref.update(siteUpdate)
+
+        if (orgId) {
+          const publishedRef = db.collection('organizations').doc(orgId).collection('published-site-settings').doc(siteId)
+          const publishedSnap = await publishedRef.get()
+          if (publishedSnap.exists) {
+            await publishedRef.update(siteUpdate)
+          }
         }
+
+        logger.log('syncSiteSettingsFromUserMeta: updated site settings from user meta', {
+          siteId,
+          orgId: orgId || '',
+          userId: primaryUserId,
+          fields: Object.keys(siteUpdate),
+        })
       }
 
-      logger.log('syncSiteSettingsFromUserMeta: updated site settings from user meta', {
-        siteId,
-        orgId: orgId || '',
-        userId: primaryUserId,
-        fields: Object.keys(siteUpdate),
-      })
+      if (profilePhotoChanged && afterProfilePhoto && orgId && siteId) {
+        try {
+          const linked = await attachPrimaryUserProfilePhotoToSiteMedia({
+            orgId,
+            siteId,
+            profilePhotoUrl: afterProfilePhoto,
+          })
+          if (linked) {
+            logger.log('syncSiteSettingsFromUserMeta: linked updated profile photo media to site', {
+              siteId,
+              orgId,
+              userId: primaryUserId,
+            })
+          }
+        }
+        catch (error) {
+          logger.warn('syncSiteSettingsFromUserMeta: failed linking updated profile photo media', {
+            siteId,
+            orgId,
+            userId: primaryUserId,
+            error: error?.message || String(error),
+          })
+        }
+      }
     }
   },
 )
