@@ -290,6 +290,74 @@ const attachPrimaryUserProfilePhotoToSiteMedia = async ({ orgId, siteId, profile
   return true
 }
 
+const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'avif'])
+
+const getMediaExtensionFromFileDoc = (fileData = {}) => {
+  const fileName = String(fileData?.fileName || fileData?.name || '').toLowerCase()
+  const fileNameMatch = fileName.match(/\.([a-z0-9]+)$/i)
+  if (fileNameMatch?.[1])
+    return fileNameMatch[1].toLowerCase()
+  const r2Url = String(fileData?.r2URL || fileData?.r2Url || '').toLowerCase()
+  const sanitizedPath = r2Url.split('?')[0]
+  const pathMatch = sanitizedPath.match(/\.([a-z0-9]+)$/i)
+  return pathMatch?.[1] ? pathMatch[1].toLowerCase() : ''
+}
+
+const isImageFileDoc = (fileData = {}) => {
+  const contentType = String(fileData?.contentType || fileData?.meta?.contentType || '').toLowerCase()
+  if (contentType.startsWith('image/'))
+    return true
+  return IMAGE_EXTENSIONS.has(getMediaExtensionFromFileDoc(fileData))
+}
+
+const pickAiImageUrl = (fileData = {}) => {
+  const variants = Array.isArray(fileData?.cloudflareImageVariants)
+    ? fileData.cloudflareImageVariants.map(v => String(v || '').trim()).filter(Boolean)
+    : []
+  const preferredVariant = variants.find(url => url.includes('/public'))
+    || variants.find(url => url.includes('/thumbnail'))
+    || variants[0]
+    || ''
+  if (preferredVariant)
+    return preferredVariant
+  return String(fileData?.r2URL || fileData?.r2Url || '').trim()
+}
+
+const getSharedCmsImagesForAi = async (orgId, { limit = 120 } = {}) => {
+  if (!orgId)
+    return []
+
+  const filesRef = db.collection('organizations').doc(orgId).collection('files')
+  const snap = await filesRef
+    .where('meta.cmssite', 'array-contains', 'all')
+    .limit(limit)
+    .get()
+
+  if (snap.empty)
+    return []
+
+  const results = []
+  for (const doc of snap.docs) {
+    const data = doc.data() || {}
+    if (!isImageFileDoc(data))
+      continue
+    const url = pickAiImageUrl(data)
+    if (!url)
+      continue
+    const tags = Array.isArray(data?.meta?.tags)
+      ? data.meta.tags.map(tag => String(tag || '').trim()).filter(Boolean)
+      : []
+    results.push({
+      docId: doc.id,
+      name: String(data?.name || data?.fileName || '').trim(),
+      url,
+      tags,
+    })
+  }
+
+  return results
+}
+
 const parseDevice = (ua, headers) => {
   const mobileHint = headers['sec-ch-ua-mobile']
   if (mobileHint === '?1')
@@ -2670,7 +2738,14 @@ const summarizeAgentRoot = (agent = {}) => {
   return entries
 }
 
-const callOpenAiForSiteBootstrap = async ({ siteData, agentData, instructions, fields }) => {
+const callOpenAiForSiteBootstrap = async ({
+  siteData,
+  agentData,
+  instructions,
+  fields,
+  sharedImages = [],
+  profilePhotoUrl = '',
+}) => {
   if (!OPENAI_API_KEY)
     throw new Error('OPENAI_API_KEY not set')
   if (!fields || fields.length === 0)
@@ -2698,6 +2773,7 @@ const callOpenAiForSiteBootstrap = async ({ siteData, agentData, instructions, f
     : 'Agent data: n/a'
 
   const fieldPrompts = fields.map(formatFieldPrompt).join('\n')
+  const sharedImagesJson = clampText(JSON.stringify(sharedImages || []), 24000)
   const structuredDataInstructions = [
     'Structured data templates (keep keys; fill in values):',
     `Site: ${SITE_STRUCTURED_DATA_TEMPLATE}`,
@@ -2713,6 +2789,8 @@ const callOpenAiForSiteBootstrap = async ({ siteData, agentData, instructions, f
     'For arrays without schema: array of short strings. For arrays with schema: array of objects matching the schema fields.',
     'For option fields: return one of the allowed option values (not the label).',
     'For image fields: return a valid image URL string.',
+    'For image fields, you must use only one of the provided "Shared CMS images" URLs or the provided profile photo URL.',
+    'Do not invent, transform, or use any other image URL source.',
     'If an image field includes default media tags, the image must match those tags.',
     'Never use an agent/profile/headshot image for background/banner/hero/cover fields or for fields tagged "Backgrounds".',
     'If an image field has no default media tags, choose the image based on page and field context.',
@@ -2728,6 +2806,10 @@ const callOpenAiForSiteBootstrap = async ({ siteData, agentData, instructions, f
     siteSummary,
     `AI instructions: ${instructions || 'n/a'}`,
     agentSummary,
+    `Profile photo URL (allowed image source): ${profilePhotoUrl || 'n/a'}`,
+    '',
+    'Shared CMS images (JSON; allowed image source):',
+    sharedImagesJson || '[]',
     '',
     structuredDataInstructions,
     '',
@@ -7240,7 +7322,11 @@ exports.syncSiteSettingsFromUserMeta = onDocumentWritten(
 
     if (!snap.empty) {
       for (const doc of snap.docs) {
-        matchedSites.set(doc.ref.path, { doc, matchedUserIds: new Set([authUserId]) })
+        const users = Array.isArray(doc.data()?.users) ? doc.data().users : []
+        const matchedUserIds = new Set(users
+          .map(value => String(value || '').trim())
+          .filter(value => value === authUserId))
+        matchedSites.set(doc.ref.path, { doc, matchedUserIds })
       }
     }
 
@@ -7367,11 +7453,15 @@ exports.siteAiBootstrapWorker = onMessagePublished(
 
     let aiResults = {}
     try {
+      const profilePhotoUrl = String(agentData?.meta?.profilephoto || agentData?.profilephoto || '').trim()
+      const sharedImages = await getSharedCmsImagesForAi(orgId)
       aiResults = await callOpenAiForSiteBootstrap({
         siteData,
         agentData,
         instructions: siteData.aiInstructions,
         fields: descriptors,
+        sharedImages,
+        profilePhotoUrl,
       })
     }
     catch (err) {
