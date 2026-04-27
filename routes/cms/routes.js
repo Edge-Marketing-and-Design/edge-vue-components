@@ -51,4 +51,9 @@ export const cmsRoutes = [
     path: '/app/dashboard/themes/:theme',
     file: './edge/routes/cms/dashboard/themes/[theme].vue',
   },
+  {
+    name: 'cms-dashboard-registrar-index',
+    path: '/app/dashboard/registrar',
+    file: './edge/routes/cms/dashboard/registrar/index.vue',
+  },
 ]
