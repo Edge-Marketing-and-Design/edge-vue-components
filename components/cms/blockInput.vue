@@ -150,6 +150,8 @@ onBeforeMount(async () => {
           <edge-cms-media-manager
             v-if="hasImageTags"
             :site="props.site"
+            :show-cms-site-filter="true"
+            cms-site-only-title="Current Site"
             :select-mode="true"
             :default-tags="props.schema.tags"
             @select="selectRichtextImage"
@@ -157,6 +159,8 @@ onBeforeMount(async () => {
           <edge-cms-media-manager
             v-else
             :site="props.site"
+            :show-cms-site-filter="true"
+            cms-site-only-title="Current Site"
             :select-mode="true"
             @select="selectRichtextImage"
           />
@@ -171,6 +175,8 @@ onBeforeMount(async () => {
           <edge-cms-media-manager
             v-if="hasImageTags"
             :site="props.site"
+            :show-cms-site-filter="true"
+            cms-site-only-title="Current Site"
             :select-mode="true"
             :include-files="true"
             :files-only="true"
@@ -180,6 +186,8 @@ onBeforeMount(async () => {
           <edge-cms-media-manager
             v-else
             :site="props.site"
+            :show-cms-site-filter="true"
+            cms-site-only-title="Current Site"
             :select-mode="true"
             :include-files="true"
             :files-only="true"
@@ -233,6 +241,8 @@ onBeforeMount(async () => {
             <edge-cms-media-manager
               v-if="hasImageTags"
               :site="props.site"
+              :show-cms-site-filter="true"
+              cms-site-only-title="Current Site"
               :select-mode="true"
               :default-tags="props.schema.tags"
               @select="selectImage"
@@ -240,6 +250,8 @@ onBeforeMount(async () => {
             <edge-cms-media-manager
               v-else
               :site="props.site"
+              :show-cms-site-filter="true"
+              cms-site-only-title="Current Site"
               :select-mode="true"
               @select="selectImage"
             />

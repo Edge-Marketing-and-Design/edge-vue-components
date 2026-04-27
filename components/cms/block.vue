@@ -2610,6 +2610,8 @@ const getTagsFromPosts = computed(() => {
                                             <edge-cms-media-manager
                                               v-if="schemaItem?.tags && schemaItem.tags.length > 0"
                                               :site="props.siteId"
+                                              :show-cms-site-filter="true"
+                                              cms-site-only-title="Current Site"
                                               :select-mode="true"
                                               :default-tags="schemaItem.tags"
                                               @select="(url) => setArrayImageValue(entry.field, index, schemaItem.field, url)"
@@ -2617,6 +2619,8 @@ const getTagsFromPosts = computed(() => {
                                             <edge-cms-media-manager
                                               v-else
                                               :site="props.siteId"
+                                              :show-cms-site-filter="true"
+                                              cms-site-only-title="Current Site"
                                               :select-mode="true"
                                               @select="(url) => setArrayImageValue(entry.field, index, schemaItem.field, url)"
                                             />
@@ -2730,6 +2734,8 @@ const getTagsFromPosts = computed(() => {
                               <edge-cms-media-manager
                                 v-if="entry.meta?.tags && entry.meta.tags.length > 0"
                                 :site="props.siteId"
+                                :show-cms-site-filter="true"
+                                cms-site-only-title="Current Site"
                                 :select-mode="true"
                                 :default-tags="entry.meta.tags"
                                 @select="(url) => { state.draft[entry.field] = url; state.imageOpenByField[entry.field] = false }"
@@ -2737,6 +2743,8 @@ const getTagsFromPosts = computed(() => {
                               <edge-cms-media-manager
                                 v-else
                                 :site="props.siteId"
+                                :show-cms-site-filter="true"
+                                cms-site-only-title="Current Site"
                                 :select-mode="true"
                                 @select="(url) => { state.draft[entry.field] = url; state.imageOpenByField[entry.field] = false }"
                               />

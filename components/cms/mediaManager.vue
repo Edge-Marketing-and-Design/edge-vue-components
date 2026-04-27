@@ -48,6 +48,16 @@ const props = defineProps({
     required: false,
     default: 'all',
   },
+  showCmsSiteFilter: {
+    type: Boolean,
+    required: false,
+    default: false,
+  },
+  cmsSiteOnlyTitle: {
+    type: String,
+    required: false,
+    default: 'Current Site',
+  },
   markPdfAsFlipbook: {
     type: Boolean,
     required: false,
@@ -284,6 +294,8 @@ const resolveCmsSiteFilterDefault = () => {
   return '__all__'
 }
 const showCmsSiteFilter = computed(() => {
+  if (!props.showCmsSiteFilter)
+    return false
   const siteId = String(props.site || '').trim()
   if (!siteId || siteId === 'all')
     return false
@@ -291,11 +303,12 @@ const showCmsSiteFilter = computed(() => {
 })
 const cmsSiteFilterItems = computed(() => {
   const siteId = String(props.site || '').trim()
+  const currentSiteTitle = String(props.cmsSiteOnlyTitle || '').trim() || 'Current Site'
   if (!siteId || siteId === 'all')
     return [{ title: 'All Sources', name: '__all__' }]
   const items = [
     { title: 'All Sources', name: '__all__' },
-    { title: 'Current Site', name: siteId },
+    { title: currentSiteTitle, name: siteId },
   ]
   if (resolveCmsSiteScopeValues().includes('all'))
     items.push({ title: 'Shared Media', name: 'all' })

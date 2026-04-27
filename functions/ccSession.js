@@ -183,10 +183,7 @@ const hasPublicationMeta = (data) => {
   const meta = (data && typeof data.meta === 'object')
     ? data.meta
     : {}
-  const cmsmedia = meta?.cmsmedia === true
-  const cmssite = Array.isArray(meta?.cmssite) ? meta.cmssite : []
-  const hasAllSite = cmssite.length === 1 && cmssite[0] === 'all'
-  return cmsmedia && hasAllSite
+  return meta?.cmsmedia === true
 }
 
 const deleteCloudflareImages = async (cfImages) => {
@@ -408,7 +405,6 @@ exports.updateFileDoc = onDocumentUpdated(
         meta: {
           ...existingMeta,
           cmsmedia: true,
-          cmssite: ['all'],
         },
       }, { merge: true })
     }
