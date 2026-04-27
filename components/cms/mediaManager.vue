@@ -151,17 +151,7 @@ const state = reactive({
   deleteConfirmAcknowledge: false,
 })
 
-let mediaEmptyFallbackTimer = null
 let mediaLoaderHoldTimer = null
-
-const startInitialMediaFallbackTimer = (delay = 2500) => {
-  if (mediaEmptyFallbackTimer)
-    return
-  mediaEmptyFallbackTimer = setTimeout(() => {
-    state.initialMediaLoadDone = true
-    mediaEmptyFallbackTimer = null
-  }, delay)
-}
 
 const resetMediaLoadState = () => {
   state.initialMediaLoadDone = false
@@ -598,28 +588,19 @@ watch(fileTypeExtensionsForScope, (extensions) => {
 }, { immediate: true })
 
 watch(
-  () => [mediaSnapshotReady.value, filteredFiles.value.length],
-  ([ready, count]) => {
+  () => [mediaSnapshotReady.value, filteredFiles.value.length, state.loaderHold],
+  ([ready, count, loaderHold]) => {
     if (count > 0) {
       state.initialMediaLoadDone = true
-      if (mediaEmptyFallbackTimer) {
-        clearTimeout(mediaEmptyFallbackTimer)
-        mediaEmptyFallbackTimer = null
-      }
       return
     }
-    if (state.initialMediaLoadDone || mediaEmptyFallbackTimer || !ready)
-      return
-    startInitialMediaFallbackTimer(2500)
+    if (ready || !loaderHold)
+      state.initialMediaLoadDone = true
   },
   { immediate: true },
 )
 
 onBeforeUnmount(() => {
-  if (mediaEmptyFallbackTimer) {
-    clearTimeout(mediaEmptyFallbackTimer)
-    mediaEmptyFallbackTimer = null
-  }
   if (mediaLoaderHoldTimer) {
     clearTimeout(mediaLoaderHoldTimer)
     mediaLoaderHoldTimer = null
@@ -628,12 +609,10 @@ onBeforeUnmount(() => {
 
 onMounted(() => {
   resetMediaLoadState()
-  startInitialMediaFallbackTimer(8000)
 })
 
 onActivated(() => {
   resetMediaLoadState()
-  startInitialMediaFallbackTimer(8000)
 })
 
 function canDeleteMedia(item) {

@@ -748,6 +748,212 @@ const removeCloudflarePagesDomain = async (domain, context = {}) => {
   }
 }
 
+const cloudflareDnsHeaders = () => ({
+  'Authorization': `Bearer ${CLOUDFLARE_PAGES_API_TOKEN}`,
+  'Content-Type': 'application/json',
+})
+
+const getCloudflareApiErrorMessage = (error, fallback = 'Cloudflare API request failed.') => {
+  const errors = error?.response?.data?.errors || []
+  if (Array.isArray(errors) && errors.length) {
+    const message = errors.map(err => err?.message).filter(Boolean).join('; ')
+    if (message)
+      return message
+  }
+  return error?.message || fallback
+}
+
+const getCloudflareZoneCandidates = (domain) => {
+  const normalized = normalizeDomain(domain)
+  const labels = normalized.split('.').filter(Boolean)
+  if (labels.length < 2)
+    return []
+  const candidates = []
+  for (let index = 0; index <= labels.length - 2; index += 1)
+    candidates.push(labels.slice(index).join('.'))
+  return candidates
+}
+
+const findCloudflareZoneForDomain = async (domain, context = {}) => {
+  if (!CF_ACCOUNT_ID || !CLOUDFLARE_PAGES_API_TOKEN)
+    return { ok: false, error: 'Cloudflare DNS credentials are not configured.' }
+
+  for (const candidate of getCloudflareZoneCandidates(domain)) {
+    try {
+      const response = await axios.get('https://api.cloudflare.com/client/v4/zones', {
+        headers: cloudflareDnsHeaders(),
+        params: {
+          'name': candidate,
+          'account.id': CF_ACCOUNT_ID,
+          'per_page': 5,
+        },
+      })
+      const zones = Array.isArray(response?.data?.result) ? response.data.result : []
+      const zone = zones.find(item => normalizeDomain(item?.name) === candidate)
+      if (response?.data?.success && zone?.id) {
+        return {
+          ok: true,
+          zoneId: zone.id,
+          zoneName: normalizeDomain(zone.name),
+        }
+      }
+    }
+    catch (error) {
+      const status = Number(error?.response?.status || 0)
+      if (status === 403 || status === 401) {
+        logger.warn('Cloudflare DNS zone lookup not authorized', {
+          domain,
+          candidate,
+          error: getCloudflareApiErrorMessage(error),
+          ...context,
+        })
+        return { ok: false, error: 'Cloudflare DNS access is not available for this domain.' }
+      }
+      logger.warn('Cloudflare DNS zone lookup failed', {
+        domain,
+        candidate,
+        status,
+        error: getCloudflareApiErrorMessage(error),
+        ...context,
+      })
+    }
+  }
+
+  return { ok: false, error: 'This domain is not in a Cloudflare zone this account can manage.' }
+}
+
+const listCloudflareDnsRecords = async (zoneId, hostName) => {
+  const response = await axios.get(`https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records`, {
+    headers: cloudflareDnsHeaders(),
+    params: {
+      name: hostName,
+      per_page: 100,
+    },
+  })
+  if (!response?.data?.success)
+    throw new Error('Cloudflare DNS record lookup was not successful.')
+  return Array.isArray(response?.data?.result) ? response.data.result : []
+}
+
+const syncCloudflareCnameRecord = async ({ zoneId, hostName, target, label, context = {} }) => {
+  const records = await listCloudflareDnsRecords(zoneId, hostName)
+  const conflictingTypes = new Set(['A', 'AAAA', 'CNAME'])
+  const matchingCname = records.find((record) => {
+    return record?.type === 'CNAME'
+      && normalizeDomain(record?.content) === normalizeDomain(target)
+  })
+
+  const deleteRecords = records.filter((record) => {
+    if (!conflictingTypes.has(record?.type))
+      return false
+    if (record?.id === matchingCname?.id)
+      return false
+    return true
+  })
+
+  for (const record of deleteRecords) {
+    await axios.delete(`https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records/${record.id}`, {
+      headers: cloudflareDnsHeaders(),
+    })
+  }
+
+  const recordPayload = {
+    type: 'CNAME',
+    name: hostName,
+    content: target,
+    ttl: 1,
+    proxied: true,
+  }
+
+  if (matchingCname?.id) {
+    await axios.patch(`https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records/${matchingCname.id}`, recordPayload, {
+      headers: cloudflareDnsHeaders(),
+    })
+    logger.log('Cloudflare DNS CNAME updated', {
+      hostName,
+      target,
+      deletedRecords: deleteRecords.length,
+      label,
+      ...context,
+    })
+    return { ok: true, updated: true, deletedRecords: deleteRecords.length }
+  }
+
+  await axios.post(`https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records`, recordPayload, {
+    headers: cloudflareDnsHeaders(),
+  })
+  logger.log('Cloudflare DNS CNAME created', {
+    hostName,
+    target,
+    deletedRecords: deleteRecords.length,
+    label,
+    ...context,
+  })
+  return { ok: true, created: true, deletedRecords: deleteRecords.length }
+}
+
+const syncCloudflarePagesDns = async ({ apexDomain, wwwDomain, target, syncApex, context = {} }) => {
+  const result = {
+    attempted: true,
+    ok: false,
+    zoneFound: false,
+    zoneName: '',
+    error: '',
+    records: {
+      www: { attempted: true, synced: false, error: '' },
+      apex: { attempted: !!syncApex, synced: false, error: '' },
+    },
+  }
+
+  const zone = await findCloudflareZoneForDomain(apexDomain, context)
+  if (!zone.ok) {
+    result.error = zone.error || 'Cloudflare DNS access is not available for this domain.'
+    result.records.www.error = result.error
+    if (syncApex)
+      result.records.apex.error = result.error
+    return result
+  }
+
+  result.zoneFound = true
+  result.zoneName = zone.zoneName || ''
+
+  try {
+    const wwwResult = await syncCloudflareCnameRecord({
+      zoneId: zone.zoneId,
+      hostName: wwwDomain,
+      target,
+      label: 'www',
+      context,
+    })
+    result.records.www = { ...result.records.www, synced: !!wwwResult.ok, error: '' }
+  }
+  catch (error) {
+    result.records.www.error = getCloudflareApiErrorMessage(error, 'Unable to update the www DNS record.')
+  }
+
+  if (syncApex) {
+    try {
+      const apexResult = await syncCloudflareCnameRecord({
+        zoneId: zone.zoneId,
+        hostName: apexDomain,
+        target,
+        label: 'apex',
+        context,
+      })
+      result.records.apex = { ...result.records.apex, synced: !!apexResult.ok, error: '' }
+    }
+    catch (error) {
+      result.records.apex.error = getCloudflareApiErrorMessage(error, 'Unable to update the apex DNS record.')
+    }
+  }
+
+  result.ok = !!result.records.www.synced && (!syncApex || !!result.records.apex.synced)
+  result.error = result.ok
+    ? ''
+    : [result.records.www.error, result.records.apex.error].filter(Boolean).join('; ')
+  return result
+}
+
 const cleanupOwnedPublishedSiteDomains = async (sitePath, { orgId, siteId } = {}) => {
   const normalizedSitePath = String(sitePath || '').trim()
   if (!normalizedSitePath)
@@ -6743,9 +6949,11 @@ exports.getCloudflarePagesProject = onCall(async (request) => {
           ...fallback,
           apexAttempted: false,
           apexAdded: false,
+          dnsSyncAttempted: false,
+          dnsSyncSucceeded: false,
           apexError: '',
           dnsGuidance: fallback.dnsEligible
-            ? 'Add the www CNAME. Apex is unavailable; forward apex to www.'
+            ? 'We will try to update DNS automatically after publishing. If not, add the records below with your DNS provider.'
             : 'DNS records are not shown for localhost, IP addresses, or .dev domains.',
         }
         return
@@ -7108,8 +7316,11 @@ exports.ensurePublishedSiteDomains = onDocumentWritten(
         apexAttempted: false,
         apexAdded: false,
         apexError: '',
+        dnsSyncAttempted: false,
+        dnsSyncSucceeded: false,
+        dnsSyncError: '',
         dnsGuidance: dnsPayload.dnsEligible
-          ? 'Add the www CNAME record. Apex is unavailable; forward apex to www.'
+          ? 'When you publish, we will try to update DNS automatically if this domain is managed in our Cloudflare account. If not, add the records below with your DNS provider.'
           : 'DNS records are not shown for localhost, IP addresses, or .dev domains.',
       })
 
@@ -7150,11 +7361,31 @@ exports.ensurePublishedSiteDomains = onDocumentWritten(
         apexAttempted = true
         apexResult = await addCloudflarePagesDomain(plan.apexDomain, { orgId, siteId, variant: 'apex' })
       }
+      const dnsResult = wwwResult?.ok
+        ? await syncCloudflarePagesDns({
+          apexDomain: plan.apexDomain,
+          wwwDomain: plan.wwwDomain,
+          target: pagesTarget,
+          syncApex: apexAttempted,
+          context: { orgId, siteId },
+        })
+        : {
+            attempted: false,
+            ok: false,
+            zoneFound: false,
+            zoneName: '',
+            error: '',
+            records: {
+              www: { attempted: false, synced: false, error: '' },
+              apex: { attempted: false, synced: false, error: '' },
+            },
+          }
       return {
         ...plan,
         apexAttempted,
         wwwResult,
         apexResult,
+        dnsResult,
       }
     }))
 
@@ -7165,23 +7396,31 @@ exports.ensurePublishedSiteDomains = onDocumentWritten(
       const apexError = apexAdded
         ? ''
         : (plan.apexAttempted ? String(plan.apexResult?.error || 'Failed to add apex domain.') : '')
+      const dnsResult = plan.dnsResult || {}
+      const dnsSyncAttempted = !!dnsResult.attempted
+      const dnsSyncSucceeded = !!dnsResult.ok
+      const dnsSyncError = dnsSyncSucceeded ? '' : String(dnsResult.error || '').trim()
 
       for (const domain of plan.domains) {
         const current = registryStateByDomain.get(domain) || buildDomainDnsPayload(domain, pagesTarget)
         const dnsGuidance = !current.dnsEligible
           ? 'DNS records are not shown for localhost, IP addresses, or .dev domains.'
-          : (apexAdded
-              ? 'Apex and www were added to Cloudflare Pages. Add both DNS records if your provider requires manual setup.'
-              : 'Add the www CNAME record. Apex is unavailable; forward apex to www.')
+          : (dnsSyncSucceeded
+              ? 'DNS was updated automatically. It can take a little time for the domain to start loading everywhere.'
+              : 'We connected the domain to the website, but DNS still needs attention. Add the records below with your DNS provider.')
         const nextDnsRecords = {
           ...(current.dnsRecords || {}),
           apex: {
             ...(current?.dnsRecords?.apex || {}),
             enabled: !!current.dnsEligible && !!current?.dnsRecords?.apex?.value && apexAdded,
+            autoManaged: !!dnsResult?.records?.apex?.synced,
+            error: dnsResult?.records?.apex?.error || '',
           },
           www: {
             ...(current?.dnsRecords?.www || {}),
             enabled: !!current.dnsEligible && !!current?.dnsRecords?.www?.value,
+            autoManaged: !!dnsResult?.records?.www?.synced,
+            error: dnsResult?.records?.www?.error || '',
           },
         }
 
@@ -7193,6 +7432,11 @@ exports.ensurePublishedSiteDomains = onDocumentWritten(
           apexAttempted: !!plan.apexAttempted,
           apexAdded,
           apexError,
+          dnsSyncAttempted,
+          dnsSyncSucceeded,
+          dnsSyncError,
+          dnsZoneFound: !!dnsResult.zoneFound,
+          dnsZoneName: dnsResult.zoneName || '',
           dnsGuidance,
         })
       }
@@ -7214,11 +7458,16 @@ exports.ensurePublishedSiteDomains = onDocumentWritten(
           apexAttempted: !!value.apexAttempted,
           apexAdded: !!value.apexAdded,
           wwwAdded: !!value.wwwAdded,
+          dnsSyncAttempted: !!value.dnsSyncAttempted,
+          dnsSyncSucceeded: !!value.dnsSyncSucceeded,
+          dnsZoneFound: !!value.dnsZoneFound,
+          dnsZoneName: value.dnsZoneName || '',
           dnsRecords: value.dnsRecords || {},
           dnsGuidance: value.dnsGuidance || '',
         }
         payload.apexError = value.apexError ? value.apexError : Firestore.FieldValue.delete()
         payload.wwwError = value.wwwError ? value.wwwError : Firestore.FieldValue.delete()
+        payload.dnsSyncError = value.dnsSyncError ? value.dnsSyncError : Firestore.FieldValue.delete()
         await registryRef.set(payload, { merge: true })
       }
     }

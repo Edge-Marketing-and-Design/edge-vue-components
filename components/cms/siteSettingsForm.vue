@@ -1,5 +1,5 @@
 <script setup lang="js">
-import { CircleAlert } from 'lucide-vue-next'
+import { CheckCircle2, CircleAlert } from 'lucide-vue-next'
 
 const props = defineProps({
   settings: {
@@ -214,8 +214,11 @@ const buildFallbackDomainEntry = (domain) => {
     wwwDomain,
     apexAttempted: false,
     apexAdded: false,
+    dnsSyncAttempted: false,
+    dnsSyncSucceeded: false,
+    dnsSyncError: '',
     apexError: '',
-    dnsGuidance: 'Add the www CNAME record. Apex is unavailable; forward apex to www.',
+    dnsGuidance: 'We will try to update DNS automatically after publishing. If not, add the records below with your DNS provider.',
     dnsRecords: {
       target,
       www: {
@@ -253,6 +256,9 @@ const domainDnsEntries = computed(() => {
       },
     }
     const apexAdded = value?.apexAdded === true
+    const dnsSyncSucceeded = value?.dnsSyncSucceeded === true
+    const dnsSyncAttempted = value?.dnsSyncAttempted === true
+    const dnsSyncError = String(value?.dnsSyncError || '').trim()
     return {
       ...fallback,
       ...value,
@@ -260,8 +266,11 @@ const domainDnsEntries = computed(() => {
       apexAdded,
       apexAttempted: value?.apexAttempted === true,
       apexError: String(value?.apexError || '').trim(),
+      dnsSyncAttempted,
+      dnsSyncSucceeded,
+      dnsSyncError,
       dnsGuidance: String(value?.dnsGuidance || '').trim()
-        || (apexAdded ? '' : fallback.dnsGuidance),
+        || (dnsSyncSucceeded ? '' : fallback.dnsGuidance),
     }
   })
 })
@@ -478,19 +487,24 @@ watch(() => props.settings?.forwardApex, (value) => {
             </div>
             <div class="text-xs">
               <span
-                v-if="entry.apexAdded"
-                class="rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-2 py-1"
+                v-if="entry.dnsSyncSucceeded"
+                class="inline-flex items-center gap-1 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-2 py-1"
               >
-                Apex added
+                <CheckCircle2 class="h-3 w-3" aria-hidden="true" />
+                DNS updated automatically
               </span>
               <span
                 v-else
-                class="rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 px-2 py-1"
+                class="inline-flex items-center gap-1 rounded bg-amber-500/15 text-amber-700 dark:text-amber-300 px-2 py-1"
               >
-                Apex not added
+                <CircleAlert class="h-3 w-3" aria-hidden="true" />
+                Manual DNS needed
               </span>
             </div>
           </div>
+          <p v-if="entry.wwwAdded || entry.apexAdded" class="text-xs text-muted-foreground">
+            The domain has been connected to the website. DNS controls whether visitors can reach it.
+          </p>
           <div class="space-y-2 text-sm">
             <div class="grid grid-cols-[70px_1fr] gap-3">
               <div class="text-muted-foreground">
@@ -509,10 +523,13 @@ watch(() => props.settings?.forwardApex, (value) => {
               </div>
             </div>
           </div>
-          <p v-if="entry.apexError" class="text-xs text-amber-700 dark:text-amber-300">
-            {{ entry.apexError }}
+          <p v-if="entry.dnsSyncError" class="text-xs text-amber-700 dark:text-amber-300">
+            {{ entry.dnsSyncError }}
           </p>
-          <p v-if="!entry.apexAdded && entry.dnsGuidance" class="text-xs text-muted-foreground">
+          <p v-if="!entry.apexAdded" class="text-xs text-muted-foreground">
+            To use {{ entry.apexDomain }}, set up forwarding from {{ entry.apexDomain }} to {{ entry.wwwDomain }} with your DNS provider.
+          </p>
+          <p v-if="entry.dnsGuidance" class="text-xs text-muted-foreground">
             {{ entry.dnsGuidance }}
           </p>
         </div>
