@@ -1,22 +1,29 @@
 <script setup>
-import { Globe, Link2, Loader2, Plus, RefreshCw, Search } from 'lucide-vue-next'
+import { Globe, Link2, Loader2, Pencil, Plus, RefreshCw, Search, Unlink2 } from 'lucide-vue-next'
 
 const edgeFirebase = inject('edgeFirebase')
 
 const state = reactive({
   domainInput: '',
-  attachDomain: '',
-  attachSiteId: '',
+  filter: '',
   loading: false,
   checking: false,
   registering: false,
-  attaching: false,
+  attachingDomains: {},
+  detachingDomains: {},
   checkResult: null,
   registeredDomains: [],
   domainRegistry: [],
   sites: [],
   message: '',
   messageType: '',
+  siteDialogOpen: false,
+  siteDialogDomain: '',
+  siteDialogCurrentSiteName: '',
+  siteDialogSelectedSiteId: '',
+  detachDialogOpen: false,
+  detachDialogDomain: '',
+  detachDialogSiteName: '',
 })
 
 const currentOrgId = computed(() => String(edgeGlobal?.edgeState?.currentOrganization || '').trim())
@@ -44,6 +51,30 @@ const normalizeDomain = (value) => {
   return normalized.replace(/\.+$/g, '')
 }
 
+const isIpAddress = (value) => {
+  const normalized = String(value || '').trim()
+  if (!normalized)
+    return false
+  const ipv4Pattern = /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/
+  if (ipv4Pattern.test(normalized))
+    return true
+  const ipv6Pattern = /^[a-fA-F0-9:]+$/
+  return normalized.includes(':') && ipv6Pattern.test(normalized)
+}
+
+const shouldExcludeDomainFromList = (value) => {
+  const normalized = normalizeDomain(value)
+  if (!normalized)
+    return true
+  if (isIpAddress(normalized))
+    return true
+  if (normalized === 'localhost' || normalized.endsWith('.localhost'))
+    return true
+  if (normalized.endsWith('.dev'))
+    return true
+  return false
+}
+
 const setMessage = (message, type = 'info') => {
   state.message = String(message || '').trim()
   state.messageType = String(type || 'info').trim()
@@ -64,13 +95,22 @@ const parseFunctionError = (error, fallback = 'Request failed.') => {
   return message || fallback
 }
 
-const refreshData = async ({ syncFromRegistry = false } = {}) => {
+const applyDomainsData = ({ registeredDomains = [], domainRegistry = [], sites = [] }) => {
+  state.registeredDomains = Array.isArray(registeredDomains) ? registeredDomains : []
+  state.domainRegistry = Array.isArray(domainRegistry) ? domainRegistry : []
+  state.sites = Array.isArray(sites) ? sites : []
+}
+
+const refreshData = async ({ syncFromRegistry = false, preserveMessage = false } = {}) => {
   if (!currentOrgId.value || !isAdmin.value)
     return
   if (!currentUid.value)
     return
+
   state.loading = true
-  clearMessage()
+  if (!preserveMessage)
+    clearMessage()
+
   try {
     if (syncFromRegistry) {
       await edgeFirebase.runFunction('cms-registrarSyncRegisteredFromRegistry', {
@@ -83,9 +123,12 @@ const refreshData = async ({ syncFromRegistry = false } = {}) => {
       uid: currentUid.value,
       orgId: currentOrgId.value,
     })
-    state.registeredDomains = Array.isArray(response?.data?.registeredDomains) ? response.data.registeredDomains : []
-    state.domainRegistry = Array.isArray(response?.data?.domainRegistry) ? response.data.domainRegistry : []
-    state.sites = Array.isArray(response?.data?.sites) ? response.data.sites : []
+
+    applyDomainsData({
+      registeredDomains: response?.data?.registeredDomains,
+      domainRegistry: response?.data?.domainRegistry,
+      sites: response?.data?.sites,
+    })
   }
   catch (error) {
     setMessage(parseFunctionError(error, 'Unable to load domain registrar data.'), 'error')
@@ -142,9 +185,8 @@ const registerDomain = async () => {
       orgId: currentOrgId.value,
       domain,
     })
-    state.attachDomain = domain
     setMessage(`"${domain}" registration request submitted.`, 'success')
-    await refreshData()
+    await refreshData({ preserveMessage: true })
   }
   catch (error) {
     setMessage(parseFunctionError(error, 'Unable to register domain.'), 'error')
@@ -154,23 +196,33 @@ const registerDomain = async () => {
   }
 }
 
-const attachDomainToSite = async () => {
-  const domain = normalizeDomain(state.attachDomain)
-  const siteId = String(state.attachSiteId || '').trim()
-  if (!domain || !siteId) {
+const attachDomainToSite = async ({ domain, siteId }) => {
+  const normalizedDomain = normalizeDomain(domain)
+  const normalizedSiteId = String(siteId || '').trim()
+
+  if (!currentUid.value) {
+    setMessage('You must be signed in to attach domains.', 'error')
+    return false
+  }
+  if (!currentOrgId.value) {
+    setMessage('Select an organization before attaching domains.', 'error')
+    return false
+  }
+  if (!normalizedDomain || !normalizedSiteId) {
     setMessage('Select both a domain and a site before attaching.', 'error')
-    return
+    return false
   }
 
-  state.attaching = true
+  state.attachingDomains[normalizedDomain] = true
   clearMessage()
   try {
     const response = await edgeFirebase.runFunction('cms-registrarAttachDomainToSite', {
       uid: currentUid.value,
       orgId: currentOrgId.value,
-      siteId,
-      domain,
+      siteId: normalizedSiteId,
+      domain: normalizedDomain,
     })
+
     const publishedMissing = response?.data?.publishedMissing === true
     setMessage(
       publishedMissing
@@ -178,13 +230,61 @@ const attachDomainToSite = async () => {
         : 'Domain attached to draft and published site settings.',
       'success',
     )
-    await refreshData()
+
+    await refreshData({ preserveMessage: true })
+    return true
   }
   catch (error) {
     setMessage(parseFunctionError(error, 'Unable to attach domain to site.'), 'error')
+    return false
   }
   finally {
-    state.attaching = false
+    state.attachingDomains[normalizedDomain] = false
+  }
+}
+
+const detachDomainFromSite = async ({ domain }) => {
+  const normalizedDomain = normalizeDomain(domain)
+
+  if (!currentUid.value) {
+    setMessage('You must be signed in to detach domains.', 'error')
+    return false
+  }
+  if (!currentOrgId.value) {
+    setMessage('Select an organization before detaching domains.', 'error')
+    return false
+  }
+  if (!normalizedDomain) {
+    setMessage('Select a valid domain to detach.', 'error')
+    return false
+  }
+
+  state.detachingDomains[normalizedDomain] = true
+  clearMessage()
+  try {
+    const response = await edgeFirebase.runFunction('cms-registrarDetachDomainFromSite', {
+      uid: currentUid.value,
+      orgId: currentOrgId.value,
+      domain: normalizedDomain,
+    })
+
+    const detached = response?.data?.detached !== false
+    setMessage(
+      detached
+        ? `"${normalizedDomain}" detached from site settings.`
+        : (response?.data?.message || `"${normalizedDomain}" is not attached.`),
+      detached ? 'success' : 'info',
+    )
+
+    await refreshData({ preserveMessage: true })
+    return detached
+  }
+  catch (error) {
+    setMessage(parseFunctionError(error, 'Unable to detach domain from site.'), 'error')
+    return false
+  }
+  finally {
+    state.detachingDomains[normalizedDomain] = false
   }
 }
 
@@ -199,32 +299,183 @@ const siteOptions = computed(() => {
   }))
 })
 
-const registeredRows = computed(() => {
-  const registryByDomain = new Map()
-  for (const item of state.domainRegistry) {
+const siteNameById = computed(() => {
+  const map = new Map()
+  for (const site of state.sites) {
+    const siteId = String(site?.docId || '').trim()
+    if (!siteId)
+      continue
+    map.set(siteId, String(site?.name || siteId).trim() || siteId)
+  }
+  return map
+})
+
+const domainRows = computed(() => {
+  const rowByDomain = new Map()
+
+  for (const item of state.registeredDomains) {
     const domain = normalizeDomain(item?.domain)
-    if (domain)
-      registryByDomain.set(domain, item)
+    if (!domain)
+      continue
+    if (shouldExcludeDomainFromList(domain))
+      continue
+
+    rowByDomain.set(domain, {
+      domain,
+      isRegistered: true,
+      hasRegistryDoc: false,
+      registrationStatus: String(item?.status || 'active').trim().toLowerCase() || 'active',
+      registrationState: String(item?.registrationState || 'registered_org').trim() || 'registered_org',
+      registrationReason: '',
+      attachedSiteId: '',
+      attachedSiteName: '',
+      provider: String(item?.provider || 'cloudflare').trim(),
+      updatedAt: item?.updatedAt || null,
+    })
   }
 
-  return (Array.isArray(state.registeredDomains) ? state.registeredDomains : []).map((item) => {
+  for (const item of state.domainRegistry) {
     const domain = normalizeDomain(item?.domain)
-    const registry = registryByDomain.get(domain) || {}
-    return {
-      domain,
-      status: String(item?.status || '').trim() || 'active',
-      attachedSiteId: String(item?.attachedSiteId || registry?.siteId || '').trim(),
-      attachedSiteName: String(item?.attachedSiteName || registry?.siteName || '').trim(),
+    if (!domain)
+      continue
+    if (shouldExcludeDomainFromList(domain))
+      continue
+
+    const siteId = String(item?.siteId || '').trim()
+    const siteName = String(item?.siteName || siteNameById.value.get(siteId) || '').trim()
+    const existing = rowByDomain.get(domain)
+
+    if (existing) {
+      existing.hasRegistryDoc = true
+      existing.registrationState = String(existing.registrationState || item?.registrationState || '').trim() || existing.registrationState
+      existing.registrationReason = String(existing.registrationReason || item?.registrationReason || '').trim()
+      existing.attachedSiteId = siteId
+      existing.attachedSiteName = siteName
+      continue
     }
+
+    rowByDomain.set(domain, {
+      domain,
+      isRegistered: false,
+      hasRegistryDoc: true,
+      registrationStatus: 'unregistered',
+      registrationState: String(item?.registrationState || 'unknown').trim() || 'unknown',
+      registrationReason: String(item?.registrationReason || '').trim(),
+      attachedSiteId: siteId,
+      attachedSiteName: siteName,
+      provider: '',
+      updatedAt: item?.updatedAt || null,
+    })
+  }
+
+  return Array.from(rowByDomain.values())
+    .sort((a, b) => a.domain.localeCompare(b.domain))
+})
+
+const filteredDomainRows = computed(() => {
+  const term = String(state.filter || '').trim().toLowerCase()
+  if (!term)
+    return domainRows.value
+
+  return domainRows.value.filter((item) => {
+    const haystack = [
+      item.domain,
+      item.attachedSiteName,
+      item.attachedSiteId,
+      item.registrationStatus,
+      item.isRegistered ? 'registered' : 'not registered',
+    ]
+      .filter(Boolean)
+      .map(value => String(value).toLowerCase())
+
+    return haystack.some(value => value.includes(term))
   })
 })
 
-const domainOptions = computed(() => {
-  return registeredRows.value.map(item => ({
-    title: item.domain,
-    value: item.domain,
-  }))
+const shownCount = computed(() => filteredDomainRows.value.length)
+const totalLoadedCount = computed(() => domainRows.value.length)
+const hiddenBySearchCount = computed(() => Math.max(totalLoadedCount.value - shownCount.value, 0))
+
+const isDomainAttaching = domain => Boolean(state.attachingDomains[normalizeDomain(domain)])
+const isDomainDetaching = domain => Boolean(state.detachingDomains[normalizeDomain(domain)])
+const isDomainBusy = domain => isDomainAttaching(domain) || isDomainDetaching(domain)
+const hasRowActionsInFlight = computed(() => {
+  return Object.values(state.attachingDomains).some(Boolean) || Object.values(state.detachingDomains).some(Boolean)
 })
+
+const getRegistrationBadgeClass = item => item.isRegistered
+  ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+  : item.registrationState === 'not_registered'
+    ? 'border-amber-300 bg-amber-50 text-amber-700'
+    : item.registrationState === 'registered_external'
+      ? 'border-blue-300 bg-blue-50 text-blue-700'
+      : 'border-slate-300 bg-slate-50 text-slate-700'
+
+const getRegistrationLabel = (item) => {
+  if (item.registrationState === 'registered_org')
+    return 'Registered in this org'
+  if (item.registrationState === 'not_registered')
+    return 'Not registered'
+  if (item.registrationState === 'registered_external')
+    return 'Registered with another registrar'
+  if (!item.isRegistered)
+    return 'Registration status unknown'
+  if (item.registrationStatus === 'active')
+    return 'Registered in this org'
+  return `Registered in this org (${item.registrationStatus || 'unknown'})`
+}
+
+const getAttachmentBadgeClass = item => item.attachedSiteId
+  ? 'border-blue-300 bg-blue-50 text-blue-700'
+  : 'border-slate-300 bg-slate-50 text-slate-600'
+
+const getAttachmentLabel = (item) => {
+  if (!item.attachedSiteId)
+    return 'No site assigned'
+  return item.attachedSiteName || item.attachedSiteId
+}
+
+const openSiteDialog = (item) => {
+  const domain = normalizeDomain(item?.domain)
+  if (!domain)
+    return
+
+  state.siteDialogDomain = domain
+  state.siteDialogCurrentSiteName = getAttachmentLabel(item)
+  state.siteDialogSelectedSiteId = String(item?.attachedSiteId || '').trim()
+  state.siteDialogOpen = true
+}
+
+const saveSiteDialog = async () => {
+  const domain = normalizeDomain(state.siteDialogDomain)
+  const siteId = String(state.siteDialogSelectedSiteId || '').trim()
+  if (!domain || !siteId)
+    return
+
+  const success = await attachDomainToSite({ domain, siteId })
+  if (success)
+    state.siteDialogOpen = false
+}
+
+const openDetachDialog = (item) => {
+  const domain = normalizeDomain(item?.domain)
+  if (!domain)
+    return
+
+  state.detachDialogDomain = domain
+  state.detachDialogSiteName = getAttachmentLabel(item)
+  state.detachDialogOpen = true
+}
+
+const confirmDetach = async () => {
+  const domain = normalizeDomain(state.detachDialogDomain)
+  if (!domain)
+    return
+
+  const success = await detachDomainFromSite({ domain })
+  if (success)
+    state.detachDialogOpen = false
+}
 
 onMounted(async () => {
   await refreshData({ syncFromRegistry: true })
@@ -254,7 +505,7 @@ watch(currentUid, async (nextUid, previousUid) => {
       </div>
       <edge-shad-button
         class="bg-slate-700 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
-        :disabled="state.loading || state.checking || state.registering || state.attaching"
+        :disabled="state.loading || state.checking || state.registering || hasRowActionsInFlight"
         @click="syncFromRegistry"
       >
         <Loader2 v-if="state.loading" class="mr-2 h-4 w-4 animate-spin" />
@@ -280,139 +531,199 @@ watch(currentUid, async (nextUid, previousUid) => {
     </div>
 
     <template v-else>
-      <div class="grid gap-4 lg:grid-cols-2">
-        <div class="rounded-lg border bg-card p-4 space-y-3">
-          <h3 class="font-semibold">
-            Check and Register
-          </h3>
-          <edge-shad-input
-            v-model="state.domainInput"
-            placeholder="example.com"
-            label="Domain"
-          />
-          <div class="flex flex-wrap gap-2">
-            <edge-shad-button
-              class="bg-slate-700 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
-              :disabled="state.checking || state.registering"
-              @click="checkDomain"
-            >
-              <Loader2 v-if="state.checking" class="mr-2 h-4 w-4 animate-spin" />
-              <Search v-else class="mr-2 h-4 w-4" />
-              Check
-            </edge-shad-button>
-            <edge-shad-button
-              :disabled="state.registering || state.checking"
-              @click="registerDomain"
-            >
-              <Loader2 v-if="state.registering" class="mr-2 h-4 w-4 animate-spin" />
-              <Plus v-else class="mr-2 h-4 w-4" />
-              Register
-            </edge-shad-button>
-          </div>
-          <div v-if="state.checkResult" class="rounded-md border p-3 text-sm">
-            <div><span class="font-medium">Registrable:</span> {{ state.checkResult.registrable ? 'Yes' : 'No' }}</div>
-            <div v-if="state.checkResult.tier">
-              <span class="font-medium">Tier:</span> {{ state.checkResult.tier }}
-            </div>
-            <div v-if="state.checkResult.reason">
-              <span class="font-medium">Reason:</span> {{ state.checkResult.reason }}
-            </div>
-            <div v-if="state.checkResult.pricing?.registration_cost">
-              <span class="font-medium">Price:</span>
-              {{ state.checkResult.pricing.currency || '' }} {{ state.checkResult.pricing.registration_cost }}
-            </div>
-          </div>
-        </div>
-
-        <div class="rounded-lg border bg-card p-4 space-y-3">
-          <h3 class="font-semibold">
-            Attach Domain to Site
-          </h3>
-          <edge-shad-select
-            v-model="state.attachDomain"
-            label="Domain"
-            placeholder="Select a registered domain"
-            :items="domainOptions"
-            item-title="title"
-            item-value="value"
-          />
-          <edge-shad-select
-            v-model="state.attachSiteId"
-            label="Site"
-            placeholder="Select a site"
-            :items="siteOptions"
-            item-title="title"
-            item-value="value"
-          />
+      <div class="rounded-lg border bg-card p-4 space-y-3">
+        <h3 class="font-semibold">
+          Check and Register
+        </h3>
+        <edge-shad-input
+          v-model="state.domainInput"
+          name="registrar-domain"
+          placeholder="example.com"
+          label="Domain"
+        />
+        <div class="flex flex-wrap gap-2">
           <edge-shad-button
             class="bg-slate-700 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
-            :disabled="state.attaching"
-            @click="attachDomainToSite"
+            :disabled="state.checking || state.registering"
+            @click="checkDomain"
           >
-            <Loader2 v-if="state.attaching" class="mr-2 h-4 w-4 animate-spin" />
-            <Link2 v-else class="mr-2 h-4 w-4" />
-            Attach
+            <Loader2 v-if="state.checking" class="mr-2 h-4 w-4 animate-spin" />
+            <Search v-else class="mr-2 h-4 w-4" />
+            Check
+          </edge-shad-button>
+          <edge-shad-button
+            :disabled="state.registering || state.checking"
+            @click="registerDomain"
+          >
+            <Loader2 v-if="state.registering" class="mr-2 h-4 w-4 animate-spin" />
+            <Plus v-else class="mr-2 h-4 w-4" />
+            Register
           </edge-shad-button>
         </div>
-      </div>
-
-      <div class="rounded-lg border bg-card p-4 space-y-2">
-        <h3 class="font-semibold">
-          Registered Domains ({{ registeredRows.length }})
-        </h3>
-        <div v-if="state.loading" class="text-sm text-muted-foreground">
-          Loading...
-        </div>
-        <div v-else-if="registeredRows.length === 0" class="text-sm text-muted-foreground">
-          No registered domains found for this org.
-        </div>
-        <div v-else class="space-y-2">
-          <div
-            v-for="item in registeredRows"
-            :key="item.domain"
-            class="rounded-md border p-3 text-sm flex flex-col gap-1 md:flex-row md:items-center md:justify-between"
-          >
-            <div class="font-medium">
-              {{ item.domain }}
-            </div>
-            <div class="text-muted-foreground">
-              Status: {{ item.status }}
-            </div>
-            <div class="text-muted-foreground">
-              Attached: {{ item.attachedSiteName || item.attachedSiteId || 'Not attached' }}
-            </div>
+        <div v-if="state.checkResult" class="rounded-md border p-3 text-sm">
+          <div><span class="font-medium">Registrable:</span> {{ state.checkResult.registrable ? 'Yes' : 'No' }}</div>
+          <div v-if="state.checkResult.tier">
+            <span class="font-medium">Tier:</span> {{ state.checkResult.tier }}
+          </div>
+          <div v-if="state.checkResult.reason">
+            <span class="font-medium">Reason:</span> {{ state.checkResult.reason }}
+          </div>
+          <div v-if="state.checkResult.pricing?.registration_cost">
+            <span class="font-medium">Price:</span>
+            {{ state.checkResult.pricing.currency || '' }} {{ state.checkResult.pricing.registration_cost }}
           </div>
         </div>
       </div>
 
-      <div class="rounded-lg border bg-card p-4 space-y-2">
-        <h3 class="font-semibold">
-          Domain Registry ({{ state.domainRegistry.length }})
-        </h3>
-        <div v-if="state.loading" class="text-sm text-muted-foreground">
+      <div class="rounded-lg border bg-card overflow-hidden">
+        <div class="px-4 py-3 border-b bg-muted/30 space-y-3 md:space-y-0 md:flex md:items-center md:justify-between md:gap-3">
+          <div>
+            <h3 class="font-semibold">
+              Domains ({{ totalLoadedCount }})
+            </h3>
+            <p class="text-xs text-muted-foreground">
+              Registered domains and org-attached domains in one list.
+            </p>
+          </div>
+          <Input
+            v-model="state.filter"
+            class="h-8 w-full md:w-64"
+            placeholder="Filter domains..."
+            aria-label="Filter domains"
+          />
+        </div>
+
+        <div v-if="state.loading" class="px-4 py-6 text-sm text-muted-foreground">
           Loading...
         </div>
-        <div v-else-if="state.domainRegistry.length === 0" class="text-sm text-muted-foreground">
-          No domain-registry records found for this org.
+        <div v-else-if="filteredDomainRows.length === 0" class="px-4 py-6 text-sm text-muted-foreground">
+          No domains found for this org.
         </div>
-        <div v-else class="space-y-2">
+        <div v-else class="divide-y">
           <div
-            v-for="item in state.domainRegistry"
-            :key="item.docId"
-            class="rounded-md border p-3 text-sm flex flex-col gap-1 md:flex-row md:items-center md:justify-between"
+            v-for="item in filteredDomainRows"
+            :key="item.domain"
+            class="px-4 py-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
           >
-            <div class="font-medium">
-              {{ item.domain }}
+            <div class="min-w-0 space-y-2">
+              <div class="font-medium truncate">
+                {{ item.domain }}
+              </div>
+              <div class="flex flex-wrap items-center gap-2 text-xs">
+                <span class="rounded-full border px-2 py-0.5" :class="getRegistrationBadgeClass(item)">
+                  {{ getRegistrationLabel(item) }}
+                </span>
+                <span class="rounded-full border px-2 py-0.5" :class="getAttachmentBadgeClass(item)">
+                  {{ getAttachmentLabel(item) }}
+                </span>
+              </div>
             </div>
-            <div class="text-muted-foreground">
-              Site: {{ item.siteName || item.siteId || 'Unassigned' }}
+
+            <div class="flex items-center gap-2 self-end md:self-center">
+              <edge-tooltip>
+                <edge-shad-button
+                  size="icon"
+                  variant="ghost"
+                  class="h-8 w-8"
+                  :disabled="isDomainBusy(item.domain)"
+                  @click="openSiteDialog(item)"
+                >
+                  <Pencil v-if="item.attachedSiteId" class="h-4 w-4" />
+                  <Plus v-else class="h-4 w-4" />
+                </edge-shad-button>
+                <template #content>
+                  {{ item.attachedSiteId ? `Edit site for ${item.domain}` : `Assign site to ${item.domain}` }}
+                </template>
+              </edge-tooltip>
+
+              <edge-tooltip>
+                <edge-shad-button
+                  size="icon"
+                  variant="ghost"
+                  class="h-8 w-8 text-destructive/80 hover:text-destructive"
+                  :disabled="!item.attachedSiteId || isDomainBusy(item.domain)"
+                  @click="openDetachDialog(item)"
+                >
+                  <Unlink2 class="h-4 w-4" />
+                </edge-shad-button>
+                <template #content>
+                  {{ `Detach ${item.domain}` }}
+                </template>
+              </edge-tooltip>
             </div>
-            <div class="text-muted-foreground">
-              Auth: {{ item.authEnabled ? 'Enabled' : 'Disabled' }}
-            </div>
+          </div>
+        </div>
+
+        <div class="border-t bg-muted/20 px-4 py-2">
+          <div class="flex items-center justify-between text-[11px] text-muted-foreground">
+            <span>{{ shownCount }} shown / {{ totalLoadedCount }} loaded</span>
+            <span>{{ hiddenBySearchCount }} hidden by search</span>
           </div>
         </div>
       </div>
     </template>
+
+    <edge-shad-dialog v-model="state.siteDialogOpen">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{{ state.siteDialogCurrentSiteName && state.siteDialogCurrentSiteName !== 'No site assigned' ? 'Edit Site Assignment' : 'Assign Site' }}</DialogTitle>
+          <DialogDescription>
+            {{ state.siteDialogDomain }}
+          </DialogDescription>
+        </DialogHeader>
+
+        <edge-shad-select
+          v-model="state.siteDialogSelectedSiteId"
+          name="registrar-site-dialog"
+          label="Site"
+          placeholder="Select a site"
+          :items="siteOptions"
+          item-title="title"
+          item-value="value"
+        />
+
+        <DialogFooter class="flex justify-between gap-2 pt-2">
+          <edge-shad-button variant="outline" @click="state.siteDialogOpen = false">
+            Cancel
+          </edge-shad-button>
+          <edge-shad-button
+            class="gap-2"
+            :disabled="!state.siteDialogSelectedSiteId || isDomainAttaching(state.siteDialogDomain)"
+            @click="saveSiteDialog"
+          >
+            <Loader2 v-if="isDomainAttaching(state.siteDialogDomain)" class="h-4 w-4 animate-spin" />
+            <Link2 v-else class="h-4 w-4" />
+            Save
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
+
+    <edge-shad-dialog v-model="state.detachDialogOpen">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Detach Domain?</DialogTitle>
+          <DialogDescription>
+            Remove {{ state.detachDialogDomain }} from {{ state.detachDialogSiteName || 'the assigned site' }}.
+          </DialogDescription>
+        </DialogHeader>
+
+        <DialogFooter class="flex justify-between gap-2 pt-2">
+          <edge-shad-button variant="outline" @click="state.detachDialogOpen = false">
+            Cancel
+          </edge-shad-button>
+          <edge-shad-button
+            variant="destructive"
+            class="gap-2"
+            :disabled="isDomainDetaching(state.detachDialogDomain)"
+            @click="confirmDetach"
+          >
+            <Loader2 v-if="isDomainDetaching(state.detachDialogDomain)" class="h-4 w-4 animate-spin" />
+            <Unlink2 v-else class="h-4 w-4" />
+            Detach
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
   </div>
 </template>

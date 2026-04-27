@@ -31,6 +31,7 @@ const CF_ACCOUNT_ID = process.env.CF_ACCOUNT_ID || ''
 const CLOUDFLARE_PAGES_API_TOKEN = process.env.CLOUDFLARE_PAGES_API_TOKEN || ''
 const CLOUDFLARE_PAGES_PROJECT = process.env.CLOUDFLARE_PAGES_PROJECT || ''
 const DOMAIN_REGISTRY_COLLECTION = 'domain-registry'
+const DOMAINS_REGISTERED_COLLECTION = 'domains-registered'
 
 const SITE_STRUCTURED_DATA_TEMPLATE = JSON.stringify({
   '@context': 'https://schema.org',
@@ -3216,6 +3217,230 @@ const assertCallableUser = (request) => {
     throw new HttpsError('unauthenticated', 'Authentication required.')
   if (request?.data?.uid !== request.auth.uid)
     throw new HttpsError('permission-denied', 'UID mismatch.')
+}
+
+const assertOrgAdminAccess = async (uid, orgId) => {
+  const normalizedUid = String(uid || '').trim()
+  const normalizedOrgId = String(orgId || '').trim()
+  if (!normalizedUid || !normalizedOrgId)
+    throw new HttpsError('invalid-argument', 'Missing uid or orgId.')
+
+  const userSnap = await db.collection('users').doc(normalizedUid).get()
+  if (!userSnap.exists)
+    throw new HttpsError('permission-denied', 'Admin access is required.')
+
+  const roles = Object.values((userSnap.data() || {}).roles || {})
+  const orgCollectionPath = `organizations-${normalizedOrgId}`
+  const scopedOrgCollectionPath = `organizations-organizations-${normalizedOrgId}`
+  const isOrgAdmin = roles.some((role) => {
+    const roleName = String(role?.role || '').trim().toLowerCase()
+    const collectionPath = String(role?.collectionPath || '').trim()
+    if (roleName !== 'admin')
+      return false
+    return collectionPath === orgCollectionPath || collectionPath === scopedOrgCollectionPath
+  })
+
+  if (!isOrgAdmin)
+    throw new HttpsError('permission-denied', 'Organization admin access is required.')
+}
+
+const isLikelyDomainName = (value) => {
+  const normalized = normalizeDomain(value)
+  if (!normalized)
+    return false
+  if (isIpAddress(normalized))
+    return false
+  if (normalized === 'localhost' || normalized.endsWith('.localhost'))
+    return false
+  return normalized.includes('.')
+}
+
+const shouldExcludeRegistrarDomain = (value) => {
+  const normalized = normalizeDomain(value)
+  if (!normalized)
+    return true
+  if (isIpAddress(normalized))
+    return true
+  if (normalized === 'localhost' || normalized.endsWith('.localhost'))
+    return true
+  if (normalized.endsWith('.dev'))
+    return true
+  return false
+}
+
+const buildRegistrarCloudflareHeaders = () => ({
+  'Authorization': `Bearer ${CLOUDFLARE_PAGES_API_TOKEN}`,
+  'Content-Type': 'application/json',
+})
+
+const assertCloudflareRegistrarEnv = () => {
+  if (!CF_ACCOUNT_ID || !CLOUDFLARE_PAGES_API_TOKEN) {
+    throw new HttpsError(
+      'failed-precondition',
+      'Cloudflare registrar is not configured. Missing CF_ACCOUNT_ID or CLOUDFLARE_PAGES_API_TOKEN.',
+    )
+  }
+}
+
+const parseCloudflareErrorMessage = (error) => {
+  const apiErrors = Array.isArray(error?.response?.data?.errors) ? error.response.data.errors : []
+  if (apiErrors.length) {
+    const joined = apiErrors
+      .map(err => String(err?.message || '').trim())
+      .filter(Boolean)
+      .join('; ')
+    if (joined)
+      return joined
+  }
+  return String(error?.message || 'Cloudflare request failed.').trim()
+}
+
+const cloudflareRegistrarRequest = async ({
+  method = 'get',
+  endpoint = '',
+  data = undefined,
+  params = undefined,
+}) => {
+  assertCloudflareRegistrarEnv()
+  const normalizedEndpoint = String(endpoint || '').replace(/^\/+/, '')
+  const url = `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/registrar/${normalizedEndpoint}`
+  const response = await axios({
+    method,
+    url,
+    data,
+    params,
+    headers: buildRegistrarCloudflareHeaders(),
+  })
+  if (!response?.data?.success) {
+    const errors = Array.isArray(response?.data?.errors) ? response.data.errors : []
+    const message = errors.map(err => String(err?.message || '').trim()).filter(Boolean).join('; ')
+    throw new Error(message || 'Cloudflare Registrar API call failed.')
+  }
+  return response.data.result
+}
+
+const listCloudflareRegistrarRegistrations = async () => {
+  assertCloudflareRegistrarEnv()
+  const results = []
+  let cursor = ''
+  let pages = 0
+  do {
+    const params = { per_page: 50 }
+    if (cursor)
+      params.cursor = cursor
+    const response = await axios({
+      method: 'get',
+      url: `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/registrar/registrations`,
+      params,
+      headers: buildRegistrarCloudflareHeaders(),
+    })
+    if (!response?.data?.success) {
+      const errors = Array.isArray(response?.data?.errors) ? response.data.errors : []
+      const message = errors.map(err => String(err?.message || '').trim()).filter(Boolean).join('; ')
+      throw new Error(message || 'Cloudflare Registrar list registrations call failed.')
+    }
+    const batch = Array.isArray(response?.data?.result) ? response.data.result : []
+    results.push(...batch)
+    const nextCursor = String(response?.data?.result_info?.cursor || '').trim()
+    cursor = nextCursor
+    pages += 1
+    if (pages > 50)
+      break
+  } while (cursor)
+  return results
+}
+
+const chunkArray = (items = [], chunkSize = 25) => {
+  const normalizedChunkSize = Number(chunkSize) > 0 ? Math.floor(Number(chunkSize)) : 25
+  const chunks = []
+  for (let index = 0; index < items.length; index += normalizedChunkSize)
+    chunks.push(items.slice(index, index + normalizedChunkSize))
+  return chunks
+}
+
+const getRegistrarAvailabilityByDomain = async (domains = []) => {
+  const uniqueDomains = Array.from(new Set((Array.isArray(domains) ? domains : []).map(normalizeDomain).filter(Boolean)))
+  const availabilityByDomain = new Map()
+  if (!uniqueDomains.length)
+    return availabilityByDomain
+
+  for (const chunk of chunkArray(uniqueDomains, 25)) {
+    const result = await cloudflareRegistrarRequest({
+      method: 'post',
+      endpoint: 'domain-check',
+      data: { domains: chunk },
+    })
+    const checkedDomains = Array.isArray(result?.domains) ? result.domains : []
+
+    for (const item of checkedDomains) {
+      const domain = normalizeDomain(item?.name || '')
+      if (!domain)
+        continue
+      availabilityByDomain.set(domain, {
+        registrable: item?.registrable === true,
+        reason: String(item?.reason || '').trim(),
+      })
+    }
+
+    for (const domain of chunk) {
+      if (availabilityByDomain.has(domain))
+        continue
+      availabilityByDomain.set(domain, null)
+    }
+  }
+
+  return availabilityByDomain
+}
+
+const listDomainRegistryDocsForOrg = async (orgId) => {
+  const normalizedOrgId = String(orgId || '').trim()
+  if (!normalizedOrgId)
+    return []
+
+  const sitePathPrefix = `organizations/${normalizedOrgId}/`
+  const [registryByOrgSnap, registryBySitePathSnap] = await Promise.all([
+    db.collection(DOMAIN_REGISTRY_COLLECTION).where('orgId', '==', normalizedOrgId).get(),
+    db.collection(DOMAIN_REGISTRY_COLLECTION)
+      .where('sitePath', '>=', sitePathPrefix)
+      .where('sitePath', '<', `${sitePathPrefix}\uF8FF`)
+      .get(),
+  ])
+
+  const docsById = new Map()
+  for (const doc of registryByOrgSnap.docs)
+    docsById.set(doc.id, doc)
+  for (const doc of registryBySitePathSnap.docs)
+    docsById.set(doc.id, doc)
+
+  return Array.from(docsById.values())
+}
+
+const getCloudflareRegisteredDomainSet = async () => {
+  const registrations = await listCloudflareRegistrarRegistrations()
+  return new Set(
+    registrations
+      .map(item => normalizeDomain(item?.domain_name || item?.name || ''))
+      .filter(Boolean),
+  )
+}
+
+const buildDomainsRegisteredPayload = ({
+  domain = '',
+  orgId = '',
+  uid = '',
+  registration = null,
+}) => {
+  const normalizedDomain = normalizeDomain(domain)
+  const status = String(registration?.status || 'active').trim().toLowerCase() || 'active'
+  return {
+    domain: normalizedDomain,
+    orgId: String(orgId || '').trim(),
+    provider: 'cloudflare',
+    status,
+    cloudflareRegistration: registration && typeof registration === 'object' ? registration : {},
+    lastSyncAt: Firestore.FieldValue.serverTimestamp(),
+    ...(uid ? { updatedBy: uid } : {}),
+  }
 }
 
 const getRestrictedSiteRefs = (orgId, siteId) => {
@@ -6983,6 +7208,581 @@ exports.getCloudflarePagesProject = onCall(async (request) => {
     project: CLOUDFLARE_PAGES_PROJECT || '',
     pagesDomain: pagesTarget,
     domainRegistry,
+  }
+})
+
+exports.registrarCheckDomainAvailability = onCall(async (request) => {
+  assertCallableUser(request)
+  const data = request.data || {}
+  const uid = String(request.auth?.uid || '').trim()
+  const orgId = String(data.orgId || '').trim()
+  const domain = normalizeDomain(data.domain || '')
+
+  if (!orgId || !domain)
+    throw new HttpsError('invalid-argument', 'Missing orgId or domain.')
+  if (!isLikelyDomainName(domain))
+    throw new HttpsError('invalid-argument', 'Please enter a valid domain name.')
+
+  await assertOrgAdminAccess(uid, orgId)
+
+  try {
+    const result = await cloudflareRegistrarRequest({
+      method: 'post',
+      endpoint: 'domain-check',
+      data: { domains: [domain] },
+    })
+    const domains = Array.isArray(result?.domains) ? result.domains : []
+    const match = domains.find(item => normalizeDomain(item?.name) === domain) || domains[0] || {}
+    return {
+      domain,
+      availability: {
+        name: normalizeDomain(match?.name || domain),
+        registrable: match?.registrable === true,
+        reason: String(match?.reason || '').trim(),
+        tier: String(match?.tier || '').trim(),
+        pricing: match?.pricing && typeof match.pricing === 'object' ? match.pricing : {},
+      },
+    }
+  }
+  catch (error) {
+    throw new HttpsError('failed-precondition', parseCloudflareErrorMessage(error))
+  }
+})
+
+exports.registrarRegisterDomain = onCall(async (request) => {
+  assertCallableUser(request)
+  const data = request.data || {}
+  const uid = String(request.auth?.uid || '').trim()
+  const orgId = String(data.orgId || '').trim()
+  const domain = normalizeDomain(data.domain || '')
+
+  if (!orgId || !domain)
+    throw new HttpsError('invalid-argument', 'Missing orgId or domain.')
+  if (!isLikelyDomainName(domain))
+    throw new HttpsError('invalid-argument', 'Please enter a valid domain name.')
+
+  await assertOrgAdminAccess(uid, orgId)
+
+  let availability = null
+  try {
+    const checkResult = await cloudflareRegistrarRequest({
+      method: 'post',
+      endpoint: 'domain-check',
+      data: { domains: [domain] },
+    })
+    const checkedDomains = Array.isArray(checkResult?.domains) ? checkResult.domains : []
+    availability = checkedDomains.find(item => normalizeDomain(item?.name) === domain) || checkedDomains[0] || null
+  }
+  catch (error) {
+    throw new HttpsError('failed-precondition', parseCloudflareErrorMessage(error))
+  }
+
+  if (!availability || availability.registrable !== true) {
+    const reason = String(availability?.reason || 'domain_unavailable').trim()
+    throw new HttpsError('failed-precondition', `Domain is not registrable: ${reason}`)
+  }
+
+  let registration = null
+  try {
+    registration = await cloudflareRegistrarRequest({
+      method: 'post',
+      endpoint: 'registrations',
+      data: { domain_name: domain },
+    })
+  }
+  catch (error) {
+    const message = parseCloudflareErrorMessage(error)
+    const alreadyRegistered = message.toLowerCase().includes('already')
+      || message.toLowerCase().includes('exists')
+      || message.toLowerCase().includes('registered')
+    if (!alreadyRegistered)
+      throw new HttpsError('failed-precondition', message)
+    try {
+      registration = await cloudflareRegistrarRequest({
+        method: 'get',
+        endpoint: `registrations/${encodeURIComponent(domain)}`,
+      })
+    }
+    catch {
+      throw new HttpsError('failed-precondition', message)
+    }
+  }
+
+  const orgDomainsRegisteredRef = db.collection('organizations').doc(orgId).collection(DOMAINS_REGISTERED_COLLECTION).doc(domain)
+  await orgDomainsRegisteredRef.set({
+    ...buildDomainsRegisteredPayload({
+      domain,
+      orgId,
+      uid,
+      registration: registration && typeof registration === 'object' ? registration : null,
+    }),
+    createdAt: Firestore.FieldValue.serverTimestamp(),
+  }, { merge: true })
+
+  return {
+    domain,
+    registration: registration && typeof registration === 'object' ? registration : {},
+    availability: availability && typeof availability === 'object' ? availability : {},
+  }
+})
+
+exports.registrarListOrgDomains = onCall(async (request) => {
+  assertCallableUser(request)
+  const data = request.data || {}
+  const uid = String(request.auth?.uid || '').trim()
+  const orgId = String(data.orgId || '').trim()
+  if (!orgId)
+    throw new HttpsError('invalid-argument', 'Missing orgId.')
+
+  await assertOrgAdminAccess(uid, orgId)
+
+  const [registeredSnap, registryDocs, sitesSnap] = await Promise.all([
+    db.collection('organizations').doc(orgId).collection(DOMAINS_REGISTERED_COLLECTION).get(),
+    listDomainRegistryDocsForOrg(orgId),
+    db.collection('organizations').doc(orgId).collection('sites').get(),
+  ])
+
+  const siteNameById = new Map()
+  const sites = sitesSnap.docs.map((doc) => {
+    const value = doc.data() || {}
+    const site = {
+      docId: doc.id,
+      name: String(value.name || doc.id || '').trim() || doc.id,
+    }
+    siteNameById.set(doc.id, site.name)
+    return site
+  })
+
+  let domainRegistry = registryDocs.map((doc) => {
+    const value = doc.data() || {}
+    const normalizedDomain = normalizeDomain(value.domain || doc.id)
+    const siteId = String(value.siteId || '').trim()
+    return {
+      docId: doc.id,
+      domain: normalizedDomain,
+      siteId,
+      siteName: siteNameById.get(siteId) || '',
+      orgId: String(value.orgId || '').trim(),
+      sitePath: String(value.sitePath || '').trim(),
+      authEnabled: value.authEnabled === true,
+      apexDomain: String(value.apexDomain || '').trim(),
+      wwwDomain: String(value.wwwDomain || '').trim(),
+      dnsGuidance: String(value.dnsGuidance || '').trim(),
+      updatedAt: value.updatedAt || null,
+    }
+  }).filter(item => !shouldExcludeRegistrarDomain(item.domain))
+
+  const registryByDomain = new Map()
+  for (const item of domainRegistry) {
+    if (item.domain)
+      registryByDomain.set(item.domain, item)
+  }
+
+  const registeredDomains = registeredSnap.docs.map((doc) => {
+    const value = doc.data() || {}
+    const normalizedDomain = normalizeDomain(value.domain || doc.id)
+    const attached = registryByDomain.get(normalizedDomain) || null
+    return {
+      docId: doc.id,
+      domain: normalizedDomain,
+      provider: String(value.provider || 'cloudflare').trim(),
+      status: String(value.status || '').trim().toLowerCase() || 'active',
+      registrationState: 'registered_org',
+      cloudflareRegistration: value.cloudflareRegistration && typeof value.cloudflareRegistration === 'object'
+        ? value.cloudflareRegistration
+        : {},
+      attachedSiteId: attached?.siteId || '',
+      attachedSiteName: attached?.siteName || '',
+      updatedAt: value.updatedAt || null,
+      lastSyncAt: value.lastSyncAt || null,
+    }
+  })
+    .filter(item => !shouldExcludeRegistrarDomain(item.domain))
+    .sort((a, b) => a.domain.localeCompare(b.domain))
+
+  const registeredDomainSet = new Set(registeredDomains.map(item => item.domain).filter(Boolean))
+  const registryDomainsNeedingLookup = Array.from(new Set(
+    domainRegistry
+      .map(item => item.domain)
+      .filter(domain => domain && !registeredDomainSet.has(domain)),
+  ))
+
+  let availabilityByDomain = new Map()
+  if (registryDomainsNeedingLookup.length) {
+    try {
+      availabilityByDomain = await getRegistrarAvailabilityByDomain(registryDomainsNeedingLookup)
+    }
+    catch (error) {
+      logger.warn('Registrar availability lookup failed for domain list', {
+        orgId,
+        error: parseCloudflareErrorMessage(error),
+      })
+    }
+  }
+
+  const getExternalRegistrationState = (domain) => {
+    const availability = availabilityByDomain.get(domain)
+    if (availability?.registrable === true)
+      return 'not_registered'
+    if (availability?.registrable === false)
+      return 'registered_external'
+    return 'unknown'
+  }
+
+  domainRegistry = domainRegistry.map((item) => {
+    const registrationState = registeredDomainSet.has(item.domain)
+      ? 'registered_org'
+      : getExternalRegistrationState(item.domain)
+    const availability = availabilityByDomain.get(item.domain)
+    return {
+      ...item,
+      registrationState,
+      registrationReason: String(availability?.reason || '').trim(),
+    }
+  })
+
+  return {
+    registeredDomains,
+    domainRegistry: domainRegistry.sort((a, b) => a.domain.localeCompare(b.domain)),
+    sites: sites.sort((a, b) => a.name.localeCompare(b.name)),
+  }
+})
+
+exports.registrarSyncRegisteredFromRegistry = onCall(async (request) => {
+  assertCallableUser(request)
+  const data = request.data || {}
+  const uid = String(request.auth?.uid || '').trim()
+  const orgId = String(data.orgId || '').trim()
+  if (!orgId)
+    throw new HttpsError('invalid-argument', 'Missing orgId.')
+
+  await assertOrgAdminAccess(uid, orgId)
+
+  const registryDocs = await listDomainRegistryDocsForOrg(orgId)
+
+  if (!registryDocs.length) {
+    return {
+      matched: 0,
+      created: 0,
+      domains: [],
+    }
+  }
+
+  let cloudflareDomainSet = new Set()
+  try {
+    cloudflareDomainSet = await getCloudflareRegisteredDomainSet()
+  }
+  catch (error) {
+    throw new HttpsError('failed-precondition', parseCloudflareErrorMessage(error))
+  }
+
+  const matchingDomains = new Set()
+  for (const doc of registryDocs) {
+    const value = doc.data() || {}
+    const domain = normalizeDomain(value.domain || doc.id)
+    if (!domain)
+      continue
+    if (shouldExcludeRegistrarDomain(domain))
+      continue
+    const apexDomain = getCloudflareApexDomain(domain)
+    if (cloudflareDomainSet.has(domain))
+      matchingDomains.add(domain)
+    else if (apexDomain && cloudflareDomainSet.has(apexDomain))
+      matchingDomains.add(apexDomain)
+  }
+
+  let created = 0
+  for (const domain of matchingDomains) {
+    const docRef = db.collection('organizations').doc(orgId).collection(DOMAINS_REGISTERED_COLLECTION).doc(domain)
+    const existing = await docRef.get()
+    await docRef.set({
+      ...buildDomainsRegisteredPayload({
+        domain,
+        orgId,
+        uid,
+        registration: {
+          domain_name: domain,
+          status: 'active',
+        },
+      }),
+      createdAt: existing.exists ? (existing.data()?.createdAt || Firestore.FieldValue.serverTimestamp()) : Firestore.FieldValue.serverTimestamp(),
+    }, { merge: true })
+    if (!existing.exists)
+      created += 1
+  }
+
+  return {
+    matched: matchingDomains.size,
+    created,
+    domains: Array.from(matchingDomains).sort((a, b) => a.localeCompare(b)),
+  }
+})
+
+exports.registrarAttachDomainToSite = onCall(async (request) => {
+  assertCallableUser(request)
+  const data = request.data || {}
+  const uid = String(request.auth?.uid || '').trim()
+  const orgId = String(data.orgId || '').trim()
+  const siteId = String(data.siteId || '').trim()
+  const domain = normalizeDomain(data.domain || '')
+
+  if (!orgId || !siteId || !domain)
+    throw new HttpsError('invalid-argument', 'Missing orgId, siteId, or domain.')
+  if (!isLikelyDomainName(domain))
+    throw new HttpsError('invalid-argument', 'Please enter a valid domain name.')
+
+  await assertOrgAdminAccess(uid, orgId)
+
+  const orgRef = db.collection('organizations').doc(orgId)
+  const siteRef = orgRef.collection('sites').doc(siteId)
+  const publishedSiteRef = orgRef.collection('published-site-settings').doc(siteId)
+  const legacyPublishedSiteRef = orgRef.collection('sites-published').doc(siteId)
+  const domainRegistryRef = db.collection(DOMAIN_REGISTRY_COLLECTION).doc(domain)
+  const orgRegisteredDomainRef = orgRef.collection(DOMAINS_REGISTERED_COLLECTION).doc(domain)
+  const sitePath = publishedSiteRef.path
+
+  const [siteSnap, publishedSnap, legacyPublishedSnap, registrySnap, registeredDomainSnap] = await Promise.all([
+    siteRef.get(),
+    publishedSiteRef.get(),
+    legacyPublishedSiteRef.get(),
+    domainRegistryRef.get(),
+    orgRegisteredDomainRef.get(),
+  ])
+
+  if (!siteSnap.exists)
+    throw new HttpsError('not-found', 'Site not found.')
+
+  const existingRegistryData = registrySnap.exists ? (registrySnap.data() || {}) : {}
+  const existingRegistryOrgId = String(existingRegistryData.orgId || '').trim()
+  const existingRegistrySiteId = String(existingRegistryData.siteId || '').trim()
+  if (registrySnap.exists && (existingRegistryOrgId !== orgId || (existingRegistrySiteId && existingRegistrySiteId !== siteId))) {
+    throw new HttpsError('already-exists', 'This domain is already attached to another site.')
+  }
+
+  if (!registeredDomainSnap.exists) {
+    let cloudflareDomainSet = new Set()
+    try {
+      cloudflareDomainSet = await getCloudflareRegisteredDomainSet()
+    }
+    catch (error) {
+      throw new HttpsError('failed-precondition', parseCloudflareErrorMessage(error))
+    }
+    const apexDomain = getCloudflareApexDomain(domain)
+    if (!cloudflareDomainSet.has(domain) && !cloudflareDomainSet.has(apexDomain)) {
+      throw new HttpsError('failed-precondition', 'Domain is not registered on this Cloudflare account.')
+    }
+
+    await orgRegisteredDomainRef.set({
+      ...buildDomainsRegisteredPayload({
+        domain: cloudflareDomainSet.has(domain) ? domain : apexDomain,
+        orgId,
+        uid,
+        registration: {
+          domain_name: cloudflareDomainSet.has(domain) ? domain : apexDomain,
+          status: 'active',
+        },
+      }),
+      createdAt: Firestore.FieldValue.serverTimestamp(),
+    }, { merge: true })
+  }
+
+  const siteData = siteSnap.data() || {}
+  const siteDomains = Array.isArray(siteData.domains) ? siteData.domains : []
+  const nextSiteDomains = Array.from(new Set([...siteDomains.map(normalizeDomain).filter(Boolean), domain]))
+
+  const publishedExists = publishedSnap.exists
+  const publishedData = publishedExists ? (publishedSnap.data() || {}) : {}
+  const publishedDomains = Array.isArray(publishedData.domains) ? publishedData.domains : []
+  const nextPublishedDomains = Array.from(new Set([...publishedDomains.map(normalizeDomain).filter(Boolean), domain]))
+
+  const legacyPublishedExists = legacyPublishedSnap.exists
+  const legacyPublishedData = legacyPublishedExists ? (legacyPublishedSnap.data() || {}) : {}
+  const legacyPublishedDomains = Array.isArray(legacyPublishedData.domains) ? legacyPublishedData.domains : []
+  const nextLegacyPublishedDomains = Array.from(new Set([...legacyPublishedDomains.map(normalizeDomain).filter(Boolean), domain]))
+
+  const dnsPayload = buildDomainDnsPayload(domain, getCloudflarePagesTarget())
+  const wwwSyncResult = shouldSyncCloudflareDomain(dnsPayload.wwwDomain)
+    ? await addCloudflarePagesDomain(dnsPayload.wwwDomain, { orgId, siteId, trigger: 'registrar-attach', uid })
+    : { ok: false, error: '' }
+  const apexSyncResult = shouldSyncCloudflareDomain(dnsPayload.apexDomain)
+    ? await addCloudflarePagesDomain(dnsPayload.apexDomain, { orgId, siteId, trigger: 'registrar-attach', uid })
+    : { ok: false, error: '' }
+  const apexAttempted = shouldSyncCloudflareDomain(dnsPayload.apexDomain)
+  const dnsGuidance = !dnsPayload.dnsEligible
+    ? 'DNS records are not shown for localhost, IP addresses, or .dev domains.'
+    : (apexSyncResult.ok
+        ? 'Apex and www were added to Cloudflare Pages. Add both DNS records if your provider requires manual setup.'
+        : 'Add the www CNAME record. Apex is unavailable; forward apex to www.')
+
+  const authEnabled = Boolean((publishedData?.restrictedContent || siteData?.restrictedContent || {}).enabled)
+
+  const batch = db.batch()
+  batch.set(siteRef, {
+    domains: nextSiteDomains,
+    updated_at: Date.now(),
+    domainError: Firestore.FieldValue.delete(),
+  }, { merge: true })
+
+  if (publishedExists) {
+    batch.set(publishedSiteRef, {
+      domains: nextPublishedDomains,
+      updated_at: Date.now(),
+      domainError: Firestore.FieldValue.delete(),
+    }, { merge: true })
+  }
+
+  if (legacyPublishedExists) {
+    batch.set(legacyPublishedSiteRef, {
+      domains: nextLegacyPublishedDomains,
+      updated_at: Date.now(),
+    }, { merge: true })
+  }
+
+  batch.set(domainRegistryRef, {
+    domain,
+    orgId,
+    siteId,
+    sitePath,
+    authEnabled,
+    apexDomain: dnsPayload.apexDomain,
+    wwwDomain: dnsPayload.wwwDomain,
+    dnsEligible: !!dnsPayload.dnsEligible,
+    apexAttempted,
+    apexAdded: !!apexSyncResult.ok,
+    wwwAdded: !!wwwSyncResult.ok,
+    dnsRecords: {
+      ...(dnsPayload.dnsRecords || {}),
+      apex: {
+        ...(dnsPayload?.dnsRecords?.apex || {}),
+        enabled: !!dnsPayload.dnsEligible && !!dnsPayload?.dnsRecords?.apex?.value && !!apexSyncResult.ok,
+      },
+      www: {
+        ...(dnsPayload?.dnsRecords?.www || {}),
+        enabled: !!dnsPayload.dnsEligible && !!dnsPayload?.dnsRecords?.www?.value,
+      },
+    },
+    dnsGuidance,
+    attachedBy: uid,
+    attachedAt: Firestore.FieldValue.serverTimestamp(),
+    updatedAt: Firestore.FieldValue.serverTimestamp(),
+    ...(apexSyncResult?.ok ? { apexError: Firestore.FieldValue.delete() } : { apexError: String(apexSyncResult?.error || '').trim() }),
+    ...(wwwSyncResult?.ok ? { wwwError: Firestore.FieldValue.delete() } : { wwwError: String(wwwSyncResult?.error || '').trim() }),
+  }, { merge: true })
+
+  await batch.commit()
+
+  return {
+    domain,
+    siteId,
+    publishedUpdated: publishedExists,
+    publishedMissing: !publishedExists,
+    legacyPublishedUpdated: legacyPublishedExists,
+  }
+})
+
+exports.registrarDetachDomainFromSite = onCall(async (request) => {
+  assertCallableUser(request)
+  const data = request.data || {}
+  const uid = String(request.auth?.uid || '').trim()
+  const orgId = String(data.orgId || '').trim()
+  const domain = normalizeDomain(data.domain || '')
+
+  if (!orgId || !domain)
+    throw new HttpsError('invalid-argument', 'Missing orgId or domain.')
+  if (!isLikelyDomainName(domain))
+    throw new HttpsError('invalid-argument', 'Please enter a valid domain name.')
+
+  await assertOrgAdminAccess(uid, orgId)
+
+  const orgRef = db.collection('organizations').doc(orgId)
+  const domainRegistryRef = db.collection(DOMAIN_REGISTRY_COLLECTION).doc(domain)
+  const registrySnap = await domainRegistryRef.get()
+
+  if (!registrySnap.exists) {
+    return {
+      domain,
+      detached: false,
+      message: 'Domain is not currently attached.',
+    }
+  }
+
+  const registryData = registrySnap.data() || {}
+  const registryOrgId = String(registryData.orgId || '').trim()
+  const siteId = String(registryData.siteId || '').trim()
+
+  if (registryOrgId && registryOrgId !== orgId)
+    throw new HttpsError('permission-denied', 'This domain belongs to another organization.')
+  if (!siteId) {
+    await domainRegistryRef.delete()
+    return {
+      domain,
+      detached: true,
+      siteId: '',
+      publishedUpdated: false,
+      legacyPublishedUpdated: false,
+      message: 'Detached stale registry record.',
+    }
+  }
+
+  const siteRef = orgRef.collection('sites').doc(siteId)
+  const publishedSiteRef = orgRef.collection('published-site-settings').doc(siteId)
+  const legacyPublishedSiteRef = orgRef.collection('sites-published').doc(siteId)
+
+  const [siteSnap, publishedSnap, legacyPublishedSnap] = await Promise.all([
+    siteRef.get(),
+    publishedSiteRef.get(),
+    legacyPublishedSiteRef.get(),
+  ])
+
+  const removeDomainFromList = (domains = []) => {
+    return Array.from(new Set(
+      (Array.isArray(domains) ? domains : [])
+        .map(normalizeDomain)
+        .filter(value => value && value !== domain),
+    ))
+  }
+
+  const batch = db.batch()
+  if (siteSnap.exists) {
+    batch.set(siteRef, {
+      domains: removeDomainFromList(siteSnap.data()?.domains),
+      updated_at: Date.now(),
+      domainError: Firestore.FieldValue.delete(),
+    }, { merge: true })
+  }
+
+  if (publishedSnap.exists) {
+    batch.set(publishedSiteRef, {
+      domains: removeDomainFromList(publishedSnap.data()?.domains),
+      updated_at: Date.now(),
+      domainError: Firestore.FieldValue.delete(),
+    }, { merge: true })
+  }
+
+  if (legacyPublishedSnap.exists) {
+    batch.set(legacyPublishedSiteRef, {
+      domains: removeDomainFromList(legacyPublishedSnap.data()?.domains),
+      updated_at: Date.now(),
+    }, { merge: true })
+  }
+
+  batch.delete(domainRegistryRef)
+  await batch.commit()
+
+  const dnsPayload = buildDomainDnsPayload(domain, getCloudflarePagesTarget())
+  await Promise.all([
+    removeCloudflarePagesDomain(dnsPayload.wwwDomain, { orgId, siteId, trigger: 'registrar-detach', uid }),
+    shouldSyncCloudflareDomain(dnsPayload.apexDomain)
+      ? removeCloudflarePagesDomain(dnsPayload.apexDomain, { orgId, siteId, trigger: 'registrar-detach', uid })
+      : Promise.resolve({ ok: true }),
+  ])
+
+  return {
+    domain,
+    detached: true,
+    siteId,
+    publishedUpdated: publishedSnap.exists,
+    legacyPublishedUpdated: legacyPublishedSnap.exists,
   }
 })
 
