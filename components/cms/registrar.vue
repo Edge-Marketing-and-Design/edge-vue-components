@@ -327,6 +327,7 @@ const domainRows = computed(() => {
       registrationStatus: String(item?.status || 'active').trim().toLowerCase() || 'active',
       registrationState: String(item?.registrationState || 'registered_org').trim() || 'registered_org',
       registrationReason: '',
+      dnsSyncError: '',
       attachedSiteId: '',
       attachedSiteName: '',
       provider: String(item?.provider || 'cloudflare').trim(),
@@ -349,6 +350,7 @@ const domainRows = computed(() => {
       existing.hasRegistryDoc = true
       existing.registrationState = String(existing.registrationState || item?.registrationState || '').trim() || existing.registrationState
       existing.registrationReason = String(existing.registrationReason || item?.registrationReason || '').trim()
+      existing.dnsSyncError = String(item?.dnsSyncError || '').trim()
       existing.attachedSiteId = siteId
       existing.attachedSiteName = siteName
       continue
@@ -361,6 +363,7 @@ const domainRows = computed(() => {
       registrationStatus: 'unregistered',
       registrationState: String(item?.registrationState || 'unknown').trim() || 'unknown',
       registrationReason: String(item?.registrationReason || '').trim(),
+      dnsSyncError: String(item?.dnsSyncError || '').trim(),
       attachedSiteId: siteId,
       attachedSiteName: siteName,
       provider: '',
@@ -403,15 +406,21 @@ const hasRowActionsInFlight = computed(() => {
   return Object.values(state.attachingDomains).some(Boolean) || Object.values(state.detachingDomains).some(Boolean)
 })
 
-const getRegistrationBadgeClass = item => item.isRegistered
-  ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
-  : item.registrationState === 'not_registered'
-    ? 'border-amber-300 bg-amber-50 text-amber-700'
-    : item.registrationState === 'registered_external'
-      ? 'border-blue-300 bg-blue-50 text-blue-700'
-      : 'border-slate-300 bg-slate-50 text-slate-700'
+const getRegistrationBadgeClass = (item) => {
+  if (String(item?.dnsSyncError || '').trim())
+    return 'border-red-300 bg-red-50 text-red-700'
+  if (item.isRegistered)
+    return 'border-emerald-300 bg-emerald-50 text-emerald-700'
+  if (item.registrationState === 'not_registered')
+    return 'border-amber-300 bg-amber-50 text-amber-700'
+  if (item.registrationState === 'registered_external')
+    return 'border-blue-300 bg-blue-50 text-blue-700'
+  return 'border-slate-300 bg-slate-50 text-slate-700'
+}
 
 const getRegistrationLabel = (item) => {
+  if (String(item?.dnsSyncError || '').trim())
+    return 'Cloudflare DNS Error'
   if (item.registrationState === 'registered_org')
     return 'Registered in this org'
   if (item.registrationState === 'not_registered')

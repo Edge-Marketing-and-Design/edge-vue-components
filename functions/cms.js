@@ -3388,6 +3388,23 @@ const getRegistrarAvailabilityByDomain = async (domains = []) => {
   return availabilityByDomain
 }
 
+const getRegistrarAvailabilityByDomainWithTimeout = async (domains = [], timeoutMs = 1800) => {
+  let timeoutId = null
+  try {
+    const result = await Promise.race([
+      getRegistrarAvailabilityByDomain(domains),
+      new Promise((resolve) => {
+        timeoutId = setTimeout(() => resolve(null), timeoutMs)
+      }),
+    ])
+    return result instanceof Map ? result : new Map()
+  }
+  finally {
+    if (timeoutId)
+      clearTimeout(timeoutId)
+  }
+}
+
 const listDomainRegistryDocsForOrg = async (orgId) => {
   const normalizedOrgId = String(orgId || '').trim()
   if (!normalizedOrgId)
@@ -7363,6 +7380,9 @@ exports.registrarListOrgDomains = onCall(async (request) => {
       authEnabled: value.authEnabled === true,
       apexDomain: String(value.apexDomain || '').trim(),
       wwwDomain: String(value.wwwDomain || '').trim(),
+      dnsSyncError: String(value.dnsSyncError || '').trim(),
+      apexError: String(value.apexError || '').trim(),
+      wwwError: String(value.wwwError || '').trim(),
       dnsGuidance: String(value.dnsGuidance || '').trim(),
       updatedAt: value.updatedAt || null,
     }
@@ -7406,7 +7426,7 @@ exports.registrarListOrgDomains = onCall(async (request) => {
   let availabilityByDomain = new Map()
   if (registryDomainsNeedingLookup.length) {
     try {
-      availabilityByDomain = await getRegistrarAvailabilityByDomain(registryDomainsNeedingLookup)
+      availabilityByDomain = await getRegistrarAvailabilityByDomainWithTimeout(registryDomainsNeedingLookup)
     }
     catch (error) {
       logger.warn('Registrar availability lookup failed for domain list', {
