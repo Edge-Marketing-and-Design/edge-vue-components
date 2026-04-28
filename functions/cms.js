@@ -839,23 +839,34 @@ const listCloudflareDnsRecords = async (zoneId, hostName) => {
 const syncCloudflareCnameRecord = async ({ zoneId, hostName, target, label, context = {} }) => {
   const records = await listCloudflareDnsRecords(zoneId, hostName)
   const conflictingTypes = new Set(['A', 'AAAA', 'CNAME'])
-  const matchingCname = records.find((record) => {
+  const dnsRecords = records.filter(record => conflictingTypes.has(record?.type))
+  const matchingCnames = dnsRecords.filter((record) => {
     return record?.type === 'CNAME'
       && normalizeDomain(record?.content) === normalizeDomain(target)
   })
 
-  const deleteRecords = records.filter((record) => {
-    if (!conflictingTypes.has(record?.type))
-      return false
-    if (record?.id === matchingCname?.id)
-      return false
-    return true
-  })
+  // Security guardrail: do not mutate existing @/www DNS records owned by the zone.
+  // If records already match our target CNAME, treat as success; otherwise require manual admin cleanup.
+  if (dnsRecords.length > 0) {
+    const nonMatchingRecords = dnsRecords.filter(record => !matchingCnames.some(match => match?.id === record?.id))
+    if (!nonMatchingRecords.length && matchingCnames.length > 0) {
+      logger.log('Cloudflare DNS CNAME already configured', {
+        hostName,
+        target,
+        existingRecords: dnsRecords.length,
+        label,
+        ...context,
+      })
+      return { ok: true, existing: true, existingRecords: dnsRecords.length }
+    }
 
-  for (const record of deleteRecords) {
-    await axios.delete(`https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records/${record.id}`, {
-      headers: cloudflareDnsHeaders(),
-    })
+    const existingSummary = dnsRecords
+      .map(record => `${record?.type || 'UNKNOWN'}:${String(record?.content || '').trim()}`)
+      .join(', ')
+    throw new Error(
+      `Cloudflare DNS for ${hostName} already has existing records (${existingSummary}). `
+      + 'A Cloudflare administrator must remove these records before this domain can be used.',
+    )
   }
 
   const recordPayload = {
@@ -866,31 +877,16 @@ const syncCloudflareCnameRecord = async ({ zoneId, hostName, target, label, cont
     proxied: true,
   }
 
-  if (matchingCname?.id) {
-    await axios.patch(`https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records/${matchingCname.id}`, recordPayload, {
-      headers: cloudflareDnsHeaders(),
-    })
-    logger.log('Cloudflare DNS CNAME updated', {
-      hostName,
-      target,
-      deletedRecords: deleteRecords.length,
-      label,
-      ...context,
-    })
-    return { ok: true, updated: true, deletedRecords: deleteRecords.length }
-  }
-
   await axios.post(`https://api.cloudflare.com/client/v4/zones/${zoneId}/dns_records`, recordPayload, {
     headers: cloudflareDnsHeaders(),
   })
   logger.log('Cloudflare DNS CNAME created', {
     hostName,
     target,
-    deletedRecords: deleteRecords.length,
     label,
     ...context,
   })
-  return { ok: true, created: true, deletedRecords: deleteRecords.length }
+  return { ok: true, created: true, existingRecords: 0 }
 }
 
 const syncCloudflarePagesDns = async ({ apexDomain, wwwDomain, target, syncApex, context = {} }) => {
