@@ -293,10 +293,15 @@ const syncFromRegistry = async () => {
 }
 
 const siteOptions = computed(() => {
-  return (Array.isArray(state.sites) ? state.sites : []).map(site => ({
-    title: site?.name || site?.docId || '',
-    value: site?.docId || '',
-  }))
+  return (Array.isArray(state.sites) ? state.sites : [])
+    .filter((site) => {
+      const siteId = String(site?.docId || '').trim().toLowerCase()
+      return siteId && siteId !== 'templates'
+    })
+    .map(site => ({
+      title: site?.name || site?.docId || '',
+      value: site?.docId || '',
+    }))
 })
 
 const siteNameById = computed(() => {
