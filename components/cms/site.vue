@@ -3327,8 +3327,10 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
               <edge-cms-media-manager
                 :site="props.site"
                 :include-files="true"
+                :show-cms-site-filter="true"
                 :mark-pdf-as-flipbook="true"
                 cms-site-filter-default="current"
+                cms-site-only-title="Current Site"
                 class="h-full min-h-0"
               />
             </div>
