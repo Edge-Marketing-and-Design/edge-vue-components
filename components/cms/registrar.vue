@@ -419,8 +419,15 @@ const getRegistrationBadgeClass = (item) => {
 }
 
 const getRegistrationLabel = (item) => {
-  if (String(item?.dnsSyncError || '').trim())
-    return 'Cloudflare DNS Error'
+  const dnsSyncError = String(item?.dnsSyncError || '').trim()
+  if (dnsSyncError) {
+    if (dnsSyncError.toLowerCase().includes('already has existing records')) {
+      return 'DNS Error: already has existing records. Cloudflare admin must remove them.'
+    }
+    const compactError = dnsSyncError.replaceAll(/\s+/g, ' ').trim()
+    const preview = compactError.length > 110 ? `${compactError.slice(0, 107)}...` : compactError
+    return `DNS Error: ${preview}`
+  }
   if (item.registrationState === 'registered_org')
     return 'Registered in this org'
   if (item.registrationState === 'not_registered')
