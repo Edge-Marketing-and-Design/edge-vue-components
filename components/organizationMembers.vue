@@ -301,6 +301,14 @@ const visibleCount = computed(() => usersByRoleFilter.value.length)
 const totalLoadedCount = computed(() => users.value.length)
 const hiddenBySearchCount = computed(() => Math.max(visibleCount.value - shownCount.value, 0))
 
+const userIsRegistered = user => Boolean(String(user?.userId || '').trim())
+
+const userRowTone = (user) => {
+  if (userIsRegistered(user))
+    return 'border-l-4 border-l-[#003E52] bg-emerald-50/30'
+  return 'bg-background'
+}
+
 const detailViewKey = computed(() => {
   if (!state.dialog)
     return 'member-empty'
@@ -344,7 +352,6 @@ const editItem = (item) => {
       })
     }
   })
-  console.log('Working Item:', state.workingItem)
   state.dialog = true
 }
 
@@ -365,7 +372,6 @@ const deleteAction = async () => {
   })
   for (const role of userRoles) {
     await edgeFirebase.removeUserRoles(targetUserId, role.collectionPath)
-    // console.log(role.collectionPath)
   }
   state.deleteDialog = false
   edgeGlobal.edgeState.changeTracker = {}
@@ -375,10 +381,6 @@ const closeDialog = () => {
   state.dialog = false
   edgeGlobal.edgeState.changeTracker = {}
 }
-
-const disableTracking = computed(() => {
-  return state.saveButton === 'Invite User'
-})
 
 const updateInviteOrgSelection = (orgId, checked) => {
   const selections = new Set(state.inviteOrgIds)
@@ -465,8 +467,6 @@ const onSubmit = async () => {
       }
     }
     const stagedUserId = state.workingItem.docId
-    console.log('Staged User ID:', stagedUserId)
-    console.log('Updating meta:', state.workingItem.meta)
     await edgeFirebase.setUserMeta(state.workingItem.meta, '', stagedUserId)
   }
   edgeGlobal.edgeState.changeTracker = {}
@@ -538,7 +538,6 @@ onBeforeMount(async () => {
 
     keys.forEach((key, index) => {
       if (index === keys.length - 1) {
-        console.log(`Setting ${key} to ${field.value}`)
         current[key] = field.value
       }
       else {
@@ -564,6 +563,9 @@ onBeforeMount(async () => {
               <div class="flex items-center gap-2 text-sm font-semibold">
                 <component :is="edgeGlobal.iconFromMenu(route)" class="h-4 w-4" />
                 <span>Members</span>
+                <Badge variant="secondary" class="rounded-full px-2.5 py-0.5 text-[11px] font-semibold tabular-nums">
+                  {{ shownCount }} / {{ totalLoadedCount }}
+                </Badge>
               </div>
               <edge-shad-button size="sm" class="h-7 text-xs bg-primary" @click="addItem()">
                 Invite
@@ -580,6 +582,7 @@ onBeforeMount(async () => {
                     item-value="docId"
                     placeholder="Select role"
                     class="w-full !h-8"
+                    aria-label="Filter members by role"
                   />
                 </div>
                 <div class="w-1/2 min-w-0">
@@ -589,6 +592,7 @@ onBeforeMount(async () => {
                     name="filter"
                     class="h-8 w-full"
                     placeholder="Filter members..."
+                    aria-label="Filter members"
                   />
                 </div>
               </div>
@@ -601,12 +605,15 @@ onBeforeMount(async () => {
                 :key="userKey(user)"
               >
                 <SidebarMenuButton
-                  class="w-full !h-auto items-start px-3 py-2"
-                  :class="state.dialog && userKey(state.workingItem) && userKey(state.workingItem) === userKey(user) ? 'bg-sidebar-accent text-sidebar-accent-foreground' : ''"
+                  class="w-full !h-auto min-h-[145px] items-start rounded-none border-b border-sidebar-border/70 px-4 py-5 hover:bg-[#E6E3DC] hover:text-foreground"
+                  :class="[
+                    userRowTone(user),
+                    state.dialog && userKey(state.workingItem) && userKey(state.workingItem) === userKey(user) ? 'bg-[#93A4AF] text-foreground' : '',
+                  ]"
                   @click="editItem(user)"
                 >
-                  <div class="flex w-full items-start gap-3" :class="!user.userId ? 'opacity-70' : ''">
-                    <Avatar class="h-12 w-12 rounded-md border bg-muted/40 flex items-center justify-center overflow-hidden">
+                  <div class="flex w-full items-start gap-4" :class="!user.userId ? 'opacity-70' : ''">
+                    <Avatar class="h-14 w-14 shrink-0 rounded-md border bg-muted/40 flex items-center justify-center overflow-hidden">
                       <img
                         v-if="user?.meta?.profilephoto"
                         :src="profileImageUrl(user.meta.profilephoto)"
@@ -616,25 +623,36 @@ onBeforeMount(async () => {
                       <User v-else width="24" height="24" />
                     </Avatar>
                     <div class="min-w-0 flex-1">
-                      <div class="flex items-center gap-2">
-                        <span class="text-sm font-medium leading-snug whitespace-normal uppercase">
+                      <div class="flex min-w-0 items-center gap-2">
+                        <span class="truncate text-[15px] font-semibold leading-tight text-foreground">
                           {{ user?.meta?.name || user?.meta?.email || 'Unnamed Member' }}
                         </span>
-                        <!-- <span v-if="!user.userId" class="text-[10px] uppercase tracking-wide text-muted-foreground">
-                          -
-                        </span> -->
                         <edge-chip v-if="user.userId === edgeFirebase.user.uid">
                           You
                         </edge-chip>
                       </div>
-                      <div class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground leading-snug">
-                        <span class="rounded-full bg-secondary px-2 py-0.5 text-[10px] text-secondary-foreground">
-                          {{ edgeGlobal.getRoleName(user.roles, edgeGlobal.edgeState.currentOrganization) }}
-                        </span>
+                      <div class="mt-1 truncate text-[12px] leading-snug text-muted-foreground">
+                        {{ user?.meta?.email || 'No email available' }}
+                      </div>
+                      <div class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-snug text-muted-foreground">
+                        <span>{{ user?.meta?.title || user?.meta?.title2 || 'No title set' }}</span>
+                        <span aria-hidden="true">&bull;</span>
+                        <span>{{ user?.meta?.phone || user?.meta?.contactPhone || 'No phone' }}</span>
                         <span v-if="!user.userId && user.docId" class="inline-flex items-center gap-1 whitespace-normal">
+                          <span aria-hidden="true">&bull;</span>
                           {{ user.docId }}
                           <edge-clipboard-button class="relative top-[1px]" :text="user.docId" />
                         </span>
+                      </div>
+                      <div class="mt-3">
+                        <Badge
+                          variant="outline"
+                          class="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em]"
+                          :class="userIsRegistered(user) ? 'border-emerald-200 bg-emerald-100 text-emerald-900' : 'border-amber-200 bg-amber-100 text-amber-900'"
+                        >
+                          <span class="h-2 w-2 rounded-full" :class="userIsRegistered(user) ? 'bg-emerald-500' : 'bg-amber-500'" aria-hidden="true" />
+                          {{ userIsRegistered(user) ? edgeGlobal.getRoleName(user.roles, edgeGlobal.edgeState.currentOrganization) || 'No role' : 'Pending registration' }}
+                        </Badge>
                       </div>
                     </div>
                     <edge-shad-button
@@ -647,7 +665,6 @@ onBeforeMount(async () => {
                     </edge-shad-button>
                   </div>
                 </SidebarMenuButton>
-                <Separator class="my-1" />
               </SidebarMenuItem>
               <div v-if="sortedFilteredUsers.length === 0" class="px-4 py-6 text-xs text-muted-foreground">
                 No members found.
@@ -655,43 +672,55 @@ onBeforeMount(async () => {
             </SidebarMenu>
           </div>
           <div class="shrink-0 border-t border-sidebar-border bg-sidebar/90 px-3 py-2">
-            <div class="flex items-center justify-between text-[11px] text-muted-foreground">
-              <span>{{ shownCount }} shown / {{ totalLoadedCount }} loaded</span>
-              <span>{{ hiddenBySearchCount }} hidden by search</span>
+            <div class="text-[11px] text-muted-foreground">
+              {{ shownCount }} shown / {{ totalLoadedCount }} loaded
+            </div>
+            <div class="mt-1 text-[10px] text-muted-foreground/80">
+              {{ hiddenBySearchCount }} hidden by search
             </div>
           </div>
         </div>
       </ResizablePanel>
-      <ResizablePanel class="bg-background">
-        <div class="h-full flex flex-col">
+      <ResizablePanel class="bg-slate-50" style="background-color: #f8fafc;">
+        <div class="org-members-detail-panel h-full flex flex-col bg-slate-50" style="background-color: #f8fafc;">
           <Transition name="fade" mode="out-in">
             <div v-if="state.dialog" :key="detailViewKey" class="h-full flex flex-col">
               <edge-shad-form
                 :key="userKey(state.workingItem) || state.workingItem?.id || 'member-form'"
                 :initial-values="state.workingItem"
                 :schema="computedUserSchema"
-                class="flex flex-col h-full"
+                class="org-members-detail-form flex flex-col h-full bg-slate-50 text-slate-900"
+                style="background-color: #f8fafc;"
                 @submit="onSubmit"
               >
-                <div class="flex items-center justify-between border-b bg-secondary px-4 py-3">
-                  <div class="text-sm font-semibold">
-                    {{ state.currentTitle || 'Member' }}
+                <slot
+                  name="edit-header"
+                  :working-item="state.workingItem"
+                  :close-dialog="closeDialog"
+                  :current-title="state.currentTitle"
+                  :loading="state.loading"
+                  :save-button="state.saveButton"
+                >
+                  <div class="flex items-center justify-between border-b bg-secondary px-4 py-3">
+                    <div class="text-sm font-semibold">
+                      {{ state.currentTitle || 'Member' }}
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <edge-shad-button variant="text" class="text-xs text-red-700" @click="closeDialog">
+                        Close
+                      </edge-shad-button>
+                      <edge-shad-button
+                        type="submit"
+                        class="text-xs bg-primary"
+                        :disabled="state.loading"
+                      >
+                        <Loader2 v-if="state.loading" class="w-4 h-4 mr-2 animate-spin" />
+                        {{ state.saveButton }}
+                      </edge-shad-button>
+                    </div>
                   </div>
-                  <div class="flex items-center gap-2">
-                    <edge-shad-button variant="text" class="text-xs text-red-700" @click="closeDialog">
-                      Close
-                    </edge-shad-button>
-                    <edge-shad-button
-                      type="submit"
-                      class="text-xs bg-primary"
-                      :disabled="state.loading"
-                    >
-                      <Loader2 v-if="state.loading" class="w-4 h-4 mr-2 animate-spin" />
-                      {{ state.saveButton }}
-                    </edge-shad-button>
-                  </div>
-                </div>
-                <div class="flex-1 overflow-y-auto p-6 space-y-4">
+                </slot>
+                <div class="org-members-detail-body flex-1 overflow-y-auto bg-slate-50 p-6 space-y-4" style="background-color: #f8fafc;">
                   <slot name="edit-fields" :working-item="state.workingItem">
                     <div class="rounded-xl border bg-card p-4 space-y-4 shadow-sm">
                       <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -902,7 +931,7 @@ onBeforeMount(async () => {
                 </div>
               </edge-shad-form>
             </div>
-            <div v-else :key="detailViewKey" class="p-4 text-center flex text-slate-500 h-[calc(100vh-4rem)] justify-center items-center overflow-y-auto">
+            <div v-else :key="detailViewKey" class="p-4 text-center flex text-slate-500 h-[calc(100vh-4rem)] justify-center items-center overflow-y-auto bg-background">
               <div class="text-4xl">
                 <ArrowLeft class="inline-block w-12 h-12 mr-2" /> Select a member to view details.
               </div>
