@@ -7,14 +7,12 @@ const state = reactive({
   domainInput: '',
   filter: '',
   loading: false,
+  syncing: false,
   checking: false,
   registering: false,
   attachingDomains: {},
   detachingDomains: {},
   checkResult: null,
-  registeredDomains: [],
-  domainRegistry: [],
-  sites: [],
   message: '',
   messageType: '',
   siteDialogOpen: false,
@@ -29,6 +27,20 @@ const state = reactive({
 const currentOrgId = computed(() => String(edgeGlobal?.edgeState?.currentOrganization || '').trim())
 const currentUid = computed(() => String(edgeFirebase?.user?.uid || '').trim())
 const isAdmin = computed(() => edgeGlobal.isAdminGlobal(edgeFirebase).value)
+const showDevOnlyActions = computed(() => edgeGlobal.allowMenuItem({ devOnly: true }, isAdmin.value))
+const orgDocPath = computed(() => String(edgeGlobal?.edgeState?.organizationDocPath || '').trim())
+const registeredDomainsPath = computed(() => orgDocPath.value ? `${orgDocPath.value}/domains-registered` : '')
+const domainRegistryPath = computed(() => orgDocPath.value ? `${orgDocPath.value}/domain-registry` : '')
+const sitesPath = computed(() => orgDocPath.value ? `${orgDocPath.value}/sites` : '')
+const snapshotPaths = computed(() => [
+  registeredDomainsPath.value,
+  domainRegistryPath.value,
+  sitesPath.value,
+].filter(Boolean))
+const snapshotContext = computed(() => ({
+  isAdmin: isAdmin.value,
+  paths: snapshotPaths.value,
+}))
 
 const normalizeDomain = (value) => {
   if (!value)
@@ -95,46 +107,64 @@ const parseFunctionError = (error, fallback = 'Request failed.') => {
   return message || fallback
 }
 
-const applyDomainsData = ({ registeredDomains = [], domainRegistry = [], sites = [] }) => {
-  state.registeredDomains = Array.isArray(registeredDomains) ? registeredDomains : []
-  state.domainRegistry = Array.isArray(domainRegistry) ? domainRegistry : []
-  state.sites = Array.isArray(sites) ? sites : []
+const snapshotCollectionItems = (path) => {
+  const data = edgeFirebase?.data?.[path] || {}
+  return Object.values(data)
+    .filter(Boolean)
+    .map(item => ({ ...item, docId: item.docId || item.id }))
 }
 
-const refreshData = async ({ syncFromRegistry = false, preserveMessage = false } = {}) => {
-  if (!currentOrgId.value || !isAdmin.value)
-    return
-  if (!currentUid.value)
+const startRegistrarSnapshots = async () => {
+  if (!isAdmin.value || !snapshotPaths.value.length)
     return
 
   state.loading = true
-  if (!preserveMessage)
-    clearMessage()
-
   try {
-    if (syncFromRegistry) {
-      await edgeFirebase.runFunction('cms-registrarSyncRegisteredFromRegistry', {
-        uid: currentUid.value,
-        orgId: currentOrgId.value,
-      })
-    }
-
-    const response = await edgeFirebase.runFunction('cms-registrarListOrgDomains', {
-      uid: currentUid.value,
-      orgId: currentOrgId.value,
-    })
-
-    applyDomainsData({
-      registeredDomains: response?.data?.registeredDomains,
-      domainRegistry: response?.data?.domainRegistry,
-      sites: response?.data?.sites,
-    })
+    const tasks = snapshotPaths.value
+      .filter(path => !edgeFirebase.data?.[path])
+      .map(path => edgeFirebase.startSnapshot(path))
+    const results = tasks.length ? await Promise.allSettled(tasks) : []
+    const rejected = results.find(result => result.status === 'rejected')
+    if (rejected)
+      throw rejected.reason
   }
   catch (error) {
     setMessage(parseFunctionError(error, 'Unable to load domain registrar data.'), 'error')
   }
   finally {
     state.loading = false
+  }
+}
+
+const stopRegistrarSnapshots = async (paths = []) => {
+  const tasks = paths
+    .filter(Boolean)
+    .map(path => edgeFirebase.stopSnapshot(path))
+  if (tasks.length)
+    await Promise.allSettled(tasks)
+}
+
+const syncFromRegistry = async () => {
+  if (!currentOrgId.value || !isAdmin.value)
+    return
+  if (!currentUid.value)
+    return
+
+  state.syncing = true
+  clearMessage()
+
+  try {
+    await edgeFirebase.runFunction('cms-registrarSyncRegisteredFromRegistry', {
+      uid: currentUid.value,
+      orgId: currentOrgId.value,
+    })
+    setMessage('Domain registry status refreshed.', 'success')
+  }
+  catch (error) {
+    setMessage(parseFunctionError(error, 'Unable to refresh domain registry status.'), 'error')
+  }
+  finally {
+    state.syncing = false
   }
 }
 
@@ -186,7 +216,6 @@ const registerDomain = async () => {
       domain,
     })
     setMessage(`"${domain}" registration request submitted.`, 'success')
-    await refreshData({ preserveMessage: true })
   }
   catch (error) {
     setMessage(parseFunctionError(error, 'Unable to register domain.'), 'error')
@@ -231,7 +260,6 @@ const attachDomainToSite = async ({ domain, siteId }) => {
       'success',
     )
 
-    await refreshData({ preserveMessage: true })
     return true
   }
   catch (error) {
@@ -276,7 +304,6 @@ const detachDomainFromSite = async ({ domain }) => {
       detached ? 'success' : 'info',
     )
 
-    await refreshData({ preserveMessage: true })
     return detached
   }
   catch (error) {
@@ -288,12 +315,12 @@ const detachDomainFromSite = async ({ domain }) => {
   }
 }
 
-const syncFromRegistry = async () => {
-  await refreshData({ syncFromRegistry: true })
-}
+const registeredDomains = computed(() => snapshotCollectionItems(registeredDomainsPath.value))
+const domainRegistry = computed(() => snapshotCollectionItems(domainRegistryPath.value))
+const sites = computed(() => snapshotCollectionItems(sitesPath.value))
 
 const siteOptions = computed(() => {
-  return (Array.isArray(state.sites) ? state.sites : [])
+  return sites.value
     .filter((site) => {
       const siteId = String(site?.docId || '').trim().toLowerCase()
       return siteId && siteId !== 'templates'
@@ -306,7 +333,7 @@ const siteOptions = computed(() => {
 
 const siteNameById = computed(() => {
   const map = new Map()
-  for (const site of state.sites) {
+  for (const site of sites.value) {
     const siteId = String(site?.docId || '').trim()
     if (!siteId)
       continue
@@ -318,7 +345,7 @@ const siteNameById = computed(() => {
 const domainRows = computed(() => {
   const rowByDomain = new Map()
 
-  for (const item of state.registeredDomains) {
+  for (const item of registeredDomains.value) {
     const domain = normalizeDomain(item?.domain)
     if (!domain)
       continue
@@ -340,7 +367,7 @@ const domainRows = computed(() => {
     })
   }
 
-  for (const item of state.domainRegistry) {
+  for (const item of domainRegistry.value) {
     const domain = normalizeDomain(item?.domain)
     if (!domain)
       continue
@@ -407,9 +434,6 @@ const hiddenBySearchCount = computed(() => Math.max(totalLoadedCount.value - sho
 const isDomainAttaching = domain => Boolean(state.attachingDomains[normalizeDomain(domain)])
 const isDomainDetaching = domain => Boolean(state.detachingDomains[normalizeDomain(domain)])
 const isDomainBusy = domain => isDomainAttaching(domain) || isDomainDetaching(domain)
-const hasRowActionsInFlight = computed(() => {
-  return Object.values(state.attachingDomains).some(Boolean) || Object.values(state.detachingDomains).some(Boolean)
-})
 
 const getRegistrationBadgeClass = (item) => {
   if (String(item?.dnsSyncError || '').trim())
@@ -498,20 +522,21 @@ const confirmDetach = async () => {
     state.detachDialogOpen = false
 }
 
-onMounted(async () => {
-  await refreshData({ syncFromRegistry: true })
-})
-
-watch(currentOrgId, async (nextOrgId, previousOrgId) => {
-  if (!nextOrgId || nextOrgId === previousOrgId)
+watch(snapshotContext, async (nextContext, previousContext = {}) => {
+  const nextPaths = nextContext.paths || []
+  const previousPaths = previousContext.paths || []
+  if (!nextContext.isAdmin) {
+    await stopRegistrarSnapshots(previousPaths)
     return
-  await refreshData({ syncFromRegistry: true })
-})
-
-watch(currentUid, async (nextUid, previousUid) => {
-  if (!nextUid || nextUid === previousUid)
+  }
+  if (!nextPaths.length)
     return
-  await refreshData({ syncFromRegistry: true })
+  await stopRegistrarSnapshots(previousPaths.filter(path => !nextPaths.includes(path)))
+  await startRegistrarSnapshots()
+}, { immediate: true })
+
+onBeforeUnmount(async () => {
+  await stopRegistrarSnapshots(snapshotPaths.value)
 })
 </script>
 
@@ -525,13 +550,15 @@ watch(currentUid, async (nextUid, previousUid) => {
         </h2>
       </div>
       <edge-shad-button
-        class="bg-slate-700 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
-        :disabled="state.loading || state.checking || state.registering || hasRowActionsInFlight"
+        v-if="showDevOnlyActions"
+        variant="outline"
+        class="gap-2"
+        :disabled="state.loading || state.syncing || state.checking || state.registering"
         @click="syncFromRegistry"
       >
-        <Loader2 v-if="state.loading" class="mr-2 h-4 w-4 animate-spin" />
-        <RefreshCw v-else class="mr-2 h-4 w-4" />
-        Sync
+        <Loader2 v-if="state.syncing" class="h-4 w-4 animate-spin" />
+        <RefreshCw v-else class="h-4 w-4" />
+        Sync Registry Status
       </edge-shad-button>
     </div>
 

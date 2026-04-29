@@ -3428,6 +3428,61 @@ const listDomainRegistryDocsForOrg = async (orgId) => {
   return Array.from(docsById.values())
 }
 
+const getOrgDomainRegistryRef = (orgId, domain) => {
+  const normalizedOrgId = String(orgId || '').trim()
+  const normalizedDomain = normalizeDomain(domain)
+  if (!normalizedOrgId || !normalizedDomain)
+    return null
+
+  return db.collection('organizations').doc(normalizedOrgId).collection(DOMAIN_REGISTRY_COLLECTION).doc(normalizedDomain)
+}
+
+const getOrgIdFromDomainRegistryData = (data = {}) => {
+  const orgId = String(data?.orgId || '').trim()
+  if (orgId)
+    return orgId
+
+  const sitePathParts = String(data?.sitePath || '').trim().split('/')
+  if (sitePathParts[0] === 'organizations' && sitePathParts[1])
+    return sitePathParts[1]
+
+  return ''
+}
+
+const mirrorDomainRegistryDocToOrg = async (doc, overrideData = null) => {
+  if (!doc?.exists)
+    return false
+
+  const data = overrideData || doc.data() || {}
+  const domain = normalizeDomain(data.domain || doc.id || '')
+  const orgId = getOrgIdFromDomainRegistryData(data)
+  const mirrorRef = getOrgDomainRegistryRef(orgId, domain)
+  if (!mirrorRef)
+    return false
+
+  await mirrorRef.set({
+    ...data,
+    domain,
+    orgId,
+  })
+  return true
+}
+
+const getRegistrationStateFromAvailability = (availability) => {
+  if (availability?.registrable === true)
+    return 'not_registered'
+  if (availability?.registrable === false)
+    return 'registered_external'
+  return 'unknown'
+}
+
+const shouldRefreshDomainRegistryRegistrationStatus = (data = {}) => {
+  const state = String(data?.registrationState || '').trim()
+  if (!state)
+    return true
+  return !data?.registrationStatusCheckedAt
+}
+
 const getCloudflareRegisteredDomainSet = async () => {
   const registrations = await listCloudflareRegistrarRegistrations()
   return new Set(
@@ -3435,6 +3490,36 @@ const getCloudflareRegisteredDomainSet = async () => {
       .map(item => normalizeDomain(item?.domain_name || item?.name || ''))
       .filter(Boolean),
   )
+}
+
+const buildDomainRegistryRegistrationStatusPayload = async (domain) => {
+  const normalizedDomain = normalizeDomain(domain)
+  if (!normalizedDomain || shouldExcludeRegistrarDomain(normalizedDomain)) {
+    return {
+      registrationState: 'unknown',
+      registrationReason: '',
+      registrationStatusCheckedAt: Firestore.FieldValue.serverTimestamp(),
+    }
+  }
+
+  const cloudflareDomainSet = await getCloudflareRegisteredDomainSet()
+  const apexDomain = getCloudflareApexDomain(normalizedDomain)
+  const registeredInOrg = cloudflareDomainSet.has(normalizedDomain) || (apexDomain && cloudflareDomainSet.has(apexDomain))
+  if (registeredInOrg) {
+    return {
+      registrationState: 'registered_org',
+      registrationReason: '',
+      registrationStatusCheckedAt: Firestore.FieldValue.serverTimestamp(),
+    }
+  }
+
+  const availabilityByDomain = await getRegistrarAvailabilityByDomainWithTimeout([normalizedDomain])
+  const availability = availabilityByDomain.get(normalizedDomain)
+  return {
+    registrationState: getRegistrationStateFromAvailability(availability),
+    registrationReason: String(availability?.reason || '').trim(),
+    registrationStatusCheckedAt: Firestore.FieldValue.serverTimestamp(),
+  }
 }
 
 const buildDomainsRegisteredPayload = ({
@@ -7480,9 +7565,13 @@ exports.registrarSyncRegisteredFromRegistry = onCall(async (request) => {
     return {
       matched: 0,
       created: 0,
+      mirrored: 0,
       domains: [],
     }
   }
+
+  const mirrorResults = await Promise.all(registryDocs.map(doc => mirrorDomainRegistryDocToOrg(doc)))
+  const mirrored = mirrorResults.filter(Boolean).length
 
   let cloudflareDomainSet = new Set()
   try {
@@ -7505,6 +7594,67 @@ exports.registrarSyncRegisteredFromRegistry = onCall(async (request) => {
       matchingDomains.add(domain)
     else if (apexDomain && cloudflareDomainSet.has(apexDomain))
       matchingDomains.add(apexDomain)
+  }
+
+  const statusChecks = []
+  const registryDomainsNeedingLookup = []
+  for (const doc of registryDocs) {
+    const value = doc.data() || {}
+    const domain = normalizeDomain(value.domain || doc.id)
+    if (!domain || shouldExcludeRegistrarDomain(domain))
+      continue
+
+    const apexDomain = getCloudflareApexDomain(domain)
+    const registeredInOrg = cloudflareDomainSet.has(domain) || (apexDomain && cloudflareDomainSet.has(apexDomain))
+    if (registeredInOrg) {
+      statusChecks.push({
+        doc,
+        domain,
+        state: 'registered_org',
+        reason: '',
+      })
+      continue
+    }
+
+    registryDomainsNeedingLookup.push(domain)
+  }
+
+  let availabilityByDomain = new Map()
+  if (registryDomainsNeedingLookup.length) {
+    try {
+      availabilityByDomain = await getRegistrarAvailabilityByDomainWithTimeout(Array.from(new Set(registryDomainsNeedingLookup)))
+    }
+    catch (error) {
+      logger.warn('Registrar availability lookup failed during registry sync', {
+        orgId,
+        error: parseCloudflareErrorMessage(error),
+      })
+    }
+  }
+
+  for (const domain of registryDomainsNeedingLookup) {
+    const availability = availabilityByDomain.get(domain)
+    statusChecks.push({
+      doc: registryDocs.find((doc) => {
+        const value = doc.data() || {}
+        return normalizeDomain(value.domain || doc.id) === domain
+      }),
+      domain,
+      state: getRegistrationStateFromAvailability(availability),
+      reason: String(availability?.reason || '').trim(),
+    })
+  }
+
+  let updatedStatus = 0
+  for (const item of statusChecks) {
+    if (!item.doc?.ref)
+      continue
+    await item.doc.ref.set({
+      registrationState: item.state,
+      registrationReason: item.reason,
+      registrationStatusCheckedAt: Firestore.FieldValue.serverTimestamp(),
+    }, { merge: true })
+    updatedStatus += 1
   }
 
   let created = 0
@@ -7530,6 +7680,8 @@ exports.registrarSyncRegisteredFromRegistry = onCall(async (request) => {
   return {
     matched: matchingDomains.size,
     created,
+    mirrored,
+    updatedStatus,
     domains: Array.from(matchingDomains).sort((a, b) => a.localeCompare(b)),
   }
 })
@@ -8028,6 +8180,64 @@ exports.syncPublishedRestrictedContentFromSite = onDocumentWritten(
     await publishedRef.set({
       restrictedContent: (afterRestricted && typeof afterRestricted === 'object') ? afterRestricted : {},
     }, { merge: true })
+  },
+)
+
+exports.mirrorDomainRegistryToOrg = onDocumentWritten(
+  { document: `${DOMAIN_REGISTRY_COLLECTION}/{domain}`, timeoutSeconds: 180 },
+  async (event) => {
+    const change = event.data
+    const beforeData = change?.before?.data?.() || {}
+    const afterData = change?.after?.data?.() || {}
+    const domain = normalizeDomain(afterData.domain || beforeData.domain || event.params.domain || '')
+    const beforeOrgId = getOrgIdFromDomainRegistryData(beforeData)
+    const afterOrgId = getOrgIdFromDomainRegistryData(afterData)
+    const beforeMirrorRef = getOrgDomainRegistryRef(beforeOrgId, domain)
+
+    if (!change?.after?.exists) {
+      if (beforeMirrorRef)
+        await beforeMirrorRef.delete()
+      return
+    }
+
+    if (!domain || !afterOrgId) {
+      if (beforeMirrorRef)
+        await beforeMirrorRef.delete()
+      return
+    }
+
+    if (!getOrgDomainRegistryRef(afterOrgId, domain))
+      return
+
+    let mirrorData = afterData
+    let statusPayload = null
+    if (shouldRefreshDomainRegistryRegistrationStatus(afterData)) {
+      try {
+        statusPayload = await buildDomainRegistryRegistrationStatusPayload(domain)
+        mirrorData = {
+          ...afterData,
+          ...statusPayload,
+        }
+      }
+      catch (error) {
+        logger.warn('Unable to cache domain registry registration status', {
+          domain,
+          orgId: afterOrgId,
+          error: parseCloudflareErrorMessage(error),
+        })
+      }
+    }
+
+    const tasks = []
+    if (beforeMirrorRef && beforeOrgId !== afterOrgId)
+      tasks.push(beforeMirrorRef.delete())
+
+    if (statusPayload)
+      tasks.push(change.after.ref.set(statusPayload, { merge: true }))
+
+    tasks.push(mirrorDomainRegistryDocToOrg(change.after, mirrorData))
+
+    await Promise.all(tasks)
   },
 )
 
