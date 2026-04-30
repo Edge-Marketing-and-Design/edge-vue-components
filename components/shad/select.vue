@@ -55,6 +55,21 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  dropdownItemClass: {
+    type: null,
+    required: false,
+    default: '',
+  },
+  itemLabelClass: {
+    type: null,
+    required: false,
+    default: '',
+  },
+  selectedLabelClass: {
+    type: null,
+    required: false,
+    default: '',
+  },
 })
 
 const emits = defineEmits(['update:modelValue'])
@@ -76,6 +91,24 @@ const modelValue = useVModel(props, 'modelValue', emits, {
   passive: false,
   prop: 'modelValue',
 })
+
+const valueTitleMap = computed(() => {
+  const map = {}
+  for (const item of computedItems.value)
+    map[item[props.itemValue]] = item[props.itemTitle]
+  return map
+})
+
+const selectedDisplay = computed(() => {
+  const value = modelValue.value
+  if (Array.isArray(value))
+    return value.map(item => valueTitleMap.value[item] ?? item).filter(Boolean).join(', ')
+  if (value === null || value === undefined || value === '')
+    return ''
+  return valueTitleMap.value[value] ?? value
+})
+
+const hasSelectedDisplay = computed(() => Boolean(props.selectedLabelClass && selectedDisplay.value))
 </script>
 
 <template>
@@ -92,7 +125,10 @@ const modelValue = useVModel(props, 'modelValue', emits, {
           <Select v-model="modelValue" :disabled="props.disabled" :multiple="props.multiple" :default-value="modelValue" v-bind="componentField">
             <FormControl>
               <SelectTrigger class="text-foreground" :class="[$slots.icon ? 'pr-8' : '', props.class, props.triggerClass]">
-                <SelectValue :placeholder="props.placeholder" />
+                <span v-if="hasSelectedDisplay" :class="props.selectedLabelClass">
+                  {{ selectedDisplay }}
+                </span>
+                <SelectValue v-else :placeholder="props.placeholder" />
               </SelectTrigger>
             </FormControl>
             <SelectContent>
@@ -101,8 +137,11 @@ const modelValue = useVModel(props, 'modelValue', emits, {
                   v-for="item in computedItems"
                   :key="item[props.itemTitle]"
                   :value="item[props.itemValue]"
+                  :class="props.dropdownItemClass"
                 >
-                  {{ item[props.itemTitle] }}
+                  <span :class="props.itemLabelClass">
+                    {{ item[props.itemTitle] }}
+                  </span>
                 </SelectItem>
               </SelectGroup>
             </SelectContent>
@@ -127,7 +166,10 @@ const modelValue = useVModel(props, 'modelValue', emits, {
       <div class="relative w-full items-center">
         <Select v-model="modelValue" :disabled="props.disabled" :default-value="modelValue">
           <SelectTrigger class="text-foreground" :class="[$slots.icon ? 'pr-8' : '', props.class, props.triggerClass]">
-            <SelectValue :placeholder="props.placeholder" />
+            <span v-if="hasSelectedDisplay" :class="props.selectedLabelClass">
+              {{ selectedDisplay }}
+            </span>
+            <SelectValue v-else :placeholder="props.placeholder" />
           </SelectTrigger>
           <SelectContent>
             <SelectGroup>
@@ -135,8 +177,11 @@ const modelValue = useVModel(props, 'modelValue', emits, {
                 v-for="item in computedItems"
                 :key="item[props.itemTitle]"
                 :value="item[props.itemValue]"
+                :class="props.dropdownItemClass"
               >
-                {{ item[props.itemTitle] }}
+                <span :class="props.itemLabelClass">
+                  {{ item[props.itemTitle] }}
+                </span>
               </SelectItem>
             </SelectGroup>
           </SelectContent>

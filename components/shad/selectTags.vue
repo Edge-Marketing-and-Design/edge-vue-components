@@ -53,6 +53,16 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  dropdownItemClass: {
+    type: null,
+    required: false,
+    default: '',
+  },
+  tagLabelClass: {
+    type: null,
+    required: false,
+    default: '',
+  },
 })
 
 const emits = defineEmits(['update:modelValue', 'add'])
@@ -181,7 +191,7 @@ const onSelectItem = (ev) => {
                   <!-- Wrapping area for tags + input -->
                   <div class="flex min-w-0 flex-1 flex-wrap items-center gap-2 overflow-hidden">
                     <TagsInputItem v-for="val in selectedValues" :key="val" class="h-6 max-w-full min-w-0 border border-slate-300 bg-slate-100 text-slate-800 dark:border-slate-500 dark:bg-slate-700 dark:text-slate-100" :value="val">
-                      <span class="block max-w-[12rem] truncate px-1" :title="valueToTitle[val] ?? val">{{ valueToTitle[val] ?? val }}</span>
+                      <span class="block max-w-[12rem] truncate px-1" :class="props.tagLabelClass" :title="valueToTitle[val] ?? val">{{ valueToTitle[val] ?? val }}</span>
                       <TagsInputItemDelete v-if="!props.disabled" />
                     </TagsInputItem>
 
@@ -224,9 +234,12 @@ const onSelectItem = (ev) => {
                   <ComboboxGroup>
                     <ComboboxItem
                       v-for="item in filteredItems" :key="item[props.itemValue]" :value="item[props.itemValue]"
+                      :class="props.dropdownItemClass"
                       @select.prevent="onSelectItem"
                     >
-                      {{ item[props.itemTitle] }}
+                      <span :class="props.tagLabelClass">
+                        {{ item[props.itemTitle] }}
+                      </span>
                     </ComboboxItem>
                   </ComboboxGroup>
                 </ComboboxList>
@@ -262,8 +275,11 @@ const onSelectItem = (ev) => {
                 v-for="item in computedItems"
                 :key="item[props.itemTitle]"
                 :value="item[props.itemValue]"
+                :class="props.dropdownItemClass"
               >
-                {{ item[props.itemTitle] }}
+                <span :class="props.tagLabelClass">
+                  {{ item[props.itemTitle] }}
+                </span>
               </SelectItem>
             </SelectGroup>
           </SelectContent>

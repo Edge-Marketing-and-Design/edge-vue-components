@@ -159,6 +159,9 @@ const state = reactive({
   deleteConfirmMode: 'single',
   deleteConfirmDocId: '',
   deleteConfirmAcknowledge: false,
+  recentUploadedMediaKeys: [],
+  recentUploadStartedAt: 0,
+  recentUploadCompletedAt: 0,
 })
 
 let mediaLoaderHoldTimer = null
@@ -407,6 +410,57 @@ const showEmptyMediaState = computed(() => {
     && filteredFiles.value.length === 0
 })
 const isDialogOpen = computed(() => state.showUpload || state.editMedia)
+const normalizeMediaKey = value => String(value || '').trim()
+const getMediaIdentityKeys = (item) => {
+  if (!item)
+    return []
+  if (typeof item === 'string')
+    return [normalizeMediaKey(item)].filter(Boolean)
+
+  return [
+    item.docId,
+    item.id,
+    item.r2URL,
+    item.r2Url,
+    item.url,
+    item.publicURL,
+    item.downloadURL,
+    edgeGlobal.getImage?.(item, 'public'),
+  ].map(normalizeMediaKey).filter(Boolean)
+}
+const isRecentlyUploadedMedia = (item) => {
+  const recentKeys = new Set(state.recentUploadedMediaKeys)
+  if (getMediaIdentityKeys(item).some(key => recentKeys.has(key)))
+    return true
+
+  const uploadTime = Number(item?.uploadTime || 0)
+  return Boolean(
+    uploadTime
+    && state.recentUploadStartedAt
+    && uploadTime >= state.recentUploadStartedAt - 5000
+    && (!state.recentUploadCompletedAt || uploadTime <= state.recentUploadCompletedAt + 30000),
+  )
+}
+const handleUploadComplete = (uploadedFiles = [], sourceFiles = [], uploadMeta = {}) => {
+  const uploadedKeys = [
+    ...(Array.isArray(uploadedFiles) ? uploadedFiles : [uploadedFiles]),
+    ...(Array.isArray(sourceFiles) ? sourceFiles : [sourceFiles]),
+  ]
+    .flatMap(file => getMediaIdentityKeys(file))
+  state.recentUploadedMediaKeys = Array.from(new Set([
+    ...state.recentUploadedMediaKeys,
+    ...uploadedKeys,
+  ]))
+  if (Array.isArray(state.filterTags) && state.filterTags.length > 0) {
+    state.filterTags = Array.from(new Set([
+      ...state.filterTags,
+      ...(Array.isArray(state.tags) ? state.tags : []),
+    ]))
+  }
+  state.recentUploadStartedAt = Number(uploadMeta?.startedAt || 0)
+  state.recentUploadCompletedAt = Number(uploadMeta?.completedAt || Date.now())
+  state.showUpload = false
+}
 
 const mediaPickerShellClass = computed(() => {
   if (!props.selectMode)
@@ -895,6 +949,8 @@ const siteQueryValue = computed(() => resolveCmsSiteScopeValues())
             name="tags"
             placeholder="Select tags"
             :allow-additions="true"
+            dropdown-item-class="uppercase"
+            tag-label-class="uppercase"
             class="w-full max-w-[800px] mx-auto mb-4 text-foreground"
           />
         </edge-shad-form>
@@ -911,6 +967,7 @@ const siteQueryValue = computed(() => resolveCmsSiteScopeValues())
             class="w-full mx-auto border-dashed border-slate-300/70 bg-gradient-to-br from-slate-900/90 via-slate-800/70 to-slate-700/50 dark:from-slate-900/70 dark:via-slate-800/70 dark:to-slate-700/70 border text-white dark:text-white/90 py-10 rounded-[20px] my-3 shadow-lg shadow-slate-900/30"
             :extra-meta="{ tags: state.tags, cmsmedia: true, cmssite: [props.site] }"
             :extra-meta-resolver="resolveUploadExtraMeta"
+            @uploaded="handleUploadComplete"
           >
             <template #title>
               <div class="flex items-center gap-2 justify-center gap-5 text-white dark:text-slate-100 drop-shadow">
@@ -998,6 +1055,9 @@ const siteQueryValue = computed(() => resolveCmsSiteScopeValues())
                         name="tags"
                         class="text-foreground w-full"
                         :items="getTagsFromMedia"
+                        dropdown-item-class="uppercase"
+                        item-label-class="uppercase"
+                        selected-label-class="uppercase"
                         placeholder="Filter Tags"
                       >
                         <template v-if="state.filterTags.length > 0" #icon>
@@ -1112,6 +1172,7 @@ const siteQueryValue = computed(() => resolveCmsSiteScopeValues())
                   class="block w-full h-full"
                   :select-mode="props.selectMode"
                   :can-delete="canDeleteMedia(item)"
+                  :is-new="isRecentlyUploadedMedia(item)"
                   @select="(checked, docId) => handleCheckboxChange(checked, docId)"
                   @delete="(docId) => openDeleteConfirmSingle(docId)"
                 />

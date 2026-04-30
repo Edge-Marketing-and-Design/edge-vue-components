@@ -64,7 +64,7 @@ const props = defineProps({
   },
 })
 
-const emits = defineEmits(['update:modelValue'])
+const emits = defineEmits(['update:modelValue', 'uploaded'])
 
 const edgeFirebase = inject('edgeFirebase')
 
@@ -102,7 +102,9 @@ const resetUploadProgressAfterDelay = () => {
 
 const uploadFiles = async () => {
   const results = []
+  const uploadedFiles = []
   if (state.files && state.files.length > 0) {
+    const startedAt = Date.now()
     state.uploadErrors = []
     state.uploadProgress = 0
     state.uploading = true
@@ -136,6 +138,7 @@ const uploadFiles = async () => {
             },
           )
           results.push(result)
+          uploadedFiles.push(file)
           state.uploadProgress = ((index + 1) / state.files.length) * 100
           index++
         }
@@ -143,6 +146,8 @@ const uploadFiles = async () => {
       state.currentUploadFile = 'Upload complete!'
       state.files = []
       modelValue.value = results
+      if (results.length > 0 && state.uploadErrors.length === 0)
+        emits('uploaded', results, uploadedFiles, { startedAt, completedAt: Date.now() })
     }
     catch (error) {
       state.uploadErrors.push(error)

@@ -17,6 +17,10 @@ const props = defineProps({
     type: Boolean,
     default: true,
   },
+  isNew: {
+    type: Boolean,
+    default: false,
+  },
 })
 const emits = defineEmits(['select', 'delete'])
 
@@ -116,6 +120,7 @@ const mediaCopyUrl = computed(() => {
 <template>
   <Card
     class="w-full group overflow-hidden rounded-2xl border bg-card hover:shadow-md hover:border-muted-foreground/20 transition-all"
+    :class="props.isNew ? 'border-emerald-500 ring-2 ring-emerald-500/35 shadow-lg shadow-emerald-500/10' : ''"
   >
     <div class="relative w-full h-[200px] flex items-center justify-center" :class="previewBackgroundClass">
       <div class="z-10 absolute w-full flex inset-0 bg-black/10 dark:bg-black/30 justify-between items-start p-2">
@@ -137,6 +142,9 @@ const mediaCopyUrl = computed(() => {
         >
           <Trash class="!h-5 !w-5" />
         </edge-shad-button>
+      </div>
+      <div v-if="props.isNew" class="absolute left-3 bottom-3 z-20 rounded-md bg-emerald-600 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-white shadow-sm">
+        Just Uploaded
       </div>
       <div v-if="isFileItem && !thumbnailUrl" class="absolute inset-0 m-auto flex h-full w-full items-center justify-center">
         <component :is="fileIconComponent" class="h-24 w-24 text-slate-600 dark:text-slate-300" />

@@ -4673,6 +4673,7 @@ const reindexPublishedPostsToKv = async () => {
                     <edge-cms-media-manager
                       :site="props.site"
                       :select-mode="true"
+                      :default-tags="['Featured Images']"
                       @select="(url) => { slotProps.workingDoc.featuredImage = url; state.imageOpen = false; }"
                     />
                   </DialogContent>
