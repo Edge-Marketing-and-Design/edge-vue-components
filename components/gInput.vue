@@ -610,6 +610,8 @@ const originalCompare = computed(() => {
 })
 
 const isTracked = computed(() => {
+  if (props.disableTracking)
+    return false
   return edgeGlobal.objHas(edgeGlobal.edgeState.changeTracker, state.trackerKey)
 })
 
@@ -673,10 +675,13 @@ const isNumber = (value) => {
 
 onMounted(() => {
   state.trackerKey = (`${props.parentTrackerId}-${props.label.replaceAll(' ', '-')}`).toLowerCase()
+  if (props.disableTracking) {
+    delete edgeGlobal.edgeState.changeTracker[state.trackerKey]
+    state.afterMount = true
+    return
+  }
   if (!edgeGlobal.objHas(edgeGlobal.edgeState.changeTracker, state.trackerKey)) {
-    if (!props.disableTracking) {
-      edgeGlobal.edgeState.changeTracker[state.trackerKey] = edgeGlobal.dupObject(modelValue.value)
-    }
+    edgeGlobal.edgeState.changeTracker[state.trackerKey] = edgeGlobal.dupObject(modelValue.value)
   }
   state.afterMount = true
 })
@@ -967,6 +972,14 @@ watch(modelValue, () => {
         <edge-g-helper :title="props.label" :helper="props.helper" />
       </template>
     </edge-shad-select>
+    <edge-shad-select-tags
+      v-if="props.fieldType === 'selectTags'" v-model="modelValue" :label="props.label" :items="props.items"
+      v-bind="props.bindings" :disabled="props.disabled" :name="props.name" :description="props.hint"
+    >
+      <template v-if="props.helper" #icon>
+        <edge-g-helper :title="props.label" :helper="props.helper" />
+      </template>
+    </edge-shad-select-tags>
     <edge-shad-textarea
       v-if="props.fieldType === 'textarea'" v-model="modelValue" v-maska:[props.maskOptions]
       type="text" :name="props.name" v-bind="props.bindings" :label="props.label" :disabled="props.disabled"

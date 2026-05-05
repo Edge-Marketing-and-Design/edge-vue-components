@@ -5,6 +5,12 @@ const edgeFirebase = inject('edgeFirebase')
 const route = useRoute()
 const router = useRouter()
 const isAiBusy = status => status === 'queued' || status === 'running'
+const props = defineProps({
+  siteDeleteDisabled: {
+    type: Array,
+    default: () => [],
+  },
+})
 
 const state = reactive({
   filter: '',
@@ -27,6 +33,12 @@ const canAddSite = computed(() => {
     return true
   return currentOrgRoleName.value === 'admin'
 })
+
+const siteDeleteDisabledIds = computed(() => new Set(
+  props.siteDeleteDisabled.map(siteId => String(siteId || '').trim()).filter(Boolean),
+))
+
+const canDeleteSite = item => !siteDeleteDisabledIds.value.has(String(item?.docId || '').trim())
 
 const queryField = computed(() => {
   if (!isAdmin.value && !cmsMultiOrg.value) {
@@ -122,6 +134,7 @@ const maybeAutoOpenSingleSite = (items = []) => {
             <edge-shad-button
               size="icon"
               class="bg-slate-600 h-7 w-7"
+              :disabled="!canDeleteSite(item)"
               @click.stop="slotProps.deleteItem(item.docId)"
             >
               <Trash class="h-5 w-5" />
