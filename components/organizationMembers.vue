@@ -556,9 +556,9 @@ onBeforeMount(async () => {
 <template>
   <div v-if="state.loaded" class="w-full flex-1 min-h-0 h-[calc(100vh-58px)] overflow-hidden">
     <ResizablePanelGroup direction="horizontal" class="w-full h-full flex-1">
-      <ResizablePanel class="bg-sidebar text-sidebar-foreground min-w-[400px]" :default-size="22" :min-size="30">
+      <ResizablePanel class="bg-white text-foreground min-w-[400px]" :default-size="22" :min-size="30">
         <div class="flex flex-col h-full">
-          <div class="px-3 py-3 border-b border-sidebar-border bg-sidebar/90">
+          <div class="px-3 py-3 border-b border-border bg-white">
             <div class="flex items-center justify-between gap-2">
               <div class="flex items-center gap-2 text-sm font-semibold">
                 <component :is="edgeGlobal.iconFromMenu(route)" class="h-4 w-4" />
@@ -605,7 +605,7 @@ onBeforeMount(async () => {
                 :key="userKey(user)"
               >
                 <SidebarMenuButton
-                  class="w-full !h-auto min-h-[145px] items-start rounded-none border-b border-sidebar-border/70 px-4 py-5 hover:bg-[#E6E3DC] hover:text-foreground"
+                  class="w-full !h-auto min-h-[145px] items-start rounded-none border-b border-border/70 px-4 py-5 hover:bg-[#E6E3DC] hover:text-foreground"
                   :class="[
                     userRowTone(user),
                     state.dialog && userKey(state.workingItem) && userKey(state.workingItem) === userKey(user) ? 'bg-[#93A4AF] text-foreground' : '',
@@ -671,7 +671,7 @@ onBeforeMount(async () => {
               </div>
             </SidebarMenu>
           </div>
-          <div class="shrink-0 border-t border-sidebar-border bg-sidebar/90 px-3 py-2">
+          <div class="shrink-0 border-t border-border bg-white px-3 py-2">
             <div class="text-[11px] text-muted-foreground">
               {{ shownCount }} shown / {{ totalLoadedCount }} loaded
             </div>
