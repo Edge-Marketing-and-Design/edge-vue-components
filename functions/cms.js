@@ -700,6 +700,39 @@ const addCloudflarePagesDomain = async (domain, context = {}) => {
   }
 }
 
+const getCachedCloudflarePagesDomainResult = ({ domain, registryData, sitePath, orgId, siteId, variant, log = true }) => {
+  const normalizedDomain = normalizeDomain(domain)
+  const normalizedSitePath = String(sitePath || '').trim()
+  const normalizedOrgId = String(orgId || '').trim()
+  const normalizedSiteId = String(siteId || '').trim()
+  const normalizedVariant = String(variant || '').trim()
+  const addedField = normalizedVariant === 'apex' ? 'apexAdded' : 'wwwAdded'
+  const domainField = normalizedVariant === 'apex' ? 'apexDomain' : 'wwwDomain'
+
+  if (!normalizedDomain || !registryData || typeof registryData !== 'object')
+    return null
+  if (String(registryData.sitePath || '').trim() !== normalizedSitePath)
+    return null
+  if (normalizedOrgId && String(registryData.orgId || '').trim() !== normalizedOrgId)
+    return null
+  if (normalizedSiteId && String(registryData.siteId || '').trim() !== normalizedSiteId)
+    return null
+  if (normalizeDomain(registryData[domainField] || '') !== normalizedDomain)
+    return null
+  if (registryData[addedField] !== true)
+    return null
+
+  if (log) {
+    logger.log('Cloudflare Pages domain add skipped: already marked connected', {
+      domain: normalizedDomain,
+      variant: normalizedVariant || 'www',
+      orgId: normalizedOrgId,
+      siteId: normalizedSiteId,
+    })
+  }
+  return { ok: true, skipped: true, alreadyConnected: true }
+}
+
 const removeCloudflarePagesDomain = async (domain, context = {}) => {
   if (!CF_ACCOUNT_ID || !CLOUDFLARE_PAGES_API_TOKEN || !CLOUDFLARE_PAGES_PROJECT) {
     logger.warn('Cloudflare Pages domain removal skipped: missing env vars', {
@@ -8279,6 +8312,7 @@ exports.ensurePublishedSiteDomains = onDocumentWritten(
     }
 
     const conflictDomains = []
+    const existingRegistryStateByDomain = new Map()
     for (const domain of normalizedDomains) {
       const registryRef = db.collection(DOMAIN_REGISTRY_COLLECTION).doc(domain)
       let conflict = false
@@ -8299,6 +8333,7 @@ exports.ensurePublishedSiteDomains = onDocumentWritten(
 
         const registryData = registrySnap.data() || {}
         if (registryData.sitePath === siteRef.path) {
+          existingRegistryStateByDomain.set(domain, registryData)
           transaction.set(registryRef, {
             domain,
             orgId,
@@ -8366,6 +8401,40 @@ exports.ensurePublishedSiteDomains = onDocumentWritten(
       .filter(plan => shouldSyncCloudflareDomain(plan.wwwDomain))
       .map(plan => ({ ...plan, domains: Array.from(plan.domains) }))
 
+    const beforeDomainKey = stableSerialize([...beforeNormalizedDomains].sort((a, b) => a.localeCompare(b)))
+    const afterDomainKey = stableSerialize([...normalizedDomains].sort((a, b) => a.localeCompare(b)))
+    const domainSyncInputsChanged = !change.before?.exists
+      || beforeDomainKey !== afterDomainKey
+      || (beforeData.forwardApex !== false) !== (siteData.forwardApex !== false)
+    const isPlanAlreadyConnected = (plan) => {
+      const planRegistryDataItems = plan.domains
+        .map(domain => existingRegistryStateByDomain.get(domain))
+        .filter(Boolean)
+      const hasCachedResult = (domain, variant) => {
+        return planRegistryDataItems.some((registryData) => {
+          return !!getCachedCloudflarePagesDomainResult({
+            domain,
+            registryData,
+            sitePath: siteRef.path,
+            orgId,
+            siteId,
+            variant,
+            log: false,
+          })
+        })
+      }
+      return hasCachedResult(plan.wwwDomain, 'www')
+        && (!shouldSyncCloudflareDomain(plan.apexDomain) || hasCachedResult(plan.apexDomain, 'apex'))
+    }
+    if (!domainSyncInputsChanged) {
+      const domainError = String(siteData.domainError || '').trim()
+      if (domainError.startsWith('Cloudflare domain sync failed') && syncPlans.every(isPlanAlreadyConnected)) {
+        await siteRef.set({ domainError: Firestore.FieldValue.delete() }, { merge: true })
+      }
+      logger.log('Cloudflare domain sync skipped: published domain config unchanged', { orgId, siteId })
+      return
+    }
+
     const removeDomains = Array.from(new Set(
       removedOwnedDomains
         .flatMap((domain) => {
@@ -8375,17 +8444,38 @@ exports.ensurePublishedSiteDomains = onDocumentWritten(
         })
         .filter(domain => shouldSyncCloudflareDomain(domain)),
     ))
-    if (removeDomains.length) {
-      await Promise.all(removeDomains.map(domain => removeCloudflarePagesDomain(domain, { orgId, siteId })))
+    for (const domain of removeDomains) {
+      await removeCloudflarePagesDomain(domain, { orgId, siteId })
     }
 
-    const syncResults = await Promise.all(syncPlans.map(async (plan) => {
-      const wwwResult = await addCloudflarePagesDomain(plan.wwwDomain, { orgId, siteId, variant: 'www' })
+    const syncResults = []
+    for (const plan of syncPlans) {
+      const planRegistryDataItems = plan.domains
+        .map(domain => existingRegistryStateByDomain.get(domain))
+        .filter(Boolean)
+      const getCachedResult = (domain, variant) => {
+        for (const registryData of planRegistryDataItems) {
+          const result = getCachedCloudflarePagesDomainResult({
+            domain,
+            registryData,
+            sitePath: siteRef.path,
+            orgId,
+            siteId,
+            variant,
+          })
+          if (result)
+            return result
+        }
+        return null
+      }
+      const wwwResult = getCachedResult(plan.wwwDomain, 'www')
+        || await addCloudflarePagesDomain(plan.wwwDomain, { orgId, siteId, variant: 'www' })
       let apexAttempted = false
       let apexResult = { ok: false, error: '' }
       if (shouldSyncCloudflareDomain(plan.apexDomain)) {
         apexAttempted = true
-        apexResult = await addCloudflarePagesDomain(plan.apexDomain, { orgId, siteId, variant: 'apex' })
+        apexResult = getCachedResult(plan.apexDomain, 'apex')
+          || await addCloudflarePagesDomain(plan.apexDomain, { orgId, siteId, variant: 'apex' })
       }
       const dnsResult = wwwResult?.ok
         ? await syncCloudflarePagesDns({
@@ -8406,14 +8496,14 @@ exports.ensurePublishedSiteDomains = onDocumentWritten(
               apex: { attempted: false, synced: false, error: '' },
             },
           }
-      return {
+      syncResults.push({
         ...plan,
         apexAttempted,
         wwwResult,
         apexResult,
         dnsResult,
-      }
-    }))
+      })
+    }
 
     for (const plan of syncResults) {
       const wwwAdded = !!plan.wwwResult?.ok
