@@ -1438,9 +1438,7 @@ exports.trackHistory = onRequest(async (req, res) => {
       timestamp: now,
     })
     const siteId = typeof data?.siteId === 'string' ? data.siteId.trim() : ''
-    const authUserId = typeof data?.userId === 'string'
-      ? data.userId.trim()
-      : (typeof data?.uid === 'string' ? data.uid.trim() : '')
+    const authUserId = typeof data?.userId === 'string' ? data.userId.trim() : ''
     if (siteId && authUserId) {
       try {
         await syncAudienceHistoryUuidForUser({
@@ -1456,15 +1454,37 @@ exports.trackHistory = onRequest(async (req, res) => {
     }
     let leadActionRef = null
     if (siteId) {
-      leadActionRef = await db.collection('organizations').doc(orgId)
+      const leadActionsRef = db.collection('organizations').doc(orgId)
         .collection('sites').doc(siteId)
         .collection('lead-actions')
-        .add({
-          action,
-          data,
-          timestamp: now,
-          uuid: docRef.id,
-        })
+      const oldUuid = typeof data?.oldUuid === 'string' ? data.oldUuid.trim() : ''
+      const leadActionPayload = {
+        action,
+        data,
+        timestamp: now,
+        uuid: docRef.id,
+      }
+
+      if (oldUuid) {
+        const existingLeadActionSnap = await leadActionsRef.where('oldUuid', '==', oldUuid).limit(1).get()
+        if (existingLeadActionSnap.empty) {
+          leadActionRef = await leadActionsRef.add({
+            ...leadActionPayload,
+            oldUuid,
+          })
+        }
+        else {
+          leadActionRef = existingLeadActionSnap.docs[0].ref
+          await leadActionRef.set({
+            ...leadActionPayload,
+            oldUuid,
+          }, { merge: true })
+        }
+        await leadActionRef.collection('actions').add(leadActionPayload)
+      }
+      else {
+        leadActionRef = await leadActionsRef.add(leadActionPayload)
+      }
     }
 
     if (action === 'Contact Form' && data && typeof data === 'object') {
