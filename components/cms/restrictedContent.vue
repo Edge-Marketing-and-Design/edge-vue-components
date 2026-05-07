@@ -16,6 +16,14 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  focusMemberUserId: {
+    type: String,
+    default: '',
+  },
+  focusMemberAudienceUserId: {
+    type: String,
+    default: '',
+  },
 })
 const edgeFirebase = inject('edgeFirebase')
 const { createRestrictedContentDefaults } = useSiteSettingsTemplate()
@@ -1466,6 +1474,58 @@ const loadInitialMembers = async (options = {}) => {
   }
 }
 
+const addFocusedMemberToRows = (member) => {
+  const normalized = normalizeMemberRow(member)
+  if (!normalized?.docId)
+    return null
+
+  const currentFirstPage = Array.isArray(state.memberPageRows?.[1]) ? state.memberPageRows[1] : []
+  const nextFirstPage = [
+    normalized,
+    ...currentFirstPage.filter(item => item?.docId !== normalized.docId),
+  ]
+  const merged = {}
+  ;[...state.memberRows, normalized].forEach((row) => {
+    if (row?.docId)
+      merged[row.docId] = row
+  })
+  state.memberPageRows = {
+    ...(state.memberPageRows || {}),
+    1: nextFirstPage,
+  }
+  state.memberRows = Object.values(merged)
+  state.memberPage = 1
+  return normalized
+}
+
+const openFocusedMember = async () => {
+  if (!props.canManage)
+    return
+  const audienceUserId = String(props.focusMemberAudienceUserId || '').trim()
+  const userId = String(props.focusMemberUserId || '').trim()
+  if (!audienceUserId && !userId)
+    return
+
+  state.activeTab = 'members'
+  state.membersLoading = true
+  try {
+    let member = null
+    if (audienceUserId)
+      member = await edgeFirebase.getDocData(audienceUsersCollectionPath.value, audienceUserId).catch(() => null)
+    if (!member && userId && typeof edgeFirebase?.SearchStaticData === 'function') {
+      const search = new edgeFirebase.SearchStaticData()
+      await search.getData(audienceUsersCollectionPath.value, [{ field: 'userId', operator: '==', value: userId }], [], 1)
+      member = Object.values(search?.results?.data || {})[0] || null
+    }
+    const normalized = addFocusedMemberToRows(member)
+    if (normalized?.docId)
+      openMember(normalized.docId)
+  }
+  finally {
+    state.membersLoading = false
+  }
+}
+
 const goToPreviousMemberPage = () => {
   if (!canGoToPreviousMemberPage.value)
     return
@@ -2322,6 +2382,14 @@ watch(membersCollectionPath, async () => {
   if (props.canManage)
     await loadInitialMembers()
 })
+
+watch(
+  () => [props.focusMemberUserId, props.focusMemberAudienceUserId, props.canManage, audienceUsersCollectionPath.value],
+  async () => {
+    await openFocusedMember()
+  },
+  { immediate: true },
+)
 
 watch(() => state.memberFilter, () => {
   state.memberPage = 1

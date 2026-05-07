@@ -58,6 +58,7 @@ const isJsonInvalid = (value) => {
 
 const isTemplateSite = computed(() => props.site === 'templates')
 const router = useRouter()
+const route = useRoute()
 
 const SUBMISSION_IGNORE_FIELDS = new Set(['orgId', 'siteId', 'pageId', 'blockId'])
 const SUBMISSION_LABEL_KEYS = ['name', 'fullName', 'firstName', 'lastName', 'email', 'phone']
@@ -202,11 +203,6 @@ const canEditSiteSettings = computed(() => {
     return true
   return currentOrgRoleName.value === 'admin' || currentOrgRoleName.value === 'site admin'
 })
-const canManageRestrictedContent = computed(() => {
-  if (!cmsMultiOrg.value)
-    return currentOrgRoleName.value === 'admin'
-  return currentOrgRoleName.value === 'admin' || currentOrgRoleName.value === 'site admin'
-})
 const useMenuPublishLabels = computed(() => {
   return cmsMultiOrg.value && !canEditSiteSettings.value
 })
@@ -247,6 +243,18 @@ const defaultViewMode = computed(() => {
 
 const siteData = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site] || {}
+})
+const currentUserId = computed(() => String(edgeFirebase.user?.uid || edgeFirebase.user?.firebaseUser?.uid || '').trim())
+const currentUserIsAssignedToSite = computed(() => {
+  const users = Array.isArray(siteData.value?.users) ? siteData.value.users.map(userId => String(userId || '').trim()) : []
+  return Boolean(currentUserId.value && users.includes(currentUserId.value))
+})
+const canManageRestrictedContent = computed(() => {
+  if (currentUserIsAssignedToSite.value)
+    return true
+  if (!cmsMultiOrg.value)
+    return currentOrgRoleName.value === 'admin'
+  return currentOrgRoleName.value === 'admin' || currentOrgRoleName.value === 'site admin'
 })
 const showMembersTab = computed(() => Boolean(siteData.value?.showMembersTab))
 const canViewRestrictedTab = computed(() => {
@@ -2328,6 +2336,15 @@ const handleRestrictedUsageTarget = (item) => {
   openSitePage(docId)
 }
 
+const openRestrictedMemberFromQuery = () => {
+  const tab = String(route.query?.tab || '').trim()
+  if (tab !== 'members')
+    return
+  if (!canViewRestrictedTab.value)
+    return
+  state.viewMode = 'restricted'
+}
+
 const clearPostSelection = () => {
   state.selectedPostId = ''
 }
@@ -2413,6 +2430,14 @@ watch(canEditSiteSettings, (allowed) => {
 watch(canManageRestrictedContent, () => {
   ensureValidViewMode()
 }, { immediate: true })
+
+watch(
+  () => [route.query?.tab, route.query?.userId, route.query?.audienceUserId, canViewRestrictedTab.value],
+  () => {
+    openRestrictedMemberFromQuery()
+  },
+  { immediate: true },
+)
 
 watch([isViewingSubmissions, sortedSubmissionIds], () => {
   if (!isViewingSubmissions.value)
@@ -3385,6 +3410,8 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
               :site-id="props.site"
               :site-doc="siteData"
               :can-manage="canManageRestrictedContent"
+              :focus-member-user-id="String(route.query?.userId || '')"
+              :focus-member-audience-user-id="String(route.query?.audienceUserId || '')"
               @open-usage-target="handleRestrictedUsageTarget"
             />
           </div>

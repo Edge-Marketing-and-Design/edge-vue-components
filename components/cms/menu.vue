@@ -11,6 +11,11 @@ const props = defineProps({
     required: false,
     default: () => ({}),
   },
+  rootModelValue: {
+    type: Object,
+    required: false,
+    default: null,
+  },
   modelValue: {
     type: Object,
     required: true,
@@ -1102,8 +1107,15 @@ const addPageAction = async () => {
     if (docId) {
       const targetMenu = modelValue.value[state.menuName]
       const alreadyExists = Array.isArray(targetMenu) && targetMenu.some(entry => entry?.item === docId)
-      if (!alreadyExists)
+      if (!alreadyExists) {
         targetMenu.push({ name: slug, menuTitle: state.newPageName, item: docId })
+        if (!props.isTemplateSite) {
+          const menusToPersist = props.rootModelValue || modelValue.value
+          await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, {
+            menus: edgeGlobal.dupObject(menusToPersist),
+          })
+        }
+      }
     }
   }
 
@@ -1373,6 +1385,7 @@ const theme = computed(() => {
               v-model="modelValue[menuName][index].item"
               :prev-menu="menuName"
               :prev-model-value="modelValue"
+              :root-model-value="props.rootModelValue || modelValue"
               :site="props.site"
               :page="props.page"
               :prev-index="index"
