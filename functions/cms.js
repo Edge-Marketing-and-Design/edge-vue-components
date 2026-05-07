@@ -1394,7 +1394,7 @@ exports.trackHistory = onRequest(async (req, res) => {
   }
 
   const historyRef = db.collection('organizations').doc(orgId).collection('lead-history')
-  const docRef = uuid ? historyRef.doc(uuid) : historyRef.doc()
+  const oldUuid = typeof data?.oldUuid === 'string' ? data.oldUuid.trim() : ''
   const now = Firestore.FieldValue.serverTimestamp()
 
   const headers = req.headers || {}
@@ -1413,7 +1413,23 @@ exports.trackHistory = onRequest(async (req, res) => {
   }
 
   try {
+    let docRef = null
     let exists = false
+
+    if (oldUuid) {
+      const oldUuidSnap = await historyRef
+        .where('oldUuids', 'array-contains', oldUuid)
+        .limit(1)
+        .get()
+      if (!oldUuidSnap.empty) {
+        docRef = oldUuidSnap.docs[0].ref
+        exists = true
+      }
+    }
+
+    if (!docRef)
+      docRef = uuid ? historyRef.doc(uuid) : historyRef.doc()
+
     if (uuid) {
       const snap = await docRef.get()
       exists = snap.exists
@@ -1426,6 +1442,8 @@ exports.trackHistory = onRequest(async (req, res) => {
       lastAction: action,
       lastData: data,
     }
+    if (oldUuid)
+      updateData.oldUuids = Firestore.FieldValue.arrayUnion(oldUuid)
     if (!exists) {
       updateData.createdAt = now
       updateData.firstActionAt = now
@@ -1457,7 +1475,6 @@ exports.trackHistory = onRequest(async (req, res) => {
       const leadActionsRef = db.collection('organizations').doc(orgId)
         .collection('sites').doc(siteId)
         .collection('lead-actions')
-      const oldUuid = typeof data?.oldUuid === 'string' ? data.oldUuid.trim() : ''
       const leadActionPayload = {
         action,
         data,
@@ -1465,26 +1482,7 @@ exports.trackHistory = onRequest(async (req, res) => {
         uuid: docRef.id,
       }
 
-      if (oldUuid) {
-        const existingLeadActionSnap = await leadActionsRef.where('oldUuid', '==', oldUuid).limit(1).get()
-        if (existingLeadActionSnap.empty) {
-          leadActionRef = await leadActionsRef.add({
-            ...leadActionPayload,
-            oldUuid,
-          })
-        }
-        else {
-          leadActionRef = existingLeadActionSnap.docs[0].ref
-          await leadActionRef.set({
-            ...leadActionPayload,
-            oldUuid,
-          }, { merge: true })
-        }
-        await leadActionRef.collection('actions').add(leadActionPayload)
-      }
-      else {
-        leadActionRef = await leadActionsRef.add(leadActionPayload)
-      }
+      leadActionRef = await leadActionsRef.add(leadActionPayload)
     }
 
     if (action === 'Contact Form' && data && typeof data === 'object') {
