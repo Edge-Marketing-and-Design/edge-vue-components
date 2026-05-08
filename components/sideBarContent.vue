@@ -73,8 +73,6 @@ const props = defineProps({
   },
 })
 
-const config = useRuntimeConfig()
-
 const {
   state: sidebarState,
   isMobile: sidebarIsMobile,
@@ -180,6 +178,24 @@ const processedMenuItems = computed(() => {
     return base
   })
 })
+
+const getMenuBadge = (item) => {
+  const rawValue = item?.badge ?? item?.badgeCount
+  const value = typeof rawValue === 'function' ? rawValue() : rawValue
+  if (value === undefined || value === null || value === false)
+    return ''
+  if (typeof value === 'number')
+    return value > 0 ? String(value) : ''
+  const text = String(value).trim()
+  return (text && text !== '0') ? text : ''
+}
+
+const shouldPulseMenuItem = (item) => {
+  const rawValue = item?.pulse ?? item?.badgePulse
+  if (typeof rawValue === 'function')
+    return Boolean(rawValue())
+  return Boolean(rawValue)
+}
 </script>
 
 <template>
@@ -201,10 +217,18 @@ const processedMenuItems = computed(() => {
                     type="button"
                     :is-active="currentRoutePath.startsWith(item.to) || (item.submenu && item.submenu.some(sub => currentRoutePath.startsWith(sub.to)))"
                     :tooltip="item.title"
-                    :class="sideBarMenuButtonClasses"
+                    :class="[sideBarMenuButtonClasses, shouldPulseMenuItem(item) ? 'animate-pulse bg-[#93A4AF]/35' : '']"
                     @click.prevent="goTo(item.to)"
                   >
-                    <component :is="item.icon" class="[stroke-width:1]" :class="sideBarIconClasses" />
+                    <span class="relative inline-flex">
+                      <component :is="item.icon" class="[stroke-width:1]" :class="sideBarIconClasses" />
+                      <span
+                        v-if="getMenuBadge(item)"
+                        class="absolute -right-2 -top-2 inline-flex min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-4 text-white ring-2 ring-sidebar"
+                      >
+                        {{ getMenuBadge(item) }}
+                      </span>
+                    </span>
                     <span v-if="!isSlack">{{ item.title }}</span>
                     <span v-else :class="submenu ? 'text-[10px]' : 'text-xs'">{{ item.title }}</span>
                   </SidebarMenuButton>
@@ -226,11 +250,19 @@ const processedMenuItems = computed(() => {
                   type="button"
                   :is-active="currentRoutePath.startsWith(item.to)"
                   :tooltip="item.title"
-                  :class="sideBarMenuButtonClasses"
+                  :class="[sideBarMenuButtonClasses, shouldPulseMenuItem(item) ? 'animate-pulse bg-[#93A4AF]/35' : '']"
                   :style="sideBarButtonStyles"
                   @click.prevent="goTo(item.to)"
                 >
-                  <component :is="item.icon" class="[stroke-width:1]" :class="sideBarIconClasses" />
+                  <span class="relative inline-flex">
+                    <component :is="item.icon" class="[stroke-width:1]" :class="sideBarIconClasses" />
+                    <span
+                      v-if="getMenuBadge(item)"
+                      class="absolute -right-2 -top-2 inline-flex min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-4 text-white ring-2 ring-sidebar"
+                    >
+                      {{ getMenuBadge(item) }}
+                    </span>
+                  </span>
                   <span v-if="!isSlack">{{ item.title }}</span>
                   <span v-else class="text-xs">{{ item.title }}</span>
                 </SidebarMenuButton>
