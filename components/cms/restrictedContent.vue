@@ -2408,7 +2408,7 @@ onBeforeUnmount(async () => {
 </script>
 
 <template>
-  <div class="flex h-[calc(100vh-140px)] flex-col gap-4 overflow-hidden">
+  <div class="flex h-full min-h-0 flex-col gap-4 overflow-hidden">
     <edge-shad-dialog v-model="state.ruleDeleteDialogOpen">
       <DialogContent class="pt-10">
         <DialogHeader>

@@ -212,6 +212,31 @@ const resolveStagedUserRef = async (userIdOrDocId) => {
   return querySnap.docs[0].ref
 }
 
+const resolveAuthoritativeStagedUserRefForUid = async (uid) => {
+  const normalizedUid = String(uid || '').trim()
+  if (!normalizedUid)
+    return null
+
+  const userSnap = await db.collection('users').doc(normalizedUid).get()
+  const stagedDocId = String(userSnap.data()?.stagedDocId || '').trim()
+  if (stagedDocId) {
+    const stagedRef = db.collection('staged-users').doc(stagedDocId)
+    const stagedSnap = await stagedRef.get()
+    if (stagedSnap.exists && String(stagedSnap.data()?.userId || '').trim() === normalizedUid)
+      return stagedRef
+  }
+
+  const querySnap = await db.collection('staged-users')
+    .where('userId', '==', normalizedUid)
+    .limit(1)
+    .get()
+
+  if (querySnap.empty)
+    return null
+
+  return querySnap.docs[0].ref
+}
+
 const stripQueryAndHash = (url) => {
   const raw = String(url || '').trim()
   if (!raw)
@@ -3936,46 +3961,22 @@ const resolveAuthUserUidByEmail = async (email) => {
   }
 }
 
-const grantRestrictedAudiencePathToUser = async ({ uid, permissionPath, email }) => {
-  const normalizedUid = String(uid || '').trim()
-  const normalizedPermissionPath = String(permissionPath || '').trim()
-  if (!normalizedUid || !normalizedPermissionPath)
+const addRolePath = (roles, collectionPaths, collectionPath, role) => {
+  if (!collectionPath)
     return
+  roles[collectionPath] = { collectionPath, role }
+  if (!collectionPaths.includes(collectionPath))
+    collectionPaths.push(collectionPath)
+}
 
-  const userRef = db.collection('users').doc(normalizedUid)
-  const userSnap = await userRef.get()
-  const userData = userSnap.exists ? (userSnap.data() || {}) : {}
-  const nextRoles = (userData.roles && typeof userData.roles === 'object' && !Array.isArray(userData.roles))
-    ? { ...userData.roles }
-    : {}
-  nextRoles[normalizedPermissionPath] = {
-    collectionPath: normalizedPermissionPath,
-    role: 'user',
-  }
-  const nextCollectionPaths = Array.isArray(userData.collectionPaths)
-    ? [...userData.collectionPaths]
-    : []
-  if (!nextCollectionPaths.includes(normalizedPermissionPath))
-    nextCollectionPaths.push(normalizedPermissionPath)
-
-  const updatePayload = {
-    roles: nextRoles,
-    collectionPaths: nextCollectionPaths,
-    last_updated: Date.now(),
-  }
-
-  if (userSnap.exists) {
-    await userRef.set(updatePayload, { merge: true })
-  }
-  else {
-    await userRef.set({
-      userId: normalizedUid,
-      meta: {
-        email: normalizeEmail(email),
-      },
-      ...updatePayload,
-    }, { merge: true })
-  }
+const removeRolePaths = (roles, collectionPaths, paths = []) => {
+  const normalizedPaths = paths.map(path => String(path || '').trim()).filter(Boolean)
+  normalizedPaths.forEach((path) => {
+    if (path in roles)
+      delete roles[path]
+  })
+  return (Array.isArray(collectionPaths) ? collectionPaths : [])
+    .filter(path => !normalizedPaths.includes(String(path || '').trim()))
 }
 
 const resolveAudienceUserForAuth = async (orgId, siteId, authUid) => {
@@ -5488,35 +5489,31 @@ exports.restrictedContentAddSeatMember = onCall({ timeoutSeconds: 180 }, async (
 
   const now = Date.now()
   const audienceUserDocPermissionPath = `organizations-${orgId}-sites-${siteId}-audience-users-${docId}`
-  const stagedUserRef = db.collection('staged-users').doc(docId)
+  const audienceUserDataPermissionPath = `${audienceUserDocPermissionPath}-data`
+  const authoritativeStagedRef = linkedAuthUid
+    ? await resolveAuthoritativeStagedUserRefForUid(linkedAuthUid)
+    : null
+  const stagedUserRef = authoritativeStagedRef || db.collection('staged-users').doc(docId)
+  const stagedUserDocId = stagedUserRef.id
   const stagedUserSnap = await stagedUserRef.get()
   const stagedUserData = stagedUserSnap.exists ? (stagedUserSnap.data() || {}) : {}
   const stagedRoles = (stagedUserData.roles && typeof stagedUserData.roles === 'object' && !Array.isArray(stagedUserData.roles))
     ? { ...stagedUserData.roles }
     : {}
-  stagedRoles[audienceUserDocPermissionPath] = {
-    collectionPath: audienceUserDocPermissionPath,
-    role: 'user',
-  }
   const stagedCollectionPaths = Array.isArray(stagedUserData.collectionPaths)
     ? [...stagedUserData.collectionPaths]
     : []
-  if (!stagedCollectionPaths.includes(audienceUserDocPermissionPath))
-    stagedCollectionPaths.push(audienceUserDocPermissionPath)
+  addRolePath(stagedRoles, stagedCollectionPaths, audienceUserDocPermissionPath, 'user')
+  addRolePath(stagedRoles, stagedCollectionPaths, audienceUserDataPermissionPath, 'edit')
 
-  await stagedUserRef.set({
-    docId,
-    ...(linkedAuthUid
+  const stagedUserUpdate = {
+    docId: stagedUserDocId,
+    ...(!authoritativeStagedRef && linkedAuthUid
       ? {
           uid: linkedAuthUid,
           userId: linkedAuthUid,
         }
       : {}),
-    meta: {
-      ...(stagedUserData.meta || {}),
-      name,
-      email,
-    },
     roles: stagedRoles,
     collectionPaths: stagedCollectionPaths,
     specialPermissions: (stagedUserData.specialPermissions && typeof stagedUserData.specialPermissions === 'object')
@@ -5524,7 +5521,17 @@ exports.restrictedContentAddSeatMember = onCall({ timeoutSeconds: 180 }, async (
       : {},
     doc_created_at: Number(stagedUserData.doc_created_at || now),
     last_updated: now,
-  }, { merge: true })
+  }
+  if (!authoritativeStagedRef) {
+    stagedUserUpdate.meta = {
+      ...(stagedUserData.meta || {}),
+      name,
+      email,
+    }
+  }
+  await stagedUserRef.set(stagedUserUpdate, { merge: true })
+  if (!stagedUserSnap.exists && linkedAuthUid)
+    await stagedUserRef.set({ last_updated: Date.now() }, { merge: true })
 
   const memberRef = audienceUsersRef.doc(docId)
   const memberSnap = await memberRef.get()
@@ -5552,7 +5559,7 @@ exports.restrictedContentAddSeatMember = onCall({ timeoutSeconds: 180 }, async (
   const ownerPlanStateSnapshot = childPlanStates[seatContext.seatRuleId]
   await memberRef.set({
     docId,
-    stagedUserId: docId,
+    stagedUserId: stagedUserDocId,
     name,
     email,
     authUid: linkedAuthUid || String(memberData.authUid || '').trim(),
@@ -5578,14 +5585,6 @@ exports.restrictedContentAddSeatMember = onCall({ timeoutSeconds: 180 }, async (
     clearPaid: false,
     now,
   }), { merge: true })
-
-  if (linkedAuthUid) {
-    await grantRestrictedAudiencePathToUser({
-      uid: linkedAuthUid,
-      permissionPath: audienceUserDocPermissionPath,
-      email,
-    })
-  }
 
   return {
     success: true,
@@ -5766,6 +5765,10 @@ exports.restrictedContentDeleteAudienceMemberAccount = onCall({ timeoutSeconds: 
   const normalizedAudienceEmail = normalizeEmail(audienceUser.email || stagedUserData?.meta?.email || '')
   const stripeCustomerId = String(audienceUser.billingStripeCustomerId || '').trim()
   const audienceUserDocPermissionPath = `organizations-${orgId}-sites-${siteId}-audience-users-${audienceUserId}`
+  const audienceUserPermissionPaths = [
+    audienceUserDocPermissionPath,
+    `${audienceUserDocPermissionPath}-data`,
+  ]
 
   let stripeCancelledSubscriptions = []
   let stripeAttemptedSubscriptions = []
@@ -5802,31 +5805,8 @@ exports.restrictedContentDeleteAudienceMemberAccount = onCall({ timeoutSeconds: 
       const nextRoles = (staged.roles && typeof staged.roles === 'object' && !Array.isArray(staged.roles))
         ? { ...staged.roles }
         : {}
-      if (audienceUserDocPermissionPath in nextRoles)
-        delete nextRoles[audienceUserDocPermissionPath]
-      const nextCollectionPaths = (Array.isArray(staged.collectionPaths) ? staged.collectionPaths : [])
-        .filter(path => String(path || '').trim() !== audienceUserDocPermissionPath)
+      const nextCollectionPaths = removeRolePaths(nextRoles, staged.collectionPaths, audienceUserPermissionPaths)
       await stagedRef.set({
-        roles: nextRoles,
-        collectionPaths: nextCollectionPaths,
-        last_updated: Date.now(),
-      }, { merge: true })
-    }
-  }
-
-  if (resolvedAuthUid) {
-    const userRef = db.collection('users').doc(resolvedAuthUid)
-    const userSnap = await userRef.get()
-    if (userSnap.exists) {
-      const userData = userSnap.data() || {}
-      const nextRoles = (userData.roles && typeof userData.roles === 'object' && !Array.isArray(userData.roles))
-        ? { ...userData.roles }
-        : {}
-      if (audienceUserDocPermissionPath in nextRoles)
-        delete nextRoles[audienceUserDocPermissionPath]
-      const nextCollectionPaths = (Array.isArray(userData.collectionPaths) ? userData.collectionPaths : [])
-        .filter(path => String(path || '').trim() !== audienceUserDocPermissionPath)
-      await userRef.set({
         roles: nextRoles,
         collectionPaths: nextCollectionPaths,
         last_updated: Date.now(),
@@ -5906,12 +5886,6 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
     if (!docId && restrictedContent.allowSelfRegistration === false)
       return fail('no-self-registration', 'Self registration is not allowed for this site.')
 
-    if (!docId && linkedAuthUid) {
-      const stagedRefByAuth = await resolveStagedUserRef(linkedAuthUid)
-      if (stagedRefByAuth?.id)
-        docId = String(stagedRefByAuth.id || '').trim()
-    }
-
     docId = await reserveGlobalRestrictedRegistrationDocId({
       email,
       authUid: linkedAuthUid,
@@ -5929,7 +5903,11 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
     if (!docId)
       return fail('internal', 'Unable to reserve registration record for this email.')
 
-    const stagedUserRef = db.collection('staged-users').doc(docId)
+    const authoritativeStagedRef = linkedAuthUid
+      ? await resolveAuthoritativeStagedUserRefForUid(linkedAuthUid)
+      : null
+    const stagedUserRef = authoritativeStagedRef || db.collection('staged-users').doc(docId)
+    const stagedUserDocId = stagedUserRef.id
     const stagedUserSnap = await stagedUserRef.get()
     const stagedUserData = stagedUserSnap.exists ? (stagedUserSnap.data() || {}) : {}
     const stagedUserId = String(stagedUserData.userId || '').trim()
@@ -5939,24 +5917,25 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
       return fail('unauthenticated', 'This email already has an account. Please log in first and continue.')
 
     const audienceUserDocPermissionPath = `organizations-${orgId}-sites-${siteId}-audience-users-${docId}`
+    const audienceUserDataPermissionPath = `${audienceUserDocPermissionPath}-data`
     const stagedRoles = (stagedUserData.roles && typeof stagedUserData.roles === 'object' && !Array.isArray(stagedUserData.roles))
       ? { ...stagedUserData.roles }
       : {}
-    stagedRoles[audienceUserDocPermissionPath] = {
-      collectionPath: audienceUserDocPermissionPath,
-      role: 'user',
-    }
     const stagedCollectionPaths = Array.isArray(stagedUserData.collectionPaths)
       ? [...stagedUserData.collectionPaths]
       : []
-    if (!stagedCollectionPaths.includes(audienceUserDocPermissionPath))
-      stagedCollectionPaths.push(audienceUserDocPermissionPath)
+    addRolePath(stagedRoles, stagedCollectionPaths, audienceUserDocPermissionPath, 'user')
+    addRolePath(stagedRoles, stagedCollectionPaths, audienceUserDataPermissionPath, 'edit')
 
     if (!stagedUserSnap.exists) {
       await stagedUserRef.set({
-        docId,
-        uid: linkedAuthUid || '',
-        userId: linkedAuthUid || '',
+        docId: stagedUserDocId,
+        ...(!authoritativeStagedRef
+          ? {
+              uid: linkedAuthUid || '',
+              userId: linkedAuthUid || '',
+            }
+          : {}),
         meta: {
           ...(hasProvidedName ? { name } : {}),
           email,
@@ -5969,13 +5948,8 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
       })
     }
     else {
-      await stagedUserRef.set({
-        meta: {
-          ...(stagedUserData.meta || {}),
-          ...(hasProvidedName ? { name } : {}),
-          email,
-        },
-        ...(linkedAuthUid && !stagedUserId
+      const stagedUserUpdate = {
+        ...(linkedAuthUid && !stagedUserId && !authoritativeStagedRef
           ? {
               uid: linkedAuthUid,
               userId: linkedAuthUid,
@@ -5984,8 +5958,18 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
         roles: stagedRoles,
         collectionPaths: stagedCollectionPaths,
         last_updated: now,
-      }, { merge: true })
+      }
+      if (!authoritativeStagedRef) {
+        stagedUserUpdate.meta = {
+          ...(stagedUserData.meta || {}),
+          ...(hasProvidedName ? { name } : {}),
+          email,
+        }
+      }
+      await stagedUserRef.set(stagedUserUpdate, { merge: true })
     }
+    if (!stagedUserSnap.exists && linkedAuthUid)
+      await stagedUserRef.set({ last_updated: Date.now() }, { merge: true })
 
     const audienceUserDocSnap = await audienceUsersRef.doc(docId).get()
     const existingAudienceUser = audienceUserDocSnap.exists
@@ -5998,7 +5982,7 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
       email,
       authUid: linkedAuthUid || existingAudienceAuthUid,
       userId: linkedAuthUid || String(existingAudienceUser.userId || '').trim(),
-      stagedUserId: docId,
+      stagedUserId: stagedUserDocId,
       status: String(existingAudienceUser.status || '').trim() || 'invited',
       billingStripeCustomerId: String(existingAudienceUser.billingStripeCustomerId || '').trim(),
       notes: String(existingAudienceUser.notes || '').trim(),
@@ -6032,14 +6016,6 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
       clearPending: false,
       now,
     }), { merge: true })
-
-    if (linkedAuthUid) {
-      await grantRestrictedAudiencePathToUser({
-        uid: linkedAuthUid,
-        permissionPath: audienceUserDocPermissionPath,
-        email,
-      })
-    }
 
     if (requestAuthUid) {
       const refreshedMemberSnap = await memberRef.get()

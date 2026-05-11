@@ -3405,7 +3405,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
               </template>
             </edge-dashboard>
           </div>
-          <div v-else-if="state.viewMode === 'restricted' && canViewRestrictedTab" class="flex-1 overflow-y-auto p-6">
+          <div v-else-if="state.viewMode === 'restricted' && canViewRestrictedTab" class="flex-1 min-h-0 overflow-hidden p-6">
             <edge-cms-restricted-content
               :site-id="props.site"
               :site-doc="siteData"
