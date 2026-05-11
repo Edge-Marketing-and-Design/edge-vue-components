@@ -5467,32 +5467,33 @@ exports.restrictedContentAddSeatMember = onCall({ timeoutSeconds: 180 }, async (
   const linkedAuthUid = existingAuthUidByEmail
     || String(existingAudience.authUid || existingAudience.userId || '').trim()
 
-  let docId = existingAudienceUserId
-  docId = await reserveGlobalRestrictedRegistrationDocId({
-    email,
-    authUid: linkedAuthUid,
-    preferredDocId: docId,
-  })
-  if (!docId)
-    throw new HttpsError('internal', 'Unable to reserve global registration record for this email.')
-
-  docId = await reserveRestrictedRegistrationDocId({
-    orgId,
-    siteId,
-    email,
-    preferredDocId: docId,
-  })
-  if (!docId)
-    throw new HttpsError('internal', 'Unable to reserve registration record for this email.')
-
-  const now = Date.now()
-  const audienceUserDocPermissionPath = `organizations-${orgId}-sites-${siteId}-audience-users-${docId}`
-  const audienceUserDataPermissionPath = `${audienceUserDocPermissionPath}-data`
+  let audienceUserId = existingAudienceUserId
   const authoritativeStagedRef = linkedAuthUid
     ? await resolveAuthoritativeStagedUserRefForUid(linkedAuthUid)
     : null
-  const stagedUserRef = authoritativeStagedRef || db.collection('staged-users').doc(docId)
-  const stagedUserDocId = stagedUserRef.id
+  const existingAudienceStagedUserId = String(existingAudience.stagedUserId || '').trim()
+  let stagedUserDocId = String(authoritativeStagedRef?.id || existingAudienceStagedUserId || '').trim()
+  stagedUserDocId = await reserveGlobalRestrictedRegistrationDocId({
+    email,
+    authUid: linkedAuthUid,
+    preferredDocId: stagedUserDocId,
+  })
+  if (!stagedUserDocId)
+    throw new HttpsError('internal', 'Unable to reserve global registration record for this email.')
+
+  audienceUserId = await reserveRestrictedRegistrationDocId({
+    orgId,
+    siteId,
+    email,
+    preferredDocId: audienceUserId,
+  })
+  if (!audienceUserId)
+    throw new HttpsError('internal', 'Unable to reserve registration record for this email.')
+
+  const now = Date.now()
+  const audienceUserDocPermissionPath = `organizations-${orgId}-sites-${siteId}-audience-users-${audienceUserId}`
+  const audienceUserDataPermissionPath = `${audienceUserDocPermissionPath}-data`
+  const stagedUserRef = authoritativeStagedRef || db.collection('staged-users').doc(stagedUserDocId)
   const stagedUserSnap = await stagedUserRef.get()
   const stagedUserData = stagedUserSnap.exists ? (stagedUserSnap.data() || {}) : {}
   const stagedRoles = (stagedUserData.roles && typeof stagedUserData.roles === 'object' && !Array.isArray(stagedUserData.roles))
@@ -5531,7 +5532,7 @@ exports.restrictedContentAddSeatMember = onCall({ timeoutSeconds: 180 }, async (
   if (!stagedUserSnap.exists && linkedAuthUid)
     await stagedUserRef.set({ last_updated: Date.now() }, { merge: true })
 
-  const memberRef = audienceUsersRef.doc(docId)
+  const memberRef = audienceUsersRef.doc(audienceUserId)
   const memberSnap = await memberRef.get()
   const memberData = memberSnap.exists ? (memberSnap.data() || {}) : existingAudience
   const childSeatOwnersByRule = normalizeSeatOwnersByRule(memberData)
@@ -5556,7 +5557,7 @@ exports.restrictedContentAddSeatMember = onCall({ timeoutSeconds: 180 }, async (
   }
   const ownerPlanStateSnapshot = childPlanStates[seatContext.seatRuleId]
   await memberRef.set({
-    docId,
+    docId: audienceUserId,
     stagedUserId: stagedUserDocId,
     name,
     email,
@@ -5573,7 +5574,7 @@ exports.restrictedContentAddSeatMember = onCall({ timeoutSeconds: 180 }, async (
 
   await memberRef.set(buildRestrictedMemberPayload({
     existingMember: memberData,
-    audienceUserId: docId,
+    audienceUserId,
     ruleId: seatContext.seatRuleId,
     status: String(memberData.status || '').trim() || 'active',
     paymentStatus: seatContext.paymentStatus || 'paid',
@@ -5586,7 +5587,7 @@ exports.restrictedContentAddSeatMember = onCall({ timeoutSeconds: 180 }, async (
 
   return {
     success: true,
-    audienceUserId: docId,
+    audienceUserId,
     ownerAudienceUserId,
     seatRuleId: seatContext.seatRuleId,
     seatLimit: seatContext.seatLimit,
@@ -5861,11 +5862,12 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
     const { audienceUsersRef } = getRestrictedSiteRefs(orgId, siteId)
     const now = Date.now()
     const audienceUserSnap = await findAudienceUserByEmail(audienceUsersRef, email)
-    let docId = String(audienceUserSnap?.id || '').trim()
+    let audienceUserId = String(audienceUserSnap?.id || '').trim()
+    const audienceUserFromEmail = audienceUserSnap?.exists ? (audienceUserSnap.data() || {}) : {}
     const existingAuthUidByEmail = await resolveAuthUserUidByEmail(email)
     const linkedAuthUid = existingAuthUidByEmail || requestAuthUid
 
-    if (existingAuthUidByEmail && !requestAuthUid && !docId && restrictedContent.allowSelfRegistration === false)
+    if (existingAuthUidByEmail && !requestAuthUid && !audienceUserId && restrictedContent.allowSelfRegistration === false)
       return fail('no-self-registration', 'Self registration is not allowed for this site.')
     if (existingAuthUidByEmail && !requestAuthUid)
       return fail('unauthenticated', 'This email already has an account. Please log in first and continue.')
@@ -5881,31 +5883,32 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
         return fail('permission-denied', 'Signed-in account does not match this email.')
     }
 
-    if (!docId && restrictedContent.allowSelfRegistration === false)
+    if (!audienceUserId && restrictedContent.allowSelfRegistration === false)
       return fail('no-self-registration', 'Self registration is not allowed for this site.')
-
-    docId = await reserveGlobalRestrictedRegistrationDocId({
-      email,
-      authUid: linkedAuthUid,
-      preferredDocId: docId,
-    })
-    if (!docId)
-      return fail('internal', 'Unable to reserve global staged user record for this email.')
-
-    docId = await reserveRestrictedRegistrationDocId({
-      orgId,
-      siteId,
-      email,
-      preferredDocId: docId,
-    })
-    if (!docId)
-      return fail('internal', 'Unable to reserve registration record for this email.')
 
     const authoritativeStagedRef = linkedAuthUid
       ? await resolveAuthoritativeStagedUserRefForUid(linkedAuthUid)
       : null
-    const stagedUserRef = authoritativeStagedRef || db.collection('staged-users').doc(docId)
-    const stagedUserDocId = stagedUserRef.id
+    const existingAudienceStagedUserId = String(audienceUserFromEmail.stagedUserId || '').trim()
+    let stagedUserDocId = String(authoritativeStagedRef?.id || existingAudienceStagedUserId || '').trim()
+    stagedUserDocId = await reserveGlobalRestrictedRegistrationDocId({
+      email,
+      authUid: linkedAuthUid,
+      preferredDocId: stagedUserDocId,
+    })
+    if (!stagedUserDocId)
+      return fail('internal', 'Unable to reserve global staged user record for this email.')
+
+    audienceUserId = await reserveRestrictedRegistrationDocId({
+      orgId,
+      siteId,
+      email,
+      preferredDocId: audienceUserId,
+    })
+    if (!audienceUserId)
+      return fail('internal', 'Unable to reserve registration record for this email.')
+
+    const stagedUserRef = authoritativeStagedRef || db.collection('staged-users').doc(stagedUserDocId)
     const stagedUserSnap = await stagedUserRef.get()
     const stagedUserData = stagedUserSnap.exists ? (stagedUserSnap.data() || {}) : {}
     const stagedUserId = String(stagedUserData.userId || '').trim()
@@ -5914,7 +5917,7 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
     if (stagedUserId && !linkedAuthUid)
       return fail('unauthenticated', 'This email already has an account. Please log in first and continue.')
 
-    const audienceUserDocPermissionPath = `organizations-${orgId}-sites-${siteId}-audience-users-${docId}`
+    const audienceUserDocPermissionPath = `organizations-${orgId}-sites-${siteId}-audience-users-${audienceUserId}`
     const audienceUserDataPermissionPath = `${audienceUserDocPermissionPath}-data`
     const stagedRoles = (stagedUserData.roles && typeof stagedUserData.roles === 'object' && !Array.isArray(stagedUserData.roles))
       ? { ...stagedUserData.roles }
@@ -5969,13 +5972,13 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
     if (!stagedUserSnap.exists && linkedAuthUid)
       await stagedUserRef.set({ last_updated: Date.now() }, { merge: true })
 
-    const audienceUserDocSnap = await audienceUsersRef.doc(docId).get()
+    const audienceUserDocSnap = await audienceUsersRef.doc(audienceUserId).get()
     const existingAudienceUser = audienceUserDocSnap.exists
       ? (audienceUserDocSnap.data() || {})
-      : (audienceUserSnap?.exists ? (audienceUserSnap.data() || {}) : {})
+      : audienceUserFromEmail
     const existingAudienceAuthUid = String(existingAudienceUser.authUid || '').trim()
-    await audienceUsersRef.doc(docId).set({
-      docId,
+    await audienceUsersRef.doc(audienceUserId).set({
+      docId: audienceUserId,
       ...(hasProvidedName ? { name } : {}),
       email,
       authUid: linkedAuthUid || existingAudienceAuthUid,
@@ -5988,7 +5991,7 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
       last_updated: now,
     }, { merge: true })
 
-    const memberRef = audienceUsersRef.doc(docId)
+    const memberRef = audienceUsersRef.doc(audienceUserId)
     const memberSnap = await memberRef.get()
     const memberData = memberSnap.exists ? (memberSnap.data() || {}) : {}
     const currentMemberStatus = String(memberData.status || '').trim().toLowerCase()
@@ -6005,7 +6008,7 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
 
     await memberRef.set(buildRestrictedMemberPayload({
       existingMember: payloadExistingMember,
-      audienceUserId: docId,
+      audienceUserId,
       ruleId: hasRuleId && effectiveRegistrationMode === 'paid' ? rule.id : '',
       status: promoteToActive ? 'active' : (String(memberData.status || '').trim() || 'active'),
       paymentStatus: 'not_required',
@@ -6035,13 +6038,13 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
         memberData: refreshedMember,
         blocked,
         audienceUsersRef,
-        audienceUserId: docId,
+        audienceUserId,
       })
 
       const response = {
         success: true,
-        audienceUserId: docId,
-        memberId: docId,
+        audienceUserId,
+        memberId: audienceUserId,
         registrationMode: effectiveRegistrationMode,
         status,
         planArray,
@@ -6064,9 +6067,9 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
 
     return {
       success: true,
-      registrationCode: docId,
-      audienceUserId: docId,
-      memberId: docId,
+      registrationCode: audienceUserId,
+      audienceUserId,
+      memberId: audienceUserId,
       registrationMode: effectiveRegistrationMode,
       planArray: [],
     }
