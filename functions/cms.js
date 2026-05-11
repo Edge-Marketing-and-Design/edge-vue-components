@@ -2854,7 +2854,6 @@ const callOpenAiForPageSeo = async ({
 
   const body = {
     model: OPENAI_MODEL,
-    temperature: 0.3,
     response_format: { type: 'json_object' },
     messages: [
       { role: 'system', content: system },
@@ -3114,7 +3113,6 @@ const callOpenAiForSiteBootstrap = async ({
 
   const body = {
     model: OPENAI_MODEL,
-    temperature: 0.4,
     response_format: { type: 'json_object' },
     messages: [
       { role: 'system', content: system },
@@ -8023,7 +8021,6 @@ exports.generateBlockFields = onCall({ timeoutSeconds: 180 }, async (request) =>
     },
     body: JSON.stringify({
       model: OPENAI_MODEL,
-      temperature: 0.6,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
