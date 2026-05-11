@@ -5503,7 +5503,7 @@ exports.restrictedContentAddSeatMember = onCall({ timeoutSeconds: 180 }, async (
     ? [...stagedUserData.collectionPaths]
     : []
   addRolePath(stagedRoles, stagedCollectionPaths, audienceUserDocPermissionPath, 'user')
-  addRolePath(stagedRoles, stagedCollectionPaths, audienceUserDataPermissionPath, 'edit')
+  addRolePath(stagedRoles, stagedCollectionPaths, audienceUserDataPermissionPath, 'editor')
 
   const stagedUserUpdate = {
     docId: stagedUserDocId,
@@ -5926,7 +5926,7 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
       ? [...stagedUserData.collectionPaths]
       : []
     addRolePath(stagedRoles, stagedCollectionPaths, audienceUserDocPermissionPath, 'user')
-    addRolePath(stagedRoles, stagedCollectionPaths, audienceUserDataPermissionPath, 'edit')
+    addRolePath(stagedRoles, stagedCollectionPaths, audienceUserDataPermissionPath, 'editor')
 
     if (!stagedUserSnap.exists) {
       await stagedUserRef.set({
