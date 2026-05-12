@@ -1,5 +1,5 @@
 <script setup>
-import { File, FileArchive, FileSpreadsheet, FileText, ImagePlus, Loader2, Square, SquareCheckBig, Trash } from 'lucide-vue-next'
+import { Eye, File, FileArchive, FileSpreadsheet, FileText, ImagePlus, Loader2, Square, SquareCheckBig, Trash } from 'lucide-vue-next'
 const props = defineProps({
   item: {
     type: Object,
@@ -22,7 +22,7 @@ const props = defineProps({
     default: false,
   },
 })
-const emits = defineEmits(['select', 'delete'])
+const emits = defineEmits(['select', 'delete', 'view'])
 
 const timeAgo = (timestamp) => {
   if (!timestamp)
@@ -79,7 +79,21 @@ const isPdfItem = computed(() => {
   return getMediaExtension() === 'pdf'
 })
 const isFileItem = computed(() => !isImageItem.value)
+const pdfPageImages = computed(() => {
+  if (!isPdfItem.value)
+    return {}
+  const pageImages = props.item?.ccState?.cFImages || props.item?.ccState?.cfImages || {}
+  return (pageImages && typeof pageImages === 'object') ? pageImages : {}
+})
+const publicationPageCount = computed(() => {
+  return Object.keys(pdfPageImages.value)
+    .filter(key => /^page-\d+$/i.test(String(key || '')))
+    .length
+})
+const isPublicationPdf = computed(() => isPdfItem.value && publicationPageCount.value > 0)
 const fileTypeLabel = computed(() => {
+  if (isPublicationPdf.value)
+    return 'Pub'
   const ext = getMediaExtension()
   if (!ext)
     return 'FILE'
@@ -134,14 +148,25 @@ const mediaCopyUrl = computed(() => {
           <SquareCheckBig v-else class="!w-5 !h-5" />
         </edge-shad-button>
         <div v-else class="w-5 h-5" />
-        <edge-shad-button
-          v-if="props.canDelete"
-          size="icon"
-          class="bg-destructive/80 text-destructive-foreground hover:bg-destructive h-9 w-9 sm:h-10 sm:w-10 rounded-xl border border-destructive/40 shadow-sm"
-          @click.stop="emits('delete', item.docId)"
-        >
-          <Trash class="!h-5 !w-5" />
-        </edge-shad-button>
+        <div class="flex items-center gap-2">
+          <edge-shad-button
+            v-if="props.selectMode"
+            size="icon"
+            aria-label="View media"
+            class="bg-slate-900 text-white hover:bg-slate-800 h-8 w-8 rounded-lg shadow-sm dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
+            @click.stop="emits('view', item)"
+          >
+            <Eye class="!h-4 !w-4" aria-hidden="true" />
+          </edge-shad-button>
+          <edge-shad-button
+            v-if="props.canDelete"
+            size="icon"
+            class="bg-destructive/80 text-destructive-foreground hover:bg-destructive h-9 w-9 sm:h-10 sm:w-10 rounded-xl border border-destructive/40 shadow-sm"
+            @click.stop="emits('delete', item.docId)"
+          >
+            <Trash class="!h-5 !w-5" />
+          </edge-shad-button>
+        </div>
       </div>
       <div v-if="props.isNew" class="absolute left-3 bottom-3 z-20 rounded-md bg-emerald-600 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-white shadow-sm">
         Just Uploaded
@@ -159,6 +184,12 @@ const mediaCopyUrl = computed(() => {
         alt=""
         class="max-h-full max-w-full h-auto w-auto object-contain transition-transform duration-200 group-hover:scale-[1.02]"
       >
+      <div
+        v-if="isPublicationPdf"
+        class="absolute bottom-3 left-3 rounded-md bg-slate-900/85 px-2 py-1 text-[10px] font-semibold text-white shadow-sm"
+      >
+        Pages: {{ publicationPageCount }}
+      </div>
       <div v-if="isFileItem" class="absolute bottom-3 right-3 rounded-md bg-red-600 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-white shadow-sm">
         {{ fileTypeLabel }}
       </div>

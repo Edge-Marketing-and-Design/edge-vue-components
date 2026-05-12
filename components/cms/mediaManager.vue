@@ -692,6 +692,11 @@ function canDeleteMedia(item) {
 }
 const canEditWorkingDoc = computed(() => canDeleteMedia(state.workingDoc))
 
+const openMediaView = (item) => {
+  state.editMedia = true
+  state.workingDoc = item
+}
+
 const itemClick = (item) => {
   if (props.selectMode) {
     const selectedUrl = isImageMediaItem(item)
@@ -700,8 +705,7 @@ const itemClick = (item) => {
     emits('select', selectedUrl)
   }
   else {
-    state.editMedia = true
-    state.workingDoc = item
+    openMediaView(item)
   }
 }
 
@@ -1175,6 +1179,7 @@ const siteQueryValue = computed(() => resolveCmsSiteScopeValues())
                   :is-new="isRecentlyUploadedMedia(item)"
                   @select="(checked, docId) => handleCheckboxChange(checked, docId)"
                   @delete="(docId) => openDeleteConfirmSingle(docId)"
+                  @view="openMediaView"
                 />
               </div>
             </div>

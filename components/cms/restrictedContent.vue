@@ -3239,9 +3239,9 @@ onBeforeUnmount(async () => {
                                 type="button"
                                 variant="link"
                                 class="h-auto px-0 text-sm"
-                                @click="state.ruleImagePickerOpen = !state.ruleImagePickerOpen"
+                                @click="state.ruleImagePickerOpen = true"
                               >
-                                {{ state.ruleImagePickerOpen ? 'Hide picker' : 'Select image' }}
+                                Select image
                               </edge-shad-button>
                             </label>
                             <div class="flex items-center gap-3">
@@ -3270,16 +3270,22 @@ onBeforeUnmount(async () => {
                               label="Image URL"
                               placeholder="https://..."
                             />
-                            <div v-if="state.ruleImagePickerOpen && props.siteId" class="rounded-lg border border-dashed border-border/70 p-2">
-                              <edge-cms-media-manager
-                                :site="props.siteId"
-                                :select-mode="true"
-                                @select="(url) => {
-                                  state.ruleWorkingDoc.registrationStripeImage = String(url || '').trim()
-                                  state.ruleImagePickerOpen = false
-                                }"
-                              />
-                            </div>
+                            <Dialog v-if="props.siteId" v-model:open="state.ruleImagePickerOpen">
+                              <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
+                                <DialogHeader>
+                                  <DialogTitle>Select Stripe Product Image</DialogTitle>
+                                  <DialogDescription />
+                                </DialogHeader>
+                                <edge-cms-media-manager
+                                  :site="props.siteId"
+                                  :select-mode="true"
+                                  @select="(url) => {
+                                    state.ruleWorkingDoc.registrationStripeImage = String(url || '').trim()
+                                    state.ruleImagePickerOpen = false
+                                  }"
+                                />
+                              </DialogContent>
+                            </Dialog>
                           </div>
 
                           <div class="space-y-3 rounded-lg border border-border/60 bg-muted/20 p-4">

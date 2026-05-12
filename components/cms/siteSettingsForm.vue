@@ -586,9 +586,9 @@ watch(() => props.settings?.forwardApex, (value) => {
             type="button"
             variant="link"
             class="px-0 h-auto text-sm"
-            @click="state.logoPickerOpen = !state.logoPickerOpen"
+            @click="state.logoPickerOpen = true"
           >
-            {{ state.logoPickerOpen ? 'Hide picker' : 'Select logo' }}
+            Select logo
           </edge-shad-button>
         </label>
         <div class="flex items-center gap-4">
@@ -609,17 +609,23 @@ watch(() => props.settings?.forwardApex, (value) => {
           </div>
           <span v-else class="text-sm text-muted-foreground italic">No logo selected</span>
         </div>
-        <div v-if="state.logoPickerOpen" class="mt-2 border border-dashed rounded-lg p-2">
-          <edge-cms-media-manager
-            :site="props.siteId"
-            :select-mode="true"
-            :default-tags="['Logos']"
-            @select="(url) => {
-              props.settings.logo = url
-              state.logoPickerOpen = false
-            }"
-          />
-        </div>
+        <Dialog v-model:open="state.logoPickerOpen">
+          <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
+            <DialogHeader>
+              <DialogTitle>Select Dark Logo</DialogTitle>
+              <DialogDescription />
+            </DialogHeader>
+            <edge-cms-media-manager
+              :site="props.siteId"
+              :select-mode="true"
+              :default-tags="['Logos']"
+              @select="(url) => {
+                props.settings.logo = url
+                state.logoPickerOpen = false
+              }"
+            />
+          </DialogContent>
+        </Dialog>
       </div>
       <edge-shad-input
         v-else
@@ -636,9 +642,9 @@ watch(() => props.settings?.forwardApex, (value) => {
             type="button"
             variant="link"
             class="px-0 h-auto text-sm"
-            @click="state.logoLightPickerOpen = !state.logoLightPickerOpen"
+            @click="state.logoLightPickerOpen = true"
           >
-            {{ state.logoLightPickerOpen ? 'Hide picker' : 'Select logo' }}
+            Select logo
           </edge-shad-button>
         </label>
         <div class="flex items-center gap-4">
@@ -659,17 +665,23 @@ watch(() => props.settings?.forwardApex, (value) => {
           </div>
           <span v-else class="text-sm text-muted-foreground italic">No light logo selected</span>
         </div>
-        <div v-if="state.logoLightPickerOpen" class="mt-2 border border-dashed rounded-lg p-2">
-          <edge-cms-media-manager
-            :site="props.siteId"
-            :select-mode="true"
-            :default-tags="['Logos']"
-            @select="(url) => {
-              props.settings.logoLight = url
-              state.logoLightPickerOpen = false
-            }"
-          />
-        </div>
+        <Dialog v-model:open="state.logoLightPickerOpen">
+          <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
+            <DialogHeader>
+              <DialogTitle>Select Light Logo</DialogTitle>
+              <DialogDescription />
+            </DialogHeader>
+            <edge-cms-media-manager
+              :site="props.siteId"
+              :select-mode="true"
+              :default-tags="['Logos']"
+              @select="(url) => {
+                props.settings.logoLight = url
+                state.logoLightPickerOpen = false
+              }"
+            />
+          </DialogContent>
+        </Dialog>
       </div>
       <edge-shad-input
         v-else
@@ -690,9 +702,9 @@ watch(() => props.settings?.forwardApex, (value) => {
               type="button"
               variant="link"
               class="px-0 h-auto text-sm"
-              @click="state.brandLogoDarkPickerOpen = !state.brandLogoDarkPickerOpen"
+              @click="state.brandLogoDarkPickerOpen = true"
             >
-              {{ state.brandLogoDarkPickerOpen ? 'Hide picker' : 'Select logo' }}
+              Select logo
             </edge-shad-button>
           </label>
           <div class="flex items-center gap-4">
@@ -713,17 +725,23 @@ watch(() => props.settings?.forwardApex, (value) => {
             </div>
             <span v-else class="text-sm text-muted-foreground italic">No brand dark logo selected</span>
           </div>
-          <div v-if="state.brandLogoDarkPickerOpen" class="mt-2 border border-dashed rounded-lg p-2">
-            <edge-cms-media-manager
-              :site="props.siteId"
-              :select-mode="true"
-              :default-tags="['Logos']"
-              @select="(url) => {
-                props.settings.brandLogoDark = url
-                state.brandLogoDarkPickerOpen = false
-              }"
-            />
-          </div>
+          <Dialog v-model:open="state.brandLogoDarkPickerOpen">
+            <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
+              <DialogHeader>
+                <DialogTitle>Select Dark Brand Logo</DialogTitle>
+                <DialogDescription />
+              </DialogHeader>
+              <edge-cms-media-manager
+                :site="props.siteId"
+                :select-mode="true"
+                :default-tags="['Logos']"
+                @select="(url) => {
+                  props.settings.brandLogoDark = url
+                  state.brandLogoDarkPickerOpen = false
+                }"
+              />
+            </DialogContent>
+          </Dialog>
         </div>
         <edge-shad-input
           v-else
@@ -740,9 +758,9 @@ watch(() => props.settings?.forwardApex, (value) => {
               type="button"
               variant="link"
               class="px-0 h-auto text-sm"
-              @click="state.brandLogoLightPickerOpen = !state.brandLogoLightPickerOpen"
+              @click="state.brandLogoLightPickerOpen = true"
             >
-              {{ state.brandLogoLightPickerOpen ? 'Hide picker' : 'Select logo' }}
+              Select logo
             </edge-shad-button>
           </label>
           <div class="flex items-center gap-4">
@@ -763,17 +781,23 @@ watch(() => props.settings?.forwardApex, (value) => {
             </div>
             <span v-else class="text-sm text-muted-foreground italic">No brand light logo selected</span>
           </div>
-          <div v-if="state.brandLogoLightPickerOpen" class="mt-2 border border-dashed rounded-lg p-2">
-            <edge-cms-media-manager
-              :site="props.siteId"
-              :select-mode="true"
-              :default-tags="['Logos']"
-              @select="(url) => {
-                props.settings.brandLogoLight = url
-                state.brandLogoLightPickerOpen = false
-              }"
-            />
-          </div>
+          <Dialog v-model:open="state.brandLogoLightPickerOpen">
+            <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
+              <DialogHeader>
+                <DialogTitle>Select Light Brand Logo</DialogTitle>
+                <DialogDescription />
+              </DialogHeader>
+              <edge-cms-media-manager
+                :site="props.siteId"
+                :select-mode="true"
+                :default-tags="['Logos']"
+                @select="(url) => {
+                  props.settings.brandLogoLight = url
+                  state.brandLogoLightPickerOpen = false
+                }"
+              />
+            </DialogContent>
+          </Dialog>
         </div>
         <edge-shad-input
           v-else
@@ -791,9 +815,9 @@ watch(() => props.settings?.forwardApex, (value) => {
             type="button"
             variant="link"
             class="px-0 h-auto text-sm"
-            @click="state.faviconPickerOpen = !state.faviconPickerOpen"
+            @click="state.faviconPickerOpen = true"
           >
-            {{ state.faviconPickerOpen ? 'Hide picker' : 'Select favicon' }}
+            Select favicon
           </edge-shad-button>
         </label>
         <div class="flex items-center gap-4">
@@ -814,17 +838,23 @@ watch(() => props.settings?.forwardApex, (value) => {
           </div>
           <span v-else class="text-sm text-muted-foreground italic">No favicon selected</span>
         </div>
-        <div v-if="state.faviconPickerOpen" class="mt-2 border border-dashed rounded-lg p-2">
-          <edge-cms-media-manager
-            :site="props.siteId"
-            :select-mode="true"
-            :default-tags="['Logos']"
-            @select="(url) => {
-              props.settings.favicon = url
-              state.faviconPickerOpen = false
-            }"
-          />
-        </div>
+        <Dialog v-model:open="state.faviconPickerOpen">
+          <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
+            <DialogHeader>
+              <DialogTitle>Select Favicon</DialogTitle>
+              <DialogDescription />
+            </DialogHeader>
+            <edge-cms-media-manager
+              :site="props.siteId"
+              :select-mode="true"
+              :default-tags="['Logos']"
+              @select="(url) => {
+                props.settings.favicon = url
+                state.faviconPickerOpen = false
+              }"
+            />
+          </DialogContent>
+        </Dialog>
       </div>
       <edge-shad-input
         v-else
