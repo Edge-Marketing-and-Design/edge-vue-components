@@ -99,7 +99,12 @@ const getDisplayName = (item) => {
   return String(item?.name || item?.fileName || item?.docId || 'Untitled publication').trim()
 }
 
-const isSelected = item => String(props.selectedValue || '') === String(item?.docId || '')
+const isSelected = (item) => {
+  const selected = String(props.selectedValue || '').trim()
+  if (!selected)
+    return false
+  return selected === String(item?.docId || '').trim() || selected === String(item?.slug || '').trim()
+}
 
 const selectPublication = (item) => {
   if (!props.selectMode)

@@ -2719,7 +2719,7 @@ const getTagsFromPosts = computed(() => {
                                 <edge-cms-publication-manager
                                   :select-mode="true"
                                   :selected-value="state.meta[entry.field].queryItems[option.field]"
-                                  @select="(docId) => { state.meta[entry.field].queryItems[option.field] = docId; state.publicationOpenByKey[`${entry.field}:${option.field}`] = false }"
+                                  @select="(docId, item) => { state.meta[entry.field].queryItems[option.field] = String(item?.slug || docId || '').trim(); state.publicationOpenByKey[`${entry.field}:${option.field}`] = false }"
                                 />
                               </DialogContent>
                             </Dialog>
@@ -2808,7 +2808,7 @@ const getTagsFromPosts = computed(() => {
                           <edge-cms-publication-manager
                             :select-mode="true"
                             :selected-value="state.draft[entry.field]"
-                            @select="(docId) => { state.draft[entry.field] = docId; state.publicationOpenByKey[entry.field] = false }"
+                            @select="(docId, item) => { state.draft[entry.field] = String(item?.slug || docId || '').trim(); state.publicationOpenByKey[entry.field] = false }"
                           />
                         </DialogContent>
                       </Dialog>
