@@ -2628,6 +2628,7 @@ const getTagsFromPosts = computed(() => {
                                               cms-site-only-title="Current Site"
                                               :select-mode="true"
                                               :default-tags="schemaItem.tags"
+                                              :image-variant="schemaItem.variant || 'public'"
                                               @select="(url) => setArrayImageValue(entry.field, index, schemaItem.field, url)"
                                             />
                                             <edge-cms-media-manager
@@ -2636,6 +2637,7 @@ const getTagsFromPosts = computed(() => {
                                               :show-cms-site-filter="true"
                                               cms-site-only-title="Current Site"
                                               :select-mode="true"
+                                              :image-variant="schemaItem.variant || 'public'"
                                               @select="(url) => setArrayImageValue(entry.field, index, schemaItem.field, url)"
                                             />
                                           </DialogContent>
@@ -2724,15 +2726,19 @@ const getTagsFromPosts = computed(() => {
                                   <span class="text-xs text-muted-foreground">Browse</span>
                                 </edge-shad-button>
                               </DialogTrigger>
-                              <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-y-auto">
+                              <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
                                 <DialogHeader>
                                   <DialogTitle>{{ genTitleFromField(option) }}</DialogTitle>
                                   <DialogDescription />
                                 </DialogHeader>
-                                <edge-cms-publication-manager
+                                <edge-cms-media-manager
                                   :select-mode="true"
-                                  :selected-value="state.meta[entry.field].queryItems[option.field]"
-                                  @select="(docId, item) => setPublicationQuerySelection(entry.field, option.field, docId, item)"
+                                  :include-files="true"
+                                  :files-only="true"
+                                  file-type-default="pub"
+                                  emit-override="docId"
+                                  :hide-file-type-selector="true"
+                                  @select="docId => setPublicationQuerySelection(entry.field, option.field, docId)"
                                 />
                               </DialogContent>
                             </Dialog>
@@ -2778,6 +2784,7 @@ const getTagsFromPosts = computed(() => {
                                 cms-site-only-title="Current Site"
                                 :select-mode="true"
                                 :default-tags="entry.meta.tags"
+                                :image-variant="entry.meta.variant || 'public'"
                                 @select="(url) => { state.draft[entry.field] = url; state.imageOpenByField[entry.field] = false }"
                               />
                               <edge-cms-media-manager
@@ -2786,6 +2793,7 @@ const getTagsFromPosts = computed(() => {
                                 :show-cms-site-filter="true"
                                 cms-site-only-title="Current Site"
                                 :select-mode="true"
+                                :image-variant="entry.meta.variant || 'public'"
                                 @select="(url) => { state.draft[entry.field] = url; state.imageOpenByField[entry.field] = false }"
                               />
                             </DialogContent>
@@ -2813,15 +2821,19 @@ const getTagsFromPosts = computed(() => {
                             <span class="text-xs text-muted-foreground">Browse</span>
                           </edge-shad-button>
                         </DialogTrigger>
-                        <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-y-auto">
+                        <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
                           <DialogHeader>
                             <DialogTitle>{{ genTitleFromField(entry) }}</DialogTitle>
                             <DialogDescription />
                           </DialogHeader>
-                          <edge-cms-publication-manager
+                          <edge-cms-media-manager
                             :select-mode="true"
-                            :selected-value="state.draft[entry.field]"
-                            @select="(docId, item) => { state.draft[entry.field] = String(item?.slug || docId || '').trim(); state.publicationOpenByKey[entry.field] = false }"
+                            :include-files="true"
+                            :files-only="true"
+                            file-type-default="pub"
+                            emit-override="docId"
+                            :hide-file-type-selector="true"
+                            @select="(docId) => { state.draft[entry.field] = String(docId || '').trim(); state.publicationOpenByKey[entry.field] = false }"
                           />
                         </DialogContent>
                       </Dialog>

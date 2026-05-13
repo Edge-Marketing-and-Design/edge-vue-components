@@ -161,7 +161,7 @@ const mediaCopyUrl = computed(() => {
           <edge-shad-button
             v-if="props.canDelete"
             size="icon"
-            class="bg-destructive/80 text-destructive-foreground hover:bg-destructive h-9 w-9 sm:h-10 sm:w-10 rounded-xl border border-destructive/40 shadow-sm"
+            class="bg-destructive/80 text-destructive-foreground hover:bg-destructive h-8 w-8 rounded-lg border border-destructive/40 shadow-sm"
             @click.stop="emits('delete', item.docId)"
           >
             <Trash class="!h-5 !w-5" />
