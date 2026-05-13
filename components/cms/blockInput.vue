@@ -67,6 +67,10 @@ const hasImageTags = computed(() => {
   return Array.isArray(props.schema?.tags) && props.schema.tags.length > 0
 })
 
+const resolvedImageVariant = computed(() => {
+  return String(props.schema?.variant || 'public').trim() || 'public'
+})
+
 const resolvedImageUrl = computed(() => {
   if (typeof modelValue.value === 'string')
     return modelValue.value
@@ -81,7 +85,7 @@ const normalizeSelectedImageUrl = (url) => {
   if (url && typeof url === 'object') {
     if (typeof url.url === 'string')
       return url.url
-    const publicUrl = edgeGlobal.getImage(url, 'public')
+    const publicUrl = edgeGlobal.getImage(url, resolvedImageVariant.value)
     if (typeof publicUrl === 'string')
       return publicUrl
   }
@@ -154,6 +158,7 @@ onBeforeMount(async () => {
             cms-site-only-title="Current Site"
             :select-mode="true"
             :default-tags="props.schema.tags"
+            :image-variant="resolvedImageVariant"
             @select="selectRichtextImage"
           />
           <edge-cms-media-manager
@@ -162,6 +167,7 @@ onBeforeMount(async () => {
             :show-cms-site-filter="true"
             cms-site-only-title="Current Site"
             :select-mode="true"
+            :image-variant="resolvedImageVariant"
             @select="selectRichtextImage"
           />
         </DialogContent>
@@ -245,6 +251,7 @@ onBeforeMount(async () => {
               cms-site-only-title="Current Site"
               :select-mode="true"
               :default-tags="props.schema.tags"
+              :image-variant="resolvedImageVariant"
               @select="selectImage"
             />
             <edge-cms-media-manager
@@ -253,6 +260,7 @@ onBeforeMount(async () => {
               :show-cms-site-filter="true"
               cms-site-only-title="Current Site"
               :select-mode="true"
+              :image-variant="resolvedImageVariant"
               @select="selectImage"
             />
           </DialogContent>

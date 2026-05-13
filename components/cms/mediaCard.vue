@@ -1,5 +1,5 @@
 <script setup>
-import { Eye, File, FileArchive, FileSpreadsheet, FileText, ImagePlus, Loader2, Square, SquareCheckBig, Trash } from 'lucide-vue-next'
+import { Code, Eye, File, FileArchive, FileSpreadsheet, FileText, ImagePlus, Loader2, Square, SquareCheckBig, Trash } from 'lucide-vue-next'
 const props = defineProps({
   item: {
     type: Object,
@@ -21,8 +21,12 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  showJsonView: {
+    type: Boolean,
+    default: false,
+  },
 })
-const emits = defineEmits(['select', 'delete', 'view'])
+const emits = defineEmits(['select', 'delete', 'view', 'viewJson'])
 
 const timeAgo = (timestamp) => {
   if (!timestamp)
@@ -159,9 +163,18 @@ const mediaCopyUrl = computed(() => {
             <Eye class="!h-4 !w-4" aria-hidden="true" />
           </edge-shad-button>
           <edge-shad-button
+            v-if="props.showJsonView"
+            size="icon"
+            aria-label="View file JSON"
+            class="bg-slate-900 text-white hover:bg-slate-800 h-8 w-8 rounded-lg shadow-sm dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
+            @click.stop="emits('viewJson', item)"
+          >
+            <Code class="!h-4 !w-4" aria-hidden="true" />
+          </edge-shad-button>
+          <edge-shad-button
             v-if="props.canDelete"
             size="icon"
-            class="bg-destructive/80 text-destructive-foreground hover:bg-destructive h-9 w-9 sm:h-10 sm:w-10 rounded-xl border border-destructive/40 shadow-sm"
+            class="bg-destructive/80 text-destructive-foreground hover:bg-destructive h-8 w-8 rounded-lg border border-destructive/40 shadow-sm"
             @click.stop="emits('delete', item.docId)"
           >
             <Trash class="!h-5 !w-5" />

@@ -314,6 +314,7 @@ const state = reactive({
   afterLoad: false,
   imageOpen: false,
   imageOpenByField: {},
+  publicationOpenByKey: {},
   aiDialogOpen: false,
   aiDialogSpotlightActive: false,
   aiGenerateButtonSpotlightActive: false,
@@ -526,6 +527,40 @@ const resolvedEditorBlockTypes = computed(() => {
   return ['Page']
 })
 const isPageBlockEditor = computed(() => resolvedEditorBlockTypes.value.includes('Page'))
+const siteRestrictedSettings = computed(() => {
+  return resolveSiteRestrictedSettings()
+})
+
+const siteRestrictedPlanOptions = computed(() => {
+  const restrictedContent = siteRestrictedSettings.value
+  const plans = Array.isArray(restrictedContent?.rules) ? restrictedContent.rules : []
+  return plans
+    .map((item, index) => {
+      const normalizedItem = (item && typeof item === 'object') ? item : {}
+      const id = String(normalizedItem.id || normalizedItem.docId || `rule-${index + 1}`).trim()
+      return {
+        value: id,
+        label: String(normalizedItem.name || id).trim() || id,
+      }
+    })
+    .filter(item => item.value)
+    .sort((a, b) => a.label.localeCompare(b.label))
+})
+
+const siteAllowsSelfRegistration = computed(() => {
+  return siteRestrictedSettings.value?.allowSelfRegistration !== false
+})
+
+const protectionAccessModeOptions = computed(() => {
+  if (siteAllowsSelfRegistration.value)
+    return PROTECTION_ACCESS_MODES
+  return PROTECTION_ACCESS_MODES.filter(item => item.name !== 'paidPlan')
+})
+
+const previewAuthToggleVisible = computed(() => {
+  return Boolean(siteRestrictedSettings.value?.enabled)
+})
+
 const showProtectionEditor = computed(() => {
   return !props.standalonePreview && props.allowProtectionEditor && isPageBlockEditor.value
 })
@@ -762,40 +797,6 @@ const previewBlockDisplayName = computed(() => {
   return String(found || '').trim() || 'Block'
 })
 
-const siteRestrictedSettings = computed(() => {
-  return resolveSiteRestrictedSettings()
-})
-
-const siteRestrictedPlanOptions = computed(() => {
-  const restrictedContent = siteRestrictedSettings.value
-  const plans = Array.isArray(restrictedContent?.rules) ? restrictedContent.rules : []
-  return plans
-    .map((item, index) => {
-      const normalizedItem = (item && typeof item === 'object') ? item : {}
-      const id = String(normalizedItem.id || normalizedItem.docId || `rule-${index + 1}`).trim()
-      return {
-        value: id,
-        label: String(normalizedItem.name || id).trim() || id,
-      }
-    })
-    .filter(item => item.value)
-    .sort((a, b) => a.label.localeCompare(b.label))
-})
-
-const siteAllowsSelfRegistration = computed(() => {
-  return siteRestrictedSettings.value?.allowSelfRegistration !== false
-})
-
-const protectionAccessModeOptions = computed(() => {
-  if (siteAllowsSelfRegistration.value)
-    return PROTECTION_ACCESS_MODES
-  return PROTECTION_ACCESS_MODES.filter(item => item.name !== 'paidPlan')
-})
-
-const previewAuthToggleVisible = computed(() => {
-  return Boolean(siteRestrictedSettings.value?.enabled)
-})
-
 const ensureQueryItemsDefaults = (meta) => {
   Object.keys(meta || {}).forEach((key) => {
     const cfg = meta[key]
@@ -842,6 +843,19 @@ const sanitizeQueryItems = (meta) => {
       delete cfg.queryItems
   }
   return cleaned
+}
+
+const setPublicationQuerySelection = (entryField, optionField, docId, item) => {
+  const selectedValue = String(item?.slug || docId || '').trim()
+  if (!state.meta?.[entryField])
+    return
+
+  if (!state.meta[entryField].queryItems || typeof state.meta[entryField].queryItems !== 'object')
+    state.meta[entryField].queryItems = {}
+
+  state.meta[entryField].queryItems[optionField] = selectedValue
+  state.draft[entryField] = selectedValue ? [{ [optionField]: selectedValue }] : []
+  state.publicationOpenByKey[`${entryField}:${optionField}`] = false
 }
 
 const resetArrayItems = (field, metaSource = null) => {
@@ -2614,6 +2628,7 @@ const getTagsFromPosts = computed(() => {
                                               cms-site-only-title="Current Site"
                                               :select-mode="true"
                                               :default-tags="schemaItem.tags"
+                                              :image-variant="schemaItem.variant || 'public'"
                                               @select="(url) => setArrayImageValue(entry.field, index, schemaItem.field, url)"
                                             />
                                             <edge-cms-media-manager
@@ -2622,6 +2637,7 @@ const getTagsFromPosts = computed(() => {
                                               :show-cms-site-filter="true"
                                               cms-site-only-title="Current Site"
                                               :select-mode="true"
+                                              :image-variant="schemaItem.variant || 'public'"
                                               @select="(url) => setArrayImageValue(entry.field, index, schemaItem.field, url)"
                                             />
                                           </DialogContent>
@@ -2696,6 +2712,36 @@ const getTagsFromPosts = computed(() => {
                               :name="option.field"
                               :placeholder="`Select ${genTitleFromField(option)}`"
                             />
+                            <Dialog
+                              v-else-if="option?.picker === 'publication'"
+                              v-model:open="state.publicationOpenByKey[`${entry.field}:${option.field}`]"
+                            >
+                              <DialogTrigger as-child>
+                                <edge-shad-button
+                                  type="button"
+                                  variant="outline"
+                                  class="w-full justify-between"
+                                >
+                                  <span>{{ state.meta[entry.field].queryItems[option.field] || `Select ${genTitleFromField(option)}` }}</span>
+                                  <span class="text-xs text-muted-foreground">Browse</span>
+                                </edge-shad-button>
+                              </DialogTrigger>
+                              <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
+                                <DialogHeader>
+                                  <DialogTitle>{{ genTitleFromField(option) }}</DialogTitle>
+                                  <DialogDescription />
+                                </DialogHeader>
+                                <edge-cms-media-manager
+                                  :select-mode="true"
+                                  :include-files="true"
+                                  :files-only="true"
+                                  file-type-default="pub"
+                                  emit-override="docId"
+                                  :hide-file-type-selector="true"
+                                  @select="docId => setPublicationQuerySelection(entry.field, option.field, docId)"
+                                />
+                              </DialogContent>
+                            </Dialog>
                             <edge-cms-options-select
                               v-else-if="entry.meta?.collection?.path !== 'post'"
                               v-model="state.meta[entry.field].queryItems[option.field]"
@@ -2738,6 +2784,7 @@ const getTagsFromPosts = computed(() => {
                                 cms-site-only-title="Current Site"
                                 :select-mode="true"
                                 :default-tags="entry.meta.tags"
+                                :image-variant="entry.meta.variant || 'public'"
                                 @select="(url) => { state.draft[entry.field] = url; state.imageOpenByField[entry.field] = false }"
                               />
                               <edge-cms-media-manager
@@ -2746,6 +2793,7 @@ const getTagsFromPosts = computed(() => {
                                 :show-cms-site-filter="true"
                                 cms-site-only-title="Current Site"
                                 :select-mode="true"
+                                :image-variant="entry.meta.variant || 'public'"
                                 @select="(url) => { state.draft[entry.field] = url; state.imageOpenByField[entry.field] = false }"
                               />
                             </DialogContent>
@@ -2759,13 +2807,38 @@ const getTagsFromPosts = computed(() => {
                       </div>
                     </div>
                     <div v-else-if="entry.meta?.option" @focusin="setActivePreviewField(entry.field)" @mousedown.capture="setActivePreviewField(entry.field)">
-                      <!-- <cms-publication-picker-field
-                    v-if="entry.meta.option?.picker === 'publication'"
-                    v-model="state.draft[entry.field]"
-                    :option="entry.meta.option"
-                    :label="genTitleFromField(entry)"
-                  /> -->
+                      <Dialog
+                        v-if="entry.meta.option?.picker === 'publication'"
+                        v-model:open="state.publicationOpenByKey[entry.field]"
+                      >
+                        <DialogTrigger as-child>
+                          <edge-shad-button
+                            type="button"
+                            variant="outline"
+                            class="w-full justify-between"
+                          >
+                            <span>{{ state.draft[entry.field] || `Select ${genTitleFromField(entry)}` }}</span>
+                            <span class="text-xs text-muted-foreground">Browse</span>
+                          </edge-shad-button>
+                        </DialogTrigger>
+                        <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
+                          <DialogHeader>
+                            <DialogTitle>{{ genTitleFromField(entry) }}</DialogTitle>
+                            <DialogDescription />
+                          </DialogHeader>
+                          <edge-cms-media-manager
+                            :select-mode="true"
+                            :include-files="true"
+                            :files-only="true"
+                            file-type-default="pub"
+                            emit-override="docId"
+                            :hide-file-type-selector="true"
+                            @select="(docId) => { state.draft[entry.field] = String(docId || '').trim(); state.publicationOpenByKey[entry.field] = false }"
+                          />
+                        </DialogContent>
+                      </Dialog>
                       <edge-cms-options-select
+                        v-else
                         v-model="state.draft[entry.field]"
                         :option="entry.meta.option"
                         :label="genTitleFromField(entry)"

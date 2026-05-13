@@ -63,6 +63,21 @@ const props = defineProps({
     required: false,
     default: false,
   },
+  imageVariant: {
+    type: String,
+    required: false,
+    default: 'public',
+  },
+  emitOverride: {
+    type: String,
+    required: false,
+    default: '',
+  },
+  hideFileTypeSelector: {
+    type: Boolean,
+    required: false,
+    default: false,
+  },
 })
 
 // const edgeGlobal = inject('edgeGlobal')
@@ -70,6 +85,8 @@ const props = defineProps({
 const emits = defineEmits(['select'])
 
 const edgeFirebase = inject('edgeFirebase')
+const isAdmin = computed(() => edgeGlobal.isAdminGlobal(edgeFirebase).value)
+const showDevOnlyActions = computed(() => edgeGlobal.allowMenuItem({ devOnly: true }, isAdmin.value))
 const allowedFileExtensions = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'ppt', 'pptx', 'txt', 'rtf', 'zip', 'odt', 'ods', 'odp']
 const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'avif']
 const allowedFileMimeTypes = [
@@ -91,6 +108,12 @@ const allowedFileMimeTypes = [
   'application/vnd.oasis.opendocument.presentation',
 ]
 const imageMimeTypes = ['image/jpg', 'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml', 'image/avif']
+const resolvedImageVariant = computed(() => {
+  return String(props.imageVariant || 'public').trim() || 'public'
+})
+const resolvedEmitOverride = computed(() => {
+  return String(props.emitOverride || '').trim()
+})
 const isPdfUpload = (file) => {
   const mimeType = String(file?.type || file?.file?.type || '').toLowerCase()
   if (mimeType === 'application/pdf')
@@ -128,6 +151,18 @@ const isAllowedFileItem = (item) => {
   const ext = getMediaExtension(item)
   return allowedFileMimeTypes.includes(contentType) || allowedFileExtensions.includes(ext)
 }
+const isPublicationPdfItem = (item) => {
+  const contentType = String(item?.contentType || '').toLowerCase()
+  const isPdf = contentType === 'application/pdf' || getMediaExtension(item) === 'pdf'
+  if (!isPdf)
+    return false
+
+  const pageImages = item?.ccState?.cFImages || item?.ccState?.cfImages || {}
+  if (!pageImages || typeof pageImages !== 'object')
+    return false
+
+  return Object.keys(pageImages).some(key => /^page-\d+$/i.test(String(key || '')))
+}
 
 const state = reactive({
   filter: '',
@@ -152,6 +187,7 @@ const state = reactive({
   showUpload: false,
   initialMediaLoadDone: false,
   loaderHold: true,
+  emptyStateHold: true,
   mediaTypeFilter: 'both',
   fileTypeFilter: 'all',
   cmsSiteFilter: 'all',
@@ -159,19 +195,27 @@ const state = reactive({
   deleteConfirmMode: 'single',
   deleteConfirmDocId: '',
   deleteConfirmAcknowledge: false,
+  jsonViewOpen: false,
+  jsonViewDoc: null,
   recentUploadedMediaKeys: [],
   recentUploadStartedAt: 0,
   recentUploadCompletedAt: 0,
 })
 
 let mediaLoaderHoldTimer = null
+let mediaEmptyStateHoldTimer = null
 
 const resetMediaLoadState = () => {
   state.initialMediaLoadDone = false
   state.loaderHold = true
+  state.emptyStateHold = true
   if (mediaLoaderHoldTimer) {
     clearTimeout(mediaLoaderHoldTimer)
     mediaLoaderHoldTimer = null
+  }
+  if (mediaEmptyStateHoldTimer) {
+    clearTimeout(mediaEmptyStateHoldTimer)
+    mediaEmptyStateHoldTimer = null
   }
   mediaLoaderHoldTimer = setTimeout(() => {
     state.loaderHold = false
@@ -208,6 +252,8 @@ const normalizeFileTypeFilter = (value) => {
   const normalized = String(value || '').trim().toLowerCase()
   if (normalized === 'all')
     return 'all'
+  if (normalized === 'pub')
+    return 'pub'
   if ([...imageExtensions, ...allowedFileExtensions].includes(normalized))
     return normalized
   return 'all'
@@ -269,15 +315,20 @@ const fileTypeExtensionsForScope = computed(() => {
     const ext = getMediaExtension(item)
     if (allowedByScope.has(ext))
       present.add(ext)
+    if (isPublicationPdfItem(item))
+      present.add('pub')
   })
 
-  const ordered = [...allowedByScope].filter(ext => present.has(ext))
+  const ordered = [
+    ...(present.has('pub') ? ['pub'] : []),
+    ...[...allowedByScope].filter(ext => present.has(ext)),
+  ]
   return ordered
 })
 const fileTypeFilterItems = computed(() => [
   { title: 'All Types', name: 'all' },
   ...fileTypeExtensionsForScope.value.map(ext => ({
-    title: ext.toUpperCase(),
+    title: ext === 'pub' ? 'PUB' : ext.toUpperCase(),
     name: ext,
   })),
 ])
@@ -346,6 +397,8 @@ const shouldIncludeItemByFileType = (item) => {
   const fileTypeFilter = normalizeFileTypeFilter(state.fileTypeFilter)
   if (fileTypeFilter === 'all')
     return true
+  if (fileTypeFilter === 'pub')
+    return isPublicationPdfItem(item)
   return getMediaExtension(item) === fileTypeFilter
 }
 const shouldIncludeItemBySearchAndTags = (item) => {
@@ -374,8 +427,7 @@ const getModeFilteredItems = (items) => {
     .filter(item => shouldIncludeItemByMode(item))
     .filter(item => shouldIncludeItemByFileType(item))
 }
-const hasModeFilteredItems = items => getModeFilteredItems(items).length > 0
-const showFileTypeFilter = computed(() => true)
+const showFileTypeFilter = computed(() => !props.hideFileTypeSelector)
 const modeFilteredFiles = computed(() => {
   const list = Object.values(files.value || {})
   return getModeFilteredItems(list)
@@ -404,9 +456,12 @@ const mediaLoading = computed(() => {
   return !state.initialMediaLoadDone
 })
 
+const canShowMediaEmptyState = computed(() => {
+  return mediaSnapshotReady.value && state.initialMediaLoadDone && !state.emptyStateHold
+})
+
 const showEmptyMediaState = computed(() => {
-  return mediaSnapshotReady.value
-    && state.initialMediaLoadDone
+  return canShowMediaEmptyState.value
     && filteredFiles.value.length === 0
 })
 const isDialogOpen = computed(() => state.showUpload || state.editMedia)
@@ -568,6 +623,21 @@ const confirmDelete = async () => {
     state.deleting = false
   }
 }
+const jsonViewTitle = computed(() => {
+  const fileName = String(state.jsonViewDoc?.fileName || state.jsonViewDoc?.name || state.jsonViewDoc?.docId || '').trim()
+  return fileName || 'Media File'
+})
+const formattedJsonViewDoc = computed(() => {
+  if (!state.jsonViewDoc)
+    return ''
+  return JSON.stringify(state.jsonViewDoc, null, 2)
+})
+const openJsonView = (item) => {
+  if (!showDevOnlyActions.value)
+    return
+  state.jsonViewDoc = item
+  state.jsonViewOpen = true
+}
 
 watch(selectAll, (newValue) => {
   if (newValue) {
@@ -602,6 +672,7 @@ const getTagsFromMedia = computed(() => {
   })
   return Array.from(tagsSet).map(tag => ({ name: tag, title: tag }))
 })
+const showTagFilter = computed(() => getTagsFromMedia.value.length > 0)
 const schemas = {
   media: toTypedSchema(z.object({
     name: z.string({
@@ -656,13 +727,27 @@ watch(fileTypeExtensionsForScope, (extensions) => {
 
 watch(
   () => [mediaSnapshotReady.value, filteredFiles.value.length, state.loaderHold],
-  ([ready, count, loaderHold]) => {
+  ([ready, count]) => {
     if (count > 0) {
       state.initialMediaLoadDone = true
+      state.emptyStateHold = false
+      if (mediaEmptyStateHoldTimer) {
+        clearTimeout(mediaEmptyStateHoldTimer)
+        mediaEmptyStateHoldTimer = null
+      }
       return
     }
-    if (ready || !loaderHold)
+    if (ready) {
       state.initialMediaLoadDone = true
+      state.emptyStateHold = true
+      if (mediaEmptyStateHoldTimer)
+        clearTimeout(mediaEmptyStateHoldTimer)
+      mediaEmptyStateHoldTimer = setTimeout(() => {
+        if (filteredFiles.value.length === 0)
+          state.emptyStateHold = false
+        mediaEmptyStateHoldTimer = null
+      }, 300)
+    }
   },
   { immediate: true },
 )
@@ -671,6 +756,10 @@ onBeforeUnmount(() => {
   if (mediaLoaderHoldTimer) {
     clearTimeout(mediaLoaderHoldTimer)
     mediaLoaderHoldTimer = null
+  }
+  if (mediaEmptyStateHoldTimer) {
+    clearTimeout(mediaEmptyStateHoldTimer)
+    mediaEmptyStateHoldTimer = null
   }
 })
 
@@ -700,9 +789,9 @@ const openMediaView = (item) => {
 const itemClick = (item) => {
   if (props.selectMode) {
     const selectedUrl = isImageMediaItem(item)
-      ? (edgeGlobal.getImage(item, 'public') || item?.r2URL || item?.r2Url || '')
-      : (item?.r2URL || item?.r2Url || edgeGlobal.getImage(item, 'public') || '')
-    emits('select', selectedUrl)
+      ? (edgeGlobal.getImage(item, resolvedImageVariant.value) || item?.r2URL || item?.r2Url || '')
+      : (item?.r2URL || item?.r2Url || edgeGlobal.getImage(item, resolvedImageVariant.value) || '')
+    emits('select', resolvedEmitOverride.value ? item?.[resolvedEmitOverride.value] : selectedUrl)
   }
   else {
     openMediaView(item)
@@ -887,7 +976,7 @@ const onPdfPreviewErrored = (event, expectedUrl = '') => {
 }
 const workingDocPreviewUrl = computed(() => {
   if (workingDocIsImage.value)
-    return String(edgeGlobal.getImage(state.workingDoc, 'public') || '')
+    return String(edgeGlobal.getImage(state.workingDoc, resolvedImageVariant.value) || '')
   if (workingDocIsPdf.value)
     return String(currentPdfPage.value?.preview || currentPdfPage.value?.thumbnail || '')
   return ''
@@ -1051,7 +1140,7 @@ const siteQueryValue = computed(() => resolveCmsSiteScopeValues())
                         {{ uploadActionLabel }}
                       </edge-shad-button>
                     </div>
-                    <div class="md:flex-1 md:min-w-[220px]">
+                    <div v-if="showTagFilter" class="md:flex-1 md:min-w-[220px]">
                       <edge-shad-select
                         v-if="!state.clearingTags"
                         v-model="state.filterTags"
@@ -1135,7 +1224,7 @@ const siteQueryValue = computed(() => resolveCmsSiteScopeValues())
           </div>
         </div>
       </template>
-      <template #list="slotProps">
+      <template #list>
         <div class="w-full h-full min-h-0 pt-3 flex flex-col overflow-hidden">
           <div v-if="mediaLoading" :class="mediaPlaceholderClass">
             <Loader2 class="h-7 w-7 animate-spin" />
@@ -1145,7 +1234,7 @@ const siteQueryValue = computed(() => resolveCmsSiteScopeValues())
           </div>
 
           <div
-            v-else-if="showEmptyMediaState || !hasModeFilteredItems(slotProps.filtered)"
+            v-else-if="showEmptyMediaState"
             :class="mediaPlaceholderClass"
           >
             <div class="text-sm font-medium">
@@ -1165,7 +1254,7 @@ const siteQueryValue = computed(() => resolveCmsSiteScopeValues())
               class="mx-auto px-0 pb-3 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5"
             >
               <div
-                v-for="item in getModeFilteredItems(slotProps.filtered)"
+                v-for="item in filteredFiles"
                 :key="item.docId"
                 class="w-full cursor-pointer"
                 @click="itemClick(item)"
@@ -1177,9 +1266,11 @@ const siteQueryValue = computed(() => resolveCmsSiteScopeValues())
                   :select-mode="props.selectMode"
                   :can-delete="canDeleteMedia(item)"
                   :is-new="isRecentlyUploadedMedia(item)"
+                  :show-json-view="showDevOnlyActions"
                   @select="(checked, docId) => handleCheckboxChange(checked, docId)"
                   @delete="(docId) => openDeleteConfirmSingle(docId)"
                   @view="openMediaView"
+                  @view-json="openJsonView"
                 />
               </div>
             </div>
@@ -1230,6 +1321,19 @@ const siteQueryValue = computed(() => resolveCmsSiteScopeValues())
             Permanently Delete
           </edge-shad-button>
         </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
+    <edge-shad-dialog v-model="state.jsonViewOpen">
+      <DialogContent class="max-w-4xl">
+        <DialogHeader>
+          <DialogTitle class="text-left">
+            {{ jsonViewTitle }}
+          </DialogTitle>
+          <DialogDescription class="text-left">
+            File document JSON
+          </DialogDescription>
+        </DialogHeader>
+        <pre class="max-h-[70vh] overflow-auto rounded-md border border-border bg-muted/30 p-3 text-xs leading-relaxed text-foreground"><code>{{ formattedJsonViewDoc }}</code></pre>
       </DialogContent>
     </edge-shad-dialog>
     <Sheet v-model:open="state.editMedia">
