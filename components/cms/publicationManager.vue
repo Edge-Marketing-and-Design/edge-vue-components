@@ -20,69 +20,37 @@ const props = defineProps({
 })
 
 const emits = defineEmits(['select'])
+const edgeFirebase = inject('edgeFirebase')
 
 const state = reactive({
   filter: '',
+  files: [],
+  loading: false,
 })
 
 const normalizeText = value => String(value || '').trim().toLowerCase()
 
-const hasImageExtension = (value) => {
-  const normalized = normalizeText(value)
-  return normalized.endsWith('.jpg')
-    || normalized.endsWith('.jpeg')
-    || normalized.endsWith('.png')
-    || normalized.endsWith('.gif')
-    || normalized.endsWith('.webp')
-    || normalized.endsWith('.svg')
-    || normalized.endsWith('.avif')
-}
-
-const isImageMimeType = value => normalizeText(value).startsWith('image/')
-
 const isPublicationFile = (file) => {
-  if (!file)
-    return false
-
-  if (file?.meta?.flipbook === true)
-    return true
-
-  const contentType = normalizeText(file?.contentType)
-  const fileName = normalizeText(file?.fileName)
-  const filePath = normalizeText(file?.filePath)
-  const r2Url = normalizeText(file?.r2URL || file?.r2Url)
-  const hasCcState = !!file?.ccState
-  const looksLikePdf = contentType.includes('pdf')
-    || fileName.endsWith('.pdf')
-    || filePath.includes('/pdfs/')
-    || filePath.startsWith('pdfs/')
-    || r2Url.endsWith('.pdf')
-
-  if (hasCcState || looksLikePdf)
-    return true
-
-  if (isImageMimeType(contentType))
-    return false
-
-  if (filePath.includes('/images/') || filePath.startsWith('images/'))
-    return false
-
-  if (hasImageExtension(fileName) || hasImageExtension(r2Url))
-    return false
-
-  return false
+  return file?.meta?.flipbook === true
 }
+
+const hasProvidedFiles = computed(() => {
+  if (Array.isArray(props.files))
+    return props.files.length > 0
+  return !!(props.files && typeof props.files === 'object' && Object.keys(props.files).length > 0)
+})
 
 const normalizedFiles = computed(() => {
-  if (Array.isArray(props.files))
-    return props.files.map((item) => {
+  const sourceFiles = hasProvidedFiles.value ? props.files : state.files
+  if (Array.isArray(sourceFiles))
+    return sourceFiles.map((item) => {
       return {
         ...(item || {}),
         docId: String(item?.docId || '').trim(),
       }
     })
-  if (props.files && typeof props.files === 'object') {
-    return Object.entries(props.files).map(([docId, item]) => ({
+  if (sourceFiles && typeof sourceFiles === 'object') {
+    return Object.entries(sourceFiles).map(([docId, item]) => ({
       ...(item || {}),
       docId: String(item?.docId || docId || '').trim(),
     }))
@@ -139,6 +107,21 @@ const selectPublication = (item) => {
 
   emits('select', String(item?.docId || ''), item)
 }
+
+onBeforeMount(async () => {
+  if (hasProvidedFiles.value || !edgeFirebase || !edgeGlobal.edgeState.organizationDocPath)
+    return
+
+  state.loading = true
+  try {
+    const staticSearch = new edgeFirebase.SearchStaticData()
+    await staticSearch.getData(`${edgeGlobal.edgeState.organizationDocPath}/files`)
+    state.files = Object.values(staticSearch.results?.data || {})
+  }
+  finally {
+    state.loading = false
+  }
+})
 </script>
 
 <template>
@@ -154,7 +137,14 @@ const selectPublication = (item) => {
     </div>
 
     <div
-      v-if="filteredPublications.length > 0"
+      v-if="state.loading"
+      class="rounded-md border border-dashed py-8 text-center text-sm text-muted-foreground"
+    >
+      Loading publications...
+    </div>
+
+    <div
+      v-else-if="filteredPublications.length > 0"
       class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
     >
       <Card
