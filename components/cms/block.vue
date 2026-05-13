@@ -845,6 +845,19 @@ const sanitizeQueryItems = (meta) => {
   return cleaned
 }
 
+const setPublicationQuerySelection = (entryField, optionField, docId, item) => {
+  const selectedValue = String(item?.slug || docId || '').trim()
+  if (!state.meta?.[entryField])
+    return
+
+  if (!state.meta[entryField].queryItems || typeof state.meta[entryField].queryItems !== 'object')
+    state.meta[entryField].queryItems = {}
+
+  state.meta[entryField].queryItems[optionField] = selectedValue
+  state.draft[entryField] = selectedValue ? [{ [optionField]: selectedValue }] : []
+  state.publicationOpenByKey[`${entryField}:${optionField}`] = false
+}
+
 const resetArrayItems = (field, metaSource = null) => {
   const meta = metaSource || modelValue.value?.meta || {}
   const fieldMeta = meta?.[field]
@@ -2719,7 +2732,7 @@ const getTagsFromPosts = computed(() => {
                                 <edge-cms-publication-manager
                                   :select-mode="true"
                                   :selected-value="state.meta[entry.field].queryItems[option.field]"
-                                  @select="(docId, item) => { state.meta[entry.field].queryItems[option.field] = String(item?.slug || docId || '').trim(); state.publicationOpenByKey[`${entry.field}:${option.field}`] = false }"
+                                  @select="(docId, item) => setPublicationQuerySelection(entry.field, option.field, docId, item)"
                                 />
                               </DialogContent>
                             </Dialog>
