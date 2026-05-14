@@ -151,6 +151,10 @@ const SITE_USER_META_FIELDS = [
   'socialTikTok',
 ]
 const DEFAULT_CONTACT_FORM_SUBJECT = 'Contact Form Submission'
+const DEFAULT_CONTACT_SPAM_SETTINGS = {
+  allowedInquiryContext: 'Legitimate messages usually come from people trying to contact the organization, ask a question, request services, request information, schedule an appointment, ask about availability, ask about pricing, follow up on an existing relationship, apply for an opportunity, submit a support request, or respond to content on the website. Allow messages that appear to be from a real visitor with a specific need, even if the message is short, informal, misspelled, or incomplete.',
+  blockedInquiryContext: 'Spam messages usually advertise third-party services to the website owner, offer SEO, marketing, web design, app development, lead generation, directory listings, backlinks, loans, crypto, suspicious investments, or unrelated business promotions. Block messages that are primarily trying to sell something to the organization, contain generic outreach with no connection to the website services, include suspicious links, use mass-sales language, or appear automated. This includes unsolicited offers for free audits, mockups, redesign concepts, SEO reviews, performance checks, marketing ideas, or other no-cost evaluations when the purpose appears to be selling or promoting a service to the organization.',
+}
 
 const pickSyncFields = (source = {}) => {
   const payload = {}
@@ -3313,6 +3317,111 @@ const assertOrgAdminAccess = async (uid, orgId) => {
   if (!isOrgAdmin)
     throw new HttpsError('permission-denied', 'Organization admin access is required.')
 }
+
+const normalizeContactSpamSettings = (value = {}) => {
+  const source = (value && typeof value === 'object' && !Array.isArray(value)) ? value : {}
+  return {
+    allowedInquiryContext: clampText(source.allowedInquiryContext || DEFAULT_CONTACT_SPAM_SETTINGS.allowedInquiryContext, 4000),
+    blockedInquiryContext: clampText(source.blockedInquiryContext || DEFAULT_CONTACT_SPAM_SETTINGS.blockedInquiryContext, 4000),
+  }
+}
+
+const sanitizeContactSpamContext = (value, fallback) => {
+  const normalized = String(value || '').trim()
+  if (normalized)
+    return normalized.slice(0, 4000)
+  return fallback
+}
+
+const buildContactSpamContextPrompt = ({ targetType, instruction, contactSpam }) => {
+  return [
+    'You update CMS contact form spam-classification context.',
+    'Return JSON only with this exact shape: {"allowedInquiryContext":"...","blockedInquiryContext":"..."}.',
+    'Rewrite both contexts from the current contexts and the requested adjustment.',
+    'Keep the contexts generic enough for the site, concise, and directly useful for spam classification.',
+    'Do not mention thresholds, UI strictness labels, implementation details, or the AI system.',
+    '',
+    `Settings target: ${targetType}`,
+    '',
+    'Current allowed inquiry context:',
+    contactSpam.allowedInquiryContext,
+    '',
+    'Current blocked inquiry context:',
+    contactSpam.blockedInquiryContext,
+    '',
+    'Requested adjustment:',
+    instruction,
+  ].join('\n')
+}
+
+exports.updateContactSpamContexts = onCall({ timeoutSeconds: 120 }, async (request) => {
+  assertCallableUser(request)
+  const data = request.data || {}
+  const uid = String(request.auth.uid || '').trim()
+  const orgId = String(data.orgId || '').trim()
+  const targetType = String(data.targetType || 'site').trim().toLowerCase()
+  const targetId = String(data.targetId || '').trim()
+  const instruction = String(data.instruction || '').trim()
+
+  if (!orgId || !instruction)
+    throw new HttpsError('invalid-argument', 'Missing orgId or instruction.')
+  if (!['site', 'theme'].includes(targetType))
+    throw new HttpsError('invalid-argument', 'Invalid target type.')
+  if (!OPENAI_API_KEY)
+    throw new HttpsError('failed-precondition', 'OPENAI_API_KEY not set.')
+
+  const collection = targetType === 'theme' ? 'themes' : 'sites'
+  const allowed = await permissionCheck(uid, 'write', `organizations/${orgId}/${collection}`)
+  if (!allowed)
+    throw new HttpsError('permission-denied', 'Not allowed to update contact spam settings.')
+
+  if (targetId && targetId !== 'new') {
+    const targetSnap = await db.collection('organizations').doc(orgId).collection(collection).doc(targetId).get()
+    if (!targetSnap.exists)
+      throw new HttpsError('not-found', `${targetType === 'theme' ? 'Theme' : 'Site'} not found.`)
+  }
+
+  const contactSpam = normalizeContactSpamSettings(data.contactSpam)
+  const userPrompt = buildContactSpamContextPrompt({
+    targetType,
+    instruction: clampText(instruction, 2000),
+    contactSpam,
+  })
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: 'You are a concise CMS configuration assistant. Return valid JSON only.' },
+        { role: 'user', content: userPrompt },
+      ],
+    }),
+  })
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '')
+    throw new HttpsError('internal', `OpenAI error ${response.status}: ${text}`)
+  }
+
+  const json = await response.json()
+  const contentText = json?.choices?.[0]?.message?.content || ''
+  const parsed = parseAiJson(contentText)
+  if (!parsed || typeof parsed !== 'object') {
+    logger.error('Contact spam AI response parse failed', { contentText })
+    throw new HttpsError('internal', 'Failed to parse AI response.')
+  }
+
+  return {
+    allowedInquiryContext: sanitizeContactSpamContext(parsed.allowedInquiryContext, contactSpam.allowedInquiryContext),
+    blockedInquiryContext: sanitizeContactSpamContext(parsed.blockedInquiryContext, contactSpam.blockedInquiryContext),
+  }
+})
 
 const isLikelyDomainName = (value) => {
   const normalized = normalizeDomain(value)

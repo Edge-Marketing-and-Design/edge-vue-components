@@ -184,6 +184,7 @@ const state = reactive({
     },
   },
   clearingTags: false,
+  filterTagsResetKey: 0,
   showUpload: false,
   initialMediaLoadDone: false,
   loaderHold: true,
@@ -440,6 +441,27 @@ const filteredFiles = computed(() => {
     .sort((a, b) => (b.uploadTime || 0) - (a.uploadTime || 0))
 })
 
+const selectedFilterTags = computed(() => {
+  return Array.isArray(state.filterTags)
+    ? state.filterTags.map(tag => String(tag || '').trim()).filter(Boolean)
+    : []
+})
+
+const selectedFilterTagsMissingFromOptions = computed(() => {
+  if (!selectedFilterTags.value.length)
+    return false
+
+  const optionTags = new Set()
+  modeFilteredFiles.value.forEach((file) => {
+    if (file.meta?.tags && Array.isArray(file.meta.tags))
+      file.meta.tags.forEach(tag => optionTags.add(String(tag || '').trim()))
+  })
+  if (!optionTags.size && !mediaSnapshotReady.value)
+    return false
+
+  return selectedFilterTags.value.every(tag => !optionTags.has(tag))
+})
+
 const uploadAcceptTypes = computed(() => {
   if (props.filesOnly)
     return [...allowedFileMimeTypes]
@@ -449,6 +471,8 @@ const uploadAcceptTypes = computed(() => {
 })
 
 const mediaLoading = computed(() => {
+  if (selectedFilterTagsMissingFromOptions.value)
+    return false
   if (state.loaderHold)
     return true
   if (!edgeGlobal.edgeState.organizationDocPath)
@@ -457,6 +481,8 @@ const mediaLoading = computed(() => {
 })
 
 const canShowMediaEmptyState = computed(() => {
+  if (selectedFilterTagsMissingFromOptions.value)
+    return true
   return mediaSnapshotReady.value && state.initialMediaLoadDone && !state.emptyStateHold
 })
 
@@ -693,8 +719,8 @@ const filters = computed(() => {
 })
 const clearTags = async () => {
   state.clearingTags = true
-  console.log('Clearing tags')
   state.filterTags = []
+  state.filterTagsResetKey += 1
   await nextTick()
   state.clearingTags = false
 }
@@ -728,6 +754,15 @@ watch(fileTypeExtensionsForScope, (extensions) => {
 watch(
   () => [mediaSnapshotReady.value, filteredFiles.value.length, state.loaderHold],
   ([ready, count]) => {
+    if (selectedFilterTagsMissingFromOptions.value) {
+      state.initialMediaLoadDone = true
+      state.emptyStateHold = false
+      if (mediaEmptyStateHoldTimer) {
+        clearTimeout(mediaEmptyStateHoldTimer)
+        mediaEmptyStateHoldTimer = null
+      }
+      return
+    }
     if (count > 0) {
       state.initialMediaLoadDone = true
       state.emptyStateHold = false
@@ -1143,15 +1178,16 @@ const siteQueryValue = computed(() => resolveCmsSiteScopeValues())
                     <div v-if="showTagFilter" class="md:flex-1 md:min-w-[220px]">
                       <edge-shad-select
                         v-if="!state.clearingTags"
+                        :key="`filter-tags-${state.filterTagsResetKey}`"
                         v-model="state.filterTags"
                         :multiple="true"
-                        name="tags"
+                        :name="`mediaFilterTags-${state.filterTagsResetKey}`"
                         class="text-foreground w-full"
                         :items="getTagsFromMedia"
                         dropdown-item-class="uppercase"
                         item-label-class="uppercase"
                         selected-label-class="uppercase"
-                        placeholder="Filter Tags"
+                        placeholder="FILTER TAGS"
                       >
                         <template v-if="state.filterTags.length > 0" #icon>
                           <X class="h-5 w-5 text-muted-foreground cursor-pointer" @click="clearTags" />

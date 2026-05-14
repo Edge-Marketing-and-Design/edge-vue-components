@@ -2039,8 +2039,23 @@ const exportCurrentBlock = async () => {
                       Image Fields (Media Picker)
                     </h3>
                     <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#image {"field":"heroImage","value":"","tags":["Backgrounds"]}}}}</code></pre>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#image {
+  "field":"cardImage",
+  "value":"",
+  "tags":["Cards"],
+  "variant":"thumbnail"
+}}}</code></pre>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#image {
+  "field":"squareHeadshot",
+  "value":"",
+  "tags":["Headshots"],
+  "variant":"width=320,height=320,fit=cover,quality=85"
+}}}</code></pre>
                     <div class="text-sm text-foreground space-y-1">
                       <div><code>tags</code> filters the media manager to specific tag groups.</div>
+                      <div><code>variant</code> chooses the Cloudflare Images variant saved into the block when the image is selected.</div>
+                      <div>Current named Cloudflare variants used by this CMS are <code>public</code>, <code>thumbnail</code>, and <code>highres</code>. If <code>variant</code> is omitted, the media picker uses <code>public</code>.</div>
+                      <div>Flexible variants are enabled. You can pass a Cloudflare flexible variant string such as <code>width=320,height=180,fit=cover,quality=85</code>; the CMS will replace the final variant segment of the selected Cloudflare Images URL.</div>
                       <div>The stored value is the image URL.</div>
                     </div>
                   </section>
@@ -2981,8 +2996,8 @@ const exportCurrentBlock = async () => {
                       What This Does
                     </h3>
                     <p class="text-sm text-foreground">
-                      Add helper classes or data attributes to a CMS block form, and the client runtime will submit to
-                      <code>/api/contact</code> with anti-bot checks and submit history tracking.
+                      Add helper classes or data attributes to a CMS block form, and the client runtime will submit a
+                      <code>Contact Form</code> history event with anti-bot checks and submit history tracking.
                     </p>
                   </section>
 
@@ -3013,7 +3028,7 @@ const exportCurrentBlock = async () => {
                       Defaults + Messages
                     </h3>
                     <div class="text-sm text-foreground space-y-1">
-                      <div>Default endpoint: <code>/api/contact</code>.</div>
+                      <div>Default flow: <code>Contact Form</code> history event.</div>
                       <div><code>data-cms-success-message</code>: override success copy.</div>
                       <div><code>data-cms-error-message</code>: override error copy.</div>
                       <div><code>data-cms-required-message</code>: override required-field copy.</div>
@@ -3154,6 +3169,26 @@ const exportCurrentBlock = async () => {
                       <div><code>.cms-hide-logged-out</code> or <code>[data-cms-hide-logged-out]</code>: hidden when logged out.</div>
                       <div>Runtime writes <code>data-cms-auth-state="logged-in|logged-out"</code> on the block HTML root.</div>
                     </div>
+                  </section>
+
+                  <section class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Plan / Price Button Helpers
+                    </h3>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div><code>[data-cms-plan-button]</code>: marks a CTA that selects a restricted-content Stripe product and price.</div>
+                      <div><code>data-cms-stripe-product-id</code>: Stripe product id to select.</div>
+                      <div><code>data-cms-stripe-price-id</code>: Stripe price id to select.</div>
+                      <div>Use these on pricing buttons so the frontend can open registration or checkout with the selected plan already chosen.</div>
+                    </div>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;a
+  href="#"
+  data-cms-plan-button
+  data-cms-stripe-product-id="prod_123"
+  data-cms-stripe-price-id="price_123"
+&gt;
+  Choose Plan A
+&lt;/a&gt;</code></pre>
                   </section>
 
                   <section class="space-y-3">

@@ -33,6 +33,8 @@ const state = reactive({
   historySelectedId: '',
   historyPreviewDoc: null,
   showHistoryDiffDialog: false,
+  contactSpamContextPushLoading: false,
+  contactSpamContextPushMessage: '',
 })
 
 const editorViewportHeight = 'calc(100vh - 420px)'
@@ -96,6 +98,9 @@ const sites = computed(() => {
     .map(([docId, data]) => ({ docId, ...(data || {}) }))
     .filter(site => site.docId && site.docId !== 'templates')
 })
+
+const isGlobalAdmin = computed(() => edgeGlobal.isAdminGlobal(edgeFirebase).value)
+const showDevOnlyActions = computed(() => edgeGlobal.allowMenuItem({ devOnly: true }, isGlobalAdmin.value))
 
 const templatePages = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/templates/pages`] || {}
@@ -162,7 +167,95 @@ const ensureDefaultSiteSettings = (doc = state.workingDoc) => {
     if (doc.defaultSiteSettings[key] === undefined)
       doc.defaultSiteSettings[key] = defaults[key]
   }
+  if (!doc.defaultSiteSettings.contactSpam || typeof doc.defaultSiteSettings.contactSpam !== 'object' || Array.isArray(doc.defaultSiteSettings.contactSpam)) {
+    doc.defaultSiteSettings.contactSpam = defaults.contactSpam
+  }
+  else {
+    for (const [key, value] of Object.entries(defaults.contactSpam || {})) {
+      if (doc.defaultSiteSettings.contactSpam[key] === undefined)
+        doc.defaultSiteSettings.contactSpam[key] = value
+    }
+  }
   return doc.defaultSiteSettings
+}
+
+const normalizeContactSpamContextPayload = (value = {}) => ({
+  allowedInquiryContext: String(value.allowedInquiryContext || '').trim(),
+  blockedInquiryContext: String(value.blockedInquiryContext || '').trim(),
+})
+
+const mergeContactSpamContexts = (doc = {}, contexts = {}, themeContactSpam = {}) => {
+  const existingContactSpam = (doc?.contactSpam && typeof doc.contactSpam === 'object' && !Array.isArray(doc.contactSpam))
+    ? doc.contactSpam
+    : {}
+  const merged = {
+    ...existingContactSpam,
+  }
+  for (const [key, value] of Object.entries(themeContactSpam || {})) {
+    if (merged[key] === undefined)
+      merged[key] = value
+  }
+  merged.allowedInquiryContext = contexts.allowedInquiryContext
+  merged.blockedInquiryContext = contexts.blockedInquiryContext
+  return merged
+}
+
+const pushContactSpamContextsToSites = async (contexts) => {
+  if (!showDevOnlyActions.value)
+    return
+
+  const normalizedContexts = normalizeContactSpamContextPayload(contexts)
+  const orgPath = edgeGlobal.edgeState.organizationDocPath
+  if (!orgPath)
+    return
+
+  state.contactSpamContextPushLoading = true
+  state.contactSpamContextPushMessage = ''
+  try {
+    const themeId = String(props.themeId || '').trim()
+    if (!themeId || themeId === 'new')
+      throw new Error('Save the theme before pushing contexts to sites.')
+
+    const sitesPath = `${orgPath}/sites`
+    const publishedPath = `${orgPath}/published-site-settings`
+    if (!edgeFirebase.data?.[sitesPath])
+      await edgeFirebase.startSnapshot(sitesPath)
+    if (!edgeFirebase.data?.[publishedPath])
+      await edgeFirebase.startSnapshot(publishedPath)
+
+    const siteDocs = Object.entries(edgeFirebase.data?.[sitesPath] || {})
+      .filter(([docId, doc]) => {
+        return docId && docId !== 'templates' && String(doc?.theme || '').trim() === themeId
+      })
+    const matchingSiteIds = new Set(siteDocs.map(([docId]) => docId))
+    const themeContactSpam = ensureDefaultSiteSettings()?.contactSpam || {}
+    const publishedDocs = Object.entries(edgeFirebase.data?.[publishedPath] || {})
+      .filter(([docId, doc]) => {
+        if (!docId || docId === 'templates')
+          return false
+        if (String(doc?.theme || '').trim() === themeId)
+          return true
+        return matchingSiteIds.has(docId)
+      })
+
+    const writes = [
+      ...siteDocs.map(([docId, doc]) => edgeFirebase.changeDoc(sitesPath, docId, {
+        contactSpam: mergeContactSpamContexts(doc, normalizedContexts, themeContactSpam),
+      })),
+      ...publishedDocs.map(([docId, doc]) => edgeFirebase.changeDoc(publishedPath, docId, {
+        contactSpam: mergeContactSpamContexts(doc, normalizedContexts, themeContactSpam),
+      })),
+    ]
+
+    await Promise.all(writes)
+    state.contactSpamContextPushMessage = `Updated ${siteDocs.length} site settings and ${publishedDocs.length} published site settings.`
+  }
+  catch (error) {
+    state.contactSpamContextPushMessage = error?.message || 'Unable to push contexts to site settings.'
+  }
+  finally {
+    state.contactSpamContextPushLoading = false
+  }
 }
 
 const _collectTemplateIdsFromMenus = (menus = {}) => {
@@ -1237,11 +1330,13 @@ onBeforeMount(async () => {
                           Default Templates
                         </CardTitle>
                         <edge-shad-button
-                          size="icon"
-                          type="text"
+                          type="button"
+                          variant="outline"
+                          class="h-8"
                           @click="state.defaultSettingsOpen = true"
                         >
-                          <FolderCog class="h-4 w-4" />
+                          <FolderCog class="mr-2 h-4 w-4" />
+                          Default Site Settings
                         </edge-shad-button>
                       </div>
                       <CardDescription class="text-xs">
@@ -1434,6 +1529,14 @@ onBeforeMount(async () => {
             :show-theme-fields="false"
             :is-admin="true"
             :enable-media-picker="false"
+            plain-branding-fields
+            editable-contact-spam-contexts
+            :show-contact-spam-context-push="showDevOnlyActions"
+            :contact-spam-context-push-loading="state.contactSpamContextPushLoading"
+            :contact-spam-context-push-message="state.contactSpamContextPushMessage"
+            contact-spam-target-type="theme"
+            :contact-spam-target-id="props.themeId"
+            @push-contact-spam-contexts="pushContactSpamContextsToSites"
           />
         </div>
         <SheetFooter class="pt-2">

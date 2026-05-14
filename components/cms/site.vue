@@ -60,7 +60,7 @@ const isTemplateSite = computed(() => props.site === 'templates')
 const router = useRouter()
 const route = useRoute()
 
-const SUBMISSION_IGNORE_FIELDS = new Set(['orgId', 'siteId', 'pageId', 'blockId'])
+const SUBMISSION_IGNORE_FIELDS = new Set(['orgId', 'siteId', 'pageId', 'blockId', 'spam', 'aiSpamReason', 'aiSpamConfidence'])
 const SUBMISSION_LABEL_KEYS = ['name', 'fullName', 'firstName', 'lastName', 'email', 'phone']
 const SUBMISSION_MESSAGE_KEYS = ['message', 'comments', 'notes', 'inquiry', 'details']
 
@@ -173,6 +173,13 @@ const schemas = {
     socialLinkedIn: z.string().optional(),
     socialYouTube: z.string().optional(),
     socialTikTok: z.string().optional(),
+    contactSpam: z.object({
+      enabled: z.boolean().optional(),
+      mode: z.enum(['block', 'flag']).optional(),
+      blockThreshold: z.number().optional(),
+      allowedInquiryContext: z.string().optional(),
+      blockedInquiryContext: z.string().optional(),
+    }).optional(),
     aiAgentUserId: z.string().optional(),
     aiInstructions: z.string().optional(),
   })),
@@ -244,6 +251,7 @@ const defaultViewMode = computed(() => {
 const siteData = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site] || {}
 })
+const contactSpamClassifierEnabled = computed(() => siteData.value?.contactSpam?.enabled === true)
 const currentUserId = computed(() => String(edgeFirebase.user?.uid || edgeFirebase.user?.firebaseUser?.uid || '').trim())
 const currentUserIsAssignedToSite = computed(() => {
   const users = Array.isArray(siteData.value?.users) ? siteData.value.users.map(userId => String(userId || '').trim()) : []
@@ -440,6 +448,32 @@ const getSubmissionMessage = (data) => {
   if (direct)
     return String(data[direct]).trim()
   return ''
+}
+
+const isSpamSubmission = (item) => {
+  const value = item?.data?.spam
+  if (value === true)
+    return true
+  if (typeof value === 'string')
+    return value.trim().toLowerCase() === 'true'
+  return false
+}
+
+const getSubmissionAiSpamReason = (item) => {
+  const reason = String(item?.data?.aiSpamReason || '').trim()
+  return reason || 'No AI classification reason was recorded for this submission.'
+}
+
+const getSubmissionAiSpamConfidence = (item) => {
+  const value = item?.data?.aiSpamConfidence
+  if (value === undefined || value === null || value === '')
+    return ''
+  const numericValue = Number(value)
+  if (Number.isFinite(numericValue)) {
+    const percentValue = numericValue <= 1 ? numericValue * 100 : numericValue
+    return `${Math.round(percentValue)}%`
+  }
+  return String(value)
 }
 
 const formatSubmissionKey = (key) => {
@@ -930,12 +964,49 @@ const buildThemeSettingsPayload = (themeDoc = {}, siteDoc = {}) => {
     let themeValue = themeDoc.defaultSiteSettings[key]
     if (key === 'structuredData' && typeof themeValue === 'string' && !themeValue.trim())
       themeValue = baseValue
+    if (key === 'contactSpam' && themeValue && typeof themeValue === 'object' && !Array.isArray(themeValue))
+      themeValue = { ...baseValue, ...themeValue }
     if (areEqualNormalized(themeValue, baseValue))
       continue
     if (shouldApplyThemeSetting(siteDoc?.[key], baseValue))
       payload[key] = themeValue
   }
   return payload
+}
+
+const normalizeContactSpamForCompare = (value) => {
+  const defaults = createSiteSettingsDefaults().contactSpam || {}
+  const source = (value && typeof value === 'object' && !Array.isArray(value)) ? value : {}
+  const threshold = Number(source.blockThreshold ?? defaults.blockThreshold)
+  const mode = ['block', 'flag'].includes(source.mode) ? source.mode : (defaults.mode || 'block')
+  return {
+    enabled: source.enabled ?? defaults.enabled,
+    mode,
+    blockThreshold: Number.isFinite(threshold) ? threshold : defaults.blockThreshold,
+    allowedInquiryContext: String(source.allowedInquiryContext ?? defaults.allowedInquiryContext ?? ''),
+    blockedInquiryContext: String(source.blockedInquiryContext ?? defaults.blockedInquiryContext ?? ''),
+  }
+}
+
+const hasPersistedContactSpam = value => !!(value && typeof value === 'object' && !Array.isArray(value))
+
+const contactSpamDiffValue = (doc = {}) => {
+  if (!hasPersistedContactSpam(doc?.contactSpam))
+    return null
+  return normalizeContactSpamForCompare(doc.contactSpam)
+}
+
+const siteHasPersistedContactSpam = computed(() => hasPersistedContactSpam(siteData.value?.contactSpam))
+
+const getThemeContactSpamDefaults = (themeId) => {
+  const normalizedThemeId = String(themeId || '').trim()
+  if (!normalizedThemeId)
+    return null
+  const themeDoc = themeCollection.value?.[normalizedThemeId] || null
+  const settings = themeDoc?.defaultSiteSettings
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings))
+    return null
+  return settings.contactSpam || null
 }
 
 const ensureTemplatePagesSnapshot = async () => {
@@ -1136,6 +1207,7 @@ const isSiteDiff = computed(() => {
       socialYouTube: publishedSite.socialYouTube,
       socialTikTok: publishedSite.socialTikTok,
       restrictedContent: publishedSite.restrictedContent || defaultRestrictedContent,
+      contactSpam: contactSpamDiffValue(publishedSite),
     }, {
       domains: siteData.value.domains,
       menus: siteData.value.menus,
@@ -1166,6 +1238,7 @@ const isSiteDiff = computed(() => {
       socialYouTube: siteData.value.socialYouTube,
       socialTikTok: siteData.value.socialTikTok,
       restrictedContent: siteData.value.restrictedContent || defaultRestrictedContent,
+      contactSpam: contactSpamDiffValue(siteData.value),
     })
   }
   return false
@@ -1201,6 +1274,7 @@ const SITE_SETTINGS_DIFF_FIELDS = [
   { key: 'socialYouTube', label: 'YouTube' },
   { key: 'socialTikTok', label: 'TikTok' },
   { key: 'restrictedContent', label: 'Restricted Content' },
+  { key: 'contactSpam', label: 'Contact Spam' },
 ]
 
 const summarizeSiteSettingsValue = (value, format = '') => {
@@ -1251,8 +1325,12 @@ const siteSettingsDiffDetails = computed(() => {
   const details = []
 
   SITE_SETTINGS_DIFF_FIELDS.forEach((field) => {
-    const baseValue = base?.[field.key]
-    const compareValue = compare?.[field.key]
+    const baseValue = field.key === 'contactSpam'
+      ? contactSpamDiffValue(base)
+      : base?.[field.key]
+    const compareValue = field.key === 'contactSpam'
+      ? contactSpamDiffValue(compare)
+      : compare?.[field.key]
     if (areEqualNormalized(baseValue, compareValue))
       return
     details.push({
@@ -1276,6 +1354,7 @@ const discardSiteSettings = async () => {
   const publishedSite = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`]?.[props.site]
   if (publishedSite) {
     const defaultRestrictedContent = createSiteSettingsDefaults().restrictedContent || {}
+    const defaultContactSpam = createSiteSettingsDefaults().contactSpam || {}
     await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, {
       domains: publishedSite.domains || [],
       menus: publishedSite.menus || {},
@@ -1306,6 +1385,7 @@ const discardSiteSettings = async () => {
       socialYouTube: publishedSite.socialYouTube || '',
       socialTikTok: publishedSite.socialTikTok || '',
       restrictedContent: publishedSite.restrictedContent || defaultRestrictedContent,
+      contactSpam: publishedSite.contactSpam || defaultContactSpam,
     })
   }
 }
@@ -3312,7 +3392,10 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                             {{ item.data.pageName }}
                           </div>
                         </div>
-                        <div class="flex items-center gap-2 text-[11px] text-muted-foreground">
+                        <div class="flex shrink-0 flex-wrap items-center justify-end gap-2 text-[11px] text-muted-foreground">
+                          <span v-if="isSpamSubmission(item)" class="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[10px] font-semibold uppercase text-red-700 dark:border-red-900/70 dark:bg-red-950/40 dark:text-red-200">
+                            Spam
+                          </span>
                           <span v-if="isSubmissionUnread(item)" class="rounded-full bg-slate-900/10 px-2 py-0.5 text-[10px] font-semibold uppercase text-slate-900 dark:bg-slate-100/80 dark:text-slate-900">
                             Unread
                           </span>
@@ -3337,6 +3420,9 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                             </CardDescription>
                           </div>
                           <div class="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            <span v-if="isSpamSubmission(selectedSubmission)" class="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[10px] font-semibold uppercase text-red-700 dark:border-red-900/70 dark:bg-red-950/40 dark:text-red-200">
+                              Spam
+                            </span>
                             <span class="normal-case font-mono">
                               {{ selectedSubmission.uuid || selectedSubmission.data?.uuid || 'Site submission' }}
                             </span>
@@ -3370,6 +3456,17 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                         >
                           {{ getSubmissionMessage(selectedSubmission.data) }}
                         </div>
+                        <details
+                          v-if="contactSpamClassifierEnabled"
+                          class="rounded-lg border border-border/60 bg-background p-3"
+                        >
+                          <summary class="cursor-pointer select-none text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            AI Classification Reason<span v-if="getSubmissionAiSpamConfidence(selectedSubmission)"> - Confidence: {{ getSubmissionAiSpamConfidence(selectedSubmission) }}</span>
+                          </summary>
+                          <div class="mt-2 rounded-md bg-muted/40 p-3 text-sm text-foreground whitespace-pre-wrap break-words">
+                            {{ getSubmissionAiSpamReason(selectedSubmission) }}
+                          </div>
+                        </details>
                         <div class="grid gap-3 md:grid-cols-2">
                           <div
                             v-for="entry in collectSubmissionEntries(selectedSubmission.data)"
@@ -3860,6 +3957,10 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                 :site-id="props.site"
                 :domain-error="domainError"
                 :settings-open="state.siteSettings"
+                :theme-contact-spam-defaults="getThemeContactSpamDefaults(slotProps.workingDoc?.theme)"
+                :contact-spam-has-persisted-value="siteHasPersistedContactSpam"
+                contact-spam-target-type="site"
+                :contact-spam-target-id="props.site"
               />
             </div>
             <SheetFooter class="pt-2 flex justify-between">

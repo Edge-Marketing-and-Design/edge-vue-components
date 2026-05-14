@@ -13,6 +13,13 @@ export const useSiteSettingsTemplate = () => {
     registrationSuccessMessage: '',
     rules: [],
   })
+  const createContactSpamDefaults = () => ({
+    enabled: true,
+    mode: 'block',
+    blockThreshold: 0.75,
+    allowedInquiryContext: 'Legitimate messages usually come from people trying to contact the organization, ask a question, request services, request information, schedule an appointment, ask about availability, ask about pricing, follow up on an existing relationship, apply for an opportunity, submit a support request, or respond to content on the website. Allow messages that appear to be from a real visitor with a specific need, even if the message is short, informal, misspelled, or incomplete.',
+    blockedInquiryContext: 'Spam messages usually advertise third-party services to the website owner, offer SEO, marketing, web design, app development, lead generation, directory listings, backlinks, loans, crypto, suspicious investments, or unrelated business promotions. Block messages that are primarily trying to sell something to the organization, contain generic outreach with no connection to the website services, include suspicious links, use mass-sales language, or appear automated. This includes unsolicited offers for free audits, mockups, redesign concepts, SEO reviews, performance checks, marketing ideas, or other no-cost evaluations when the purpose appears to be selling or promoting a service to the organization.',
+  })
   const createDefaults = () => ({
     name: '',
     theme: '',
@@ -45,6 +52,7 @@ export const useSiteSettingsTemplate = () => {
     socialTikTok: '',
     users: [],
     restrictedContent: createRestrictedContentDefaults(),
+    contactSpam: createContactSpamDefaults(),
     aiAgentUserId: '',
     aiInstructions: '',
   })
@@ -82,6 +90,7 @@ export const useSiteSettingsTemplate = () => {
       socialYouTube: { bindings: { 'field-type': 'text', 'label': 'YouTube URL' }, cols: '12', value: defaults.socialYouTube },
       socialTikTok: { bindings: { 'field-type': 'text', 'label': 'TikTok URL' }, cols: '12', value: defaults.socialTikTok },
       users: { bindings: { 'field-type': 'users', 'label': 'Users', 'hint': 'Choose users' }, cols: '12', value: defaults.users },
+      contactSpam: { value: defaults.contactSpam },
       aiAgentUserId: { bindings: { 'field-type': 'select', 'label': 'Agent Data for AI to use to build initial site' }, cols: '12', value: defaults.aiAgentUserId },
       aiInstructions: { bindings: { 'field-type': 'textarea', 'label': 'Additional AI Instructions' }, cols: '12', value: defaults.aiInstructions },
     }
@@ -92,6 +101,7 @@ export const useSiteSettingsTemplate = () => {
   return {
     createDefaults,
     createRestrictedContentDefaults,
+    createContactSpamDefaults,
     createNewDocSchema,
     settingsKeys,
   }

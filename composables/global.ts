@@ -677,6 +677,11 @@ const getImage = (file: any, type: string) => {
       if (match) {
         return match
       }
+      const flexibleVariant = String(type || '').trim()
+      const baseVariant = variants.find((variant: string) => variant.includes('imagedelivery.net/')) || variants[0]
+      if (flexibleVariant && baseVariant && !/[/?#]/.test(flexibleVariant)) {
+        return baseVariant.replace(/\/[^/]*$/, `/${flexibleVariant}`)
+      }
     }
     return variants[0]
   }

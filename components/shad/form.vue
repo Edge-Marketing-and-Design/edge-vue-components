@@ -20,6 +20,7 @@ const { schema, initialValues } = toRefs(props)
 const form = useForm({
   validationSchema: schema,
   initialValues: initialValues.value,
+  keepValuesOnUnmount: true,
 })
 
 const onSubmit = form.handleSubmit(

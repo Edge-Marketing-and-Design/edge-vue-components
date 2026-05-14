@@ -1,5 +1,5 @@
 <script setup lang="js">
-import { CheckCircle2, CircleAlert } from 'lucide-vue-next'
+import { CheckCircle2, CircleAlert, Loader2 } from 'lucide-vue-next'
 
 const props = defineProps({
   settings: {
@@ -46,9 +46,51 @@ const props = defineProps({
     type: Boolean,
     default: true,
   },
+  contactSpamOnly: {
+    type: Boolean,
+    default: false,
+  },
+  plainBrandingFields: {
+    type: Boolean,
+    default: false,
+  },
+  editableContactSpamContexts: {
+    type: Boolean,
+    default: false,
+  },
+  themeContactSpamDefaults: {
+    type: Object,
+    default: null,
+  },
+  contactSpamHasPersistedValue: {
+    type: Boolean,
+    default: true,
+  },
+  contactSpamTargetType: {
+    type: String,
+    default: 'site',
+  },
+  contactSpamTargetId: {
+    type: String,
+    default: '',
+  },
+  showContactSpamContextPush: {
+    type: Boolean,
+    default: false,
+  },
+  contactSpamContextPushLoading: {
+    type: Boolean,
+    default: false,
+  },
+  contactSpamContextPushMessage: {
+    type: String,
+    default: '',
+  },
 })
 
+const emit = defineEmits(['pushContactSpamContexts'])
 const edgeFirebase = inject('edgeFirebase')
+const { createContactSpamDefaults } = useSiteSettingsTemplate()
 
 const state = reactive({
   logoPickerOpen: false,
@@ -56,7 +98,186 @@ const state = reactive({
   brandLogoDarkPickerOpen: false,
   brandLogoLightPickerOpen: false,
   faviconPickerOpen: false,
+  contactSpamInstruction: '',
+  contactSpamGenerating: false,
+  contactSpamError: '',
+  contactSpamHydratedFromFallback: false,
+  contactSpamUserEdited: false,
+  contactSpamHydrationKey: '',
 })
+
+const CONTACT_SPAM_THRESHOLD_BY_LABEL = {
+  lenient: 0.9,
+  normal: 0.75,
+  strict: 0.6,
+}
+
+const contactSpamStrictnessItems = [
+  { value: 'lenient', label: 'Lenient' },
+  { value: 'normal', label: 'Normal' },
+  { value: 'strict', label: 'Strict' },
+]
+
+const contactSpamModeItems = [
+  { value: 'block', label: 'Block' },
+  { value: 'flag', label: 'Flag' },
+]
+
+const brandingFields = [
+  { key: 'logo', label: 'Dark logo URL', placeholder: 'https://...' },
+  { key: 'logoLight', label: 'Light logo URL', placeholder: 'https://...' },
+  { key: 'favicon', label: 'Favicon URL', placeholder: 'https://...' },
+]
+
+const brandFields = [
+  { key: 'brandLogoDark', label: 'Dark brand logo URL', placeholder: 'https://...' },
+  { key: 'brandLogoLight', label: 'Light brand logo URL', placeholder: 'https://...' },
+]
+
+const showAppearanceTab = computed(() => props.showThemeFields)
+const tabListClass = computed(() => showAppearanceTab.value ? 'xl:grid-cols-8' : 'xl:grid-cols-7')
+
+const normalizeContactSpamSettings = (value, fallback = createContactSpamDefaults()) => {
+  const source = (value && typeof value === 'object' && !Array.isArray(value)) ? value : {}
+  const fallbackSource = (fallback && typeof fallback === 'object' && !Array.isArray(fallback))
+    ? fallback
+    : createContactSpamDefaults()
+  const defaults = createContactSpamDefaults()
+  const threshold = Number(source.blockThreshold ?? fallbackSource.blockThreshold ?? defaults.blockThreshold)
+  const mode = ['block', 'flag'].includes(source.mode)
+    ? source.mode
+    : (['block', 'flag'].includes(fallbackSource.mode) ? fallbackSource.mode : defaults.mode)
+  return {
+    enabled: source.enabled ?? fallbackSource.enabled ?? defaults.enabled,
+    mode,
+    blockThreshold: Number.isFinite(threshold) ? threshold : defaults.blockThreshold,
+    allowedInquiryContext: String(source.allowedInquiryContext ?? fallbackSource.allowedInquiryContext ?? defaults.allowedInquiryContext),
+    blockedInquiryContext: String(source.blockedInquiryContext ?? fallbackSource.blockedInquiryContext ?? defaults.blockedInquiryContext),
+  }
+}
+
+const getContactSpamFallback = () => normalizeContactSpamSettings(props.themeContactSpamDefaults)
+const isContactSpamSettingsObject = value => !!(value && typeof value === 'object' && !Array.isArray(value))
+const serializeContactSpamSettings = value => JSON.stringify(normalizeContactSpamSettings(value))
+
+const markContactSpamEdited = () => {
+  state.contactSpamHydratedFromFallback = false
+  state.contactSpamUserEdited = true
+}
+
+const assignContactSpamSettings = (next) => {
+  const current = props.settings.contactSpam
+  if (isContactSpamSettingsObject(current)) {
+    if (serializeContactSpamSettings(current) !== serializeContactSpamSettings(next))
+      Object.assign(current, next)
+    return current
+  }
+  Reflect.set(props.settings, 'contactSpam', next)
+  return props.settings.contactSpam
+}
+
+const ensureContactSpamSettings = () => {
+  if (!props.settings || typeof props.settings !== 'object')
+    return normalizeContactSpamSettings()
+  const current = props.settings.contactSpam
+  const hasPersistedOrEditedSettings = isContactSpamSettingsObject(current) && (props.contactSpamHasPersistedValue || state.contactSpamUserEdited)
+  const shouldUseFallback = !hasPersistedOrEditedSettings || state.contactSpamHydratedFromFallback
+  const next = shouldUseFallback
+    ? normalizeContactSpamSettings({}, getContactSpamFallback())
+    : normalizeContactSpamSettings(current, getContactSpamFallback())
+  const hydrationKey = JSON.stringify({
+    persisted: props.contactSpamHasPersistedValue,
+    edited: state.contactSpamUserEdited,
+    fallback: shouldUseFallback,
+    next,
+  })
+  if (state.contactSpamHydrationKey === hydrationKey && isContactSpamSettingsObject(current))
+    return current
+
+  state.contactSpamHydrationKey = hydrationKey
+  state.contactSpamHydratedFromFallback = shouldUseFallback
+  return assignContactSpamSettings(next)
+}
+
+const contactSpamSettings = computed(() => {
+  if (isContactSpamSettingsObject(props.settings?.contactSpam))
+    return props.settings.contactSpam
+  return normalizeContactSpamSettings({}, getContactSpamFallback())
+})
+
+const contactSpamStrictness = computed({
+  get: () => {
+    const threshold = Number(contactSpamSettings.value?.blockThreshold)
+    if (threshold >= 0.85)
+      return 'lenient'
+    if (threshold <= 0.65)
+      return 'strict'
+    return 'normal'
+  },
+  set: (value) => {
+    const key = String(value || 'normal')
+    markContactSpamEdited()
+    ensureContactSpamSettings().blockThreshold = CONTACT_SPAM_THRESHOLD_BY_LABEL[key] ?? CONTACT_SPAM_THRESHOLD_BY_LABEL.normal
+  },
+})
+
+const contactSpamMode = computed({
+  get: () => contactSpamSettings.value?.mode || 'block',
+  set: (value) => {
+    const mode = value === 'flag' ? 'flag' : 'block'
+    markContactSpamEdited()
+    ensureContactSpamSettings().mode = mode
+  },
+})
+
+const updateContactSpamContexts = async () => {
+  const instruction = String(state.contactSpamInstruction || '').trim()
+  if (!instruction) {
+    state.contactSpamError = 'Enter instructions for how AI should adjust the contexts.'
+    return
+  }
+  if (!edgeFirebase?.runFunction) {
+    state.contactSpamError = 'Cloud Functions are not available.'
+    return
+  }
+  const orgId = String(edgeGlobal?.edgeState?.currentOrganization || '').trim()
+  if (!orgId) {
+    state.contactSpamError = 'Organization is not loaded.'
+    return
+  }
+
+  state.contactSpamGenerating = true
+  state.contactSpamError = ''
+  try {
+    const current = ensureContactSpamSettings()
+    const response = await edgeFirebase.runFunction('cms-updateContactSpamContexts', {
+      uid: edgeFirebase.user?.uid,
+      orgId,
+      targetType: props.contactSpamTargetType,
+      targetId: props.contactSpamTargetId || props.siteId || '',
+      instruction,
+      contactSpam: current,
+    }, { timeout: 120000 })
+    const result = response?.data || {}
+    markContactSpamEdited()
+    current.allowedInquiryContext = String(result.allowedInquiryContext || current.allowedInquiryContext || '')
+    current.blockedInquiryContext = String(result.blockedInquiryContext || current.blockedInquiryContext || '')
+    state.contactSpamInstruction = ''
+  }
+  catch (error) {
+    state.contactSpamError = error?.message || 'Unable to update contact spam contexts.'
+  }
+  finally {
+    state.contactSpamGenerating = false
+  }
+}
+
+const pushContactSpamContexts = () => {
+  emit('pushContactSpamContexts', {
+    allowedInquiryContext: contactSpamSettings.value.allowedInquiryContext,
+    blockedInquiryContext: contactSpamSettings.value.blockedInquiryContext,
+  })
+}
 
 const themeOptionsMap = computed(() => {
   const map = new Map()
@@ -350,18 +571,124 @@ watch(() => props.settings?.forwardApex, (value) => {
   if (value === undefined)
     props.settings.forwardApex = true
 }, { immediate: true })
+
+watch(() => [
+  props.settings,
+  props.contactSpamHasPersistedValue,
+  JSON.stringify(props.themeContactSpamDefaults || null),
+], () => {
+  ensureContactSpamSettings()
+}, { immediate: true })
 </script>
 
 <template>
-  <Tabs class="w-full" default-value="general">
-    <TabsList class="w-full mt-3 rounded-sm grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-1 border border-slate-300 bg-slate-200 dark:border-slate-700 dark:bg-slate-800">
+  <div v-if="props.contactSpamOnly" class="space-y-4">
+    <edge-cms-boolean-card
+      v-model="contactSpamSettings.enabled"
+      name="contactSpamEnabled"
+      label="Contact Spam Classifier"
+      class="w-full"
+      checked-label="Enabled"
+      unchecked-label="Disabled"
+      @update:model-value="markContactSpamEdited"
+    >
+      Check contact form messages against the allowed and blocked context before accepting them.
+    </edge-cms-boolean-card>
+    <edge-shad-select
+      v-model="contactSpamMode"
+      name="contactSpamMode"
+      label="When Spam Is Detected"
+      class="w-full"
+      :items="contactSpamModeItems"
+      item-title="label"
+      item-value="value"
+      description="Block rejects spam submissions. Flag allows the submission but marks it for review."
+    />
+    <edge-shad-select
+      v-model="contactSpamStrictness"
+      name="contactSpamStrictness"
+      label="Strictness"
+      class="w-full"
+      :items="contactSpamStrictnessItems"
+      item-title="label"
+      item-value="value"
+      :description="`Saved block threshold: ${contactSpamSettings.blockThreshold}`"
+    />
+    <edge-shad-textarea
+      v-model="state.contactSpamInstruction"
+      name="contactSpamInstruction"
+      label="AI Context Instructions"
+      placeholder="Tell AI how to adjust the allowed and blocked contact form context for this site."
+      class="min-h-[88px]"
+      :disabled="state.contactSpamGenerating"
+    />
+    <div class="flex items-center gap-3">
+      <edge-shad-button
+        type="button"
+        :disabled="state.contactSpamGenerating || !state.contactSpamInstruction.trim()"
+        @click="updateContactSpamContexts"
+      >
+        <Loader2 v-if="state.contactSpamGenerating" class="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+        Update Context
+      </edge-shad-button>
+      <p v-if="state.contactSpamError" class="text-sm text-destructive">
+        {{ state.contactSpamError }}
+      </p>
+    </div>
+    <p v-if="!props.editableContactSpamContexts" class="text-sm text-muted-foreground">
+      Allowed and blocked contexts are generated by AI and cannot be edited directly. Describe the change above, to update the contexts.
+    </p>
+    <p v-else class="text-sm text-muted-foreground">
+      Edit the contexts directly, or describe a change above to have AI update them.
+    </p>
+    <div v-if="props.showContactSpamContextPush" class="rounded-md border border-amber-200 bg-amber-50 p-3 space-y-2 text-sm text-amber-900">
+      <div>
+        Copy only the allowed and blocked contexts to every site settings document and every published site settings document.
+      </div>
+      <edge-shad-button
+        type="button"
+        variant="outline"
+        class="bg-white"
+        :disabled="props.contactSpamContextPushLoading"
+        @click="pushContactSpamContexts"
+      >
+        <Loader2 v-if="props.contactSpamContextPushLoading" class="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+        Push Contexts to Sites
+      </edge-shad-button>
+      <p v-if="props.contactSpamContextPushMessage" class="text-xs">
+        {{ props.contactSpamContextPushMessage }}
+      </p>
+    </div>
+    <div class="space-y-2">
+      <label for="contactSpamAllowedInquiryContextOnly" class="text-sm font-medium text-foreground">Allowed Inquiry Context</label>
+      <textarea
+        id="contactSpamAllowedInquiryContextOnly"
+        v-model="contactSpamSettings.allowedInquiryContext"
+        :readonly="!props.editableContactSpamContexts"
+        class="w-full min-h-[140px] rounded-md border border-input bg-muted/40 px-3 py-2 text-sm text-muted-foreground"
+        @input="markContactSpamEdited"
+      />
+    </div>
+    <div class="space-y-2">
+      <label for="contactSpamBlockedInquiryContextOnly" class="text-sm font-medium text-foreground">Blocked Inquiry Context</label>
+      <textarea
+        id="contactSpamBlockedInquiryContextOnly"
+        v-model="contactSpamSettings.blockedInquiryContext"
+        :readonly="!props.editableContactSpamContexts"
+        class="w-full min-h-[140px] rounded-md border border-input bg-muted/40 px-3 py-2 text-sm text-muted-foreground"
+        @input="markContactSpamEdited"
+      />
+    </div>
+  </div>
+  <Tabs v-else class="w-full" default-value="general">
+    <TabsList class="w-full mt-3 rounded-sm grid grid-cols-2 md:grid-cols-4 gap-1 border border-slate-300 bg-slate-200 dark:border-slate-700 dark:bg-slate-800" :class="tabListClass">
       <TabsTrigger value="general" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
         General
       </TabsTrigger>
       <TabsTrigger value="domains" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
         Domains
       </TabsTrigger>
-      <TabsTrigger value="appearance" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+      <TabsTrigger v-if="showAppearanceTab" value="appearance" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
         Appearance
       </TabsTrigger>
       <TabsTrigger value="branding" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
@@ -372,6 +699,9 @@ watch(() => props.settings?.forwardApex, (value) => {
       </TabsTrigger>
       <TabsTrigger value="tracking" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
         Tracking
+      </TabsTrigger>
+      <TabsTrigger value="contact-spam" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+        Spam
       </TabsTrigger>
       <TabsTrigger value="social" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
         Socials
@@ -535,7 +865,7 @@ watch(() => props.settings?.forwardApex, (value) => {
         </div>
       </div>
     </TabsContent>
-    <TabsContent value="appearance" class="pt-4 space-y-4">
+    <TabsContent v-if="showAppearanceTab" value="appearance" class="pt-4 space-y-4">
       <edge-shad-select-tags
         v-if="props.showThemeFields && props.isAdmin"
         :model-value="Array.isArray(props.settings.allowedThemes) ? props.settings.allowedThemes : []"
@@ -579,156 +909,80 @@ watch(() => props.settings?.forwardApex, (value) => {
       /> -->
     </TabsContent>
     <TabsContent value="branding" class="pt-4 space-y-4">
-      <div v-if="props.enableMediaPicker && props.siteId" class="space-y-2">
-        <label class="text-sm font-medium text-foreground flex items-center justify-between">
-          Dark logo
-          <edge-shad-button
-            type="button"
-            variant="link"
-            class="px-0 h-auto text-sm"
-            @click="state.logoPickerOpen = true"
+      <template v-if="props.plainBrandingFields">
+        <div
+          v-for="field in brandingFields"
+          :key="field.key"
+          class="space-y-2"
+        >
+          <label :for="`plain-${field.key}`" class="text-sm font-medium text-foreground">
+            {{ field.label }}
+          </label>
+          <input
+            :id="`plain-${field.key}`"
+            v-model="props.settings[field.key]"
+            type="url"
+            :placeholder="field.placeholder"
+            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
-            Select logo
-          </edge-shad-button>
-        </label>
-        <div class="flex items-center gap-4">
-          <div v-if="props.settings.logo" class="flex items-center gap-3">
-            <img
-              :src="props.settings.logo"
-              alt="Logo preview"
-              class="max-h-16 max-w-[220px] h-auto w-auto rounded-md border border-border object-contain" :class="[previewBackgroundClass(props.settings.logo)]"
-            >
-            <edge-shad-button
-              type="button"
-              variant="ghost"
-              class="h-8"
-              @click="props.settings.logo = ''"
-            >
-              Remove
-            </edge-shad-button>
-          </div>
-          <span v-else class="text-sm text-muted-foreground italic">No logo selected</span>
         </div>
-        <Dialog v-model:open="state.logoPickerOpen">
-          <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
-            <DialogHeader>
-              <DialogTitle>Select Dark Logo</DialogTitle>
-              <DialogDescription />
-            </DialogHeader>
-            <edge-cms-media-manager
-              :site="props.siteId"
-              :select-mode="true"
-              :default-tags="['Logos']"
-              @select="(url) => {
-                props.settings.logo = url
-                state.logoPickerOpen = false
-              }"
-            />
-          </DialogContent>
-        </Dialog>
-      </div>
-      <edge-shad-input
-        v-else
-        v-model="props.settings.logo"
-        name="logo"
-        label="Dark logo URL"
-        placeholder="https://..."
-        class="w-full"
-      />
-      <div v-if="props.enableMediaPicker && props.siteId" class="space-y-2">
-        <label class="text-sm font-medium text-foreground flex items-center justify-between">
-          Light logo
-          <edge-shad-button
-            type="button"
-            variant="link"
-            class="px-0 h-auto text-sm"
-            @click="state.logoLightPickerOpen = true"
+        <div v-if="props.isAdmin" class="space-y-4 border border-dashed rounded-lg p-4">
+          <div class="text-sm font-semibold text-foreground">
+            Umbrella Brand
+          </div>
+          <div
+            v-for="field in brandFields"
+            :key="field.key"
+            class="space-y-2"
           >
-            Select logo
-          </edge-shad-button>
-        </label>
-        <div class="flex items-center gap-4">
-          <div v-if="props.settings.logoLight" class="flex items-center gap-3">
-            <img
-              :src="props.settings.logoLight"
-              alt="Light logo preview"
-              class="max-h-16 max-w-[220px] h-auto w-auto rounded-md border border-border object-contain" :class="[previewBackgroundClass(props.settings.logoLight)]"
+            <label :for="`plain-${field.key}`" class="text-sm font-medium text-foreground">
+              {{ field.label }}
+            </label>
+            <input
+              :id="`plain-${field.key}`"
+              v-model="props.settings[field.key]"
+              type="url"
+              :placeholder="field.placeholder"
+              class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
-            <edge-shad-button
-              type="button"
-              variant="ghost"
-              class="h-8"
-              @click="props.settings.logoLight = ''"
-            >
-              Remove
-            </edge-shad-button>
           </div>
-          <span v-else class="text-sm text-muted-foreground italic">No light logo selected</span>
         </div>
-        <Dialog v-model:open="state.logoLightPickerOpen">
-          <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
-            <DialogHeader>
-              <DialogTitle>Select Light Logo</DialogTitle>
-              <DialogDescription />
-            </DialogHeader>
-            <edge-cms-media-manager
-              :site="props.siteId"
-              :select-mode="true"
-              :default-tags="['Logos']"
-              @select="(url) => {
-                props.settings.logoLight = url
-                state.logoLightPickerOpen = false
-              }"
-            />
-          </DialogContent>
-        </Dialog>
-      </div>
-      <edge-shad-input
-        v-else
-        v-model="props.settings.logoLight"
-        name="logoLight"
-        label="Light logo URL"
-        placeholder="https://..."
-        class="w-full"
-      />
-      <div v-if="props.isAdmin" class="space-y-4 border border-dashed rounded-lg p-4">
-        <div class="text-sm font-semibold text-foreground">
-          Umbrella Brand
-        </div>
+      </template>
+      <template v-else>
         <div v-if="props.enableMediaPicker && props.siteId" class="space-y-2">
           <label class="text-sm font-medium text-foreground flex items-center justify-between">
-            Dark brand logo
+            Dark logo
             <edge-shad-button
               type="button"
               variant="link"
               class="px-0 h-auto text-sm"
-              @click="state.brandLogoDarkPickerOpen = true"
+              @click="state.logoPickerOpen = true"
             >
               Select logo
             </edge-shad-button>
           </label>
           <div class="flex items-center gap-4">
-            <div v-if="props.settings.brandLogoDark" class="flex items-center gap-3">
+            <div v-if="props.settings.logo" class="flex items-center gap-3">
               <img
-                :src="props.settings.brandLogoDark"
-                alt="Brand dark logo preview"
-                class="max-h-16 max-w-[220px] h-auto w-auto rounded-md border border-border object-contain" :class="[previewBackgroundClass(props.settings.brandLogoDark)]"
+                :src="props.settings.logo"
+                alt="Logo preview"
+                class="max-h-16 max-w-[220px] h-auto w-auto rounded-md border border-border object-contain" :class="[previewBackgroundClass(props.settings.logo)]"
               >
               <edge-shad-button
                 type="button"
                 variant="ghost"
                 class="h-8"
-                @click="props.settings.brandLogoDark = ''"
+                @click="props.settings.logo = ''"
               >
                 Remove
               </edge-shad-button>
             </div>
-            <span v-else class="text-sm text-muted-foreground italic">No brand dark logo selected</span>
+            <span v-else class="text-sm text-muted-foreground italic">No logo selected</span>
           </div>
-          <Dialog v-model:open="state.brandLogoDarkPickerOpen">
+          <Dialog v-model:open="state.logoPickerOpen">
             <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
               <DialogHeader>
-                <DialogTitle>Select Dark Brand Logo</DialogTitle>
+                <DialogTitle>Select Dark Logo</DialogTitle>
                 <DialogDescription />
               </DialogHeader>
               <edge-cms-media-manager
@@ -736,8 +990,8 @@ watch(() => props.settings?.forwardApex, (value) => {
                 :select-mode="true"
                 :default-tags="['Logos']"
                 @select="(url) => {
-                  props.settings.brandLogoDark = url
-                  state.brandLogoDarkPickerOpen = false
+                  props.settings.logo = url
+                  state.logoPickerOpen = false
                 }"
               />
             </DialogContent>
@@ -745,46 +999,46 @@ watch(() => props.settings?.forwardApex, (value) => {
         </div>
         <edge-shad-input
           v-else
-          v-model="props.settings.brandLogoDark"
-          name="brandLogoDark"
-          label="Dark brand logo URL"
+          v-model="props.settings.logo"
+          name="logo"
+          label="Dark logo URL"
           placeholder="https://..."
           class="w-full"
         />
         <div v-if="props.enableMediaPicker && props.siteId" class="space-y-2">
           <label class="text-sm font-medium text-foreground flex items-center justify-between">
-            Light brand logo
+            Light logo
             <edge-shad-button
               type="button"
               variant="link"
               class="px-0 h-auto text-sm"
-              @click="state.brandLogoLightPickerOpen = true"
+              @click="state.logoLightPickerOpen = true"
             >
               Select logo
             </edge-shad-button>
           </label>
           <div class="flex items-center gap-4">
-            <div v-if="props.settings.brandLogoLight" class="flex items-center gap-3">
+            <div v-if="props.settings.logoLight" class="flex items-center gap-3">
               <img
-                :src="props.settings.brandLogoLight"
-                alt="Brand light logo preview"
-                class="max-h-16 max-w-[220px] h-auto w-auto rounded-md border border-border object-contain" :class="[previewBackgroundClass(props.settings.brandLogoLight)]"
+                :src="props.settings.logoLight"
+                alt="Light logo preview"
+                class="max-h-16 max-w-[220px] h-auto w-auto rounded-md border border-border object-contain" :class="[previewBackgroundClass(props.settings.logoLight)]"
               >
               <edge-shad-button
                 type="button"
                 variant="ghost"
                 class="h-8"
-                @click="props.settings.brandLogoLight = ''"
+                @click="props.settings.logoLight = ''"
               >
                 Remove
               </edge-shad-button>
             </div>
-            <span v-else class="text-sm text-muted-foreground italic">No brand light logo selected</span>
+            <span v-else class="text-sm text-muted-foreground italic">No light logo selected</span>
           </div>
-          <Dialog v-model:open="state.brandLogoLightPickerOpen">
+          <Dialog v-model:open="state.logoLightPickerOpen">
             <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
               <DialogHeader>
-                <DialogTitle>Select Light Brand Logo</DialogTitle>
+                <DialogTitle>Select Light Logo</DialogTitle>
                 <DialogDescription />
               </DialogHeader>
               <edge-cms-media-manager
@@ -792,8 +1046,8 @@ watch(() => props.settings?.forwardApex, (value) => {
                 :select-mode="true"
                 :default-tags="['Logos']"
                 @select="(url) => {
-                  props.settings.brandLogoLight = url
-                  state.brandLogoLightPickerOpen = false
+                  props.settings.logoLight = url
+                  state.logoLightPickerOpen = false
                 }"
               />
             </DialogContent>
@@ -801,69 +1055,186 @@ watch(() => props.settings?.forwardApex, (value) => {
         </div>
         <edge-shad-input
           v-else
-          v-model="props.settings.brandLogoLight"
-          name="brandLogoLight"
-          label="Light brand logo URL"
+          v-model="props.settings.logoLight"
+          name="logoLight"
+          label="Light logo URL"
           placeholder="https://..."
           class="w-full"
         />
-      </div>
-      <div v-if="props.enableMediaPicker && props.siteId" class="space-y-2">
-        <label class="text-sm font-medium text-foreground flex items-center justify-between">
-          Favicon
-          <edge-shad-button
-            type="button"
-            variant="link"
-            class="px-0 h-auto text-sm"
-            @click="state.faviconPickerOpen = true"
-          >
-            Select favicon
-          </edge-shad-button>
-        </label>
-        <div class="flex items-center gap-4">
-          <div v-if="props.settings.favicon" class="flex items-center gap-3">
-            <img
-              :src="props.settings.favicon"
-              alt="Favicon preview"
-              class="max-h-12 max-w-12 h-auto w-auto rounded-md border border-border object-contain" :class="[previewBackgroundClass(props.settings.favicon)]"
-            >
+        <div v-if="props.isAdmin" class="space-y-4 border border-dashed rounded-lg p-4">
+          <div class="text-sm font-semibold text-foreground">
+            Umbrella Brand
+          </div>
+          <div v-if="props.enableMediaPicker && props.siteId" class="space-y-2">
+            <label class="text-sm font-medium text-foreground flex items-center justify-between">
+              Dark brand logo
+              <edge-shad-button
+                type="button"
+                variant="link"
+                class="px-0 h-auto text-sm"
+                @click="state.brandLogoDarkPickerOpen = true"
+              >
+                Select logo
+              </edge-shad-button>
+            </label>
+            <div class="flex items-center gap-4">
+              <div v-if="props.settings.brandLogoDark" class="flex items-center gap-3">
+                <img
+                  :src="props.settings.brandLogoDark"
+                  alt="Brand dark logo preview"
+                  class="max-h-16 max-w-[220px] h-auto w-auto rounded-md border border-border object-contain" :class="[previewBackgroundClass(props.settings.brandLogoDark)]"
+                >
+                <edge-shad-button
+                  type="button"
+                  variant="ghost"
+                  class="h-8"
+                  @click="props.settings.brandLogoDark = ''"
+                >
+                  Remove
+                </edge-shad-button>
+              </div>
+              <span v-else class="text-sm text-muted-foreground italic">No brand dark logo selected</span>
+            </div>
+            <Dialog v-model:open="state.brandLogoDarkPickerOpen">
+              <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
+                <DialogHeader>
+                  <DialogTitle>Select Dark Brand Logo</DialogTitle>
+                  <DialogDescription />
+                </DialogHeader>
+                <edge-cms-media-manager
+                  :site="props.siteId"
+                  :select-mode="true"
+                  :default-tags="['Logos']"
+                  @select="(url) => {
+                    props.settings.brandLogoDark = url
+                    state.brandLogoDarkPickerOpen = false
+                  }"
+                />
+              </DialogContent>
+            </Dialog>
+          </div>
+          <edge-shad-input
+            v-else
+            v-model="props.settings.brandLogoDark"
+            name="brandLogoDark"
+            label="Dark brand logo URL"
+            placeholder="https://..."
+            class="w-full"
+          />
+          <div v-if="props.enableMediaPicker && props.siteId" class="space-y-2">
+            <label class="text-sm font-medium text-foreground flex items-center justify-between">
+              Light brand logo
+              <edge-shad-button
+                type="button"
+                variant="link"
+                class="px-0 h-auto text-sm"
+                @click="state.brandLogoLightPickerOpen = true"
+              >
+                Select logo
+              </edge-shad-button>
+            </label>
+            <div class="flex items-center gap-4">
+              <div v-if="props.settings.brandLogoLight" class="flex items-center gap-3">
+                <img
+                  :src="props.settings.brandLogoLight"
+                  alt="Brand light logo preview"
+                  class="max-h-16 max-w-[220px] h-auto w-auto rounded-md border border-border object-contain" :class="[previewBackgroundClass(props.settings.brandLogoLight)]"
+                >
+                <edge-shad-button
+                  type="button"
+                  variant="ghost"
+                  class="h-8"
+                  @click="props.settings.brandLogoLight = ''"
+                >
+                  Remove
+                </edge-shad-button>
+              </div>
+              <span v-else class="text-sm text-muted-foreground italic">No brand light logo selected</span>
+            </div>
+            <Dialog v-model:open="state.brandLogoLightPickerOpen">
+              <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
+                <DialogHeader>
+                  <DialogTitle>Select Light Brand Logo</DialogTitle>
+                  <DialogDescription />
+                </DialogHeader>
+                <edge-cms-media-manager
+                  :site="props.siteId"
+                  :select-mode="true"
+                  :default-tags="['Logos']"
+                  @select="(url) => {
+                    props.settings.brandLogoLight = url
+                    state.brandLogoLightPickerOpen = false
+                  }"
+                />
+              </DialogContent>
+            </Dialog>
+          </div>
+          <edge-shad-input
+            v-else
+            v-model="props.settings.brandLogoLight"
+            name="brandLogoLight"
+            label="Light brand logo URL"
+            placeholder="https://..."
+            class="w-full"
+          />
+        </div>
+        <div v-if="props.enableMediaPicker && props.siteId" class="space-y-2">
+          <label class="text-sm font-medium text-foreground flex items-center justify-between">
+            Favicon
             <edge-shad-button
               type="button"
-              variant="ghost"
-              class="h-8"
-              @click="props.settings.favicon = ''"
+              variant="link"
+              class="px-0 h-auto text-sm"
+              @click="state.faviconPickerOpen = true"
             >
-              Remove
+              Select favicon
             </edge-shad-button>
+          </label>
+          <div class="flex items-center gap-4">
+            <div v-if="props.settings.favicon" class="flex items-center gap-3">
+              <img
+                :src="props.settings.favicon"
+                alt="Favicon preview"
+                class="max-h-12 max-w-12 h-auto w-auto rounded-md border border-border object-contain" :class="[previewBackgroundClass(props.settings.favicon)]"
+              >
+              <edge-shad-button
+                type="button"
+                variant="ghost"
+                class="h-8"
+                @click="props.settings.favicon = ''"
+              >
+                Remove
+              </edge-shad-button>
+            </div>
+            <span v-else class="text-sm text-muted-foreground italic">No favicon selected</span>
           </div>
-          <span v-else class="text-sm text-muted-foreground italic">No favicon selected</span>
+          <Dialog v-model:open="state.faviconPickerOpen">
+            <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
+              <DialogHeader>
+                <DialogTitle>Select Favicon</DialogTitle>
+                <DialogDescription />
+              </DialogHeader>
+              <edge-cms-media-manager
+                :site="props.siteId"
+                :select-mode="true"
+                :default-tags="['Logos']"
+                @select="(url) => {
+                  props.settings.favicon = url
+                  state.faviconPickerOpen = false
+                }"
+              />
+            </DialogContent>
+          </Dialog>
         </div>
-        <Dialog v-model:open="state.faviconPickerOpen">
-          <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
-            <DialogHeader>
-              <DialogTitle>Select Favicon</DialogTitle>
-              <DialogDescription />
-            </DialogHeader>
-            <edge-cms-media-manager
-              :site="props.siteId"
-              :select-mode="true"
-              :default-tags="['Logos']"
-              @select="(url) => {
-                props.settings.favicon = url
-                state.faviconPickerOpen = false
-              }"
-            />
-          </DialogContent>
-        </Dialog>
-      </div>
-      <edge-shad-input
-        v-else
-        v-model="props.settings.favicon"
-        name="favicon"
-        label="Favicon URL"
-        placeholder="https://..."
-        class="w-full"
-      />
+        <edge-shad-input
+          v-else
+          v-model="props.settings.favicon"
+          name="favicon"
+          label="Favicon URL"
+          placeholder="https://..."
+          class="w-full"
+        />
+      </template>
     </TabsContent>
     <TabsContent value="seo" class="pt-4">
       <div class="space-y-4">
@@ -926,6 +1297,106 @@ watch(() => props.settings?.forwardApex, (value) => {
           name="sureFeedURL"
           placeholder=""
         />
+      </div>
+    </TabsContent>
+    <TabsContent value="contact-spam" class="pt-4">
+      <div class="space-y-4">
+        <edge-cms-boolean-card
+          v-model="contactSpamSettings.enabled"
+          name="contactSpamEnabled"
+          label="Contact Spam Classifier"
+          class="w-full"
+          checked-label="Enabled"
+          unchecked-label="Disabled"
+          @update:model-value="markContactSpamEdited"
+        >
+          Check contact form messages against the allowed and blocked context before accepting them.
+        </edge-cms-boolean-card>
+        <edge-shad-select
+          v-model="contactSpamMode"
+          name="contactSpamMode"
+          label="When Spam Is Detected"
+          class="w-full"
+          :items="contactSpamModeItems"
+          item-title="label"
+          item-value="value"
+          description="Block rejects spam submissions. Flag allows the submission but marks it for review."
+        />
+        <edge-shad-select
+          v-model="contactSpamStrictness"
+          name="contactSpamStrictness"
+          label="Strictness"
+          class="w-full"
+          :items="contactSpamStrictnessItems"
+          item-title="label"
+          item-value="value"
+          :description="`Saved block threshold: ${contactSpamSettings.blockThreshold}`"
+        />
+        <edge-shad-textarea
+          v-model="state.contactSpamInstruction"
+          name="contactSpamInstruction"
+          label="AI Context Instructions"
+          placeholder="Tell AI how to adjust the allowed and blocked contact form context for this site."
+          class="min-h-[88px]"
+          :disabled="state.contactSpamGenerating"
+        />
+        <div class="flex items-center gap-3">
+          <edge-shad-button
+            type="button"
+            :disabled="state.contactSpamGenerating || !state.contactSpamInstruction.trim()"
+            @click="updateContactSpamContexts"
+          >
+            <Loader2 v-if="state.contactSpamGenerating" class="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+            Update Context
+          </edge-shad-button>
+          <p v-if="state.contactSpamError" class="text-sm text-destructive">
+            {{ state.contactSpamError }}
+          </p>
+        </div>
+        <p v-if="!props.editableContactSpamContexts" class="text-sm text-muted-foreground">
+          Allowed and blocked contexts are generated by AI and cannot be edited directly. Describe the change above, to update the contexts.
+        </p>
+        <p v-else class="text-sm text-muted-foreground">
+          Edit the contexts directly, or describe a change above to have AI update them.
+        </p>
+        <div v-if="props.showContactSpamContextPush" class="rounded-md border border-amber-200 bg-amber-50 p-3 space-y-2 text-sm text-amber-900">
+          <div>
+            Copy only the allowed and blocked contexts to every site settings document and every published site settings document.
+          </div>
+          <edge-shad-button
+            type="button"
+            variant="outline"
+            class="bg-white"
+            :disabled="props.contactSpamContextPushLoading"
+            @click="pushContactSpamContexts"
+          >
+            <Loader2 v-if="props.contactSpamContextPushLoading" class="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+            Push Contexts to Sites
+          </edge-shad-button>
+          <p v-if="props.contactSpamContextPushMessage" class="text-xs">
+            {{ props.contactSpamContextPushMessage }}
+          </p>
+        </div>
+        <div class="space-y-2">
+          <label for="contactSpamAllowedInquiryContext" class="text-sm font-medium text-foreground">Allowed Inquiry Context</label>
+          <textarea
+            id="contactSpamAllowedInquiryContext"
+            v-model="contactSpamSettings.allowedInquiryContext"
+            :readonly="!props.editableContactSpamContexts"
+            class="w-full min-h-[140px] rounded-md border border-input bg-muted/40 px-3 py-2 text-sm text-muted-foreground"
+            @input="markContactSpamEdited"
+          />
+        </div>
+        <div class="space-y-2">
+          <label for="contactSpamBlockedInquiryContext" class="text-sm font-medium text-foreground">Blocked Inquiry Context</label>
+          <textarea
+            id="contactSpamBlockedInquiryContext"
+            v-model="contactSpamSettings.blockedInquiryContext"
+            :readonly="!props.editableContactSpamContexts"
+            class="w-full min-h-[140px] rounded-md border border-input bg-muted/40 px-3 py-2 text-sm text-muted-foreground"
+            @input="markContactSpamEdited"
+          />
+        </div>
       </div>
     </TabsContent>
     <TabsContent value="social" class="pt-4">
