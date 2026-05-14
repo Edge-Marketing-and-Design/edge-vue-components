@@ -60,7 +60,7 @@ const isTemplateSite = computed(() => props.site === 'templates')
 const router = useRouter()
 const route = useRoute()
 
-const SUBMISSION_IGNORE_FIELDS = new Set(['orgId', 'siteId', 'pageId', 'blockId', 'spam', 'aiSpamReason', 'aiSpamConfidence'])
+const SUBMISSION_IGNORE_FIELDS = new Set(['orgId', 'siteId', 'pageId', 'blockId', 'spam', 'aiSpamConclusion', 'aiSpamReason', 'aiSpamConfidence'])
 const SUBMISSION_LABEL_KEYS = ['name', 'fullName', 'firstName', 'lastName', 'email', 'phone']
 const SUBMISSION_MESSAGE_KEYS = ['message', 'comments', 'notes', 'inquiry', 'details']
 
@@ -462,6 +462,10 @@ const isSpamSubmission = (item) => {
 const getSubmissionAiSpamReason = (item) => {
   const reason = String(item?.data?.aiSpamReason || '').trim()
   return reason || 'No AI classification reason was recorded for this submission.'
+}
+
+const getSubmissionAiSpamConclusion = (item) => {
+  return String(item?.data?.aiSpamConclusion || '').trim()
 }
 
 const getSubmissionAiSpamConfidence = (item) => {
@@ -3464,6 +3468,9 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                             AI Classification Reason<span v-if="getSubmissionAiSpamConfidence(selectedSubmission)"> - Confidence: {{ getSubmissionAiSpamConfidence(selectedSubmission) }}</span>
                           </summary>
                           <div class="mt-2 rounded-md bg-muted/40 p-3 text-sm text-foreground whitespace-pre-wrap break-words">
+                            <div v-if="getSubmissionAiSpamConclusion(selectedSubmission)" class="mb-2 font-semibold">
+                              {{ getSubmissionAiSpamConclusion(selectedSubmission) }}
+                            </div>
                             {{ getSubmissionAiSpamReason(selectedSubmission) }}
                           </div>
                         </details>
