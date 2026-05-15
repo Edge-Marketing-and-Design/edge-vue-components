@@ -1,5 +1,5 @@
 <script setup>
-import { ChevronLeft, ChevronRight, FileText, ImagePlus, Loader2, Square, SquareCheckBig } from 'lucide-vue-next'
+import { ChevronLeft, ChevronRight, FileText, ImagePlus, Loader2, RotateCw, Square, SquareCheckBig } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 const props = defineProps({
@@ -198,6 +198,8 @@ const state = reactive({
   deleteConfirmAcknowledge: false,
   jsonViewOpen: false,
   jsonViewDoc: null,
+  retryingImage: false,
+  retryImageError: '',
   recentUploadedMediaKeys: [],
   recentUploadStartedAt: 0,
   recentUploadCompletedAt: 0,
@@ -841,6 +843,10 @@ const isLightName = (name) => {
 
 const previewBackgroundClass = computed(() => (isLightName(state.workingDoc?.name) ? 'bg-neutral-900/90' : 'bg-neutral-100'))
 const workingDocIsImage = computed(() => isImageMediaItem(state.workingDoc))
+const workingDocR2Path = computed(() => String(state.workingDoc?.r2FilePath || '').trim())
+const canRetryWorkingImage = computed(() => {
+  return showDevOnlyActions.value && workingDocIsImage.value && !!workingDocR2Path.value && !!filesPath.value && canEditWorkingDoc.value
+})
 const workingDocIsPdf = computed(() => {
   const contentType = String(state.workingDoc?.contentType || '').toLowerCase()
   if (contentType === 'application/pdf')
@@ -1011,11 +1017,35 @@ const onPdfPreviewErrored = (event, expectedUrl = '') => {
 }
 const workingDocPreviewUrl = computed(() => {
   if (workingDocIsImage.value)
-    return String(edgeGlobal.getImage(state.workingDoc, resolvedImageVariant.value) || '')
+    return String(edgeGlobal.getImage(state.workingDoc, resolvedImageVariant.value) || state.workingDoc?.r2URL || state.workingDoc?.r2Url || '')
   if (workingDocIsPdf.value)
     return String(currentPdfPage.value?.preview || currentPdfPage.value?.thumbnail || '')
   return ''
 })
+const retryWorkingImage = async () => {
+  if (!canRetryWorkingImage.value || state.retryingImage)
+    return
+  state.retryingImage = true
+  state.retryImageError = ''
+  try {
+    await edgeFirebase.changeDoc(filesPath.value, state.workingDoc.docId, {
+      retryImages: Date.now(),
+      edgeMediaImageState: {
+        ...((state.workingDoc?.edgeMediaImageState && typeof state.workingDoc.edgeMediaImageState === 'object') ? state.workingDoc.edgeMediaImageState : {}),
+        status: 'retry_requested',
+        r2Path: workingDocR2Path.value,
+        errorMessage: '',
+        retryRequestedAt: Date.now(),
+      },
+    })
+  }
+  catch (error) {
+    state.retryImageError = error?.message || 'Image retry request failed.'
+  }
+  finally {
+    state.retryingImage = false
+  }
+}
 watch(
   () => currentPdfPage.value?.preview,
   (nextPreview) => {
@@ -1456,6 +1486,24 @@ const siteQueryValue = computed(() => resolveCmsSiteScopeValues())
                 Original: <span class="font-semibold">{{ state.workingDoc?.fileName }}</span>
               </div>
               <div>Size: <span class="font-semibold">{{ (state.workingDoc?.fileSize / 1024).toFixed(2) }} KB</span></div>
+            </div>
+            <div v-if="canRetryWorkingImage" class="absolute right-4 top-14 flex flex-col items-end gap-2">
+              <edge-shad-button
+                size="sm"
+                class="bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
+                :disabled="state.retryingImage"
+                @click="retryWorkingImage"
+              >
+                <Loader2 v-if="state.retryingImage" class="mr-2 h-4 w-4 animate-spin" />
+                <RotateCw v-else class="mr-2 h-4 w-4" />
+                Retry Image
+              </edge-shad-button>
+              <div
+                v-if="state.retryImageError"
+                class="max-w-[260px] rounded-md border border-destructive/50 bg-destructive/90 px-2 py-1 text-xs text-destructive-foreground shadow-sm"
+              >
+                {{ state.retryImageError }}
+              </div>
             </div>
           </div>
 
