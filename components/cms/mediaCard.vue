@@ -76,6 +76,24 @@ const isImageItem = computed(() => {
     return true
   return imageExtensions.includes(getMediaExtension())
 })
+const getEdgeMediaImageVariant = (variant) => {
+  const variants = props.item?.edgeMediaImageState?.outputs?.image?.variants
+  if (!variants)
+    return ''
+  const requestedVariant = String(variant || 'public').trim() || 'public'
+  const variantUrls = Array.isArray(variants)
+    ? variants.map(url => String(url || '')).filter(Boolean)
+    : Object.values(variants).map(url => String(url || '')).filter(Boolean)
+  const directMatch = Array.isArray(variants)
+    ? variantUrls.find(url => url.includes(`/${requestedVariant}`))
+    : String(variants[requestedVariant] || '')
+  if (directMatch)
+    return directMatch
+  const baseUrl = variantUrls.find(url => url.includes('/public')) || variantUrls[0] || ''
+  if (!baseUrl)
+    return ''
+  return baseUrl.replace(/\/[^/]+$/, `/${requestedVariant}`)
+}
 const isPdfItem = computed(() => {
   const contentType = String(props.item?.contentType || '').toLowerCase()
   if (contentType === 'application/pdf')
@@ -119,7 +137,7 @@ const fileIconComponent = computed(() => {
 })
 const thumbnailUrl = computed(() => {
   if (isImageItem.value)
-    return edgeGlobal.getImage(props.item, 'thumbnail') || ''
+    return edgeGlobal.getImage(props.item, 'thumbnail') || getEdgeMediaImageVariant('thumbnail') || ''
   if (!isPdfItem.value)
     return ''
   const pageImages = props.item?.ccState?.cFImages || props.item?.ccState?.cfImages || {}
@@ -131,7 +149,7 @@ const thumbnailUrl = computed(() => {
 const mediaCopyUrl = computed(() => {
   if (isFileItem.value)
     return String(props.item?.r2URL || props.item?.r2Url || '')
-  return String(edgeGlobal.getImage(props.item, 'public') || '')
+  return String(edgeGlobal.getImage(props.item, 'public') || getEdgeMediaImageVariant('public') || '')
 })
 </script>
 

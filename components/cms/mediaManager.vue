@@ -144,6 +144,24 @@ const isImageMediaItem = (item) => {
   const ext = getMediaExtension(item)
   return imageExtensions.includes(ext)
 }
+const getEdgeMediaImageVariant = (item, variant) => {
+  const variants = item?.edgeMediaImageState?.outputs?.image?.variants
+  if (!variants)
+    return ''
+  const requestedVariant = String(variant || 'public').trim() || 'public'
+  const variantUrls = Array.isArray(variants)
+    ? variants.map(url => String(url || '')).filter(Boolean)
+    : Object.values(variants).map(url => String(url || '')).filter(Boolean)
+  const directMatch = Array.isArray(variants)
+    ? variantUrls.find(url => url.includes(`/${requestedVariant}`))
+    : String(variants[requestedVariant] || '')
+  if (directMatch)
+    return directMatch
+  const baseUrl = variantUrls.find(url => url.includes('/public')) || variantUrls[0] || ''
+  if (!baseUrl)
+    return ''
+  return baseUrl.replace(/\/[^/]+$/, `/${requestedVariant}`)
+}
 const isAllowedFileItem = (item) => {
   if (isImageMediaItem(item))
     return false
@@ -509,6 +527,7 @@ const getMediaIdentityKeys = (item) => {
     item.publicURL,
     item.downloadURL,
     edgeGlobal.getImage?.(item, 'public'),
+    getEdgeMediaImageVariant(item, 'public'),
   ].map(normalizeMediaKey).filter(Boolean)
 }
 const isRecentlyUploadedMedia = (item) => {
@@ -826,7 +845,7 @@ const openMediaView = (item) => {
 const itemClick = (item) => {
   if (props.selectMode) {
     const selectedUrl = isImageMediaItem(item)
-      ? (edgeGlobal.getImage(item, resolvedImageVariant.value) || item?.r2URL || item?.r2Url || '')
+      ? (edgeGlobal.getImage(item, resolvedImageVariant.value) || getEdgeMediaImageVariant(item, resolvedImageVariant.value) || item?.r2URL || item?.r2Url || '')
       : (item?.r2URL || item?.r2Url || edgeGlobal.getImage(item, resolvedImageVariant.value) || '')
     emits('select', resolvedEmitOverride.value ? item?.[resolvedEmitOverride.value] : selectedUrl)
   }
@@ -1017,7 +1036,7 @@ const onPdfPreviewErrored = (event, expectedUrl = '') => {
 }
 const workingDocPreviewUrl = computed(() => {
   if (workingDocIsImage.value)
-    return String(edgeGlobal.getImage(state.workingDoc, resolvedImageVariant.value) || state.workingDoc?.r2URL || state.workingDoc?.r2Url || '')
+    return String(edgeGlobal.getImage(state.workingDoc, resolvedImageVariant.value) || getEdgeMediaImageVariant(state.workingDoc, resolvedImageVariant.value) || state.workingDoc?.r2URL || state.workingDoc?.r2Url || '')
   if (workingDocIsPdf.value)
     return String(currentPdfPage.value?.preview || currentPdfPage.value?.thumbnail || '')
   return ''

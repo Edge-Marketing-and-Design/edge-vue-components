@@ -46,21 +46,27 @@ const getFileRef = (organization, fileDocId) => {
 const normalizeImageJob = (job = {}, r2Path = '') => {
   const result = job.result || job
   const meta = result.meta || job.meta || {}
-  const variants = result.variants || []
+  const outputs = result.outputs || {}
+  const imageOutput = outputs.image || result.image || {}
+  const rawVariants = result.variants || imageOutput.variants || []
+  const variants = Array.isArray(rawVariants)
+    ? rawVariants
+    : Object.values(rawVariants || {}).filter(Boolean)
   const responseId = result.id || job.id || null
   const isImageJob = result.type === 'image' || job.type === 'image'
   const jobId = meta.jobId || result.jobId || job.jobId || (isImageJob ? responseId : null)
-  const cloudflareImageId = result.cloudflareImageId || (variants.length ? result.id : '')
+  const cloudflareImageId = result.cloudflareImageId || imageOutput.cfImagesId || (variants.length ? result.id : '')
+  const resolvedR2Path = result.inputKey || result.r2Path || imageOutput.r2Path || imageOutput.originalR2Path || meta.r2Path || meta.inputKey || r2Path
   return {
     id: jobId,
     type: result.type || job.type || 'image',
     status: result.status || job.status || 'queued',
-    r2Path: result.inputKey || result.r2Path || meta.r2Path || meta.inputKey || r2Path,
-    inputKey: result.inputKey || meta.inputKey || r2Path,
+    r2Path: resolvedR2Path,
+    inputKey: result.inputKey || meta.inputKey || resolvedR2Path,
     sourceType: result.sourceType || meta.uploadType || '',
     bucket: result.bucket || meta.inputBucket || 'files',
     resolvedOutputPrefix: result.resolvedOutputPrefix || '',
-    outputs: result.outputs || {},
+    outputs,
     cloudflareImageId,
     variants,
     meta,
