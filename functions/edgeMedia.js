@@ -600,6 +600,17 @@ exports.uploadDocumentDeleted = onDocumentDeleted(
 exports.fileDeleted = onObjectDeleted(
   { region: process.env.FIREBASE_STORAGE_BUCKET_REGION },
   async (event) => {
+    const fileBucket = event.data.bucket
+    const filePath = event.data.name
+
+    if (fileBucket && filePath) {
+      const [replacementExists] = await admin.storage().bucket(fileBucket).file(filePath).exists()
+      if (replacementExists) {
+        logger.info('Skipping stale R2 delete cleanup because a replacement object already exists', { filePath })
+        return
+      }
+    }
+
     const toR2 = event.data.metadata?.toR2
     if (!toR2 || event.data.metadata?.r2ProcessCompleted !== 'true')
       return
