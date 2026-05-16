@@ -28,6 +28,10 @@
         "function": "cms-trackHistory"
       },
       {
+        "source": "/api/edge-media",
+        "function": "edgeMedia-mediaWebhook"
+      },
+      {
         "source": "/api/members-stripe",
         "function": "cms-restrictedContentStripeWebhook"
       },
