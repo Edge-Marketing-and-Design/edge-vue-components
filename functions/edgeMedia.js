@@ -948,6 +948,14 @@ const handlePublicationWebhook = async ({ organization, fileDocId, eventData, re
   const fileSnap = await fileRef.get()
   const fileData = fileSnap.data() || {}
   const existingState = fileData.edgeMediaState || {}
+  const payloadPageCount = Number(eventData.pageCount)
+  const payloadProcessedPages = Number(eventData.processedPages)
+  const pageCount = (Number.isFinite(payloadPageCount) && payloadPageCount > 0)
+    ? payloadPageCount
+    : (Number(existingState.pageCount) || 0)
+  const processedPages = (Number.isFinite(payloadProcessedPages) && payloadProcessedPages >= 0)
+    ? payloadProcessedPages
+    : (Number(existingState.processedPages) || 0)
 
   if (eventName === 'processing_started') {
     await fileRef.set({
@@ -956,6 +964,8 @@ const handlePublicationWebhook = async ({ organization, fileDocId, eventData, re
         status: status || 'processing',
         inputKey: eventData.inputKey || existingState.inputKey || '',
         resolvedOutputPrefix: eventData.resolvedOutputPrefix || existingState.resolvedOutputPrefix || '',
+        pageCount,
+        processedPages,
         errorMessage: '',
         stages: {
           uploaded: true,
@@ -975,12 +985,13 @@ const handlePublicationWebhook = async ({ organization, fileDocId, eventData, re
       return
     }
     const outputs = mergeOutputs(existingState.outputs, { [pageKey]: eventData.output })
-    const processedPages = Object.keys(outputs).filter(key => /^page-\d+$/i.test(key)).length
+    const outputProcessedPages = Object.keys(outputs).filter(key => /^page-\d+$/i.test(key)).length
     await fileRef.set({
       edgeMediaState: {
         id: eventData.id || existingState.id || null,
         status: status || 'processing',
-        processedPages,
+        pageCount,
+        processedPages: processedPages || outputProcessedPages,
         outputs,
         errorMessage: '',
         stages: {
@@ -998,7 +1009,7 @@ const handlePublicationWebhook = async ({ organization, fileDocId, eventData, re
     const outputs = mergeOutputs(existingState.outputs, eventData.outputs)
     const pages = buildPages(outputs)
     const highResImages = buildHighResImages(outputs)
-    const pageCount = Number(eventData.pageCount) || pages.length
+    const completePageCount = pageCount || pages.length
     const currentSlug = String(fileData.slug || '').trim()
     const slug = currentSlug || await generateSlug(organization, fileData.name || fileData.fileName || fileDocId, fileDocId)
 
@@ -1007,13 +1018,13 @@ const handlePublicationWebhook = async ({ organization, fileDocId, eventData, re
       pageEffect: fileData?.pageEffect || 'flip',
       pages,
       highResImages,
-      totalPages: pageCount,
+      totalPages: completePageCount,
       edgeMediaState: {
         id: eventData.id || existingState.id || null,
         status: 'complete',
         resolvedOutputPrefix: eventData.resolvedOutputPrefix || existingState.resolvedOutputPrefix || '',
-        pageCount,
-        processedPages: Number(eventData.processedPages) || pages.length,
+        pageCount: completePageCount,
+        processedPages: processedPages || pages.length,
         outputs,
         errorMessage: '',
         stages: {
@@ -1049,6 +1060,8 @@ const handlePublicationWebhook = async ({ organization, fileDocId, eventData, re
     edgeMediaState: {
       id: eventData.id || existingState.id || null,
       status: status || eventName || 'processing',
+      pageCount,
+      processedPages,
     },
   }, { merge: true })
   res.status(200).send('OK')

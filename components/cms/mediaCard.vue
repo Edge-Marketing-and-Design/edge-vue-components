@@ -31,7 +31,6 @@ const {
   getPublicationPageCount,
   getPublicationProgressLabel,
   getPublicationThumbnailUrl,
-  hasPublicationMediaState,
 } = usePublicationMedia()
 
 const timeAgo = (timestamp) => {
@@ -111,7 +110,11 @@ const publicationPageCount = computed(() => {
   return getPublicationPageCount(props.item)
 })
 const publicationProgressLabel = computed(() => getPublicationProgressLabel(props.item))
-const isPublicationPdf = computed(() => isPdfItem.value && (publicationPageCount.value > 0 || hasPublicationMediaState(props.item)))
+const hasEdgeMediaPublicationState = computed(() => {
+  const edgeMediaState = props.item?.edgeMediaState
+  return !!edgeMediaState && typeof edgeMediaState === 'object'
+})
+const isPublicationPdf = computed(() => isPdfItem.value && (hasEdgeMediaPublicationState.value || publicationPageCount.value > 0))
 const fileTypeLabel = computed(() => {
   if (isPublicationPdf.value)
     return 'Pub'
@@ -247,7 +250,7 @@ const mediaCopyUrl = computed(() => {
           <edge-clipboard-button :text="mediaCopyUrl" class="shrink-0" />
         </div>
         <div
-          v-if="publicationProgressLabel && publicationProgressLabel !== 'Complete'"
+          v-if="isPublicationPdf && publicationProgressLabel && publicationProgressLabel !== 'Complete'"
           class="mt-1 flex items-center gap-1.5 text-[11px] font-medium text-sky-700 dark:text-sky-300"
         >
           <Loader2 v-if="!['Failed', 'Complete'].includes(publicationProgressLabel)" class="h-3.5 w-3.5 animate-spin" />

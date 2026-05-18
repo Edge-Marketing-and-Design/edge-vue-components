@@ -90,7 +90,6 @@ const showDevOnlyActions = computed(() => edgeGlobal.allowMenuItem({ devOnly: tr
 const {
   getPublicationPageCount,
   getPublicationPreviewPages,
-  hasPublicationMediaState,
 } = usePublicationMedia()
 const allowedFileExtensions = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'ppt', 'pptx', 'txt', 'rtf', 'zip', 'odt', 'ods', 'odp']
 const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'avif']
@@ -190,7 +189,9 @@ const isPublicationPdfItem = (item) => {
   if (!isPdf)
     return false
 
-  return getPublicationPageCount(item) > 0 || hasPublicationMediaState(item)
+  const edgeMediaState = item?.edgeMediaState
+  const hasEdgeMediaPublicationState = !!edgeMediaState && typeof edgeMediaState === 'object'
+  return hasEdgeMediaPublicationState || getPublicationPageCount(item) > 0
 }
 
 const state = reactive({
@@ -431,6 +432,8 @@ const shouldIncludeItemByFileType = (item) => {
     return true
   if (fileTypeFilter === 'pub')
     return isPublicationPdfItem(item)
+  if (fileTypeFilter === 'pdf')
+    return getMediaExtension(item) === 'pdf' && !isPublicationPdfItem(item)
   return getMediaExtension(item) === fileTypeFilter
 }
 const shouldIncludeItemBySearchAndTags = (item) => {
