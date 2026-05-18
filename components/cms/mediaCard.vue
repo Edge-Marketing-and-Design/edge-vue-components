@@ -215,7 +215,8 @@ const mediaCopyUrl = computed(() => {
       >
       <div
         v-if="isPublicationPdf"
-        class="absolute bottom-3 left-3 rounded-md bg-slate-900/85 px-2 py-1 text-[10px] font-semibold text-white shadow-sm"
+        class="absolute left-3 z-10 rounded-md bg-slate-900/85 px-2 py-1 text-[10px] font-semibold text-white shadow-sm"
+        :class="props.isNew ? 'bottom-10' : 'bottom-3'"
       >
         Pages: {{ publicationPageCount || '-' }}
       </div>

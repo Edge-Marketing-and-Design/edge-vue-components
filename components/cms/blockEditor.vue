@@ -450,7 +450,7 @@ function* iterateTags(html) {
 
     const rawCfg = html.slice(configStart, configEnd + 1)
     const tagStart = m.index
-    const closeTriple = html.indexOf('}}}', configEnd)
+    const closeTriple = html.indexOf('}}}', configEnd + 1)
     const tagEnd = closeTriple !== -1 ? closeTriple + 3 : configEnd + 1
 
     yield { type, rawCfg, tagStart, tagEnd, configStart, configEnd }

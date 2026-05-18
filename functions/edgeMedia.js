@@ -1,14 +1,12 @@
 const AWS = require('aws-sdk')
 const fetch = require('node-fetch')
 
-const { Firestore, admin, db, logger, onDocumentDeleted, onDocumentUpdated, onObjectDeleted, onObjectFinalized, onRequest, onSchedule } = require('./config.js')
+const { admin, db, logger, onDocumentDeleted, onDocumentUpdated, onObjectDeleted, onObjectFinalized, onRequest } = require('./config.js')
 
 const EDGE_MEDIA_API_URL = String(process.env.EDGE_MEDIA_API_URL || 'https://edge-media-api.edge-marketing.workers.dev').replace(/\/+$/, '')
 const EDGE_MEDIA_API_KEY = String(process.env.EDGE_MEDIA_API_KEY || '').trim()
 const EDGE_MEDIA_DEFAULT_FORMAT = String(process.env.EDGE_MEDIA_DEFAULT_FORMAT || 'jpg').trim().toLowerCase()
 const EDGE_MEDIA_DEFAULT_DPI = Number(process.env.EDGE_MEDIA_DEFAULT_DPI || 200)
-const EDGE_MEDIA_LEGACY_IMPORT_BATCH_SIZE = Number(process.env.EDGE_MEDIA_LEGACY_IMPORT_BATCH_SIZE || 25)
-const LEGACY_IMPORT_MIGRATION_ID = 'edgeMediaLegacyPublicationsImport'
 
 const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp']
 
@@ -148,55 +146,6 @@ const mergeOutputs = (existing, next) => ({
   ...((existing && typeof existing === 'object') ? existing : {}),
   ...((next && typeof next === 'object') ? next : {}),
 })
-
-const getLegacyPageImages = (data) => {
-  const pageImages = data?.ccState?.cFImages || data?.ccState?.cfImages
-  return (pageImages && typeof pageImages === 'object') ? pageImages : {}
-}
-
-const normalizeLegacyVariants = (legacyPage = {}) => {
-  const variants = legacyPage?.variants || {}
-  const normalized = {
-    thumbnail: getVariant({ variants }, 'thumbnail'),
-    public: getVariant({ variants }, 'public'),
-    highres: getVariant({ variants }, 'highres'),
-  }
-  const first = getFirstVariant({ variants })
-  if (!normalized.public && first)
-    normalized.public = first
-  if (!normalized.thumbnail && normalized.public)
-    normalized.thumbnail = normalized.public
-  if (!normalized.highres && normalized.public)
-    normalized.highres = normalized.public
-
-  return Object.fromEntries(
-    Object.entries(normalized)
-      .filter(([, url]) => String(url || '').startsWith('https://')),
-  )
-}
-
-const getCloudflareImageIdFromUrl = (url) => {
-  try {
-    const parsed = new URL(String(url || ''))
-    const parts = parsed.pathname.split('/').filter(Boolean)
-    return parts.length >= 2 ? parts[1] : ''
-  }
-  catch {
-    return ''
-  }
-}
-
-const buildLegacyImportPages = (fileData) => {
-  return sortedOutputEntries(getLegacyPageImages(fileData))
-    .map(([, pageData]) => {
-      const variants = normalizeLegacyVariants(pageData)
-      const cfImagesId = String(pageData?.cfImagesId || pageData?.id || getCloudflareImageIdFromUrl(variants.public || variants.thumbnail || variants.highres) || '').trim()
-      if (!cfImagesId || !Object.keys(variants).length)
-        return null
-      return { cfImagesId, variants }
-    })
-    .filter(Boolean)
-}
 
 const normalizeImageJob = (job = {}, r2Path = '') => {
   const result = job.result || job
@@ -370,13 +319,6 @@ const startPublicationJob = async (organization, fileDocId, fileData) => {
     webhookUrl: getWebhookUrl(organization, fileDocId, 'publication'),
     format: EDGE_MEDIA_DEFAULT_FORMAT === 'png' ? 'png' : 'jpg',
     dpi: Number.isFinite(EDGE_MEDIA_DEFAULT_DPI) ? EDGE_MEDIA_DEFAULT_DPI : 200,
-  })
-}
-
-const importLegacyPublicationJob = async (fileData) => {
-  return postEdgeMediaJson('/pdf-to-images/import', {
-    inputKey: getInputKey(fileData),
-    pages: buildLegacyImportPages(fileData),
   })
 }
 
@@ -795,149 +737,6 @@ exports.retryImageUpload = onDocumentUpdated(
         error: error?.message || String(error),
       })
     }
-  },
-)
-
-exports.importLegacyPublications = onSchedule(
-  { schedule: 'every 15 minutes', timeoutSeconds: 540, memory: '1GiB' },
-  async () => {
-    const migrationRef = db.collection('_cms-migrations').doc(LEGACY_IMPORT_MIGRATION_ID)
-    const migrationSnap = await migrationRef.get()
-    const migration = migrationSnap.data() || {}
-    if (migration.status === 'complete')
-      return
-
-    const hasConfiguredBatchSize = Number.isFinite(EDGE_MEDIA_LEGACY_IMPORT_BATCH_SIZE) && EDGE_MEDIA_LEGACY_IMPORT_BATCH_SIZE > 0
-    const batchSize = hasConfiguredBatchSize
-      ? EDGE_MEDIA_LEGACY_IMPORT_BATCH_SIZE
-      : 25
-    const snapshot = await db.collectionGroup('files')
-      .where('ccState.status', '==', 'complete')
-      .get()
-
-    const docs = snapshot.docs
-      .sort((left, right) => left.ref.path.localeCompare(right.ref.path))
-      .filter((doc) => {
-        const fileData = doc.data() || {}
-        return !String(fileData?.edgeMediaState?.id || '').trim()
-          && isPdfFile(fileData)
-          && hasPublicationMeta(fileData)
-          && !!getInputKey(fileData)
-          && buildLegacyImportPages(fileData).length > 0
-      })
-      .slice(0, batchSize)
-
-    if (!docs.length) {
-      await migrationRef.set({
-        status: 'complete',
-        completedAt: Firestore.FieldValue.serverTimestamp(),
-        updatedAt: Firestore.FieldValue.serverTimestamp(),
-      }, { merge: true })
-      logger.info('Edge Media legacy publication import completed', { migrationId: LEGACY_IMPORT_MIGRATION_ID })
-      return
-    }
-
-    await migrationRef.set({
-      status: 'running',
-      startedAt: migration.startedAt || Firestore.FieldValue.serverTimestamp(),
-      updatedAt: Firestore.FieldValue.serverTimestamp(),
-    }, { merge: true })
-
-    let sent = 0
-    let skipped = 0
-    let failed = 0
-
-    for (const doc of docs) {
-      const fileData = doc.data() || {}
-      const orgId = doc.ref.parent.parent?.id || ''
-      const docId = doc.id
-      const inputKey = getInputKey(fileData)
-      const pages = buildLegacyImportPages(fileData)
-      const baseMigrationUpdate = {
-        status: 'running',
-        lastFilePath: doc.ref.path,
-        lastInputKey: inputKey,
-        updatedAt: Firestore.FieldValue.serverTimestamp(),
-      }
-
-      if (!orgId) {
-        skipped += 1
-        await migrationRef.set({
-          ...baseMigrationUpdate,
-          skipped: Number(migration.skipped || 0) + skipped,
-        }, { merge: true })
-        continue
-      }
-
-      try {
-        const job = await importLegacyPublicationJob(fileData)
-        const outputs = job.outputs || {}
-        const pageCount = Number(job.pageCount) || pages.length
-        await doc.ref.set({
-          edgeMediaState: {
-            ...job,
-            id: job.id || null,
-            status: 'complete',
-            inputKey: job.inputKey || inputKey,
-            resolvedOutputPrefix: job.resolvedOutputPrefix || '',
-            pageCount,
-            processedPages: Number(job.processedPages) || pageCount,
-            outputs,
-            errorMessage: '',
-            importedFromLegacy: true,
-            stages: {
-              uploaded: true,
-              processing: true,
-              finalized: true,
-            },
-          },
-          pages: buildPages(outputs),
-          highResImages: buildHighResImages(outputs),
-          totalPages: pageCount,
-        }, { merge: true })
-
-        sent += 1
-        await migrationRef.set({
-          ...baseMigrationUpdate,
-          lastJobId: job.id || null,
-          sent: Number(migration.sent || 0) + sent,
-        }, { merge: true })
-      }
-      catch (error) {
-        failed += 1
-        await migrationRef.set({
-          ...baseMigrationUpdate,
-          failed: Number(migration.failed || 0) + failed,
-          lastError: {
-            filePath: doc.ref.path,
-            message: error?.message || String(error),
-          },
-        }, { merge: true })
-        logger.error('Edge Media legacy publication import failed', {
-          orgId,
-          docId,
-          inputKey,
-          error: error?.message || String(error),
-        })
-      }
-    }
-
-    await migrationRef.set({
-      status: docs.length < batchSize ? 'complete' : 'running',
-      sent: Number(migration.sent || 0) + sent,
-      skipped: Number(migration.skipped || 0) + skipped,
-      failed: Number(migration.failed || 0) + failed,
-      completedAt: docs.length < batchSize ? Firestore.FieldValue.serverTimestamp() : null,
-      updatedAt: Firestore.FieldValue.serverTimestamp(),
-    }, { merge: true })
-
-    logger.info('Edge Media legacy publication import run completed', {
-      migrationId: LEGACY_IMPORT_MIGRATION_ID,
-      sent,
-      skipped,
-      failed,
-      processed: docs.length,
-    })
   },
 )
 

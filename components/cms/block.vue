@@ -276,7 +276,7 @@ function extractFieldsInOrder(template) {
       seen.add(field)
     }
 
-    const closeTriple = template.indexOf('}}}', configEnd)
+    const closeTriple = template.indexOf('}}}', configEnd + 1)
     TAG_START_RE.lastIndex = closeTriple !== -1 ? closeTriple + 3 : configEnd + 1
   }
 
@@ -846,7 +846,34 @@ const getPublicationSelectionLabel = (value, label) => {
   const pageCount = getPublicationPagesCount(value)
   if (pageCount)
     return `${pageCount} page${pageCount === 1 ? '' : 's'} selected`
+  if (value && typeof value === 'object')
+    return `Select ${label}`
   return String(value || '').trim() || `Select ${label}`
+}
+
+const getPublicationVariantUrl = (pageData = {}) => {
+  const variants = pageData?.variants || {}
+  if (Array.isArray(variants)) {
+    const urls = variants.map(url => String(url || '').trim()).filter(Boolean)
+    return urls.find(url => url.includes('/thumbnail'))
+      || urls.find(url => url.includes('/public'))
+      || urls.find(url => url.includes('/highres'))
+      || urls[0]
+      || ''
+  }
+  if (variants && typeof variants === 'object') {
+    return String(variants.thumbnail || variants.public || variants.highres || Object.values(variants).find(Boolean) || '').trim()
+  }
+  return ''
+}
+
+const getPublicationPreviewUrl = (value) => {
+  if (!isPublicationPagesValue(value))
+    return ''
+  const firstPageKey = Object.keys(value)
+    .filter(key => /^page-\d+$/i.test(String(key || '')))
+    .sort((a, b) => Number(a.match(/(\d+)/)?.[1] || 0) - Number(b.match(/(\d+)/)?.[1] || 0))[0]
+  return getPublicationVariantUrl(value[firstPageKey])
 }
 
 const sanitizeQueryItems = (meta) => {
@@ -943,7 +970,7 @@ function* iterateTags(html) {
       continue
 
     const rawCfg = html.slice(configStart, configEnd + 1)
-    const closeTriple = html.indexOf('}}}', configEnd)
+    const closeTriple = html.indexOf('}}}', configEnd + 1)
     const tagEnd = closeTriple !== -1 ? closeTriple + 3 : configEnd + 1
 
     yield { type, rawCfg, tagStart, tagEnd }
@@ -2851,34 +2878,51 @@ const getTagsFromPosts = computed(() => {
                     </div>
                     <div v-else-if="entry.meta?.type === 'publication'" @focusin="setActivePreviewField(entry.field)" @mousedown.capture="setActivePreviewField(entry.field)">
                       <div class="space-y-3">
-                        <Dialog
-                          v-model:open="state.publicationOpenByKey[entry.field]"
-                        >
-                          <DialogTrigger as-child>
-                            <edge-shad-button
-                              type="button"
-                              variant="outline"
-                              class="w-full justify-between"
+                        <div class="text-sm font-medium text-foreground">
+                          {{ genTitleFromField(entry) }}
+                        </div>
+                        <div class="relative min-h-36 rounded-md border border-border bg-neutral-100 py-3 flex items-center justify-center overflow-hidden">
+                          <div class="bg-black/80 absolute left-0 top-0 w-full h-full opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center z-10 cursor-pointer">
+                            <Dialog
+                              v-model:open="state.publicationOpenByKey[entry.field]"
                             >
-                              <span>{{ getPublicationSelectionLabel(state.draft[entry.field], genTitleFromField(entry)) }}</span>
-                              <span class="text-xs text-muted-foreground">Browse</span>
-                            </edge-shad-button>
-                          </DialogTrigger>
-                          <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
-                            <DialogHeader>
-                              <DialogTitle>{{ genTitleFromField(entry) }}</DialogTitle>
-                              <DialogDescription />
-                            </DialogHeader>
-                            <edge-cms-media-manager
-                              :select-mode="true"
-                              :include-files="true"
-                              :files-only="true"
-                              file-type-default="pub"
-                              :hide-file-type-selector="true"
-                              @select="(_value, item) => setPublicationFieldSelection(entry.field, item)"
-                            />
-                          </DialogContent>
-                        </Dialog>
+                              <DialogTrigger as-child>
+                                <edge-shad-button variant="outline" class="bg-white text-black hover:bg-gray-200">
+                                  <ImagePlus class="h-5 w-5 mr-2" />
+                                  Browse
+                                </edge-shad-button>
+                              </DialogTrigger>
+                              <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
+                                <DialogHeader>
+                                  <DialogTitle>{{ genTitleFromField(entry) }}</DialogTitle>
+                                  <DialogDescription />
+                                </DialogHeader>
+                                <edge-cms-media-manager
+                                  :select-mode="true"
+                                  :include-files="true"
+                                  :files-only="true"
+                                  file-type-default="pub"
+                                  :hide-file-type-selector="true"
+                                  @select="(_value, item) => setPublicationFieldSelection(entry.field, item)"
+                                />
+                              </DialogContent>
+                            </Dialog>
+                          </div>
+                          <img
+                            v-if="getPublicationPreviewUrl(state.draft[entry.field])"
+                            :src="getPublicationPreviewUrl(state.draft[entry.field])"
+                            class="max-h-40 max-w-full h-auto w-auto object-contain"
+                          >
+                          <div v-else class="text-sm text-muted-foreground">
+                            {{ getPublicationSelectionLabel(state.draft[entry.field], genTitleFromField(entry)) }}
+                          </div>
+                          <div
+                            v-if="getPublicationPagesCount(state.draft[entry.field])"
+                            class="absolute bottom-2 left-2 rounded-md bg-slate-900/85 px-2 py-1 text-[10px] font-semibold text-white shadow-sm"
+                          >
+                            {{ getPublicationSelectionLabel(state.draft[entry.field], genTitleFromField(entry)) }}
+                          </div>
+                        </div>
                         <edge-shad-select
                           v-model="state.meta[entry.field].effect"
                           :items="publicationEffectOptions"
@@ -2889,34 +2933,51 @@ const getTagsFromPosts = computed(() => {
                     </div>
                     <div v-else-if="entry.meta?.option" @focusin="setActivePreviewField(entry.field)" @mousedown.capture="setActivePreviewField(entry.field)">
                       <div v-if="entry.meta.option?.picker === 'publication'" class="space-y-3">
-                        <Dialog
-                          v-model:open="state.publicationOpenByKey[entry.field]"
-                        >
-                          <DialogTrigger as-child>
-                            <edge-shad-button
-                              type="button"
-                              variant="outline"
-                              class="w-full justify-between"
+                        <div class="text-sm font-medium text-foreground">
+                          {{ genTitleFromField(entry) }}
+                        </div>
+                        <div class="relative min-h-36 rounded-md border border-border bg-neutral-100 py-3 flex items-center justify-center overflow-hidden">
+                          <div class="bg-black/80 absolute left-0 top-0 w-full h-full opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center z-10 cursor-pointer">
+                            <Dialog
+                              v-model:open="state.publicationOpenByKey[entry.field]"
                             >
-                              <span>{{ getPublicationSelectionLabel(state.draft[entry.field], genTitleFromField(entry)) }}</span>
-                              <span class="text-xs text-muted-foreground">Browse</span>
-                            </edge-shad-button>
-                          </DialogTrigger>
-                          <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
-                            <DialogHeader>
-                              <DialogTitle>{{ genTitleFromField(entry) }}</DialogTitle>
-                              <DialogDescription />
-                            </DialogHeader>
-                            <edge-cms-media-manager
-                              :select-mode="true"
-                              :include-files="true"
-                              :files-only="true"
-                              file-type-default="pub"
-                              :hide-file-type-selector="true"
-                              @select="(_value, item) => setPublicationFieldSelection(entry.field, item)"
-                            />
-                          </DialogContent>
-                        </Dialog>
+                              <DialogTrigger as-child>
+                                <edge-shad-button variant="outline" class="bg-white text-black hover:bg-gray-200">
+                                  <ImagePlus class="h-5 w-5 mr-2" />
+                                  Browse
+                                </edge-shad-button>
+                              </DialogTrigger>
+                              <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
+                                <DialogHeader>
+                                  <DialogTitle>{{ genTitleFromField(entry) }}</DialogTitle>
+                                  <DialogDescription />
+                                </DialogHeader>
+                                <edge-cms-media-manager
+                                  :select-mode="true"
+                                  :include-files="true"
+                                  :files-only="true"
+                                  file-type-default="pub"
+                                  :hide-file-type-selector="true"
+                                  @select="(_value, item) => setPublicationFieldSelection(entry.field, item)"
+                                />
+                              </DialogContent>
+                            </Dialog>
+                          </div>
+                          <img
+                            v-if="getPublicationPreviewUrl(state.draft[entry.field])"
+                            :src="getPublicationPreviewUrl(state.draft[entry.field])"
+                            class="max-h-40 max-w-full h-auto w-auto object-contain"
+                          >
+                          <div v-else class="text-sm text-muted-foreground">
+                            {{ getPublicationSelectionLabel(state.draft[entry.field], genTitleFromField(entry)) }}
+                          </div>
+                          <div
+                            v-if="getPublicationPagesCount(state.draft[entry.field])"
+                            class="absolute bottom-2 left-2 rounded-md bg-slate-900/85 px-2 py-1 text-[10px] font-semibold text-white shadow-sm"
+                          >
+                            {{ getPublicationSelectionLabel(state.draft[entry.field], genTitleFromField(entry)) }}
+                          </div>
+                        </div>
                         <edge-shad-select
                           v-model="state.meta[entry.field].effect"
                           :items="publicationEffectOptions"
