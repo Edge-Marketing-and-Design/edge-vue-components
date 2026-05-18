@@ -27,6 +27,12 @@ const props = defineProps({
   },
 })
 const emits = defineEmits(['select', 'delete', 'view', 'viewJson'])
+const {
+  getPublicationPageCount,
+  getPublicationProgressLabel,
+  getPublicationThumbnailUrl,
+  hasPublicationMediaState,
+} = usePublicationMedia()
 
 const timeAgo = (timestamp) => {
   if (!timestamp)
@@ -101,18 +107,11 @@ const isPdfItem = computed(() => {
   return getMediaExtension() === 'pdf'
 })
 const isFileItem = computed(() => !isImageItem.value)
-const pdfPageImages = computed(() => {
-  if (!isPdfItem.value)
-    return {}
-  const pageImages = props.item?.ccState?.cFImages || props.item?.ccState?.cfImages || {}
-  return (pageImages && typeof pageImages === 'object') ? pageImages : {}
-})
 const publicationPageCount = computed(() => {
-  return Object.keys(pdfPageImages.value)
-    .filter(key => /^page-\d+$/i.test(String(key || '')))
-    .length
+  return getPublicationPageCount(props.item)
 })
-const isPublicationPdf = computed(() => isPdfItem.value && publicationPageCount.value > 0)
+const publicationProgressLabel = computed(() => getPublicationProgressLabel(props.item))
+const isPublicationPdf = computed(() => isPdfItem.value && (publicationPageCount.value > 0 || hasPublicationMediaState(props.item)))
 const fileTypeLabel = computed(() => {
   if (isPublicationPdf.value)
     return 'Pub'
@@ -140,11 +139,7 @@ const thumbnailUrl = computed(() => {
     return edgeGlobal.getImage(props.item, 'thumbnail') || getEdgeMediaImageVariant('thumbnail') || ''
   if (!isPdfItem.value)
     return ''
-  const pageImages = props.item?.ccState?.cFImages || props.item?.ccState?.cfImages || {}
-  const pageOne = pageImages?.['page-001'] || {}
-  const variants = Array.isArray(pageOne?.variants) ? pageOne.variants : []
-  const thumbnail = variants.find(variant => String(variant || '').includes('/thumbnail'))
-  return String(thumbnail || variants[0] || '')
+  return getPublicationThumbnailUrl(props.item)
 })
 const mediaCopyUrl = computed(() => {
   if (isFileItem.value)
@@ -219,7 +214,7 @@ const mediaCopyUrl = computed(() => {
         v-if="isPublicationPdf"
         class="absolute bottom-3 left-3 rounded-md bg-slate-900/85 px-2 py-1 text-[10px] font-semibold text-white shadow-sm"
       >
-        Pages: {{ publicationPageCount }}
+        Pages: {{ publicationPageCount || '-' }}
       </div>
       <div v-if="isFileItem" class="absolute bottom-3 right-3 rounded-md bg-red-600 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-white shadow-sm">
         {{ fileTypeLabel }}
@@ -250,6 +245,13 @@ const mediaCopyUrl = computed(() => {
             {{ mediaCopyUrl }}
           </span>
           <edge-clipboard-button :text="mediaCopyUrl" class="shrink-0" />
+        </div>
+        <div
+          v-if="publicationProgressLabel && publicationProgressLabel !== 'Complete'"
+          class="mt-1 flex items-center gap-1.5 text-[11px] font-medium text-sky-700 dark:text-sky-300"
+        >
+          <Loader2 v-if="!['Failed', 'Complete'].includes(publicationProgressLabel)" class="h-3.5 w-3.5 animate-spin" />
+          <span class="truncate">{{ publicationProgressLabel }}</span>
         </div>
       </div>
     </CardContent>

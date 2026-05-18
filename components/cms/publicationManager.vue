@@ -21,6 +21,10 @@ const props = defineProps({
 
 const emits = defineEmits(['select'])
 const edgeFirebase = inject('edgeFirebase')
+const {
+  getPublicationProgressLabel,
+  getPublicationThumbnailUrl,
+} = usePublicationMedia()
 
 const state = reactive({
   filter: '',
@@ -78,12 +82,9 @@ const filteredPublications = computed(() => {
 })
 
 const getPreviewUrl = (item) => {
-  const variants = item?.ccState?.cfImages?.['page-001']?.variants
-  if (Array.isArray(variants) && variants.length > 0) {
-    const thumbnail = variants.find(url => String(url || '').includes('/thumbnail'))
-    return thumbnail || variants[0] || ''
-  }
-
+  const publicationThumbnail = getPublicationThumbnailUrl(item)
+  if (publicationThumbnail)
+    return publicationThumbnail
   const firstPage = Array.isArray(item?.pages) ? item.pages[0] : null
   if (typeof firstPage === 'string')
     return firstPage
@@ -105,6 +106,8 @@ const isSelected = (item) => {
     return false
   return selected === String(item?.docId || '').trim() || selected === String(item?.slug || '').trim()
 }
+
+const getProgressLabel = item => getPublicationProgressLabel(item)
 
 const selectPublication = (item) => {
   if (!props.selectMode)
@@ -181,6 +184,12 @@ onBeforeMount(async () => {
             </div>
             <div class="line-clamp-1 text-xs text-muted-foreground" :title="item.fileName || item.docId">
               {{ item.fileName || item.docId }}
+            </div>
+            <div
+              v-if="getProgressLabel(item) && getProgressLabel(item) !== 'Complete'"
+              class="line-clamp-1 text-xs font-medium text-sky-700 dark:text-sky-300"
+            >
+              {{ getProgressLabel(item) }}
             </div>
           </CardContent>
         </button>

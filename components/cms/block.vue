@@ -82,6 +82,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:modelValue', 'delete'])
 const edgeFirebase = inject('edgeFirebase')
+const { getPublicationPageOutputs } = usePublicationMedia()
 const BLOCK_INSTRUCTIONS_FIELD_KEY = 'Instructions'
 const BLOCK_AI_INSTRUCTIONS_FIELD_KEY = 'aiInstructions'
 const PROTECTION_ACCESS_MODES = [
@@ -641,6 +642,10 @@ const previewScaleOptions = [
   { name: '50', title: '50%' },
   { name: '25', title: '25%' },
 ]
+const publicationEffectOptions = [
+  { name: 'flip', title: 'Flip' },
+  { name: 'slide', title: 'Slide' },
+]
 const selectedPreviewViewport = computed(() => previewViewportOptions.find(option => option.id === state.previewViewport) || previewViewportOptions[0])
 const previewScaleValue = computed(() => {
   const parsed = Number.parseInt(String(state.previewScale || '100'), 10)
@@ -819,10 +824,38 @@ const ensureQueryItemsDefaults = (meta) => {
   })
 }
 
+const normalizePublicationEffect = (value) => {
+  const effect = String(value || '').trim().toLowerCase()
+  return publicationEffectOptions.some(option => option.name === effect) ? effect : 'flip'
+}
+
+const isPublicationPagesValue = (value) => {
+  return !!value
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && Object.keys(value).some(key => /^page-\d+$/i.test(String(key || '')))
+}
+
+const getPublicationPagesCount = (value) => {
+  if (!isPublicationPagesValue(value))
+    return 0
+  return Object.keys(value).filter(key => /^page-\d+$/i.test(String(key || ''))).length
+}
+
+const getPublicationSelectionLabel = (value, label) => {
+  const pageCount = getPublicationPagesCount(value)
+  if (pageCount)
+    return `${pageCount} page${pageCount === 1 ? '' : 's'} selected`
+  return String(value || '').trim() || `Select ${label}`
+}
+
 const sanitizeQueryItems = (meta) => {
   const cleaned = JSON.parse(JSON.stringify(meta || {}))
   for (const key of Object.keys(cleaned)) {
     const cfg = cleaned[key]
+    if (cfg?.type === 'publication')
+      cfg.effect = normalizePublicationEffect(cfg.effect)
+
     const hasQueryOptions = Array.isArray(cfg?.queryOptions) && cfg.queryOptions.length > 0
     if (cfg?.api && !hasQueryOptions && cfg?.queryItems && typeof cfg.queryItems === 'object') {
       delete cfg.queryItems
@@ -856,6 +889,11 @@ const setPublicationQuerySelection = (entryField, optionField, docId, item) => {
   state.meta[entryField].queryItems[optionField] = selectedValue
   state.draft[entryField] = selectedValue ? [{ [optionField]: selectedValue }] : []
   state.publicationOpenByKey[`${entryField}:${optionField}`] = false
+}
+
+const setPublicationFieldSelection = (field, item) => {
+  state.draft[field] = getPublicationPageOutputs(item)
+  state.publicationOpenByKey[field] = false
 }
 
 const resetArrayItems = (field, metaSource = null) => {
@@ -933,6 +971,8 @@ const parseBlockContentModel = (html) => {
     let val = cfg.value
     if (type === 'image')
       val = !val ? PLACEHOLDERS.image : String(val)
+    else if (type === 'publication')
+      val = (val && typeof val === 'object') ? JSON.parse(JSON.stringify(val)) : String(val || '')
     else if (type === 'text')
       val = !val ? PLACEHOLDERS.text : String(val)
     else if (type === 'array') {
@@ -1632,6 +1672,9 @@ const openEditor = async (event) => {
     }
     if (storedField.limit !== undefined) {
       mergedMeta[key].limit = storedField.limit
+    }
+    if (mergedMeta[key]?.type === 'publication' && storedField.effect !== undefined) {
+      mergedMeta[key].effect = normalizePublicationEffect(storedField.effect)
     }
   }
 
@@ -2736,9 +2779,9 @@ const getTagsFromPosts = computed(() => {
                                   :include-files="true"
                                   :files-only="true"
                                   file-type-default="pub"
-                                  emit-override="docId"
+                                  emit-override="edgeMediaState.id"
                                   :hide-file-type-selector="true"
-                                  @select="docId => setPublicationQuerySelection(entry.field, option.field, docId)"
+                                  @select="jobId => setPublicationQuerySelection(entry.field, option.field, jobId)"
                                 />
                               </DialogContent>
                             </Dialog>
@@ -2806,37 +2849,81 @@ const getTagsFromPosts = computed(() => {
                         >
                       </div>
                     </div>
+                    <div v-else-if="entry.meta?.type === 'publication'" @focusin="setActivePreviewField(entry.field)" @mousedown.capture="setActivePreviewField(entry.field)">
+                      <div class="space-y-3">
+                        <Dialog
+                          v-model:open="state.publicationOpenByKey[entry.field]"
+                        >
+                          <DialogTrigger as-child>
+                            <edge-shad-button
+                              type="button"
+                              variant="outline"
+                              class="w-full justify-between"
+                            >
+                              <span>{{ getPublicationSelectionLabel(state.draft[entry.field], genTitleFromField(entry)) }}</span>
+                              <span class="text-xs text-muted-foreground">Browse</span>
+                            </edge-shad-button>
+                          </DialogTrigger>
+                          <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
+                            <DialogHeader>
+                              <DialogTitle>{{ genTitleFromField(entry) }}</DialogTitle>
+                              <DialogDescription />
+                            </DialogHeader>
+                            <edge-cms-media-manager
+                              :select-mode="true"
+                              :include-files="true"
+                              :files-only="true"
+                              file-type-default="pub"
+                              :hide-file-type-selector="true"
+                              @select="(_value, item) => setPublicationFieldSelection(entry.field, item)"
+                            />
+                          </DialogContent>
+                        </Dialog>
+                        <edge-shad-select
+                          v-model="state.meta[entry.field].effect"
+                          :items="publicationEffectOptions"
+                          :name="`${entry.field}Effect`"
+                          label="Effect"
+                        />
+                      </div>
+                    </div>
                     <div v-else-if="entry.meta?.option" @focusin="setActivePreviewField(entry.field)" @mousedown.capture="setActivePreviewField(entry.field)">
-                      <Dialog
-                        v-if="entry.meta.option?.picker === 'publication'"
-                        v-model:open="state.publicationOpenByKey[entry.field]"
-                      >
-                        <DialogTrigger as-child>
-                          <edge-shad-button
-                            type="button"
-                            variant="outline"
-                            class="w-full justify-between"
-                          >
-                            <span>{{ state.draft[entry.field] || `Select ${genTitleFromField(entry)}` }}</span>
-                            <span class="text-xs text-muted-foreground">Browse</span>
-                          </edge-shad-button>
-                        </DialogTrigger>
-                        <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
-                          <DialogHeader>
-                            <DialogTitle>{{ genTitleFromField(entry) }}</DialogTitle>
-                            <DialogDescription />
-                          </DialogHeader>
-                          <edge-cms-media-manager
-                            :select-mode="true"
-                            :include-files="true"
-                            :files-only="true"
-                            file-type-default="pub"
-                            emit-override="docId"
-                            :hide-file-type-selector="true"
-                            @select="(docId) => { state.draft[entry.field] = String(docId || '').trim(); state.publicationOpenByKey[entry.field] = false }"
-                          />
-                        </DialogContent>
-                      </Dialog>
+                      <div v-if="entry.meta.option?.picker === 'publication'" class="space-y-3">
+                        <Dialog
+                          v-model:open="state.publicationOpenByKey[entry.field]"
+                        >
+                          <DialogTrigger as-child>
+                            <edge-shad-button
+                              type="button"
+                              variant="outline"
+                              class="w-full justify-between"
+                            >
+                              <span>{{ getPublicationSelectionLabel(state.draft[entry.field], genTitleFromField(entry)) }}</span>
+                              <span class="text-xs text-muted-foreground">Browse</span>
+                            </edge-shad-button>
+                          </DialogTrigger>
+                          <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
+                            <DialogHeader>
+                              <DialogTitle>{{ genTitleFromField(entry) }}</DialogTitle>
+                              <DialogDescription />
+                            </DialogHeader>
+                            <edge-cms-media-manager
+                              :select-mode="true"
+                              :include-files="true"
+                              :files-only="true"
+                              file-type-default="pub"
+                              :hide-file-type-selector="true"
+                              @select="(_value, item) => setPublicationFieldSelection(entry.field, item)"
+                            />
+                          </DialogContent>
+                        </Dialog>
+                        <edge-shad-select
+                          v-model="state.meta[entry.field].effect"
+                          :items="publicationEffectOptions"
+                          :name="`${entry.field}Effect`"
+                          label="Effect"
+                        />
+                      </div>
                       <edge-cms-options-select
                         v-else
                         v-model="state.draft[entry.field]"

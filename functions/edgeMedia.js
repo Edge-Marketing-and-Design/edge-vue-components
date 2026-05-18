@@ -1,10 +1,14 @@
 const AWS = require('aws-sdk')
 const fetch = require('node-fetch')
 
-const { admin, db, logger, onDocumentDeleted, onDocumentUpdated, onObjectDeleted, onObjectFinalized, onRequest } = require('./config.js')
+const { Firestore, admin, db, logger, onDocumentDeleted, onDocumentUpdated, onObjectDeleted, onObjectFinalized, onRequest, onSchedule } = require('./config.js')
 
 const EDGE_MEDIA_API_URL = String(process.env.EDGE_MEDIA_API_URL || 'https://edge-media-api.edge-marketing.workers.dev').replace(/\/+$/, '')
 const EDGE_MEDIA_API_KEY = String(process.env.EDGE_MEDIA_API_KEY || '').trim()
+const EDGE_MEDIA_DEFAULT_FORMAT = String(process.env.EDGE_MEDIA_DEFAULT_FORMAT || 'jpg').trim().toLowerCase()
+const EDGE_MEDIA_DEFAULT_DPI = Number(process.env.EDGE_MEDIA_DEFAULT_DPI || 200)
+const EDGE_MEDIA_LEGACY_IMPORT_BATCH_SIZE = Number(process.env.EDGE_MEDIA_LEGACY_IMPORT_BATCH_SIZE || 25)
+const LEGACY_IMPORT_MIGRATION_ID = 'edgeMediaLegacyPublicationsImport'
 
 const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp']
 
@@ -31,16 +35,167 @@ const isImageFileData = (fileData = {}) => {
     || isImagePath(fileData?.r2FilePath)
 }
 
-const getWebhookUrl = (organization, fileDocId) => {
+const getWebhookUrl = (organization, fileDocId, type = 'image') => {
   const webhookBase = String(process.env.FIREBASE_WEBHOOK_BASE_URL || '').trim().replace(/\/+$/, '')
   if (!webhookBase)
     throw new Error('Missing FIREBASE_WEBHOOK_BASE_URL.')
 
-  return `${webhookBase}/api/edge-media?organization=${encodeURIComponent(organization)}&fileDocId=${encodeURIComponent(fileDocId)}&type=image`
+  return `${webhookBase}/api/edge-media?organization=${encodeURIComponent(organization)}&fileDocId=${encodeURIComponent(fileDocId)}&type=${encodeURIComponent(type)}`
 }
 
 const getFileRef = (organization, fileDocId) => {
   return db.collection('organizations').doc(organization).collection('files').doc(fileDocId)
+}
+
+const cleanPath = value => String(value || '').trim().replace(/^\/+/, '')
+
+const isPdfFile = (data) => {
+  const contentType = String(data?.contentType || data?.meta?.contentType || '').toLowerCase()
+  if (contentType)
+    return contentType === 'application/pdf'
+
+  const names = [
+    data?.fileName,
+    data?.filename,
+    data?.name,
+    data?.filePath,
+    data?.r2FilePath,
+    data?.meta?.fileName,
+    data?.meta?.name,
+  ].filter(Boolean)
+
+  return names.some(name => String(name).toLowerCase().split('?')[0].endsWith('.pdf'))
+}
+
+const hasPublicationMeta = (data) => {
+  const meta = (data && typeof data.meta === 'object') ? data.meta : {}
+  return meta.flipbook === true || meta.cmsmedia === true
+}
+
+const getInputKey = data => cleanPath(data?.r2FilePath)
+
+const buildOutputPrefix = (inputKey) => {
+  const key = cleanPath(inputKey)
+  const slashIndex = key.lastIndexOf('/')
+  const directory = slashIndex >= 0 ? key.slice(0, slashIndex + 1) : ''
+  const filename = slashIndex >= 0 ? key.slice(slashIndex + 1) : key
+  const baseName = filename.replace(/\.pdf$/i, '').replace(/\/+$/, '')
+  return `${directory}${baseName}/`
+}
+
+const pageNumber = key => Number(String(key || '').match(/(\d+)/)?.[1] || Number.POSITIVE_INFINITY)
+
+const sortedOutputEntries = outputs => Object.entries(outputs || {})
+  .filter(([key]) => /^page-\d+$/i.test(String(key || '')))
+  .sort((a, b) => pageNumber(a[0]) - pageNumber(b[0]))
+
+const getVariant = (output, name) => {
+  const variants = output?.variants
+  if (!variants)
+    return ''
+  if (Array.isArray(variants))
+    return String(variants.find(variant => String(variant || '').includes(`/${name}`)) || '')
+  if (typeof variants === 'object')
+    return String(variants[name] || '')
+  return ''
+}
+
+const getFirstVariant = (output) => {
+  const variants = output?.variants
+  if (Array.isArray(variants))
+    return String(variants[0] || '')
+  if (variants && typeof variants === 'object')
+    return String(Object.values(variants).find(Boolean) || '')
+  return ''
+}
+
+const outputPublicUrl = output => getVariant(output, 'public') || getFirstVariant(output)
+
+const outputHighResUrl = output => getVariant(output, 'highres') || getVariant(output, 'public') || getFirstVariant(output)
+
+const buildPages = outputs => sortedOutputEntries(outputs)
+  .map(([, output]) => outputPublicUrl(output))
+  .filter(Boolean)
+
+const buildHighResImages = outputs => sortedOutputEntries(outputs)
+  .map(([pageName, output]) => {
+    const url = outputHighResUrl(output)
+    return url ? { pageName, url } : null
+  })
+  .filter(Boolean)
+
+const generateSlug = async (organization, name, fileDocId) => {
+  const fallback = `publication-${Date.now()}`
+  const baseSlug = (String(name || '').trim() || fallback)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    || fallback
+
+  let slug = baseSlug
+  let counter = 1
+  while (true) {
+    const snapshot = await db.collection('organizations').doc(organization).collection('files').where('slug', '==', slug).limit(1).get()
+    const takenByOtherDoc = snapshot.docs.some(doc => doc.id !== fileDocId)
+    if (!takenByOtherDoc)
+      return slug
+    slug = `${baseSlug}-${counter}`
+    counter += 1
+  }
+}
+
+const mergeOutputs = (existing, next) => ({
+  ...((existing && typeof existing === 'object') ? existing : {}),
+  ...((next && typeof next === 'object') ? next : {}),
+})
+
+const getLegacyPageImages = (data) => {
+  const pageImages = data?.ccState?.cFImages || data?.ccState?.cfImages
+  return (pageImages && typeof pageImages === 'object') ? pageImages : {}
+}
+
+const normalizeLegacyVariants = (legacyPage = {}) => {
+  const variants = legacyPage?.variants || {}
+  const normalized = {
+    thumbnail: getVariant({ variants }, 'thumbnail'),
+    public: getVariant({ variants }, 'public'),
+    highres: getVariant({ variants }, 'highres'),
+  }
+  const first = getFirstVariant({ variants })
+  if (!normalized.public && first)
+    normalized.public = first
+  if (!normalized.thumbnail && normalized.public)
+    normalized.thumbnail = normalized.public
+  if (!normalized.highres && normalized.public)
+    normalized.highres = normalized.public
+
+  return Object.fromEntries(
+    Object.entries(normalized)
+      .filter(([, url]) => String(url || '').startsWith('https://')),
+  )
+}
+
+const getCloudflareImageIdFromUrl = (url) => {
+  try {
+    const parsed = new URL(String(url || ''))
+    const parts = parsed.pathname.split('/').filter(Boolean)
+    return parts.length >= 2 ? parts[1] : ''
+  }
+  catch {
+    return ''
+  }
+}
+
+const buildLegacyImportPages = (fileData) => {
+  return sortedOutputEntries(getLegacyPageImages(fileData))
+    .map(([, pageData]) => {
+      const variants = normalizeLegacyVariants(pageData)
+      const cfImagesId = String(pageData?.cfImagesId || pageData?.id || getCloudflareImageIdFromUrl(variants.public || variants.thumbnail || variants.highres) || '').trim()
+      if (!cfImagesId || !Object.keys(variants).length)
+        return null
+      return { cfImagesId, variants }
+    })
+    .filter(Boolean)
 }
 
 const normalizeImageJob = (job = {}, r2Path = '') => {
@@ -178,6 +333,51 @@ const startImageJob = async ({ organization, fileDocId, r2Path }) => {
   }
 
   return data
+}
+
+const postEdgeMediaJson = async (path, payload) => {
+  if (!EDGE_MEDIA_API_KEY)
+    throw new Error('Missing EDGE_MEDIA_API_KEY.')
+
+  const response = await fetch(`${EDGE_MEDIA_API_URL}${path}`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${EDGE_MEDIA_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok || data?.success === false) {
+    const errorMessages = (data?.errors || [])
+      .map(error => error.message || 'Unknown error')
+      .join('; ')
+    throw new Error(errorMessages || data?.error?.message || `Edge Media request failed: ${response.statusText}`)
+  }
+
+  return data
+}
+
+const startPublicationJob = async (organization, fileDocId, fileData) => {
+  const inputKey = getInputKey(fileData)
+  if (!inputKey)
+    throw new Error('Missing R2 PDF path on file document.')
+
+  return postEdgeMediaJson('/pdf-to-images', {
+    inputKey,
+    outputPrefix: buildOutputPrefix(inputKey),
+    webhookUrl: getWebhookUrl(organization, fileDocId, 'publication'),
+    format: EDGE_MEDIA_DEFAULT_FORMAT === 'png' ? 'png' : 'jpg',
+    dpi: Number.isFinite(EDGE_MEDIA_DEFAULT_DPI) ? EDGE_MEDIA_DEFAULT_DPI : 200,
+  })
+}
+
+const importLegacyPublicationJob = async (fileData) => {
+  return postEdgeMediaJson('/pdf-to-images/import', {
+    inputKey: getInputKey(fileData),
+    pages: buildLegacyImportPages(fileData),
+  })
 }
 
 const deleteR2File = async (filePath) => {
@@ -429,6 +629,99 @@ exports.toR2 = onObjectFinalized(
   },
 )
 
+exports.updateFileDoc = onDocumentUpdated(
+  { document: 'organizations/{orgId}/files/{docId}', timeoutSeconds: 180 },
+  async (event) => {
+    const change = event.data
+    const orgId = event.params.orgId
+    const docId = event.params.docId
+    const before = change.before.data() || {}
+    const after = change.after.data() || {}
+
+    if (!isPdfFile(after) || !hasPublicationMeta(after))
+      return
+
+    const inputKey = getInputKey(after)
+    if (!inputKey)
+      return
+
+    const previousInputKey = getInputKey(before)
+    const previousRetryAt = Number(before?.edgeMediaRetryAt || before?.ccRetryAt) || 0
+    const nextRetryAt = Number(after?.edgeMediaRetryAt || after?.ccRetryAt) || 0
+    const retryRequested = nextRetryAt > 0 && nextRetryAt !== previousRetryAt
+    const pdfReplaced = !!previousInputKey && previousInputKey !== inputKey
+    const stateRemoved = !!before?.edgeMediaState && !after?.edgeMediaState
+    const hasExistingState = !!after?.edgeMediaState
+    const shouldStart = !hasExistingState || retryRequested || pdfReplaced || stateRemoved
+
+    if (!shouldStart)
+      return
+
+    const fileRef = getFileRef(orgId, docId)
+    const existingMeta = (after && typeof after.meta === 'object') ? after.meta : {}
+    const fallbackDisplayName = String(after?.fileName || '').trim()
+
+    await fileRef.set({
+      ...((String(after?.name || '').trim() || !fallbackDisplayName) ? {} : { name: fallbackDisplayName }),
+      meta: {
+        ...existingMeta,
+        cmsmedia: true,
+        flipbook: true,
+      },
+      edgeMediaState: {
+        id: null,
+        status: 'queued',
+        inputKey,
+        outputPrefix: buildOutputPrefix(inputKey),
+        errorMessage: '',
+        processedPages: 0,
+        pageCount: 0,
+        outputs: {},
+        stages: {
+          uploaded: true,
+          processing: false,
+          finalized: false,
+        },
+      },
+      totalPages: 0,
+      pages: [],
+      highResImages: [],
+    }, { merge: true })
+
+    try {
+      const job = await startPublicationJob(orgId, docId, after)
+      await fileRef.set({
+        edgeMediaState: {
+          ...job,
+          id: job.id || null,
+          status: job.status || 'queued',
+          inputKey: job.inputKey || inputKey,
+          outputPrefix: buildOutputPrefix(inputKey),
+          resolvedOutputPrefix: job.resolvedOutputPrefix || '',
+          errorMessage: '',
+          processedPages: Number(job.processedPages) || 0,
+          pageCount: Number(job.pageCount) || 0,
+          outputs: job.outputs || {},
+          stages: {
+            uploaded: true,
+            processing: false,
+            finalized: false,
+          },
+        },
+      }, { merge: true })
+    }
+    catch (error) {
+      logger.error('Edge Media publication job creation failed', { orgId, docId, error: error?.message || String(error) })
+      await fileRef.set({
+        edgeMediaState: {
+          status: 'failed',
+          errorMessage: error?.message || 'Edge Media publication job creation failed.',
+        },
+      }, { merge: true })
+    }
+  },
+)
+
 exports.retryImageUpload = onDocumentUpdated(
   { document: 'organizations/{orgId}/files/{docId}', timeoutSeconds: 180 },
   async (event) => {
@@ -505,6 +798,262 @@ exports.retryImageUpload = onDocumentUpdated(
   },
 )
 
+exports.importLegacyPublications = onSchedule(
+  { schedule: 'every 15 minutes', timeoutSeconds: 540, memory: '1GiB' },
+  async () => {
+    const migrationRef = db.collection('_cms-migrations').doc(LEGACY_IMPORT_MIGRATION_ID)
+    const migrationSnap = await migrationRef.get()
+    const migration = migrationSnap.data() || {}
+    if (migration.status === 'complete')
+      return
+
+    const hasConfiguredBatchSize = Number.isFinite(EDGE_MEDIA_LEGACY_IMPORT_BATCH_SIZE) && EDGE_MEDIA_LEGACY_IMPORT_BATCH_SIZE > 0
+    const batchSize = hasConfiguredBatchSize
+      ? EDGE_MEDIA_LEGACY_IMPORT_BATCH_SIZE
+      : 25
+    const snapshot = await db.collectionGroup('files')
+      .where('ccState.status', '==', 'complete')
+      .get()
+
+    const docs = snapshot.docs
+      .sort((left, right) => left.ref.path.localeCompare(right.ref.path))
+      .filter((doc) => {
+        const fileData = doc.data() || {}
+        return !String(fileData?.edgeMediaState?.id || '').trim()
+          && isPdfFile(fileData)
+          && hasPublicationMeta(fileData)
+          && !!getInputKey(fileData)
+          && buildLegacyImportPages(fileData).length > 0
+      })
+      .slice(0, batchSize)
+
+    if (!docs.length) {
+      await migrationRef.set({
+        status: 'complete',
+        completedAt: Firestore.FieldValue.serverTimestamp(),
+        updatedAt: Firestore.FieldValue.serverTimestamp(),
+      }, { merge: true })
+      logger.info('Edge Media legacy publication import completed', { migrationId: LEGACY_IMPORT_MIGRATION_ID })
+      return
+    }
+
+    await migrationRef.set({
+      status: 'running',
+      startedAt: migration.startedAt || Firestore.FieldValue.serverTimestamp(),
+      updatedAt: Firestore.FieldValue.serverTimestamp(),
+    }, { merge: true })
+
+    let sent = 0
+    let skipped = 0
+    let failed = 0
+
+    for (const doc of docs) {
+      const fileData = doc.data() || {}
+      const orgId = doc.ref.parent.parent?.id || ''
+      const docId = doc.id
+      const inputKey = getInputKey(fileData)
+      const pages = buildLegacyImportPages(fileData)
+      const baseMigrationUpdate = {
+        status: 'running',
+        lastFilePath: doc.ref.path,
+        lastInputKey: inputKey,
+        updatedAt: Firestore.FieldValue.serverTimestamp(),
+      }
+
+      if (!orgId) {
+        skipped += 1
+        await migrationRef.set({
+          ...baseMigrationUpdate,
+          skipped: Number(migration.skipped || 0) + skipped,
+        }, { merge: true })
+        continue
+      }
+
+      try {
+        const job = await importLegacyPublicationJob(fileData)
+        const outputs = job.outputs || {}
+        const pageCount = Number(job.pageCount) || pages.length
+        await doc.ref.set({
+          edgeMediaState: {
+            ...job,
+            id: job.id || null,
+            status: 'complete',
+            inputKey: job.inputKey || inputKey,
+            resolvedOutputPrefix: job.resolvedOutputPrefix || '',
+            pageCount,
+            processedPages: Number(job.processedPages) || pageCount,
+            outputs,
+            errorMessage: '',
+            importedFromLegacy: true,
+            stages: {
+              uploaded: true,
+              processing: true,
+              finalized: true,
+            },
+          },
+          pages: buildPages(outputs),
+          highResImages: buildHighResImages(outputs),
+          totalPages: pageCount,
+        }, { merge: true })
+
+        sent += 1
+        await migrationRef.set({
+          ...baseMigrationUpdate,
+          lastJobId: job.id || null,
+          sent: Number(migration.sent || 0) + sent,
+        }, { merge: true })
+      }
+      catch (error) {
+        failed += 1
+        await migrationRef.set({
+          ...baseMigrationUpdate,
+          failed: Number(migration.failed || 0) + failed,
+          lastError: {
+            filePath: doc.ref.path,
+            message: error?.message || String(error),
+          },
+        }, { merge: true })
+        logger.error('Edge Media legacy publication import failed', {
+          orgId,
+          docId,
+          inputKey,
+          error: error?.message || String(error),
+        })
+      }
+    }
+
+    await migrationRef.set({
+      status: docs.length < batchSize ? 'complete' : 'running',
+      sent: Number(migration.sent || 0) + sent,
+      skipped: Number(migration.skipped || 0) + skipped,
+      failed: Number(migration.failed || 0) + failed,
+      completedAt: docs.length < batchSize ? Firestore.FieldValue.serverTimestamp() : null,
+      updatedAt: Firestore.FieldValue.serverTimestamp(),
+    }, { merge: true })
+
+    logger.info('Edge Media legacy publication import run completed', {
+      migrationId: LEGACY_IMPORT_MIGRATION_ID,
+      sent,
+      skipped,
+      failed,
+      processed: docs.length,
+    })
+  },
+)
+
+const handlePublicationWebhook = async ({ organization, fileDocId, eventData, res }) => {
+  const eventName = String(eventData.event || '').trim()
+  const status = String(eventData.status || '').trim().toLowerCase()
+  const fileRef = getFileRef(organization, fileDocId)
+  const fileSnap = await fileRef.get()
+  const fileData = fileSnap.data() || {}
+  const existingState = fileData.edgeMediaState || {}
+
+  if (eventName === 'processing_started') {
+    await fileRef.set({
+      edgeMediaState: {
+        id: eventData.id || existingState.id || null,
+        status: status || 'processing',
+        inputKey: eventData.inputKey || existingState.inputKey || '',
+        resolvedOutputPrefix: eventData.resolvedOutputPrefix || existingState.resolvedOutputPrefix || '',
+        errorMessage: '',
+        stages: {
+          uploaded: true,
+          processing: true,
+          finalized: false,
+        },
+      },
+    }, { merge: true })
+    res.status(200).send('OK')
+    return
+  }
+
+  if (eventName === 'page_complete') {
+    const pageKey = String(eventData.pageKey || '').trim()
+    if (!pageKey || !eventData.output) {
+      res.status(400).send('Missing page output.')
+      return
+    }
+    const outputs = mergeOutputs(existingState.outputs, { [pageKey]: eventData.output })
+    const processedPages = Object.keys(outputs).filter(key => /^page-\d+$/i.test(key)).length
+    await fileRef.set({
+      edgeMediaState: {
+        id: eventData.id || existingState.id || null,
+        status: status || 'processing',
+        processedPages,
+        outputs,
+        errorMessage: '',
+        stages: {
+          uploaded: true,
+          processing: true,
+          finalized: false,
+        },
+      },
+    }, { merge: true })
+    res.status(200).send('OK')
+    return
+  }
+
+  if (eventName === 'complete') {
+    const outputs = mergeOutputs(existingState.outputs, eventData.outputs)
+    const pages = buildPages(outputs)
+    const highResImages = buildHighResImages(outputs)
+    const pageCount = Number(eventData.pageCount) || pages.length
+    const currentSlug = String(fileData.slug || '').trim()
+    const slug = currentSlug || await generateSlug(organization, fileData.name || fileData.fileName || fileDocId, fileDocId)
+
+    await fileRef.set({
+      slug,
+      pageEffect: fileData?.pageEffect || 'flip',
+      pages,
+      highResImages,
+      totalPages: pageCount,
+      edgeMediaState: {
+        id: eventData.id || existingState.id || null,
+        status: 'complete',
+        resolvedOutputPrefix: eventData.resolvedOutputPrefix || existingState.resolvedOutputPrefix || '',
+        pageCount,
+        processedPages: Number(eventData.processedPages) || pages.length,
+        outputs,
+        errorMessage: '',
+        stages: {
+          uploaded: true,
+          processing: true,
+          finalized: true,
+        },
+      },
+    }, { merge: true })
+    res.status(200).send('OK')
+    return
+  }
+
+  if (eventName === 'failed') {
+    await fileRef.set({
+      edgeMediaState: {
+        id: eventData.id || existingState.id || null,
+        status: 'failed',
+        errorMessage: eventData?.error?.message || 'Edge Media conversion failed.',
+        error: eventData.error || null,
+        stages: {
+          uploaded: true,
+          processing: false,
+          finalized: false,
+        },
+      },
+    }, { merge: true })
+    res.status(200).send('OK')
+    return
+  }
+
+  await fileRef.set({
+    edgeMediaState: {
+      id: eventData.id || existingState.id || null,
+      status: status || eventName || 'processing',
+    },
+  }, { merge: true })
+  res.status(200).send('OK')
+}
+
 exports.mediaWebhook = onRequest({ timeoutSeconds: 180 }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).send('Method not allowed.')
@@ -519,12 +1068,18 @@ exports.mediaWebhook = onRequest({ timeoutSeconds: 180 }, async (req, res) => {
   }
 
   const eventData = req.body || {}
+  const webhookType = String(req.query.type || eventData.type || '').trim().toLowerCase()
   const status = String(eventData.status || eventData.event || eventData.type || '').toLowerCase()
   const job = eventData.job || eventData.result || eventData
   const normalized = normalizeImageJob(job, eventData.r2Path || job.inputKey || '')
   const docRef = getFileRef(organization, fileDocId)
 
   try {
+    if (webhookType === 'publication') {
+      await handlePublicationWebhook({ organization, fileDocId, eventData, res })
+      return
+    }
+
     if (status === 'processing_started' || status === 'processing' || status === 'queued') {
       await docRef.set(buildImageStateUpdate(job, normalized.r2Path, status === 'processing_started' ? 'processing' : status), { merge: true })
       res.status(200).send('OK')
@@ -588,8 +1143,12 @@ exports.uploadDocumentDeleted = onDocumentDeleted(
   async (event) => {
     const fileData = event.data.data() || {}
     const imageJobId = String(fileData?.edgeMediaImageState?.id || '').trim()
+    const publicationJobId = String(fileData?.edgeMediaState?.id || '').trim()
     const legacyImageId = String(fileData?.cloudflareImageId || '').trim()
     const videoId = String(fileData?.cloudflareVideoId || '').trim()
+
+    if (publicationJobId)
+      await deleteEdgeMediaJob(publicationJobId)
 
     if (imageJobId) {
       await deleteEdgeMediaJob(imageJobId)

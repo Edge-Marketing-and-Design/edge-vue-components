@@ -293,6 +293,11 @@ const BLOCK_CONTENT_SNIPPETS = [
     description: 'Image field placeholder',
   },
   {
+    label: 'Publication',
+    snippet: '{{{#publication {"field":"publicationPages","effect":"flip","value":{}}}}}',
+    description: 'Publication picker that stores selected page image data',
+  },
+  {
     label: 'Array (Basic)',
     snippet: `{{{#array {"field": "items", "value": [] }}}}
   <!-- iterate with {{item}} -->
@@ -484,6 +489,9 @@ const blockModel = (html) => {
 
     if (type === 'image') {
       val = !val ? PLACEHOLDERS.image : String(val)
+    }
+    else if (type === 'publication') {
+      val = (val && typeof val === 'object') ? JSON.parse(JSON.stringify(val)) : String(val || '')
     }
     else if (type === 'text') {
       val = !val ? PLACEHOLDERS.text : String(val)
@@ -733,6 +741,8 @@ const editorDocUpdates = (workingDoc) => {
   console.log('Editor workingDoc update:', state.workingDoc)
 }
 
+const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value)
+
 const syncEditorStateFromBlockDoc = (doc) => {
   if (!isPlainObject(doc))
     return
@@ -903,8 +913,6 @@ const getTagsFromBlocks = computed(() => {
   // Always prepend it
   return [{ name: 'Quick Picks', title: 'Quick Picks' }, ...filtered]
 })
-
-const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value)
 
 const cloneSchemaValue = (value) => {
   if (isPlainObject(value) || Array.isArray(value))
@@ -1902,7 +1910,7 @@ const exportCurrentBlock = async () => {
         </SheetHeader>
         <div class="px-6 pb-6">
           <Tabs class="w-full" default-value="guide">
-            <TabsList class="w-full mt-3 rounded-sm grid grid-cols-7 border border-slate-300 bg-slate-200 dark:border-slate-700 dark:bg-slate-800">
+            <TabsList class="w-full mt-3 rounded-sm grid grid-cols-8 border border-slate-300 bg-slate-200 dark:border-slate-700 dark:bg-slate-800">
               <TabsTrigger value="guide" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
                 Block Guide
               </TabsTrigger>
@@ -1914,6 +1922,9 @@ const exportCurrentBlock = async () => {
               </TabsTrigger>
               <TabsTrigger value="form-helpers" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
                 Forms
+              </TabsTrigger>
+              <TabsTrigger value="publications" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
+                Publications
               </TabsTrigger>
               <TabsTrigger value="auth-helpers" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
                 Auth
@@ -2027,6 +2038,7 @@ const exportCurrentBlock = async () => {
                       <div><code>richtext</code> → WYSIWYG editor (HTML is rendered as‑is).</div>
                       <div><code>number</code> → number input.</div>
                       <div><code>image</code> → image picker + preview.</div>
+                      <div><code>publication</code> → publication picker that stores selected page image data.</div>
                       <div><code>array</code> → list editor (manual items) or data loader (API/collection).</div>
                     </div>
                     <p class="text-sm text-foreground">
@@ -3129,6 +3141,29 @@ const exportCurrentBlock = async () => {
     &lt;/div&gt;
   &lt;/div&gt;
 &lt;/section&gt;</code></pre>
+                  </section>
+                </div>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="publications">
+              <div class="h-[calc(100vh-190px)] overflow-y-auto pr-1 pb-6">
+                <div class="space-y-8">
+                  <section class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Publication Fields
+                    </h3>
+                    <p class="text-sm text-foreground">
+                      Use a publication field when the CMS user should select an already processed PDF publication.
+                      The picker opens the media manager filtered to publications and saves the selected publication's
+                      page output map as the field value.
+                    </p>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#publication {"field":"publicationPages","effect":"flip","value":{}}}}}</code></pre>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div><code>field</code> is the saved data key for the selected publication pages object.</div>
+                      <div><code>value</code> is the default pages object. Use <code>{}</code> when the CMS user should choose one.</div>
+                      <div><code>effect</code> is the default editor choice. Page editors can save either <code>flip</code> or <code>slide</code> for each publication field.</div>
+                    </div>
                   </section>
                 </div>
               </div>

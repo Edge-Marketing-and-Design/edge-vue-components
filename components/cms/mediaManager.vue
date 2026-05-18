@@ -87,6 +87,11 @@ const emits = defineEmits(['select'])
 const edgeFirebase = inject('edgeFirebase')
 const isAdmin = computed(() => edgeGlobal.isAdminGlobal(edgeFirebase).value)
 const showDevOnlyActions = computed(() => edgeGlobal.allowMenuItem({ devOnly: true }, isAdmin.value))
+const {
+  getPublicationPageCount,
+  getPublicationPreviewPages,
+  hasPublicationMediaState,
+} = usePublicationMedia()
 const allowedFileExtensions = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'ppt', 'pptx', 'txt', 'rtf', 'zip', 'odt', 'ods', 'odp']
 const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'avif']
 const allowedFileMimeTypes = [
@@ -114,6 +119,16 @@ const resolvedImageVariant = computed(() => {
 const resolvedEmitOverride = computed(() => {
   return String(props.emitOverride || '').trim()
 })
+const resolveEmitOverrideValue = (item) => {
+  const path = resolvedEmitOverride.value
+  if (!path)
+    return undefined
+  return path.split('.').reduce((value, key) => {
+    if (value && typeof value === 'object')
+      return value[key]
+    return undefined
+  }, item)
+}
 const isPdfUpload = (file) => {
   const mimeType = String(file?.type || file?.file?.type || '').toLowerCase()
   if (mimeType === 'application/pdf')
@@ -175,11 +190,7 @@ const isPublicationPdfItem = (item) => {
   if (!isPdf)
     return false
 
-  const pageImages = item?.ccState?.cFImages || item?.ccState?.cfImages || {}
-  if (!pageImages || typeof pageImages !== 'object')
-    return false
-
-  return Object.keys(pageImages).some(key => /^page-\d+$/i.test(String(key || '')))
+  return getPublicationPageCount(item) > 0 || hasPublicationMediaState(item)
 }
 
 const state = reactive({
@@ -847,7 +858,8 @@ const itemClick = (item) => {
     const selectedUrl = isImageMediaItem(item)
       ? (edgeGlobal.getImage(item, resolvedImageVariant.value) || getEdgeMediaImageVariant(item, resolvedImageVariant.value) || item?.r2URL || item?.r2Url || '')
       : (item?.r2URL || item?.r2Url || edgeGlobal.getImage(item, resolvedImageVariant.value) || '')
-    emits('select', resolvedEmitOverride.value ? item?.[resolvedEmitOverride.value] : selectedUrl)
+    const overrideValue = resolveEmitOverrideValue(item)
+    emits('select', resolvedEmitOverride.value ? overrideValue : selectedUrl, item)
   }
   else {
     openMediaView(item)
@@ -872,36 +884,10 @@ const workingDocIsPdf = computed(() => {
     return true
   return getMediaExtension(state.workingDoc) === 'pdf'
 })
-const parsePageNumber = (key) => {
-  const match = String(key || '').match(/^page-(\d+)$/i)
-  return match?.[1] ? Number(match[1]) : Number.POSITIVE_INFINITY
-}
-const resolvePageVariants = (pageData = {}) => {
-  const variants = Array.isArray(pageData?.variants) ? pageData.variants : []
-  const thumbnail = variants.find(variant => String(variant || '').includes('/thumbnail')) || variants[0] || ''
-  const highres = variants.find(variant => String(variant || '').includes('/highres')) || ''
-  const publicVariant = variants.find(variant => String(variant || '').includes('/public')) || ''
-  return {
-    thumbnail: String(thumbnail || ''),
-    highres: String(highres || ''),
-    public: String(publicVariant || ''),
-  }
-}
 const workingDocPdfPages = computed(() => {
   if (!workingDocIsPdf.value)
     return []
-  const pageImages = state.workingDoc?.ccState?.cFImages || state.workingDoc?.ccState?.cfImages || {}
-  return Object.entries(pageImages)
-    .filter(([key]) => /^page-\d+$/i.test(String(key || '')))
-    .sort((a, b) => parsePageNumber(a[0]) - parsePageNumber(b[0]))
-    .map(([key, value]) => {
-      const variants = resolvePageVariants(value || {})
-      return {
-        key: String(key),
-        thumbnail: variants.thumbnail,
-        preview: variants.highres || variants.public || variants.thumbnail,
-      }
-    })
+  return getPublicationPreviewPages(state.workingDoc)
 })
 const pdfPageIndex = ref(0)
 const pdfThumbnailVisible = ref(false)
