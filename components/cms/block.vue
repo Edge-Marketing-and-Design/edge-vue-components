@@ -621,6 +621,7 @@ const blockWrapperClass = computed(() => ({
   'overflow-visible': shouldContainFixedPreview.value,
   'min-h-[88px]': props.editMode && shouldContainFixedPreview.value && shouldDisableInteractivePreview.value,
   'min-h-[calc(100vh-360px)]': props.editMode && shouldContainFixedPreview.value && !shouldDisableInteractivePreview.value,
+  'z-[10000]': !props.editMode && hasNavigationContent.value,
   'z-30': shouldContainFixedPreview.value,
   'bg-white text-black': props.editMode && effectivePreviewType.value === 'light',
   'bg-neutral-950 text-neutral-50': props.editMode && effectivePreviewType.value === 'dark',
@@ -2194,7 +2195,7 @@ const getTagsFromPosts = computed(() => {
         v-if="canShowPreviewToolbar"
         data-cms-block-control
         class="pointer-events-none absolute right-8 opacity-0 transition-opacity duration-200 group-hover:opacity-100"
-        :class="[props.centerPreviewToolbar ? 'top-1/2 -translate-y-1/2' : 'top-2', hasNavigationContent ? 'z-[10001]' : 'z-20']"
+        :class="[props.centerPreviewToolbar ? 'top-1/2 -translate-y-1/2' : 'top-2', hasNavigationContent ? 'z-[10001]' : 'z-[9999]']"
       >
         <div class="pointer-events-auto flex min-w-[180px] flex-col rounded-md border border-slate-300 bg-white/95 p-1 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-950/95">
           <span class="w-full min-w-0 truncate px-2 pb-1 text-center text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
