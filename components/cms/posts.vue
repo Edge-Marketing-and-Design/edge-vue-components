@@ -2,7 +2,7 @@
 import { computed, inject, onBeforeMount, reactive, ref, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { ArrowDown, ArrowLeft, ArrowUp, Clock3, Copy, Eye, File, FileCheck, FilePen, FileWarning, FileX, GripVertical, History, Image, ImagePlus, Loader2, MoreHorizontal, Pencil, Plus, RotateCcw, Save, Trash2, X } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, ArrowUp, Clock3, Copy, Eye, File, FileCheck, FilePen, FileWarning, FileX, GripVertical, History, Image, ImagePlus, Loader2, MoreHorizontal, PanelTop, Plus, RotateCcw, Save, Trash2, X } from 'lucide-vue-next'
 
 const props = defineProps({
   site: {
@@ -41,10 +41,6 @@ const canManageRestrictionAssignments = computed(() => {
 const isDevModeEnabled = computed(() => process.dev || Boolean(edgeGlobal.edgeState.devOverride))
 const showDevOnlyActions = computed(() => edgeGlobal.allowMenuItem({ devOnly: true }, isAdmin.value))
 const canOpenPreviewBlockContentEditor = computed(() => {
-  if (!isAdmin.value)
-    return false
-  if (cmsMultiOrg.value)
-    return true
   return isDevModeEnabled.value
 })
 
@@ -4122,8 +4118,8 @@ const reindexPublishedPostsToKv = async () => {
                     Preview Mode
                   </template>
                   <template v-else>
-                    <Pencil class="w-4 h-4" />
-                    Edit Mode
+                    <PanelTop class="w-4 h-4" />
+                    Edit Layout
                   </template>
                 </edge-shad-button>
               </div>
@@ -4640,8 +4636,8 @@ const reindexPublishedPostsToKv = async () => {
                   Preview Mode
                 </template>
                 <template v-else>
-                  <Pencil class="w-4 h-4" />
-                  Edit Mode
+                  <PanelTop class="w-4 h-4" />
+                  Edit Layout
                 </template>
               </edge-shad-button>
             </div>

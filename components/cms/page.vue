@@ -1,5 +1,5 @@
 <script setup>
-import { ArrowDown, ArrowLeft, ArrowUp, Download, ExternalLink, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FileUp, FileWarning, FileX, History, Loader2, Maximize2, Monitor, MoreHorizontal, RotateCcw, Smartphone, Sparkles, Tablet, UploadCloud } from 'lucide-vue-next'
+import { ArrowDown, ArrowLeft, ArrowUp, Download, ExternalLink, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FileUp, FileWarning, FileX, History, Loader2, Maximize2, Monitor, MoreHorizontal, PanelTop, RotateCcw, Smartphone, Sparkles, Tablet, UploadCloud } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 const props = defineProps({
@@ -25,7 +25,6 @@ const route = useRoute()
 const router = useRouter()
 const { buildPageStructuredData } = useStructuredDataTemplates()
 const cmsMultiOrg = useState('cmsMultiOrg', () => true)
-const isAdmin = computed(() => edgeGlobal.isAdminGlobal(edgeFirebase).value)
 const currentOrgRoleName = computed(() => {
   return String(edgeGlobal.getRoleName(edgeFirebase?.user?.roles || [], edgeGlobal.edgeState.currentOrganization) || '').toLowerCase()
 })
@@ -36,10 +35,6 @@ const canManageRestrictionAssignments = computed(() => {
 })
 const isDevModeEnabled = computed(() => process.dev || Boolean(edgeGlobal.edgeState.devOverride))
 const canOpenPreviewBlockContentEditor = computed(() => {
-  if (!isAdmin.value)
-    return false
-  if (cmsMultiOrg.value)
-    return true
   return isDevModeEnabled.value
 })
 
@@ -3536,8 +3531,8 @@ const hasUnsavedChanges = (changes) => {
                 Preview Mode
               </template>
               <template v-else>
-                <Pencil class="w-4 h-4" />
-                Edit Mode
+                <PanelTop class="w-4 h-4" />
+                Edit Layout
               </template>
             </edge-shad-button>
             <edge-shad-button

@@ -1,7 +1,7 @@
 <script setup>
 import { useVModel } from '@vueuse/core'
 import { renderTemplate } from '@edgedev/template-engine'
-import { ChevronDown, GripVertical, ImagePlus, Loader2, LockKeyhole, LockOpen, Maximize2, Monitor, Plus, Smartphone, Sparkles, Tablet, X } from 'lucide-vue-next'
+import { ChevronDown, FilePen, GripVertical, ImagePlus, Loader2, LockKeyhole, LockOpen, Maximize2, Monitor, Pencil, Plus, Smartphone, Sparkles, Tablet, X } from 'lucide-vue-next'
 const props = defineProps({
   modelValue: {
     type: Object,
@@ -510,7 +510,10 @@ const effectivePreviewType = computed(() => {
 
 const canOpenFieldEditor = computed(() => props.editMode)
 const canOpenPreviewContentEditor = computed(() => !props.editMode && props.allowPreviewContentEdit)
-const canOpenEditor = computed(() => canOpenFieldEditor.value || canOpenPreviewContentEditor.value)
+const canShowPreviewContentControl = computed(() => !props.editMode && !props.standalonePreview)
+const canShowPreviewDevControls = computed(() => canOpenPreviewContentEditor.value)
+const canShowPreviewToolbar = computed(() => canShowPreviewContentControl.value || canShowPreviewDevControls.value)
+const canOpenEditor = computed(() => canOpenFieldEditor.value)
 const resolvedEditorBlockTypes = computed(() => {
   const instanceTypes = normalizeBlockTypes(modelValue.value?.type, { fallbackToPage: false })
   if (instanceTypes.length)
@@ -1672,8 +1675,9 @@ const updateBlockContent = async () => {
   }
 }
 
-const openEditor = async (event) => {
-  if (!canOpenEditor.value)
+const openEditor = async (event, options = {}) => {
+  const allowPreviewFieldEditor = options?.allowPreviewFieldEditor === true && canShowPreviewContentControl.value
+  if (!canOpenFieldEditor.value && !allowPreviewFieldEditor)
     return
   const target = event?.target
   const shouldSuppressClick = props.suppressInteractiveClicksExceptAllowed && !shouldAllowSuppressedInteractiveClick(target)
@@ -1687,12 +1691,6 @@ const openEditor = async (event) => {
   if (shouldOverrideEditClicks) {
     event?.preventDefault?.()
     event?.stopPropagation?.()
-  }
-  if (canOpenPreviewContentEditor.value) {
-    event?.preventDefault?.()
-    event?.stopPropagation?.()
-    await openPreviewContentEditor()
-    return
   }
   if (!shouldOverrideEditClicks && target?.closest?.(INTERACTIVE_CLICK_SELECTOR)) {
     if (!shouldSuppressClick) {
@@ -2180,6 +2178,47 @@ const getTagsFromPosts = computed(() => {
               <div>Access: {{ protectionAccessLabel }}</div>
               <div>When not logged in: {{ protectionUnauthBehaviorLabel }}</div>
             </div>
+          </div>
+        </div>
+      </div>
+      <div
+        v-if="canShowPreviewToolbar"
+        data-cms-block-control
+        class="pointer-events-none absolute right-8 top-2 z-[10001] opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+      >
+        <div class="pointer-events-auto flex min-w-[180px] flex-col rounded-md border border-slate-300 bg-white/95 p-1 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-950/95">
+          <span class="w-full min-w-0 truncate px-2 pb-1 text-center text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            {{ previewBlockDisplayName }}
+          </span>
+          <div class="flex w-full items-center justify-center gap-1 border-t border-slate-200 pt-1 dark:border-slate-800">
+            <edge-shad-button
+              v-if="canShowPreviewDevControls"
+              type="button"
+              size="sm"
+              variant="ghost"
+              class="h-7 px-2 text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+              @click.stop.prevent="openPreviewContentEditor"
+            >
+              <FilePen class="h-3.5 w-3.5" />
+              Edit Block Template
+            </edge-shad-button>
+            <div
+              v-if="canShowPreviewDevControls && canShowPreviewContentControl"
+              class="h-5 w-px bg-slate-300 dark:bg-slate-700"
+              aria-hidden="true"
+            />
+            <edge-shad-button
+              v-if="canShowPreviewContentControl"
+            type="button"
+            size="sm"
+            variant="ghost"
+            class="h-7 px-2 text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+            :class="canShowPreviewDevControls ? '' : 'w-full justify-center'"
+            @click.stop.prevent="openEditor(null, { allowPreviewFieldEditor: true })"
+          >
+              <Pencil class="h-3.5 w-3.5" />
+              {{ canShowPreviewDevControls ? 'Edit Block Contents' : 'Edit Block' }}
+            </edge-shad-button>
           </div>
         </div>
       </div>
