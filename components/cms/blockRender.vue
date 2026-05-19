@@ -37,6 +37,8 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['loaded'])
+const renderInstanceId = `cms-block-render-${Math.random().toString(36).slice(2, 10)}`
+const htmlReady = ref(false)
 
 const defaultTheme = {
   extend: {
@@ -166,9 +168,10 @@ const renderHtmlSegment = (content) => {
   return renderTemplate(content, renderValues.value, props.meta)
 }
 
-const renderedSegments = computed(() => {
+const renderedBlock = computed(() => {
   const content = String(props.content || '')
-  const segments = []
+  let html = ''
+  const publications = []
   let cursor = 0
   let publicationIndex = 0
 
@@ -177,23 +180,20 @@ const renderedSegments = computed(() => {
       continue
 
     const before = content.slice(cursor, tag.tagStart)
-    if (before) {
-      segments.push({
-        id: `html-${segments.length}`,
-        type: 'html',
-        html: renderHtmlSegment(before),
-      })
-    }
+    if (before)
+      html += renderHtmlSegment(before)
 
     const cfg = safeParseTagConfig(tag.rawCfg)
     const field = String(cfg?.field || '').trim()
     const fieldMeta = props.meta?.[field] || {}
     const pages = renderValues.value?.[field] || cfg?.value || {}
     const effect = fieldMeta.effect || cfg?.effect || 'flip'
+    const targetId = `${renderInstanceId}-publication-${publicationIndex}`
 
-    segments.push({
-      id: `publication-${field || publicationIndex}-${publicationIndex}`,
-      type: 'publication',
+    html += `<div id="${targetId}" class="edge-cms-publication-slot"></div>`
+    publications.push({
+      id: targetId,
+      target: `#${targetId}`,
       pages,
       effect,
       instanceKey: `${field || 'publication'}-${publicationIndex}`,
@@ -203,37 +203,48 @@ const renderedSegments = computed(() => {
   }
 
   const after = content.slice(cursor)
-  if (after || !segments.length) {
-    segments.push({
-      id: `html-${segments.length}`,
-      type: 'html',
-      html: renderHtmlSegment(after),
-    })
-  }
+  if (after || !html)
+    html += renderHtmlSegment(after)
 
-  return segments
+  return { html, publications }
 })
+
+watch(() => renderedBlock.value.html, () => {
+  htmlReady.value = false
+})
+
+const handleHtmlLoaded = async () => {
+  await nextTick()
+  htmlReady.value = true
+  emit('loaded')
+}
 </script>
 
 <template>
-  <template v-for="segment in renderedSegments" :key="segment.id">
-    <edge-cms-html-content
-      v-if="segment.type === 'html'"
-      :html="segment.html"
-      :theme="theme"
-      :isolated="props.isolated"
-      :viewport-mode="props.viewportMode"
-      :standalone-preview="props.standalonePreview"
-      @loaded="emit('loaded')"
-    />
-    <edge-cms-publication-preview
-      v-else-if="segment.type === 'publication'"
-      :pages="segment.pages"
-      :effect="segment.effect"
-      :instance-key="segment.instanceKey"
-      @click.stop
-    />
-  </template>
+  <edge-cms-html-content
+    :html="renderedBlock.html"
+    :theme="theme"
+    :isolated="props.isolated"
+    :viewport-mode="props.viewportMode"
+    :standalone-preview="props.standalonePreview"
+    @loaded="handleHtmlLoaded"
+  />
+  <ClientOnly>
+    <template v-if="htmlReady">
+      <Teleport
+        v-for="publication in renderedBlock.publications"
+        :key="publication.id"
+        :to="publication.target"
+      >
+        <edge-cms-publication-preview
+          :pages="publication.pages"
+          :effect="publication.effect"
+          :instance-key="publication.instanceKey"
+          @click.stop
+        />
+      </Teleport>
+    </template>
+  </ClientOnly>
 </template>
 
 <style scoped>

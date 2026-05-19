@@ -219,7 +219,7 @@ const magazine = computed(() => {
 
 <template>
   <div ref="publicationShellRef" class="edge-cms-publication-preview flex w-full flex-col items-center bg-white text-slate-900" :style="shellStyle">
-    <div class="relative h-14 w-full border-b border-slate-200 bg-white">
+    <div class="relative h-14 w-full border-b border-slate-200 bg-transparent">
       <div
         :id="controlsId"
         class="absolute inset-0 z-0 flex items-center justify-center"
