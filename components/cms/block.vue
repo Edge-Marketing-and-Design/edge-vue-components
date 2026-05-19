@@ -2817,6 +2817,9 @@ const getTagsFromPosts = computed(() => {
                                   <DialogDescription />
                                 </DialogHeader>
                                 <edge-cms-media-manager
+                                  :site="props.siteId"
+                                  :show-cms-site-filter="true"
+                                  cms-site-only-title="Current Site"
                                   :select-mode="true"
                                   :include-files="true"
                                   :files-only="true"
@@ -2913,6 +2916,9 @@ const getTagsFromPosts = computed(() => {
                                   <DialogDescription />
                                 </DialogHeader>
                                 <edge-cms-media-manager
+                                  :site="props.siteId"
+                                  :show-cms-site-filter="true"
+                                  cms-site-only-title="Current Site"
                                   :select-mode="true"
                                   :include-files="true"
                                   :files-only="true"
@@ -2968,6 +2974,9 @@ const getTagsFromPosts = computed(() => {
                                   <DialogDescription />
                                 </DialogHeader>
                                 <edge-cms-media-manager
+                                  :site="props.siteId"
+                                  :show-cms-site-filter="true"
+                                  cms-site-only-title="Current Site"
                                   :select-mode="true"
                                   :include-files="true"
                                   :files-only="true"
