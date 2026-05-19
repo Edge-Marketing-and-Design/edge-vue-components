@@ -30,6 +30,14 @@ const safeInstanceKey = computed(() => {
 })
 
 const controlsId = computed(() => `edge-cms-publication-controls-${safeInstanceKey.value}-${localInstanceKey}`)
+const publicationShellRef = ref(null)
+const containerWidth = ref(0)
+const pageAspectRatio = ref(0)
+let resizeObserver = null
+let imageLoadToken = 0
+
+const fallbackPublicationHeight = 560
+const defaultPageAspectRatio = 11 / 8.5
 
 const pageNumber = page => Number(page?.page || String(page?.pageKey || '').replace(/\D/g, ''))
 
@@ -75,6 +83,101 @@ const pageUrl = page => variantUrl(page, 'public')
 
 const highResUrl = page => variantUrl(page, 'highres')
 
+const firstPageImageUrls = computed(() => {
+  const firstPage = sortedOutputs.value[0]
+  if (!firstPage)
+    return []
+
+  return [
+    pageUrl(firstPage),
+    highResUrl(firstPage),
+    variantUrl(firstPage, 'thumbnail'),
+  ].filter((url, index, urls) => url && urls.indexOf(url) === index)
+})
+
+const publicationHeight = computed(() => {
+  if (!containerWidth.value)
+    return fallbackPublicationHeight
+
+  const aspectRatio = pageAspectRatio.value || defaultPageAspectRatio
+  const horizontalPadding = 32
+  const pageGap = normalizedEffect.value === 'slide' ? 30 : 0
+  const verticalPadding = normalizedEffect.value === 'flip' ? 88 : 0
+  const availableWidth = Math.max(1, containerWidth.value - horizontalPadding - pageGap)
+  const pageWidth = availableWidth / 2
+  const calculatedHeight = Math.round((pageWidth * aspectRatio) + verticalPadding)
+  return Math.min(Math.max(calculatedHeight, 240), 2400)
+})
+
+const shellStyle = computed(() => ({
+  minHeight: `${publicationHeight.value + 56}px`,
+}))
+
+const magazineStyle = computed(() => ({
+  height: `${publicationHeight.value}px`,
+}))
+
+const magazineRenderKey = computed(() => `${controlsId.value}-${normalizedEffect.value}-${publicationHeight.value}`)
+
+const updateContainerWidth = () => {
+  const width = publicationShellRef.value?.clientWidth || 0
+  containerWidth.value = Math.round(width)
+}
+
+const disconnectResizeObserver = () => {
+  if (resizeObserver)
+    resizeObserver.disconnect()
+  resizeObserver = null
+}
+
+const startResizeObserver = async () => {
+  disconnectResizeObserver()
+  await nextTick()
+  updateContainerWidth()
+  if (typeof ResizeObserver === 'undefined' || !publicationShellRef.value)
+    return
+
+  resizeObserver = new ResizeObserver(updateContainerWidth)
+  resizeObserver.observe(publicationShellRef.value)
+}
+
+const loadPageAspectRatio = (urls, token, index = 0) => {
+  const url = urls[index]
+  if (!url || token !== imageLoadToken || typeof Image === 'undefined')
+    return
+
+  const image = new Image()
+  image.onload = () => {
+    if (token !== imageLoadToken)
+      return
+    if (image.naturalWidth > 0 && image.naturalHeight > 0)
+      pageAspectRatio.value = image.naturalHeight / image.naturalWidth
+  }
+  image.onerror = () => loadPageAspectRatio(urls, token, index + 1)
+  image.src = url
+}
+
+watch(firstPageImageUrls, (urls) => {
+  imageLoadToken += 1
+  pageAspectRatio.value = 0
+  if (!urls.length)
+    return
+
+  loadPageAspectRatio(urls, imageLoadToken)
+}, { immediate: true })
+
+onMounted(() => {
+  startResizeObserver()
+})
+
+watch(magazineRenderKey, () => {
+  startResizeObserver()
+}, { flush: 'post' })
+
+onBeforeUnmount(() => {
+  disconnectResizeObserver()
+})
+
 const magazine = computed(() => {
   const pages = sortedOutputs.value
     .map(pageUrl)
@@ -115,7 +218,7 @@ const magazine = computed(() => {
 </script>
 
 <template>
-  <div class="edge-cms-publication-preview flex min-h-[560px] w-full flex-col items-center bg-white text-slate-900">
+  <div ref="publicationShellRef" class="edge-cms-publication-preview flex w-full flex-col items-center bg-white text-slate-900" :style="shellStyle">
     <div class="relative h-14 w-full border-b border-slate-200 bg-white">
       <div
         :id="controlsId"
@@ -128,50 +231,52 @@ const magazine = computed(() => {
     </div>
 
     <ClientOnly>
-      <Magazine
-        v-if="magazine"
-        :teleport-flipbook-controls="controlsId"
-        :effect="normalizedEffect"
-        :magazine="magazine"
-        class="!h-[560px] !w-full !bg-white"
-        @click.stop.prevent
-      >
-        <template #controls="flipbook">
-          <div class="flex w-full items-center justify-center gap-1">
-            <button
-              class="edge-cms-publication-control-button"
-              type="button"
-              :disabled="!flipbook.canFlipLeft"
-              aria-label="Previous page"
-              @click="flipbook.flipLeft"
-            >
-              <ChevronLeftCircle class="m-1" :size="24" />
-            </button>
+      <div v-if="magazine" class="w-full" :style="magazineStyle">
+        <Magazine
+          :key="magazineRenderKey"
+          :teleport-flipbook-controls="controlsId"
+          :effect="normalizedEffect"
+          :magazine="magazine"
+          class="h-full w-full bg-white"
+          @click.stop.prevent
+        >
+          <template #controls="flipbook">
+            <div class="flex w-full items-center justify-center gap-1">
+              <button
+                class="edge-cms-publication-control-button"
+                type="button"
+                :disabled="!flipbook.canFlipLeft"
+                aria-label="Previous page"
+                @click="flipbook.flipLeft"
+              >
+                <ChevronLeftCircle class="m-1" :size="24" />
+              </button>
 
-            <div class="mx-2 min-w-[6.5rem] text-center text-sm font-medium text-slate-900">
-              Page {{ flipbook.page }} of {{ flipbook.numPages }}
+              <div class="mx-2 min-w-[6.5rem] text-center text-sm font-medium text-slate-900">
+                Page {{ flipbook.page }} of {{ flipbook.numPages }}
+              </div>
+
+              <button
+                class="edge-cms-publication-control-button"
+                type="button"
+                :disabled="!flipbook.canFlipRight"
+                aria-label="Next page"
+                @click="flipbook.flipRight"
+              >
+                <ChevronRightCircle class="m-1" :size="24" />
+              </button>
+              <button
+                class="edge-cms-publication-control-button"
+                type="button"
+                aria-label="Open fullscreen"
+                @click="flipbook.openFullscreen(flipbook.viewport)"
+              >
+                <Fullscreen class="m-1" :size="24" />
+              </button>
             </div>
-
-            <button
-              class="edge-cms-publication-control-button"
-              type="button"
-              :disabled="!flipbook.canFlipRight"
-              aria-label="Next page"
-              @click="flipbook.flipRight"
-            >
-              <ChevronRightCircle class="m-1" :size="24" />
-            </button>
-            <button
-              class="edge-cms-publication-control-button"
-              type="button"
-              aria-label="Open fullscreen"
-              @click="flipbook.openFullscreen(flipbook.viewport)"
-            >
-              <Fullscreen class="m-1" :size="24" />
-            </button>
-          </div>
-        </template>
-      </Magazine>
+          </template>
+        </Magazine>
+      </div>
     </ClientOnly>
   </div>
 </template>

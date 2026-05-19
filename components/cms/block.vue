@@ -829,6 +829,10 @@ const normalizePublicationEffect = (value) => {
   return publicationEffectOptions.some(option => option.name === effect) ? effect : 'flip'
 }
 
+const isPublicationFieldMeta = (meta) => {
+  return meta?.type === 'publication' || meta?.option?.picker === 'publication'
+}
+
 const isPublicationPagesValue = (value) => {
   return !!value
     && typeof value === 'object'
@@ -880,8 +884,10 @@ const sanitizeQueryItems = (meta) => {
   const cleaned = JSON.parse(JSON.stringify(meta || {}))
   for (const key of Object.keys(cleaned)) {
     const cfg = cleaned[key]
-    if (cfg?.type === 'publication')
+    if (isPublicationFieldMeta(cfg)) {
       cfg.effect = normalizePublicationEffect(cfg.effect)
+      delete cfg.height
+    }
 
     const hasQueryOptions = Array.isArray(cfg?.queryOptions) && cfg.queryOptions.length > 0
     if (cfg?.api && !hasQueryOptions && cfg?.queryItems && typeof cfg.queryItems === 'object') {
@@ -994,6 +1000,10 @@ const parseBlockContentModel = (html) => {
     const title = cfg.title != null ? String(cfg.title) : ''
     const { value: _omitValue, field: _omitField, ...rest } = cfg
     meta[field] = { type, ...rest, title }
+    if (type === 'publication') {
+      meta[field].effect = normalizePublicationEffect(meta[field].effect)
+      delete meta[field].height
+    }
 
     let val = cfg.value
     if (type === 'image')
@@ -1036,6 +1046,10 @@ const buildUpdatedBlockDocFromContent = (content, sourceDoc = {}) => {
       nextMeta[field] = {
         ...previousMeta[field],
         ...parsed.meta[field],
+      }
+      if (isPublicationFieldMeta(nextMeta[field])) {
+        nextMeta[field].effect = normalizePublicationEffect(previousMeta[field].effect ?? parsed.meta[field].effect)
+        delete nextMeta[field].height
       }
     }
     else {
@@ -1700,8 +1714,9 @@ const openEditor = async (event) => {
     if (storedField.limit !== undefined) {
       mergedMeta[key].limit = storedField.limit
     }
-    if (mergedMeta[key]?.type === 'publication' && storedField.effect !== undefined) {
-      mergedMeta[key].effect = normalizePublicationEffect(storedField.effect)
+    if (isPublicationFieldMeta(mergedMeta[key])) {
+      mergedMeta[key].effect = normalizePublicationEffect(storedField.effect ?? mergedMeta[key].effect)
+      delete mergedMeta[key].height
     }
   }
 
