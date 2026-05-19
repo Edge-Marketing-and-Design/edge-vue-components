@@ -79,6 +79,10 @@ const props = defineProps({
     type: Boolean,
     default: true,
   },
+  centerPreviewToolbar: {
+    type: Boolean,
+    default: false,
+  },
 })
 const emit = defineEmits(['update:modelValue', 'delete'])
 const edgeFirebase = inject('edgeFirebase')
@@ -446,6 +450,11 @@ const shouldAllowSuppressedInteractiveClick = (target) => {
 const hasFixedPositionInContent = computed(() => {
   const content = String(modelValue.value?.content || '')
   return /\bfixed\b/.test(content)
+})
+
+const hasNavigationContent = computed(() => {
+  const content = String(modelValue.value?.content || '').toLowerCase()
+  return content.includes('cms-nav-') || content.includes('data-cms-nav')
 })
 
 const normalizePreviewType = (value) => {
@@ -2184,7 +2193,8 @@ const getTagsFromPosts = computed(() => {
       <div
         v-if="canShowPreviewToolbar"
         data-cms-block-control
-        class="pointer-events-none absolute right-8 top-2 z-[10001] opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+        class="pointer-events-none absolute right-8 opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+        :class="[props.centerPreviewToolbar ? 'top-1/2 -translate-y-1/2' : 'top-2', hasNavigationContent ? 'z-[10001]' : 'z-20']"
       >
         <div class="pointer-events-auto flex min-w-[180px] flex-col rounded-md border border-slate-300 bg-white/95 p-1 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-950/95">
           <span class="w-full min-w-0 truncate px-2 pb-1 text-center text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
@@ -2223,12 +2233,12 @@ const getTagsFromPosts = computed(() => {
         </div>
       </div>
       <!-- Darken overlay on hover -->
-      <div v-if="props.editMode" class="pointer-events-none absolute inset-0 bg-black/50 opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-[10000]" />
+      <div v-if="props.editMode" class="pointer-events-none absolute inset-0 bg-black/50 opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-10" />
 
       <!-- Hover controls -->
       <div
         v-if="props.editMode"
-        class="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-[10001]"
+        class="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-20"
       >
         <div class="absolute top-2 left-2">
           <span class="inline-flex items-center rounded bg-black px-2 py-1 text-[11px] font-medium leading-none text-white">

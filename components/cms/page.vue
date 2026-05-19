@@ -628,6 +628,28 @@ const blockIndex = (workingDoc, blockId, isPost = false) => {
   return (workingDoc[contentKey] || []).findIndex(block => block.id === blockId)
 }
 
+const isNavigationBlock = (block) => {
+  const content = String(block?.content || '').toLowerCase()
+  return content.includes('cms-nav-') || content.includes('data-cms-nav')
+}
+
+const isNonNavigationBlockInFirstRow = (workingDoc, blockId, isPost = false) => {
+  if (!workingDoc || !blockId)
+    return false
+  const contentKey = isPost ? 'postContent' : 'content'
+  const structureKey = isPost ? 'postStructure' : 'structure'
+  const blocksById = new Map((workingDoc[contentKey] || []).map(block => [block.id, block]))
+  const firstRow = workingDoc[structureKey]?.[0]
+
+  for (const column of firstRow?.columns || []) {
+    if (!(column.blocks || []).includes(blockId))
+      continue
+    const block = blocksById.get(blockId)
+    return !!block && !isNavigationBlock(block)
+  }
+  return false
+}
+
 const removeBlockFromStructure = (workingDoc, blockId, isPost = false) => {
   const structureKey = isPost ? 'postStructure' : 'structure'
   for (const row of workingDoc[structureKey] || []) {
@@ -4200,6 +4222,7 @@ const hasUnsavedChanges = (changes) => {
                                       :preview-auth-logged-in="state.previewAuthLoggedIn"
                                       :block-id="blockId"
                                       :theme="theme"
+                                      :center-preview-toolbar="!state.editMode && isNonNavigationBlockInFirstRow(slotProps.workingDoc, blockId, false)"
                                       :allow-protection-editor="isRestrictedContentEnabled"
                                       @delete="(block) => deleteBlock(block, slotProps)"
                                     />
@@ -4461,6 +4484,7 @@ const hasUnsavedChanges = (changes) => {
                                       :theme="theme"
                                       :site-id="selectedPreviewContextSiteId"
                                       :route-last-segment="previewRouteLastSegment"
+                                      :center-preview-toolbar="!state.editMode && isNonNavigationBlockInFirstRow(slotProps.workingDoc, blockId, true)"
                                       :allow-protection-editor="isRestrictedContentEnabled"
                                       @delete="(block) => deleteBlock(block, slotProps, true)"
                                     />
