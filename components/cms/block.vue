@@ -2153,11 +2153,11 @@ const getTagsFromPosts = computed(() => {
       v-if="!shouldHideForLoggedOutPreview"
       :class="[{ 'cursor-pointer': canOpenEditor }, blockWrapperClass]"
       :style="blockWrapperStyle"
-      class="relative group"
+      class="relative group isolate"
       @click.capture="openEditor($event)"
     >
       <!-- Content -->
-      <div :class="props.editMode && props.overrideClicksInEditMode ? 'pointer-events-none' : ''">
+      <div class="relative z-0" :class="props.editMode && props.overrideClicksInEditMode ? 'pointer-events-none' : ''">
         <edge-cms-block-api :site-id="props.siteId" :route-last-segment="props.routeLastSegment" :theme="props.theme" :content="modelValue?.content" :values="modelValue?.values" :meta="modelValue?.meta" :viewport-mode="props.viewportMode" :render-context="props.renderContext" :standalone-preview="props.standalonePreview" @pending="state.loading = $event" />
         <edge-cms-block-render
           v-if="state.loading"
