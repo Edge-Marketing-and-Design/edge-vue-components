@@ -169,7 +169,7 @@ const styleOverrides = computed(() => {
 
 const route = useRoute()
 
-const submenu = computed(() => {
+const activeSubmenuParent = computed(() => {
   // Direct match on top-level item
   let match = props.menuItems.find(item => item.to === route.path)
 
@@ -194,7 +194,11 @@ const submenu = computed(() => {
     )
   }
 
-  return match?.submenu || []
+  return match || null
+})
+
+const submenu = computed(() => {
+  return activeSubmenuParent.value?.submenu || []
 })
 
 const isDev = computed(() => {
@@ -206,7 +210,6 @@ const isAdmin = computed(() => {
 })
 
 const subMenuItems = (items) => {
-  console.log('submenu items', items)
   return items
     .filter(item => edgeGlobal.allowMenuItem(item, isAdmin.value))
     .map(item => ({
@@ -216,6 +219,11 @@ const subMenuItems = (items) => {
         : item.submenu,
     }))
 }
+
+const hasSecondarySubmenuItems = computed(() => {
+  const parentTo = activeSubmenuParent.value?.to
+  return subMenuItems(submenu.value).some(item => item.to !== parentTo)
+})
 </script>
 
 <template>
@@ -244,7 +252,7 @@ const subMenuItems = (items) => {
     <!-- Submenu Sidebar -->
     <Transition name="slide-submenu">
       <Sidebar
-        v-if="subMenuItems(submenu).length > 0 && !sidebarIsMobile"
+        v-if="hasSecondarySubmenuItems && !sidebarIsMobile"
         side="left"
         :collapsible="collapsible"
         class="border-solid border-r w-[60px]"

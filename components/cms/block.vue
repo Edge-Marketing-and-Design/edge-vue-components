@@ -169,6 +169,13 @@ function normalizeConfigLiteral(str) {
 
 function safeParseTagConfig(raw) {
   try {
+    return JSON.parse(raw)
+  }
+  catch {
+    // Fall back to legacy loose config support below.
+  }
+
+  try {
     return JSON.parse(normalizeConfigLiteral(raw))
   }
   catch {

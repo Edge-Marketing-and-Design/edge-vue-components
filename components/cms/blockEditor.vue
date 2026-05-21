@@ -382,6 +382,13 @@ function normalizeConfigLiteral(str) {
 
 function safeParseConfig(raw) {
   try {
+    return JSON.parse(raw)
+  }
+  catch {
+    // Fall back to legacy loose config support below.
+  }
+
+  try {
     return JSON.parse(normalizeConfigLiteral(raw))
   }
   catch {
@@ -545,6 +552,11 @@ function handleEditorLineClick(payload, workingDoc) {
     type: tag.type,
     field: parsedCfg?.field != null ? String(parsedCfg.field) : null,
     workingDoc,
+    tagStart: tag.tagStart,
+    tagEnd: tag.tagEnd,
+    configStart: tag.configStart,
+    configEnd: tag.configEnd,
+    originalRawCfg: tag.rawCfg,
     originalTag: workingDoc.content.slice(tag.tagStart, tag.tagEnd),
     configStartOffset: tag.configStart - tag.tagStart,
     configEndOffset: tag.configEnd - tag.tagStart,
@@ -565,7 +577,7 @@ function handleJsonEditorSave() {
   }
 
   const serialized = JSON.stringify(parsed)
-  const { workingDoc, type, field, originalTag, configStartOffset, configEndOffset } = state.editingContext
+  const { workingDoc, type, field, originalTag, originalRawCfg, configStartOffset, configEndOffset } = state.editingContext
   const content = workingDoc?.content ?? ''
   if (!content) {
     state.jsonEditorError = 'Block content is empty.'
@@ -573,17 +585,18 @@ function handleJsonEditorSave() {
   }
 
   let target = null
-  for (const tag of iterateTags(content)) {
-    if (tag.type !== type)
-      continue
-    if (!field) {
-      target = tag
-      break
-    }
-    const cfg = safeParseConfig(tag.rawCfg)
-    if (cfg && String(cfg.field) === field) {
-      target = tag
-      break
+  const exactConfigStart = state.editingContext.configStart
+  const exactConfigEnd = state.editingContext.configEnd
+  if (
+    typeof exactConfigStart === 'number'
+    && typeof exactConfigEnd === 'number'
+    && exactConfigStart >= 0
+    && exactConfigEnd >= exactConfigStart
+    && content.slice(exactConfigStart, exactConfigEnd + 1) === originalRawCfg
+  ) {
+    target = {
+      configStart: exactConfigStart,
+      configEnd: exactConfigEnd,
     }
   }
 
@@ -598,6 +611,22 @@ function handleJsonEditorSave() {
           configEnd: idx + endOffset,
         }
       }
+    }
+  }
+
+  for (const tag of iterateTags(content)) {
+    if (target)
+      break
+    if (tag.type !== type)
+      continue
+    if (!field) {
+      target = tag
+      break
+    }
+    const cfg = safeParseConfig(tag.rawCfg)
+    if (cfg && String(cfg.field) === field) {
+      target = tag
+      break
     }
   }
 
