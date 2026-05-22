@@ -54,6 +54,11 @@ const props = defineProps({
     required: false,
     default: false,
   },
+  inputAttrs: {
+    type: Object,
+    required: false,
+    default: () => ({}),
+  },
 })
 
 const emits = defineEmits(['update:modelValue'])
@@ -199,7 +204,7 @@ const triggerTitle = computed(() => {
         </PopoverTrigger>
         <PopoverContent class="p-0" :style="`width: ${state.width}px !important;`">
           <Command>
-            <CommandInput class="h-9" placeholder="Search..." />
+            <CommandInput class="h-9" placeholder="Search..." v-bind="props.inputAttrs" />
             <CommandEmpty>Not found.</CommandEmpty>
             <CommandList>
               <CommandGroup>
