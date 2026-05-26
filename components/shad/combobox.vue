@@ -49,6 +49,11 @@ const props = defineProps({
     required: false,
     default: 'name',
   },
+  itemDescription: {
+    type: String,
+    required: false,
+    default: 'description',
+  },
   multiple: {
     type: Boolean,
     required: false,
@@ -78,6 +83,7 @@ const computedItems = computed(() => {
     return {
       [props.itemTitle]: getNestedValue(item, props.itemTitle),
       [props.itemValue]: getNestedValue(item, props.itemValue),
+      [props.itemDescription]: getNestedValue(item, props.itemDescription),
     }
   })
 })
@@ -220,7 +226,15 @@ const triggerTitle = computed(() => {
                       isSelected(item) ? 'opacity-100' : 'opacity-0',
                     )"
                   />
-                  {{ item[props.itemTitle] }}
+                  <span class="min-w-0">
+                    <span class="block truncate">{{ item[props.itemTitle] }}</span>
+                    <span
+                      v-if="item[props.itemDescription]"
+                      class="block truncate text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+                    >
+                      {{ item[props.itemDescription] }}
+                    </span>
+                  </span>
                 </CommandItem>
               </CommandGroup>
             </CommandList>

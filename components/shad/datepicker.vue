@@ -2,7 +2,7 @@
 import { useVModel } from '@vueuse/core'
 import { CalendarDate, parseDate } from '@internationalized/date'
 import { Calendar as CalendarIcon } from 'lucide-vue-next'
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useField } from 'vee-validate'
 import {
   FormControl,
@@ -62,6 +62,35 @@ const getCalendarDate = (dateString) => {
   return new CalendarDate(year, month, day)
 }
 
+const minCalendarDate = computed(() => getCalendarDate(props.minValue))
+const maxCalendarDate = computed(() => getCalendarDate(props.maxValue))
+
+const monthOptions = [
+  { label: 'January', value: 1 },
+  { label: 'February', value: 2 },
+  { label: 'March', value: 3 },
+  { label: 'April', value: 4 },
+  { label: 'May', value: 5 },
+  { label: 'June', value: 6 },
+  { label: 'July', value: 7 },
+  { label: 'August', value: 8 },
+  { label: 'September', value: 9 },
+  { label: 'October', value: 10 },
+  { label: 'November', value: 11 },
+  { label: 'December', value: 12 },
+]
+
+const yearOptions = computed(() => {
+  const startYear = minCalendarDate.value?.year || 1900
+  const endYear = maxCalendarDate.value?.year || 2099
+  const years = []
+
+  for (let year = endYear; year >= startYear; year--)
+    years.push(year)
+
+  return years
+})
+
 const modelValue = useVModel(props, 'modelValue', emits, {
   passive: false,
   prop: 'modelValue',
@@ -70,6 +99,52 @@ const modelValue = useVModel(props, 'modelValue', emits, {
 const { setValue } = useField(props.name)
 
 const value = ref(props.multiple ? [] : null)
+const placeholder = ref()
+
+const todayCalendarDate = () => {
+  const now = new Date()
+  return new CalendarDate(now.getFullYear(), now.getMonth() + 1, now.getDate())
+}
+
+const compareCalendarDates = (firstDate, secondDate) => {
+  if (!firstDate || !secondDate)
+    return 0
+  const first = new Date(firstDate.year, firstDate.month - 1, firstDate.day)
+  const second = new Date(secondDate.year, secondDate.month - 1, secondDate.day)
+  return first - second
+}
+
+const clampCalendarDate = (date) => {
+  if (!date)
+    return date
+  if (minCalendarDate.value && compareCalendarDates(date, minCalendarDate.value) < 0)
+    return minCalendarDate.value
+  if (maxCalendarDate.value && compareCalendarDates(date, maxCalendarDate.value) > 0)
+    return maxCalendarDate.value
+  return date
+}
+
+const firstSelectedDate = computed(() => {
+  if (props.multiple && Array.isArray(value.value))
+    return value.value[0] || null
+  return value.value || null
+})
+
+const visibleCalendarDate = computed(() => {
+  return placeholder.value || firstSelectedDate.value || clampCalendarDate(todayCalendarDate())
+})
+
+const visibleMonth = computed(() => visibleCalendarDate.value?.month || 1)
+const visibleYear = computed(() => visibleCalendarDate.value?.year || new Date().getFullYear())
+
+const setVisibleCalendarDate = ({ year = visibleYear.value, month = visibleMonth.value }) => {
+  const sourceDate = visibleCalendarDate.value || todayCalendarDate()
+  const nextDate = new CalendarDate(Number(year), Number(month), Math.min(sourceDate.day || 1, 28))
+  placeholder.value = clampCalendarDate(nextDate)
+}
+
+const setVisibleMonth = event => setVisibleCalendarDate({ month: event.target.value })
+const setVisibleYear = event => setVisibleCalendarDate({ year: event.target.value })
 
 const formatDate = (dates) => {
   const pad = num => String(num).padStart(2, '0')
@@ -105,8 +180,6 @@ watch(() => value.value, (newValue) => {
   )
 })
 
-const placeholder = ref()
-
 onMounted(() => {
   if (props.multiple) {
     if (Array.isArray(props.modelValue) && props.modelValue.length > 0) {
@@ -124,6 +197,8 @@ onMounted(() => {
       value.value = null // Set to null if modelValue is empty or invalid
     }
   }
+
+  placeholder.value = clampCalendarDate(firstSelectedDate.value || todayCalendarDate())
 })
 </script>
 
@@ -156,6 +231,31 @@ onMounted(() => {
           </FormControl>
         </PopoverTrigger>
         <PopoverContent class="w-auto p-0">
+          <div class="flex items-center gap-2 border-b border-slate-200 p-2">
+            <label class="sr-only" :for="`${props.name}-calendar-month`">Calendar month</label>
+            <select
+              :id="`${props.name}-calendar-month`"
+              class="h-8 rounded-md border border-slate-300 bg-white px-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
+              :value="visibleMonth"
+              @change="setVisibleMonth"
+            >
+              <option v-for="month in monthOptions" :key="month.value" :value="month.value">
+                {{ month.label }}
+              </option>
+            </select>
+
+            <label class="sr-only" :for="`${props.name}-calendar-year`">Calendar year</label>
+            <select
+              :id="`${props.name}-calendar-year`"
+              class="h-8 w-24 rounded-md border border-slate-300 bg-white px-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
+              :value="visibleYear"
+              @change="setVisibleYear"
+            >
+              <option v-for="year in yearOptions" :key="year" :value="year">
+                {{ year }}
+              </option>
+            </select>
+          </div>
           <Calendar
             v-model:placeholder="placeholder"
             v-model="value"
