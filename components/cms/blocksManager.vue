@@ -431,6 +431,8 @@ watch(themeOptions, (options) => {
 const themesCollection = computed(() => {
   return edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`] || {}
 })
+const blockCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/blocks`)
+const blocksCollection = computed(() => edgeFirebase.data?.[blockCollectionPath.value] || {})
 
 const openBlocksExportDialog = (total) => {
   state.exportDialogOpen = true
@@ -472,7 +474,7 @@ const exportAllBlocks = async () => {
   const selectedDocIds = [...state.selectedBlockDocIds].filter(docId => blocksCollection.value?.[docId])
   const files = selectedDocIds
     .sort((leftId, rightId) => String(leftId).localeCompare(String(rightId)))
-    .map((docId) => ({
+    .map(docId => ({
       suggestedName: `block-${docId}.json`,
       payload: {
         ...edgeGlobal.dupObject(blocksCollection.value?.[docId] || {}),
@@ -665,8 +667,6 @@ const applyListSelectionFilters = (items = []) => {
   return applyThemeSelectionFilter(applyTagSelectionFilter(applyTypeSelectionFilter(items)))
 }
 
-const blockCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/blocks`)
-const blocksCollection = computed(() => edgeFirebase.data?.[blockCollectionPath.value] || {})
 const visibleBlockItems = computed(() => {
   const query = String(state.filter || '').trim().toLowerCase()
   const items = Object.entries(blocksCollection.value || {}).map(([docId, doc]) => ({
@@ -1370,7 +1370,6 @@ const handleBlockImport = async (event) => {
                     <div class="scale-wrapper">
                       <div class="scale-inner scale p-4 block-list-preview-content">
                         <edge-cms-block-api
-                          :key="getPreviewSelectionKey(item.docId)"
                           :site-id="blockPreviewSiteId"
                           :content="item.content"
                           :values="item.values"
