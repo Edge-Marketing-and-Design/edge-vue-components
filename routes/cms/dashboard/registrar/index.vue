@@ -7,7 +7,19 @@ const router = useRouter()
 const state = reactive({
   mounted: false,
 })
-const isAdmin = computed(() => edgeGlobal.isAdminGlobal(edgeFirebase).value)
+const currentUserHasDomainsRole = (roles) => {
+  const orgId = edgeGlobal.edgeState.currentOrganization
+  const orgPath = `organizations-${String(orgId || '').replaceAll('/', '-')}`
+  return (edgeFirebase?.user?.roles || []).some(role =>
+    role.collectionPath === `${orgPath}-domains` && roles.includes(role.role),
+  )
+}
+const canViewDomains = computed(() => {
+  return Boolean(
+    edgeGlobal.isAdminGlobal(edgeFirebase).value
+    || currentUserHasDomainsRole(['user', 'editor', 'admin']),
+  )
+})
 
 useEdgeCmsDialogPositionFix()
 
@@ -22,7 +34,7 @@ onMounted(() => {
 watchEffect(() => {
   if (!state.mounted)
     return
-  if (isAdmin.value)
+  if (canViewDomains.value)
     return
   router.replace('/app/dashboard/sites')
 })

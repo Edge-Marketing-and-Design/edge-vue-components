@@ -1,4 +1,5 @@
 <script setup>
+import { Music } from 'lucide-vue-next'
 import {
   useSidebar,
 } from '@/components/ui/sidebar'
@@ -196,6 +197,12 @@ const shouldPulseMenuItem = (item) => {
     return Boolean(rawValue())
   return Boolean(rawValue)
 }
+
+const iconComponents = {
+  Music,
+}
+
+const resolveMenuIcon = icon => iconComponents[icon] || icon
 </script>
 
 <template>
@@ -221,7 +228,7 @@ const shouldPulseMenuItem = (item) => {
                     @click.prevent="goTo(item.to)"
                   >
                     <span class="relative inline-flex">
-                      <component :is="item.icon" class="[stroke-width:1]" :class="sideBarIconClasses" />
+                      <component :is="resolveMenuIcon(item.icon)" class="[stroke-width:1]" :class="sideBarIconClasses" />
                       <span
                         v-if="getMenuBadge(item)"
                         class="absolute -right-2 -top-2 inline-flex min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-4 text-white ring-2 ring-sidebar"
@@ -255,7 +262,7 @@ const shouldPulseMenuItem = (item) => {
                   @click.prevent="goTo(item.to)"
                 >
                   <span class="relative inline-flex">
-                    <component :is="item.icon" class="[stroke-width:1]" :class="sideBarIconClasses" />
+                    <component :is="resolveMenuIcon(item.icon)" class="[stroke-width:1]" :class="sideBarIconClasses" />
                     <span
                       v-if="getMenuBadge(item)"
                       class="absolute -right-2 -top-2 inline-flex min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-4 text-white ring-2 ring-sidebar"

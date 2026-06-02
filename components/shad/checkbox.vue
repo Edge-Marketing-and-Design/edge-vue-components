@@ -13,6 +13,10 @@ const props = defineProps({
     type: null,
     required: false,
   },
+  itemClass: {
+    type: null,
+    required: false,
+  },
   placeholder: {
     type: String,
     required: false,
@@ -44,7 +48,7 @@ watch(modelValue, (val) => {
 <template>
   <div>
     <FormField v-slot="{ handleChange }" type="checkbox" :name="props.name">
-      <FormItem class="flex flex-row items-start gap-x-3 space-y-0 rounded-md border p-3 mt-3" @click.capture.once="formHandleChange(modelValue)">
+      <FormItem class="flex flex-row items-start gap-x-3 space-y-0 rounded-md border p-3 mt-3" :class="props.itemClass" @click.capture.once="formHandleChange(modelValue)">
         <FormControl>
           <Checkbox
             :id="props.name"

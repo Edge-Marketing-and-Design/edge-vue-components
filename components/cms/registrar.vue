@@ -26,7 +26,25 @@ const state = reactive({
 
 const currentOrgId = computed(() => String(edgeGlobal?.edgeState?.currentOrganization || '').trim())
 const currentUid = computed(() => String(edgeFirebase?.user?.uid || '').trim())
-const isAdmin = computed(() => edgeGlobal.isAdminGlobal(edgeFirebase).value)
+const currentUserHasDomainsRole = (roles) => {
+  const orgPath = `organizations-${String(currentOrgId.value || '').replaceAll('/', '-')}`
+  return (edgeFirebase?.user?.roles || []).some(role =>
+    role.collectionPath === `${orgPath}-domains` && roles.includes(role.role),
+  )
+}
+const canViewDomains = computed(() => {
+  return Boolean(
+    edgeGlobal.isAdminGlobal(edgeFirebase).value
+    || currentUserHasDomainsRole(['user', 'editor', 'admin']),
+  )
+})
+const canUseDomains = computed(() => {
+  return Boolean(
+    edgeGlobal.isAdminGlobal(edgeFirebase).value
+    || currentUserHasDomainsRole(['editor', 'admin']),
+  )
+})
+const isAdmin = computed(() => canUseDomains.value)
 const showDevOnlyActions = computed(() => edgeGlobal.allowMenuItem({ devOnly: true }, isAdmin.value))
 const orgDocPath = computed(() => String(edgeGlobal?.edgeState?.organizationDocPath || '').trim())
 const registeredDomainsPath = computed(() => orgDocPath.value ? `${orgDocPath.value}/domains-registered` : '')
@@ -38,7 +56,7 @@ const snapshotPaths = computed(() => [
   sitesPath.value,
 ].filter(Boolean))
 const snapshotContext = computed(() => ({
-  isAdmin: isAdmin.value,
+  canView: canViewDomains.value,
   paths: snapshotPaths.value,
 }))
 
@@ -115,7 +133,7 @@ const snapshotCollectionItems = (path) => {
 }
 
 const startRegistrarSnapshots = async () => {
-  if (!isAdmin.value || !snapshotPaths.value.length)
+  if (!canViewDomains.value || !snapshotPaths.value.length)
     return
 
   state.loading = true
@@ -145,7 +163,7 @@ const stopRegistrarSnapshots = async (paths = []) => {
 }
 
 const syncFromRegistry = async () => {
-  if (!currentOrgId.value || !isAdmin.value)
+  if (!currentOrgId.value || !canUseDomains.value)
     return
   if (!currentUid.value)
     return
@@ -169,6 +187,8 @@ const syncFromRegistry = async () => {
 }
 
 const checkDomain = async () => {
+  if (!canUseDomains.value)
+    return
   const domain = normalizeDomain(state.domainInput)
   if (!domain) {
     setMessage('Enter a domain to check.', 'error')
@@ -201,6 +221,8 @@ const checkDomain = async () => {
 }
 
 const registerDomain = async () => {
+  if (!canUseDomains.value)
+    return
   const domain = normalizeDomain(state.domainInput)
   if (!domain) {
     setMessage('Enter a domain to register.', 'error')
@@ -226,6 +248,8 @@ const registerDomain = async () => {
 }
 
 const attachDomainToSite = async ({ domain, siteId }) => {
+  if (!canUseDomains.value)
+    return false
   const normalizedDomain = normalizeDomain(domain)
   const normalizedSiteId = String(siteId || '').trim()
 
@@ -272,6 +296,8 @@ const attachDomainToSite = async ({ domain, siteId }) => {
 }
 
 const detachDomainFromSite = async ({ domain }) => {
+  if (!canUseDomains.value)
+    return false
   const normalizedDomain = normalizeDomain(domain)
 
   if (!currentUid.value) {
@@ -481,6 +507,8 @@ const getAttachmentLabel = (item) => {
 }
 
 const openSiteDialog = (item) => {
+  if (!canUseDomains.value)
+    return
   const domain = normalizeDomain(item?.domain)
   if (!domain)
     return
@@ -503,6 +531,8 @@ const saveSiteDialog = async () => {
 }
 
 const openDetachDialog = (item) => {
+  if (!canUseDomains.value)
+    return
   const domain = normalizeDomain(item?.domain)
   if (!domain)
     return
@@ -525,7 +555,7 @@ const confirmDetach = async () => {
 watch(snapshotContext, async (nextContext, previousContext = {}) => {
   const nextPaths = nextContext.paths || []
   const previousPaths = previousContext.paths || []
-  if (!nextContext.isAdmin) {
+  if (!nextContext.canView) {
     await stopRegistrarSnapshots(previousPaths)
     return
   }
@@ -574,12 +604,12 @@ onBeforeUnmount(async () => {
       {{ state.message }}
     </div>
 
-    <div v-if="!isAdmin" class="rounded-md border border-amber-300 bg-amber-50 p-4 text-amber-800">
-      Admin access is required for domain registrar tools.
+    <div v-if="!canViewDomains" class="rounded-md border border-amber-300 bg-amber-50 p-4 text-amber-800">
+      Domain access is required for this page.
     </div>
 
     <template v-else>
-      <div class="rounded-lg border bg-card p-4 space-y-3">
+      <div v-if="canUseDomains" class="rounded-lg border bg-card p-4 space-y-3">
         <h3 class="font-semibold">
           Check and Register
         </h3>
@@ -667,7 +697,7 @@ onBeforeUnmount(async () => {
               </div>
             </div>
 
-            <div class="flex items-center gap-2 self-end md:self-center">
+            <div v-if="canUseDomains" class="flex items-center gap-2 self-end md:self-center">
               <edge-tooltip>
                 <edge-shad-button
                   size="icon"

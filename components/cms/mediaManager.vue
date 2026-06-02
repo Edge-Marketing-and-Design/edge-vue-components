@@ -78,6 +78,11 @@ const props = defineProps({
     required: false,
     default: false,
   },
+  readOnly: {
+    type: Boolean,
+    required: false,
+    default: false,
+  },
 })
 
 // const edgeGlobal = inject('edgeGlobal')
@@ -842,6 +847,8 @@ onActivated(() => {
 })
 
 function canDeleteMedia(item) {
+  if (props.readOnly)
+    return false
   if (!props.site)
     return true
   if (item?.meta?.cmssite && Array.isArray(item.meta.cmssite)) {
@@ -1204,7 +1211,7 @@ const siteQueryValue = computed(() => resolveCmsSiteScopeValues())
                         placeholder="Source"
                       />
                     </div>
-                    <div class="shrink-0">
+                    <div v-if="!props.readOnly" class="shrink-0">
                       <edge-shad-button
                         class="bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
                         @click="state.showUpload = true"
@@ -1270,7 +1277,7 @@ const siteQueryValue = computed(() => resolveCmsSiteScopeValues())
               <div />
             </template>
           </edge-menu>
-          <div v-if="!selectMode" class="flex flex-wrap items-center justify-between gap-2 mt-2 px-3">
+          <div v-if="!selectMode && !props.readOnly" class="flex flex-wrap items-center justify-between gap-2 mt-2 px-3">
             <div class="flex items-center gap-2">
               <div class="text-xs text-slate-600 dark:text-slate-300">
                 {{ state.selected.length }} selected

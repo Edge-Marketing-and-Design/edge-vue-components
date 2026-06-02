@@ -1,6 +1,7 @@
 <script setup>
 import { computed, defineProps, inject, nextTick, onBeforeMount, reactive, ref, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
+import { Check, Loader2 } from 'lucide-vue-next'
 import { useToast } from '@/components/ui/toast/use-toast'
 const props = defineProps({
   metaFields: {
@@ -196,6 +197,14 @@ const currentMeta = computed(() => {
   return edgeFirebase.user.meta
 })
 
+const profileHeaderTitle = computed(() => {
+  return String(state.meta?.name || state.meta?.email || '').trim() || 'My Profile'
+})
+
+const profileHeaderSubtitle = computed(() => {
+  return String(state.meta?.email || '').trim() || 'Email not set'
+})
+
 onBeforeMount(() => {
   state.meta = cloneMeta(currentMeta.value)
   initializeDefaults(state.meta)
@@ -212,16 +221,10 @@ watch(currentMeta, async () => {
   await nextTick()
   state.loaded = true
 })
-const route = useRoute()
-const menuIcon = computed(() => {
-  if (edgeGlobal?.iconFromMenu)
-    return edgeGlobal.iconFromMenu(route)
-  return null
-})
 </script>
 
 <template>
-  <Card class="w-full flex-1 bg-muted/50 mx-auto w-full border-none shadow-none pt-2">
+  <Card class="mx-auto w-full flex-1 border-none bg-slate-100 pt-0 shadow-none dark:bg-slate-950">
     <edge-shad-form
       ref="formRef"
       :schema="resolvedSchema"
@@ -229,36 +232,40 @@ const menuIcon = computed(() => {
       @submit="onSubmit"
     >
       <slot name="header">
-        <edge-menu class="bg-secondary text-foreground rounded-none sticky top-0 py-3">
-          <template #start>
-            <slot name="header-start">
-              <component :is="menuIcon" class="mr-2" />
-              <span class="capitalize">My Profile</span>
-            </slot>
-          </template>
-          <template #center>
-            <slot name="header-center">
-              <div class="w-full px-6" />
-            </slot>
-          </template>
-          <template #end>
-            <slot name="header-end">
-              <edge-shad-button
-                type="submit"
-                :disabled="state.loading"
-                class="text-white bg-slate-800 hover:bg-slate-400"
-              >
-                <Loader2 v-if="state.loading" class="w-4 h-4 mr-2 animate-spin" />
-                Update Profile
-              </edge-shad-button>
-            </slot>
-          </template>
-        </edge-menu>
+        <div class="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+          <div class="px-6 py-6">
+            <div class="text-sm text-slate-500 dark:text-slate-400">
+              Account <span class="mx-2 text-slate-300 dark:text-slate-700">/</span>
+              <span class="font-medium text-slate-900 dark:text-slate-100">My Profile</span>
+            </div>
+            <div class="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div class="min-w-0">
+                <h1 class="line-clamp-2 max-w-5xl text-3xl font-bold leading-tight text-slate-950 dark:text-slate-50 xl:text-4xl">
+                  {{ profileHeaderTitle }}
+                </h1>
+                <div class="mt-3 flex flex-wrap items-center gap-3 text-base text-slate-500 dark:text-slate-400">
+                  <span>{{ profileHeaderSubtitle }}</span>
+                </div>
+              </div>
+              <div class="flex shrink-0 items-center gap-2">
+                <edge-shad-button
+                  type="submit"
+                  :disabled="state.loading"
+                  class="h-10 bg-slate-900 px-4 text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-300"
+                >
+                  <Loader2 v-if="state.loading" class="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+                  <Check v-else class="mr-2 h-4 w-4" aria-hidden="true" />
+                  {{ state.loading ? 'Saving...' : 'Update Profile' }}
+                </edge-shad-button>
+              </div>
+            </div>
+          </div>
+        </div>
       </slot>
-      <CardContent v-if="state.loaded" class="p-3 w-full overflow-y-auto scroll-area">
+      <CardContent v-if="state.loaded" class="scroll-area w-full overflow-y-auto bg-slate-100 p-6 dark:bg-slate-950">
         <CardContent class="space-y-6">
-          <div class="rounded-xl border bg-card p-4 space-y-4 shadow-sm">
-            <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <div class="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
               Profile Details
             </div>
             <div class="flex flex-col gap-4 md:flex-row md:items-stretch">
@@ -296,8 +303,8 @@ const menuIcon = computed(() => {
             </div>
           </div>
 
-          <div v-if="filteredMetaFields.length" class="rounded-xl border bg-card p-4 space-y-4 shadow-sm">
-            <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <div v-if="filteredMetaFields.length" class="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
               Additional Details
             </div>
             <div class="grid grid-cols-12 gap-4">
@@ -319,7 +326,7 @@ const menuIcon = computed(() => {
                   :disabled="field?.disabled || false"
                   @update:model-value="val => setByPath(state.meta, field.field, val)"
                 />
-                <p v-if="field?.type === 'imagePicker' && field?.disabled" class="mt-1 text-xs text-muted-foreground">
+                <p v-if="field?.type === 'imagePicker' && field?.disabled" class="mt-1 text-xs text-slate-500 dark:text-slate-400">
                   {{ getDisabledNote(field) }}
                 </p>
                 <div v-else-if="field?.type === 'richText'" class="profile-richtext">
@@ -361,7 +368,7 @@ const menuIcon = computed(() => {
                     :disabled="field?.disabled || false"
                     @update:model-value="val => setByPath(state.meta, field.field, val)"
                   />
-                  <p v-if="mergeDisabledNote(field?.hint, field)" class="text-xs text-muted-foreground">
+                  <p v-if="mergeDisabledNote(field?.hint, field)" class="text-xs text-slate-500 dark:text-slate-400">
                     {{ mergeDisabledNote(field?.hint, field) }}
                   </p>
                 </div>

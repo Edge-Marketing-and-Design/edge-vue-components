@@ -36,7 +36,6 @@ const state = reactive({
 
 const edgeUsers = toRef(edgeFirebase.state, 'users')
 const users = computed(() => Object.values(edgeUsers.value ?? {}))
-const roles = computed(() => edgeFirebase.user.roles)
 
 const bringUserOptions = computed(() => {
   return users.value.filter(user => user.userId !== edgeFirebase.user.uid)
@@ -124,19 +123,6 @@ const addUsersToOrganization = async (orgId) => {
   }
 }
 
-const waitForOrgRole = async (orgId) => {
-  const orgPath = `organizations-${String(orgId).replaceAll('/', '-')}`
-  const maxAttempts = 30
-  const delayMs = 300
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    if (edgeFirebase.user.roles.some(role => role.collectionPath === orgPath)) {
-      return true
-    }
-    await new Promise(resolve => setTimeout(resolve, delayMs))
-  }
-  return false
-}
-
 const waitForNewOrgRole = async (previousOrgPaths) => {
   const maxAttempts = 30
   const delayMs = 300
@@ -206,34 +192,37 @@ const schema = toTypedSchema(z.object({
 </script>
 
 <template>
-  <edge-shad-button v-if="props.item === null && props.passThroughProps" class="bg-slate-500 mx-2 h-6 text-xs" @click="addItem()">
+  <edge-shad-button v-if="props.item === null && props.passThroughProps" class="mx-2 h-9 bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-300" @click="addItem()">
     Add Organization
   </edge-shad-button>
-  <edge-shad-button v-if="props.item === null" class="bg-slate-500 mx-2 h-6 text-xs" @click="joinOrg()">
+  <edge-shad-button v-if="props.item === null" class="mx-2 h-9 border border-slate-300 bg-white px-4 text-sm font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:hover:bg-slate-900" @click="joinOrg()">
     Join Organization
   </edge-shad-button>
-  <div v-else class="flex w-full py-2 justify-between items-center">
-    <Avatar class="p-0 h-6 w-6 mr-2">
+  <div v-else class="flex w-full items-center justify-between gap-3 border-b border-slate-200/80 py-3 last:border-b-0 dark:border-slate-700">
+    <Avatar class="mr-2 h-8 w-8 border border-slate-200 bg-slate-100 p-0 dark:border-slate-700 dark:bg-slate-800">
       <User width="18" height="18" />
     </Avatar>
-    <div class="flex gap-2 mr-2 items-center">
-      <div class="text-md text-bold mr-2">
+    <div class="mr-2 flex min-w-0 items-center gap-2">
+      <div class="truncate text-sm font-semibold text-slate-950 dark:text-slate-100">
         {{ props.item.name }}
       </div>
-      <edge-chip v-if="edgeGlobal.edgeState.currentOrganization === props.item.docId" size="small" color="primary">
+      <span
+        v-if="edgeGlobal.edgeState.currentOrganization === props.item.docId"
+        class="inline-flex h-6 items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 text-xs font-semibold text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300"
+      >
         Current
-      </edge-chip>
-      <edge-shad-button v-else class="bg-slate-500 h-6 text-xs" @click.stop.prevent="switchOrganization(props.item.docId)">
+      </span>
+      <edge-shad-button v-else class="h-8 bg-slate-900 px-3 text-xs font-medium text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-300" @click.stop.prevent="switchOrganization(props.item.docId)">
         Switch
       </edge-shad-button>
     </div>
-    <div class="grow flex gap-2 justify-end">
-      <edge-chip>
+    <div class="flex grow justify-end gap-2">
+      <span class="inline-flex h-6 items-center rounded-full border border-slate-200 bg-slate-100 px-2.5 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
         {{ edgeGlobal.getRoleName(edgeFirebase.user.roles, props.item.docId) }}
-      </edge-chip>
+      </span>
     </div>
     <edge-shad-button
-      class="bg-red-400 mx-2 h-6 text-xs"
+      class="mx-2 h-7 border-red-200 bg-red-50 text-xs text-red-700 hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/70"
       variant="outline"
       @click.stop="deleteConfirm(props.item)"
     >
@@ -256,7 +245,7 @@ const schema = toTypedSchema(z.object({
         As an admin, you cannot leave the organization "{{ state.currentTitle }}" from this screen. Please go to the organization's members page to remove yourself.
       </h3>
       <DialogFooter class="pt-6 flex justify-between">
-        <edge-shad-button class="text-white bg-slate-800 hover:bg-slate-400" @click="state.deleteDialog = false">
+        <edge-shad-button class="border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900" variant="outline" @click="state.deleteDialog = false">
           Cancel
         </edge-shad-button>
         <edge-shad-button
@@ -296,7 +285,7 @@ const schema = toTypedSchema(z.object({
           To join an existing organization, please enter the registration code provided by the organization.
         </template>
         <div v-if="showBringUsers" class="mt-4 w-full">
-          <div class="text-sm font-medium text-foreground">
+          <div class="text-sm font-medium text-slate-950 dark:text-slate-100">
             Users to bring over (you will be added automatically)
           </div>
           <div class="mt-2 w-full flex flex-wrap gap-2">
@@ -312,12 +301,12 @@ const schema = toTypedSchema(z.object({
           </div>
         </div>
         <DialogFooter class="pt-6 flex justify-between">
-          <edge-shad-button variant="destructive" @click="closeDialog">
+          <edge-shad-button variant="outline" class="border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900" @click="closeDialog">
             Close
           </edge-shad-button>
           <edge-shad-button
             :disabled="state.loading"
-            class="text-white w-100 bg-slate-800 hover:bg-slate-400"
+            class="w-100 bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-300"
             type="submit"
           >
             <Loader2 v-if="state.loading" class="w-4 h-4 mr-2 animate-spin" />

@@ -217,37 +217,48 @@ const cmsSiteTabs = useState('cmsSiteTabs', () => ({
   pages: true,
   posts: true,
   inbox: true,
+  members: false,
+  media: true,
+  mediaEdit: true,
 }))
 const cmsTabAccess = computed(() => {
   const normalized = {
     pages: cmsSiteTabs.value?.pages !== false,
     posts: cmsSiteTabs.value?.posts !== false,
     inbox: cmsSiteTabs.value?.inbox !== false,
+    members: cmsSiteTabs.value?.members === true,
+    media: cmsSiteTabs.value?.media !== false,
+    mediaEdit: cmsSiteTabs.value?.mediaEdit === true,
   }
-  if (!normalized.pages && !normalized.posts && !normalized.inbox) {
+  if (!normalized.pages && !normalized.posts && !normalized.inbox && !normalized.members && !normalized.media) {
     normalized.inbox = true
   }
   return normalized
 })
+const currentUserHasRoleAt = (suffix, roles = ['user', 'writer', 'editor', 'admin']) => {
+  const orgId = edgeGlobal.edgeState.currentOrganization
+  const orgPath = `organizations-${String(orgId || '').replaceAll('/', '-')}`
+  const collectionPath = suffix ? `${orgPath}-${suffix}` : orgPath
+  return (edgeFirebase?.user?.roles || []).some(role =>
+    role.collectionPath === collectionPath && roles.includes(role.role),
+  )
+}
+const currentUserCanViewSiteMedia = computed(() =>
+  cmsMultiOrg.value && (isOrgAdmin.value
+  || currentOrgRoleName.value === 'site admin'
+  || currentUserHasRoleAt('sites-media')),
+)
+const currentUserCanEditSiteMedia = computed(() =>
+  cmsMultiOrg.value && (isOrgAdmin.value
+  || currentOrgRoleName.value === 'site admin'
+  || currentUserHasRoleAt('sites-media', ['editor', 'admin'])),
+)
 const canViewPagesTab = computed(() => cmsTabAccess.value.pages)
 const canViewPostsTab = computed(() => cmsTabAccess.value.posts)
 const canViewInboxTab = computed(() => cmsTabAccess.value.inbox)
-const canViewMediaTab = computed(() => !isTemplateSite.value)
+const canViewMediaTab = computed(() => !isTemplateSite.value && (!cmsMultiOrg.value || cmsTabAccess.value.media || currentUserCanViewSiteMedia.value))
+const canEditMediaTab = computed(() => !isTemplateSite.value && (!cmsMultiOrg.value || cmsTabAccess.value.mediaEdit || currentUserCanEditSiteMedia.value))
 const hidePublishStatusAndActions = computed(() => cmsMultiOrg.value && !canViewPagesTab.value)
-const defaultViewMode = computed(() => {
-  if (canViewPagesTab.value)
-    return 'pages'
-  if (canViewPostsTab.value)
-    return 'posts'
-  if (canViewInboxTab.value)
-    return 'submissions'
-  if (canViewRestrictedTab.value)
-    return 'restricted'
-  if (canViewMediaTab.value)
-    return 'media'
-  return 'pages'
-})
-
 const siteData = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site] || {}
 })
@@ -262,7 +273,7 @@ const canManageRestrictedContent = computed(() => {
     return true
   if (!cmsMultiOrg.value)
     return currentOrgRoleName.value === 'admin'
-  return currentOrgRoleName.value === 'admin' || currentOrgRoleName.value === 'site admin'
+  return currentOrgRoleName.value === 'admin' || currentOrgRoleName.value === 'site admin' || cmsTabAccess.value.members
 })
 const showMembersTab = computed(() => Boolean(siteData.value?.showMembersTab))
 const canViewRestrictedTab = computed(() => {
@@ -271,6 +282,19 @@ const canViewRestrictedTab = computed(() => {
   if (!cmsMultiOrg.value)
     return true
   return canManageRestrictedContent.value
+})
+const defaultViewMode = computed(() => {
+  if (canViewPagesTab.value)
+    return 'pages'
+  if (canViewPostsTab.value)
+    return 'posts'
+  if (canViewInboxTab.value)
+    return 'submissions'
+  if (canViewRestrictedTab.value)
+    return 'restricted'
+  if (canViewMediaTab.value)
+    return 'media'
+  return 'pages'
 })
 const restrictedContentEnabled = computed(() => Boolean(siteData.value?.restrictedContent?.enabled))
 const publishedSiteSettings = computed(() => {
@@ -3524,6 +3548,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
               <edge-cms-media-manager
                 :site="props.site"
                 :include-files="true"
+                :read-only="!canEditMediaTab"
                 :show-cms-site-filter="true"
                 :mark-pdf-as-flipbook="true"
                 cms-site-filter-default="current"
