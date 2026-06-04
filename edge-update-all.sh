@@ -12,7 +12,8 @@ Usage: ./edge-update-all.sh
 Updates:
 1) edge subtree (via edge-pull.sh)
 2) sync edge/functions + index and root config files
-3) install packages listed in edge/root/edge.packages.json
+3) migrate app CMS access helper in pages/app.vue when present
+4) install packages listed in edge/root/edge.packages.json
 EOF
 }
 
@@ -331,6 +332,18 @@ fs.writeFileSync(localPath, `${JSON.stringify(localJson, null, 2)}\n`)
 EOF
 }
 
+migrate_app_cms_access() {
+  migration_script="$PROJECT_ROOT/edge/scripts/migrate-app-cms-access.js"
+  app_vue="$PROJECT_ROOT/pages/app.vue"
+
+  if [ ! -f "$migration_script" ] || [ ! -f "$app_vue" ]; then
+    return
+  fi
+
+  echo "==> Migrating CMS access helper in pages/app.vue"
+  node "$migration_script" "$app_vue"
+}
+
 install_edge_packages() {
   edge_packages_manifest="$PROJECT_ROOT/edge/root/edge.packages.json"
 
@@ -407,6 +420,7 @@ merge_edge_functions_index
 merge_firestore_indexes
 merge_history_config
 merge_firebase_json
+migrate_app_cms_access
 install_edge_packages
 
 echo "==> Done"

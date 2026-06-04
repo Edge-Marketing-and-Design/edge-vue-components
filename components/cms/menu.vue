@@ -129,6 +129,44 @@ const normalizeForCompare = (value) => {
 const stableSerialize = value => JSON.stringify(normalizeForCompare(value))
 const areEqualNormalized = (a, b) => stableSerialize(a) === stableSerialize(b)
 const isBlankString = value => String(value || '').trim() === ''
+const hasStructuredDataCmsToken = value => typeof value === 'string' && /\{\{\s*cms-[^}]+\s*\}\}/.test(value)
+const parseStructuredDataValue = (value) => {
+  if (!value)
+    return null
+  if (typeof value === 'object')
+    return value
+  try {
+    return JSON.parse(value)
+  }
+  catch {
+    return null
+  }
+}
+const matchesDefaultStructuredDataShape = (current, defaultValue) => {
+  if (hasStructuredDataCmsToken(defaultValue))
+    return current === defaultValue
+  if (Array.isArray(defaultValue))
+    return Array.isArray(current)
+  if (defaultValue && typeof defaultValue === 'object') {
+    if (!current || typeof current !== 'object' || Array.isArray(current))
+      return false
+    const currentKeys = Object.keys(current).sort()
+    const defaultKeys = Object.keys(defaultValue).sort()
+    if (stableSerialize(currentKeys) !== stableSerialize(defaultKeys))
+      return false
+    return defaultKeys.every(key => matchesDefaultStructuredDataShape(current[key], defaultValue[key]))
+  }
+  return true
+}
+const isCustomStructuredDataTemplate = (value) => {
+  if (!String(value || '').trim())
+    return false
+  const current = parseStructuredDataValue(value)
+  const defaultValue = parseStructuredDataValue(buildPageStructuredData())
+  if (!current || !defaultValue)
+    return true
+  return !matchesDefaultStructuredDataShape(current, defaultValue)
+}
 const isJsonInvalid = (value) => {
   if (value === null || value === undefined)
     return false
@@ -966,6 +1004,7 @@ const buildPagePayloadFromTemplate = (templateDoc, slug) => {
     metaTitle: '',
     metaDescription: '',
     structuredData,
+    structuredDataAiLocked: templateDoc ? isCustomStructuredDataTemplate(templateStructuredData) : false,
     postMetaTitle: '',
     postMetaDescription: '',
     postStructuredData: '',
@@ -984,6 +1023,7 @@ const buildPagePayloadFromTemplate = (templateDoc, slug) => {
   copy.blockIds = deriveBlockIds(copy)
   if (!String(copy.structuredData || '').trim())
     copy.structuredData = structuredData
+  copy.structuredDataAiLocked = isCustomStructuredDataTemplate(templateStructuredData)
   return { ...basePayload, ...copy }
 }
 
@@ -1243,8 +1283,38 @@ const canRename = (menuName) => {
 
 const publishPage = async (pageId) => {
   const pageData = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`] || {}
-  if (pageData[pageId]) {
-    await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`, pageData[pageId])
+  const pageDoc = pageData[pageId]
+  if (!pageDoc)
+    return null
+
+  const normalizedVersion = Number(pageDoc?.version)
+  const pageVersion = Number.isFinite(normalizedVersion) ? Math.max(0, Math.trunc(normalizedVersion)) : 1
+  await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`, {
+    ...pageDoc,
+    version: pageVersion,
+  })
+
+  const publishedSettingsPath = `${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`
+  try {
+    await edgeFirebase.changeDoc(publishedSettingsPath, props.site, {
+      [`pageVersions.${pageId}`]: pageVersion,
+    })
+  }
+  catch {
+    await edgeFirebase.storeDoc(publishedSettingsPath, {
+      docId: props.site,
+      pageVersions: {
+        [pageId]: pageVersion,
+      },
+    })
+  }
+
+  await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, {
+    [`pageVersions.${pageId}`]: pageVersion,
+  })
+
+  return {
+    pageVersion,
   }
 }
 const unPublishPage = async (pageId) => {

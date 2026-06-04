@@ -33,7 +33,7 @@ const canManageRestrictionAssignments = computed(() => {
     return currentOrgRoleName.value === 'admin'
   return currentOrgRoleName.value === 'admin' || currentOrgRoleName.value === 'site admin'
 })
-const isDevModeEnabled = computed(() => process.dev || Boolean(edgeGlobal.edgeState.devOverride))
+const isDevModeEnabled = computed(() => Boolean(edgeGlobal.edgeState.devOverride))
 const canOpenPreviewBlockContentEditor = computed(() => {
   return isDevModeEnabled.value
 })

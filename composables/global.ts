@@ -327,6 +327,12 @@ const getRoleName = (roles: RoleType[], orgId: string) => {
 }
 
 const isAdminGlobal = (edgeFirebase: any) => computed(() => {
+  const rootRole = edgeFirebase?.user?.roles.find((role: any) =>
+    role.collectionPath === '-' && role.role === 'admin',
+  )
+  if (rootRole)
+    return true
+
   const roleCompares = dupObject(edgeState.isAdminCollections)
   roleCompares.push(`organizations-${edgeState.currentOrganization}`)
   console.log('roles compare')
@@ -401,31 +407,16 @@ const iconFromMenu = (route: { path: string }): string => {
   return best.icon
 }
 const toBool = (v: any): boolean => v === true || v === 'true' || v === 1 || v === '1'
-const DEV_OVERRIDE_KEY = 'edgeDevOverride'
-
 const devOverrideEnabled = (): boolean => {
-  if (edgeState.devOverride)
-    return true
-  if (typeof window === 'undefined')
-    return edgeState.devOverride
-  try {
-    return localStorage.getItem(DEV_OVERRIDE_KEY) === '1'
-  }
-  catch (error) {
-    console.warn('dev override read failed', error)
-    return false
-  }
+  return edgeState.devOverride === true
 }
 
 const syncDevOverride = () => {
-  if (typeof window === 'undefined')
-    return
   edgeState.devOverride = devOverrideEnabled()
 }
 
 const allowMenuItem = (item: any, isAdmin: boolean) => {
-  // const config = useRuntimeConfig()
-  const isDev = process.dev || devOverrideEnabled()
+  const isDev = devOverrideEnabled()
   const adminOnly = toBool(item.adminOnly)
   const devOnly = toBool(item.devOnly)
   // console.log('allowMenuItem', { item, isAdmin, isDev, adminOnly, devOnly })

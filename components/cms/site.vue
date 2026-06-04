@@ -39,6 +39,44 @@ const normalizeForCompare = (value) => {
 
 const stableSerialize = value => JSON.stringify(normalizeForCompare(value))
 const areEqualNormalized = (a, b) => stableSerialize(a) === stableSerialize(b)
+const hasStructuredDataCmsToken = value => typeof value === 'string' && /\{\{\s*cms-[^}]+\s*\}\}/.test(value)
+const parseStructuredDataValue = (value) => {
+  if (!value)
+    return null
+  if (typeof value === 'object')
+    return value
+  try {
+    return JSON.parse(value)
+  }
+  catch {
+    return null
+  }
+}
+const matchesDefaultStructuredDataShape = (current, defaultValue) => {
+  if (hasStructuredDataCmsToken(defaultValue))
+    return current === defaultValue
+  if (Array.isArray(defaultValue))
+    return Array.isArray(current)
+  if (defaultValue && typeof defaultValue === 'object') {
+    if (!current || typeof current !== 'object' || Array.isArray(current))
+      return false
+    const currentKeys = Object.keys(current).sort()
+    const defaultKeys = Object.keys(defaultValue).sort()
+    if (stableSerialize(currentKeys) !== stableSerialize(defaultKeys))
+      return false
+    return defaultKeys.every(key => matchesDefaultStructuredDataShape(current[key], defaultValue[key]))
+  }
+  return true
+}
+const isCustomStructuredDataTemplate = (value) => {
+  if (!String(value || '').trim())
+    return false
+  const current = parseStructuredDataValue(value)
+  const defaultValue = parseStructuredDataValue(buildPageStructuredData())
+  if (!current || !defaultValue)
+    return true
+  return !matchesDefaultStructuredDataShape(current, defaultValue)
+}
 const isJsonInvalid = (value) => {
   if (value === null || value === undefined)
     return false
@@ -193,11 +231,16 @@ const schemas = {
 const isAdmin = computed(() => {
   return edgeGlobal.isAdminGlobal(edgeFirebase).value
 })
+const isRootAdmin = computed(() =>
+  (edgeFirebase?.user?.roles || []).some(role =>
+    String(role?.collectionPath || '').trim() === '-' && role?.role === 'admin',
+  ),
+)
 const currentOrgRoleName = computed(() => {
   return String(edgeGlobal.getRoleName(edgeFirebase?.user?.roles || [], edgeGlobal.edgeState.currentOrganization) || '').toLowerCase()
 })
 const isOrgAdmin = computed(() => {
-  return currentOrgRoleName.value === 'admin'
+  return isRootAdmin.value || currentOrgRoleName.value === 'admin'
 })
 const canCreateSite = computed(() => {
   if (!props.disableAddSiteForNonAdmin)
@@ -208,7 +251,7 @@ const cmsMultiOrg = useState('cmsMultiOrg', () => false)
 const canEditSiteSettings = computed(() => {
   if (!cmsMultiOrg.value)
     return true
-  return currentOrgRoleName.value === 'admin' || currentOrgRoleName.value === 'site admin'
+  return isRootAdmin.value || currentOrgRoleName.value === 'admin' || currentOrgRoleName.value === 'site admin'
 })
 const useMenuPublishLabels = computed(() => {
   return cmsMultiOrg.value && !canEditSiteSettings.value
@@ -933,6 +976,7 @@ const buildPagePayloadFromTemplateDoc = (templateDoc, slug, displayName = '') =>
     metaTitle: templateDoc?.metaTitle || '',
     metaDescription: templateDoc?.metaDescription || '',
     structuredData: templateStructuredData || buildPageStructuredData(),
+    structuredDataAiLocked: isCustomStructuredDataTemplate(templateStructuredData),
     doc_created_at: timestamp,
     last_updated: timestamp,
   }
@@ -1372,9 +1416,20 @@ const siteSettingsDiffDetails = computed(() => {
   return details
 })
 
-const publishSiteSettings = async () => {
+const publishSiteSettings = async ({ siteVersion = null, bumpVersion = true } = {}) => {
   console.log('Publishing site settings for site:', props.site)
-  await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`, siteData.value)
+  const nextVersion = siteVersion || (bumpVersion ? getNextVersion(siteData.value?.version) : siteData.value?.version)
+  const payload = {
+    ...siteData.value,
+    version: nextVersion,
+  }
+  if (bumpVersion) {
+    await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, {
+      version: nextVersion,
+    })
+  }
+  await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`, payload)
+  return nextVersion
 }
 
 const discardSiteSettings = async () => {
@@ -1427,9 +1482,10 @@ const unPublishSite = async () => {
   await edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`, props.site)
 }
 
-const publishSite = async () => {
+const publishSite = async ({ siteVersion = null, bumpSiteVersion = true } = {}) => {
   const pagesData = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`] || {}
   const pageVersions = {}
+  const nextSiteVersion = siteVersion || (bumpSiteVersion ? getNextVersion(siteData.value?.version) : siteData.value?.version)
 
   for (const [pageId, pageData] of Object.entries(pagesData)) {
     const normalizedVersion = Number(pageData?.version)
@@ -1441,22 +1497,32 @@ const publishSite = async () => {
     })
   }
 
-  await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, {
+  const siteUpdate = {
     pageVersions,
-  })
+  }
+  if (bumpSiteVersion)
+    siteUpdate.version = nextSiteVersion
+
+  await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, siteUpdate)
 
   try {
-    await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`, props.site, {
+    const publishedUpdate = {
       pageVersions,
-    })
+    }
+    if (nextSiteVersion)
+      publishedUpdate.version = nextSiteVersion
+    await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`, props.site, publishedUpdate)
   }
   catch {
     await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`, {
       ...siteData.value,
       docId: props.site,
+      version: nextSiteVersion,
       pageVersions,
     })
   }
+
+  return nextSiteVersion
 }
 
 const publishSiteAndSettings = async () => {
@@ -1464,8 +1530,8 @@ const publishSiteAndSettings = async () => {
     return
   state.publishSiteLoading = true
   try {
-    await publishSiteSettings()
-    await publishSite()
+    const siteVersion = await publishSiteSettings({ bumpVersion: true })
+    await publishSite({ siteVersion, bumpSiteVersion: false })
   }
   finally {
     state.publishSiteLoading = false
@@ -1875,11 +1941,11 @@ const exportSitePage = (item) => {
   pageMenuRef.value?.exportPage?.(docId)
 }
 
-const publishSitePage = (item) => {
+const publishSitePage = async (item) => {
   const docId = String(item?.docId || '').trim()
   if (!docId)
     return
-  pageMenuRef.value?.publishPage?.(docId)
+  await pageMenuRef.value?.publishPage?.(docId)
 }
 
 const unPublishSitePage = (item) => {
@@ -2653,6 +2719,44 @@ const isSiteSettingPublished = computed(() => {
   return !!publishedSite
 })
 
+const cacheVerificationNow = ref(Date.now())
+let cacheVerificationTimer = null
+onMounted(() => {
+  cacheVerificationTimer = setInterval(() => {
+    cacheVerificationNow.value = Date.now()
+  }, 1000)
+})
+onBeforeUnmount(() => {
+  if (cacheVerificationTimer)
+    clearInterval(cacheVerificationTimer)
+})
+
+const cacheVerificationStatus = computed(() => publishedSiteSettings.value?.cacheVerification || {})
+const cacheVerificationVerifiedRecently = computed(() => {
+  const status = cacheVerificationStatus.value || {}
+  if (status.status !== 'verified')
+    return false
+  const completedAt = Number(status.completedAt || status.lastCheckedAt || 0)
+  return Number.isFinite(completedAt) && cacheVerificationNow.value - completedAt <= 10000
+})
+const showCacheVerificationStatus = computed(() => {
+  const status = String(cacheVerificationStatus.value?.status || '')
+  return ['running', 'timeout', 'failed'].includes(status) || cacheVerificationVerifiedRecently.value
+})
+const cacheVerificationLabel = computed(() => {
+  const status = cacheVerificationStatus.value || {}
+  const label = String(status.activeLabel || '').trim()
+  if (!label)
+    return 'Clear Cache'
+  if (status.status === 'verified')
+    return `Cache Cleared: ${label}`
+  const total = Number(status.total)
+  const completed = Number(status.completed)
+  if (status.status === 'running' && Number.isFinite(total) && total > 1 && Number.isFinite(completed))
+    return `Clear Cache: ${label} ${Math.min(completed + 1, total)} of ${total}`
+  return `Clear Cache: ${label}`
+})
+
 const isAnyPagesDiff = computed(() => {
   const pagesData = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`] || {}
   const publishedData = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`] || {}
@@ -3290,12 +3394,46 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                     <FolderUp v-else class="h-3.5 w-3.5" />
                     Publish Site
                   </edge-shad-button>
+                  <div
+                    v-if="showCacheVerificationStatus"
+                    class="flex gap-1 items-center text-xs py-1 px-3 rounded"
+                    :class="cacheVerificationStatus.status === 'running'
+                      ? 'bg-sky-100 text-sky-800'
+                      : cacheVerificationStatus.status === 'verified'
+                        ? 'bg-green-100 text-green-800'
+                        : 'bg-red-100 text-red-800'"
+                  >
+                    <Loader2 v-if="cacheVerificationStatus.status === 'running'" class="w-3 h-3 animate-spin" />
+                    <FileCheck v-else-if="cacheVerificationStatus.status === 'verified'" class="w-3 h-3" />
+                    <CircleAlert v-else class="w-3 h-3" />
+                    <span class="font-medium text-[10px]">
+                      {{ cacheVerificationLabel }}
+                    </span>
+                  </div>
                 </div>
-                <div v-else key="published" class="flex gap-1 items-center bg-green-100 text-xs py-1 px-3 text-green-800 rounded">
-                  <FileCheck class="!text-green-800 w-3 h-6" />
-                  <span class="font-medium text-[10px]">
-                    {{ useMenuPublishLabels ? 'Menu Published' : 'Settings Published' }}
-                  </span>
+                <div v-else key="published" class="flex gap-2 items-center">
+                  <div class="flex gap-1 items-center bg-green-100 text-xs py-1 px-3 text-green-800 rounded">
+                    <FileCheck class="!text-green-800 w-3 h-6" />
+                    <span class="font-medium text-[10px]">
+                      {{ useMenuPublishLabels ? 'Menu Published' : 'Settings Published' }}
+                    </span>
+                  </div>
+                  <div
+                    v-if="showCacheVerificationStatus"
+                    class="flex gap-1 items-center text-xs py-1 px-3 rounded"
+                    :class="cacheVerificationStatus.status === 'running'
+                      ? 'bg-sky-100 text-sky-800'
+                      : cacheVerificationStatus.status === 'verified'
+                        ? 'bg-green-100 text-green-800'
+                        : 'bg-red-100 text-red-800'"
+                  >
+                    <Loader2 v-if="cacheVerificationStatus.status === 'running'" class="w-3 h-3 animate-spin" />
+                    <FileCheck v-else-if="cacheVerificationStatus.status === 'verified'" class="w-3 h-3" />
+                    <CircleAlert v-else class="w-3 h-3" />
+                    <span class="font-medium text-[10px]">
+                      {{ cacheVerificationLabel }}
+                    </span>
+                  </div>
                 </div>
               </Transition>
             </div>

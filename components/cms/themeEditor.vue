@@ -39,10 +39,32 @@ const state = reactive({
 
 const editorViewportHeight = 'calc(100vh - 420px)'
 
+const isValidJsonInput = (value) => {
+  if (value === undefined || value === null || value === '')
+    return true
+  if (typeof value === 'object')
+    return true
+  if (typeof value !== 'string')
+    return false
+  try {
+    JSON.parse(value)
+    return true
+  }
+  catch {
+    return false
+  }
+}
+
+const jsonFieldSchema = label => z.any().refine(isValidJsonInput, {
+  message: `${label} must be valid JSON. Check for trailing commas or syntax errors.`,
+})
+
 const blockSchema = toTypedSchema(z.object({
   name: z.string({
     required_error: 'Name is required',
   }).min(1, { message: 'Name is required' }),
+  theme: jsonFieldSchema('Theme JSON'),
+  headJSON: jsonFieldSchema('Head JSON'),
 }))
 
 onMounted(() => {
@@ -1286,6 +1308,7 @@ onBeforeMount(async () => {
                     title="Theme JSON"
                     language="json"
                     name="content"
+                    validate-json
                     :height="editorViewportHeight"
                     class="w-full"
                   />
@@ -1297,6 +1320,7 @@ onBeforeMount(async () => {
                     title="Head JSON"
                     language="json"
                     name="headJSON"
+                    validate-json
                     :height="editorViewportHeight"
                     class="w-full"
                   />
