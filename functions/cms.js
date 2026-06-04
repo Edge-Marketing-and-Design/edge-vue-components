@@ -1271,6 +1271,233 @@ const formatValue = (value) => {
   }
 }
 
+const DEFAULT_EMAIL_TEMPLATE_ID = 'default'
+const DEFAULT_EMAIL_TEMPLATE_EXCLUDED_FIELDS = ['siteId', 'pageId', 'blockId', 'emailTemplate']
+
+const getBuiltInDefaultEmailTemplate = () => ({
+  docId: DEFAULT_EMAIL_TEMPLATE_ID,
+  name: 'Default',
+  subject: '{{subject}}',
+  html: [
+    '<div style="margin:0; padding:24px; background:#f8fafc; font-family:Arial,Helvetica,sans-serif; color:#111827;">',
+    '  <div style="max-width:680px; margin:0 auto; background:#ffffff; border:1px solid #e5e7eb; border-radius:8px; overflow:hidden;">',
+    '    <div style="background:#111827; color:#ffffff; padding:20px 24px;">',
+    '      <h1 style="margin:0; font-size:20px; line-height:1.35;">{{subject}}</h1>',
+    '    </div>',
+    '    <div style="padding:24px;">',
+    '      <p style="margin:0 0 18px; color:#4b5563; font-size:14px; line-height:1.6;">A new submission was received.</p>',
+    '      {{{all_fields_html}}}',
+    '    </div>',
+    '  </div>',
+    '</div>',
+  ].join('\n'),
+  text: '{{subject}}\n\n{{all_fields}}',
+  excludedFields: DEFAULT_EMAIL_TEMPLATE_EXCLUDED_FIELDS,
+})
+
+const humanizeEmailFieldName = value =>
+  String(value || '')
+    .replace(/\[(\d+)\]/g, ' $1')
+    .replace(/[._-]+/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, char => char.toUpperCase())
+
+const flattenEmailTemplateFields = (value, prefix = '') => {
+  if (value === undefined || value === null)
+    return []
+  if (Array.isArray(value))
+    return value.flatMap((item, index) => flattenEmailTemplateFields(item, `${prefix}[${index}]`))
+  if (typeof value === 'object') {
+    return Object.entries(value).flatMap(([key, item]) =>
+      flattenEmailTemplateFields(item, prefix ? `${prefix}.${key}` : key),
+    )
+  }
+  return [{ key: prefix, value }]
+}
+
+const normalizeEmailTemplateValue = (value) => {
+  if (Array.isArray(value))
+    return value.map(item => normalizeEmailTemplateValue(item))
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, normalizeEmailTemplateValue(item)]),
+    )
+  }
+  if (typeof value !== 'string')
+    return value
+
+  const trimmed = value.trim()
+  if (!trimmed)
+    return value
+
+  try {
+    return normalizeEmailTemplateValue(JSON.parse(trimmed))
+  }
+  catch {
+    return value
+  }
+}
+
+const normalizeEmailTemplateData = (data = {}) => {
+  if (!data || typeof data !== 'object')
+    return {}
+  return Object.fromEntries(
+    Object.entries(data).map(([key, value]) => [key, normalizeEmailTemplateValue(value)]),
+  )
+}
+
+const setEmailTemplateContextByPath = (target, path, value) => {
+  const parts = String(path || '')
+    .replace(/\[(\d+)\]/g, '.$1')
+    .split('.')
+    .filter(Boolean)
+  if (!parts.length)
+    return
+  let current = target
+  parts.forEach((part, index) => {
+    const isLast = index === parts.length - 1
+    if (isLast) {
+      current[part] = value
+      return
+    }
+    if (!current[part] || typeof current[part] !== 'object')
+      current[part] = /^\d+$/.test(parts[index + 1]) ? [] : {}
+    current = current[part]
+  })
+}
+
+const emailTemplateEntryIsExcluded = (key, template) => {
+  const excluded = new Set(Array.isArray(template?.excludedFields) ? template.excludedFields : DEFAULT_EMAIL_TEMPLATE_EXCLUDED_FIELDS)
+  const lastSegment = String(key || '').split('.').pop()
+  return excluded.has(key) || excluded.has(lastSegment)
+}
+
+const getEmailTemplateFieldLabel = (key) => {
+  return humanizeEmailFieldName(key)
+}
+
+const buildEmailTemplateContext = ({ data, entries, subject, template }) => {
+  const context = {
+    subject: subject || DEFAULT_CONTACT_FORM_SUBJECT,
+  }
+  const normalizedData = normalizeEmailTemplateData(data)
+
+  Object.entries(normalizedData).forEach(([key, value]) => {
+    context[key] = value
+    setEmailTemplateContextByPath(context, key, value)
+  })
+
+  const sourceEntries = entries?.length
+    ? entries.map(entry => ({
+      ...entry,
+      value: normalizeEmailTemplateValue(entry.value),
+    }))
+    : flattenEmailTemplateFields(normalizedData)
+
+  const visibleEntries = sourceEntries
+    .filter(entry => entry?.key && !emailTemplateEntryIsExcluded(entry.key, template))
+    .map(entry => ({
+      key: entry.key,
+      label: getEmailTemplateFieldLabel(entry.key),
+      value: entry.value,
+    }))
+
+  context.entries = visibleEntries
+  context.all_fields = visibleEntries.length
+    ? visibleEntries.map(entry => `${entry.label}: ${formatValue(entry.value)}`).join('\n')
+    : '(no fields provided)'
+  context.all_fields_html = visibleEntries.length
+    ? [
+        '<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%; border-collapse:collapse; border:1px solid #e5e7eb;">',
+        ...visibleEntries.map((entry, index) => [
+          `<tr style="background:${index % 2 === 0 ? '#ffffff' : '#f9fafb'};">`,
+          `<td style="width:36%; padding:10px 12px; border-bottom:1px solid #e5e7eb; font-weight:700; color:#374151; vertical-align:top;">${escapeHtml(entry.label)}</td>`,
+          `<td style="padding:10px 12px; border-bottom:1px solid #e5e7eb; color:#111827; white-space:pre-wrap;">${escapeHtml(formatValue(entry.value))}</td>`,
+          '</tr>',
+        ].join('')),
+        '</table>',
+      ].join('')
+    : '<p style="margin:0; color:#6b7280;">No fields were provided.</p>'
+
+  return context
+}
+
+const tokenizeEmailTemplatePath = path =>
+  String(path || '')
+    .replace(/\[(\d+)\]/g, '.$1')
+    .split('.')
+    .filter(Boolean)
+
+const resolveEmailTemplatePath = (ctxStack, path) => {
+  if (!path || path === '.')
+    return ctxStack[0]
+  const parts = tokenizeEmailTemplatePath(path)
+  for (const ctx of ctxStack) {
+    let current = ctx
+    let found = true
+    for (const part of parts) {
+      if (current == null) {
+        found = false
+        break
+      }
+      current = current[part]
+    }
+    if (found && current !== undefined)
+      return current
+  }
+  return undefined
+}
+
+const isPlainEmailTemplateObject = value => Object.prototype.toString.call(value) === '[object Object]'
+
+const renderEmailTemplateString = (template, ctxStack, options = {}) => {
+  let output = String(template ?? '')
+  const sectionRe = /\{\{([#^])([-\w.\[\]@]+)\}\}([\s\S]*?)\{\{\/\2\}\}/g
+  let match
+  // eslint-disable-next-line no-cond-assign
+  while ((match = sectionRe.exec(output))) {
+    const [full, sigil, key, inner] = match
+    const value = resolveEmailTemplatePath(ctxStack, key)
+    const inverted = sigil === '^'
+    let replacement = ''
+    if (!inverted) {
+      if (Array.isArray(value))
+        replacement = value.map(item => renderEmailTemplateString(inner, [item, ...ctxStack], options)).join('')
+      else if (isPlainEmailTemplateObject(value))
+        replacement = renderEmailTemplateString(inner, [value, ...ctxStack], options)
+      else if (value)
+        replacement = renderEmailTemplateString(inner, ctxStack, options)
+    }
+    else if (!value || (Array.isArray(value) && value.length === 0)) {
+      replacement = renderEmailTemplateString(inner, ctxStack, options)
+    }
+    output = output.slice(0, match.index) + replacement + output.slice(match.index + full.length)
+    sectionRe.lastIndex = 0
+  }
+
+  output = output.replace(/\{\{\{\s*([^}]+?)\s*\}\}\}/g, (_, expr) => {
+    const value = resolveEmailTemplatePath(ctxStack, expr.trim())
+    return value == null ? '' : String(value)
+  })
+  output = output.replace(/\{\{\s*([^#\/\^\s][^}]*)\}\}/g, (_, expr) => {
+    const value = resolveEmailTemplatePath(ctxStack, expr.trim())
+    const normalized = value == null ? '' : String(value)
+    return options.escape === false ? normalized : escapeHtml(normalized)
+  })
+  return output
+}
+
+const getOrgEmailTemplate = async (orgId, templateId) => {
+  const normalizedOrgId = String(orgId || '').trim()
+  const normalizedTemplateId = String(templateId || '').trim()
+  if (!normalizedOrgId || !normalizedTemplateId)
+    return null
+  const snap = await db.collection('organizations').doc(normalizedOrgId).collection('emailTemplates').doc(normalizedTemplateId).get()
+  return snap.exists ? { ...snap.data(), docId: snap.id } : null
+}
+
 const getPublishedEmailTo = async (orgId, siteId, pageId, blockId) => {
   if (!orgId || !siteId || !pageId || !blockId)
     return []
@@ -1304,11 +1531,9 @@ const sendContactFormEmail = async ({
   to,
   replyTo,
   subject,
+  data,
   entries,
   orgId,
-  siteId,
-  pageId,
-  blockId,
 }) => {
   if (!SENDGRID_API_KEY || !SENDGRID_FROM_EMAIL) {
     logger.error('SendGrid config missing')
@@ -1332,25 +1557,27 @@ const sendContactFormEmail = async ({
     : ['- (no fields provided)']
   const textBody = fieldLines.join('\n')
 
-  const htmlFields = entries.length
-    ? entries
-      .map(entry => `<li><strong>${escapeHtml(entry.key)}:</strong> ${escapeHtml(formatValue(entry.value))}</li>`)
-      .join('')
-    : '<li>(no fields provided)</li>'
-  const htmlBody = `
-    <div>
-      <h2>${escapeHtml(subject || DEFAULT_CONTACT_FORM_SUBJECT)}</h2>
-      <ul>${htmlFields}</ul>
-    </div>
-  `
+  const requestedTemplateId = String(data?.emailTemplate || '').trim() || DEFAULT_EMAIL_TEMPLATE_ID
+  const storedTemplate = await getOrgEmailTemplate(orgId, requestedTemplateId)
+    || await getOrgEmailTemplate(orgId, DEFAULT_EMAIL_TEMPLATE_ID)
+  const emailTemplate = storedTemplate || getBuiltInDefaultEmailTemplate()
+  const templateContext = buildEmailTemplateContext({
+    data,
+    entries,
+    subject: subject || DEFAULT_CONTACT_FORM_SUBJECT,
+    template: emailTemplate,
+  })
+  const renderedSubject = renderEmailTemplateString(emailTemplate.subject || '{{subject}}', [templateContext], { escape: false }) || subject || DEFAULT_CONTACT_FORM_SUBJECT
+  const renderedText = renderEmailTemplateString(emailTemplate.text || '{{all_fields}}', [templateContext], { escape: false }) || textBody
+  const htmlBody = renderEmailTemplateString(emailTemplate.html || getBuiltInDefaultEmailTemplate().html, [templateContext])
 
   try {
     const response = await axios.post('https://api.sendgrid.com/v3/mail/send', {
-      personalizations: [{ to: recipients.map(email => ({ email })), subject: subject || DEFAULT_CONTACT_FORM_SUBJECT }],
+      personalizations: [{ to: recipients.map(email => ({ email })), subject: renderedSubject }],
       from: { email: SENDGRID_FROM_EMAIL },
       reply_to: { email: replyTo || SENDGRID_FROM_EMAIL },
       content: [
-        { type: 'text/plain', value: textBody },
+        { type: 'text/plain', value: renderedText },
         { type: 'text/html', value: htmlBody },
       ],
     }, {
@@ -1365,6 +1592,7 @@ const sendContactFormEmail = async ({
       status: response?.status ?? 202,
       message: 'accepted',
       recipients,
+      emailTemplate: emailTemplate.docId || requestedTemplateId,
     }
   }
   catch (error) {
@@ -1549,6 +1777,7 @@ exports.trackHistory = onRequest(async (req, res) => {
               to: emailTo,
               replyTo,
               subject,
+              data,
               entries,
               orgId,
               siteId,
