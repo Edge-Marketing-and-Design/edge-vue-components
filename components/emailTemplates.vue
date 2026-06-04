@@ -180,6 +180,37 @@ const flattenFields = (value, prefix = '') => {
   return [{ key: prefix, value }]
 }
 
+const normalizeTemplateValue = (value) => {
+  if (Array.isArray(value))
+    return value.map(item => normalizeTemplateValue(item))
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, normalizeTemplateValue(item)]),
+    )
+  }
+  if (typeof value !== 'string')
+    return value
+
+  const trimmed = value.trim()
+  if (!trimmed)
+    return value
+
+  try {
+    return normalizeTemplateValue(JSON.parse(trimmed))
+  }
+  catch {
+    return value
+  }
+}
+
+const normalizeTemplateData = (data = {}) => {
+  if (!data || typeof data !== 'object')
+    return {}
+  return Object.fromEntries(
+    Object.entries(data).map(([key, value]) => [key, normalizeTemplateValue(value)]),
+  )
+}
+
 const setByPath = (target, path, value) => {
   const parts = String(path || '')
     .replace(/\[(\d+)\]/g, '.$1')
@@ -212,12 +243,13 @@ const entryIsExcluded = (key, template) => {
 
 const buildTemplateContext = (data, template) => {
   const context = {}
-  Object.entries(data || {}).forEach(([key, value]) => {
+  const normalizedData = normalizeTemplateData(data)
+  Object.entries(normalizedData).forEach(([key, value]) => {
     context[key] = value
     setByPath(context, key, value)
   })
 
-  const entries = flattenFields(data)
+  const entries = flattenFields(normalizedData)
     .filter(entry => entry.key && !entryIsExcluded(entry.key, template))
     .map(entry => ({
       key: entry.key,
