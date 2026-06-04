@@ -21,6 +21,8 @@ const props = defineProps({
 })
 const edgeFirebase = inject('edgeFirebase')
 const cmsMultiOrg = useState('cmsMultiOrg', () => false)
+const { singleOrg: envSingleOrg } = useEdgeOrgMode()
+const effectiveSingleOrg = computed(() => envSingleOrg.value || props.singleOrg)
 const isAdmin = computed(() => {
   const orgRole = edgeFirebase?.user?.roles.find(role =>
     role.collectionPath === edgeGlobal.edgeState.organizationDocPath.replaceAll('/', '-'),
@@ -129,6 +131,8 @@ const focusOrgPickerSearch = async () => {
 }
 
 const openOrgDialog = async () => {
+  if (effectiveSingleOrg.value)
+    return
   if (hasMultipleOrgs.value) {
     orgDialogOpen.value = true
     await focusOrgPickerSearch()
@@ -201,12 +205,12 @@ const firstPart = computed(() => {
         </CardHeader>
       </Card>
       <!-- </DropdownMenuItem> -->
-      <DropdownMenuSeparator v-if="!props.singleOrg" />
-      <DropdownMenuLabel v-if="!props.singleOrg" class="text-xs text-muted-foreground">
+      <DropdownMenuSeparator v-if="!effectiveSingleOrg" />
+      <DropdownMenuLabel v-if="!effectiveSingleOrg" class="text-xs text-muted-foreground">
         {{ props.title }}
       </DropdownMenuLabel>
       <DropdownMenuItem
-        v-if="!props.singleOrg"
+        v-if="!effectiveSingleOrg"
         class="cursor-pointer text-foreground"
         :disabled="!hasMultipleOrgs"
         @click="openOrgDialog"
@@ -264,7 +268,7 @@ const firstPart = computed(() => {
         <Check v-if="currentRoutePath === `${firstPart}/account/my-account`" class="h-3 w-3 mr-2 ml-auto" />
       </DropdownMenuItem>
       <DropdownMenuItem
-        v-if="!props.singleOrg"
+        v-if="!effectiveSingleOrg"
         class="cursor-pointer"
         :class="{ 'bg-accent': currentRoutePath === `${firstPart}/account/my-organizations` }"
         @click="goTo(`${firstPart}/account/my-organizations`)"

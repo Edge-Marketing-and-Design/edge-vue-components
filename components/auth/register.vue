@@ -44,6 +44,12 @@ const props = defineProps({
   },
 })
 
+const config = useRuntimeConfig()
+const { singleOrg: envSingleOrg } = useEdgeOrgMode()
+const effectiveSingleOrganization = computed(() => envSingleOrg.value || props.singleOrganization)
+const effectiveRegistrationCode = computed(() =>
+  effectiveSingleOrganization.value ? '' : (props.registrationCode || config.public.registrationCode || ''),
+)
 const multipleProviders = computed(() => props.providers.length > 1)
 
 const router = useRouter()
@@ -70,7 +76,7 @@ const register = reactive({
   meta: { name: '' },
   email: '',
   password: '',
-  registrationCode: props.registrationCode, // TODO - This should come from .env since it will be different on production
+  registrationCode: effectiveRegistrationCode.value,
   dynamicDocumentFieldValue: '',
   phoneNumber: null,
   phoneCode: '',
@@ -121,7 +127,7 @@ const waitForUserSnapshot = async (timeoutMs = 8000) => {
 const onSubmit = async () => {
   state.registering = true
 
-  if (props.singleOrganization) {
+  if (effectiveSingleOrganization.value) {
     register.dynamicDocumentFieldValue = register.meta.name
   }
   if (state.provider === 'phone') {
@@ -146,7 +152,7 @@ const onSubmit = async () => {
     // state.phoneConfirmDialog = true
   }
   else {
-    if (state.showRegistrationCode || !props.registrationCode) {
+    if (state.showRegistrationCode || !effectiveRegistrationCode.value) {
       register.registrationCode = state.registrationCode
     }
     if (state.provider === 'email' && register.email) {
@@ -249,14 +255,14 @@ const schema = computed(() => {
     }).min(14, { message: 'Not a valid phone number' }).max(14, { message: 'Not a valid phone number' })
   }
 
-  if (state.showRegistrationCode || !props.registrationCode) {
+  if (state.showRegistrationCode || !effectiveRegistrationCode.value) {
     baseSchema.registrationCode = z.string({
       required_error: 'Registration code is required',
     }).min(1, { message: 'Registration code is required' })
   }
 
   if (!state.showRegistrationCode) {
-    if (!props.singleOrganization) {
+    if (!effectiveSingleOrganization.value) {
       baseSchema.dynamicDocumentFieldValue = z.string({
         required_error: `${props.title} is required`,
       }).min(1, { message: `${props.title} is required` })
@@ -354,16 +360,16 @@ const customMaskOptions = {
             :mask-options="customMaskOptions"
           />
           <edge-shad-checkbox
-            v-if="!props.singleOrganization"
+            v-if="!effectiveSingleOrganization"
             v-model="state.showRegistrationCode"
             name="showRegistrationCode"
           >
             {{ props.joinMessage }}
           </edge-shad-checkbox>
 
-          <template v-if="!props.singleOrganization">
+          <template v-if="!effectiveSingleOrganization">
             <edge-shad-input
-              v-if="state.showRegistrationCode || !props.registrationCode"
+              v-if="state.showRegistrationCode || !effectiveRegistrationCode"
               v-model="state.registrationCode"
               label="Registration Code"
               name="registrationCode"
@@ -376,7 +382,7 @@ const customMaskOptions = {
             />
           </template>
           <edge-shad-input
-            v-if="!props.registrationCode"
+            v-if="!effectiveRegistrationCode"
             v-model="state.registrationCode"
             label="Registration Code"
             name="registrationCode"

@@ -78,6 +78,9 @@ const {
   state: sidebarState,
   isMobile: sidebarIsMobile,
 } = useSidebar()
+const { singleOrg: envSingleOrg, filterSingleOrgMenuItems } = useEdgeOrgMode()
+const effectiveSingleOrg = computed(() => envSingleOrg.value || props.singleOrg)
+const effectiveSettingsMenuItems = computed(() => filterSingleOrgMenuItems(props.settingsMenuItems))
 
 const sidebarMenuItemClasses = computed(() => {
   if (props.collapsible === 'slack' && !sidebarIsMobile.value) {
@@ -149,7 +152,7 @@ const isAdmin = computed(() => {
   return edgeGlobal.isAdminGlobal(edgeFirebase).value
 })
 const menuItems = computed(() => {
-  return props.menuItems
+  return filterSingleOrgMenuItems(props.menuItems)
     .filter(item => edgeGlobal.allowMenuItem(item, isAdmin.value))
     .map(item => ({
       ...item,
@@ -246,12 +249,12 @@ const resolveMenuIcon = icon => iconComponents[icon] || icon
         </SidebarGroupContent>
       </SidebarGroup>
       <SidebarGroup class="pt-0" :class="sidebarGroupClasses">
-        <SidebarGroupLabel v-if="props.settingsTitle && props.settingsMenuItems.length > 0" :class="props.groupLabelClasses">
+        <SidebarGroupLabel v-if="props.settingsTitle && effectiveSettingsMenuItems.length > 0" :class="props.groupLabelClasses">
           {{ props.settingsTitle }}
         </SidebarGroupLabel>
         <SidebarGroupContent>
           <SidebarMenu :class="sidebarMenuClasses">
-            <SidebarMenuItem v-for="item in props.settingsMenuItems" :key="item.title" :class="sidebarMenuItemClasses">
+            <SidebarMenuItem v-for="item in effectiveSettingsMenuItems" :key="item.title" :class="sidebarMenuItemClasses">
               <div class="flex flex-col items-center w-full">
                 <SidebarMenuButton
                   type="button"
@@ -277,7 +280,7 @@ const resolveMenuIcon = icon => iconComponents[icon] || icon
             </SidebarMenuItem>
             <template v-if="props.showSettingsSection">
               <SidebarMenuItem :class="sidebarMenuItemClasses">
-                <edge-user-menu class="w-full" :single-org="props.singleOrg" :title="props.organizationTitle">
+                <edge-user-menu class="w-full" :single-org="effectiveSingleOrg" :title="props.organizationTitle">
                   <template #trigger>
                     <div class="flex flex-col items-center w-full">
                       <SidebarMenuButton type="button" :is-active="currentRoutePath.startsWith('/app/account')" :class="sideBarMenuButtonClasses" tooltip="Settings">

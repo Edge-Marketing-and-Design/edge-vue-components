@@ -50,6 +50,12 @@ const props = defineProps({
 const emit = defineEmits(['update:auth'])
 
 const edgeFirebase = inject('edgeFirebase')
+const config = useRuntimeConfig()
+const { singleOrg: envSingleOrg } = useEdgeOrgMode()
+const effectiveSingleOrganization = computed(() => envSingleOrg.value || props.singleOrganization)
+const effectiveRegistrationCode = computed(() =>
+  effectiveSingleOrganization.value ? '' : (props.registrationCode || config.public.registrationCode || ''),
+)
 // const edgeGlobal = inject('edgeGlobal')
 
 const doLogin = async () => {
@@ -88,8 +94,8 @@ watch(edgeFirebase.user, async () => {
   </edge-auth-login>
   <edge-auth-register
     v-else-if="props.type === 'register'"
-    :single-organization="props.singleOrganization"
-    :registration-code="props.registrationCode"
+    :single-organization="effectiveSingleOrganization"
+    :registration-code="effectiveRegistrationCode"
     :title="props.title"
     :join-message="props.joinMessage"
     :providers="props.providers"

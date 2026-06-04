@@ -64,6 +64,9 @@ const props = defineProps({
 })
 
 const route = useRoute()
+const { singleOrg: envSingleOrg, filterSingleOrgMenuItems } = useEdgeOrgMode()
+const effectiveSingleOrg = computed(() => envSingleOrg.value || props.singleOrg)
+const effectiveMenuItems = computed(() => filterSingleOrgMenuItems(props.menuItems))
 
 const orgName = computed(() => {
   const org = edgeGlobal.edgeState.organizations.find(
@@ -93,12 +96,12 @@ const startsWithCurrentRoute = (path) => {
   </div>
   <div v-if="props.showCenter" class="grow flex items-center gap-1">
     <slot name="center" />
-    <div v-if="props.menuItems.length > 0" class="grow">
+    <div v-if="effectiveMenuItems.length > 0" class="grow">
       <nav
         :class="cn('justify-center ml-4 hidden flex-col gap-3 text-lg font-medium md:flex md:flex-row md:items-center md:gap-2 md:text-sm lg:gap-3', navClass)"
       >
         <edge-shad-button
-          v-for="(item, key) in props.menuItems"
+          v-for="(item, key) in effectiveMenuItems"
           :key="key"
           :to="item.to"
           :class="cn(
@@ -125,7 +128,7 @@ const startsWithCurrentRoute = (path) => {
   <div v-if="props.showEnd" class="flex items-center gap-1">
     <slot name="end">
       <div class="grow text-right">
-        <edge-user-menu :single-org="props.singleOrg" button-class="bg-primary" />
+        <edge-user-menu :single-org="effectiveSingleOrg" button-class="bg-primary" />
       </div>
     </slot>
   </div>

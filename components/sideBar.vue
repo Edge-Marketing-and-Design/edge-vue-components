@@ -73,6 +73,9 @@ const props = defineProps({
 })
 
 const edgeFirebase = inject('edgeFirebase')
+const { singleOrg: envSingleOrg, filterSingleOrgMenuItems } = useEdgeOrgMode()
+const effectiveSingleOrg = computed(() => envSingleOrg.value || props.singleOrg)
+const effectiveMenuItems = computed(() => filterSingleOrgMenuItems(props.menuItems))
 
 const attrs = useAttrs()
 
@@ -135,25 +138,25 @@ const route = useRoute()
 
 const activeSubmenuParent = computed(() => {
   // Direct match on top-level item
-  let match = props.menuItems.find(item => item.to === route.path)
+  let match = effectiveMenuItems.value.find(item => item.to === route.path)
 
   // Exact match on a submenu item
   if (!match) {
-    match = props.menuItems.find(item =>
+    match = effectiveMenuItems.value.find(item =>
       item.submenu?.some(sub => sub.to === route.path),
     )
   }
 
   // Match route starting with submenu.to (e.g., dynamic routes like /blocks/abc)
   if (!match) {
-    match = props.menuItems.find(item =>
+    match = effectiveMenuItems.value.find(item =>
       item.submenu?.some(sub => route.path.startsWith(`${sub.to}/`)),
     )
   }
 
   // Fallback: match route starting with top-level item.to
   if (!match) {
-    match = props.menuItems.find(item =>
+    match = effectiveMenuItems.value.find(item =>
       route.path.startsWith(`${item.to}/`),
     )
   }
@@ -201,6 +204,8 @@ const hasSecondarySubmenuItems = computed(() => {
       <slot name="content">
         <edge-side-bar-content
           v-bind="props"
+          :single-org="effectiveSingleOrg"
+          :menu-items="effectiveMenuItems"
         />
       </slot>
       <SidebarFooter :class="props.footerClasses">
@@ -231,6 +236,7 @@ const hasSecondarySubmenuItems = computed(() => {
           :button-classes="`gap-0 h-[52px] ${props.buttonClasses}`"
           :icon-classes="props.iconClasses"
           :hide-logout="props.hideLogout"
+          :single-org="effectiveSingleOrg"
           class="mt-4"
         />
       </Sidebar>

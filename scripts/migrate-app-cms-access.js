@@ -20,6 +20,7 @@ const {
   currentUserHasRoleAt,
 } = useEdgeCmsAccess(edgeFirebase, currentOrganization)
 ${endMarker}`
+const orgModeLine = 'const { singleOrg, cmsMultiOrg } = useEdgeOrgMode()'
 const devToggleBlock = `${devStartMarker}
 const DEV_OVERRIDE_KEY = 'edgeDevOverride'
 
@@ -152,6 +153,34 @@ const replaceLegacyAccessBlock = (source) => {
   return source
 }
 
+const applyOrgModeLine = (source) => {
+  if (source.includes('useEdgeOrgMode()'))
+    return source
+
+  if (source.includes('const DEV_OVERRIDE_KEY = \'edgeDevOverride\''))
+    return source.replace('const DEV_OVERRIDE_KEY = \'edgeDevOverride\'\n', 'const DEV_OVERRIDE_KEY = \'edgeDevOverride\'\nconst { singleOrg, cmsMultiOrg } = useEdgeOrgMode()\n')
+
+  const routerRe = /const router = useRouter\(\)\n/
+  if (routerRe.test(source))
+    return source.replace(routerRe, match => `${match}${orgModeLine}\n`)
+
+  return source
+}
+
+const applyCmsMultiOrgFromOrgMode = (source) => {
+  if (!source.includes('useEdgeOrgMode()'))
+    return source
+  return source.replace(/useState\('cmsMultiOrg', \(\) => (true|false)\)/g, 'useState(\'cmsMultiOrg\', () => cmsMultiOrg.value)')
+}
+
+const applySingleOrgSidebarBinding = (source) => {
+  if (!source.includes('useEdgeOrgMode()'))
+    return source
+  return source
+    .replace(/:single-org="true"/g, ':single-org="singleOrg"')
+    .replace(/:single-org="false"/g, ':single-org="singleOrg"')
+}
+
 const applyDevToggleBlock = (source) => {
   if (!source.includes('currentUserIsRootAdmin'))
     return source
@@ -223,9 +252,12 @@ if (!fs.existsSync(targetPath)) {
 
 const original = fs.readFileSync(targetPath, 'utf8')
 let next = removeLegacyDevOverrideKey(original)
+next = applyOrgModeLine(next)
 next = replaceMarkedBlock(next)
 next = replaceLegacyAccessBlock(next)
 next = applyRootAdminTabsBranch(next)
+next = applyCmsMultiOrgFromOrgMode(next)
+next = applySingleOrgSidebarBinding(next)
 next = applyDevToggleBlock(next)
 next = applyDevWatchBlock(next)
 next = applyDevToggleButton(next)

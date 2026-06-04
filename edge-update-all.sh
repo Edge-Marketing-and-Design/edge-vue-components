@@ -12,7 +12,7 @@ Usage: ./edge-update-all.sh
 Updates:
 1) edge subtree (via edge-pull.sh)
 2) sync edge/functions + index and root config files
-3) migrate app CMS access/dev-mode helpers in pages/app.vue when present
+3) migrate Nuxt/app CMS access, org-mode, and dev-mode helpers when present
 4) install packages listed in edge/root/edge.packages.json
 EOF
 }
@@ -355,6 +355,57 @@ migrate_app_cms_access() {
   node "$migration_script" "$app_vue"
 }
 
+migrate_nuxt_single_org_runtime_config() {
+  nuxt_config=""
+
+  if [ -f "$PROJECT_ROOT/nuxt.config.ts" ]; then
+    nuxt_config="$PROJECT_ROOT/nuxt.config.ts"
+  elif [ -f "$PROJECT_ROOT/nuxt.config.js" ]; then
+    nuxt_config="$PROJECT_ROOT/nuxt.config.js"
+  fi
+
+  if [ -z "$nuxt_config" ]; then
+    return
+  fi
+
+  echo "==> Migrating SINGLE_ORG runtime config"
+  NUXT_CONFIG_PATH="$nuxt_config" node <<'EOF'
+const fs = require('fs')
+
+const configPath = process.env.NUXT_CONFIG_PATH
+const original = fs.readFileSync(configPath, 'utf8')
+
+if (original.includes('singleOrg: process.env.SINGLE_ORG')) {
+  console.log(`No changes needed: ${configPath}`)
+  process.exit(0)
+}
+
+let next = original
+const singleOrgLine = "      singleOrg: process.env.SINGLE_ORG === 'true',\n"
+
+if (next.includes("      developmentMode: process.env.DEVELOPMENT_MODE === 'true',\n")) {
+  next = next.replace(
+    "      developmentMode: process.env.DEVELOPMENT_MODE === 'true',\n",
+    `      developmentMode: process.env.DEVELOPMENT_MODE === 'true',\n${singleOrgLine}`,
+  )
+}
+else if (next.includes('      registrationCode: process.env.REGISTRATION_CODE,\n')) {
+  next = next.replace(
+    '      registrationCode: process.env.REGISTRATION_CODE,\n',
+    `      registrationCode: process.env.REGISTRATION_CODE,\n${singleOrgLine}`,
+  )
+}
+
+if (next === original) {
+  console.warn(`Could not automatically add singleOrg runtime config to ${configPath}`)
+  process.exit(0)
+}
+
+fs.writeFileSync(configPath, next.endsWith('\n') ? next : `${next}\n`)
+console.log(`Updated ${configPath}`)
+EOF
+}
+
 install_edge_packages() {
   edge_packages_manifest="$PROJECT_ROOT/edge/root/edge.packages.json"
 
@@ -431,6 +482,7 @@ merge_edge_functions_index
 merge_firestore_indexes
 merge_history_config
 merge_firebase_json
+migrate_nuxt_single_org_runtime_config
 migrate_app_cms_access
 install_edge_packages
 
