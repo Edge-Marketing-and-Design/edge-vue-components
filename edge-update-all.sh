@@ -162,6 +162,10 @@ const makeKey = index => JSON.stringify({
     vectorConfig: field?.vectorConfig || null,
   })),
 })
+const makeFieldOverrideKey = override => JSON.stringify({
+  collectionGroup: override?.collectionGroup || '',
+  fieldPath: override?.fieldPath || '',
+})
 
 const mergedMap = new Map()
 for (const index of normalizeArray(localJson.indexes))
@@ -169,10 +173,17 @@ for (const index of normalizeArray(localJson.indexes))
 for (const index of normalizeArray(edgeJson.indexes))
   mergedMap.set(makeKey(index), index)
 
+const mergedFieldOverridesMap = new Map()
+for (const override of normalizeArray(localJson.fieldOverrides))
+  mergedFieldOverridesMap.set(makeFieldOverrideKey(override), override)
+for (const override of normalizeArray(edgeJson.fieldOverrides))
+  mergedFieldOverridesMap.set(makeFieldOverrideKey(override), override)
+
 const merged = {
   ...localJson,
   ...edgeJson,
   indexes: Array.from(mergedMap.values()),
+  fieldOverrides: Array.from(mergedFieldOverridesMap.values()),
 }
 
 fs.writeFileSync(localPath, `${JSON.stringify(merged, null, 2)}\n`)
