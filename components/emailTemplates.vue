@@ -14,6 +14,22 @@ const edgeFirebase = inject('edgeFirebase')
 const DEFAULT_TEMPLATE_ID = 'default'
 const DEFAULT_EXCLUDED_FIELDS = ['siteId', 'pageId', 'blockId', 'emailTemplate']
 
+const sampleData = {
+  subject: 'New Contact Form Submission',
+  name: 'John Smith',
+  email: 'john@example.com',
+  phone: '(555) 123-4567',
+  message: 'I would like more information.',
+  services: [
+    { name: 'Website Design', budget: '$5,000' },
+    { name: 'Email Marketing', budget: '$1,500' },
+  ],
+  siteId: 'sample-site',
+  pageId: 'contact',
+  blockId: 'contact-form',
+  emailTemplate: 'default',
+}
+
 const defaultTemplate = {
   docId: DEFAULT_TEMPLATE_ID,
   name: 'Default',
@@ -33,24 +49,10 @@ const defaultTemplate = {
   ].join('\n'),
   text: '{{subject}}\n\n{{all_fields}}',
   excludedFields: DEFAULT_EXCLUDED_FIELDS,
+  sampleData,
   systemDefault: true,
 }
 
-const sampleData = {
-  subject: 'New Contact Form Submission',
-  name: 'John Smith',
-  email: 'john@example.com',
-  phone: '(555) 123-4567',
-  message: 'I would like more information.',
-  services: [
-    { name: 'Website Design', budget: '$5,000' },
-    { name: 'Email Marketing', budget: '$1,500' },
-  ],
-  siteId: 'sample-site',
-  pageId: 'contact',
-  blockId: 'contact-form',
-  emailTemplate: 'default',
-}
 const helpExamples = {
   field: '{{name}}',
   nested: '{{contact.email}}',
@@ -117,6 +119,16 @@ const previewSampleData = computed(() => {
     return sampleData
   }
 })
+
+const sampleDataTextForTemplate = template =>
+  JSON.stringify(template?.sampleData || sampleData, null, 2)
+
+const applyWorkingTemplate = (template) => {
+  const normalizedTemplate = normalizeTemplateDoc(template)
+  state.workingTemplate = normalizedTemplate
+  state.sampleDataText = sampleDataTextForTemplate(normalizedTemplate)
+}
+
 const openPreview = () => {
   state.previewMode = true
   state.previewTab = 'html'
@@ -131,6 +143,9 @@ const normalizeTemplateDoc = (doc = {}) => ({
   ...edgeGlobal.dupObject(doc || {}),
   docId: doc?.docId || DEFAULT_TEMPLATE_ID,
   excludedFields: Array.isArray(doc?.excludedFields) ? doc.excludedFields : DEFAULT_EXCLUDED_FIELDS,
+  sampleData: doc?.sampleData && typeof doc.sampleData === 'object' && !Array.isArray(doc.sampleData)
+    ? doc.sampleData
+    : sampleData,
   systemDefault: doc?.docId === DEFAULT_TEMPLATE_ID || doc?.systemDefault === true,
 })
 
@@ -352,7 +367,7 @@ const previewContent = computed(() => {
 
 const selectTemplate = (template) => {
   state.selectedTemplateId = template.docId
-  state.workingTemplate = normalizeTemplateDoc(template)
+  applyWorkingTemplate(template)
 }
 
 const ensureDefaultTemplate = async () => {
@@ -374,7 +389,7 @@ const createTemplate = async () => {
   }
   await edgeFirebase.storeDoc(collectionPath.value, nextTemplate, docId)
   state.selectedTemplateId = docId
-  state.workingTemplate = normalizeTemplateDoc(nextTemplate)
+  applyWorkingTemplate(nextTemplate)
 }
 
 const saveTemplate = async () => {
@@ -384,6 +399,7 @@ const saveTemplate = async () => {
   const payload = {
     ...edgeGlobal.dupObject(state.workingTemplate),
     systemDefault: state.workingTemplate.docId === DEFAULT_TEMPLATE_ID,
+    sampleData: previewSampleData.value,
     doc_updated_at: Date.now(),
   }
   if (!payload.doc_created_at)
@@ -406,12 +422,12 @@ const deleteTemplate = async () => {
   await edgeFirebase.removeDoc(collectionPath.value, docId)
   state.deleteDialog = false
   state.selectedTemplateId = DEFAULT_TEMPLATE_ID
-  state.workingTemplate = normalizeTemplateDoc(collectionData.value?.[DEFAULT_TEMPLATE_ID] || defaultTemplate)
+  applyWorkingTemplate(collectionData.value?.[DEFAULT_TEMPLATE_ID] || defaultTemplate)
 }
 
 watch(selectedTemplate, (template) => {
   if (template)
-    state.workingTemplate = normalizeTemplateDoc(template)
+    applyWorkingTemplate(template)
 })
 
 watch(collectionPath, async (nextPath, previousPath) => {
