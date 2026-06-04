@@ -2657,7 +2657,11 @@ exports.onSiteWritten = createKvMirrorHandler({
     }
     return keys
   },
-  serialize: data => JSON.stringify(data),
+  serialize: (data) => {
+    const copy = { ...(data || {}) }
+    delete copy.cacheVerification
+    return JSON.stringify(copy)
+  },
   timeoutSeconds: 180,
 })
 
@@ -2698,6 +2702,251 @@ exports.onPublishedPageWritten = createKvMirrorHandler({
     `pages:${orgId}:${siteId}:${pageId}`,
   timeoutSeconds: 180,
 })
+
+const stripCacheVerification = (data = {}) => {
+  const copy = { ...(data || {}) }
+  delete copy.cacheVerification
+  return copy
+}
+
+const isCacheVerificationOnlyWrite = (beforeData = {}, afterData = {}) => {
+  return stableSerialize(stripCacheVerification(beforeData)) === stableSerialize(stripCacheVerification(afterData))
+}
+
+const firstPublishedDomain = (...domainLists) => {
+  for (const domains of domainLists) {
+    if (!Array.isArray(domains))
+      continue
+    for (const domain of domains) {
+      const normalized = normalizeDomain(domain)
+      if (normalized)
+        return normalized
+    }
+  }
+  return ''
+}
+
+const normalizePublishedPathSegment = value => slug(value)
+
+const findPublishedPagePathFromMenus = (menus = {}, pageId, folderSegments = []) => {
+  const targetPageId = String(pageId || '').trim()
+  if (!targetPageId)
+    return ''
+
+  for (const [menuName, items] of Object.entries(menus || {})) {
+    if (!Array.isArray(items))
+      continue
+    const menuSegment = ['Site Root', 'Not In Menu'].includes(menuName) ? '' : normalizePublishedPathSegment(menuName)
+    const nextFolderSegments = menuSegment ? [...folderSegments, menuSegment] : folderSegments
+    for (const entry of items) {
+      if (!entry || typeof entry !== 'object')
+        continue
+      if (typeof entry.item === 'string' && entry.item === targetPageId) {
+        const pageSegment = normalizePublishedPathSegment(entry.name || entry.menuTitle || targetPageId)
+        if (!pageSegment)
+          return ''
+        if (!nextFolderSegments.length && pageSegment === 'home')
+          return '/'
+        return `/${[...nextFolderSegments, pageSegment].map(encodeURIComponent).join('/')}`
+      }
+      if (entry.item && typeof entry.item === 'object') {
+        for (const [folderName, nestedItems] of Object.entries(entry.item)) {
+          const folderSegment = normalizePublishedPathSegment(folderName)
+          const nested = findPublishedPagePathFromMenus(
+            { 'Site Root': nestedItems },
+            targetPageId,
+            folderSegment ? [...nextFolderSegments, folderSegment] : nextFolderSegments,
+          )
+          if (nested)
+            return nested
+        }
+      }
+    }
+  }
+
+  return ''
+}
+
+const fallbackPublishedPagePath = (pageId, pageData = {}) => {
+  const segment = normalizePublishedPathSegment(pageData.slug || pageData.name || pageId)
+  if (!segment || segment === 'home')
+    return '/'
+  return `/${encodeURIComponent(segment)}`
+}
+
+const buildCacheVersionUrl = ({ origin, path }) => {
+  const url = new URL('/api/cache-version', origin)
+  url.searchParams.set('path', path || '/')
+  url.searchParams.set('cacheBust', String(Date.now()))
+  return url.toString()
+}
+
+const getCacheVersionHeaders = response => ({
+  siteVersion: String(response?.headers?.['x-site-version'] || '').trim(),
+  pageVersion: String(response?.headers?.['x-page-version'] || '').trim(),
+  buildVersion: String(response?.headers?.['x-build-version'] || '').trim(),
+  cacheStatus: String(response?.headers?.['x-cache-status'] || '').trim(),
+})
+
+const cacheVersionMatches = ({ headers, target, expectedVersion }) => {
+  const actualVersion = target === 'page' ? headers.pageVersion : headers.siteVersion
+  const cacheStatus = String(headers.cacheStatus || '').trim().toUpperCase()
+  return cacheStatus === 'BYPASS' && String(actualVersion || '').trim() === String(expectedVersion || '').trim()
+}
+
+const updateCacheVerificationStatus = async (ref, payload) => {
+  await ref.set({
+    cacheVerification: {
+      ...payload,
+      lastCheckedAt: Date.now(),
+    },
+  }, { merge: true })
+}
+
+const verifyPublishedCacheVersion = async ({
+  orgId,
+  siteId,
+  target,
+  label,
+  path,
+  expectedVersion,
+  publishedSiteData,
+  draftSiteData,
+}) => {
+  const statusRef = db.collection('organizations').doc(orgId).collection('published-site-settings').doc(siteId)
+  const domain = firstPublishedDomain(publishedSiteData?.domains, draftSiteData?.domains)
+  const origin = domain ? `https://${domain}` : ''
+  const verificationId = `${target}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const baseStatus = {
+    verificationId,
+    status: 'running',
+    target,
+    activeLabel: label || (target === 'site' ? 'Site Settings' : 'Page'),
+    activePath: path || '/',
+    expectedSiteVersion: target === 'site' ? expectedVersion : null,
+    expectedPageVersion: target === 'page' ? expectedVersion : null,
+    completed: 0,
+    total: 1,
+    failed: 0,
+    startedAt: Date.now(),
+  }
+
+  if (!origin || expectedVersion === null || expectedVersion === undefined || expectedVersion === '') {
+    await updateCacheVerificationStatus(statusRef, {
+      ...baseStatus,
+      status: 'skipped',
+      error: 'Missing live domain or expected version.',
+      completedAt: Date.now(),
+    })
+    return
+  }
+
+  await updateCacheVerificationStatus(statusRef, baseStatus)
+
+  const timeoutMs = 45000
+  const pollMs = 1500
+  const startedAt = Date.now()
+  let lastHeaders = {}
+  let lastError = ''
+
+  while (Date.now() - startedAt <= timeoutMs) {
+    try {
+      const response = await axios.get(buildCacheVersionUrl({ origin, path }), {
+        timeout: 10000,
+        validateStatus: () => true,
+      })
+      lastHeaders = getCacheVersionHeaders(response)
+      if (response.status >= 200 && response.status < 300 && cacheVersionMatches({ headers: lastHeaders, target, expectedVersion })) {
+        await updateCacheVerificationStatus(statusRef, {
+          ...baseStatus,
+          status: 'verified',
+          headers: lastHeaders,
+          completed: 1,
+          completedAt: Date.now(),
+        })
+        return
+      }
+    }
+    catch (error) {
+      lastError = error?.message || 'Cache verification request failed.'
+    }
+
+    await sleep(pollMs)
+  }
+
+  await updateCacheVerificationStatus(statusRef, {
+    ...baseStatus,
+    status: 'timeout',
+    error: lastError || 'Cache verification timed out.',
+    headers: lastHeaders,
+    failed: 1,
+    completedAt: Date.now(),
+  })
+}
+
+exports.verifyPublishedSiteCacheVersion = onDocumentWritten(
+  { document: 'organizations/{orgId}/published-site-settings/{siteId}', timeoutSeconds: 120 },
+  async (event) => {
+    const change = event.data
+    if (!change.after.exists)
+      return
+
+    const beforeData = change.before.exists ? (change.before.data() || {}) : {}
+    const afterData = change.after.data() || {}
+    if (change.before.exists && isCacheVerificationOnlyWrite(beforeData, afterData))
+      return
+
+    const orgId = event.params.orgId
+    const siteId = event.params.siteId
+    const expectedVersion = Number.isFinite(Number(afterData?.version)) ? Math.max(0, Math.trunc(Number(afterData.version))) : ''
+    const draftSnap = await db.collection('organizations').doc(orgId).collection('sites').doc(siteId).get()
+    await verifyPublishedCacheVersion({
+      orgId,
+      siteId,
+      target: 'site',
+      label: 'Site Settings',
+      path: '/',
+      expectedVersion,
+      publishedSiteData: afterData,
+      draftSiteData: draftSnap.exists ? (draftSnap.data() || {}) : {},
+    })
+  },
+)
+
+exports.verifyPublishedPageCacheVersion = onDocumentWritten(
+  { document: 'organizations/{orgId}/sites/{siteId}/published/{pageId}', timeoutSeconds: 120 },
+  async (event) => {
+    const change = event.data
+    if (!change.after.exists)
+      return
+
+    const pageData = change.after.data() || {}
+    const orgId = event.params.orgId
+    const siteId = event.params.siteId
+    const pageId = event.params.pageId
+    const orgRef = db.collection('organizations').doc(orgId)
+    const [publishedSiteSnap, draftSiteSnap] = await Promise.all([
+      orgRef.collection('published-site-settings').doc(siteId).get(),
+      orgRef.collection('sites').doc(siteId).get(),
+    ])
+    const publishedSiteData = publishedSiteSnap.exists ? (publishedSiteSnap.data() || {}) : {}
+    const draftSiteData = draftSiteSnap.exists ? (draftSiteSnap.data() || {}) : {}
+    const menus = publishedSiteData?.menus || draftSiteData?.menus || {}
+    const path = findPublishedPagePathFromMenus(menus, pageId) || fallbackPublishedPagePath(pageId, pageData)
+    const expectedVersion = Number.isFinite(Number(pageData?.version)) ? Math.max(0, Math.trunc(Number(pageData.version))) : ''
+
+    await verifyPublishedCacheVersion({
+      orgId,
+      siteId,
+      target: 'page',
+      label: pageData?.name || pageData?.title || pageId,
+      path,
+      expectedVersion,
+      publishedSiteData,
+      draftSiteData,
+    })
+  },
+)
 
 exports.syncPublishedSyncedBlocks = onDocumentWritten({ document: 'organizations/{orgId}/sites/{siteId}/published/{pageId}', timeoutSeconds: 180 }, async (event) => {
   const change = event.data
@@ -3011,31 +3260,103 @@ const summarizeBlocksForSeo = (blocks = []) => {
   return summaries.join('\n\n')
 }
 
+const isBlankAiValue = (value) => {
+  if (value === null || value === undefined)
+    return true
+  if (typeof value === 'string')
+    return value.trim().length === 0
+  return false
+}
+
+const hasCmsToken = value => typeof value === 'string' && /\{\{\s*cms-[^}]+\s*\}\}/.test(value)
+
+const parseStructuredDataJson = (value) => {
+  if (value === null || value === undefined || value === '')
+    return null
+  if (typeof value === 'object')
+    return value
+  if (typeof value !== 'string')
+    return null
+  try {
+    return JSON.parse(value)
+  }
+  catch {
+    return null
+  }
+}
+
+const matchesDefaultStructuredDataShape = (current, defaultValue) => {
+  if (hasCmsToken(defaultValue))
+    return current === defaultValue
+  if (Array.isArray(defaultValue))
+    return Array.isArray(current)
+  if (defaultValue && typeof defaultValue === 'object') {
+    if (!current || typeof current !== 'object' || Array.isArray(current))
+      return false
+    const currentKeys = Object.keys(current).sort()
+    const defaultKeys = Object.keys(defaultValue).sort()
+    if (stableSerialize(currentKeys) !== stableSerialize(defaultKeys))
+      return false
+    return defaultKeys.every(key => matchesDefaultStructuredDataShape(current[key], defaultValue[key]))
+  }
+  return true
+}
+
+const isDefaultStructuredDataShape = (value, defaultTemplate) => {
+  const current = parseStructuredDataJson(value)
+  const parsedDefault = parseStructuredDataJson(defaultTemplate)
+  if (!current || !parsedDefault)
+    return false
+  return matchesDefaultStructuredDataShape(current, parsedDefault)
+}
+
+const mergeStructuredDataPreservingTokens = (current, aiValue) => {
+  if (hasCmsToken(current))
+    return current
+  if (Array.isArray(current))
+    return Array.isArray(aiValue) ? aiValue : current
+  if (current && typeof current === 'object') {
+    const merged = {}
+    for (const [key, value] of Object.entries(current))
+      merged[key] = mergeStructuredDataPreservingTokens(value, aiValue?.[key])
+    return merged
+  }
+  return isBlankAiValue(aiValue) ? current : aiValue
+}
+
+const buildSeoTextUpdate = (currentValue, aiValue) => {
+  if (!isBlankAiValue(currentValue))
+    return null
+  if (isBlankAiValue(aiValue))
+    return null
+  return aiValue
+}
+
+const buildSeoStructuredDataUpdate = (currentValue, aiValue, defaultTemplate) => {
+  if (isBlankAiValue(aiValue))
+    return null
+
+  const parsedAi = parseStructuredDataJson(aiValue)
+  const parsedDefault = parseStructuredDataJson(defaultTemplate)
+  if (!parsedAi || !parsedDefault)
+    return null
+
+  const currentIsBlank = isBlankAiValue(currentValue)
+  const current = currentIsBlank ? parsedDefault : parseStructuredDataJson(currentValue)
+  if (!current)
+    return null
+  if (!currentIsBlank && !matchesDefaultStructuredDataShape(current, parsedDefault))
+    return null
+
+  const merged = mergeStructuredDataPreservingTokens(current, parsedAi)
+  return JSON.stringify(merged, null, 2)
+}
+
 const shouldUpdateSiteStructuredData = (siteData = {}) => {
   const raw = siteData?.structuredData
-  if (!raw || (typeof raw === 'string' && !raw.trim()))
+  if (isBlankAiValue(raw))
     return true
-  let parsed = null
-  if (typeof raw === 'string') {
-    try {
-      parsed = JSON.parse(raw)
-    }
-    catch {
-      return false
-    }
-  }
-  else if (typeof raw === 'object') {
-    parsed = raw
-  }
-  if (!parsed)
-    return false
-  const name = String(parsed.name || '').trim()
-  const url = String(parsed.url || '').trim()
-  const description = String(parsed.description || '').trim()
-  const publisherName = String(parsed.publisher?.name || '').trim()
-  const logoUrl = String(parsed.publisher?.logo?.url || '').trim()
-  const sameAs = Array.isArray(parsed.sameAs) ? parsed.sameAs.filter(Boolean) : []
-  return !name && !url && !description && !publisherName && !logoUrl && sameAs.length === 0
+  return isDefaultStructuredDataShape(raw, SITE_STRUCTURED_DATA_TEMPLATE)
 }
 
 const callOpenAiForPageSeo = async ({
@@ -3385,6 +3706,19 @@ const applyAiResults = (descriptorMap, pagesSnap, aiResults, siteData = {}) => {
   for (const doc of pagesSnap.docs)
     pageDocsMap.set(doc.id, doc.data() || {})
 
+  const ensurePageUpdate = (pageId, pageData = {}) => {
+    if (!pageUpdates[pageId]) {
+      pageUpdates[pageId] = {
+        content: Array.isArray(pageData.content) ? JSON.parse(JSON.stringify(pageData.content)) : [],
+        postContent: Array.isArray(pageData.postContent) ? JSON.parse(JSON.stringify(pageData.postContent)) : [],
+        metaTitle: pageData.metaTitle || '',
+        metaDescription: pageData.metaDescription || '',
+        structuredData: pageData.structuredData || '',
+      }
+    }
+    return pageUpdates[pageId]
+  }
+
   for (const [path, value] of Object.entries(aiResults.fields)) {
     const descriptor = descriptorMap.get(path)
     if (!descriptor)
@@ -3399,37 +3733,49 @@ const applyAiResults = (descriptorMap, pagesSnap, aiResults, siteData = {}) => {
       continue
 
     if (descriptor.location === 'siteMeta') {
-      if (descriptor.field === 'structuredData')
-        siteUpdates.structuredData = sanitized
-      else if (descriptor.field === 'metaTitle')
-        siteUpdates.metaTitle = sanitized
-      else if (descriptor.field === 'metaDescription')
-        siteUpdates.metaDescription = sanitized
+      if (descriptor.field === 'structuredData') {
+        const structuredData = buildSeoStructuredDataUpdate(siteData?.structuredData, sanitized, SITE_STRUCTURED_DATA_TEMPLATE)
+        if (structuredData)
+          siteUpdates.structuredData = structuredData
+      }
+      else if (descriptor.field === 'metaTitle') {
+        const metaTitle = buildSeoTextUpdate(siteData?.metaTitle, sanitized)
+        if (metaTitle)
+          siteUpdates.metaTitle = metaTitle
+      }
+      else if (descriptor.field === 'metaDescription') {
+        const metaDescription = buildSeoTextUpdate(siteData?.metaDescription, sanitized)
+        if (metaDescription)
+          siteUpdates.metaDescription = metaDescription
+      }
       continue
     }
 
     const pageData = pageDocsMap.get(descriptor.pageId) || {}
-    if (!pageUpdates[descriptor.pageId]) {
-      pageUpdates[descriptor.pageId] = {
-        content: Array.isArray(pageData.content) ? JSON.parse(JSON.stringify(pageData.content)) : [],
-        postContent: Array.isArray(pageData.postContent) ? JSON.parse(JSON.stringify(pageData.postContent)) : [],
-        metaTitle: pageData.metaTitle || '',
-        metaDescription: pageData.metaDescription || '',
-        structuredData: pageData.structuredData || '',
-      }
-    }
 
     if (descriptor.location === 'pageMeta') {
-      if (descriptor.field === 'metaTitle')
-        pageUpdates[descriptor.pageId].metaTitle = sanitized
-      else if (descriptor.field === 'metaDescription')
-        pageUpdates[descriptor.pageId].metaDescription = sanitized
-      else if (descriptor.field === 'structuredData')
-        pageUpdates[descriptor.pageId].structuredData = sanitized
+      if (descriptor.field === 'metaTitle') {
+        const metaTitle = buildSeoTextUpdate(pageData?.metaTitle, sanitized)
+        if (metaTitle)
+          ensurePageUpdate(descriptor.pageId, pageData).metaTitle = metaTitle
+      }
+      else if (descriptor.field === 'metaDescription') {
+        const metaDescription = buildSeoTextUpdate(pageData?.metaDescription, sanitized)
+        if (metaDescription)
+          ensurePageUpdate(descriptor.pageId, pageData).metaDescription = metaDescription
+      }
+      else if (descriptor.field === 'structuredData') {
+        const structuredData = pageData?.structuredDataAiLocked
+          ? null
+          : buildSeoStructuredDataUpdate(pageData?.structuredData, sanitized, PAGE_STRUCTURED_DATA_TEMPLATE)
+        if (structuredData)
+          ensurePageUpdate(descriptor.pageId, pageData).structuredData = structuredData
+      }
       continue
     }
 
-    const targetBlocks = descriptor.location === 'postContent' ? pageUpdates[descriptor.pageId].postContent : pageUpdates[descriptor.pageId].content
+    const pageUpdate = ensurePageUpdate(descriptor.pageId, pageData)
+    const targetBlocks = descriptor.location === 'postContent' ? pageUpdate.postContent : pageUpdate.content
     const block = targetBlocks[descriptor.blockIndex]
     if (!block)
       continue
@@ -7582,18 +7928,24 @@ exports.updateSeoFromAi = onCall({ timeoutSeconds: 180 }, async (request) => {
   const metaTitle = sanitizeValueForMeta('text', aiResults?.metaTitle)
   const metaDescription = sanitizeValueForMeta('text', aiResults?.metaDescription)
   const structuredData = sanitizeValueForMeta('json', aiResults?.structuredData)
-  if (metaTitle)
-    pageUpdates.metaTitle = metaTitle
-  if (metaDescription)
-    pageUpdates.metaDescription = metaDescription
-  if (structuredData)
-    pageUpdates.structuredData = structuredData
+  const metaTitleUpdate = buildSeoTextUpdate(pageData?.metaTitle, metaTitle)
+  const metaDescriptionUpdate = buildSeoTextUpdate(pageData?.metaDescription, metaDescription)
+  const structuredDataUpdate = pageData?.structuredDataAiLocked
+    ? null
+    : buildSeoStructuredDataUpdate(pageData?.structuredData, structuredData, PAGE_STRUCTURED_DATA_TEMPLATE)
+  if (metaTitleUpdate)
+    pageUpdates.metaTitle = metaTitleUpdate
+  if (metaDescriptionUpdate)
+    pageUpdates.metaDescription = metaDescriptionUpdate
+  if (structuredDataUpdate)
+    pageUpdates.structuredData = structuredDataUpdate
 
   const siteUpdates = {}
   if (includeSiteStructuredData) {
     const siteStructuredData = sanitizeValueForMeta('json', aiResults?.siteStructuredData)
-    if (siteStructuredData)
-      siteUpdates.structuredData = siteStructuredData
+    const siteStructuredDataUpdate = buildSeoStructuredDataUpdate(siteData?.structuredData, siteStructuredData, SITE_STRUCTURED_DATA_TEMPLATE)
+    if (siteStructuredDataUpdate)
+      siteUpdates.structuredData = siteStructuredDataUpdate
   }
 
   if (Object.keys(pageUpdates).length > 0)
