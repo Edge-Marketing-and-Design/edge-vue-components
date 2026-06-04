@@ -12,7 +12,7 @@ Usage: ./edge-update-all.sh
 Updates:
 1) edge subtree (via edge-pull.sh)
 2) sync edge/functions + index and root config files
-3) migrate app CMS access helper in pages/app.vue when present
+3) migrate app CMS access/dev-mode helpers in pages/app.vue when present
 4) install packages listed in edge/root/edge.packages.json
 EOF
 }
