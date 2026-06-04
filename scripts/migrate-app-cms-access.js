@@ -164,13 +164,35 @@ const applyOrgModeLine = (source) => {
   if (routerRe.test(source))
     return source.replace(routerRe, match => `${match}${orgModeLine}\n`)
 
+  const edgeFirebaseRe = /const edgeFirebase = inject\('edgeFirebase'\)\n/
+  if (edgeFirebaseRe.test(source))
+    return source.replace(edgeFirebaseRe, match => `${match}${orgModeLine}\n`)
+
+  const lastImportRe = /(<script setup>\n(?:import[^\n]*\n)+)/
+  if (lastImportRe.test(source))
+    return source.replace(lastImportRe, match => `${match}\n${orgModeLine}\n`)
+
+  const scriptSetupRe = /<script setup>\n/
+  if (scriptSetupRe.test(source))
+    return source.replace(scriptSetupRe, match => `${match}${orgModeLine}\n`)
+
   return source
 }
 
 const applyCmsMultiOrgFromOrgMode = (source) => {
   if (!source.includes('useEdgeOrgMode()'))
     return source
-  return source.replace(/useState\('cmsMultiOrg', \(\) => (true|false)\)/g, 'useState(\'cmsMultiOrg\', () => cmsMultiOrg.value)')
+  if (/useState\((['"])cmsMultiOrg\1/.test(source) && source.includes('cmsMultiOrg.value'))
+    return source
+  const cmsMultiOrgRe = /useState\((['"])cmsMultiOrg\1,\s*\(\) => (true|false)\)/g
+  if (cmsMultiOrgRe.test(source))
+    return source.replace(cmsMultiOrgRe, 'useState(\'cmsMultiOrg\', () => cmsMultiOrg.value)')
+
+  const orgModeLineRe = new RegExp(`${escapeRegExp(orgModeLine)}\\n`)
+  if (orgModeLineRe.test(source))
+    return source.replace(orgModeLineRe, match => `${match}useState('cmsMultiOrg', () => cmsMultiOrg.value)\n`)
+
+  return source
 }
 
 const applySingleOrgSidebarBinding = (source) => {
@@ -179,6 +201,7 @@ const applySingleOrgSidebarBinding = (source) => {
   return source
     .replace(/:single-org="true"/g, ':single-org="singleOrg"')
     .replace(/:single-org="false"/g, ':single-org="singleOrg"')
+    .replace(/\ssingle-org(?=[\s>])/g, ' :single-org="singleOrg"')
 }
 
 const applyDevToggleBlock = (source) => {
