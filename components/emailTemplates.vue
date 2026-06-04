@@ -554,6 +554,15 @@ onBeforeUnmount(() => {
                     <edge-shad-input v-model="state.workingTemplate.name" name="email-template-name" label="Name" />
                     <edge-shad-input v-model="state.workingTemplate.subject" name="email-template-subject" label="Subject" />
                     <div class="w-full md:col-span-2">
+                      <label class="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-200">Template ID</label>
+                      <div class="flex min-h-10 items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-950">
+                        <code class="min-w-0 flex-1 truncate text-xs text-slate-700 dark:text-slate-300">
+                          {{ state.workingTemplate.docId }}
+                        </code>
+                        <edge-clipboard-button :text="state.workingTemplate.docId" class="shrink-0" />
+                      </div>
+                    </div>
+                    <div class="w-full md:col-span-2">
                       <edge-shad-tags
                         v-model="state.workingTemplate.excludedFields"
                         name="email-template-excluded-fields"
