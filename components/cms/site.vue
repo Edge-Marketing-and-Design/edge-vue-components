@@ -2750,11 +2750,46 @@ const cacheVerificationLabel = computed(() => {
     return 'Clear Cache'
   if (status.status === 'verified')
     return `Cache Cleared: ${label}`
+  if (status.status === 'timeout')
+    return `Cache Clear Timed Out: ${label}`
+  if (status.status === 'failed')
+    return `Cache Clear Failed: ${label}`
+  if (status.status === 'skipped')
+    return `Cache Clear Skipped: ${label}`
   const total = Number(status.total)
   const completed = Number(status.completed)
   if (status.status === 'running' && Number.isFinite(total) && total > 1 && Number.isFinite(completed))
     return `Clear Cache: ${label} ${Math.min(completed + 1, total)} of ${total}`
   return `Clear Cache: ${label}`
+})
+const cacheVerificationDetail = computed(() => {
+  const status = cacheVerificationStatus.value || {}
+  const parts = []
+  const state = String(status.status || '').trim()
+  const path = String(status.activePath || '').trim()
+  const error = String(status.error || '').trim()
+  const headers = (status.headers && typeof status.headers === 'object') ? status.headers : {}
+  const expectedSiteVersion = status.expectedSiteVersion ?? ''
+  const expectedPageVersion = status.expectedPageVersion ?? ''
+
+  if (state)
+    parts.push(`Status: ${state}`)
+  if (path)
+    parts.push(`Path: ${path}`)
+  if (expectedSiteVersion !== null && expectedSiteVersion !== undefined && expectedSiteVersion !== '')
+    parts.push(`Expected site version: ${expectedSiteVersion}`)
+  if (expectedPageVersion !== null && expectedPageVersion !== undefined && expectedPageVersion !== '')
+    parts.push(`Expected page version: ${expectedPageVersion}`)
+  if (headers.siteVersion)
+    parts.push(`Live site version: ${headers.siteVersion}`)
+  if (headers.pageVersion)
+    parts.push(`Live page version: ${headers.pageVersion}`)
+  if (headers.cacheStatus)
+    parts.push(`Live cache status: ${headers.cacheStatus}`)
+  if (error)
+    parts.push(`Error: ${error}`)
+
+  return parts.join('\n')
 })
 
 const isAnyPagesDiff = computed(() => {
@@ -3397,6 +3432,8 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                   <div
                     v-if="showCacheVerificationStatus"
                     class="flex gap-1 items-center text-xs py-1 px-3 rounded"
+                    :title="cacheVerificationDetail"
+                    :aria-label="cacheVerificationDetail || cacheVerificationLabel"
                     :class="cacheVerificationStatus.status === 'running'
                       ? 'bg-sky-100 text-sky-800'
                       : cacheVerificationStatus.status === 'verified'
@@ -3421,6 +3458,8 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                   <div
                     v-if="showCacheVerificationStatus"
                     class="flex gap-1 items-center text-xs py-1 px-3 rounded"
+                    :title="cacheVerificationDetail"
+                    :aria-label="cacheVerificationDetail || cacheVerificationLabel"
                     :class="cacheVerificationStatus.status === 'running'
                       ? 'bg-sky-100 text-sky-800'
                       : cacheVerificationStatus.status === 'verified'
