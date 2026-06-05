@@ -20,7 +20,8 @@ const {
   currentUserHasRoleAt,
 } = useEdgeCmsAccess(edgeFirebase, currentOrganization)
 ${endMarker}`
-const orgModeLine = 'const { singleOrg, cmsMultiOrg } = useEdgeOrgMode()'
+const orgModeLine = 'const { cmsMultiOrg } = useEdgeOrgMode()'
+const orgModeWithSingleOrgLine = 'const { singleOrg, cmsMultiOrg } = useEdgeOrgMode()'
 const devToggleBlock = `${devStartMarker}
 const DEV_OVERRIDE_KEY = 'edgeDevOverride'
 
@@ -157,16 +158,13 @@ const applyOrgModeLine = (source) => {
   if (source.includes('useEdgeOrgMode()'))
     return source
 
-  if (source.includes('const DEV_OVERRIDE_KEY = \'edgeDevOverride\''))
-    return source.replace('const DEV_OVERRIDE_KEY = \'edgeDevOverride\'\n', 'const DEV_OVERRIDE_KEY = \'edgeDevOverride\'\nconst { singleOrg, cmsMultiOrg } = useEdgeOrgMode()\n')
+  const edgeFirebaseRe = /const edgeFirebase = inject\('edgeFirebase'\)\n/
+  if (edgeFirebaseRe.test(source))
+    return source.replace(edgeFirebaseRe, match => `${match}${orgModeLine}\n`)
 
   const routerRe = /const router = useRouter\(\)\n/
   if (routerRe.test(source))
     return source.replace(routerRe, match => `${match}${orgModeLine}\n`)
-
-  const edgeFirebaseRe = /const edgeFirebase = inject\('edgeFirebase'\)\n/
-  if (edgeFirebaseRe.test(source))
-    return source.replace(edgeFirebaseRe, match => `${match}${orgModeLine}\n`)
 
   const lastImportRe = /(<script setup>\n(?:import[^\n]*\n)+)/
   if (lastImportRe.test(source))
@@ -198,10 +196,15 @@ const applyCmsMultiOrgFromOrgMode = (source) => {
 const applySingleOrgSidebarBinding = (source) => {
   if (!source.includes('useEdgeOrgMode()'))
     return source
-  return source
+  const next = source
     .replace(/:single-org="true"/g, ':single-org="singleOrg"')
     .replace(/:single-org="false"/g, ':single-org="singleOrg"')
     .replace(/\ssingle-org(?=[\s>])/g, ' :single-org="singleOrg"')
+
+  if (next.includes(':single-org="singleOrg"') && next.includes(orgModeLine))
+    return next.replace(orgModeLine, orgModeWithSingleOrgLine)
+
+  return next
 }
 
 const applyDevToggleBlock = (source) => {
@@ -275,15 +278,15 @@ if (!fs.existsSync(targetPath)) {
 
 const original = fs.readFileSync(targetPath, 'utf8')
 let next = removeLegacyDevOverrideKey(original)
-next = applyOrgModeLine(next)
 next = replaceMarkedBlock(next)
 next = replaceLegacyAccessBlock(next)
 next = applyRootAdminTabsBranch(next)
-next = applyCmsMultiOrgFromOrgMode(next)
-next = applySingleOrgSidebarBinding(next)
 next = applyDevToggleBlock(next)
 next = applyDevWatchBlock(next)
 next = applyDevToggleButton(next)
+next = applyOrgModeLine(next)
+next = applyCmsMultiOrgFromOrgMode(next)
+next = applySingleOrgSidebarBinding(next)
 next = ensureComposableImport(next)
 
 if (next === original) {
