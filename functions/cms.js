@@ -2728,7 +2728,12 @@ const firstPublishedDomain = (...domainLists) => {
 
 const normalizePublishedPathSegment = value => slug(value)
 
-const findPublishedPagePathFromMenus = (menus = {}, pageId, folderSegments = []) => {
+const resolveRootPageIdFromMenus = (menus = {}) => {
+  const siteRoot = Array.isArray(menus?.['Site Root']) ? menus['Site Root'] : []
+  return typeof siteRoot[0]?.item === 'string' ? siteRoot[0].item : ''
+}
+
+const findPublishedPagePathFromMenus = (menus = {}, pageId, folderSegments = [], rootPageId = resolveRootPageIdFromMenus(menus)) => {
   const targetPageId = String(pageId || '').trim()
   if (!targetPageId)
     return ''
@@ -2745,7 +2750,7 @@ const findPublishedPagePathFromMenus = (menus = {}, pageId, folderSegments = [])
         const pageSegment = normalizePublishedPathSegment(entry.name || entry.menuTitle || targetPageId)
         if (!pageSegment)
           return ''
-        if (!nextFolderSegments.length && pageSegment === 'home')
+        if (!nextFolderSegments.length && entry.item === rootPageId)
           return '/'
         return `/${[...nextFolderSegments, pageSegment].map(encodeURIComponent).join('/')}`
       }
@@ -2756,6 +2761,7 @@ const findPublishedPagePathFromMenus = (menus = {}, pageId, folderSegments = [])
             { 'Site Root': nestedItems },
             targetPageId,
             folderSegment ? [...nextFolderSegments, folderSegment] : nextFolderSegments,
+            rootPageId,
           )
           if (nested)
             return nested
@@ -2769,7 +2775,7 @@ const findPublishedPagePathFromMenus = (menus = {}, pageId, folderSegments = [])
 
 const fallbackPublishedPagePath = (pageId, pageData = {}) => {
   const segment = normalizePublishedPathSegment(pageData.slug || pageData.name || pageId)
-  if (!segment || segment === 'home')
+  if (!segment)
     return '/'
   return `/${encodeURIComponent(segment)}`
 }
