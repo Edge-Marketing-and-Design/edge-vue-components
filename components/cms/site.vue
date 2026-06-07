@@ -169,15 +169,9 @@ const sitePagePreviewSnapshotQueue = []
 const sitePagePreviewSnapshotQueued = new Set()
 const sitePagePreviewForcedRendered = ref(new Set())
 const sitePagePreviewScale = ref(0.18)
-const lazyPagePreviewVisible = useState('edge-cms-lazy-page-preview-visible', () => ({}))
-const lazyPagePreviewRefs = new Map()
-const lazyPagePreviewQueued = new Set()
-const lazyPagePreviewQueue = []
 let html2canvasModulePromise = null
 let sitePagePreviewSnapshotQueueRunning = false
 let sitePagePreviewSnapshotQueueStopped = false
-let lazyPagePreviewObserver = null
-let lazyPagePreviewQueueRunning = false
 const SITE_PAGE_PREVIEW_THUMBNAIL_VERSION = 'viewport-html2canvas-ok-computed-color-v16'
 const SITE_PAGE_PREVIEW_JPEG_ENABLED = false
 const showPreviewSnapshotStatus = computed(() => SITE_PAGE_PREVIEW_JPEG_ENABLED && Boolean(edgeGlobal.edgeState.devOverride))
@@ -1713,7 +1707,6 @@ const templatePreviewRows = (pageDoc) => {
 }
 
 const templatePageHasPreview = pageDoc => templatePreviewRows(pageDoc).length > 0
-const templatePreviewCardRows = pageDoc => templatePreviewRows(pageDoc).slice(0, 3)
 
 const resolveTemplateBlockSource = (pageDoc, blockRef) => {
   if (!blockRef)
@@ -1811,92 +1804,6 @@ const observeSitePagePreviewScale = (element) => {
     updateSitePagePreviewScale(entry.target)
   })
   sitePagePreviewScaleObserver.observe(element)
-}
-
-const getLazyPagePreviewKey = (scope, pageDoc) => {
-  const docId = String(pageDoc?.docId || '').trim()
-  return docId ? `${scope}:${docId}` : ''
-}
-
-const isLazyPagePreviewVisible = (scope, pageDoc) => {
-  const key = getLazyPagePreviewKey(scope, pageDoc)
-  return !!(key && lazyPagePreviewVisible.value?.[key])
-}
-
-const releaseLazyPagePreviewQueue = () => {
-  if (lazyPagePreviewQueueRunning)
-    return
-  lazyPagePreviewQueueRunning = true
-
-  const releaseNext = () => {
-    const key = lazyPagePreviewQueue.shift()
-    if (!key) {
-      lazyPagePreviewQueueRunning = false
-      return
-    }
-
-    lazyPagePreviewQueued.delete(key)
-    if (!lazyPagePreviewVisible.value?.[key])
-      lazyPagePreviewVisible.value = { ...(lazyPagePreviewVisible.value || {}), [key]: true }
-
-    globalThis.setTimeout?.(releaseNext, 500)
-  }
-
-  globalThis.requestAnimationFrame?.(releaseNext) || releaseNext()
-}
-
-const enqueueLazyPagePreview = (key) => {
-  if (!key || lazyPagePreviewVisible.value?.[key] || lazyPagePreviewQueued.has(key))
-    return
-  lazyPagePreviewQueued.add(key)
-  lazyPagePreviewQueue.push(key)
-  releaseLazyPagePreviewQueue()
-}
-
-const ensureLazyPagePreviewObserver = () => {
-  if (lazyPagePreviewObserver || typeof IntersectionObserver === 'undefined')
-    return lazyPagePreviewObserver
-
-  lazyPagePreviewObserver = new IntersectionObserver((entries) => {
-    entries.forEach((entry) => {
-      if (!entry.isIntersecting)
-        return
-      const key = entry.target?.dataset?.lazyPagePreviewKey || ''
-      enqueueLazyPagePreview(key)
-      lazyPagePreviewObserver?.unobserve(entry.target)
-    })
-  }, {
-    root: null,
-    rootMargin: '700px 0px',
-    threshold: 0.01,
-  })
-
-  return lazyPagePreviewObserver
-}
-
-const setLazyPagePreviewRef = (scope, pageDoc, element) => {
-  const key = getLazyPagePreviewKey(scope, pageDoc)
-  if (!key)
-    return
-
-  const previousElement = lazyPagePreviewRefs.get(key)
-  if (previousElement && previousElement !== element)
-    lazyPagePreviewObserver?.unobserve(previousElement)
-
-  if (!element) {
-    lazyPagePreviewRefs.delete(key)
-    return
-  }
-
-  lazyPagePreviewRefs.set(key, element)
-  element.dataset.lazyPagePreviewKey = key
-
-  const observer = ensureLazyPagePreviewObserver()
-  if (!observer) {
-    enqueueLazyPagePreview(key)
-    return
-  }
-  observer.observe(element)
 }
 
 const getTemplatePagePreviewKey = (docId) => {
@@ -3551,11 +3458,6 @@ onBeforeUnmount(() => {
   sitePagePreviewSnapshotQueued.clear()
   sitePagePreviewSnapshotRefs.clear()
   sitePagePreviewSnapshotUploads.clear()
-  lazyPagePreviewQueue.splice(0, lazyPagePreviewQueue.length)
-  lazyPagePreviewQueued.clear()
-  lazyPagePreviewRefs.clear()
-  if (lazyPagePreviewObserver)
-    lazyPagePreviewObserver.disconnect()
   if (sitePagePreviewScaleObserver)
     sitePagePreviewScaleObserver.disconnect()
 })
@@ -3981,7 +3883,6 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
             <div
               v-for="item in slotProps.filtered"
               :key="item.docId"
-              :ref="element => setLazyPagePreviewRef('template', item, element)"
               role="button"
               tabindex="0"
               class="w-full h-full"
@@ -4030,13 +3931,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                     <div class="template-page-preview-scale-wrapper">
                       <div class="template-page-preview-scale-inner">
                         <div class="template-page-preview-content space-y-4">
-                          <template v-if="!isLazyPagePreviewVisible('template', item)">
-                            <div class="flex h-32 flex-col items-center justify-center gap-3 mt-[100px] text-muted-foreground">
-                              <Loader2 class="h-100 w-100 animate-spin" />
-                              <span class="text-sm font-medium">Loading preview…</span>
-                            </div>
-                          </template>
-                          <template v-else-if="state.pagePreviewsLoading">
+                          <template v-if="state.pagePreviewsLoading">
                             <div class="flex h-32 flex-col items-center justify-center gap-3 mt-[100px] text-muted-foreground">
                               <Loader2 class="h-100 w-100 animate-spin" />
                               <span class="text-sm font-medium">Loading preview…</span>
@@ -4044,7 +3939,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                           </template>
                           <template v-else-if="templatePageHasPreview(item) && selectedTemplatePreviewThemeReady">
                             <div
-                              v-for="(row, rowIndex) in templatePreviewCardRows(item)"
+                              v-for="(row, rowIndex) in templatePreviewRows(item)"
                               :key="`${item.docId}-row-${row.id || rowIndex}`"
                               class="w-full"
                             >
@@ -4625,7 +4520,6 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                     <div
                       v-for="item in sitePageGridItems"
                       :key="item.docId"
-                      :ref="element => setLazyPagePreviewRef('site', item, element)"
                       role="button"
                       tabindex="0"
                       class="w-full h-full"
@@ -4736,13 +4630,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                           >
                             <div class="template-scale-inner">
                               <div class="template-scale-content space-y-4" :style="sitePagePreviewScaleStyle">
-                                <template v-if="!isLazyPagePreviewVisible('site', item)">
-                                  <div class="flex h-32 flex-col items-center justify-center gap-3 mt-[100px] text-muted-foreground">
-                                    <Loader2 class="h-100 w-100 animate-spin" />
-                                    <span class="text-sm font-medium">Loading preview…</span>
-                                  </div>
-                                </template>
-                                <template v-else-if="state.pagePreviewsLoading">
+                                <template v-if="state.pagePreviewsLoading">
                                   <div class="flex h-32 flex-col items-center justify-center gap-3 mt-[100px] text-muted-foreground">
                                     <Loader2 class="h-100 w-100 animate-spin" />
                                     <span class="text-sm font-medium">Loading preview…</span>
@@ -4750,7 +4638,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                                 </template>
                                 <template v-else-if="templatePageHasPreview(item) && sitePreviewThemeReady">
                                   <div
-                                    v-for="(row, rowIndex) in templatePreviewCardRows(item)"
+                                    v-for="(row, rowIndex) in templatePreviewRows(item)"
                                     :key="`${item.docId}-row-${row.id || rowIndex}`"
                                     class="w-full"
                                   >
