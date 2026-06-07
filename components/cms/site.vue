@@ -169,7 +169,7 @@ const sitePagePreviewSnapshotQueue = []
 const sitePagePreviewSnapshotQueued = new Set()
 const sitePagePreviewForcedRendered = ref(new Set())
 const sitePagePreviewScale = ref(0.18)
-const lazyPagePreviewVisible = ref(new Set())
+const lazyPagePreviewVisible = useState('edge-cms-lazy-page-preview-visible', () => ({}))
 const lazyPagePreviewRefs = new Map()
 const lazyPagePreviewQueued = new Set()
 const lazyPagePreviewQueue = []
@@ -1713,6 +1713,7 @@ const templatePreviewRows = (pageDoc) => {
 }
 
 const templatePageHasPreview = pageDoc => templatePreviewRows(pageDoc).length > 0
+const templatePreviewCardRows = pageDoc => templatePreviewRows(pageDoc).slice(0, 3)
 
 const resolveTemplateBlockSource = (pageDoc, blockRef) => {
   if (!blockRef)
@@ -1819,7 +1820,7 @@ const getLazyPagePreviewKey = (scope, pageDoc) => {
 
 const isLazyPagePreviewVisible = (scope, pageDoc) => {
   const key = getLazyPagePreviewKey(scope, pageDoc)
-  return !!(key && lazyPagePreviewVisible.value.has(key))
+  return !!(key && lazyPagePreviewVisible.value?.[key])
 }
 
 const releaseLazyPagePreviewQueue = () => {
@@ -1835,20 +1836,17 @@ const releaseLazyPagePreviewQueue = () => {
     }
 
     lazyPagePreviewQueued.delete(key)
-    if (!lazyPagePreviewVisible.value.has(key)) {
-      const next = new Set(lazyPagePreviewVisible.value)
-      next.add(key)
-      lazyPagePreviewVisible.value = next
-    }
+    if (!lazyPagePreviewVisible.value?.[key])
+      lazyPagePreviewVisible.value = { ...(lazyPagePreviewVisible.value || {}), [key]: true }
 
-    globalThis.setTimeout?.(releaseNext, 90)
+    globalThis.setTimeout?.(releaseNext, 500)
   }
 
   globalThis.requestAnimationFrame?.(releaseNext) || releaseNext()
 }
 
 const enqueueLazyPagePreview = (key) => {
-  if (!key || lazyPagePreviewVisible.value.has(key) || lazyPagePreviewQueued.has(key))
+  if (!key || lazyPagePreviewVisible.value?.[key] || lazyPagePreviewQueued.has(key))
     return
   lazyPagePreviewQueued.add(key)
   lazyPagePreviewQueue.push(key)
@@ -4046,7 +4044,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                           </template>
                           <template v-else-if="templatePageHasPreview(item) && selectedTemplatePreviewThemeReady">
                             <div
-                              v-for="(row, rowIndex) in templatePreviewRows(item)"
+                              v-for="(row, rowIndex) in templatePreviewCardRows(item)"
                               :key="`${item.docId}-row-${row.id || rowIndex}`"
                               class="w-full"
                             >
@@ -4752,7 +4750,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                                 </template>
                                 <template v-else-if="templatePageHasPreview(item) && sitePreviewThemeReady">
                                   <div
-                                    v-for="(row, rowIndex) in templatePreviewRows(item)"
+                                    v-for="(row, rowIndex) in templatePreviewCardRows(item)"
                                     :key="`${item.docId}-row-${row.id || rowIndex}`"
                                     class="w-full"
                                   >
