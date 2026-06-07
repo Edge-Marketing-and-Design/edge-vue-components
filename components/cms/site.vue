@@ -155,12 +155,22 @@ const state = reactive({
   templatePageRenderContext: null,
   sitePageRenderContext: null,
   pagePreviewsLoading: true,
+  sitePagePreviewSnapshots: {},
 })
 
 const pageImportInputRef = ref(null)
 const pageImportDocIdResolver = ref(null)
 const pageImportConflictResolver = ref(null)
 const pageMenuRef = ref(null)
+const sitePagePreviewSnapshotRefs = new Map()
+const sitePagePreviewSnapshotTimers = new Map()
+const sitePagePreviewSnapshotUploads = new Set()
+const sitePagePreviewForcedRendered = ref(new Set())
+const sitePagePreviewScale = ref(0.18)
+let html2canvasModulePromise = null
+const SITE_PAGE_PREVIEW_THUMBNAIL_VERSION = 'viewport-html2canvas-ok-computed-color-v16'
+const showPreviewSnapshotStatus = computed(() => Boolean(edgeGlobal.edgeState.devOverride))
+const SITE_PAGE_PREVIEW_BASE_WIDTH = 1600
 
 const pageInit = {
   name: '',
@@ -1758,6 +1768,38 @@ const previewColumnStyle = (column) => {
   return { gridColumn: `span ${safeSpan} / span ${safeSpan}` }
 }
 
+const sitePagePreviewScaleStyle = computed(() => ({
+  transform: `scale(${sitePagePreviewScale.value})`,
+}))
+
+const updateSitePagePreviewScale = (element) => {
+  if (!element)
+    return
+  const width = element.getBoundingClientRect?.().width || 0
+  if (!width)
+    return
+  const nextScale = Math.max(0.12, Math.min(0.5, width / SITE_PAGE_PREVIEW_BASE_WIDTH))
+  sitePagePreviewScale.value = Number(nextScale.toFixed(4))
+}
+
+let sitePagePreviewScaleObserver = null
+const observeSitePagePreviewScale = (element) => {
+  if (!element || typeof ResizeObserver === 'undefined') {
+    updateSitePagePreviewScale(element)
+    return
+  }
+  if (sitePagePreviewScaleObserver)
+    sitePagePreviewScaleObserver.disconnect()
+  updateSitePagePreviewScale(element)
+  sitePagePreviewScaleObserver = new ResizeObserver((entries) => {
+    const entry = entries?.[0]
+    if (!entry?.target)
+      return
+    updateSitePagePreviewScale(entry.target)
+  })
+  sitePagePreviewScaleObserver.observe(element)
+}
+
 const getTemplatePagePreviewKey = (docId) => {
   const themeId = String(selectedTemplatePreviewThemeId.value || 'no-theme')
   const siteId = String(selectedTemplatePreviewSiteId.value || 'no-site')
@@ -1779,6 +1821,575 @@ const getSitePagePreviewKey = (docId) => {
   const themeId = String(siteData.value?.theme || 'no-theme')
   const themeVersion = getThemePreviewVersion(themeCollection.value?.[themeId] || null)
   return `${String(docId || 'page')}:${props.site}:${themeId}:${themeVersion}`
+}
+
+const loadHtml2Canvas = () => {
+  if (!html2canvasModulePromise)
+    html2canvasModulePromise = import('html2canvas')
+  return html2canvasModulePromise
+}
+
+const createPreviewSignatureHash = (value) => {
+  const input = stableSerialize(value)
+  let hash = 5381
+  for (let index = 0; index < input.length; index++)
+    hash = ((hash << 5) + hash) ^ input.charCodeAt(index)
+  return String(hash >>> 0)
+}
+
+const getSitePagePreviewBlockSignature = (pageDoc) => {
+  return templatePreviewRows(pageDoc).map(row => ({
+    id: row.id,
+    columns: row.columns.map(column => ({
+      id: column.id,
+      span: column.span,
+      blocks: (column.blocks || []).map((blockRef) => {
+        const block = resolveTemplateBlockForPreview(pageDoc, blockRef)
+        return {
+          content: block?.content || null,
+          values: block?.values || null,
+          meta: block?.meta || null,
+        }
+      }),
+    })),
+  }))
+}
+
+const getSitePagePreviewThemeSignature = () => {
+  const themeId = String(siteData.value?.theme || '').trim()
+  const themeDoc = themeId ? themeCollection.value?.[themeId] || null : null
+  return createPreviewSignatureHash({
+    id: themeId || 'no-theme',
+    theme: themeDoc?.theme || null,
+    extraCSS: themeDoc?.extraCSS || '',
+  })
+}
+
+const getSitePagePreviewSnapshotSignature = (pageDoc) => {
+  return createPreviewSignatureHash({
+    thumbnailVersion: SITE_PAGE_PREVIEW_THUMBNAIL_VERSION,
+    previewKey: getSitePagePreviewKey(pageDoc?.docId),
+    theme: getSitePagePreviewThemeSignature(),
+    version: pageDoc?.version || null,
+    rows: getSitePagePreviewBlockSignature(pageDoc),
+  })
+}
+
+const getSitePagePreviewSnapshot = (pageDoc) => {
+  const docId = String(pageDoc?.docId || '').trim()
+  return docId ? state.sitePagePreviewSnapshots[docId] || null : null
+}
+
+const getPersistedSitePagePreviewThumbnail = (pageDoc) => {
+  return pageDoc?.previewThumbnail && typeof pageDoc.previewThumbnail === 'object'
+    ? pageDoc.previewThumbnail
+    : null
+}
+
+const getPersistedSitePagePreviewThumbnailUrl = (pageDoc) => {
+  const previewThumbnail = getPersistedSitePagePreviewThumbnail(pageDoc)
+  return String(previewThumbnail?.url || previewThumbnail?.downloadURL || '').trim()
+}
+
+const isPersistedSitePagePreviewThumbnailFresh = (pageDoc) => {
+  const previewThumbnail = getPersistedSitePagePreviewThumbnail(pageDoc)
+  return !!(
+    previewThumbnail?.status === 'ready'
+    && getPersistedSitePagePreviewThumbnailUrl(pageDoc)
+    && previewThumbnail.signature === getSitePagePreviewSnapshotSignature(pageDoc)
+  )
+}
+
+const isSitePagePreviewSnapshotFresh = (pageDoc) => {
+  const snapshot = getSitePagePreviewSnapshot(pageDoc)
+  return !!(
+    snapshot?.status === 'ready'
+    && snapshot.dataUrl
+    && snapshot.signature === getSitePagePreviewSnapshotSignature(pageDoc)
+  )
+}
+
+const isSitePagePreviewSnapshotDisplayable = (pageDoc) => {
+  const snapshot = getSitePagePreviewSnapshot(pageDoc)
+  return !!(
+    ['ready', 'uploading'].includes(snapshot?.status)
+    && snapshot.dataUrl
+    && snapshot.signature === getSitePagePreviewSnapshotSignature(pageDoc)
+  )
+}
+
+const hasFreshSitePagePreviewImage = (pageDoc) => {
+  return isPersistedSitePagePreviewThumbnailFresh(pageDoc) || isSitePagePreviewSnapshotDisplayable(pageDoc)
+}
+
+const getFreshSitePagePreviewImageUrl = (pageDoc) => {
+  if (isPersistedSitePagePreviewThumbnailFresh(pageDoc))
+    return getPersistedSitePagePreviewThumbnailUrl(pageDoc)
+  if (isSitePagePreviewSnapshotDisplayable(pageDoc))
+    return getSitePagePreviewSnapshot(pageDoc)?.dataUrl || ''
+  return ''
+}
+
+const isSitePagePreviewForcedRendered = (pageDoc) => {
+  const docId = String(pageDoc?.docId || '').trim()
+  return !!(docId && sitePagePreviewForcedRendered.value.has(docId))
+}
+
+const shouldShowSitePagePreviewImage = (pageDoc) => {
+  return hasFreshSitePagePreviewImage(pageDoc) && !isSitePagePreviewForcedRendered(pageDoc)
+}
+
+const toggleSitePagePreviewRendered = (pageDoc) => {
+  const docId = String(pageDoc?.docId || '').trim()
+  if (!docId)
+    return
+  const next = new Set(sitePagePreviewForcedRendered.value)
+  if (next.has(docId))
+    next.delete(docId)
+  else
+    next.add(docId)
+  sitePagePreviewForcedRendered.value = next
+}
+
+const getSitePagePreviewSnapshotLabel = (pageDoc) => {
+  const snapshot = getSitePagePreviewSnapshot(pageDoc)
+  if (isPersistedSitePagePreviewThumbnailFresh(pageDoc))
+    return 'Cached JPEG (Firebase)'
+  if (isSitePagePreviewSnapshotFresh(pageDoc)) {
+    const renderer = String(snapshot?.renderer || '').trim()
+    return renderer ? `Captured JPEG (${renderer})` : 'Captured JPEG'
+  }
+  if (snapshot?.status === 'uploading') {
+    const renderer = String(snapshot?.renderer || '').trim()
+    return renderer ? `Uploading JPEG (${renderer})` : 'Uploading JPEG'
+  }
+  if (snapshot?.status === 'capturing')
+    return 'Capturing JPEG...'
+  if (snapshot?.status === 'failed') {
+    const reason = String(snapshot.errorMessage || '').trim()
+    return reason
+      ? `Live preview - capture failed once: ${reason.slice(0, 120)}`
+      : 'Live preview - capture failed once'
+  }
+  return 'Live preview'
+}
+
+const getSitePagePreviewSnapshotTitle = (pageDoc) => {
+  const snapshot = getSitePagePreviewSnapshot(pageDoc)
+  return snapshot?.errorMessage || getSitePagePreviewSnapshotLabel(pageDoc)
+}
+
+const normalizePreviewCaptureError = (error) => {
+  const message = String(error?.message || '').trim()
+  if (message)
+    return message
+  const name = String(error?.name || '').trim()
+  const code = String(error?.code || '').trim()
+  const status = String(error?.status || '').trim()
+  const statusText = String(error?.statusText || '').trim()
+  const type = String(error?.type || '').trim()
+  const details = [name, code, status, statusText, type].filter(Boolean).join(' ')
+  if (details)
+    return details
+  if (error && typeof error === 'object') {
+    try {
+      const entries = Object.entries(error)
+        .filter(([, value]) => value !== undefined && value !== null && typeof value !== 'function')
+        .slice(0, 8)
+      if (entries.length) {
+        return entries
+          .map(([key, value]) => `${key}: ${typeof value === 'object' ? stableSerialize(value) : String(value)}`)
+          .join(', ')
+          .slice(0, 300)
+      }
+    }
+    catch {}
+  }
+  const fallback = String(error || '').trim()
+  return fallback && fallback !== '[object Object]' ? fallback : 'Preview capture failed with an unknown object error.'
+}
+
+const dataUrlToFile = async (dataUrl, fileName) => {
+  const response = await fetch(dataUrl)
+  const blob = await response.blob()
+  if (typeof globalThis.File === 'function')
+    return new globalThis.File([blob], fileName, { type: blob.type || 'image/jpeg' })
+  Object.defineProperty(blob, 'name', {
+    value: fileName,
+    configurable: true,
+  })
+  return blob
+}
+
+const firebaseStoragePublicUrl = (filePath) => {
+  const bucket = String(edgeFirebase?.firebaseConfig?.storageBucket || '').trim()
+  const normalizedFilePath = String(filePath || '').trim()
+  if (!bucket || !normalizedFilePath)
+    return ''
+  return `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(normalizedFilePath)}?alt=media`
+}
+
+const uploadSitePagePreviewSnapshot = async ({ pageDoc, dataUrl, signature, renderer }) => {
+  const docId = String(pageDoc?.docId || '').trim()
+  if (!docId || !dataUrl || sitePagePreviewSnapshotUploads.has(docId))
+    return
+  sitePagePreviewSnapshotUploads.add(docId)
+  state.sitePagePreviewSnapshots[docId] = {
+    status: 'uploading',
+    signature,
+    dataUrl,
+    renderer,
+  }
+  try {
+    const fileName = `cms-page-preview-${props.site}-${docId}-${signature}.jpg`
+      .replace(/[^a-z0-9_.-]/gi, '-')
+      .toLowerCase()
+    const file = await dataUrlToFile(dataUrl, fileName)
+    const result = await edgeFirebase.uploadFile(
+      edgeGlobal.edgeState.currentOrganization,
+      file,
+      'cms-page-previews',
+      true,
+      false,
+      {
+        cmsPagePreview: true,
+        siteId: props.site,
+        pageId: docId,
+        signature,
+        renderer,
+      },
+    )
+    if (!result?.success)
+      throw new Error(result?.message || 'Firebase preview upload failed.')
+
+    const filePath = String(result?.meta?.file || '').trim()
+    const url = firebaseStoragePublicUrl(filePath)
+    if (!url)
+      throw new Error('Firebase preview upload did not return a usable file path.')
+
+    const previewThumbnail = {
+      status: 'ready',
+      provider: 'firebase-storage',
+      url,
+      filePath,
+      fileDocId: result?.meta?.fileDocId || '',
+      signature,
+      renderer,
+      updatedAt: new Date().toISOString(),
+    }
+    await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`, docId, {
+      previewThumbnail,
+    })
+    state.sitePagePreviewSnapshots[docId] = {
+      status: 'ready',
+      signature,
+      dataUrl,
+      renderer,
+      uploaded: true,
+      url,
+      capturedAt: Date.now(),
+    }
+  }
+  catch (error) {
+    state.sitePagePreviewSnapshots[docId] = {
+      status: 'failed',
+      signature,
+      dataUrl: '',
+      errorMessage: `upload: ${normalizePreviewCaptureError(error)}`,
+    }
+  }
+  finally {
+    sitePagePreviewSnapshotUploads.delete(docId)
+  }
+}
+
+const colorValueUsesUnsupportedCaptureFunction = (value) => {
+  return /oklab|oklch/i.test(String(value || ''))
+}
+
+const parseOkColorChannel = (value, percentScale = 1) => {
+  const normalized = String(value || '').trim()
+  if (!normalized)
+    return 0
+  const numeric = Number.parseFloat(normalized)
+  if (!Number.isFinite(numeric))
+    return 0
+  return normalized.endsWith('%') ? numeric / 100 * percentScale : numeric
+}
+
+const parseOkAlpha = (value) => {
+  const normalized = String(value || '').trim()
+  if (!normalized)
+    return 1
+  const numeric = Number.parseFloat(normalized)
+  if (!Number.isFinite(numeric))
+    return 1
+  return normalized.endsWith('%') ? numeric / 100 : numeric
+}
+
+const linearSrgbToByte = (value) => {
+  const clamped = Math.min(Math.max(value, 0), 1)
+  const encoded = clamped <= 0.0031308
+    ? 12.92 * clamped
+    : 1.055 * (clamped ** (1 / 2.4)) - 0.055
+  return Math.round(Math.min(Math.max(encoded, 0), 1) * 255)
+}
+
+const oklabToRgbString = (l, a, b, alpha = 1) => {
+  const lPrime = l + 0.3963377774 * a + 0.2158037573 * b
+  const mPrime = l - 0.1055613458 * a - 0.0638541728 * b
+  const sPrime = l - 0.0894841775 * a - 1.2914855480 * b
+  const l3 = lPrime ** 3
+  const m3 = mPrime ** 3
+  const s3 = sPrime ** 3
+  const r = linearSrgbToByte(+4.0767416621 * l3 - 3.3077115913 * m3 + 0.2309699292 * s3)
+  const g = linearSrgbToByte(-1.2684380046 * l3 + 2.6097574011 * m3 - 0.3413193965 * s3)
+  const blue = linearSrgbToByte(-0.0041960863 * l3 - 0.7034186147 * m3 + 1.7076147010 * s3)
+  const safeAlpha = Math.min(Math.max(alpha, 0), 1)
+  return safeAlpha < 1 ? `rgba(${r}, ${g}, ${blue}, ${safeAlpha})` : `rgb(${r}, ${g}, ${blue})`
+}
+
+const convertOklabCaptureColor = (rawValue) => {
+  const value = String(rawValue || '').trim()
+  const alphaParts = value.split('/')
+  const channels = alphaParts[0]
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+  if (channels.length < 3)
+    return null
+  const l = parseOkColorChannel(channels[0])
+  const a = parseOkColorChannel(channels[1])
+  const b = parseOkColorChannel(channels[2])
+  const alpha = parseOkAlpha(alphaParts[1])
+  return oklabToRgbString(l, a, b, alpha)
+}
+
+const convertOklchCaptureColor = (rawValue) => {
+  const value = String(rawValue || '').trim()
+  const alphaParts = value.split('/')
+  const channels = alphaParts[0]
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+  if (channels.length < 3)
+    return null
+  const l = parseOkColorChannel(channels[0])
+  const chroma = parseOkColorChannel(channels[1])
+  const hue = Number.parseFloat(channels[2])
+  if (!Number.isFinite(hue))
+    return null
+  const alpha = parseOkAlpha(alphaParts[1])
+  const hueRadians = hue * Math.PI / 180
+  return oklabToRgbString(l, chroma * Math.cos(hueRadians), chroma * Math.sin(hueRadians), alpha)
+}
+
+const replaceUnsupportedCaptureColors = (value, fallback = '#ffffff') => {
+  return String(value || '')
+    .replace(/oklab\(((?:[^()]|\([^()]*\))*)\)/gi, (_match, colorValue) => convertOklabCaptureColor(colorValue) || fallback)
+    .replace(/oklch\(((?:[^()]|\([^()]*\))*)\)/gi, (_match, colorValue) => convertOklchCaptureColor(colorValue) || fallback)
+}
+
+const sanitizePreviewCloneStylesheets = (clonedDocument) => {
+  clonedDocument.querySelectorAll('style').forEach((styleElement) => {
+    if (!colorValueUsesUnsupportedCaptureFunction(styleElement.textContent))
+      return
+    styleElement.textContent = replaceUnsupportedCaptureColors(styleElement.textContent)
+  })
+  clonedDocument.querySelectorAll('[style]').forEach((element) => {
+    const styleAttribute = element.getAttribute('style') || ''
+    if (!colorValueUsesUnsupportedCaptureFunction(styleAttribute))
+      return
+    element.setAttribute('style', replaceUnsupportedCaptureColors(styleAttribute))
+  })
+}
+
+const sanitizePreviewCloneComputedColors = (sourceElement, clonedElement) => {
+  const directColorProperties = [
+    'color',
+    'backgroundColor',
+    'borderTopColor',
+    'borderRightColor',
+    'borderBottomColor',
+    'borderLeftColor',
+    'outlineColor',
+    'textDecorationColor',
+    'columnRuleColor',
+    'fill',
+    'stroke',
+  ]
+  const complexColorProperties = [
+    'backgroundImage',
+    'boxShadow',
+    'textShadow',
+  ]
+
+  const sourceNodes = [sourceElement, ...sourceElement.querySelectorAll('*')]
+  const clonedNodes = [clonedElement, ...clonedElement.querySelectorAll('*')]
+  clonedNodes.forEach((clonedNode, index) => {
+    const sourceNode = sourceNodes[index]
+    if (!sourceNode)
+      return
+    const style = globalThis.getComputedStyle?.(sourceNode)
+    if (!style)
+      return
+    directColorProperties.forEach((property) => {
+      const value = String(style[property] || '').trim()
+      if (colorValueUsesUnsupportedCaptureFunction(value))
+        clonedNode.style[property] = replaceUnsupportedCaptureColors(value)
+    })
+    complexColorProperties.forEach((property) => {
+      const value = String(style[property] || '').trim()
+      if (colorValueUsesUnsupportedCaptureFunction(value))
+        clonedNode.style[property] = replaceUnsupportedCaptureColors(value, 'transparent')
+    })
+  })
+}
+
+const getPreviewContentVisualWidth = (previewElement) => {
+  const contentElement = previewElement?.querySelector?.('.template-scale-content')
+  if (!contentElement)
+    return 0
+  const contentRect = contentElement.getBoundingClientRect()
+  return Math.ceil(contentRect.width)
+}
+
+const getSitePagePreviewCaptureRect = (previewElement) => {
+  const frameRect = previewElement.getBoundingClientRect()
+  const contentWidth = getPreviewContentVisualWidth(previewElement)
+  return {
+    width: Math.min(
+      Math.ceil(frameRect.width),
+      contentWidth > 0 ? contentWidth : Math.ceil(frameRect.width),
+    ),
+    height: Math.ceil(frameRect.height),
+  }
+}
+
+const captureSitePagePreviewWithHtml2Canvas = async (element, rect) => {
+  const module = await loadHtml2Canvas()
+  const html2canvas = module.default || module
+  const canvas = await html2canvas(element, {
+    backgroundColor: '#ffffff',
+    width: Math.ceil(rect.width),
+    height: Math.ceil(rect.height),
+    windowWidth: Math.max(globalThis.window?.innerWidth || 0, Math.ceil(rect.width)),
+    windowHeight: Math.max(globalThis.window?.innerHeight || 0, Math.ceil(rect.height)),
+    scale: 2,
+    useCORS: true,
+    allowTaint: false,
+    logging: false,
+    imageTimeout: 1500,
+    onclone: (clonedDocument, clonedElement) => {
+      sanitizePreviewCloneStylesheets(clonedDocument)
+      if (clonedElement)
+        sanitizePreviewCloneComputedColors(element, clonedElement)
+    },
+  })
+  return canvas.toDataURL('image/jpeg', 0.94)
+}
+
+const captureSitePagePreviewSnapshot = async (pageDoc) => {
+  const docId = String(pageDoc?.docId || '').trim()
+  const element = sitePagePreviewSnapshotRefs.get(docId)
+  if (!docId || !element)
+    return
+
+  const signature = getSitePagePreviewSnapshotSignature(pageDoc)
+  state.sitePagePreviewSnapshots[docId] = {
+    status: 'capturing',
+    signature,
+    dataUrl: getSitePagePreviewSnapshot(pageDoc)?.dataUrl || '',
+  }
+
+  try {
+    await nextTick()
+    if (globalThis.document?.fonts?.ready)
+      await globalThis.document.fonts.ready
+    await new Promise(resolve => setTimeout(resolve, 250))
+    if (!sitePagePreviewSnapshotRefs.has(docId))
+      return
+    const rect = getSitePagePreviewCaptureRect(element)
+    if (!rect.width || !rect.height)
+      throw new Error('Preview element has no rendered size.')
+    const renderer = 'html2canvas'
+    const dataUrl = await captureSitePagePreviewWithHtml2Canvas(element, rect)
+    if (signature !== getSitePagePreviewSnapshotSignature(pageDoc))
+      return
+    state.sitePagePreviewSnapshots[docId] = {
+      status: 'ready',
+      signature,
+      dataUrl,
+      renderer,
+      capturedAt: Date.now(),
+    }
+    await uploadSitePagePreviewSnapshot({ pageDoc, dataUrl, signature, renderer })
+  }
+  catch (error) {
+    state.sitePagePreviewSnapshots[docId] = {
+      status: 'failed',
+      signature,
+      dataUrl: '',
+      errorMessage: normalizePreviewCaptureError(error),
+    }
+  }
+}
+
+const scheduleSitePagePreviewSnapshotCapture = (pageDoc) => {
+  const docId = String(pageDoc?.docId || '').trim()
+  if (
+    !docId
+    || state.pagePreviewsLoading
+    || !templatePageHasPreview(pageDoc)
+    || !sitePreviewThemeReady.value
+    || hasFreshSitePagePreviewImage(pageDoc)
+  )
+    return
+
+  const snapshot = getSitePagePreviewSnapshot(pageDoc)
+  const signature = getSitePagePreviewSnapshotSignature(pageDoc)
+  if (
+    snapshot?.signature === signature
+    && (snapshot.status === 'capturing' || snapshot.status === 'uploading' || snapshot.status === 'failed')
+  )
+    return
+
+  if (sitePagePreviewSnapshotTimers.has(docId))
+    clearTimeout(sitePagePreviewSnapshotTimers.get(docId))
+
+  sitePagePreviewSnapshotTimers.set(docId, setTimeout(() => {
+    sitePagePreviewSnapshotTimers.delete(docId)
+    captureSitePagePreviewSnapshot(pageDoc)
+  }, 650))
+}
+
+const setSitePagePreviewSnapshotRef = (pageDoc, element) => {
+  const docId = String(pageDoc?.docId || '').trim()
+  if (!docId)
+    return
+  if (!element) {
+    sitePagePreviewSnapshotRefs.delete(docId)
+    return
+  }
+  sitePagePreviewSnapshotRefs.set(docId, element)
+  observeSitePagePreviewScale(element)
+  scheduleSitePagePreviewSnapshotCapture(pageDoc)
+}
+
+const recaptureSitePagePreviewSnapshot = async (pageDoc) => {
+  const docId = String(pageDoc?.docId || '').trim()
+  if (!docId)
+    return
+  if (sitePagePreviewSnapshotTimers.has(docId)) {
+    clearTimeout(sitePagePreviewSnapshotTimers.get(docId))
+    sitePagePreviewSnapshotTimers.delete(docId)
+  }
+  delete state.sitePagePreviewSnapshots[docId]
+  await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`, docId, {
+    previewThumbnail: null,
+  })
+  await nextTick()
+  captureSitePagePreviewSnapshot(pageDoc)
 }
 
 const orderedSiteMenus = computed(() => {
@@ -2729,6 +3340,12 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (cacheVerificationTimer)
     clearInterval(cacheVerificationTimer)
+  sitePagePreviewSnapshotTimers.forEach(timer => clearTimeout(timer))
+  sitePagePreviewSnapshotTimers.clear()
+  sitePagePreviewSnapshotRefs.clear()
+  sitePagePreviewSnapshotUploads.clear()
+  if (sitePagePreviewScaleObserver)
+    sitePagePreviewScaleObserver.disconnect()
 })
 
 const cacheVerificationStatus = computed(() => publishedSiteSettings.value?.cacheVerification || {})
@@ -3882,9 +4499,23 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                               </DropdownMenuContent>
                             </DropdownMenu>
                           </div>
-                          <div class="template-scale-wrapper border border-dashed border-border/60 rounded-md bg-background/80">
+                          <div
+                            v-if="shouldShowSitePagePreviewImage(item)"
+                            class="template-scale-wrapper"
+                          >
+                            <img
+                              :src="getFreshSitePagePreviewImageUrl(item)"
+                              :alt="`${item.name || item.docId || 'Page'} preview snapshot`"
+                              class="h-full w-full object-cover object-top"
+                            >
+                          </div>
+                          <div
+                            v-else
+                            :ref="element => setSitePagePreviewSnapshotRef(item, element)"
+                            class="template-scale-wrapper"
+                          >
                             <div class="template-scale-inner">
-                              <div class="template-scale-content space-y-4">
+                              <div class="template-scale-content space-y-4" :style="sitePagePreviewScaleStyle">
                                 <template v-if="state.pagePreviewsLoading">
                                   <div class="flex h-32 flex-col items-center justify-center gap-3 mt-[100px] text-muted-foreground">
                                     <Loader2 class="h-100 w-100 animate-spin" />
@@ -3930,6 +4561,30 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                                   </div>
                                 </template>
                               </div>
+                            </div>
+                          </div>
+                          <div
+                            v-if="showPreviewSnapshotStatus"
+                            class="mt-2 flex items-center justify-between gap-2 text-[11px] font-medium uppercase tracking-wide text-slate-400"
+                          >
+                            <span class="min-w-0 flex-1 truncate" :title="getSitePagePreviewSnapshotTitle(item)">
+                              {{ getSitePagePreviewSnapshotLabel(item) }}
+                            </span>
+                            <div class="flex shrink-0 items-center gap-1">
+                              <button
+                                type="button"
+                                class="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] leading-none text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                                @click.stop="toggleSitePagePreviewRendered(item)"
+                              >
+                                {{ isSitePagePreviewForcedRendered(item) ? 'jpg' : 'rendered' }}
+                              </button>
+                              <button
+                                type="button"
+                                class="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] leading-none text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                                @click.stop="recaptureSitePagePreviewSnapshot(item)"
+                              >
+                                re-jpg
+                              </button>
                             </div>
                           </div>
                           <div class="mt-auto space-y-2 text-xs text-slate-500 dark:text-slate-400">
@@ -4246,7 +4901,6 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
 }
 
 .template-page-preview-surface {
-  border: 1px dashed hsl(var(--border) / 0.6);
   background: hsl(var(--background) / 0.8);
 }
 
@@ -4264,9 +4918,12 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
   width: 1600px;
   min-height: 820px;
   padding: 1.5rem;
-  transform: scale(0.18);
   transform-origin: top left;
   margin-bottom: -1312px;
+}
+
+.template-page-preview-content {
+  transform: scale(0.18);
 }
 
 .fade-enter-active,

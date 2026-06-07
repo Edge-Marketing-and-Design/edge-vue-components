@@ -1,7 +1,7 @@
 {
   "dependencies": {
     "@edgedev/firebase": "latest",
-    "@edgedev/edgecomponents": "0.1.27",
+    "@edgedev/edgecomponents": "latest",
     "@edgedev/template-engine": "latest",
     "@tiptap/extension-image": "2.11.5",
     "@tiptap/extension-link": "2.11.5",
@@ -14,6 +14,7 @@
     "@vee-validate/zod": "4.15.0",
     "@vueuse/core": "10.4.1",
     "dompurify": "3.2.6",
+    "html2canvas": "1.4.1",
     "lucide-vue-next": "0.539.0",
     "reka-ui": "2.1.0",
     "vee-validate": "4.15.0",
