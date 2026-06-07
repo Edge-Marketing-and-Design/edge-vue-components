@@ -1,7 +1,7 @@
 {
   "dependencies": {
     "@edgedev/firebase": "latest",
-    "@edgedev/edgecomponents": "latest",
+    "@edgedev/edgecomponents": "0.1.27",
     "@edgedev/template-engine": "latest",
     "@tiptap/extension-image": "2.11.5",
     "@tiptap/extension-link": "2.11.5",
