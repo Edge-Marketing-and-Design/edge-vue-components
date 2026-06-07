@@ -169,11 +169,18 @@ const sitePagePreviewSnapshotQueue = []
 const sitePagePreviewSnapshotQueued = new Set()
 const sitePagePreviewForcedRendered = ref(new Set())
 const sitePagePreviewScale = ref(0.18)
+const lazyPagePreviewVisible = ref(new Set())
+const lazyPagePreviewRefs = new Map()
+const lazyPagePreviewQueued = new Set()
+const lazyPagePreviewQueue = []
 let html2canvasModulePromise = null
 let sitePagePreviewSnapshotQueueRunning = false
 let sitePagePreviewSnapshotQueueStopped = false
-const SITE_PAGE_PREVIEW_THUMBNAIL_VERSION = 'viewport-html2canvas-ok-computed-color-v17'
-const showPreviewSnapshotStatus = computed(() => Boolean(edgeGlobal.edgeState.devOverride))
+let lazyPagePreviewObserver = null
+let lazyPagePreviewQueueRunning = false
+const SITE_PAGE_PREVIEW_THUMBNAIL_VERSION = 'viewport-html2canvas-ok-computed-color-v16'
+const SITE_PAGE_PREVIEW_JPEG_ENABLED = false
+const showPreviewSnapshotStatus = computed(() => SITE_PAGE_PREVIEW_JPEG_ENABLED && Boolean(edgeGlobal.edgeState.devOverride))
 const SITE_PAGE_PREVIEW_BASE_WIDTH = 1600
 const isPreviewSnapshotDevRefreshEnabled = () => Boolean(edgeGlobal.edgeState.devOverride)
 
@@ -1805,6 +1812,95 @@ const observeSitePagePreviewScale = (element) => {
   sitePagePreviewScaleObserver.observe(element)
 }
 
+const getLazyPagePreviewKey = (scope, pageDoc) => {
+  const docId = String(pageDoc?.docId || '').trim()
+  return docId ? `${scope}:${docId}` : ''
+}
+
+const isLazyPagePreviewVisible = (scope, pageDoc) => {
+  const key = getLazyPagePreviewKey(scope, pageDoc)
+  return !!(key && lazyPagePreviewVisible.value.has(key))
+}
+
+const releaseLazyPagePreviewQueue = () => {
+  if (lazyPagePreviewQueueRunning)
+    return
+  lazyPagePreviewQueueRunning = true
+
+  const releaseNext = () => {
+    const key = lazyPagePreviewQueue.shift()
+    if (!key) {
+      lazyPagePreviewQueueRunning = false
+      return
+    }
+
+    lazyPagePreviewQueued.delete(key)
+    if (!lazyPagePreviewVisible.value.has(key)) {
+      const next = new Set(lazyPagePreviewVisible.value)
+      next.add(key)
+      lazyPagePreviewVisible.value = next
+    }
+
+    globalThis.setTimeout?.(releaseNext, 90)
+  }
+
+  globalThis.requestAnimationFrame?.(releaseNext) || releaseNext()
+}
+
+const enqueueLazyPagePreview = (key) => {
+  if (!key || lazyPagePreviewVisible.value.has(key) || lazyPagePreviewQueued.has(key))
+    return
+  lazyPagePreviewQueued.add(key)
+  lazyPagePreviewQueue.push(key)
+  releaseLazyPagePreviewQueue()
+}
+
+const ensureLazyPagePreviewObserver = () => {
+  if (lazyPagePreviewObserver || typeof IntersectionObserver === 'undefined')
+    return lazyPagePreviewObserver
+
+  lazyPagePreviewObserver = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting)
+        return
+      const key = entry.target?.dataset?.lazyPagePreviewKey || ''
+      enqueueLazyPagePreview(key)
+      lazyPagePreviewObserver?.unobserve(entry.target)
+    })
+  }, {
+    root: null,
+    rootMargin: '700px 0px',
+    threshold: 0.01,
+  })
+
+  return lazyPagePreviewObserver
+}
+
+const setLazyPagePreviewRef = (scope, pageDoc, element) => {
+  const key = getLazyPagePreviewKey(scope, pageDoc)
+  if (!key)
+    return
+
+  const previousElement = lazyPagePreviewRefs.get(key)
+  if (previousElement && previousElement !== element)
+    lazyPagePreviewObserver?.unobserve(previousElement)
+
+  if (!element) {
+    lazyPagePreviewRefs.delete(key)
+    return
+  }
+
+  lazyPagePreviewRefs.set(key, element)
+  element.dataset.lazyPagePreviewKey = key
+
+  const observer = ensureLazyPagePreviewObserver()
+  if (!observer) {
+    enqueueLazyPagePreview(key)
+    return
+  }
+  observer.observe(element)
+}
+
 const getTemplatePagePreviewKey = (docId) => {
   const themeId = String(selectedTemplatePreviewThemeId.value || 'no-theme')
   const siteId = String(selectedTemplatePreviewSiteId.value || 'no-site')
@@ -1968,7 +2064,7 @@ const isSitePagePreviewSnapshotDisplayable = (pageDoc) => {
 }
 
 const hasFreshSitePagePreviewImage = (pageDoc) => {
-  return isPersistedSitePagePreviewThumbnailFresh(pageDoc) || isSitePagePreviewSnapshotDisplayable(pageDoc)
+  return SITE_PAGE_PREVIEW_JPEG_ENABLED && (isPersistedSitePagePreviewThumbnailFresh(pageDoc) || isSitePagePreviewSnapshotDisplayable(pageDoc))
 }
 
 const getFreshSitePagePreviewImageUrl = (pageDoc) => {
@@ -1985,7 +2081,7 @@ const isSitePagePreviewForcedRendered = (pageDoc) => {
 }
 
 const shouldShowSitePagePreviewImage = (pageDoc) => {
-  return hasFreshSitePagePreviewImage(pageDoc) && !isSitePagePreviewForcedRendered(pageDoc)
+  return SITE_PAGE_PREVIEW_JPEG_ENABLED && hasFreshSitePagePreviewImage(pageDoc) && !isSitePagePreviewForcedRendered(pageDoc)
 }
 
 const toggleSitePagePreviewRendered = (pageDoc) => {
@@ -2164,7 +2260,7 @@ const uploadSitePagePreviewSnapshot = async ({ pageDoc, dataUrl, signature, rend
 }
 
 const colorValueUsesUnsupportedCaptureFunction = (value) => {
-  return /\boklab\b|\boklch\b/i.test(String(value || ''))
+  return /oklab|oklch/i.test(String(value || ''))
 }
 
 const parseOkColorChannel = (value, percentScale = 1) => {
@@ -2245,10 +2341,9 @@ const convertOklchCaptureColor = (rawValue) => {
 }
 
 const replaceUnsupportedCaptureColors = (value, fallback = '#ffffff') => {
-  const replacedValue = String(value || '')
+  return String(value || '')
     .replace(/oklab\(((?:[^()]|\([^()]*\))*)\)/gi, (_match, colorValue) => convertOklabCaptureColor(colorValue) || fallback)
     .replace(/oklch\(((?:[^()]|\([^()]*\))*)\)/gi, (_match, colorValue) => convertOklchCaptureColor(colorValue) || fallback)
-  return colorValueUsesUnsupportedCaptureFunction(replacedValue) ? fallback : replacedValue
 }
 
 const sanitizePreviewCloneStylesheets = (clonedDocument) => {
@@ -2449,6 +2544,7 @@ const scheduleSitePagePreviewSnapshotCapture = (pageDoc) => {
   const docId = String(pageDoc?.docId || '').trim()
   if (
     !docId
+    || !SITE_PAGE_PREVIEW_JPEG_ENABLED
     || state.pagePreviewsLoading
     || !templatePageHasPreview(pageDoc)
     || !sitePreviewThemeReady.value
@@ -2488,7 +2584,7 @@ const setSitePagePreviewSnapshotRef = (pageDoc, element) => {
 
 const recaptureSitePagePreviewSnapshot = async (pageDoc) => {
   const docId = String(pageDoc?.docId || '').trim()
-  if (!docId)
+  if (!docId || !SITE_PAGE_PREVIEW_JPEG_ENABLED)
     return
   if (sitePagePreviewSnapshotTimers.has(docId)) {
     clearTimeout(sitePagePreviewSnapshotTimers.get(docId))
@@ -3457,6 +3553,11 @@ onBeforeUnmount(() => {
   sitePagePreviewSnapshotQueued.clear()
   sitePagePreviewSnapshotRefs.clear()
   sitePagePreviewSnapshotUploads.clear()
+  lazyPagePreviewQueue.splice(0, lazyPagePreviewQueue.length)
+  lazyPagePreviewQueued.clear()
+  lazyPagePreviewRefs.clear()
+  if (lazyPagePreviewObserver)
+    lazyPagePreviewObserver.disconnect()
   if (sitePagePreviewScaleObserver)
     sitePagePreviewScaleObserver.disconnect()
 })
@@ -3882,6 +3983,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
             <div
               v-for="item in slotProps.filtered"
               :key="item.docId"
+              :ref="element => setLazyPagePreviewRef('template', item, element)"
               role="button"
               tabindex="0"
               class="w-full h-full"
@@ -3930,7 +4032,13 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                     <div class="template-page-preview-scale-wrapper">
                       <div class="template-page-preview-scale-inner">
                         <div class="template-page-preview-content space-y-4">
-                          <template v-if="state.pagePreviewsLoading">
+                          <template v-if="!isLazyPagePreviewVisible('template', item)">
+                            <div class="flex h-32 flex-col items-center justify-center gap-3 mt-[100px] text-muted-foreground">
+                              <Loader2 class="h-100 w-100 animate-spin" />
+                              <span class="text-sm font-medium">Loading preview…</span>
+                            </div>
+                          </template>
+                          <template v-else-if="state.pagePreviewsLoading">
                             <div class="flex h-32 flex-col items-center justify-center gap-3 mt-[100px] text-muted-foreground">
                               <Loader2 class="h-100 w-100 animate-spin" />
                               <span class="text-sm font-medium">Loading preview…</span>
@@ -4519,6 +4627,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                     <div
                       v-for="item in sitePageGridItems"
                       :key="item.docId"
+                      :ref="element => setLazyPagePreviewRef('site', item, element)"
                       role="button"
                       tabindex="0"
                       class="w-full h-full"
@@ -4629,7 +4738,13 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                           >
                             <div class="template-scale-inner">
                               <div class="template-scale-content space-y-4" :style="sitePagePreviewScaleStyle">
-                                <template v-if="state.pagePreviewsLoading">
+                                <template v-if="!isLazyPagePreviewVisible('site', item)">
+                                  <div class="flex h-32 flex-col items-center justify-center gap-3 mt-[100px] text-muted-foreground">
+                                    <Loader2 class="h-100 w-100 animate-spin" />
+                                    <span class="text-sm font-medium">Loading preview…</span>
+                                  </div>
+                                </template>
+                                <template v-else-if="state.pagePreviewsLoading">
                                   <div class="flex h-32 flex-col items-center justify-center gap-3 mt-[100px] text-muted-foreground">
                                     <Loader2 class="h-100 w-100 animate-spin" />
                                     <span class="text-sm font-medium">Loading preview…</span>
