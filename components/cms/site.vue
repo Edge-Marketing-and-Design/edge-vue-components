@@ -172,7 +172,7 @@ const sitePagePreviewScale = ref(0.18)
 let html2canvasModulePromise = null
 let sitePagePreviewSnapshotQueueRunning = false
 let sitePagePreviewSnapshotQueueStopped = false
-const SITE_PAGE_PREVIEW_THUMBNAIL_VERSION = 'viewport-html2canvas-ok-computed-color-v16'
+const SITE_PAGE_PREVIEW_THUMBNAIL_VERSION = 'viewport-html2canvas-ok-computed-color-v17'
 const showPreviewSnapshotStatus = computed(() => Boolean(edgeGlobal.edgeState.devOverride))
 const SITE_PAGE_PREVIEW_BASE_WIDTH = 1600
 const isPreviewSnapshotDevRefreshEnabled = () => Boolean(edgeGlobal.edgeState.devOverride)
@@ -2164,7 +2164,7 @@ const uploadSitePagePreviewSnapshot = async ({ pageDoc, dataUrl, signature, rend
 }
 
 const colorValueUsesUnsupportedCaptureFunction = (value) => {
-  return /oklab|oklch/i.test(String(value || ''))
+  return /\boklab\b|\boklch\b/i.test(String(value || ''))
 }
 
 const parseOkColorChannel = (value, percentScale = 1) => {
@@ -2245,9 +2245,10 @@ const convertOklchCaptureColor = (rawValue) => {
 }
 
 const replaceUnsupportedCaptureColors = (value, fallback = '#ffffff') => {
-  return String(value || '')
+  const replacedValue = String(value || '')
     .replace(/oklab\(((?:[^()]|\([^()]*\))*)\)/gi, (_match, colorValue) => convertOklabCaptureColor(colorValue) || fallback)
     .replace(/oklch\(((?:[^()]|\([^()]*\))*)\)/gi, (_match, colorValue) => convertOklchCaptureColor(colorValue) || fallback)
+  return colorValueUsesUnsupportedCaptureFunction(replacedValue) ? fallback : replacedValue
 }
 
 const sanitizePreviewCloneStylesheets = (clonedDocument) => {
