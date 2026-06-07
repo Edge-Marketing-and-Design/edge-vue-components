@@ -165,12 +165,17 @@ const pageMenuRef = ref(null)
 const sitePagePreviewSnapshotRefs = new Map()
 const sitePagePreviewSnapshotTimers = new Map()
 const sitePagePreviewSnapshotUploads = new Set()
+const sitePagePreviewSnapshotQueue = []
+const sitePagePreviewSnapshotQueued = new Set()
 const sitePagePreviewForcedRendered = ref(new Set())
 const sitePagePreviewScale = ref(0.18)
 let html2canvasModulePromise = null
+let sitePagePreviewSnapshotQueueRunning = false
+let sitePagePreviewSnapshotQueueStopped = false
 const SITE_PAGE_PREVIEW_THUMBNAIL_VERSION = 'viewport-html2canvas-ok-computed-color-v16'
 const showPreviewSnapshotStatus = computed(() => Boolean(edgeGlobal.edgeState.devOverride))
 const SITE_PAGE_PREVIEW_BASE_WIDTH = 1600
+const isPreviewSnapshotDevRefreshEnabled = () => Boolean(edgeGlobal.edgeState.devOverride)
 
 const pageInit = {
   name: '',
@@ -1855,6 +1860,27 @@ const getSitePagePreviewBlockSignature = (pageDoc) => {
   }))
 }
 
+const getSitePagePreviewPageRowsSignature = (pageDoc) => {
+  return templatePreviewRows(pageDoc).map(row => ({
+    id: row.id,
+    columns: row.columns.map(column => ({
+      id: column.id,
+      span: column.span,
+      blocks: (column.blocks || []).map((blockRef) => {
+        if (!blockRef || typeof blockRef !== 'object')
+          return blockRef || null
+        return {
+          id: blockRef.id || null,
+          blockId: blockRef.blockId || null,
+          content: blockRef.content || null,
+          values: blockRef.values || null,
+          meta: blockRef.meta || null,
+        }
+      }),
+    })),
+  }))
+}
+
 const getSitePagePreviewThemeSignature = () => {
   const themeId = String(siteData.value?.theme || '').trim()
   const themeDoc = themeId ? themeCollection.value?.[themeId] || null : null
@@ -1865,7 +1891,17 @@ const getSitePagePreviewThemeSignature = () => {
   })
 }
 
-const getSitePagePreviewSnapshotSignature = (pageDoc) => {
+const getSitePagePreviewPageSnapshotSignature = (pageDoc) => {
+  return createPreviewSignatureHash({
+    thumbnailVersion: SITE_PAGE_PREVIEW_THUMBNAIL_VERSION,
+    siteId: props.site,
+    pageId: pageDoc?.docId || null,
+    version: pageDoc?.version || null,
+    rows: getSitePagePreviewPageRowsSignature(pageDoc),
+  })
+}
+
+const getSitePagePreviewFullSnapshotSignature = (pageDoc) => {
   return createPreviewSignatureHash({
     thumbnailVersion: SITE_PAGE_PREVIEW_THUMBNAIL_VERSION,
     previewKey: getSitePagePreviewKey(pageDoc?.docId),
@@ -1873,6 +1909,12 @@ const getSitePagePreviewSnapshotSignature = (pageDoc) => {
     version: pageDoc?.version || null,
     rows: getSitePagePreviewBlockSignature(pageDoc),
   })
+}
+
+const getSitePagePreviewSnapshotSignature = (pageDoc) => {
+  return isPreviewSnapshotDevRefreshEnabled()
+    ? getSitePagePreviewFullSnapshotSignature(pageDoc)
+    : getSitePagePreviewPageSnapshotSignature(pageDoc)
 }
 
 const getSitePagePreviewSnapshot = (pageDoc) => {
@@ -1886,6 +1928,13 @@ const getPersistedSitePagePreviewThumbnail = (pageDoc) => {
     : null
 }
 
+const getPersistedSitePagePreviewExpectedSignature = (pageDoc) => {
+  const previewThumbnail = getPersistedSitePagePreviewThumbnail(pageDoc)
+  if (isPreviewSnapshotDevRefreshEnabled())
+    return previewThumbnail?.fullSignature || previewThumbnail?.signature || ''
+  return previewThumbnail?.pageSignature || previewThumbnail?.signature || ''
+}
+
 const getPersistedSitePagePreviewThumbnailUrl = (pageDoc) => {
   const previewThumbnail = getPersistedSitePagePreviewThumbnail(pageDoc)
   return String(previewThumbnail?.url || previewThumbnail?.downloadURL || '').trim()
@@ -1896,7 +1945,7 @@ const isPersistedSitePagePreviewThumbnailFresh = (pageDoc) => {
   return !!(
     previewThumbnail?.status === 'ready'
     && getPersistedSitePagePreviewThumbnailUrl(pageDoc)
-    && previewThumbnail.signature === getSitePagePreviewSnapshotSignature(pageDoc)
+    && getPersistedSitePagePreviewExpectedSignature(pageDoc) === getSitePagePreviewSnapshotSignature(pageDoc)
   )
 }
 
@@ -1963,6 +2012,8 @@ const getSitePagePreviewSnapshotLabel = (pageDoc) => {
     const renderer = String(snapshot?.renderer || '').trim()
     return renderer ? `Uploading JPEG (${renderer})` : 'Uploading JPEG'
   }
+  if (snapshot?.status === 'queued')
+    return 'Queued JPEG...'
   if (snapshot?.status === 'capturing')
     return 'Capturing JPEG...'
   if (snapshot?.status === 'failed') {
@@ -2033,6 +2084,9 @@ const uploadSitePagePreviewSnapshot = async ({ pageDoc, dataUrl, signature, rend
   const docId = String(pageDoc?.docId || '').trim()
   if (!docId || !dataUrl || sitePagePreviewSnapshotUploads.has(docId))
     return
+  const pageSignature = getSitePagePreviewPageSnapshotSignature(pageDoc)
+  const fullSignature = getSitePagePreviewFullSnapshotSignature(pageDoc)
+  const refreshMode = isPreviewSnapshotDevRefreshEnabled() ? 'dev-full' : 'page'
   sitePagePreviewSnapshotUploads.add(docId)
   state.sitePagePreviewSnapshots[docId] = {
     status: 'uploading',
@@ -2056,6 +2110,9 @@ const uploadSitePagePreviewSnapshot = async ({ pageDoc, dataUrl, signature, rend
         siteId: props.site,
         pageId: docId,
         signature,
+        pageSignature,
+        fullSignature,
+        refreshMode,
         renderer,
       },
     )
@@ -2074,6 +2131,9 @@ const uploadSitePagePreviewSnapshot = async ({ pageDoc, dataUrl, signature, rend
       filePath,
       fileDocId: result?.meta?.fileDocId || '',
       signature,
+      pageSignature,
+      fullSignature,
+      refreshMode,
       renderer,
       updatedAt: new Date().toISOString(),
     }
@@ -2335,6 +2395,55 @@ const captureSitePagePreviewSnapshot = async (pageDoc) => {
   }
 }
 
+const processSitePagePreviewSnapshotQueue = async () => {
+  if (sitePagePreviewSnapshotQueueRunning)
+    return
+  sitePagePreviewSnapshotQueueRunning = true
+  try {
+    while (sitePagePreviewSnapshotQueue.length) {
+      if (sitePagePreviewSnapshotQueueStopped)
+        break
+      const pageDoc = sitePagePreviewSnapshotQueue.shift()
+      const docId = String(pageDoc?.docId || '').trim()
+      if (docId)
+        sitePagePreviewSnapshotQueued.delete(docId)
+      if (!docId || hasFreshSitePagePreviewImage(pageDoc))
+        continue
+      const snapshot = getSitePagePreviewSnapshot(pageDoc)
+      const signature = getSitePagePreviewSnapshotSignature(pageDoc)
+      if (
+        snapshot?.signature === signature
+        && ['capturing', 'uploading', 'failed'].includes(snapshot.status)
+      )
+        continue
+      await captureSitePagePreviewSnapshot(pageDoc)
+    }
+  }
+  finally {
+    sitePagePreviewSnapshotQueueRunning = false
+  }
+}
+
+const enqueueSitePagePreviewSnapshotCapture = (pageDoc, { front = false } = {}) => {
+  const docId = String(pageDoc?.docId || '').trim()
+  if (!docId || sitePagePreviewSnapshotQueued.has(docId))
+    return
+
+  const signature = getSitePagePreviewSnapshotSignature(pageDoc)
+  sitePagePreviewSnapshotQueued.add(docId)
+  state.sitePagePreviewSnapshots[docId] = {
+    status: 'queued',
+    signature,
+    dataUrl: getSitePagePreviewSnapshot(pageDoc)?.dataUrl || '',
+  }
+
+  if (front)
+    sitePagePreviewSnapshotQueue.unshift(pageDoc)
+  else
+    sitePagePreviewSnapshotQueue.push(pageDoc)
+  processSitePagePreviewSnapshotQueue()
+}
+
 const scheduleSitePagePreviewSnapshotCapture = (pageDoc) => {
   const docId = String(pageDoc?.docId || '').trim()
   if (
@@ -2350,7 +2459,7 @@ const scheduleSitePagePreviewSnapshotCapture = (pageDoc) => {
   const signature = getSitePagePreviewSnapshotSignature(pageDoc)
   if (
     snapshot?.signature === signature
-    && (snapshot.status === 'capturing' || snapshot.status === 'uploading' || snapshot.status === 'failed')
+    && (snapshot.status === 'queued' || snapshot.status === 'capturing' || snapshot.status === 'uploading' || snapshot.status === 'failed')
   )
     return
 
@@ -2359,7 +2468,7 @@ const scheduleSitePagePreviewSnapshotCapture = (pageDoc) => {
 
   sitePagePreviewSnapshotTimers.set(docId, setTimeout(() => {
     sitePagePreviewSnapshotTimers.delete(docId)
-    captureSitePagePreviewSnapshot(pageDoc)
+    enqueueSitePagePreviewSnapshotCapture(pageDoc)
   }, 650))
 }
 
@@ -2389,7 +2498,7 @@ const recaptureSitePagePreviewSnapshot = async (pageDoc) => {
     previewThumbnail: null,
   })
   await nextTick()
-  captureSitePagePreviewSnapshot(pageDoc)
+  enqueueSitePagePreviewSnapshotCapture(pageDoc, { front: true })
 }
 
 const orderedSiteMenus = computed(() => {
@@ -3338,10 +3447,13 @@ onMounted(() => {
   }, 1000)
 })
 onBeforeUnmount(() => {
+  sitePagePreviewSnapshotQueueStopped = true
   if (cacheVerificationTimer)
     clearInterval(cacheVerificationTimer)
   sitePagePreviewSnapshotTimers.forEach(timer => clearTimeout(timer))
   sitePagePreviewSnapshotTimers.clear()
+  sitePagePreviewSnapshotQueue.splice(0, sitePagePreviewSnapshotQueue.length)
+  sitePagePreviewSnapshotQueued.clear()
   sitePagePreviewSnapshotRefs.clear()
   sitePagePreviewSnapshotUploads.clear()
   if (sitePagePreviewScaleObserver)
