@@ -4043,6 +4043,20 @@ const getSitePagePreviewThemeSignature = ({ siteData, themeData }) => {
   })
 }
 
+const getSitePagePreviewSiteSignature = (siteData = {}) => {
+  return createPreviewSignatureHash({
+    theme: siteData?.theme || null,
+    menus: siteData?.menus || null,
+    restrictedContent: siteData?.restrictedContent || null,
+    logo: siteData?.logo || null,
+    logoLight: siteData?.logoLight || null,
+    logoText: siteData?.logoText || null,
+    logoType: siteData?.logoType || null,
+    brandLogoDark: siteData?.brandLogoDark || null,
+    brandLogoLight: siteData?.brandLogoLight || null,
+  })
+}
+
 const getThemePreviewVersion = (themeData) => {
   if (!themeData)
     return 'no-theme-data'
@@ -4069,6 +4083,7 @@ const getSitePagePreviewFullSnapshotSignature = ({ siteId, pageId, pageData, sit
   return createPreviewSignatureHash({
     thumbnailVersion: SITE_PAGE_PREVIEW_THUMBNAIL_VERSION,
     previewKey: `${String(pageId || 'page')}:${siteId}:${themeId}:${themeVersion}`,
+    site: getSitePagePreviewSiteSignature(siteData || {}),
     theme: getSitePagePreviewThemeSignature({ siteData, themeData }),
     version: pageData?.version || null,
     rows: getSitePagePreviewBlockSignature({ ...pageData, docId: pageId || pageData?.docId }, blocksById),
@@ -4450,7 +4465,7 @@ exports.onCmsSiteWrittenRenderPreviewThumbnails = onDocumentWritten(
     const after = event.data.after.data() || {}
     if (pageChangeOnlyTouchedPreviewThumbnail(before, after))
       return
-    const relevantKeys = ['theme', 'logo', 'logoLight', 'logoText', 'logoType', 'brandLogoDark', 'brandLogoLight']
+    const relevantKeys = ['theme', 'menus', 'restrictedContent', 'logo', 'logoLight', 'logoText', 'logoType', 'brandLogoDark', 'brandLogoLight']
     const relevantChanged = relevantKeys.some(key => stableSerialize(before?.[key]) !== stableSerialize(after?.[key]))
     if (!relevantChanged)
       return

@@ -2049,7 +2049,7 @@ const isSitePagePreviewForcedRendered = (pageDoc) => {
 }
 
 const shouldShowSitePagePreviewImage = (pageDoc) => {
-  return Boolean(edgeGlobal.edgeState.devOverride) && hasFreshSitePagePreviewImage(pageDoc) && !isSitePagePreviewForcedRendered(pageDoc)
+  return hasFreshSitePagePreviewImage(pageDoc) && !isSitePagePreviewForcedRendered(pageDoc)
 }
 
 const toggleSitePagePreviewRendered = (pageDoc) => {
@@ -5163,8 +5163,12 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
   width: 100%;
   overflow: hidden;
   position: relative;
-  border-radius: 0.5rem;
+  border-radius: 0 !important;
   height: 400px;
+}
+
+.template-scale-wrapper > img {
+  border-radius: 0 !important;
 }
 
 .template-scale-wrapper :deep(*),

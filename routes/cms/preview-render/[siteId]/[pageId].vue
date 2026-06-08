@@ -21,6 +21,7 @@ const pageId = computed(() => String(route.params.pageId || '').trim())
 const previewSignature = computed(() => String(route.query.signature || '').trim())
 const organizationId = computed(() => String(route.query.orgId || edgeGlobal.edgeState.currentOrganization || localStorage.getItem('organizationID') || '').trim())
 const routeLastSegment = computed(() => String(route.query.routeLastSegment || '').trim())
+const orgPath = computed(() => organizationId.value ? `organizations/${organizationId.value}` : '')
 
 const siteDoc = computed(() => state.payload?.site || null)
 const pageDoc = computed(() => state.payload?.page || null)
@@ -195,6 +196,34 @@ const previewColumnStyle = (column) => {
   return { gridColumn: `span ${safeSpan} / span ${safeSpan}` }
 }
 
+const mergePreviewCollection = (collectionPath, docs) => {
+  if (!collectionPath || !docs || typeof docs !== 'object')
+    return
+  if (!edgeFirebase.data)
+    edgeFirebase.data = {}
+  edgeFirebase.data[collectionPath] = {
+    ...(edgeFirebase.data[collectionPath] || {}),
+    ...docs,
+  }
+}
+
+const hydratePreviewCollections = (payload) => {
+  if (!orgPath.value || !payload)
+    return
+  const site = payload.site || null
+  const page = payload.page || null
+  const theme = payload.theme || null
+  const themeId = String(site?.theme || '').trim()
+
+  if (site)
+    mergePreviewCollection(`${orgPath.value}/sites`, { [siteId.value]: site })
+  if (page)
+    mergePreviewCollection(`${orgPath.value}/sites/${siteId.value}/pages`, { [pageId.value]: page })
+  if (themeId && theme)
+    mergePreviewCollection(`${orgPath.value}/themes`, { [themeId]: theme })
+  mergePreviewCollection(`${orgPath.value}/blocks`, payload.blocks || {})
+}
+
 const loadPreviewData = async () => {
   state.loading = true
   state.error = ''
@@ -227,6 +256,7 @@ const loadPreviewData = async () => {
     })
     state.payload = response?.data || response || null
     state.renderContext = state.payload?.renderContext || null
+    hydratePreviewCollections(state.payload)
   }
   catch (error) {
     state.error = error?.message || 'Unable to load preview.'
