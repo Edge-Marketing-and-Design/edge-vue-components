@@ -1801,7 +1801,9 @@ const updateSitePagePreviewScale = (element) => {
   if (!width)
     return
   const nextScale = Math.max(0.12, Math.min(0.5, width / SITE_PAGE_PREVIEW_BASE_WIDTH))
-  sitePagePreviewScale.value = Number(nextScale.toFixed(4))
+  const roundedScale = Number(nextScale.toFixed(4))
+  if (sitePagePreviewScale.value !== roundedScale)
+    sitePagePreviewScale.value = roundedScale
 }
 
 let sitePagePreviewScaleObserver = null
@@ -2533,6 +2535,8 @@ const scheduleSitePagePreviewSnapshotCapture = (pageDoc) => {
 }
 
 const setSitePagePreviewSnapshotRef = (pageDoc, element) => {
+  if (!SITE_PAGE_PREVIEW_JPEG_ENABLED)
+    return
   const docId = String(pageDoc?.docId || '').trim()
   if (!docId)
     return
@@ -4642,7 +4646,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                                   <MoreHorizontal class="h-4 w-4" />
                                 </edge-shad-button>
                               </DropdownMenuTrigger>
-                              <DropdownMenuContent side="right" align="start" @click.stop>
+                              <DropdownMenuContent side="right" align="start">
                                 <DropdownMenuLabel class="flex items-center gap-2">
                                   <File class="w-5 h-5" /> {{ item.menuPath }}/{{ item.name }}
                                 </DropdownMenuLabel>
