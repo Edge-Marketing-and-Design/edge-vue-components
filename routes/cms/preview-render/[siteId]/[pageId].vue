@@ -308,8 +308,10 @@ watch(() => [organizationId.value, siteId.value, pageId.value, previewSignature.
 
 <style scoped>
 .cms-preview-render-page {
-  width: 100%;
-  min-height: 100vh;
+  box-sizing: border-box;
+  width: 1600px;
+  min-height: 820px;
+  padding: 1.5rem;
   overflow-x: hidden;
 }
 

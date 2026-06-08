@@ -38,7 +38,9 @@ const DOMAINS_REGISTERED_COLLECTION = 'domains-registered'
 const EDGE_CMS_PREVIEW_RENDER_SIGNATURE_SALT = 'edge-cms-preview-render-v1'
 const SITE_PAGE_PREVIEW_THUMBNAIL_VERSION = 'backend-puppeteer-v1'
 const SITE_PAGE_PREVIEW_CAPTURE_WIDTH = 1600
-const SITE_PAGE_PREVIEW_CAPTURE_HEIGHT = 1200
+const SITE_PAGE_PREVIEW_VIEWPORT_HEIGHT = 900
+const SITE_PAGE_PREVIEW_CAPTURE_HEIGHT = 2400
+const SITE_PAGE_PREVIEW_DESKTOP_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36'
 const SITE_PAGE_PREVIEW_LOCK_TTL_MS = 5 * 60 * 1000
 const SITE_PAGE_PREVIEW_BATCH_LIMIT = 100
 
@@ -4233,18 +4235,28 @@ const acquirePagePreviewCaptureLock = async ({ pageRef, pageSignature, force }) 
 const captureCmsPreviewJpeg = async (url) => {
   const executablePath = await chromium.executablePath()
   const browser = await puppeteer.launch({
-    args: [...chromium.args, '--disable-dev-shm-usage'],
+    args: [
+      ...chromium.args,
+      '--disable-dev-shm-usage',
+      `--window-size=${SITE_PAGE_PREVIEW_CAPTURE_WIDTH},${SITE_PAGE_PREVIEW_VIEWPORT_HEIGHT}`,
+    ],
     executablePath,
     headless: true,
   })
   try {
     const page = await browser.newPage()
+    await page.setUserAgent(SITE_PAGE_PREVIEW_DESKTOP_USER_AGENT)
     await page.setViewport({
       width: SITE_PAGE_PREVIEW_CAPTURE_WIDTH,
-      height: SITE_PAGE_PREVIEW_CAPTURE_HEIGHT,
+      height: SITE_PAGE_PREVIEW_VIEWPORT_HEIGHT,
+      isMobile: false,
+      hasTouch: false,
       deviceScaleFactor: 1,
     })
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 45000 })
+    const viewportWidth = await page.evaluate(() => window.innerWidth)
+    if (viewportWidth < SITE_PAGE_PREVIEW_CAPTURE_WIDTH)
+      throw new Error(`Preview browser width was ${viewportWidth}px; expected ${SITE_PAGE_PREVIEW_CAPTURE_WIDTH}px.`)
     await page.evaluate(async () => {
       if (document.fonts?.ready)
         await document.fonts.ready

@@ -167,11 +167,14 @@ const sitePagePreviewSnapshotTimers = new Map()
 const sitePagePreviewSnapshotUploads = new Set()
 const sitePagePreviewSnapshotQueue = []
 const sitePagePreviewSnapshotQueued = new Set()
+const sitePagePreviewBackendQueue = []
+const sitePagePreviewBackendQueued = new Set()
 const sitePagePreviewForcedRendered = ref(new Set())
 const sitePagePreviewScale = ref(0.18)
 let html2canvasModulePromise = null
 let sitePagePreviewSnapshotQueueRunning = false
 let sitePagePreviewSnapshotQueueStopped = false
+let sitePagePreviewBackendQueueRunning = false
 const SITE_PAGE_PREVIEW_THUMBNAIL_VERSION = 'backend-puppeteer-v1'
 const SITE_PAGE_PREVIEW_JPEG_ENABLED = false
 const showPreviewSnapshotStatus = computed(() => Boolean(edgeGlobal.edgeState.devOverride))
@@ -2091,6 +2094,18 @@ const getSitePagePreviewSnapshotTitle = (pageDoc) => {
   return snapshot?.errorMessage || getSitePagePreviewSnapshotLabel(pageDoc)
 }
 
+const isSitePagePreviewBackendRefreshPending = (pageDoc) => {
+  const docId = String(pageDoc?.docId || '').trim()
+  const snapshot = getSitePagePreviewSnapshot(pageDoc)
+  return !!(
+    docId
+    && (
+      sitePagePreviewBackendQueued.has(docId)
+      || ['queued', 'capturing'].includes(snapshot?.status)
+    )
+  )
+}
+
 const normalizePreviewCaptureError = (error) => {
   const message = String(error?.message || '').trim()
   if (message)
@@ -2549,7 +2564,7 @@ const setSitePagePreviewSnapshotRef = (pageDoc, element) => {
   scheduleSitePagePreviewSnapshotCapture(pageDoc)
 }
 
-const recaptureSitePagePreviewSnapshot = async (pageDoc) => {
+const runBackendSitePagePreviewRefresh = async (pageDoc) => {
   const docId = String(pageDoc?.docId || '').trim()
   const orgId = String(edgeGlobal.edgeState.currentOrganization || '').trim()
   if (!docId || !orgId || !props.site || !edgeGlobal.edgeState.devOverride)
@@ -2573,13 +2588,15 @@ const recaptureSitePagePreviewSnapshot = async (pageDoc) => {
       pageId: docId,
     })
     const response = result?.data || result || {}
+    const isReady = response?.status === 'ready'
     state.sitePagePreviewSnapshots[docId] = {
-      status: response?.status === 'ready' ? 'ready' : 'queued',
+      status: isReady ? 'ready' : 'failed',
       signature,
       dataUrl: '',
       renderer: 'puppeteer',
       url: response?.url || '',
       capturedAt: Date.now(),
+      errorMessage: isReady ? '' : `Backend capture returned ${response?.status || 'unknown status'}.`,
     }
   }
   catch (error) {
@@ -2591,6 +2608,40 @@ const recaptureSitePagePreviewSnapshot = async (pageDoc) => {
       errorMessage: normalizePreviewCaptureError(error),
     }
   }
+}
+
+const processSitePagePreviewBackendQueue = async () => {
+  if (sitePagePreviewBackendQueueRunning)
+    return
+  sitePagePreviewBackendQueueRunning = true
+  try {
+    while (sitePagePreviewBackendQueue.length) {
+      const pageDoc = sitePagePreviewBackendQueue.shift()
+      const docId = String(pageDoc?.docId || '').trim()
+      if (docId)
+        sitePagePreviewBackendQueued.delete(docId)
+      await runBackendSitePagePreviewRefresh(pageDoc)
+    }
+  }
+  finally {
+    sitePagePreviewBackendQueueRunning = false
+  }
+}
+
+const recaptureSitePagePreviewSnapshot = (pageDoc) => {
+  const docId = String(pageDoc?.docId || '').trim()
+  if (!docId || sitePagePreviewBackendQueued.has(docId) || isSitePagePreviewBackendRefreshPending(pageDoc))
+    return
+  const signature = getSitePagePreviewSnapshotSignature(pageDoc)
+  sitePagePreviewBackendQueued.add(docId)
+  state.sitePagePreviewSnapshots[docId] = {
+    status: 'queued',
+    signature,
+    dataUrl: '',
+    renderer: 'puppeteer',
+  }
+  sitePagePreviewBackendQueue.push(pageDoc)
+  processSitePagePreviewBackendQueue()
 }
 
 const orderedSiteMenus = computed(() => {
@@ -3546,6 +3597,8 @@ onBeforeUnmount(() => {
   sitePagePreviewSnapshotTimers.clear()
   sitePagePreviewSnapshotQueue.splice(0, sitePagePreviewSnapshotQueue.length)
   sitePagePreviewSnapshotQueued.clear()
+  sitePagePreviewBackendQueue.splice(0, sitePagePreviewBackendQueue.length)
+  sitePagePreviewBackendQueued.clear()
   sitePagePreviewSnapshotRefs.clear()
   sitePagePreviewSnapshotUploads.clear()
   if (sitePagePreviewScaleObserver)
@@ -4710,7 +4763,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                             <img
                               :src="getFreshSitePagePreviewImageUrl(item)"
                               :alt="`${item.name || item.docId || 'Page'} preview snapshot`"
-                              class="h-full w-full object-cover object-top"
+                              class="block w-full max-w-none"
                             >
                           </div>
                           <div
@@ -4800,9 +4853,10 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                               <button
                                 type="button"
                                 class="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] leading-none text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                                :disabled="isSitePagePreviewBackendRefreshPending(item)"
                                 @click.stop="recaptureSitePagePreviewSnapshot(item)"
                               >
-                                re-jpg
+                                {{ isSitePagePreviewBackendRefreshPending(item) ? 'working' : 're-jpg' }}
                               </button>
                             </div>
                           </div>
