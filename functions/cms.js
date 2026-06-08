@@ -1,7 +1,8 @@
 const axios = require('axios')
 const Stripe = require('stripe')
 const { randomUUID } = require('crypto')
-const puppeteer = require('puppeteer')
+const chromium = require('@sparticuz/chromium').default
+const puppeteer = require('puppeteer-core')
 const {
   logger,
   admin,
@@ -4142,6 +4143,39 @@ const readPreviewRenderContext = async ({ orgId, siteId, pageId }) => {
   return { siteRef, pageRef, siteData, pageData, themeData, blocksById }
 }
 
+const serializePreviewPayload = value => JSON.parse(JSON.stringify(value || null))
+
+const fetchPreviewRenderContext = async ({ orgId, siteId }) => {
+  try {
+    const snap = await db.collection('organizations').doc(orgId).collection('sites').doc(siteId).collection('published_posts').limit(1).get()
+    return snap.empty ? null : serializePreviewPayload({ id: snap.docs[0].id, ...snap.docs[0].data() })
+  }
+  catch {
+    return null
+  }
+}
+
+exports.getPreviewRenderPayload = onCall({ timeoutSeconds: 60, memory: '512MiB' }, async (request) => {
+  const data = request.data || {}
+  const orgId = String(data.orgId || '').trim()
+  const siteId = String(data.siteId || '').trim()
+  const pageId = String(data.pageId || '').trim()
+  const signature = String(data.signature || '').trim()
+  if (!orgId || !siteId || !pageId || !signature)
+    throw new HttpsError('invalid-argument', 'Missing preview render payload fields.')
+  if (signature !== getCmsPreviewRenderSignature({ orgId, siteId, pageId }))
+    throw new HttpsError('permission-denied', 'Invalid preview signature.')
+
+  const context = await readPreviewRenderContext({ orgId, siteId, pageId })
+  return {
+    site: serializePreviewPayload(context.siteData),
+    page: serializePreviewPayload({ ...context.pageData, docId: pageId }),
+    theme: serializePreviewPayload(context.themeData),
+    blocks: serializePreviewPayload(context.blocksById),
+    renderContext: await fetchPreviewRenderContext({ orgId, siteId }),
+  }
+})
+
 const pageChangeOnlyTouchedPreviewThumbnail = (before = {}, after = {}) => {
   const keys = new Set([...Object.keys(before || {}), ...Object.keys(after || {})])
   keys.delete('previewThumbnail')
@@ -4197,9 +4231,11 @@ const acquirePagePreviewCaptureLock = async ({ pageRef, pageSignature, force }) 
 }
 
 const captureCmsPreviewJpeg = async (url) => {
+  const executablePath = await chromium.executablePath()
   const browser = await puppeteer.launch({
+    args: [...chromium.args, '--disable-dev-shm-usage'],
+    executablePath,
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
   })
   try {
     const page = await browser.newPage()
@@ -4369,7 +4405,6 @@ exports.renderPagePreviewThumbnail = onCall({ timeoutSeconds: 180, memory: '1GiB
     orgId,
     siteId,
     pageId,
-    baseUrl: data.baseUrl,
     force: true,
     trigger: 'manual-dev',
   })

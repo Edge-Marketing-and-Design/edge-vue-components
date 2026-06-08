@@ -2567,7 +2567,6 @@ const recaptureSitePagePreviewSnapshot = async (pageDoc) => {
       orgId,
       siteId: props.site,
       pageId: docId,
-      baseUrl: globalThis.location?.origin || '',
     })
     const response = result?.data || result || {}
     state.sitePagePreviewSnapshots[docId] = {

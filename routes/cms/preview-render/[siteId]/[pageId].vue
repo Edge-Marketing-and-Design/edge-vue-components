@@ -10,6 +10,7 @@ const state = reactive({
   bootstrapped: false,
   loading: true,
   error: '',
+  payload: null,
   renderContext: null,
 })
 
@@ -21,15 +22,10 @@ const previewSignature = computed(() => String(route.query.signature || '').trim
 const organizationId = computed(() => String(route.query.orgId || edgeGlobal.edgeState.currentOrganization || localStorage.getItem('organizationID') || '').trim())
 const routeLastSegment = computed(() => String(route.query.routeLastSegment || '').trim())
 
-const orgPath = computed(() => organizationId.value ? `organizations/${organizationId.value}` : '')
-const siteDoc = computed(() => orgPath.value ? edgeFirebase.data?.[`${orgPath.value}/sites`]?.[siteId.value] || null : null)
-const pageDoc = computed(() => orgPath.value ? edgeFirebase.data?.[`${orgPath.value}/sites/${siteId.value}/pages`]?.[pageId.value] || null : null)
-const blocksCollection = computed(() => orgPath.value ? edgeFirebase.data?.[`${orgPath.value}/blocks`] || {} : {})
-const themeCollection = computed(() => orgPath.value ? edgeFirebase.data?.[`${orgPath.value}/themes`] || {} : {})
-const themeDoc = computed(() => {
-  const themeId = String(siteDoc.value?.theme || '').trim()
-  return themeId ? themeCollection.value?.[themeId] || null : null
-})
+const siteDoc = computed(() => state.payload?.site || null)
+const pageDoc = computed(() => state.payload?.page || null)
+const blocksCollection = computed(() => state.payload?.blocks || {})
+const themeDoc = computed(() => state.payload?.theme || null)
 
 const normalizeForCompare = (value) => {
   if (Array.isArray(value))
@@ -199,22 +195,10 @@ const previewColumnStyle = (column) => {
   return { gridColumn: `span ${safeSpan} / span ${safeSpan}` }
 }
 
-const fetchPreviewContextForSite = async () => {
-  if (!orgPath.value || !siteId.value)
-    return null
-  try {
-    const staticSearch = new edgeFirebase.SearchStaticData()
-    await staticSearch.getData(`${orgPath.value}/sites/${siteId.value}/published_posts`, [], [], 1)
-    return Object.values(staticSearch.results?.data || {})[0] || null
-  }
-  catch {
-    return null
-  }
-}
-
 const loadPreviewData = async () => {
   state.loading = true
   state.error = ''
+  state.payload = null
   try {
     state.bootstrapped = true
 
@@ -226,7 +210,7 @@ const loadPreviewData = async () => {
       state.error = 'Invalid preview signature.'
       return
     }
-    if (!orgPath.value) {
+    if (!organizationId.value) {
       state.error = 'Missing organization for preview.'
       return
     }
@@ -235,13 +219,14 @@ const loadPreviewData = async () => {
       return
     }
 
-    await Promise.all([
-      edgeFirebase.startSnapshot(`${orgPath.value}/sites`),
-      edgeFirebase.startSnapshot(`${orgPath.value}/sites/${siteId.value}/pages`),
-      edgeFirebase.startSnapshot(`${orgPath.value}/themes`),
-      edgeFirebase.startSnapshot(`${orgPath.value}/blocks`),
-    ])
-    state.renderContext = await fetchPreviewContextForSite()
+    const response = await edgeFirebase.runFunction('cms-getPreviewRenderPayload', {
+      orgId: organizationId.value,
+      siteId: siteId.value,
+      pageId: pageId.value,
+      signature: previewSignature.value,
+    })
+    state.payload = response?.data || response || null
+    state.renderContext = state.payload?.renderContext || null
   }
   catch (error) {
     state.error = error?.message || 'Unable to load preview.'
@@ -255,7 +240,7 @@ onMounted(() => {
   loadPreviewData()
 })
 
-watch(() => [edgeFirebase?.user?.loggedIn, siteId.value, pageId.value], () => {
+watch(() => [organizationId.value, siteId.value, pageId.value, previewSignature.value], () => {
   if (state.bootstrapped)
     loadPreviewData()
 })
