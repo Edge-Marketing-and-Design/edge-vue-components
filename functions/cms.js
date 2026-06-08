@@ -1,5 +1,7 @@
 const axios = require('axios')
 const Stripe = require('stripe')
+const { randomUUID } = require('crypto')
+const puppeteer = require('puppeteer')
 const {
   logger,
   admin,
@@ -32,6 +34,12 @@ const CLOUDFLARE_PAGES_API_TOKEN = process.env.CLOUDFLARE_PAGES_API_TOKEN || ''
 const CLOUDFLARE_PAGES_PROJECT = process.env.CLOUDFLARE_PAGES_PROJECT || ''
 const DOMAIN_REGISTRY_COLLECTION = 'domain-registry'
 const DOMAINS_REGISTERED_COLLECTION = 'domains-registered'
+const EDGE_CMS_PREVIEW_RENDER_SIGNATURE_SALT = 'edge-cms-preview-render-v1'
+const SITE_PAGE_PREVIEW_THUMBNAIL_VERSION = 'backend-puppeteer-v1'
+const SITE_PAGE_PREVIEW_CAPTURE_WIDTH = 1600
+const SITE_PAGE_PREVIEW_CAPTURE_HEIGHT = 1200
+const SITE_PAGE_PREVIEW_LOCK_TTL_MS = 5 * 60 * 1000
+const SITE_PAGE_PREVIEW_BATCH_LIMIT = 100
 
 const SITE_STRUCTURED_DATA_TEMPLATE = JSON.stringify({
   '@context': 'https://schema.org',
@@ -3898,6 +3906,569 @@ const assertOrgAdminAccess = async (uid, orgId) => {
   if (!isOrgAdmin)
     throw new HttpsError('permission-denied', 'Organization admin access is required.')
 }
+
+const createPreviewSignatureHash = (value) => {
+  const input = stableSerialize(value)
+  let hash = 5381
+  for (let index = 0; index < input.length; index++)
+    hash = ((hash << 5) + hash) ^ input.charCodeAt(index)
+  return String(hash >>> 0)
+}
+
+const getCmsPreviewRenderSignature = ({ orgId, siteId, pageId }) => {
+  return createPreviewSignatureHash({
+    salt: EDGE_CMS_PREVIEW_RENDER_SIGNATURE_SALT,
+    orgId,
+    siteId,
+    pageId,
+  })
+}
+
+const normalizePreviewColumnsForSignature = (row) => {
+  if (!Array.isArray(row?.columns) || !row.columns.length)
+    return []
+  return row.columns.map((column, idx) => ({
+    id: column?.id || `${row?.id || 'row'}-col-${idx}`,
+    span: Number(column?.span) || null,
+    blocks: Array.isArray(column?.blocks) ? column.blocks.filter(Boolean) : [],
+  }))
+}
+
+const templatePreviewRowsForSignature = (pageDoc = {}) => {
+  const structureRows = Array.isArray(pageDoc?.structure) ? pageDoc.structure : []
+  if (structureRows.length) {
+    return structureRows
+      .map((row, rowIndex) => ({
+        id: row?.id || `${pageDoc?.docId || 'template-page'}-row-${rowIndex}`,
+        columns: normalizePreviewColumnsForSignature(row),
+      }))
+      .filter(row => row.columns.length > 0)
+  }
+
+  const legacyBlocks = Array.isArray(pageDoc?.content) ? pageDoc.content.filter(Boolean) : []
+  if (!legacyBlocks.length)
+    return []
+  return [{
+    id: `${pageDoc?.docId || 'template-page'}-legacy-row`,
+    columns: [{
+      id: `${pageDoc?.docId || 'template-page'}-legacy-col`,
+      span: null,
+      blocks: legacyBlocks,
+    }],
+  }]
+}
+
+const resolveTemplateBlockSourceForSignature = (pageDoc, blockRef) => {
+  if (!blockRef)
+    return null
+  if (typeof blockRef === 'object')
+    return blockRef
+  const lookupId = String(blockRef).trim()
+  if (!lookupId)
+    return null
+  const templateBlocks = Array.isArray(pageDoc?.content) ? pageDoc.content : []
+  return templateBlocks.find(block => block?.id === lookupId || block?.blockId === lookupId) || null
+}
+
+const resolveTemplateBlockForSignature = (pageDoc, blockRef, blocksById = {}) => {
+  const block = resolveTemplateBlockSourceForSignature(pageDoc, blockRef)
+  if (!block)
+    return null
+  if (block.content) {
+    return {
+      content: block.content,
+      values: block.values || {},
+      meta: block.meta || {},
+    }
+  }
+  if (block.blockId && blocksById?.[block.blockId]) {
+    const libraryBlock = blocksById[block.blockId]
+    return {
+      content: libraryBlock.content,
+      values: block.values || libraryBlock.values || {},
+      meta: block.meta || libraryBlock.meta || {},
+    }
+  }
+  return null
+}
+
+const getSitePagePreviewPageRowsSignature = (pageDoc) => {
+  return templatePreviewRowsForSignature(pageDoc).map(row => ({
+    id: row.id,
+    columns: row.columns.map(column => ({
+      id: column.id,
+      span: column.span,
+      blocks: (column.blocks || []).map((blockRef) => {
+        if (!blockRef || typeof blockRef !== 'object')
+          return blockRef || null
+        return {
+          id: blockRef.id || null,
+          blockId: blockRef.blockId || null,
+          content: blockRef.content || null,
+          values: blockRef.values || null,
+          meta: blockRef.meta || null,
+        }
+      }),
+    })),
+  }))
+}
+
+const getSitePagePreviewBlockSignature = (pageDoc, blocksById) => {
+  return templatePreviewRowsForSignature(pageDoc).map(row => ({
+    id: row.id,
+    columns: row.columns.map(column => ({
+      id: column.id,
+      span: column.span,
+      blocks: (column.blocks || []).map((blockRef) => {
+        const block = resolveTemplateBlockForSignature(pageDoc, blockRef, blocksById)
+        return {
+          content: block?.content || null,
+          values: block?.values || null,
+          meta: block?.meta || null,
+        }
+      }),
+    })),
+  }))
+}
+
+const getSitePagePreviewThemeSignature = ({ siteData, themeData }) => {
+  const themeId = String(siteData?.theme || '').trim()
+  return createPreviewSignatureHash({
+    id: themeId || 'no-theme',
+    theme: themeData?.theme || null,
+    extraCSS: themeData?.extraCSS || '',
+  })
+}
+
+const getThemePreviewVersion = (themeData) => {
+  if (!themeData)
+    return 'no-theme-data'
+  const rawTheme = typeof themeData?.theme === 'string'
+    ? themeData.theme
+    : JSON.stringify(themeData?.theme || {})
+  const extraCSS = typeof themeData?.extraCSS === 'string' ? themeData.extraCSS : ''
+  return `${rawTheme.length}:${extraCSS.length}`
+}
+
+const getSitePagePreviewPageSnapshotSignature = ({ siteId, pageId, pageData }) => {
+  return createPreviewSignatureHash({
+    thumbnailVersion: SITE_PAGE_PREVIEW_THUMBNAIL_VERSION,
+    siteId,
+    pageId: pageId || pageData?.docId || null,
+    version: pageData?.version || null,
+    rows: getSitePagePreviewPageRowsSignature({ ...pageData, docId: pageId || pageData?.docId }),
+  })
+}
+
+const getSitePagePreviewFullSnapshotSignature = ({ siteId, pageId, pageData, siteData, themeData, blocksById }) => {
+  const themeId = String(siteData?.theme || 'no-theme')
+  const themeVersion = getThemePreviewVersion(themeData || null)
+  return createPreviewSignatureHash({
+    thumbnailVersion: SITE_PAGE_PREVIEW_THUMBNAIL_VERSION,
+    previewKey: `${String(pageId || 'page')}:${siteId}:${themeId}:${themeVersion}`,
+    theme: getSitePagePreviewThemeSignature({ siteData, themeData }),
+    version: pageData?.version || null,
+    rows: getSitePagePreviewBlockSignature({ ...pageData, docId: pageId || pageData?.docId }, blocksById),
+  })
+}
+
+const sanitizePreviewBaseUrl = (baseUrl) => {
+  const raw = String(baseUrl || '').trim()
+  if (!raw)
+    return ''
+  try {
+    const url = new URL(raw)
+    if (!['http:', 'https:'].includes(url.protocol))
+      return ''
+    return `${url.protocol}//${url.host}`
+  }
+  catch {
+    return ''
+  }
+}
+
+const resolveDefaultPreviewBaseUrl = () => {
+  const webhookBaseUrl = sanitizePreviewBaseUrl(process.env.FIREBASE_WEBHOOK_BASE_URL)
+  if (webhookBaseUrl)
+    return webhookBaseUrl
+  const configured = sanitizePreviewBaseUrl(process.env.CMS_PREVIEW_RENDER_BASE_URL)
+  if (configured)
+    return configured
+  const projectId = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || admin.app()?.options?.projectId || ''
+  return projectId ? `https://${projectId}.web.app` : ''
+}
+
+const resolveStorageBucketName = () => {
+  const projectId = process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || process.env.GOOGLE_CLOUD_PROJECT || admin.app()?.options?.projectId || ''
+  return admin.app()?.options?.storageBucket || (projectId ? `${projectId}.appspot.com` : '')
+}
+
+const firebaseStoragePublicUrl = ({ bucketName, filePath, token }) => {
+  const encodedPath = encodeURIComponent(filePath)
+  if (process.env.FIREBASE_STORAGE_EMULATOR_HOST)
+    return `http://${process.env.FIREBASE_STORAGE_EMULATOR_HOST}/v0/b/${bucketName}/o/${encodedPath}?alt=media`
+  return `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodedPath}?alt=media&token=${token}`
+}
+
+const buildCmsPreviewRenderUrl = ({ baseUrl, orgId, siteId, pageId }) => {
+  const signature = getCmsPreviewRenderSignature({ orgId, siteId, pageId })
+  const url = new URL(`/cms-preview-render/${encodeURIComponent(siteId)}/${encodeURIComponent(pageId)}`, baseUrl)
+  url.searchParams.set('orgId', orgId)
+  url.searchParams.set('signature', signature)
+  return url.toString()
+}
+
+const readPreviewRenderContext = async ({ orgId, siteId, pageId }) => {
+  const orgRef = db.collection('organizations').doc(orgId)
+  const siteRef = orgRef.collection('sites').doc(siteId)
+  const pageRef = siteRef.collection('pages').doc(pageId)
+  const [siteSnap, pageSnap] = await Promise.all([siteRef.get(), pageRef.get()])
+  if (!siteSnap.exists)
+    throw new HttpsError('not-found', 'Site not found.')
+  if (!pageSnap.exists)
+    throw new HttpsError('not-found', 'Page not found.')
+  const siteData = siteSnap.data() || {}
+  const pageData = pageSnap.data() || {}
+  const themeId = String(siteData?.theme || '').trim()
+  const themeSnap = themeId ? await orgRef.collection('themes').doc(themeId).get() : null
+  const themeData = themeSnap?.exists ? themeSnap.data() || {} : {}
+  const blockIds = Array.isArray(pageData?.blockIds) ? pageData.blockIds.filter(Boolean) : []
+  const blocksById = {}
+  await Promise.all(blockIds.map(async (blockId) => {
+    const snap = await orgRef.collection('blocks').doc(String(blockId)).get()
+    if (snap.exists)
+      blocksById[String(blockId)] = snap.data() || {}
+  }))
+  return { siteRef, pageRef, siteData, pageData, themeData, blocksById }
+}
+
+const pageChangeOnlyTouchedPreviewThumbnail = (before = {}, after = {}) => {
+  const keys = new Set([...Object.keys(before || {}), ...Object.keys(after || {})])
+  keys.delete('previewThumbnail')
+  keys.delete('previewThumbnailUpdatedAt')
+  keys.delete('previewThumbnailRequestedAt')
+  keys.delete('previewThumbnailCaptureLock')
+  for (const key of keys) {
+    if (stableSerialize(before?.[key]) !== stableSerialize(after?.[key]))
+      return false
+  }
+  return true
+}
+
+const pageHasFreshPreviewThumbnail = ({ pageData, pageSignature, fullSignature }) => {
+  const previewThumbnail = pageData?.previewThumbnail || {}
+  return !!(
+    previewThumbnail.status === 'ready'
+    && previewThumbnail.url
+    && previewThumbnail.thumbnailVersion === SITE_PAGE_PREVIEW_THUMBNAIL_VERSION
+    && (previewThumbnail.pageSignature === pageSignature || previewThumbnail.fullSignature === fullSignature)
+  )
+}
+
+const acquirePagePreviewCaptureLock = async ({ pageRef, pageSignature, force }) => {
+  const now = Date.now()
+  const lockId = randomUUID()
+  const lockExpiresAt = now + SITE_PAGE_PREVIEW_LOCK_TTL_MS
+  const acquired = await db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(pageRef)
+    if (!snap.exists)
+      return false
+    const data = snap.data() || {}
+    const previewThumbnail = data.previewThumbnail || {}
+    const activeLockExpiresAt = Number(previewThumbnail.lockExpiresAt || 0)
+    if (!force && previewThumbnail.status === 'capturing' && activeLockExpiresAt > now)
+      return false
+    transaction.set(pageRef, {
+      previewThumbnail: {
+        ...previewThumbnail,
+        status: 'capturing',
+        provider: 'firebase-storage',
+        renderer: 'puppeteer',
+        thumbnailVersion: SITE_PAGE_PREVIEW_THUMBNAIL_VERSION,
+        pageSignature,
+        lockId,
+        lockExpiresAt,
+        requestedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+    }, { merge: true })
+    return true
+  })
+  return acquired ? lockId : ''
+}
+
+const captureCmsPreviewJpeg = async (url) => {
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+  })
+  try {
+    const page = await browser.newPage()
+    await page.setViewport({
+      width: SITE_PAGE_PREVIEW_CAPTURE_WIDTH,
+      height: SITE_PAGE_PREVIEW_CAPTURE_HEIGHT,
+      deviceScaleFactor: 1,
+    })
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 45000 })
+    await page.evaluate(async () => {
+      if (document.fonts?.ready)
+        await document.fonts.ready
+    })
+    await page.waitForSelector('.cms-preview-render-page', { timeout: 20000 })
+    const errorText = await page.$eval('body', body => body?.innerText || '').catch(() => '')
+    if (/Invalid preview signature|Missing preview signature|Page not found|Unable to load preview/i.test(errorText))
+      throw new Error(errorText.trim().slice(0, 240))
+    await new Promise(resolve => setTimeout(resolve, 350))
+    return await page.screenshot({
+      type: 'jpeg',
+      quality: 92,
+      clip: {
+        x: 0,
+        y: 0,
+        width: SITE_PAGE_PREVIEW_CAPTURE_WIDTH,
+        height: SITE_PAGE_PREVIEW_CAPTURE_HEIGHT,
+      },
+    })
+  }
+  finally {
+    await browser.close()
+  }
+}
+
+const renderCmsPagePreviewThumbnail = async ({ orgId, siteId, pageId, baseUrl, force = false, trigger = 'unknown' }) => {
+  const normalizedOrgId = String(orgId || '').trim()
+  const normalizedSiteId = String(siteId || '').trim()
+  const normalizedPageId = String(pageId || '').trim()
+  if (!normalizedOrgId || !normalizedSiteId || !normalizedPageId)
+    throw new HttpsError('invalid-argument', 'Missing orgId, siteId, or pageId.')
+
+  const previewBaseUrl = sanitizePreviewBaseUrl(baseUrl) || resolveDefaultPreviewBaseUrl()
+  if (!previewBaseUrl)
+    throw new HttpsError('failed-precondition', 'Preview render base URL could not be resolved.')
+
+  const context = await readPreviewRenderContext({ orgId: normalizedOrgId, siteId: normalizedSiteId, pageId: normalizedPageId })
+  const pageSignature = getSitePagePreviewPageSnapshotSignature({
+    siteId: normalizedSiteId,
+    pageId: normalizedPageId,
+    pageData: context.pageData,
+  })
+  const fullSignature = getSitePagePreviewFullSnapshotSignature({
+    siteId: normalizedSiteId,
+    pageId: normalizedPageId,
+    pageData: context.pageData,
+    siteData: context.siteData,
+    themeData: context.themeData,
+    blocksById: context.blocksById,
+  })
+  if (!force && pageHasFreshPreviewThumbnail({ pageData: context.pageData, pageSignature, fullSignature }))
+    return { skipped: true, status: 'ready', pageId: normalizedPageId, url: context.pageData.previewThumbnail.url }
+
+  const lockId = await acquirePagePreviewCaptureLock({ pageRef: context.pageRef, pageSignature, force })
+  if (!lockId)
+    return { skipped: true, status: 'capturing', pageId: normalizedPageId }
+
+  try {
+    const renderUrl = buildCmsPreviewRenderUrl({
+      baseUrl: previewBaseUrl,
+      orgId: normalizedOrgId,
+      siteId: normalizedSiteId,
+      pageId: normalizedPageId,
+    })
+    const buffer = await captureCmsPreviewJpeg(renderUrl)
+    const bucketName = resolveStorageBucketName()
+    if (!bucketName)
+      throw new HttpsError('failed-precondition', 'Storage bucket is not configured.')
+    const token = randomUUID()
+    const filePath = `public/cms-page-previews/${normalizedOrgId}/${normalizedSiteId}/${normalizedPageId}-${fullSignature}.jpg`
+    await admin.storage().bucket(bucketName).file(filePath).save(buffer, {
+      contentType: 'image/jpeg',
+      metadata: {
+        metadata: {
+          firebaseStorageDownloadTokens: token,
+          orgId: normalizedOrgId,
+          siteId: normalizedSiteId,
+          pageId: normalizedPageId,
+          cmsPagePreview: 'true',
+        },
+      },
+    })
+    const url = firebaseStoragePublicUrl({ bucketName, filePath, token })
+    const previewThumbnail = {
+      status: 'ready',
+      provider: 'firebase-storage',
+      renderer: 'puppeteer',
+      thumbnailVersion: SITE_PAGE_PREVIEW_THUMBNAIL_VERSION,
+      url,
+      filePath,
+      signature: fullSignature,
+      pageSignature,
+      fullSignature,
+      trigger,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAtISO: new Date().toISOString(),
+    }
+    await context.pageRef.set({ previewThumbnail }, { merge: true })
+    return { skipped: false, status: 'ready', pageId: normalizedPageId, url }
+  }
+  catch (error) {
+    await context.pageRef.set({
+      previewThumbnail: {
+        status: 'failed',
+        provider: 'firebase-storage',
+        renderer: 'puppeteer',
+        thumbnailVersion: SITE_PAGE_PREVIEW_THUMBNAIL_VERSION,
+        pageSignature,
+        fullSignature,
+        trigger,
+        errorMessage: error?.message || String(error),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAtISO: new Date().toISOString(),
+      },
+    }, { merge: true })
+    throw error
+  }
+}
+
+const renderCmsPagePreviewThumbnailsSequentially = async ({ orgId, siteId, pageIds, trigger }) => {
+  const uniquePageIds = Array.from(new Set((pageIds || []).map(pageId => String(pageId || '').trim()).filter(Boolean))).slice(0, SITE_PAGE_PREVIEW_BATCH_LIMIT)
+  const results = []
+  for (const pageId of uniquePageIds) {
+    try {
+      results.push(await renderCmsPagePreviewThumbnail({ orgId, siteId, pageId, force: true, trigger }))
+    }
+    catch (error) {
+      logger.error('CMS preview thumbnail capture failed', { orgId, siteId, pageId, trigger, error: error?.message })
+      results.push({ status: 'failed', pageId, error: error?.message || String(error) })
+    }
+  }
+  return results
+}
+
+const listSitePageIdsForPreview = async ({ orgId, siteId }) => {
+  const snap = await db.collection('organizations').doc(orgId).collection('sites').doc(siteId).collection('pages').limit(SITE_PAGE_PREVIEW_BATCH_LIMIT).get()
+  return snap.docs.map(doc => doc.id)
+}
+
+const renderCmsSitePreviewThumbnails = async ({ orgId, siteId, trigger }) => {
+  const pageIds = await listSitePageIdsForPreview({ orgId, siteId })
+  return renderCmsPagePreviewThumbnailsSequentially({ orgId, siteId, pageIds, trigger })
+}
+
+exports.renderPagePreviewThumbnail = onCall({ timeoutSeconds: 180, memory: '1GiB' }, async (request) => {
+  assertCallableUser(request)
+  const data = request.data || {}
+  const auth = request.auth || {}
+  const orgId = String(data.orgId || '').trim()
+  const siteId = String(data.siteId || '').trim()
+  const pageId = String(data.pageId || '').trim()
+  if (!orgId || !siteId || !pageId)
+    throw new HttpsError('invalid-argument', 'Missing orgId, siteId, or pageId.')
+  const allowed = await permissionCheck(auth.uid, 'write', `organizations/${orgId}/sites/${siteId}/pages`)
+  if (!allowed)
+    throw new HttpsError('permission-denied', 'Not allowed to render page preview thumbnails.')
+  return renderCmsPagePreviewThumbnail({
+    orgId,
+    siteId,
+    pageId,
+    baseUrl: data.baseUrl,
+    force: true,
+    trigger: 'manual-dev',
+  })
+})
+
+exports.onCmsPageWrittenRenderPreviewThumbnail = onDocumentWritten(
+  { document: 'organizations/{orgId}/sites/{siteId}/pages/{pageId}', timeoutSeconds: 180, memory: '1GiB' },
+  async (event) => {
+    if (!event.data?.after?.exists)
+      return
+    const before = event.data.before.exists ? event.data.before.data() || {} : {}
+    const after = event.data.after.data() || {}
+    if (event.data.before.exists && pageChangeOnlyTouchedPreviewThumbnail(before, after))
+      return
+    await renderCmsPagePreviewThumbnail({
+      orgId: event.params.orgId,
+      siteId: event.params.siteId,
+      pageId: event.params.pageId,
+      force: true,
+      trigger: event.data.before.exists ? 'page-update' : 'page-create',
+    })
+  },
+)
+
+exports.onCmsSiteWrittenRenderPreviewThumbnails = onDocumentWritten(
+  { document: 'organizations/{orgId}/sites/{siteId}', timeoutSeconds: 540, memory: '1GiB' },
+  async (event) => {
+    if (!event.data?.after?.exists || !event.data.before.exists)
+      return
+    const before = event.data.before.data() || {}
+    const after = event.data.after.data() || {}
+    if (pageChangeOnlyTouchedPreviewThumbnail(before, after))
+      return
+    const relevantKeys = ['theme', 'logo', 'logoLight', 'logoText', 'logoType', 'brandLogoDark', 'brandLogoLight']
+    const relevantChanged = relevantKeys.some(key => stableSerialize(before?.[key]) !== stableSerialize(after?.[key]))
+    if (!relevantChanged)
+      return
+    await renderCmsSitePreviewThumbnails({
+      orgId: event.params.orgId,
+      siteId: event.params.siteId,
+      trigger: 'site-update',
+    })
+  },
+)
+
+exports.onCmsThemeWrittenRenderPreviewThumbnails = onDocumentWritten(
+  { document: 'organizations/{orgId}/themes/{themeId}', timeoutSeconds: 540, memory: '1GiB' },
+  async (event) => {
+    if (!event.data?.after?.exists || !event.data.before.exists)
+      return
+    const before = event.data.before.data() || {}
+    const after = event.data.after.data() || {}
+    const relevantKeys = ['theme', 'extraCSS', 'headJSON']
+    const relevantChanged = relevantKeys.some(key => stableSerialize(before?.[key]) !== stableSerialize(after?.[key]))
+    if (!relevantChanged)
+      return
+    const sitesSnap = await db.collection('organizations').doc(event.params.orgId).collection('sites').where('theme', '==', event.params.themeId).limit(50).get()
+    for (const siteDoc of sitesSnap.docs) {
+      await renderCmsSitePreviewThumbnails({
+        orgId: event.params.orgId,
+        siteId: siteDoc.id,
+        trigger: 'theme-update',
+      })
+    }
+  },
+)
+
+exports.onCmsBlockWrittenRenderPreviewThumbnails = onDocumentWritten(
+  { document: 'organizations/{orgId}/blocks/{blockId}', timeoutSeconds: 540, memory: '1GiB' },
+  async (event) => {
+    if (!event.data?.after?.exists || !event.data.before.exists)
+      return
+    const before = event.data.before.data() || {}
+    const after = event.data.after.data() || {}
+    const relevantKeys = ['content', 'values', 'meta', 'type', 'blockUpdatedAt']
+    const relevantChanged = relevantKeys.some(key => stableSerialize(before?.[key]) !== stableSerialize(after?.[key]))
+    if (!relevantChanged)
+      return
+    const pagesSnap = await db.collectionGroup('pages').where('blockIds', 'array-contains', event.params.blockId).limit(SITE_PAGE_PREVIEW_BATCH_LIMIT).get()
+    const bySite = new Map()
+    for (const pageDoc of pagesSnap.docs) {
+      const parts = pageDoc.ref.path.split('/')
+      if (parts[0] !== 'organizations' || parts[1] !== event.params.orgId || parts[2] !== 'sites' || !parts[3])
+        continue
+      const siteId = parts[3]
+      if (!bySite.has(siteId))
+        bySite.set(siteId, [])
+      bySite.get(siteId).push(pageDoc.id)
+    }
+    for (const [siteId, pageIds] of bySite.entries()) {
+      await renderCmsPagePreviewThumbnailsSequentially({
+        orgId: event.params.orgId,
+        siteId,
+        pageIds,
+        trigger: 'block-update',
+      })
+    }
+  },
+)
 
 const normalizeContactSpamSettings = (value = {}) => {
   const source = (value && typeof value === 'object' && !Array.isArray(value)) ? value : {}

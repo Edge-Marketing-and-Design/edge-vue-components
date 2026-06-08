@@ -40,10 +40,11 @@ export const createCmsNuxtHooks = (resolveFile) => {
   return {
     'pages:extend': (pages) => {
       const appRootRoute = pages.find(page => page.path === '/app')
-      const targetRoutes = appRootRoute?.children || pages
 
       cmsRoutes.forEach((route) => {
-        const routeToAdd = resolveCmsRoute(route, appRootRoute)
+        const isAppRoute = String(route.path || '').startsWith('/app')
+        const targetRoutes = isAppRoute && appRootRoute?.children ? appRootRoute.children : pages
+        const routeToAdd = resolveCmsRoute(route, isAppRoute ? appRootRoute : null)
         if (!routeExists(targetRoutes, routeToAdd.name))
           targetRoutes.push(routeToAdd)
       })

@@ -172,10 +172,12 @@ const sitePagePreviewScale = ref(0.18)
 let html2canvasModulePromise = null
 let sitePagePreviewSnapshotQueueRunning = false
 let sitePagePreviewSnapshotQueueStopped = false
-const SITE_PAGE_PREVIEW_THUMBNAIL_VERSION = 'viewport-html2canvas-ok-computed-color-v16'
+const SITE_PAGE_PREVIEW_THUMBNAIL_VERSION = 'backend-puppeteer-v1'
 const SITE_PAGE_PREVIEW_JPEG_ENABLED = false
-const showPreviewSnapshotStatus = computed(() => SITE_PAGE_PREVIEW_JPEG_ENABLED && Boolean(edgeGlobal.edgeState.devOverride))
+const showPreviewSnapshotStatus = computed(() => Boolean(edgeGlobal.edgeState.devOverride))
+const showPreviewRenderTools = computed(() => Boolean(edgeGlobal.edgeState.devOverride))
 const SITE_PAGE_PREVIEW_BASE_WIDTH = 1600
+const EDGE_CMS_PREVIEW_RENDER_SIGNATURE_SALT = 'edge-cms-preview-render-v1'
 const isPreviewSnapshotDevRefreshEnabled = () => Boolean(edgeGlobal.edgeState.devOverride)
 
 const pageInit = {
@@ -674,6 +676,16 @@ const parseThemeDoc = (themeDoc) => {
   }
 }
 
+const parseHeadDoc = (themeDoc) => {
+  try {
+    const parsed = JSON.parse(themeDoc?.headJSON || '{}')
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+      return parsed
+  }
+  catch {}
+  return {}
+}
+
 const getThemePreviewVersion = (themeDoc) => {
   if (!themeDoc)
     return 'no-theme-data'
@@ -721,6 +733,10 @@ const selectedTemplatePreviewTheme = computed(() => {
   if (!themeId)
     return null
   return parseThemeDoc(themeCollection.value?.[themeId]) || null
+})
+const selectedTemplatePreviewHead = computed(() => {
+  const themeId = selectedTemplatePreviewThemeId.value
+  return themeId ? parseHeadDoc(themeCollection.value?.[themeId]) : {}
 })
 const selectedTemplatePreviewThemeReady = computed(() => {
   return !selectedTemplatePreviewThemeId.value || !!selectedTemplatePreviewTheme.value
@@ -1819,9 +1835,21 @@ const sitePreviewTheme = computed(() => {
     return null
   return parseThemeDoc(themeCollection.value?.[themeId]) || null
 })
+const sitePreviewHead = computed(() => {
+  const themeId = String(siteData.value?.theme || '').trim()
+  return themeId ? parseHeadDoc(themeCollection.value?.[themeId]) : {}
+})
 const sitePreviewThemeReady = computed(() => {
   return !String(siteData.value?.theme || '').trim() || !!sitePreviewTheme.value
 })
+
+const activePreviewHead = computed(() => {
+  if (isTemplateSite.value)
+    return selectedTemplatePreviewHead.value || {}
+  return sitePreviewHead.value || {}
+})
+
+useHead(() => activePreviewHead.value || {})
 
 const getSitePagePreviewKey = (docId) => {
   const themeId = String(siteData.value?.theme || 'no-theme')
@@ -1841,6 +1869,36 @@ const createPreviewSignatureHash = (value) => {
   for (let index = 0; index < input.length; index++)
     hash = ((hash << 5) + hash) ^ input.charCodeAt(index)
   return String(hash >>> 0)
+}
+
+const getCmsPreviewRenderSignature = ({ orgId, siteId, pageId }) => {
+  return createPreviewSignatureHash({
+    salt: EDGE_CMS_PREVIEW_RENDER_SIGNATURE_SALT,
+    orgId,
+    siteId,
+    pageId,
+  })
+}
+
+const getCmsPreviewRenderUrl = (pageDoc) => {
+  const orgId = String(edgeGlobal.edgeState.currentOrganization || '').trim()
+  const siteId = String(props.site || '').trim()
+  const pageId = String(pageDoc?.docId || '').trim()
+  if (!orgId || !siteId || !pageId)
+    return ''
+  const signature = getCmsPreviewRenderSignature({ orgId, siteId, pageId })
+  const params = new URLSearchParams({
+    orgId,
+    signature,
+  })
+  return `/cms-preview-render/${encodeURIComponent(siteId)}/${encodeURIComponent(pageId)}?${params.toString()}`
+}
+
+const openCmsPreviewRender = (pageDoc) => {
+  const url = getCmsPreviewRenderUrl(pageDoc)
+  if (!url)
+    return
+  globalThis.open?.(url, '_blank', 'noopener,noreferrer')
 }
 
 const getSitePagePreviewBlockSignature = (pageDoc) => {
@@ -1969,7 +2027,7 @@ const isSitePagePreviewSnapshotDisplayable = (pageDoc) => {
 }
 
 const hasFreshSitePagePreviewImage = (pageDoc) => {
-  return SITE_PAGE_PREVIEW_JPEG_ENABLED && (isPersistedSitePagePreviewThumbnailFresh(pageDoc) || isSitePagePreviewSnapshotDisplayable(pageDoc))
+  return isPersistedSitePagePreviewThumbnailFresh(pageDoc) || (SITE_PAGE_PREVIEW_JPEG_ENABLED && isSitePagePreviewSnapshotDisplayable(pageDoc))
 }
 
 const getFreshSitePagePreviewImageUrl = (pageDoc) => {
@@ -1986,7 +2044,7 @@ const isSitePagePreviewForcedRendered = (pageDoc) => {
 }
 
 const shouldShowSitePagePreviewImage = (pageDoc) => {
-  return SITE_PAGE_PREVIEW_JPEG_ENABLED && hasFreshSitePagePreviewImage(pageDoc) && !isSitePagePreviewForcedRendered(pageDoc)
+  return Boolean(edgeGlobal.edgeState.devOverride) && hasFreshSitePagePreviewImage(pageDoc) && !isSitePagePreviewForcedRendered(pageDoc)
 }
 
 const toggleSitePagePreviewRendered = (pageDoc) => {
@@ -2489,18 +2547,47 @@ const setSitePagePreviewSnapshotRef = (pageDoc, element) => {
 
 const recaptureSitePagePreviewSnapshot = async (pageDoc) => {
   const docId = String(pageDoc?.docId || '').trim()
-  if (!docId || !SITE_PAGE_PREVIEW_JPEG_ENABLED)
+  const orgId = String(edgeGlobal.edgeState.currentOrganization || '').trim()
+  if (!docId || !orgId || !props.site || !edgeGlobal.edgeState.devOverride)
     return
   if (sitePagePreviewSnapshotTimers.has(docId)) {
     clearTimeout(sitePagePreviewSnapshotTimers.get(docId))
     sitePagePreviewSnapshotTimers.delete(docId)
   }
-  delete state.sitePagePreviewSnapshots[docId]
-  await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`, docId, {
-    previewThumbnail: null,
-  })
-  await nextTick()
-  enqueueSitePagePreviewSnapshotCapture(pageDoc, { front: true })
+  const signature = getSitePagePreviewSnapshotSignature(pageDoc)
+  state.sitePagePreviewSnapshots[docId] = {
+    status: 'capturing',
+    signature,
+    dataUrl: '',
+    renderer: 'puppeteer',
+  }
+  try {
+    const result = await edgeFirebase.runFunction('cms-renderPagePreviewThumbnail', {
+      uid: edgeFirebase.user.uid,
+      orgId,
+      siteId: props.site,
+      pageId: docId,
+      baseUrl: globalThis.location?.origin || '',
+    })
+    const response = result?.data || result || {}
+    state.sitePagePreviewSnapshots[docId] = {
+      status: response?.status === 'ready' ? 'ready' : 'queued',
+      signature,
+      dataUrl: '',
+      renderer: 'puppeteer',
+      url: response?.url || '',
+      capturedAt: Date.now(),
+    }
+  }
+  catch (error) {
+    state.sitePagePreviewSnapshots[docId] = {
+      status: 'failed',
+      signature,
+      dataUrl: '',
+      renderer: 'puppeteer',
+      errorMessage: normalizePreviewCaptureError(error),
+    }
+  }
 }
 
 const orderedSiteMenus = computed(() => {
@@ -4678,14 +4765,29 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                             </div>
                           </div>
                           <div
-                            v-if="showPreviewSnapshotStatus"
+                            v-if="showPreviewRenderTools"
                             class="mt-2 flex items-center justify-between gap-2 text-[11px] font-medium uppercase tracking-wide text-slate-400"
                           >
-                            <span class="min-w-0 flex-1 truncate" :title="getSitePagePreviewSnapshotTitle(item)">
+                            <span
+                              v-if="showPreviewSnapshotStatus"
+                              class="min-w-0 flex-1 truncate"
+                              :title="getSitePagePreviewSnapshotTitle(item)"
+                            >
                               {{ getSitePagePreviewSnapshotLabel(item) }}
+                            </span>
+                            <span v-else class="min-w-0 flex-1 truncate">
+                              Preview render
                             </span>
                             <div class="flex shrink-0 items-center gap-1">
                               <button
+                                type="button"
+                                class="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] leading-none text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                                @click.stop="openCmsPreviewRender(item)"
+                              >
+                                open
+                              </button>
+                              <button
+                                v-if="hasFreshSitePagePreviewImage(item)"
                                 type="button"
                                 class="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] leading-none text-slate-500 hover:bg-slate-100 hover:text-slate-800"
                                 @click.stop="toggleSitePagePreviewRendered(item)"
