@@ -46,6 +46,15 @@ const state = reactive({
   loading: true,
 })
 
+const sortOptionsByTitle = (options = []) => {
+  return [...options].sort((a, b) =>
+    String(a?.title || '').localeCompare(String(b?.title || ''), undefined, {
+      numeric: true,
+      sensitivity: 'base',
+    }),
+  )
+}
+
 onBeforeMount(async () => {
   staticOption = JSON.parse(JSON.stringify(props.option))
   // Helper: safely resolve nested keys like "meta.user"
@@ -64,7 +73,7 @@ onBeforeMount(async () => {
     if (props.option.optionsKey && props.option.optionsValue) {
       const seen = new Set()
 
-      staticOption.options = options
+      staticOption.options = sortOptionsByTitle(options
         .map((item) => {
           const title = getByPath(item, props.option.optionsKey)
           const name = getByPath(item, props.option.optionsValue)
@@ -78,14 +87,14 @@ onBeforeMount(async () => {
             return false
           seen.add(item.name)
           return true
-        })
+        }))
     }
     else {
-      staticOption.options = options
+      staticOption.options = sortOptionsByTitle(options)
     }
   }
   else {
-    staticOption.options = props.option.options
+    staticOption.options = sortOptionsByTitle(props.option.options
       .map((item) => {
         const title = getByPath(item, props.option.optionsKey)
         const name = getByPath(item, props.option.optionsValue)
@@ -93,7 +102,7 @@ onBeforeMount(async () => {
           ? { title, name }
           : null
       })
-      .filter(Boolean) // remove nulls
+      .filter(Boolean)) // remove nulls
   }
   if (!props.multiple) {
     staticOption.options.unshift({ title: '(none)', name: NONE_VALUE })
@@ -103,12 +112,13 @@ onBeforeMount(async () => {
 </script>
 
 <template>
-  <edge-shad-select
+  <edge-shad-combobox
     v-if="!state.loading && staticOption.options.length > 0 && !props.multiple"
     v-model="selectValue"
     :label="props.label"
     :name="props.option.field"
     :items="staticOption.options"
+    class="w-full"
   />
   <edge-shad-select-tags
     v-else-if="!state.loading && staticOption.options.length > 0 && props.multiple"
