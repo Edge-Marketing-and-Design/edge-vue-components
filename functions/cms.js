@@ -3520,6 +3520,7 @@ const buildFieldsList = (pagesSnap, siteData = {}) => {
         const meta = block?.meta || {}
         const values = block?.values || {}
         const blockId = block?.blockId || `block-${blockIndex}`
+        const blockInstructions = clampText(block?.aiInstructions || '', 1200)
         for (const [field, cfg] of Object.entries(meta)) {
           if (!isFillableMeta(cfg))
             continue
@@ -3538,6 +3539,7 @@ const buildFieldsList = (pagesSnap, siteData = {}) => {
             option: cfg.option || null,
             schema: Array.isArray(cfg.schema) ? cfg.schema : null,
             tags: Array.isArray(cfg.tags) ? cfg.tags : [],
+            instructions: blockInstructions,
           }
           descriptors.push(descriptor)
           descriptorMap.set(path, descriptor)
@@ -3568,6 +3570,9 @@ const formatFieldPrompt = (descriptor) => {
   }
   if (descriptor.type === 'image' && descriptor.tags?.length) {
     parts.push(`  default media tags: ${descriptor.tags.join(', ')}`)
+  }
+  if (descriptor.instructions) {
+    parts.push(`  block AI instructions: ${descriptor.instructions}`)
   }
   return parts.join('\n')
 }
