@@ -4133,26 +4133,31 @@ const firebaseStoragePublicUrl = ({ bucketName, filePath, token }) => {
   return `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodedPath}?alt=media&token=${token}`
 }
 
-const buildCmsPreviewRenderUrl = ({ baseUrl, orgId, siteId, pageId, mode = '' }) => {
+const buildCmsPreviewRenderUrl = ({ baseUrl, orgId, siteId, pageId, mode = '', source = '' }) => {
   const signature = getCmsPreviewRenderSignature({ orgId, siteId, pageId })
   const url = new URL(`/cms-preview-render/${encodeURIComponent(siteId)}/${encodeURIComponent(pageId)}`, baseUrl)
   url.searchParams.set('orgId', orgId)
   url.searchParams.set('signature', signature)
   if (mode)
     url.searchParams.set('mode', mode)
+  if (source)
+    url.searchParams.set('source', source)
   return url.toString()
 }
 
-const readPreviewRenderContext = async ({ orgId, siteId, pageId }) => {
+const readPreviewRenderContext = async ({ orgId, siteId, pageId, source = 'draft' }) => {
   const orgRef = db.collection('organizations').doc(orgId)
   const siteRef = orgRef.collection('sites').doc(siteId)
-  const pageRef = siteRef.collection('pages').doc(pageId)
-  const [siteSnap, pageSnap] = await Promise.all([siteRef.get(), pageRef.get()])
-  if (!siteSnap.exists)
+  const draftPageRef = siteRef.collection('pages').doc(pageId)
+  const usePublished = source === 'published'
+  const renderSiteRef = usePublished ? orgRef.collection('published-site-settings').doc(siteId) : siteRef
+  const renderPageRef = usePublished ? siteRef.collection('published').doc(pageId) : draftPageRef
+  const [draftSiteSnap, renderSiteSnap, pageSnap] = await Promise.all([siteRef.get(), renderSiteRef.get(), renderPageRef.get()])
+  if (!draftSiteSnap.exists && !renderSiteSnap.exists)
     throw new HttpsError('not-found', 'Site not found.')
   if (!pageSnap.exists)
     throw new HttpsError('not-found', 'Page not found.')
-  const siteData = siteSnap.data() || {}
+  const siteData = renderSiteSnap.exists ? renderSiteSnap.data() || {} : draftSiteSnap.data() || {}
   const pageData = pageSnap.data() || {}
   const themeId = String(siteData?.theme || '').trim()
   const themeSnap = themeId ? await orgRef.collection('themes').doc(themeId).get() : null
@@ -4164,7 +4169,7 @@ const readPreviewRenderContext = async ({ orgId, siteId, pageId }) => {
     if (snap.exists)
       blocksById[String(blockId)] = snap.data() || {}
   }))
-  return { siteRef, pageRef, siteData, pageData, themeData, blocksById }
+  return { siteRef, pageRef: draftPageRef, renderPageRef, siteData, pageData, themeData, blocksById, source: usePublished ? 'published' : 'draft' }
 }
 
 const serializePreviewPayload = value => JSON.parse(JSON.stringify(value || null))
@@ -4185,12 +4190,13 @@ exports.getPreviewRenderPayload = onCall({ timeoutSeconds: 60, memory: '512MiB' 
   const siteId = String(data.siteId || '').trim()
   const pageId = String(data.pageId || '').trim()
   const signature = String(data.signature || '').trim()
+  const source = String(data.source || '').trim() === 'published' ? 'published' : 'draft'
   if (!orgId || !siteId || !pageId || !signature)
     throw new HttpsError('invalid-argument', 'Missing preview render payload fields.')
   if (signature !== getCmsPreviewRenderSignature({ orgId, siteId, pageId }))
     throw new HttpsError('permission-denied', 'Invalid preview signature.')
 
-  const context = await readPreviewRenderContext({ orgId, siteId, pageId })
+  const context = await readPreviewRenderContext({ orgId, siteId, pageId, source })
   return {
     site: serializePreviewPayload(context.siteData),
     page: serializePreviewPayload({ ...context.pageData, docId: pageId }),
@@ -4203,6 +4209,8 @@ exports.getPreviewRenderPayload = onCall({ timeoutSeconds: 60, memory: '512MiB' 
 const pageChangeOnlyTouchedPreviewThumbnail = (before = {}, after = {}) => {
   const keys = new Set([...Object.keys(before || {}), ...Object.keys(after || {})])
   keys.delete('previewThumbnail')
+  keys.delete('publishedPreviewThumbnail')
+  keys.delete('manualPreviewThumbnail')
   keys.delete('previewThumbnailUpdatedAt')
   keys.delete('previewThumbnailRequestedAt')
   keys.delete('previewThumbnailCaptureLock')
@@ -4213,8 +4221,8 @@ const pageChangeOnlyTouchedPreviewThumbnail = (before = {}, after = {}) => {
   return true
 }
 
-const pageHasFreshPreviewThumbnail = ({ pageData, pageSignature, fullSignature }) => {
-  const previewThumbnail = pageData?.previewThumbnail || {}
+const pageHasFreshPreviewThumbnail = ({ pageData, pageSignature, fullSignature, field = 'previewThumbnail' }) => {
+  const previewThumbnail = pageData?.[field] || {}
   return !!(
     previewThumbnail.status === 'ready'
     && previewThumbnail.url
@@ -4223,7 +4231,7 @@ const pageHasFreshPreviewThumbnail = ({ pageData, pageSignature, fullSignature }
   )
 }
 
-const acquirePagePreviewCaptureLock = async ({ pageRef, pageSignature, force }) => {
+const acquirePagePreviewCaptureLock = async ({ pageRef, pageSignature, force, field = 'previewThumbnail' }) => {
   const now = Date.now()
   const lockId = randomUUID()
   const lockExpiresAt = now + SITE_PAGE_PREVIEW_LOCK_TTL_MS
@@ -4232,18 +4240,19 @@ const acquirePagePreviewCaptureLock = async ({ pageRef, pageSignature, force }) 
     if (!snap.exists)
       return false
     const data = snap.data() || {}
-    const previewThumbnail = data.previewThumbnail || {}
+    const previewThumbnail = data[field] || {}
     const activeLockExpiresAt = Number(previewThumbnail.lockExpiresAt || 0)
     if (!force && previewThumbnail.status === 'capturing' && activeLockExpiresAt > now)
       return false
     transaction.set(pageRef, {
-      previewThumbnail: {
+      [field]: {
         ...previewThumbnail,
         status: 'capturing',
         provider: 'firebase-storage',
         renderer: 'puppeteer',
         thumbnailVersion: SITE_PAGE_PREVIEW_THUMBNAIL_VERSION,
         pageSignature,
+        source: field === 'publishedPreviewThumbnail' ? 'published' : field === 'manualPreviewThumbnail' ? 'manual' : 'legacy',
         lockId,
         lockExpiresAt,
         requestedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -4307,7 +4316,7 @@ const captureCmsPreviewJpeg = async (url) => {
   }
 }
 
-const renderCmsPagePreviewThumbnail = async ({ orgId, siteId, pageId, baseUrl, force = false, trigger = 'unknown' }) => {
+const renderCmsPagePreviewThumbnail = async ({ orgId, siteId, pageId, baseUrl, force = false, trigger = 'unknown', source = 'draft', field = 'manualPreviewThumbnail' }) => {
   const normalizedOrgId = String(orgId || '').trim()
   const normalizedSiteId = String(siteId || '').trim()
   const normalizedPageId = String(pageId || '').trim()
@@ -4318,7 +4327,11 @@ const renderCmsPagePreviewThumbnail = async ({ orgId, siteId, pageId, baseUrl, f
   if (!previewBaseUrl)
     throw new HttpsError('failed-precondition', 'Preview render base URL could not be resolved.')
 
-  const context = await readPreviewRenderContext({ orgId: normalizedOrgId, siteId: normalizedSiteId, pageId: normalizedPageId })
+  const normalizedSource = source === 'published' ? 'published' : 'draft'
+  const thumbnailField = ['publishedPreviewThumbnail', 'manualPreviewThumbnail', 'previewThumbnail'].includes(field)
+    ? field
+    : (normalizedSource === 'published' ? 'publishedPreviewThumbnail' : 'manualPreviewThumbnail')
+  const context = await readPreviewRenderContext({ orgId: normalizedOrgId, siteId: normalizedSiteId, pageId: normalizedPageId, source: normalizedSource })
   const pageSignature = getSitePagePreviewPageSnapshotSignature({
     siteId: normalizedSiteId,
     pageId: normalizedPageId,
@@ -4332,12 +4345,13 @@ const renderCmsPagePreviewThumbnail = async ({ orgId, siteId, pageId, baseUrl, f
     themeData: context.themeData,
     blocksById: context.blocksById,
   })
-  if (!force && pageHasFreshPreviewThumbnail({ pageData: context.pageData, pageSignature, fullSignature }))
-    return { skipped: true, status: 'ready', pageId: normalizedPageId, url: context.pageData.previewThumbnail.url }
+  const currentStoredPage = (await context.pageRef.get()).data() || {}
+  if (!force && pageHasFreshPreviewThumbnail({ pageData: currentStoredPage, pageSignature, fullSignature, field: thumbnailField }))
+    return { skipped: true, status: 'ready', pageId: normalizedPageId, url: currentStoredPage[thumbnailField].url, field: thumbnailField }
 
-  const lockId = await acquirePagePreviewCaptureLock({ pageRef: context.pageRef, pageSignature, force })
+  const lockId = await acquirePagePreviewCaptureLock({ pageRef: context.pageRef, pageSignature, force, field: thumbnailField })
   if (!lockId)
-    return { skipped: true, status: 'capturing', pageId: normalizedPageId }
+    return { skipped: true, status: 'capturing', pageId: normalizedPageId, field: thumbnailField }
 
   try {
     const renderUrl = buildCmsPreviewRenderUrl({
@@ -4346,13 +4360,14 @@ const renderCmsPagePreviewThumbnail = async ({ orgId, siteId, pageId, baseUrl, f
       siteId: normalizedSiteId,
       pageId: normalizedPageId,
       mode: 'thumbnail',
+      source: normalizedSource === 'published' ? 'published' : '',
     })
     const buffer = await captureCmsPreviewJpeg(renderUrl)
     const bucketName = resolveStorageBucketName()
     if (!bucketName)
       throw new HttpsError('failed-precondition', 'Storage bucket is not configured.')
     const token = randomUUID()
-    const filePath = `public/cms-page-previews/${normalizedOrgId}/${normalizedSiteId}/${normalizedPageId}-${fullSignature}.jpg`
+    const filePath = `public/cms-page-previews/${normalizedOrgId}/${normalizedSiteId}/${normalizedPageId}-${thumbnailField}-${fullSignature}.jpg`
     await admin.storage().bucket(bucketName).file(filePath).save(buffer, {
       contentType: 'image/jpeg',
       metadata: {
@@ -4362,6 +4377,8 @@ const renderCmsPagePreviewThumbnail = async ({ orgId, siteId, pageId, baseUrl, f
           siteId: normalizedSiteId,
           pageId: normalizedPageId,
           cmsPagePreview: 'true',
+          source: normalizedSource,
+          field: thumbnailField,
         },
       },
     })
@@ -4376,22 +4393,24 @@ const renderCmsPagePreviewThumbnail = async ({ orgId, siteId, pageId, baseUrl, f
       signature: fullSignature,
       pageSignature,
       fullSignature,
+      source: normalizedSource,
       trigger,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAtISO: new Date().toISOString(),
     }
-    await context.pageRef.set({ previewThumbnail }, { merge: true })
-    return { skipped: false, status: 'ready', pageId: normalizedPageId, url }
+    await context.pageRef.set({ [thumbnailField]: previewThumbnail }, { merge: true })
+    return { skipped: false, status: 'ready', pageId: normalizedPageId, url, field: thumbnailField }
   }
   catch (error) {
     await context.pageRef.set({
-      previewThumbnail: {
+      [thumbnailField]: {
         status: 'failed',
         provider: 'firebase-storage',
         renderer: 'puppeteer',
         thumbnailVersion: SITE_PAGE_PREVIEW_THUMBNAIL_VERSION,
         pageSignature,
         fullSignature,
+        source: normalizedSource,
         trigger,
         errorMessage: error?.message || String(error),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -4402,12 +4421,12 @@ const renderCmsPagePreviewThumbnail = async ({ orgId, siteId, pageId, baseUrl, f
   }
 }
 
-const renderCmsPagePreviewThumbnailsSequentially = async ({ orgId, siteId, pageIds, trigger }) => {
+const renderCmsPagePreviewThumbnailsSequentially = async ({ orgId, siteId, pageIds, trigger, source = 'published', field = 'publishedPreviewThumbnail' }) => {
   const uniquePageIds = Array.from(new Set((pageIds || []).map(pageId => String(pageId || '').trim()).filter(Boolean))).slice(0, SITE_PAGE_PREVIEW_BATCH_LIMIT)
   const results = []
   for (const pageId of uniquePageIds) {
     try {
-      results.push(await renderCmsPagePreviewThumbnail({ orgId, siteId, pageId, force: true, trigger }))
+      results.push(await renderCmsPagePreviewThumbnail({ orgId, siteId, pageId, force: true, trigger, source, field }))
     }
     catch (error) {
       logger.error('CMS preview thumbnail capture failed', { orgId, siteId, pageId, trigger, error: error?.message })
@@ -4417,14 +4436,15 @@ const renderCmsPagePreviewThumbnailsSequentially = async ({ orgId, siteId, pageI
   return results
 }
 
-const listSitePageIdsForPreview = async ({ orgId, siteId }) => {
-  const snap = await db.collection('organizations').doc(orgId).collection('sites').doc(siteId).collection('pages').limit(SITE_PAGE_PREVIEW_BATCH_LIMIT).get()
+const listSitePageIdsForPreview = async ({ orgId, siteId, source = 'published' }) => {
+  const collection = source === 'published' ? 'published' : 'pages'
+  const snap = await db.collection('organizations').doc(orgId).collection('sites').doc(siteId).collection(collection).limit(SITE_PAGE_PREVIEW_BATCH_LIMIT).get()
   return snap.docs.map(doc => doc.id)
 }
 
-const renderCmsSitePreviewThumbnails = async ({ orgId, siteId, trigger }) => {
-  const pageIds = await listSitePageIdsForPreview({ orgId, siteId })
-  return renderCmsPagePreviewThumbnailsSequentially({ orgId, siteId, pageIds, trigger })
+const renderCmsSitePreviewThumbnails = async ({ orgId, siteId, trigger, source = 'published', field = 'publishedPreviewThumbnail' }) => {
+  const pageIds = await listSitePageIdsForPreview({ orgId, siteId, source })
+  return renderCmsPagePreviewThumbnailsSequentially({ orgId, siteId, pageIds, trigger, source, field })
 }
 
 exports.renderPagePreviewThumbnail = onCall({ timeoutSeconds: 300, memory: '2GiB' }, async (request) => {
@@ -4445,14 +4465,23 @@ exports.renderPagePreviewThumbnail = onCall({ timeoutSeconds: 300, memory: '2GiB
     pageId,
     force: true,
     trigger: 'manual-dev',
+    source: 'draft',
+    field: 'manualPreviewThumbnail',
   })
 })
 
 exports.onCmsPageWrittenRenderPreviewThumbnail = onDocumentWritten(
   { document: 'organizations/{orgId}/sites/{siteId}/pages/{pageId}', timeoutSeconds: 300, memory: '2GiB' },
+  async () => {},
+)
+
+exports.onCmsPublishedPageWrittenRenderPreviewThumbnail = onDocumentWritten(
+  { document: 'organizations/{orgId}/sites/{siteId}/published/{pageId}', timeoutSeconds: 300, memory: '2GiB' },
   async (event) => {
     if (!event.data?.after?.exists)
-      return
+      return db.collection('organizations').doc(event.params.orgId).collection('sites').doc(event.params.siteId).collection('pages').doc(event.params.pageId).set({
+        publishedPreviewThumbnail: admin.firestore.FieldValue.delete(),
+      }, { merge: true })
     const before = event.data.before.exists ? event.data.before.data() || {} : {}
     const after = event.data.after.data() || {}
     if (event.data.before.exists && pageChangeOnlyTouchedPreviewThumbnail(before, after))
@@ -4462,85 +4491,26 @@ exports.onCmsPageWrittenRenderPreviewThumbnail = onDocumentWritten(
       siteId: event.params.siteId,
       pageId: event.params.pageId,
       force: true,
-      trigger: event.data.before.exists ? 'page-update' : 'page-create',
+      trigger: event.data.before.exists ? 'published-page-update' : 'published-page-create',
+      source: 'published',
+      field: 'publishedPreviewThumbnail',
     })
   },
 )
 
 exports.onCmsSiteWrittenRenderPreviewThumbnails = onDocumentWritten(
   { document: 'organizations/{orgId}/sites/{siteId}', timeoutSeconds: 540, memory: '2GiB' },
-  async (event) => {
-    if (!event.data?.after?.exists || !event.data.before.exists)
-      return
-    const before = event.data.before.data() || {}
-    const after = event.data.after.data() || {}
-    if (pageChangeOnlyTouchedPreviewThumbnail(before, after))
-      return
-    const relevantKeys = ['theme', 'menus', 'restrictedContent', 'logo', 'logoLight', 'logoText', 'logoType', 'brandLogoDark', 'brandLogoLight']
-    const relevantChanged = relevantKeys.some(key => stableSerialize(before?.[key]) !== stableSerialize(after?.[key]))
-    if (!relevantChanged)
-      return
-    await renderCmsSitePreviewThumbnails({
-      orgId: event.params.orgId,
-      siteId: event.params.siteId,
-      trigger: 'site-update',
-    })
-  },
+  async () => {},
 )
 
 exports.onCmsThemeWrittenRenderPreviewThumbnails = onDocumentWritten(
   { document: 'organizations/{orgId}/themes/{themeId}', timeoutSeconds: 540, memory: '2GiB' },
-  async (event) => {
-    if (!event.data?.after?.exists || !event.data.before.exists)
-      return
-    const before = event.data.before.data() || {}
-    const after = event.data.after.data() || {}
-    const relevantKeys = ['theme', 'extraCSS', 'headJSON']
-    const relevantChanged = relevantKeys.some(key => stableSerialize(before?.[key]) !== stableSerialize(after?.[key]))
-    if (!relevantChanged)
-      return
-    const sitesSnap = await db.collection('organizations').doc(event.params.orgId).collection('sites').where('theme', '==', event.params.themeId).limit(50).get()
-    for (const siteDoc of sitesSnap.docs) {
-      await renderCmsSitePreviewThumbnails({
-        orgId: event.params.orgId,
-        siteId: siteDoc.id,
-        trigger: 'theme-update',
-      })
-    }
-  },
+  async () => {},
 )
 
 exports.onCmsBlockWrittenRenderPreviewThumbnails = onDocumentWritten(
   { document: 'organizations/{orgId}/blocks/{blockId}', timeoutSeconds: 540, memory: '2GiB' },
-  async (event) => {
-    if (!event.data?.after?.exists || !event.data.before.exists)
-      return
-    const before = event.data.before.data() || {}
-    const after = event.data.after.data() || {}
-    const relevantKeys = ['content', 'values', 'meta', 'type', 'blockUpdatedAt']
-    const relevantChanged = relevantKeys.some(key => stableSerialize(before?.[key]) !== stableSerialize(after?.[key]))
-    if (!relevantChanged)
-      return
-    const pagesSnap = await db.collectionGroup('pages').where('blockIds', 'array-contains', event.params.blockId).limit(SITE_PAGE_PREVIEW_BATCH_LIMIT).get()
-    const bySite = new Map()
-    for (const pageDoc of pagesSnap.docs) {
-      const parts = pageDoc.ref.path.split('/')
-      if (parts[0] !== 'organizations' || parts[1] !== event.params.orgId || parts[2] !== 'sites' || !parts[3])
-        continue
-      const siteId = parts[3]
-      if (!bySite.has(siteId))
-        bySite.set(siteId, [])
-      bySite.get(siteId).push(pageDoc.id)
-    }
-    for (const [siteId, pageIds] of bySite.entries()) {
-      await renderCmsPagePreviewThumbnailsSequentially({
-        orgId: event.params.orgId,
-        siteId,
-        pageIds,
-        trigger: 'block-update',
-      })
-    }
-  },
+  async () => {},
 )
 
 const normalizeContactSpamSettings = (value = {}) => {

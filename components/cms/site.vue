@@ -2000,31 +2000,38 @@ const getSitePagePreviewSnapshot = (pageDoc) => {
   return docId ? state.sitePagePreviewSnapshots[docId] || null : null
 }
 
-const getPersistedSitePagePreviewThumbnail = (pageDoc) => {
-  return pageDoc?.previewThumbnail && typeof pageDoc.previewThumbnail === 'object'
-    ? pageDoc.previewThumbnail
+const getPersistedSitePagePreviewThumbnail = (pageDoc, field = 'previewThumbnail') => {
+  return pageDoc?.[field] && typeof pageDoc[field] === 'object'
+    ? pageDoc[field]
     : null
 }
 
-const getPersistedSitePagePreviewExpectedSignature = (pageDoc) => {
-  const previewThumbnail = getPersistedSitePagePreviewThumbnail(pageDoc)
-  if (isPreviewSnapshotDevRefreshEnabled())
-    return previewThumbnail?.fullSignature || previewThumbnail?.signature || ''
-  return previewThumbnail?.pageSignature || previewThumbnail?.signature || ''
-}
-
-const getPersistedSitePagePreviewThumbnailUrl = (pageDoc) => {
-  const previewThumbnail = getPersistedSitePagePreviewThumbnail(pageDoc)
+const getPersistedSitePagePreviewThumbnailUrl = (pageDoc, field = 'previewThumbnail') => {
+  const previewThumbnail = getPersistedSitePagePreviewThumbnail(pageDoc, field)
   return String(previewThumbnail?.url || previewThumbnail?.downloadURL || '').trim()
 }
 
-const isPersistedSitePagePreviewThumbnailFresh = (pageDoc) => {
-  const previewThumbnail = getPersistedSitePagePreviewThumbnail(pageDoc)
+const isPersistedSitePagePreviewThumbnailDisplayable = (pageDoc, field = 'previewThumbnail') => {
+  const previewThumbnail = getPersistedSitePagePreviewThumbnail(pageDoc, field)
   return !!(
     previewThumbnail?.status === 'ready'
-    && getPersistedSitePagePreviewThumbnailUrl(pageDoc)
-    && getPersistedSitePagePreviewExpectedSignature(pageDoc) === getSitePagePreviewSnapshotSignature(pageDoc)
+    && getPersistedSitePagePreviewThumbnailUrl(pageDoc, field)
   )
+}
+
+const getPreferredSitePagePreviewThumbnailField = (pageDoc) => {
+  if (isPersistedSitePagePreviewThumbnailDisplayable(pageDoc, 'publishedPreviewThumbnail'))
+    return 'publishedPreviewThumbnail'
+  if (isPersistedSitePagePreviewThumbnailDisplayable(pageDoc, 'manualPreviewThumbnail'))
+    return 'manualPreviewThumbnail'
+  if (isPersistedSitePagePreviewThumbnailDisplayable(pageDoc, 'previewThumbnail'))
+    return 'previewThumbnail'
+  return ''
+}
+
+const getPreferredSitePagePreviewThumbnail = (pageDoc) => {
+  const field = getPreferredSitePagePreviewThumbnailField(pageDoc)
+  return field ? getPersistedSitePagePreviewThumbnail(pageDoc, field) : null
 }
 
 const isSitePagePreviewSnapshotFresh = (pageDoc) => {
@@ -2046,12 +2053,13 @@ const isSitePagePreviewSnapshotDisplayable = (pageDoc) => {
 }
 
 const hasFreshSitePagePreviewImage = (pageDoc) => {
-  return isPersistedSitePagePreviewThumbnailFresh(pageDoc) || (SITE_PAGE_PREVIEW_JPEG_ENABLED && isSitePagePreviewSnapshotDisplayable(pageDoc))
+  return !!getPreferredSitePagePreviewThumbnail(pageDoc) || (SITE_PAGE_PREVIEW_JPEG_ENABLED && isSitePagePreviewSnapshotDisplayable(pageDoc))
 }
 
 const getFreshSitePagePreviewImageUrl = (pageDoc) => {
-  if (isPersistedSitePagePreviewThumbnailFresh(pageDoc))
-    return getPersistedSitePagePreviewThumbnailUrl(pageDoc)
+  const field = getPreferredSitePagePreviewThumbnailField(pageDoc)
+  if (field)
+    return getPersistedSitePagePreviewThumbnailUrl(pageDoc, field)
   if (isSitePagePreviewSnapshotDisplayable(pageDoc))
     return getSitePagePreviewSnapshot(pageDoc)?.dataUrl || ''
   return ''
@@ -2064,6 +2072,12 @@ const isSitePagePreviewForcedRendered = (pageDoc) => {
 
 const shouldShowSitePagePreviewImage = (pageDoc) => {
   return hasFreshSitePagePreviewImage(pageDoc) && !isSitePagePreviewForcedRendered(pageDoc)
+}
+
+const isSitePagePreviewDecisionPending = (pageDoc) => {
+  if (shouldShowSitePagePreviewImage(pageDoc))
+    return false
+  return !!state.pagePreviewsLoading
 }
 
 const toggleSitePagePreviewRendered = (pageDoc) => {
@@ -2080,8 +2094,13 @@ const toggleSitePagePreviewRendered = (pageDoc) => {
 
 const getSitePagePreviewSnapshotLabel = (pageDoc) => {
   const snapshot = getSitePagePreviewSnapshot(pageDoc)
-  if (isPersistedSitePagePreviewThumbnailFresh(pageDoc))
-    return 'Cached JPEG (Firebase)'
+  const persistedField = getPreferredSitePagePreviewThumbnailField(pageDoc)
+  if (persistedField === 'publishedPreviewThumbnail')
+    return 'Published JPEG (Firebase)'
+  if (persistedField === 'manualPreviewThumbnail')
+    return 'Manual JPEG (Firebase)'
+  if (persistedField === 'previewThumbnail')
+    return 'Cached JPEG (Legacy)'
   if (isSitePagePreviewSnapshotFresh(pageDoc)) {
     const renderer = String(snapshot?.renderer || '').trim()
     return renderer ? `Captured JPEG (${renderer})` : 'Captured JPEG'
@@ -2105,7 +2124,11 @@ const getSitePagePreviewSnapshotLabel = (pageDoc) => {
 
 const getSitePagePreviewSnapshotTitle = (pageDoc) => {
   const snapshot = getSitePagePreviewSnapshot(pageDoc)
-  return snapshot?.errorMessage || getSitePagePreviewSnapshotLabel(pageDoc)
+  if (snapshot?.errorMessage)
+    return snapshot.errorMessage
+  const publishedError = getPersistedSitePagePreviewThumbnail(pageDoc, 'publishedPreviewThumbnail')?.errorMessage
+  const manualError = getPersistedSitePagePreviewThumbnail(pageDoc, 'manualPreviewThumbnail')?.errorMessage
+  return publishedError || manualError || getSitePagePreviewSnapshotLabel(pageDoc)
 }
 
 const isSitePagePreviewBackendRefreshPending = (pageDoc) => {
@@ -3614,6 +3637,8 @@ const cacheVerificationVerifiedRecently = computed(() => {
   return Number.isFinite(completedAt) && cacheVerificationNow.value - completedAt <= 10000
 })
 const showCacheVerificationStatus = computed(() => {
+  if (!edgeGlobal.edgeState.devOverride)
+    return false
   const status = String(cacheVerificationStatus.value?.status || '')
   return ['running', 'timeout', 'failed'].includes(status) || cacheVerificationVerifiedRecently.value
 })
@@ -4757,7 +4782,15 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                             </DropdownMenu>
                           </div>
                           <div
-                            v-if="shouldShowSitePagePreviewImage(item)"
+                            v-if="isSitePagePreviewDecisionPending(item)"
+                            class="template-scale-wrapper"
+                          >
+                            <div class="flex h-full min-h-40 w-full items-center justify-center bg-slate-100 text-xs font-medium uppercase tracking-wide text-slate-400 dark:bg-slate-900/60 dark:text-slate-500">
+                              Loading preview
+                            </div>
+                          </div>
+                          <div
+                            v-else-if="shouldShowSitePagePreviewImage(item)"
                             class="template-scale-wrapper"
                           >
                             <img

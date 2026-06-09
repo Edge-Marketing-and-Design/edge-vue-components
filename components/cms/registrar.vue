@@ -430,6 +430,10 @@ const domainRows = computed(() => {
       registrationStatus: String(item?.status || 'active').trim().toLowerCase() || 'active',
       registrationState: String(item?.registrationState || 'registered_org').trim() || 'registered_org',
       registrationReason: '',
+      dnsSyncAttempted: false,
+      dnsSyncSucceeded: false,
+      dnsZoneFound: false,
+      dnsZoneName: '',
       dnsSyncError: '',
       wwwError: '',
       apexError: '',
@@ -455,6 +459,10 @@ const domainRows = computed(() => {
       existing.hasRegistryDoc = true
       existing.registrationState = String(existing.registrationState || item?.registrationState || '').trim() || existing.registrationState
       existing.registrationReason = String(existing.registrationReason || item?.registrationReason || '').trim()
+      existing.dnsSyncAttempted = item?.dnsSyncAttempted === true
+      existing.dnsSyncSucceeded = item?.dnsSyncSucceeded === true
+      existing.dnsZoneFound = item?.dnsZoneFound === true
+      existing.dnsZoneName = String(item?.dnsZoneName || '').trim()
       existing.dnsSyncError = String(item?.dnsSyncError || '').trim()
       existing.wwwError = String(item?.wwwError || '').trim()
       existing.apexError = String(item?.apexError || '').trim()
@@ -470,6 +478,10 @@ const domainRows = computed(() => {
       registrationStatus: 'unregistered',
       registrationState: String(item?.registrationState || 'unknown').trim() || 'unknown',
       registrationReason: String(item?.registrationReason || '').trim(),
+      dnsSyncAttempted: item?.dnsSyncAttempted === true,
+      dnsSyncSucceeded: item?.dnsSyncSucceeded === true,
+      dnsZoneFound: item?.dnsZoneFound === true,
+      dnsZoneName: String(item?.dnsZoneName || '').trim(),
       dnsSyncError: String(item?.dnsSyncError || '').trim(),
       wwwError: String(item?.wwwError || '').trim(),
       apexError: String(item?.apexError || '').trim(),
@@ -496,6 +508,8 @@ const filteredDomainRows = computed(() => {
       item.attachedSiteId,
       item.registrationStatus,
       item.isRegistered ? 'registered' : 'not registered',
+      item.dnsSyncSucceeded ? 'dns synced' : '',
+      item.dnsZoneFound ? 'cloudflare dns' : '',
     ]
       .filter(Boolean)
       .map(value => String(value).toLowerCase())
@@ -515,8 +529,6 @@ const isDomainBusy = domain => isDomainAttaching(domain) || isDomainDetaching(do
 const getDomainSyncError = item => String(item?.dnsSyncError || item?.wwwError || item?.apexError || '').trim()
 
 const getRegistrationBadgeClass = (item) => {
-  if (getDomainSyncError(item))
-    return 'border-red-300 bg-red-50 text-red-700'
   if (item.isRegistered)
     return 'border-emerald-300 bg-emerald-50 text-emerald-700'
   if (item.registrationState === 'not_registered')
@@ -527,26 +539,49 @@ const getRegistrationBadgeClass = (item) => {
 }
 
 const getRegistrationLabel = (item) => {
-  const dnsSyncError = getDomainSyncError(item)
-  if (dnsSyncError) {
-    if (dnsSyncError.toLowerCase().includes('already has existing records')) {
-      return 'DNS Error: already has existing records. Cloudflare admin must remove them.'
-    }
-    const compactError = dnsSyncError.replaceAll(/\s+/g, ' ').trim()
-    const preview = compactError.length > 110 ? `${compactError.slice(0, 107)}...` : compactError
-    return `DNS Error: ${preview}`
-  }
   if (item.registrationState === 'registered_org')
     return 'Registered in this org'
   if (item.registrationState === 'not_registered')
     return 'Not registered'
   if (item.registrationState === 'registered_external')
-    return 'Registered with another registrar'
+    return 'External registrar'
   if (!item.isRegistered)
     return 'Registration status unknown'
   if (item.registrationStatus === 'active')
     return 'Registered in this org'
   return `Registered in this org (${item.registrationStatus || 'unknown'})`
+}
+
+const getDnsBadgeClass = (item) => {
+  if (getDomainSyncError(item))
+    return 'border-red-300 bg-red-50 text-red-700'
+  if (item.dnsSyncSucceeded)
+    return 'border-emerald-300 bg-emerald-50 text-emerald-700'
+  if (item.dnsZoneFound)
+    return 'border-sky-300 bg-sky-50 text-sky-700'
+  if (item.dnsSyncAttempted)
+    return 'border-amber-300 bg-amber-50 text-amber-700'
+  return 'border-slate-300 bg-slate-50 text-slate-600'
+}
+
+const getDnsLabel = (item) => {
+  const dnsSyncError = getDomainSyncError(item)
+  if (dnsSyncError) {
+    if (dnsSyncError.toLowerCase().includes('already has existing records'))
+      return 'DNS Error: existing records need admin cleanup'
+    const compactError = dnsSyncError.replaceAll(/\s+/g, ' ').trim()
+    const preview = compactError.length > 80 ? `${compactError.slice(0, 77)}...` : compactError
+    return `DNS Error: ${preview}`
+  }
+  if (item.dnsSyncSucceeded)
+    return 'DNS synced in Cloudflare'
+  if (item.dnsZoneFound)
+    return item.dnsZoneName ? `Cloudflare DNS: ${item.dnsZoneName}` : 'Cloudflare DNS zone'
+  if (item.dnsSyncAttempted)
+    return 'DNS needs attention'
+  if (item.hasRegistryDoc)
+    return 'DNS not checked'
+  return ''
 }
 
 const getAttachmentBadgeClass = item => item.attachedSiteId
@@ -743,6 +778,13 @@ onBeforeUnmount(async () => {
               <div class="flex flex-wrap items-center gap-2 text-xs">
                 <span class="rounded-full border px-2 py-0.5" :class="getRegistrationBadgeClass(item)">
                   {{ getRegistrationLabel(item) }}
+                </span>
+                <span
+                  v-if="getDnsLabel(item)"
+                  class="rounded-full border px-2 py-0.5"
+                  :class="getDnsBadgeClass(item)"
+                >
+                  {{ getDnsLabel(item) }}
                 </span>
                 <span class="rounded-full border px-2 py-0.5" :class="getAttachmentBadgeClass(item)">
                   {{ getAttachmentLabel(item) }}

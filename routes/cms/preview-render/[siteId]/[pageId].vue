@@ -22,6 +22,7 @@ const previewSignature = computed(() => String(route.query.signature || '').trim
 const organizationId = computed(() => String(route.query.orgId || edgeGlobal.edgeState.currentOrganization || localStorage.getItem('organizationID') || '').trim())
 const routeLastSegment = computed(() => String(route.query.routeLastSegment || '').trim())
 const isThumbnailMode = computed(() => String(route.query.mode || '').trim() === 'thumbnail')
+const previewSource = computed(() => String(route.query.source || '').trim() === 'published' ? 'published' : 'draft')
 const orgPath = computed(() => organizationId.value ? `organizations/${organizationId.value}` : '')
 
 const siteDoc = computed(() => state.payload?.site || null)
@@ -254,6 +255,7 @@ const loadPreviewData = async () => {
       siteId: siteId.value,
       pageId: pageId.value,
       signature: previewSignature.value,
+      source: previewSource.value,
     })
     state.payload = response?.data || response || null
     state.renderContext = state.payload?.renderContext || null
@@ -271,7 +273,7 @@ onMounted(() => {
   loadPreviewData()
 })
 
-watch(() => [organizationId.value, siteId.value, pageId.value, previewSignature.value], () => {
+watch(() => [organizationId.value, siteId.value, pageId.value, previewSignature.value, previewSource.value], () => {
   if (state.bootstrapped)
     loadPreviewData()
 })
