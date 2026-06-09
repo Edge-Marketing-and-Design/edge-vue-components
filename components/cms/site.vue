@@ -167,14 +167,12 @@ const sitePagePreviewSnapshotTimers = new Map()
 const sitePagePreviewSnapshotUploads = new Set()
 const sitePagePreviewSnapshotQueue = []
 const sitePagePreviewSnapshotQueued = new Set()
-const sitePagePreviewBackendQueue = []
 const sitePagePreviewBackendQueued = new Set()
 const sitePagePreviewForcedRendered = ref(new Set())
 const sitePagePreviewScale = ref(0.18)
 let html2canvasModulePromise = null
 let sitePagePreviewSnapshotQueueRunning = false
 let sitePagePreviewSnapshotQueueStopped = false
-let sitePagePreviewBackendQueueRunning = false
 const SITE_PAGE_PREVIEW_THUMBNAIL_VERSION = 'backend-puppeteer-v1'
 const SITE_PAGE_PREVIEW_JPEG_ENABLED = false
 const showPreviewSnapshotStatus = computed(() => Boolean(edgeGlobal.edgeState.devOverride))
@@ -2629,24 +2627,6 @@ const runBackendSitePagePreviewRefresh = async (pageDoc) => {
   }
 }
 
-const processSitePagePreviewBackendQueue = async () => {
-  if (sitePagePreviewBackendQueueRunning)
-    return
-  sitePagePreviewBackendQueueRunning = true
-  try {
-    while (sitePagePreviewBackendQueue.length) {
-      const pageDoc = sitePagePreviewBackendQueue.shift()
-      const docId = String(pageDoc?.docId || '').trim()
-      if (docId)
-        sitePagePreviewBackendQueued.delete(docId)
-      await runBackendSitePagePreviewRefresh(pageDoc)
-    }
-  }
-  finally {
-    sitePagePreviewBackendQueueRunning = false
-  }
-}
-
 const recaptureSitePagePreviewSnapshot = (pageDoc) => {
   const docId = String(pageDoc?.docId || '').trim()
   if (!docId || sitePagePreviewBackendQueued.has(docId) || isSitePagePreviewBackendRefreshPending(pageDoc))
@@ -2654,13 +2634,15 @@ const recaptureSitePagePreviewSnapshot = (pageDoc) => {
   const signature = getSitePagePreviewSnapshotSignature(pageDoc)
   sitePagePreviewBackendQueued.add(docId)
   state.sitePagePreviewSnapshots[docId] = {
-    status: 'queued',
+    status: 'capturing',
     signature,
     dataUrl: '',
     renderer: 'puppeteer',
   }
-  sitePagePreviewBackendQueue.push(pageDoc)
-  processSitePagePreviewBackendQueue()
+  runBackendSitePagePreviewRefresh(pageDoc)
+    .finally(() => {
+      sitePagePreviewBackendQueued.delete(docId)
+    })
 }
 
 const orderedSiteMenus = computed(() => {
@@ -3616,7 +3598,6 @@ onBeforeUnmount(() => {
   sitePagePreviewSnapshotTimers.clear()
   sitePagePreviewSnapshotQueue.splice(0, sitePagePreviewSnapshotQueue.length)
   sitePagePreviewSnapshotQueued.clear()
-  sitePagePreviewBackendQueue.splice(0, sitePagePreviewBackendQueue.length)
   sitePagePreviewBackendQueued.clear()
   sitePagePreviewSnapshotRefs.clear()
   sitePagePreviewSnapshotUploads.clear()
