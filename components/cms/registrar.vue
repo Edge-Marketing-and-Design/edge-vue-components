@@ -12,6 +12,7 @@ const state = reactive({
   registering: false,
   attachingDomains: {},
   detachingDomains: {},
+  retryingDomainSync: {},
   checkResult: null,
   message: '',
   messageType: '',
@@ -341,6 +342,50 @@ const detachDomainFromSite = async ({ domain }) => {
   }
 }
 
+const retryDomainSync = async (item) => {
+  if (!canUseDomains.value)
+    return
+  const domain = normalizeDomain(item?.domain)
+  const siteId = String(item?.attachedSiteId || '').trim()
+
+  if (!currentUid.value) {
+    setMessage('You must be signed in to retry domain sync.', 'error')
+    return
+  }
+  if (!currentOrgId.value) {
+    setMessage('Select an organization before retrying domain sync.', 'error')
+    return
+  }
+  if (!domain || !siteId) {
+    setMessage('Select an attached domain before retrying DNS sync.', 'error')
+    return
+  }
+
+  state.retryingDomainSync[domain] = true
+  clearMessage()
+  try {
+    const response = await edgeFirebase.runFunction('cms-retrySiteDomainSync', {
+      uid: currentUid.value,
+      orgId: currentOrgId.value,
+      siteId,
+      domain,
+    })
+    const allClear = response?.data?.allClear === true
+    setMessage(
+      allClear
+        ? `"${domain}" DNS sync retried and domain errors are clear.`
+        : `"${domain}" DNS sync retried. Check the DNS status for remaining errors.`,
+      allClear ? 'success' : 'info',
+    )
+  }
+  catch (error) {
+    setMessage(parseFunctionError(error, 'Unable to retry DNS sync.'), 'error')
+  }
+  finally {
+    state.retryingDomainSync[domain] = false
+  }
+}
+
 const registeredDomains = computed(() => snapshotCollectionItems(registeredDomainsPath.value))
 const domainRegistry = computed(() => snapshotCollectionItems(domainRegistryPath.value))
 const sites = computed(() => snapshotCollectionItems(sitesPath.value))
@@ -386,6 +431,8 @@ const domainRows = computed(() => {
       registrationState: String(item?.registrationState || 'registered_org').trim() || 'registered_org',
       registrationReason: '',
       dnsSyncError: '',
+      wwwError: '',
+      apexError: '',
       attachedSiteId: '',
       attachedSiteName: '',
       provider: String(item?.provider || 'cloudflare').trim(),
@@ -409,6 +456,8 @@ const domainRows = computed(() => {
       existing.registrationState = String(existing.registrationState || item?.registrationState || '').trim() || existing.registrationState
       existing.registrationReason = String(existing.registrationReason || item?.registrationReason || '').trim()
       existing.dnsSyncError = String(item?.dnsSyncError || '').trim()
+      existing.wwwError = String(item?.wwwError || '').trim()
+      existing.apexError = String(item?.apexError || '').trim()
       existing.attachedSiteId = siteId
       existing.attachedSiteName = siteName
       continue
@@ -422,6 +471,8 @@ const domainRows = computed(() => {
       registrationState: String(item?.registrationState || 'unknown').trim() || 'unknown',
       registrationReason: String(item?.registrationReason || '').trim(),
       dnsSyncError: String(item?.dnsSyncError || '').trim(),
+      wwwError: String(item?.wwwError || '').trim(),
+      apexError: String(item?.apexError || '').trim(),
       attachedSiteId: siteId,
       attachedSiteName: siteName,
       provider: '',
@@ -459,10 +510,12 @@ const hiddenBySearchCount = computed(() => Math.max(totalLoadedCount.value - sho
 
 const isDomainAttaching = domain => Boolean(state.attachingDomains[normalizeDomain(domain)])
 const isDomainDetaching = domain => Boolean(state.detachingDomains[normalizeDomain(domain)])
-const isDomainBusy = domain => isDomainAttaching(domain) || isDomainDetaching(domain)
+const isDomainRetryingSync = domain => Boolean(state.retryingDomainSync[normalizeDomain(domain)])
+const isDomainBusy = domain => isDomainAttaching(domain) || isDomainDetaching(domain) || isDomainRetryingSync(domain)
+const getDomainSyncError = item => String(item?.dnsSyncError || item?.wwwError || item?.apexError || '').trim()
 
 const getRegistrationBadgeClass = (item) => {
-  if (String(item?.dnsSyncError || '').trim())
+  if (getDomainSyncError(item))
     return 'border-red-300 bg-red-50 text-red-700'
   if (item.isRegistered)
     return 'border-emerald-300 bg-emerald-50 text-emerald-700'
@@ -474,7 +527,7 @@ const getRegistrationBadgeClass = (item) => {
 }
 
 const getRegistrationLabel = (item) => {
-  const dnsSyncError = String(item?.dnsSyncError || '').trim()
+  const dnsSyncError = getDomainSyncError(item)
   if (dnsSyncError) {
     if (dnsSyncError.toLowerCase().includes('already has existing records')) {
       return 'DNS Error: already has existing records. Cloudflare admin must remove them.'
@@ -698,6 +751,22 @@ onBeforeUnmount(async () => {
             </div>
 
             <div v-if="canUseDomains" class="flex items-center gap-2 self-end md:self-center">
+              <edge-tooltip v-if="item.attachedSiteId && getDomainSyncError(item)">
+                <edge-shad-button
+                  size="icon"
+                  variant="ghost"
+                  class="h-8 w-8 text-amber-700 hover:text-amber-800"
+                  :disabled="isDomainBusy(item.domain)"
+                  @click="retryDomainSync(item)"
+                >
+                  <Loader2 v-if="isDomainRetryingSync(item.domain)" class="h-4 w-4 animate-spin" />
+                  <RefreshCw v-else class="h-4 w-4" />
+                </edge-shad-button>
+                <template #content>
+                  {{ `Retry DNS sync for ${item.domain}` }}
+                </template>
+              </edge-tooltip>
+
               <edge-tooltip>
                 <edge-shad-button
                   size="icon"

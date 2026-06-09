@@ -1,5 +1,5 @@
 <script setup lang="js">
-import { CheckCircle2, CircleAlert, Loader2 } from 'lucide-vue-next'
+import { CheckCircle2, CircleAlert, Loader2, RefreshCw } from 'lucide-vue-next'
 
 const props = defineProps({
   settings: {
@@ -329,6 +329,7 @@ const serverPagesProject = ref('')
 const domainRegistry = ref({})
 const loadingDomainRegistry = ref(false)
 const hasLoadedDomainRegistry = ref(false)
+const retryingDomainSync = reactive({})
 const pagesProject = computed(() => String(serverPagesProject.value || '').trim())
 const pagesDomain = computed(() => (pagesProject.value ? `${pagesProject.value}.pages.dev` : '(CLOUDFLARE_PAGES_PROJECT).pages.dev'))
 const forwardApexEnabled = computed({
@@ -496,6 +497,25 @@ const domainDnsEntries = computed(() => {
   })
 })
 
+const domainRetryTarget = computed(() => {
+  const errored = domainDnsEntries.value.find(entry =>
+    String(entry?.dnsSyncError || entry?.wwwError || entry?.apexError || '').trim(),
+  )
+  return errored?.domain || domainDnsEntries.value[0]?.domain || ''
+})
+
+const isRetryingDomainSync = domain => Boolean(retryingDomainSync[normalizeDomain(domain)])
+
+const parseFunctionError = (error, fallback = 'Request failed.') => {
+  const message = String(
+    error?.message
+    || error?.details?.message
+    || error?.details
+    || fallback,
+  ).trim()
+  return message || fallback
+}
+
 const fetchDomainRegistry = async (options = {}) => {
   const { background = false } = options
   if (!edgeFirebase?.runFunction)
@@ -525,6 +545,38 @@ const fetchDomainRegistry = async (options = {}) => {
   finally {
     if (!background)
       loadingDomainRegistry.value = false
+  }
+}
+
+const retryDomainSync = async (domain) => {
+  const normalizedDomain = normalizeDomain(domain)
+  const orgId = organizationId.value
+  const siteId = String(props.siteId || '').trim()
+  const uid = String(edgeFirebase?.user?.uid || '').trim()
+  if (!normalizedDomain || !orgId || !siteId || !uid)
+    return
+
+  retryingDomainSync[normalizedDomain] = true
+  try {
+    const response = await edgeFirebase.runFunction('cms-retrySiteDomainSync', {
+      uid,
+      orgId,
+      siteId,
+      domain: normalizedDomain,
+    })
+    const allClear = response?.data?.allClear === true
+    edgeFirebase?.toast?.success?.(
+      allClear
+        ? `Retried DNS sync for ${normalizedDomain}; domain errors are clear.`
+        : `Retried DNS sync for ${normalizedDomain}.`,
+    )
+    await fetchDomainRegistry()
+  }
+  catch (error) {
+    edgeFirebase?.toast?.error?.(parseFunctionError(error, 'Unable to retry DNS sync.'))
+  }
+  finally {
+    retryingDomainSync[normalizedDomain] = false
   }
 }
 
@@ -783,7 +835,22 @@ watch(() => [
       </div>
       <Alert v-if="domainError" variant="destructive">
         <CircleAlert class="h-4 w-4" />
-        <AlertTitle>Domain error</AlertTitle>
+        <div class="flex items-start justify-between gap-3">
+          <AlertTitle>Domain error</AlertTitle>
+          <edge-shad-button
+            v-if="domainRetryTarget"
+            type="button"
+            size="sm"
+            variant="outline"
+            class="h-8 gap-2 border-red-200 bg-white/80 text-red-700 hover:bg-red-50"
+            :disabled="isRetryingDomainSync(domainRetryTarget)"
+            @click="retryDomainSync(domainRetryTarget)"
+          >
+            <Loader2 v-if="isRetryingDomainSync(domainRetryTarget)" class="h-3.5 w-3.5 animate-spin" />
+            <RefreshCw v-else class="h-3.5 w-3.5" />
+            Retry DNS Sync
+          </edge-shad-button>
+        </div>
         <AlertDescription class="text-sm">
           {{ domainError }}
         </AlertDescription>
@@ -815,7 +882,7 @@ watch(() => [
             <div class="text-sm font-semibold text-foreground font-mono">
               {{ entry.domain }}
             </div>
-            <div class="text-xs">
+            <div class="flex items-center gap-2 text-xs">
               <span
                 v-if="entry.dnsSyncSucceeded"
                 class="inline-flex items-center gap-1 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-2 py-1"
@@ -830,6 +897,19 @@ watch(() => [
                 <CircleAlert class="h-3 w-3" aria-hidden="true" />
                 Manual DNS needed
               </span>
+              <edge-shad-button
+                v-if="entry.dnsSyncError || entry.wwwError || entry.apexError"
+                type="button"
+                size="sm"
+                variant="outline"
+                class="h-7 gap-1.5 px-2 text-[11px]"
+                :disabled="isRetryingDomainSync(entry.domain)"
+                @click="retryDomainSync(entry.domain)"
+              >
+                <Loader2 v-if="isRetryingDomainSync(entry.domain)" class="h-3 w-3 animate-spin" />
+                <RefreshCw v-else class="h-3 w-3" />
+                Retry
+              </edge-shad-button>
             </div>
           </div>
           <p v-if="entry.wwwAdded || entry.apexAdded" class="text-xs text-muted-foreground">

@@ -8677,6 +8677,288 @@ exports.getCloudflarePagesProject = onCall(async (request) => {
   }
 })
 
+const syncSiteDomainRecords = async ({ orgId, siteId, domains, trigger = 'manual-retry' }) => {
+  const normalizedOrgId = String(orgId || '').trim()
+  const normalizedSiteId = String(siteId || '').trim()
+  const normalizedDomains = Array.from(new Set((Array.isArray(domains) ? domains : [])
+    .map(normalizeDomain)
+    .filter(Boolean)))
+  if (!normalizedOrgId || !normalizedSiteId || !normalizedDomains.length)
+    throw new HttpsError('invalid-argument', 'Missing orgId, siteId, or domains.')
+
+  const orgRef = db.collection('organizations').doc(normalizedOrgId)
+  const draftSiteRef = orgRef.collection('sites').doc(normalizedSiteId)
+  const publishedSiteRef = orgRef.collection('published-site-settings').doc(normalizedSiteId)
+  const [draftSnap, publishedSnap] = await Promise.all([
+    draftSiteRef.get(),
+    publishedSiteRef.get(),
+  ])
+  if (!draftSnap.exists && !publishedSnap.exists)
+    throw new HttpsError('not-found', 'Site not found.')
+
+  const draftData = draftSnap.exists ? draftSnap.data() || {} : {}
+  const publishedData = publishedSnap.exists ? publishedSnap.data() || {} : {}
+  const siteDomains = Array.from(new Set([
+    ...(Array.isArray(publishedData.domains) ? publishedData.domains : []),
+    ...(Array.isArray(draftData.domains) ? draftData.domains : []),
+  ].map(normalizeDomain).filter(Boolean)))
+  const siteDomainSet = new Set(siteDomains)
+  const retryDomains = normalizedDomains.filter(domain => siteDomainSet.has(domain))
+  if (!retryDomains.length)
+    throw new HttpsError('invalid-argument', 'No selected domains are attached to this site.')
+
+  const pagesTarget = getCloudflarePagesTarget()
+  const sitePath = publishedSiteRef.path
+  const membershipEnabled = Boolean((publishedData?.restrictedContent || draftData?.restrictedContent || {}).enabled)
+  const registryDataByDomain = new Map()
+
+  for (const domain of retryDomains) {
+    const registryRef = db.collection(DOMAIN_REGISTRY_COLLECTION).doc(domain)
+    const registrySnap = await registryRef.get()
+    const registryData = registrySnap.exists ? registrySnap.data() || {} : {}
+    const registrySitePath = String(registryData.sitePath || '').trim()
+    const registryOrgId = String(registryData.orgId || '').trim()
+    const registrySiteId = String(registryData.siteId || '').trim()
+    if (
+      registrySnap.exists
+      && registrySitePath
+      && registrySitePath !== sitePath
+      && (registryOrgId !== normalizedOrgId || registrySiteId !== normalizedSiteId)
+    ) {
+      throw new HttpsError('already-exists', `Domain "${domain}" is attached to another site.`)
+    }
+    registryDataByDomain.set(domain, registryData)
+  }
+
+  const syncPlansByApex = new Map()
+  for (const domain of retryDomains) {
+    const dnsPayload = buildDomainDnsPayload(domain, pagesTarget)
+    const apexDomain = dnsPayload.apexDomain
+    if (!apexDomain)
+      continue
+    const existingPlan = syncPlansByApex.get(apexDomain) || {
+      apexDomain,
+      wwwDomain: dnsPayload.wwwDomain,
+      domains: new Set(),
+    }
+    existingPlan.domains.add(domain)
+    syncPlansByApex.set(apexDomain, existingPlan)
+  }
+
+  const syncPlans = Array.from(syncPlansByApex.values())
+    .filter(plan => shouldSyncCloudflareDomain(plan.wwwDomain))
+    .map(plan => ({ ...plan, domains: Array.from(plan.domains) }))
+
+  const syncResults = []
+  for (const plan of syncPlans) {
+    const planRegistryDataItems = plan.domains
+      .map(domain => registryDataByDomain.get(domain))
+      .filter(Boolean)
+    const getCachedResult = (domain, variant) => {
+      for (const registryData of planRegistryDataItems) {
+        const result = getCachedCloudflarePagesDomainResult({
+          domain,
+          registryData,
+          sitePath,
+          orgId: normalizedOrgId,
+          siteId: normalizedSiteId,
+          variant,
+        })
+        if (result)
+          return result
+      }
+      return null
+    }
+    const wwwResult = getCachedResult(plan.wwwDomain, 'www')
+      || await addCloudflarePagesDomain(plan.wwwDomain, { orgId: normalizedOrgId, siteId: normalizedSiteId, variant: 'www', trigger })
+    let apexAttempted = false
+    let apexResult = { ok: false, error: '' }
+    if (shouldSyncCloudflareDomain(plan.apexDomain)) {
+      apexAttempted = true
+      apexResult = getCachedResult(plan.apexDomain, 'apex')
+        || await addCloudflarePagesDomain(plan.apexDomain, { orgId: normalizedOrgId, siteId: normalizedSiteId, variant: 'apex', trigger })
+    }
+    const dnsResult = wwwResult?.ok
+      ? await syncCloudflarePagesDns({
+        apexDomain: plan.apexDomain,
+        wwwDomain: plan.wwwDomain,
+        target: pagesTarget,
+        syncApex: apexAttempted,
+        context: { orgId: normalizedOrgId, siteId: normalizedSiteId, trigger },
+      })
+      : {
+          attempted: false,
+          ok: false,
+          zoneFound: false,
+          zoneName: '',
+          error: '',
+          records: {
+            www: { attempted: false, synced: false, error: '' },
+            apex: { attempted: false, synced: false, error: '' },
+          },
+        }
+    syncResults.push({
+      ...plan,
+      apexAttempted,
+      wwwResult,
+      apexResult,
+      dnsResult,
+    })
+  }
+
+  const registryWrites = []
+  const resultsByDomain = new Map()
+  for (const plan of syncResults) {
+    const wwwAdded = !!plan.wwwResult?.ok
+    const wwwError = wwwAdded ? '' : String(plan.wwwResult?.error || 'Failed to add www domain.')
+    const apexAdded = !!plan.apexResult?.ok
+    const apexError = apexAdded
+      ? ''
+      : (plan.apexAttempted ? String(plan.apexResult?.error || 'Failed to add apex domain.') : '')
+    const dnsResult = plan.dnsResult || {}
+    const dnsSyncAttempted = !!dnsResult.attempted
+    const dnsSyncSucceeded = !!dnsResult.ok
+    const dnsSyncError = dnsSyncSucceeded ? '' : String(dnsResult.error || '').trim()
+
+    for (const domain of plan.domains) {
+      const current = {
+        ...buildDomainDnsPayload(domain, pagesTarget),
+        ...(registryDataByDomain.get(domain) || {}),
+      }
+      const dnsGuidance = !current.dnsEligible
+        ? 'DNS records are not shown for localhost, IP addresses, or .dev domains.'
+        : (dnsSyncSucceeded
+            ? 'DNS was updated automatically. It can take a little time for the domain to start loading everywhere.'
+            : 'We connected the domain to the website, but DNS still needs attention. Add the records below with your DNS provider.')
+      const nextDnsRecords = {
+        ...(current.dnsRecords || {}),
+        apex: {
+          ...(current?.dnsRecords?.apex || {}),
+          enabled: !!current.dnsEligible && !!current?.dnsRecords?.apex?.value && apexAdded,
+          autoManaged: !!dnsResult?.records?.apex?.synced,
+          error: dnsResult?.records?.apex?.error || '',
+        },
+        www: {
+          ...(current?.dnsRecords?.www || {}),
+          enabled: !!current.dnsEligible && !!current?.dnsRecords?.www?.value,
+          autoManaged: !!dnsResult?.records?.www?.synced,
+          error: dnsResult?.records?.www?.error || '',
+        },
+      }
+      const registryRef = db.collection(DOMAIN_REGISTRY_COLLECTION).doc(domain)
+      const payload = {
+        domain,
+        orgId: normalizedOrgId,
+        siteId: normalizedSiteId,
+        sitePath,
+        authEnabled: membershipEnabled,
+        updatedAt: Firestore.FieldValue.serverTimestamp(),
+        domainSyncRetriedAt: Firestore.FieldValue.serverTimestamp(),
+        apexDomain: current.apexDomain || plan.apexDomain || '',
+        wwwDomain: current.wwwDomain || plan.wwwDomain || '',
+        dnsEligible: !!current.dnsEligible,
+        apexAttempted: !!plan.apexAttempted,
+        apexAdded,
+        wwwAdded,
+        dnsSyncAttempted,
+        dnsSyncSucceeded,
+        dnsZoneFound: !!dnsResult.zoneFound,
+        dnsZoneName: dnsResult.zoneName || '',
+        dnsRecords: nextDnsRecords,
+        dnsGuidance,
+      }
+      payload.apexError = apexError ? apexError : Firestore.FieldValue.delete()
+      payload.wwwError = wwwError ? wwwError : Firestore.FieldValue.delete()
+      payload.dnsSyncError = dnsSyncError ? dnsSyncError : Firestore.FieldValue.delete()
+      registryWrites.push(registryRef.set(payload, { merge: true })
+        .then(async () => {
+          const updatedSnap = await registryRef.get()
+          await mirrorDomainRegistryDocToOrg(updatedSnap)
+        }))
+      resultsByDomain.set(domain, {
+        domain,
+        wwwDomain: plan.wwwDomain,
+        apexDomain: plan.apexDomain,
+        wwwAdded,
+        apexAttempted: !!plan.apexAttempted,
+        apexAdded,
+        dnsSyncAttempted,
+        dnsSyncSucceeded,
+        error: [wwwError, apexError, dnsSyncError].filter(Boolean).join('; '),
+      })
+    }
+  }
+  await Promise.all(registryWrites)
+
+  const remainingErrorDomains = []
+  for (const domain of siteDomains) {
+    const registrySnap = await db.collection(DOMAIN_REGISTRY_COLLECTION).doc(domain).get()
+    if (!registrySnap.exists)
+      continue
+    const registryData = registrySnap.data() || {}
+    if (String(registryData.sitePath || '').trim() !== sitePath)
+      continue
+    const hasError = String(registryData.dnsSyncError || registryData.wwwError || registryData.apexError || '').trim()
+    if (hasError)
+      remainingErrorDomains.push(domain)
+  }
+
+  if (!remainingErrorDomains.length) {
+    await Promise.all([
+      draftSiteRef.set({ domainError: Firestore.FieldValue.delete() }, { merge: true }),
+      publishedSiteRef.set({ domainError: Firestore.FieldValue.delete() }, { merge: true }),
+    ])
+  }
+
+  const results = retryDomains.map((domain) => {
+    return resultsByDomain.get(domain) || {
+      domain,
+      skipped: true,
+      error: shouldSyncCloudflareDomain(getCloudflarePagesDomain(getCloudflareApexDomain(domain)))
+        ? 'Domain sync was not attempted.'
+        : 'Domain does not need Cloudflare DNS sync.',
+    }
+  })
+
+  logger.log('Cloudflare domain sync retried', {
+    orgId: normalizedOrgId,
+    siteId: normalizedSiteId,
+    domains: retryDomains,
+    remainingErrorDomains,
+    trigger,
+  })
+
+  return {
+    domains: results,
+    remainingErrorDomains,
+    allClear: remainingErrorDomains.length === 0,
+  }
+}
+
+exports.retrySiteDomainSync = onCall({ timeoutSeconds: 180 }, async (request) => {
+  assertCallableUser(request)
+  const data = request.data || {}
+  const uid = String(request.auth?.uid || '').trim()
+  const orgId = String(data.orgId || '').trim()
+  const siteId = String(data.siteId || '').trim()
+  const requestedDomains = Array.isArray(data.domains) ? data.domains : [data.domain]
+  const domains = Array.from(new Set(requestedDomains.map(normalizeDomain).filter(Boolean)))
+
+  if (!orgId || !siteId || !domains.length)
+    throw new HttpsError('invalid-argument', 'Missing orgId, siteId, or domain.')
+
+  const allowed = await permissionCheck(uid, 'write', `organizations/${orgId}/sites/${siteId}`)
+  if (!allowed)
+    throw new HttpsError('permission-denied', 'Not allowed to retry domain sync for this site.')
+
+  return syncSiteDomainRecords({
+    orgId,
+    siteId,
+    domains,
+    trigger: 'manual-retry',
+  })
+})
+
 exports.registrarCheckDomainAvailability = onCall(async (request) => {
   assertCallableUser(request)
   const data = request.data || {}
