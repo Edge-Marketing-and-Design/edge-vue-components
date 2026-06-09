@@ -21,6 +21,7 @@ const pageId = computed(() => String(route.params.pageId || '').trim())
 const previewSignature = computed(() => String(route.query.signature || '').trim())
 const organizationId = computed(() => String(route.query.orgId || edgeGlobal.edgeState.currentOrganization || localStorage.getItem('organizationID') || '').trim())
 const routeLastSegment = computed(() => String(route.query.routeLastSegment || '').trim())
+const isThumbnailMode = computed(() => String(route.query.mode || '').trim() === 'thumbnail')
 const orgPath = computed(() => organizationId.value ? `organizations/${organizationId.value}` : '')
 
 const siteDoc = computed(() => state.payload?.site || null)
@@ -294,43 +295,48 @@ watch(() => [organizationId.value, siteId.value, pageId.value, previewSignature.
       Loading theme...
     </div>
 
-    <div v-else class="cms-preview-render-page cms-auth-preview-logged-in">
-      <template v-if="previewRows.length">
-        <div
-          v-for="(row, rowIndex) in previewRows"
-          :key="`${pageId}-row-${row.id || rowIndex}`"
-          class="w-full"
-        >
-          <div :class="previewGridClass(row)">
-            <div
-              v-for="(column, colIndex) in row.columns"
-              :key="`${pageId}-row-${row.id || rowIndex}-col-${column.id || colIndex}`"
-              class="min-w-0"
-              :style="previewColumnStyle(column)"
-            >
+    <div
+      v-else
+      :class="isThumbnailMode ? 'cms-preview-thumbnail-capture cms-auth-preview-logged-in' : 'cms-preview-render-page cms-auth-preview-logged-in'"
+    >
+      <div :class="isThumbnailMode ? 'cms-preview-render-page cms-preview-thumbnail-content' : ''">
+        <template v-if="previewRows.length">
+          <div
+            v-for="(row, rowIndex) in previewRows"
+            :key="`${pageId}-row-${row.id || rowIndex}`"
+            class="w-full"
+          >
+            <div :class="previewGridClass(row)">
               <div
-                v-for="(blockRef, blockIdx) in column.blocks || []"
-                :key="`${pageId}-row-${row.id || rowIndex}-col-${column.id || colIndex}-block-${blockIdx}`"
+                v-for="(column, colIndex) in row.columns"
+                :key="`${pageId}-row-${row.id || rowIndex}-col-${column.id || colIndex}`"
+                class="min-w-0"
+                :style="previewColumnStyle(column)"
               >
-                <edge-cms-block-api
-                  v-if="resolveBlockForPreview(blockRef)"
-                  :key="`${siteId}:${pageId}:${blockIdx}`"
-                  :site-id="siteId"
-                  :content="resolveBlockForPreview(blockRef).content"
-                  :values="resolveBlockForPreview(blockRef).values"
-                  :meta="resolveBlockForPreview(blockRef).meta"
-                  :theme="previewTheme"
-                  :render-context="state.renderContext"
-                  :route-last-segment="routeLastSegment"
-                  :standalone-preview="true"
-                />
+                <div
+                  v-for="(blockRef, blockIdx) in column.blocks || []"
+                  :key="`${pageId}-row-${row.id || rowIndex}-col-${column.id || colIndex}-block-${blockIdx}`"
+                >
+                  <edge-cms-block-api
+                    v-if="resolveBlockForPreview(blockRef)"
+                    :key="`${siteId}:${pageId}:${blockIdx}`"
+                    :site-id="siteId"
+                    :content="resolveBlockForPreview(blockRef).content"
+                    :values="resolveBlockForPreview(blockRef).values"
+                    :meta="resolveBlockForPreview(blockRef).meta"
+                    :theme="previewTheme"
+                    :render-context="state.renderContext"
+                    :route-last-segment="routeLastSegment"
+                    :standalone-preview="true"
+                  />
+                </div>
               </div>
             </div>
           </div>
+        </template>
+        <div v-else class="flex min-h-screen items-center justify-center text-sm text-slate-500">
+          No blocks yet.
         </div>
-      </template>
-      <div v-else class="flex min-h-screen items-center justify-center text-sm text-slate-500">
-        No blocks yet.
       </div>
     </div>
   </main>
@@ -343,6 +349,18 @@ watch(() => [organizationId.value, siteId.value, pageId.value, previewSignature.
   min-height: 820px;
   padding: 1.5rem;
   overflow-x: hidden;
+}
+
+.cms-preview-thumbnail-capture {
+  width: 600px;
+  height: 800px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.cms-preview-thumbnail-content {
+  transform: scale(0.375);
+  transform-origin: top left;
 }
 
 .cms-auth-preview-logged-in :deep(.cms-show-logged-out),

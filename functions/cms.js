@@ -4128,11 +4128,13 @@ const firebaseStoragePublicUrl = ({ bucketName, filePath, token }) => {
   return `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodedPath}?alt=media&token=${token}`
 }
 
-const buildCmsPreviewRenderUrl = ({ baseUrl, orgId, siteId, pageId }) => {
+const buildCmsPreviewRenderUrl = ({ baseUrl, orgId, siteId, pageId, mode = '' }) => {
   const signature = getCmsPreviewRenderSignature({ orgId, siteId, pageId })
   const url = new URL(`/cms-preview-render/${encodeURIComponent(siteId)}/${encodeURIComponent(pageId)}`, baseUrl)
   url.searchParams.set('orgId', orgId)
   url.searchParams.set('signature', signature)
+  if (mode)
+    url.searchParams.set('mode', mode)
   return url.toString()
 }
 
@@ -4276,20 +4278,23 @@ const captureCmsPreviewJpeg = async (url) => {
       if (document.fonts?.ready)
         await document.fonts.ready
     })
-    await page.waitForSelector('.cms-preview-render-page', { timeout: 20000 })
+    await page.waitForFunction(() => {
+      const bodyText = document.body?.innerText || ''
+      return document.querySelector('.cms-preview-thumbnail-capture')
+        || document.querySelector('.cms-preview-render-page')
+        || /Invalid preview signature|Missing preview signature|Page not found|Unable to load preview/i.test(bodyText)
+    }, { timeout: 20000 })
     const errorText = await page.$eval('body', body => body?.innerText || '').catch(() => '')
     if (/Invalid preview signature|Missing preview signature|Page not found|Unable to load preview/i.test(errorText))
       throw new Error(errorText.trim().slice(0, 240))
     await new Promise(resolve => setTimeout(resolve, 350))
-    return await page.screenshot({
+    const captureElement = await page.$('.cms-preview-thumbnail-capture')
+      || await page.$('.cms-preview-render-page')
+    if (!captureElement)
+      throw new Error('Preview capture element was not found.')
+    return await captureElement.screenshot({
       type: 'jpeg',
       quality: 92,
-      clip: {
-        x: 0,
-        y: 0,
-        width: SITE_PAGE_PREVIEW_CAPTURE_WIDTH,
-        height: SITE_PAGE_PREVIEW_CAPTURE_HEIGHT,
-      },
     })
   }
   finally {
@@ -4335,6 +4340,7 @@ const renderCmsPagePreviewThumbnail = async ({ orgId, siteId, pageId, baseUrl, f
       orgId: normalizedOrgId,
       siteId: normalizedSiteId,
       pageId: normalizedPageId,
+      mode: 'thumbnail',
     })
     const buffer = await captureCmsPreviewJpeg(renderUrl)
     const bucketName = resolveStorageBucketName()
@@ -4416,7 +4422,7 @@ const renderCmsSitePreviewThumbnails = async ({ orgId, siteId, trigger }) => {
   return renderCmsPagePreviewThumbnailsSequentially({ orgId, siteId, pageIds, trigger })
 }
 
-exports.renderPagePreviewThumbnail = onCall({ timeoutSeconds: 180, memory: '1GiB' }, async (request) => {
+exports.renderPagePreviewThumbnail = onCall({ timeoutSeconds: 300, memory: '2GiB' }, async (request) => {
   assertCallableUser(request)
   const data = request.data || {}
   const auth = request.auth || {}
@@ -4438,7 +4444,7 @@ exports.renderPagePreviewThumbnail = onCall({ timeoutSeconds: 180, memory: '1GiB
 })
 
 exports.onCmsPageWrittenRenderPreviewThumbnail = onDocumentWritten(
-  { document: 'organizations/{orgId}/sites/{siteId}/pages/{pageId}', timeoutSeconds: 180, memory: '1GiB' },
+  { document: 'organizations/{orgId}/sites/{siteId}/pages/{pageId}', timeoutSeconds: 300, memory: '2GiB' },
   async (event) => {
     if (!event.data?.after?.exists)
       return
@@ -4457,7 +4463,7 @@ exports.onCmsPageWrittenRenderPreviewThumbnail = onDocumentWritten(
 )
 
 exports.onCmsSiteWrittenRenderPreviewThumbnails = onDocumentWritten(
-  { document: 'organizations/{orgId}/sites/{siteId}', timeoutSeconds: 540, memory: '1GiB' },
+  { document: 'organizations/{orgId}/sites/{siteId}', timeoutSeconds: 540, memory: '2GiB' },
   async (event) => {
     if (!event.data?.after?.exists || !event.data.before.exists)
       return
@@ -4478,7 +4484,7 @@ exports.onCmsSiteWrittenRenderPreviewThumbnails = onDocumentWritten(
 )
 
 exports.onCmsThemeWrittenRenderPreviewThumbnails = onDocumentWritten(
-  { document: 'organizations/{orgId}/themes/{themeId}', timeoutSeconds: 540, memory: '1GiB' },
+  { document: 'organizations/{orgId}/themes/{themeId}', timeoutSeconds: 540, memory: '2GiB' },
   async (event) => {
     if (!event.data?.after?.exists || !event.data.before.exists)
       return
@@ -4500,7 +4506,7 @@ exports.onCmsThemeWrittenRenderPreviewThumbnails = onDocumentWritten(
 )
 
 exports.onCmsBlockWrittenRenderPreviewThumbnails = onDocumentWritten(
-  { document: 'organizations/{orgId}/blocks/{blockId}', timeoutSeconds: 540, memory: '1GiB' },
+  { document: 'organizations/{orgId}/blocks/{blockId}', timeoutSeconds: 540, memory: '2GiB' },
   async (event) => {
     if (!event.data?.after?.exists || !event.data.before.exists)
       return
