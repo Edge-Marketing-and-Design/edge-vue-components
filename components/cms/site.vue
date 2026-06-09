@@ -1955,6 +1955,21 @@ const getSitePagePreviewThemeSignature = () => {
   })
 }
 
+const getSitePagePreviewSiteSignature = () => {
+  const currentSiteData = siteData.value || {}
+  return createPreviewSignatureHash({
+    theme: currentSiteData.theme || null,
+    menus: currentSiteData.menus || null,
+    restrictedContent: currentSiteData.restrictedContent || null,
+    logo: currentSiteData.logo || null,
+    logoLight: currentSiteData.logoLight || null,
+    logoText: currentSiteData.logoText || null,
+    logoType: currentSiteData.logoType || null,
+    brandLogoDark: currentSiteData.brandLogoDark || null,
+    brandLogoLight: currentSiteData.brandLogoLight || null,
+  })
+}
+
 const getSitePagePreviewPageSnapshotSignature = (pageDoc) => {
   return createPreviewSignatureHash({
     thumbnailVersion: SITE_PAGE_PREVIEW_THUMBNAIL_VERSION,
@@ -1969,6 +1984,7 @@ const getSitePagePreviewFullSnapshotSignature = (pageDoc) => {
   return createPreviewSignatureHash({
     thumbnailVersion: SITE_PAGE_PREVIEW_THUMBNAIL_VERSION,
     previewKey: getSitePagePreviewKey(pageDoc?.docId),
+    site: getSitePagePreviewSiteSignature(),
     theme: getSitePagePreviewThemeSignature(),
     version: pageDoc?.version || null,
     rows: getSitePagePreviewBlockSignature(pageDoc),
@@ -2589,14 +2605,17 @@ const runBackendSitePagePreviewRefresh = async (pageDoc) => {
     })
     const response = result?.data || result || {}
     const isReady = response?.status === 'ready'
+    const url = String(response?.url || '').trim()
     state.sitePagePreviewSnapshots[docId] = {
-      status: isReady ? 'ready' : 'failed',
+      status: isReady && url ? 'ready' : 'failed',
       signature,
-      dataUrl: '',
+      dataUrl: url,
       renderer: 'puppeteer',
-      url: response?.url || '',
+      url,
       capturedAt: Date.now(),
-      errorMessage: isReady ? '' : `Backend capture returned ${response?.status || 'unknown status'}.`,
+      errorMessage: isReady
+        ? (url ? '' : 'Backend capture finished but did not return a preview URL.')
+        : `Backend capture returned ${response?.status || 'unknown status'}.`,
     }
   }
   catch (error) {
