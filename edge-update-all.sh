@@ -14,6 +14,7 @@ Updates:
 2) sync edge/functions + index and root config files
 3) migrate Nuxt/app CMS access, org-mode, and dev-mode helpers when present
 4) install packages listed in edge/root/edge.packages.json
+5) install function packages listed in edge/functions/edge.packages.json
 EOF
 }
 
@@ -53,6 +54,9 @@ sync_edge_functions() {
   find "$edge_functions_dir" -type f | sort | while IFS= read -r src_file; do
     rel_path="${src_file#$edge_functions_dir/}"
     if [ "$rel_path" = "index.js" ]; then
+      continue
+    fi
+    if [ "$rel_path" = "edge.packages.json" ]; then
       continue
     fi
     dest_file="$local_functions_dir/$rel_path"
@@ -474,6 +478,75 @@ EOF
   fi
 }
 
+install_edge_function_packages() {
+  edge_packages_manifest="$PROJECT_ROOT/edge/functions/edge.packages.json"
+  functions_dir="$PROJECT_ROOT/functions"
+
+  if [ ! -f "$edge_packages_manifest" ] || [ ! -f "$functions_dir/package.json" ]; then
+    return
+  fi
+
+  echo "==> Installing edge-required function packages from edge/functions/edge.packages.json"
+
+  dep_specs="$(EDGE_PACKAGES_PATH="$edge_packages_manifest" node <<'EOF'
+const fs = require('fs')
+
+const manifestPath = process.env.EDGE_PACKAGES_PATH
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+const dependencies = (manifest.dependencies && typeof manifest.dependencies === 'object')
+  ? manifest.dependencies
+  : {}
+
+const specs = Object.entries(dependencies)
+  .map(([name, version]) => {
+    const normalizedVersion = String(version || '').trim()
+    return normalizedVersion ? `${name}@${normalizedVersion}` : name
+  })
+  .filter(Boolean)
+
+process.stdout.write(specs.join('\n'))
+EOF
+)"
+
+  if [ -n "$dep_specs" ]; then
+    echo "$dep_specs" | while IFS= read -r spec
+    do
+      if [ -n "$spec" ]; then
+        npm --prefix "$functions_dir" install --save-exact "$spec"
+      fi
+    done
+  fi
+
+  dev_dep_specs="$(EDGE_PACKAGES_PATH="$edge_packages_manifest" node <<'EOF'
+const fs = require('fs')
+
+const manifestPath = process.env.EDGE_PACKAGES_PATH
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+const devDependencies = (manifest.devDependencies && typeof manifest.devDependencies === 'object')
+  ? manifest.devDependencies
+  : {}
+
+const specs = Object.entries(devDependencies)
+  .map(([name, version]) => {
+    const normalizedVersion = String(version || '').trim()
+    return normalizedVersion ? `${name}@${normalizedVersion}` : name
+  })
+  .filter(Boolean)
+
+process.stdout.write(specs.join('\n'))
+EOF
+)"
+
+  if [ -n "$dev_dep_specs" ]; then
+    echo "$dev_dep_specs" | while IFS= read -r spec
+    do
+      if [ -n "$spec" ]; then
+        npm --prefix "$functions_dir" install --save-dev --save-exact "$spec"
+      fi
+    done
+  fi
+}
+
 echo "==> Updating edge subtree"
 "$PROJECT_ROOT/edge-pull.sh"
 
@@ -485,5 +558,6 @@ merge_firebase_json
 migrate_nuxt_single_org_runtime_config
 migrate_app_cms_access
 install_edge_packages
+install_edge_function_packages
 
 echo "==> Done"
