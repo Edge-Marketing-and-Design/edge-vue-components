@@ -56,4 +56,9 @@ export const cmsRoutes = [
     path: '/app/dashboard/registrar',
     file: './edge/routes/cms/dashboard/registrar/index.vue',
   },
+  {
+    name: 'cms-preview-render-page',
+    path: '/cms-preview-render/:siteId/:pageId',
+    file: './edge/routes/cms/preview-render/[siteId]/[pageId].vue',
+  },
 ]
