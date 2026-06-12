@@ -176,8 +176,9 @@ let sitePagePreviewSnapshotQueueRunning = false
 let sitePagePreviewSnapshotQueueStopped = false
 const SITE_PAGE_PREVIEW_THUMBNAIL_VERSION = 'backend-puppeteer-v1'
 const SITE_PAGE_PREVIEW_JPEG_ENABLED = false
-const showPreviewSnapshotStatus = computed(() => Boolean(edgeGlobal.edgeState.devOverride))
-const showPreviewRenderTools = computed(() => Boolean(edgeGlobal.edgeState.devOverride))
+const SITE_PAGE_PREVIEW_BACKEND_JPEG_ENABLED = false
+const showPreviewSnapshotStatus = computed(() => false)
+const showPreviewRenderTools = computed(() => false)
 const SITE_PAGE_PREVIEW_BASE_WIDTH = 1600
 const isPreviewSnapshotDevRefreshEnabled = () => Boolean(edgeGlobal.edgeState.devOverride)
 
@@ -2072,7 +2073,10 @@ const isSitePagePreviewSnapshotDisplayable = (pageDoc) => {
 }
 
 const hasFreshSitePagePreviewImage = (pageDoc) => {
-  return !!getPreferredSitePagePreviewThumbnail(pageDoc) || (SITE_PAGE_PREVIEW_JPEG_ENABLED && isSitePagePreviewSnapshotDisplayable(pageDoc))
+  if (!SITE_PAGE_PREVIEW_JPEG_ENABLED && !SITE_PAGE_PREVIEW_BACKEND_JPEG_ENABLED)
+    return false
+  return (SITE_PAGE_PREVIEW_BACKEND_JPEG_ENABLED && !!getPreferredSitePagePreviewThumbnail(pageDoc))
+    || (SITE_PAGE_PREVIEW_JPEG_ENABLED && isSitePagePreviewSnapshotDisplayable(pageDoc))
 }
 
 const getFreshSitePagePreviewImageUrl = (pageDoc) => {
@@ -2622,6 +2626,8 @@ const setSitePagePreviewSnapshotRef = (pageDoc, element) => {
 }
 
 const runBackendSitePagePreviewRefresh = async (pageDoc) => {
+  if (!SITE_PAGE_PREVIEW_BACKEND_JPEG_ENABLED)
+    return
   const docId = String(pageDoc?.docId || '').trim()
   const orgId = String(edgeGlobal.edgeState.currentOrganization || '').trim()
   if (!docId || !orgId || !props.site || !edgeGlobal.edgeState.devOverride)
@@ -2674,6 +2680,8 @@ const runBackendSitePagePreviewRefresh = async (pageDoc) => {
 }
 
 const recaptureSitePagePreviewSnapshot = (pageDoc) => {
+  if (!SITE_PAGE_PREVIEW_BACKEND_JPEG_ENABLED)
+    return
   const docId = String(pageDoc?.docId || '').trim()
   if (!docId || sitePagePreviewBackendQueued.has(docId) || isSitePagePreviewBackendRefreshPending(pageDoc))
     return
@@ -3663,26 +3671,26 @@ const showCacheVerificationStatus = computed(() => {
   if (!edgeGlobal.edgeState.devOverride)
     return false
   const status = String(cacheVerificationStatus.value?.status || '')
-  return ['running', 'timeout', 'failed'].includes(status) || cacheVerificationVerifiedRecently.value
+  return ['pending', 'running', 'delayed', 'failed', 'skipped'].includes(status) || cacheVerificationVerifiedRecently.value
 })
 const cacheVerificationLabel = computed(() => {
   const status = cacheVerificationStatus.value || {}
   const label = String(status.activeLabel || '').trim()
   if (!label)
-    return 'Clear Cache'
+    return 'Cache Refresh'
   if (status.status === 'verified')
-    return `Cache Cleared: ${label}`
-  if (status.status === 'timeout')
-    return `Cache Clear Timed Out: ${label}`
+    return `Cache Verified: ${label}`
+  if (status.status === 'delayed')
+    return `Still Refreshing: ${label}`
   if (status.status === 'failed')
-    return `Cache Clear Failed: ${label}`
+    return `Cache Check Failed: ${label}`
   if (status.status === 'skipped')
-    return `Cache Clear Skipped: ${label}`
+    return `Cache Check Skipped: ${label}`
   const total = Number(status.total)
   const completed = Number(status.completed)
   if (status.status === 'running' && Number.isFinite(total) && total > 1 && Number.isFinite(completed))
-    return `Clear Cache: ${label} ${Math.min(completed + 1, total)} of ${total}`
-  return `Clear Cache: ${label}`
+    return `Refreshing Cache: ${label} ${Math.min(completed + 1, total)} of ${total}`
+  return `Refreshing Cache: ${label}`
 })
 const cacheVerificationDetail = computed(() => {
   const status = cacheVerificationStatus.value || {}
@@ -3693,6 +3701,9 @@ const cacheVerificationDetail = computed(() => {
   const headers = (status.headers && typeof status.headers === 'object') ? status.headers : {}
   const expectedSiteVersion = status.expectedSiteVersion ?? ''
   const expectedPageVersion = status.expectedPageVersion ?? ''
+  const attempts = Number(status.attempts)
+  const nextRunAt = Number(status.nextRunAt || 0)
+  const lastCheckedAt = Number(status.lastCheckedAt || 0)
 
   if (state)
     parts.push(`Status: ${state}`)
@@ -3708,10 +3719,33 @@ const cacheVerificationDetail = computed(() => {
     parts.push(`Live page version: ${headers.pageVersion}`)
   if (headers.cacheStatus)
     parts.push(`Live cache status: ${headers.cacheStatus}`)
+  if (Number.isFinite(attempts) && attempts > 0)
+    parts.push(`Checks: ${attempts}`)
+  if (Number.isFinite(lastCheckedAt) && lastCheckedAt > 0)
+    parts.push(`Last checked: ${formatTemplatePageDate(lastCheckedAt)}`)
+  if (Number.isFinite(nextRunAt) && nextRunAt > cacheVerificationNow.value)
+    parts.push(`Next check: ${formatTemplatePageDate(nextRunAt)}`)
   if (error)
     parts.push(`Error: ${error}`)
 
   return parts.join('\n')
+})
+
+const cacheVerificationPillClass = computed(() => {
+  const status = String(cacheVerificationStatus.value?.status || '')
+  if (status === 'verified')
+    return 'bg-green-100 text-green-800'
+  if (status === 'failed')
+    return 'bg-red-100 text-red-800'
+  if (status === 'skipped')
+    return 'bg-slate-100 text-slate-700'
+  if (status === 'delayed')
+    return 'bg-amber-100 text-amber-800'
+  return 'bg-sky-100 text-sky-800'
+})
+
+const isCacheVerificationSpinning = computed(() => {
+  return ['pending', 'running', 'delayed'].includes(String(cacheVerificationStatus.value?.status || ''))
 })
 
 const isAnyPagesDiff = computed(() => {
@@ -4356,13 +4390,9 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                     class="flex gap-1 items-center text-xs py-1 px-3 rounded"
                     :title="cacheVerificationDetail"
                     :aria-label="cacheVerificationDetail || cacheVerificationLabel"
-                    :class="cacheVerificationStatus.status === 'running'
-                      ? 'bg-sky-100 text-sky-800'
-                      : cacheVerificationStatus.status === 'verified'
-                        ? 'bg-green-100 text-green-800'
-                        : 'bg-red-100 text-red-800'"
+                    :class="cacheVerificationPillClass"
                   >
-                    <Loader2 v-if="cacheVerificationStatus.status === 'running'" class="w-3 h-3 animate-spin" />
+                    <Loader2 v-if="isCacheVerificationSpinning" class="w-3 h-3 animate-spin" />
                     <FileCheck v-else-if="cacheVerificationStatus.status === 'verified'" class="w-3 h-3" />
                     <CircleAlert v-else class="w-3 h-3" />
                     <span class="font-medium text-[10px]">
@@ -4382,13 +4412,9 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                     class="flex gap-1 items-center text-xs py-1 px-3 rounded"
                     :title="cacheVerificationDetail"
                     :aria-label="cacheVerificationDetail || cacheVerificationLabel"
-                    :class="cacheVerificationStatus.status === 'running'
-                      ? 'bg-sky-100 text-sky-800'
-                      : cacheVerificationStatus.status === 'verified'
-                        ? 'bg-green-100 text-green-800'
-                        : 'bg-red-100 text-red-800'"
+                    :class="cacheVerificationPillClass"
                   >
-                    <Loader2 v-if="cacheVerificationStatus.status === 'running'" class="w-3 h-3 animate-spin" />
+                    <Loader2 v-if="isCacheVerificationSpinning" class="w-3 h-3 animate-spin" />
                     <FileCheck v-else-if="cacheVerificationStatus.status === 'verified'" class="w-3 h-3" />
                     <CircleAlert v-else class="w-3 h-3" />
                     <span class="font-medium text-[10px]">

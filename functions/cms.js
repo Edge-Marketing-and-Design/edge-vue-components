@@ -43,6 +43,9 @@ const SITE_PAGE_PREVIEW_CAPTURE_HEIGHT = 2400
 const SITE_PAGE_PREVIEW_DESKTOP_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36'
 const SITE_PAGE_PREVIEW_LOCK_TTL_MS = 5 * 60 * 1000
 const SITE_PAGE_PREVIEW_BATCH_LIMIT = 100
+const CACHE_VERIFICATION_DELAYED_AFTER_MS = 10 * 60 * 1000
+const CACHE_VERIFICATION_MAX_RETRY_MS = 5 * 60 * 1000
+const CACHE_VERIFICATION_SCAN_LIMIT = 25
 
 const SITE_STRUCTURED_DATA_TEMPLATE = JSON.stringify({
   '@context': 'https://schema.org',
@@ -2884,7 +2887,12 @@ const updateCacheVerificationStatus = async (ref, payload, { expectedVerificatio
   }, { merge: true })
 }
 
-const verifyPublishedCacheVersion = async ({
+const getCacheVerificationRetryDelay = (attempts = 0) => {
+  const normalizedAttempts = Math.max(0, Math.trunc(Number(attempts) || 0))
+  return Math.min(CACHE_VERIFICATION_MAX_RETRY_MS, 15_000 * Math.max(1, 2 ** Math.min(normalizedAttempts, 4)))
+}
+
+const enqueuePublishedCacheVerification = async ({
   orgId,
   siteId,
   target,
@@ -2898,18 +2906,22 @@ const verifyPublishedCacheVersion = async ({
   const domain = firstPublishedDomain(publishedSiteData?.domains, draftSiteData?.domains)
   const origin = domain ? `https://${domain}` : ''
   const verificationId = `${target}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const now = Date.now()
   const baseStatus = {
     verificationId,
-    status: 'running',
+    status: 'pending',
     target,
     activeLabel: label || (target === 'site' ? 'Site Settings' : 'Page'),
     activePath: path || '/',
+    origin,
     expectedSiteVersion: target === 'site' ? expectedVersion : null,
     expectedPageVersion: target === 'page' ? expectedVersion : null,
     completed: 0,
     total: 1,
     failed: 0,
-    startedAt: Date.now(),
+    attempts: 0,
+    startedAt: now,
+    nextRunAt: now,
   }
 
   if (!origin || expectedVersion === null || expectedVersion === undefined || expectedVersion === '') {
@@ -2923,46 +2935,96 @@ const verifyPublishedCacheVersion = async ({
   }
 
   await updateCacheVerificationStatus(statusRef, baseStatus)
+}
 
-  const timeoutMs = 45000
-  const pollMs = 1500
-  const startedAt = Date.now()
-  let lastHeaders = {}
-  let lastError = ''
+const isRetryableCacheVerificationStatus = status => ['pending', 'running', 'delayed'].includes(String(status || ''))
 
-  while (Date.now() - startedAt <= timeoutMs) {
-    try {
-      const response = await axios.get(buildCacheVersionUrl({ origin, path }), {
-        timeout: 10000,
-        validateStatus: () => true,
-      })
-      lastHeaders = getCacheVersionHeaders(response)
-      if (response.status >= 200 && response.status < 300 && cacheVersionMatches({ headers: lastHeaders, target, expectedVersion })) {
-        await updateCacheVerificationStatus(statusRef, {
-          ...baseStatus,
-          status: 'verified',
-          headers: lastHeaders,
-          completed: 1,
-          completedAt: Date.now(),
-        }, { expectedVerificationId: verificationId })
-        return
-      }
-    }
-    catch (error) {
-      lastError = error?.message || 'Cache verification request failed.'
-    }
+const getCacheVerificationExpectedVersion = (status = {}) => {
+  return status.target === 'page' ? status.expectedPageVersion : status.expectedSiteVersion
+}
 
-    await sleep(pollMs)
+const processCacheVerificationStatus = async (statusRef, status = {}) => {
+  const verificationId = String(status.verificationId || '').trim()
+  if (!verificationId || !isRetryableCacheVerificationStatus(status.status))
+    return false
+
+  const now = Date.now()
+  const nextRunAt = Number(status.nextRunAt || 0)
+  if (Number.isFinite(nextRunAt) && nextRunAt > now)
+    return false
+
+  const origin = String(status.origin || '').trim()
+  const path = String(status.activePath || '/').trim() || '/'
+  const target = String(status.target || '').trim()
+  const expectedVersion = getCacheVerificationExpectedVersion(status)
+  const attempts = Math.max(0, Math.trunc(Number(status.attempts) || 0))
+  const startedAt = Number(status.startedAt || now)
+  const elapsedMs = Number.isFinite(startedAt) ? now - startedAt : 0
+
+  if (!origin || expectedVersion === null || expectedVersion === undefined || expectedVersion === '') {
+    await updateCacheVerificationStatus(statusRef, {
+      ...status,
+      status: 'skipped',
+      error: 'Missing live domain or expected version.',
+      completedAt: now,
+    }, { expectedVerificationId: verificationId })
+    return true
   }
 
   await updateCacheVerificationStatus(statusRef, {
-    ...baseStatus,
-    status: 'timeout',
-    error: lastError || 'Cache verification timed out.',
-    headers: lastHeaders,
-    failed: 1,
-    completedAt: Date.now(),
+    ...status,
+    status: 'running',
+    attempts,
+    lastAttemptStartedAt: now,
   }, { expectedVerificationId: verificationId })
+
+  let lastHeaders = {}
+  let lastError = ''
+  let responseStatus = 0
+
+  try {
+    const response = await axios.get(buildCacheVersionUrl({ origin, path }), {
+      timeout: 10000,
+      validateStatus: () => true,
+    })
+    responseStatus = Number(response.status || 0)
+    lastHeaders = getCacheVersionHeaders(response)
+    if (responseStatus >= 200 && responseStatus < 300 && cacheVersionMatches({ headers: lastHeaders, target, expectedVersion })) {
+      await updateCacheVerificationStatus(statusRef, {
+        ...status,
+        status: 'verified',
+        headers: lastHeaders,
+        attempts: attempts + 1,
+        completed: 1,
+        failed: 0,
+        completedAt: Date.now(),
+      }, { expectedVerificationId: verificationId })
+      return true
+    }
+    if (responseStatus >= 400 && responseStatus < 500)
+      lastError = `Cache verification endpoint returned HTTP ${responseStatus}.`
+  }
+  catch (error) {
+    lastError = error?.message || 'Cache verification request failed.'
+  }
+
+  const nextAttempts = attempts + 1
+  const nextStatus = lastError && responseStatus >= 400 && responseStatus < 500
+    ? 'failed'
+    : (elapsedMs >= CACHE_VERIFICATION_DELAYED_AFTER_MS ? 'delayed' : 'pending')
+  const retryDelay = getCacheVerificationRetryDelay(nextAttempts)
+  await updateCacheVerificationStatus(statusRef, {
+    ...status,
+    status: nextStatus,
+    error: lastError || '',
+    headers: lastHeaders,
+    attempts: nextAttempts,
+    failed: nextStatus === 'failed' ? 1 : 0,
+    completed: 0,
+    lastCheckedAt: Date.now(),
+    nextRunAt: nextStatus === 'failed' ? null : Date.now() + retryDelay,
+  }, { expectedVerificationId: verificationId })
+  return true
 }
 
 exports.verifyPublishedSiteCacheVersion = onDocumentWritten(
@@ -2987,7 +3049,7 @@ exports.verifyPublishedSiteCacheVersion = onDocumentWritten(
     const siteId = event.params.siteId
     const expectedVersion = afterVersion !== null ? afterVersion : ''
     const draftSnap = await db.collection('organizations').doc(orgId).collection('sites').doc(siteId).get()
-    await verifyPublishedCacheVersion({
+    await enqueuePublishedCacheVerification({
       orgId,
       siteId,
       target: 'site',
@@ -3034,7 +3096,7 @@ exports.verifyPublishedPageCacheVersion = onDocumentWritten(
     const menus = publishedSiteData?.menus || draftSiteData?.menus || {}
     const path = findPublishedPagePathFromMenus(menus, pageId) || fallbackPublishedPagePath(pageId, pageData)
 
-    await verifyPublishedCacheVersion({
+    await enqueuePublishedCacheVerification({
       orgId,
       siteId,
       target: 'page',
@@ -3044,6 +3106,64 @@ exports.verifyPublishedPageCacheVersion = onDocumentWritten(
       publishedSiteData,
       draftSiteData,
     })
+  },
+)
+
+exports.processPendingCacheVerifications = onSchedule(
+  { schedule: 'every 1 minutes', timeoutSeconds: 120 },
+  async () => {
+    const now = Date.now()
+    let processed = 0
+    let orgsScanned = 0
+    let sitesScanned = 0
+    let lastOrg = null
+
+    while (processed < CACHE_VERIFICATION_SCAN_LIMIT) {
+      let orgQuery = db.collection('organizations')
+        .orderBy(admin.firestore.FieldPath.documentId())
+        .limit(50)
+
+      if (lastOrg)
+        orgQuery = orgQuery.startAfter(lastOrg)
+
+      const orgSnap = await orgQuery.get()
+      if (orgSnap.empty)
+        break
+
+      for (const orgDoc of orgSnap.docs) {
+        orgsScanned += 1
+        const settingsSnap = await orgDoc.ref.collection('published-site-settings').limit(100).get()
+        for (const siteDoc of settingsSnap.docs) {
+          sitesScanned += 1
+          const status = siteDoc.data()?.cacheVerification || {}
+          if (!isRetryableCacheVerificationStatus(status.status))
+            continue
+          const nextRunAt = Number(status.nextRunAt || 0)
+          if (Number.isFinite(nextRunAt) && nextRunAt > now)
+            continue
+          const didProcess = await processCacheVerificationStatus(siteDoc.ref, status)
+          if (didProcess) {
+            processed += 1
+            if (processed >= CACHE_VERIFICATION_SCAN_LIMIT)
+              break
+          }
+        }
+        if (processed >= CACHE_VERIFICATION_SCAN_LIMIT)
+          break
+      }
+
+      lastOrg = orgSnap.docs[orgSnap.docs.length - 1]
+      if (orgSnap.size < 50)
+        break
+    }
+
+    if (processed || orgsScanned || sitesScanned) {
+      logger.log('processPendingCacheVerifications complete', {
+        processed,
+        orgsScanned,
+        sitesScanned,
+      })
+    }
   },
 )
 
@@ -4801,25 +4921,7 @@ const renderCmsSitePreviewThumbnails = async ({ orgId, siteId, trigger, source =
 
 exports.renderPagePreviewThumbnail = onCall({ timeoutSeconds: 300, memory: '2GiB' }, async (request) => {
   assertCallableUser(request)
-  const data = request.data || {}
-  const auth = request.auth || {}
-  const orgId = String(data.orgId || '').trim()
-  const siteId = String(data.siteId || '').trim()
-  const pageId = String(data.pageId || '').trim()
-  if (!orgId || !siteId || !pageId)
-    throw new HttpsError('invalid-argument', 'Missing orgId, siteId, or pageId.')
-  const allowed = await permissionCheck(auth.uid, 'write', `organizations/${orgId}/sites/${siteId}/pages`)
-  if (!allowed)
-    throw new HttpsError('permission-denied', 'Not allowed to render page preview thumbnails.')
-  return renderCmsPagePreviewThumbnail({
-    orgId,
-    siteId,
-    pageId,
-    force: true,
-    trigger: 'manual-dev',
-    source: 'draft',
-    field: 'manualPreviewThumbnail',
-  })
+  return { skipped: true, status: 'disabled', message: 'CMS preview JPEG rendering is disabled.' }
 })
 
 exports.onCmsPageWrittenRenderPreviewThumbnail = onDocumentWritten(
@@ -4829,25 +4931,7 @@ exports.onCmsPageWrittenRenderPreviewThumbnail = onDocumentWritten(
 
 exports.onCmsPublishedPageWrittenRenderPreviewThumbnail = onDocumentWritten(
   { document: 'organizations/{orgId}/sites/{siteId}/published/{pageId}', timeoutSeconds: 300, memory: '2GiB' },
-  async (event) => {
-    if (!event.data?.after?.exists)
-      return db.collection('organizations').doc(event.params.orgId).collection('sites').doc(event.params.siteId).collection('pages').doc(event.params.pageId).set({
-        publishedPreviewThumbnail: admin.firestore.FieldValue.delete(),
-      }, { merge: true })
-    const before = event.data.before.exists ? event.data.before.data() || {} : {}
-    const after = event.data.after.data() || {}
-    if (event.data.before.exists && pageChangeOnlyTouchedPreviewThumbnail(before, after))
-      return
-    await renderCmsPagePreviewThumbnail({
-      orgId: event.params.orgId,
-      siteId: event.params.siteId,
-      pageId: event.params.pageId,
-      force: true,
-      trigger: event.data.before.exists ? 'published-page-update' : 'published-page-create',
-      source: 'published',
-      field: 'publishedPreviewThumbnail',
-    })
-  },
+  async () => {},
 )
 
 exports.onCmsSiteWrittenRenderPreviewThumbnails = onDocumentWritten(
