@@ -170,7 +170,7 @@ const sitePagePreviewSnapshotQueue = []
 const sitePagePreviewSnapshotQueued = new Set()
 const sitePagePreviewBackendQueued = new Set()
 const sitePagePreviewForcedRendered = ref(new Set())
-const sitePagePreviewScale = ref(0.18)
+const sitePagePreviewScales = ref({})
 let html2canvasModulePromise = null
 let sitePagePreviewSnapshotQueueRunning = false
 let sitePagePreviewSnapshotQueueStopped = false
@@ -1827,11 +1827,17 @@ const previewColumnStyle = (column) => {
   return { gridColumn: `span ${safeSpan} / span ${safeSpan}` }
 }
 
-const sitePagePreviewScaleStyle = computed(() => ({
-  transform: `scale(${sitePagePreviewScale.value})`,
-}))
+const getSitePagePreviewScale = (pageDoc) => {
+  const docId = String(pageDoc?.docId || '').trim()
+  return Number(sitePagePreviewScales.value?.[docId] || 0.18)
+}
 
-const updateSitePagePreviewScale = (element) => {
+const sitePagePreviewScaleStyle = pageDoc => ({
+  transform: `translateX(-50%) scale(${getSitePagePreviewScale(pageDoc)})`,
+})
+
+const updateSitePagePreviewScale = (pageDoc, element) => {
+  const docId = String(pageDoc?.docId || '').trim()
   if (!element)
     return
   const width = element.getBoundingClientRect?.().width || 0
@@ -1839,26 +1845,29 @@ const updateSitePagePreviewScale = (element) => {
     return
   const nextScale = Math.max(0.12, Math.min(0.5, width / SITE_PAGE_PREVIEW_BASE_WIDTH))
   const roundedScale = Number(nextScale.toFixed(4))
-  if (sitePagePreviewScale.value !== roundedScale)
-    sitePagePreviewScale.value = roundedScale
+  if (docId && sitePagePreviewScales.value?.[docId] !== roundedScale)
+    sitePagePreviewScales.value = { ...sitePagePreviewScales.value, [docId]: roundedScale }
 }
 
-let sitePagePreviewScaleObserver = null
-const observeSitePagePreviewScale = (element) => {
+const sitePagePreviewScaleObservers = new Map()
+const observeSitePagePreviewScale = (pageDoc, element) => {
+  const docId = String(pageDoc?.docId || '').trim()
   if (!element || typeof ResizeObserver === 'undefined') {
-    updateSitePagePreviewScale(element)
+    updateSitePagePreviewScale(pageDoc, element)
     return
   }
-  if (sitePagePreviewScaleObserver)
-    sitePagePreviewScaleObserver.disconnect()
-  updateSitePagePreviewScale(element)
-  sitePagePreviewScaleObserver = new ResizeObserver((entries) => {
+  if (docId && sitePagePreviewScaleObservers.has(docId))
+    sitePagePreviewScaleObservers.get(docId)?.disconnect?.()
+  updateSitePagePreviewScale(pageDoc, element)
+  const observer = new ResizeObserver((entries) => {
     const entry = entries?.[0]
     if (!entry?.target)
       return
-    updateSitePagePreviewScale(entry.target)
+    updateSitePagePreviewScale(pageDoc, entry.target)
   })
-  sitePagePreviewScaleObserver.observe(element)
+  observer.observe(element)
+  if (docId)
+    sitePagePreviewScaleObservers.set(docId, observer)
 }
 
 const getTemplatePagePreviewKey = (docId) => {
@@ -2080,6 +2089,8 @@ const hasFreshSitePagePreviewImage = (pageDoc) => {
 }
 
 const getFreshSitePagePreviewImageUrl = (pageDoc) => {
+  if (!SITE_PAGE_PREVIEW_JPEG_ENABLED && !SITE_PAGE_PREVIEW_BACKEND_JPEG_ENABLED)
+    return ''
   const field = getPreferredSitePagePreviewThumbnailField(pageDoc)
   if (field)
     return getPersistedSitePagePreviewThumbnailUrl(pageDoc, field)
@@ -2094,10 +2105,14 @@ const isSitePagePreviewForcedRendered = (pageDoc) => {
 }
 
 const shouldShowSitePagePreviewImage = (pageDoc) => {
+  if (!SITE_PAGE_PREVIEW_JPEG_ENABLED && !SITE_PAGE_PREVIEW_BACKEND_JPEG_ENABLED)
+    return false
   return hasFreshSitePagePreviewImage(pageDoc) && !isSitePagePreviewForcedRendered(pageDoc)
 }
 
 const isSitePagePreviewDecisionPending = (pageDoc) => {
+  if (!SITE_PAGE_PREVIEW_JPEG_ENABLED && !SITE_PAGE_PREVIEW_BACKEND_JPEG_ENABLED)
+    return false
   if (shouldShowSitePagePreviewImage(pageDoc))
     return false
   return !!state.pagePreviewsLoading
@@ -2611,8 +2626,6 @@ const scheduleSitePagePreviewSnapshotCapture = (pageDoc) => {
 }
 
 const setSitePagePreviewSnapshotRef = (pageDoc, element) => {
-  if (!SITE_PAGE_PREVIEW_JPEG_ENABLED)
-    return
   const docId = String(pageDoc?.docId || '').trim()
   if (!docId)
     return
@@ -2620,8 +2633,10 @@ const setSitePagePreviewSnapshotRef = (pageDoc, element) => {
     sitePagePreviewSnapshotRefs.delete(docId)
     return
   }
+  observeSitePagePreviewScale(pageDoc, element)
+  if (!SITE_PAGE_PREVIEW_JPEG_ENABLED)
+    return
   sitePagePreviewSnapshotRefs.set(docId, element)
-  observeSitePagePreviewScale(element)
   scheduleSitePagePreviewSnapshotCapture(pageDoc)
 }
 
@@ -3655,8 +3670,8 @@ onBeforeUnmount(() => {
   sitePagePreviewBackendQueued.clear()
   sitePagePreviewSnapshotRefs.clear()
   sitePagePreviewSnapshotUploads.clear()
-  if (sitePagePreviewScaleObserver)
-    sitePagePreviewScaleObserver.disconnect()
+  sitePagePreviewScaleObservers.forEach(observer => observer.disconnect())
+  sitePagePreviewScaleObservers.clear()
 })
 
 const cacheVerificationStatus = computed(() => publishedSiteSettings.value?.cacheVerification || {})
@@ -4839,29 +4854,14 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                             </div>
                           </div>
                           <div
-                            v-else-if="shouldShowSitePagePreviewImage(item)"
-                            class="template-scale-wrapper"
-                          >
-                            <img
-                              :src="getFreshSitePagePreviewImageUrl(item)"
-                              :alt="`${item.name || item.docId || 'Page'} preview snapshot`"
-                              class="block w-full max-w-none"
-                            >
-                          </div>
-                          <div
                             v-else
                             :ref="element => setSitePagePreviewSnapshotRef(item, element)"
                             class="template-scale-wrapper"
+                            data-cms-standalone-preview="true"
                           >
                             <div class="template-scale-inner">
-                              <div class="template-scale-content space-y-4" :style="sitePagePreviewScaleStyle">
-                                <template v-if="state.pagePreviewsLoading">
-                                  <div class="flex h-32 flex-col items-center justify-center gap-3 mt-[100px] text-muted-foreground">
-                                    <Loader2 class="h-100 w-100 animate-spin" />
-                                    <span class="text-sm font-medium">Loading preview…</span>
-                                  </div>
-                                </template>
-                                <template v-else-if="templatePageHasPreview(item) && sitePreviewThemeReady">
+                              <div class="template-scale-content space-y-4" :style="sitePagePreviewScaleStyle(item)">
+                                <template v-if="templatePageHasPreview(item) && sitePreviewThemeReady">
                                   <div
                                     v-for="(row, rowIndex) in templatePreviewRows(item)"
                                     :key="`${item.docId}-row-${row.id || rowIndex}`"
@@ -4893,6 +4893,12 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                                         </div>
                                       </div>
                                     </div>
+                                  </div>
+                                </template>
+                                <template v-else-if="state.pagePreviewsLoading">
+                                  <div class="flex h-32 flex-col items-center justify-center gap-3 mt-[100px] text-muted-foreground">
+                                    <Loader2 class="h-100 w-100 animate-spin" />
+                                    <span class="text-sm font-medium">Loading preview…</span>
                                   </div>
                                 </template>
                                 <template v-else>
@@ -5260,13 +5266,25 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
 .template-scale-inner,
 .template-page-preview-scale-inner {
   transform-origin: top left;
-  display: inline-block;
+  display: block;
   width: 100%;
   height: 400px;
   overflow: hidden;
+  position: relative;
 }
 
-.template-scale-content,
+.template-scale-content {
+  box-sizing: border-box;
+  width: 1600px;
+  min-height: 820px;
+  padding: 1.5rem;
+  transform-origin: top center;
+  position: absolute;
+  top: 0;
+  left: 50%;
+  margin-bottom: -1312px;
+}
+
 .template-page-preview-content {
   width: 1600px;
   min-height: 820px;
