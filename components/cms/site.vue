@@ -156,6 +156,7 @@ const state = reactive({
   sitePageRenderContext: null,
   pagePreviewsLoading: true,
   sitePagePreviewSnapshots: {},
+  sitePagePreviewPendingBlocks: {},
 })
 
 const pageImportInputRef = ref(null)
@@ -1725,6 +1726,33 @@ const templatePreviewRows = (pageDoc) => {
 
 const templatePageHasPreview = pageDoc => templatePreviewRows(pageDoc).length > 0
 
+const getSitePagePreviewBlockPendingKey = (row, rowIndex, column, colIndex, blockIdx) => {
+  return `${row?.id || rowIndex}:${column?.id || colIndex}:${blockIdx}`
+}
+
+const isSitePagePreviewBlocksPending = (pageDoc) => {
+  const docId = String(pageDoc?.docId || '').trim()
+  if (!docId)
+    return false
+  return Object.values(state.sitePagePreviewPendingBlocks?.[docId] || {}).some(Boolean)
+}
+
+const setSitePagePreviewBlockPending = (pageDoc, key, pending) => {
+  const docId = String(pageDoc?.docId || '').trim()
+  if (!docId || !key)
+    return
+  if (!state.sitePagePreviewPendingBlocks[docId])
+    state.sitePagePreviewPendingBlocks[docId] = {}
+  if (pending) {
+    state.sitePagePreviewPendingBlocks[docId][key] = true
+    return
+  }
+  delete state.sitePagePreviewPendingBlocks[docId][key]
+  if (!Object.keys(state.sitePagePreviewPendingBlocks[docId]).length)
+    delete state.sitePagePreviewPendingBlocks[docId]
+  nextTick(() => scheduleSitePagePreviewSnapshotCapture(pageDoc))
+}
+
 const resolveTemplateBlockSource = (pageDoc, blockRef) => {
   if (!blockRef)
     return null
@@ -2563,6 +2591,7 @@ const scheduleSitePagePreviewSnapshotCapture = (pageDoc) => {
     !docId
     || !SITE_PAGE_PREVIEW_JPEG_ENABLED
     || state.pagePreviewsLoading
+    || isSitePagePreviewBlocksPending(pageDoc)
     || !templatePageHasPreview(pageDoc)
     || !sitePreviewThemeReady.value
     || hasFreshSitePagePreviewImage(pageDoc)
@@ -4839,6 +4868,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                                             :theme="sitePreviewTheme"
                                             :render-context="state.sitePageRenderContext"
                                             :isolated="true"
+                                            @pending="setSitePagePreviewBlockPending(item, getSitePagePreviewBlockPendingKey(row, rowIndex, column, colIndex, blockIdx), $event)"
                                           />
                                         </div>
                                       </div>

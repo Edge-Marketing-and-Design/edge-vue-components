@@ -12,6 +12,8 @@ const state = reactive({
   error: '',
   payload: null,
   renderContext: null,
+  blockPending: {},
+  blockLoaded: {},
 })
 
 const EDGE_CMS_PREVIEW_RENDER_SIGNATURE_SALT = 'edge-cms-preview-render-v1'
@@ -198,6 +200,49 @@ const previewColumnStyle = (column) => {
   return { gridColumn: `span ${safeSpan} / span ${safeSpan}` }
 }
 
+const previewBlockKey = (row, rowIndex, column, colIndex, blockIdx) => {
+  return `${row?.id || rowIndex}:${column?.id || colIndex}:${blockIdx}`
+}
+
+const previewBlockKeys = computed(() => {
+  const keys = []
+  previewRows.value.forEach((row, rowIndex) => {
+    ;(row.columns || []).forEach((column, colIndex) => {
+      ;(column.blocks || []).forEach((blockRef, blockIdx) => {
+        if (resolveBlockForPreview(blockRef))
+          keys.push(previewBlockKey(row, rowIndex, column, colIndex, blockIdx))
+      })
+    })
+  })
+  return keys
+})
+
+const previewReady = computed(() => {
+  if (state.loading || state.error || !pageDoc.value || !previewThemeReady.value)
+    return false
+  const keys = previewBlockKeys.value
+  if (!keys.length)
+    return true
+  return keys.every(key => state.blockLoaded[key] && !state.blockPending[key])
+})
+
+const setPreviewBlockPending = (key, pending) => {
+  if (!key)
+    return
+  if (pending) {
+    state.blockPending[key] = true
+    delete state.blockLoaded[key]
+    return
+  }
+  delete state.blockPending[key]
+}
+
+const setPreviewBlockLoaded = (key) => {
+  if (!key || state.blockPending[key])
+    return
+  state.blockLoaded[key] = true
+}
+
 const mergePreviewCollection = (collectionPath, docs) => {
   if (!collectionPath || !docs || typeof docs !== 'object')
     return
@@ -230,6 +275,8 @@ const loadPreviewData = async () => {
   state.loading = true
   state.error = ''
   state.payload = null
+  state.blockPending = {}
+  state.blockLoaded = {}
   try {
     state.bootstrapped = true
 
@@ -300,6 +347,7 @@ watch(() => [organizationId.value, siteId.value, pageId.value, previewSignature.
     <div
       v-else
       :class="isThumbnailMode ? 'cms-preview-thumbnail-capture cms-auth-preview-logged-in' : 'cms-preview-render-page cms-auth-preview-logged-in'"
+      :data-preview-ready="previewReady ? 'true' : 'false'"
     >
       <div :class="isThumbnailMode ? 'cms-preview-render-page cms-preview-thumbnail-content' : ''">
         <template v-if="previewRows.length">
@@ -321,7 +369,7 @@ watch(() => [organizationId.value, siteId.value, pageId.value, previewSignature.
                 >
                   <edge-cms-block-api
                     v-if="resolveBlockForPreview(blockRef)"
-                    :key="`${siteId}:${pageId}:${blockIdx}`"
+                    :key="`${siteId}:${pageId}:${previewBlockKey(row, rowIndex, column, colIndex, blockIdx)}`"
                     :site-id="siteId"
                     :content="resolveBlockForPreview(blockRef).content"
                     :values="resolveBlockForPreview(blockRef).values"
@@ -330,6 +378,8 @@ watch(() => [organizationId.value, siteId.value, pageId.value, previewSignature.
                     :render-context="state.renderContext"
                     :route-last-segment="routeLastSegment"
                     :standalone-preview="true"
+                    @pending="setPreviewBlockPending(previewBlockKey(row, rowIndex, column, colIndex, blockIdx), $event)"
+                    @loaded="setPreviewBlockLoaded(previewBlockKey(row, rowIndex, column, colIndex, blockIdx))"
                   />
                 </div>
               </div>

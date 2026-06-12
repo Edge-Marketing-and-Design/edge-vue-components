@@ -298,6 +298,9 @@ const { data: apiResolved, pending } = await useAsyncData(
     watch: [runtimeMeta, () => props.values],
   },
 )
+const collectionPending = ref(false)
+let collectionRequestId = 0
+const anyPending = computed(() => pending.value || collectionPending.value)
 
 /* ---------------- state & derived values ---------------- */
 
@@ -311,7 +314,7 @@ const mergedValues = computed(() => {
 
 // Map original loading flags into class toggles
 const loadingRender = (content) => {
-  const isLoading = pending.value
+  const isLoading = anyPending.value
   if (isLoading) {
     content = content.replaceAll('{{loading}}', '')
     content = content.replaceAll('{{loaded}}', 'hidden')
@@ -323,20 +326,33 @@ const loadingRender = (content) => {
   return content
 }
 
-// Emit pending state to parent (client-side)
 if (import.meta.client) {
-  watch(pending, val => emit('pending', val), { immediate: true })
+  watch(anyPending, async (val) => {
+    emit('pending', val)
+    if (!val) {
+      await nextTick()
+      emit('loaded')
+    }
+  }, { immediate: true })
 }
 
 const collectionValues = computedAsync(
   async () => {
-    const collectionData = await edgeGlobal.cmsCollectionData(
-      edgeFirebase,
-      mergedValues.value,
-      runtimeMeta.value,
-      props.siteId,
-    )
-    return collectionData
+    const requestId = ++collectionRequestId
+    collectionPending.value = true
+    try {
+      const collectionData = await edgeGlobal.cmsCollectionData(
+        edgeFirebase,
+        mergedValues.value,
+        runtimeMeta.value,
+        props.siteId,
+      )
+      return collectionData
+    }
+    finally {
+      if (requestId === collectionRequestId)
+        collectionPending.value = false
+    }
   },
   {},
 )
@@ -358,7 +374,7 @@ const finalValues = computed(() => {
     :viewport-mode="props.viewportMode"
     :render-context="props.renderContext"
     :standalone-preview="props.standalonePreview"
-    @loaded="emit('loaded')"
+    @loaded="!anyPending && emit('loaded')"
   />
 </template>
 

@@ -4361,16 +4361,16 @@ const captureCmsPreviewJpeg = async (url) => {
     })
     await page.waitForFunction(() => {
       const bodyText = document.body?.innerText || ''
-      return document.querySelector('.cms-preview-thumbnail-capture')
-        || document.querySelector('.cms-preview-render-page')
+      return document.querySelector('.cms-preview-thumbnail-capture[data-preview-ready="true"]')
+        || document.querySelector('.cms-preview-render-page[data-preview-ready="true"]')
         || /Invalid preview signature|Missing preview signature|Page not found|Unable to load preview/i.test(bodyText)
     }, { timeout: 20000 })
     const errorText = await page.$eval('body', body => body?.innerText || '').catch(() => '')
     if (/Invalid preview signature|Missing preview signature|Page not found|Unable to load preview/i.test(errorText))
       throw new Error(errorText.trim().slice(0, 240))
     await new Promise(resolve => setTimeout(resolve, 350))
-    const captureElement = await page.$('.cms-preview-thumbnail-capture')
-      || await page.$('.cms-preview-render-page')
+    const captureElement = await page.$('.cms-preview-thumbnail-capture[data-preview-ready="true"]')
+      || await page.$('.cms-preview-render-page[data-preview-ready="true"]')
     if (!captureElement)
       throw new Error('Preview capture element was not found.')
     return await captureElement.screenshot({
