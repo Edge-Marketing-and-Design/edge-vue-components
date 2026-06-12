@@ -2728,6 +2728,47 @@ const isCacheVerificationOnlyWrite = (beforeData = {}, afterData = {}) => {
   return stableSerialize(stripCacheVerification(beforeData)) === stableSerialize(stripCacheVerification(afterData))
 }
 
+const stripSiteVerificationIgnoredFields = (data = {}) => {
+  const copy = stripCacheVerification(data)
+  delete copy.pageVersions
+  return copy
+}
+
+const isSiteVerificationRelevantWrite = (beforeData = {}, afterData = {}) => {
+  return stableSerialize(stripSiteVerificationIgnoredFields(beforeData)) !== stableSerialize(stripSiteVerificationIgnoredFields(afterData))
+}
+
+const normalizeCacheVersionNumber = (value) => {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric))
+    return null
+  return Math.max(0, Math.trunc(numeric))
+}
+
+const getPublishedPageVersion = (siteData = {}, pageId = '') => {
+  const pageVersions = siteData?.pageVersions && typeof siteData.pageVersions === 'object'
+    ? siteData.pageVersions
+    : {}
+  return normalizeCacheVersionNumber(pageVersions?.[pageId])
+}
+
+const waitForPublishedPageVersion = async ({ siteRef, pageId, expectedVersion, timeoutMs = 30000, pollMs = 1000 }) => {
+  const expected = normalizeCacheVersionNumber(expectedVersion)
+  if (!siteRef || !pageId || expected === null)
+    return null
+
+  const startedAt = Date.now()
+  let lastData = null
+  while (Date.now() - startedAt <= timeoutMs) {
+    const snap = await siteRef.get()
+    lastData = snap.exists ? (snap.data() || {}) : {}
+    if (getPublishedPageVersion(lastData, pageId) === expected)
+      return lastData
+    await sleep(pollMs)
+  }
+  return lastData
+}
+
 const firstPublishedDomain = (...domainLists) => {
   for (const domains of domainLists) {
     if (!Array.isArray(domains))
@@ -2815,7 +2856,23 @@ const cacheVersionMatches = ({ headers, target, expectedVersion }) => {
   return cacheStatus === 'BYPASS' && String(actualVersion || '').trim() === String(expectedVersion || '').trim()
 }
 
-const updateCacheVerificationStatus = async (ref, payload) => {
+const updateCacheVerificationStatus = async (ref, payload, { expectedVerificationId = '' } = {}) => {
+  if (expectedVerificationId) {
+    await db.runTransaction(async (transaction) => {
+      const snap = await transaction.get(ref)
+      const currentVerificationId = String(snap.data()?.cacheVerification?.verificationId || '')
+      if (currentVerificationId !== expectedVerificationId)
+        return
+      transaction.set(ref, {
+        cacheVerification: {
+          ...payload,
+          lastCheckedAt: Date.now(),
+        },
+      }, { merge: true })
+    })
+    return
+  }
+
   await ref.set({
     cacheVerification: {
       ...payload,
@@ -2884,7 +2941,7 @@ const verifyPublishedCacheVersion = async ({
           headers: lastHeaders,
           completed: 1,
           completedAt: Date.now(),
-        })
+        }, { expectedVerificationId: verificationId })
         return
       }
     }
@@ -2902,7 +2959,7 @@ const verifyPublishedCacheVersion = async ({
     headers: lastHeaders,
     failed: 1,
     completedAt: Date.now(),
-  })
+  }, { expectedVerificationId: verificationId })
 }
 
 exports.verifyPublishedSiteCacheVersion = onDocumentWritten(
@@ -2915,6 +2972,8 @@ exports.verifyPublishedSiteCacheVersion = onDocumentWritten(
     const beforeData = change.before.exists ? (change.before.data() || {}) : {}
     const afterData = change.after.data() || {}
     if (change.before.exists && isCacheVerificationOnlyWrite(beforeData, afterData))
+      return
+    if (change.before.exists && !isSiteVerificationRelevantWrite(beforeData, afterData))
       return
 
     const orgId = event.params.orgId
@@ -2946,15 +3005,19 @@ exports.verifyPublishedPageCacheVersion = onDocumentWritten(
     const siteId = event.params.siteId
     const pageId = event.params.pageId
     const orgRef = db.collection('organizations').doc(orgId)
-    const [publishedSiteSnap, draftSiteSnap] = await Promise.all([
-      orgRef.collection('published-site-settings').doc(siteId).get(),
+    const publishedSiteRef = orgRef.collection('published-site-settings').doc(siteId)
+    const expectedVersion = Number.isFinite(Number(pageData?.version)) ? Math.max(0, Math.trunc(Number(pageData.version))) : ''
+    const [publishedSiteData, draftSiteSnap] = await Promise.all([
+      waitForPublishedPageVersion({
+        siteRef: publishedSiteRef,
+        pageId,
+        expectedVersion,
+      }),
       orgRef.collection('sites').doc(siteId).get(),
     ])
-    const publishedSiteData = publishedSiteSnap.exists ? (publishedSiteSnap.data() || {}) : {}
     const draftSiteData = draftSiteSnap.exists ? (draftSiteSnap.data() || {}) : {}
     const menus = publishedSiteData?.menus || draftSiteData?.menus || {}
     const path = findPublishedPagePathFromMenus(menus, pageId) || fallbackPublishedPagePath(pageId, pageData)
-    const expectedVersion = Number.isFinite(Number(pageData?.version)) ? Math.max(0, Math.trunc(Number(pageData.version))) : ''
 
     await verifyPublishedCacheVersion({
       orgId,
