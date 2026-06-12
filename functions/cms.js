@@ -2852,8 +2852,11 @@ const getCacheVersionHeaders = response => ({
 
 const cacheVersionMatches = ({ headers, target, expectedVersion }) => {
   const actualVersion = target === 'page' ? headers.pageVersion : headers.siteVersion
-  const cacheStatus = String(headers.cacheStatus || '').trim().toUpperCase()
-  return cacheStatus === 'BYPASS' && String(actualVersion || '').trim() === String(expectedVersion || '').trim()
+  const actualNumeric = normalizeCacheVersionNumber(actualVersion)
+  const expectedNumeric = normalizeCacheVersionNumber(expectedVersion)
+  if (actualNumeric !== null && expectedNumeric !== null)
+    return actualNumeric >= expectedNumeric
+  return String(actualVersion || '').trim() === String(expectedVersion || '').trim()
 }
 
 const updateCacheVerificationStatus = async (ref, payload, { expectedVerificationId = '' } = {}) => {
@@ -2975,10 +2978,14 @@ exports.verifyPublishedSiteCacheVersion = onDocumentWritten(
       return
     if (change.before.exists && !isSiteVerificationRelevantWrite(beforeData, afterData))
       return
+    const beforeVersion = normalizeCacheVersionNumber(beforeData?.version)
+    const afterVersion = normalizeCacheVersionNumber(afterData?.version)
+    if (change.before.exists && beforeVersion === afterVersion)
+      return
 
     const orgId = event.params.orgId
     const siteId = event.params.siteId
-    const expectedVersion = Number.isFinite(Number(afterData?.version)) ? Math.max(0, Math.trunc(Number(afterData.version))) : ''
+    const expectedVersion = afterVersion !== null ? afterVersion : ''
     const draftSnap = await db.collection('organizations').doc(orgId).collection('sites').doc(siteId).get()
     await verifyPublishedCacheVersion({
       orgId,
@@ -3000,13 +3007,21 @@ exports.verifyPublishedPageCacheVersion = onDocumentWritten(
     if (!change.after.exists)
       return
 
+    const beforeData = change.before.exists ? (change.before.data() || {}) : {}
     const pageData = change.after.data() || {}
+    if (change.before.exists && pageChangeOnlyTouchedPreviewThumbnail(beforeData, pageData))
+      return
+    const beforeVersion = normalizeCacheVersionNumber(beforeData?.version)
+    const afterVersion = normalizeCacheVersionNumber(pageData?.version)
+    if (change.before.exists && beforeVersion === afterVersion)
+      return
+
     const orgId = event.params.orgId
     const siteId = event.params.siteId
     const pageId = event.params.pageId
     const orgRef = db.collection('organizations').doc(orgId)
     const publishedSiteRef = orgRef.collection('published-site-settings').doc(siteId)
-    const expectedVersion = Number.isFinite(Number(pageData?.version)) ? Math.max(0, Math.trunc(Number(pageData.version))) : ''
+    const expectedVersion = afterVersion !== null ? afterVersion : ''
     const [publishedSiteData, draftSiteSnap] = await Promise.all([
       waitForPublishedPageVersion({
         siteRef: publishedSiteRef,
@@ -4046,6 +4061,15 @@ const resolveTemplateBlockSourceForSignature = (pageDoc, blockRef) => {
 }
 
 const resolveTemplateBlockForSignature = (pageDoc, blockRef, blocksById = {}) => {
+  if (typeof blockRef === 'string' && blocksById?.[blockRef]) {
+    const libraryBlock = blocksById[blockRef]
+    return {
+      content: libraryBlock.content,
+      values: libraryBlock.values || {},
+      meta: libraryBlock.meta || {},
+    }
+  }
+
   const block = resolveTemplateBlockSourceForSignature(pageDoc, blockRef)
   if (!block)
     return null
@@ -4065,6 +4089,257 @@ const resolveTemplateBlockForSignature = (pageDoc, blockRef, blocksById = {}) =>
     }
   }
   return null
+}
+
+const collectPreviewBlockIds = (pageData = {}) => {
+  const ids = new Set(Array.isArray(pageData?.blockIds) ? pageData.blockIds.filter(Boolean).map(String) : [])
+  const collectBlocks = (blocks) => {
+    if (!Array.isArray(blocks))
+      return
+    for (const block of blocks) {
+      const blockId = String(block?.blockId || '').trim()
+      if (blockId)
+        ids.add(blockId)
+    }
+  }
+  const collectStructure = (structure) => {
+    if (!Array.isArray(structure))
+      return
+    for (const row of structure) {
+      for (const column of row?.columns || []) {
+        if (!Array.isArray(column?.blocks))
+          continue
+        for (const block of column.blocks) {
+          const blockId = typeof block === 'string'
+            ? block.trim()
+            : String(block?.blockId || '').trim()
+          if (blockId)
+            ids.add(blockId)
+        }
+      }
+    }
+  }
+
+  collectBlocks(pageData.content)
+  collectBlocks(pageData.postContent)
+  collectStructure(pageData.structure)
+  collectStructure(pageData.postStructure)
+  return Array.from(ids)
+}
+
+const resolveCmsPreviewCollectionTokens = (input, { orgId, siteId, pageId, routeLastSegment } = {}) => {
+  const replaceTokens = (raw) => {
+    let resolved = String(raw)
+    if (orgId)
+      resolved = resolved.replaceAll('{orgId}', orgId)
+    if (siteId)
+      resolved = resolved.replaceAll('{siteId}', siteId)
+    if (pageId)
+      resolved = resolved.replaceAll('{pageId}', pageId)
+    if (routeLastSegment)
+      resolved = resolved.replaceAll('{routeLastSegment}', routeLastSegment)
+    return resolved
+  }
+
+  if (typeof input === 'string')
+    return replaceTokens(input)
+  if (Array.isArray(input))
+    return input.map(item => resolveCmsPreviewCollectionTokens(item, { orgId, siteId, pageId, routeLastSegment }))
+  if (input && typeof input === 'object') {
+    return Object.entries(input).reduce((acc, [key, value]) => {
+      acc[key] = resolveCmsPreviewCollectionTokens(value, { orgId, siteId, pageId, routeLastSegment })
+      return acc
+    }, {})
+  }
+  return input
+}
+
+const hasUnresolvedCmsPreviewToken = (value) => {
+  try {
+    return JSON.stringify(value).includes('{')
+  }
+  catch {
+    return false
+  }
+}
+
+const getCmsPreviewCollectionPath = ({ orgId, siteId, cfg }) => {
+  const path = String(cfg?.collection?.path || '').trim()
+  if (!path)
+    return ''
+  if (path === 'posts' || path === 'post')
+    return `organizations/${orgId}/sites/${siteId}/published_posts`
+  return `organizations/${orgId}/${path}`
+}
+
+const compareCmsPreviewCollectionValues = (aValue, bValue) => {
+  if (aValue == null && bValue == null)
+    return 0
+  if (aValue == null)
+    return 1
+  if (bValue == null)
+    return -1
+  return String(aValue).localeCompare(String(bValue), undefined, { numeric: true, sensitivity: 'base' })
+}
+
+const getCmsPreviewValueAtPath = (source, path) => {
+  if (!path || typeof path !== 'string')
+    return source
+  return path.split('.').reduce((acc, key) => {
+    if (acc == null || typeof acc !== 'object')
+      return undefined
+    return acc[key]
+  }, source)
+}
+
+const applyCmsPreviewCollectionOrder = (records, orderList = []) => {
+  if (!Array.isArray(records) || !Array.isArray(orderList) || orderList.length === 0)
+    return Array.isArray(records) ? records : []
+
+  const validOrders = orderList.filter(order => order && typeof order.field === 'string' && order.field.trim())
+  if (!validOrders.length)
+    return records
+
+  return [...records].sort((a, b) => {
+    for (const order of validOrders) {
+      const direction = String(order.direction || 'asc').toLowerCase() === 'desc' ? -1 : 1
+      const compared = compareCmsPreviewCollectionValues(
+        getCmsPreviewValueAtPath(a, order.field),
+        getCmsPreviewValueAtPath(b, order.field),
+      )
+      if (compared !== 0)
+        return compared * direction
+    }
+    return 0
+  })
+}
+
+const buildCmsPreviewCollectionQuery = ({ cfg, orgId, siteId, pageId, routeLastSegment }) => {
+  const tokenContext = { orgId, siteId, pageId, routeLastSegment }
+  const currentQuery = Array.isArray(cfg?.collection?.query)
+    ? resolveCmsPreviewCollectionTokens(JSON.parse(JSON.stringify(cfg.collection.query)), tokenContext)
+    : []
+
+  for (const queryKey in cfg?.queryItems || {}) {
+    const rawValue = cfg.queryItems[queryKey]
+    if (!rawValue) {
+      const findIndex = currentQuery.findIndex(q => q.field === queryKey)
+      if (findIndex > -1)
+        currentQuery.splice(findIndex, 1)
+      continue
+    }
+
+    const queryOption = cfg?.queryOptions?.find(option => option.field === queryKey)
+    const operator = queryOption?.operator || '=='
+    let queryValue = resolveCmsPreviewCollectionTokens(rawValue, tokenContext)
+    if (operator === 'array-contains-any' && !Array.isArray(queryValue))
+      queryValue = [queryValue]
+
+    const newQuery = { field: queryKey, operator, value: queryValue }
+    const findIndex = currentQuery.findIndex(q => q.field === queryKey)
+    if (findIndex > -1)
+      currentQuery[findIndex] = newQuery
+    else
+      currentQuery.push(newQuery)
+  }
+
+  return currentQuery.filter(query => query?.field && query?.operator && !hasUnresolvedCmsPreviewToken(query?.value))
+}
+
+const fetchCmsPreviewCollectionField = async ({ cfg, orgId, siteId, pageId, routeLastSegment }) => {
+  const collectionPath = getCmsPreviewCollectionPath({ orgId, siteId, cfg })
+  if (!collectionPath)
+    return []
+
+  const tokenContext = { orgId, siteId, pageId, routeLastSegment }
+  const canonicalLookupKey = String(cfg?.collection?.canonicalLookup?.key || '').trim()
+  const resolvedCanonicalLookupKey = canonicalLookupKey
+    ? resolveCmsPreviewCollectionTokens(canonicalLookupKey, tokenContext)
+    : ''
+
+  if (resolvedCanonicalLookupKey && !hasUnresolvedCmsPreviewToken(resolvedCanonicalLookupKey)) {
+    const canonicalSegments = resolvedCanonicalLookupKey.split(':').filter(Boolean)
+    const docId = canonicalSegments[canonicalSegments.length - 1]
+    if (docId) {
+      const snap = await db.doc(`${collectionPath}/${docId}`).get()
+      return snap.exists ? [{ docId: snap.id, ...(snap.data() || {}) }] : []
+    }
+  }
+
+  let queryRef = db.collection(collectionPath)
+  for (const query of buildCmsPreviewCollectionQuery({ cfg, orgId, siteId, pageId, routeLastSegment }))
+    queryRef = queryRef.where(query.field, query.operator, query.value)
+  for (const order of Array.isArray(cfg?.collection?.order) ? cfg.collection.order : []) {
+    if (order?.field)
+      queryRef = queryRef.orderBy(order.field, String(order.direction || 'asc').toLowerCase() === 'desc' ? 'desc' : 'asc')
+  }
+
+  const limit = Number(cfg?.limit)
+  const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 250) : 250
+  const snap = await queryRef.limit(safeLimit).get()
+  return applyCmsPreviewCollectionOrder(
+    snap.docs.map(doc => ({ docId: doc.id, ...(doc.data() || {}) })),
+    cfg?.collection?.order,
+  )
+}
+
+const resolveCmsPreviewBlockCollectionValues = async ({ block, orgId, siteId, pageId, routeLastSegment }) => {
+  const values = {}
+  const entries = Object.entries(block?.meta || {})
+  await Promise.all(entries.map(async ([field, cfg]) => {
+    if (!cfg || typeof cfg !== 'object' || !cfg.collection)
+      return
+    values[field] = await fetchCmsPreviewCollectionField({ cfg, orgId, siteId, pageId, routeLastSegment })
+  }))
+  return values
+}
+
+const getCmsPreviewBlockKey = (row, rowIndex, column, colIndex, blockIdx) => {
+  return `${row?.id || rowIndex}:${column?.id || colIndex}:${blockIdx}`
+}
+
+const resolveCmsPreviewCollectionValues = async ({ orgId, siteId, pageId, pageData, blocksById, routeLastSegment }) => {
+  const rows = templatePreviewRowsForSignature({ ...pageData, docId: pageId })
+  const valuesByBlockKey = {}
+  const tasks = []
+
+  rows.forEach((row, rowIndex) => {
+    ;(row.columns || []).forEach((column, colIndex) => {
+      ;(column.blocks || []).forEach((blockRef, blockIdx) => {
+        const block = resolveTemplateBlockForSignature(pageData, blockRef, blocksById)
+        if (!block?.meta)
+          return
+        const blockKey = getCmsPreviewBlockKey(row, rowIndex, column, colIndex, blockIdx)
+        tasks.push((async () => {
+          const values = await resolveCmsPreviewBlockCollectionValues({ block, orgId, siteId, pageId, routeLastSegment })
+          if (Object.keys(values).length)
+            valuesByBlockKey[blockKey] = values
+        })())
+      })
+    })
+  })
+
+  await Promise.all(tasks)
+  return valuesByBlockKey
+}
+
+const resolveCmsPreviewCollectionValuesWithTimeout = async (options, timeoutMs = 8000) => {
+  let timeoutId = null
+  try {
+    return await Promise.race([
+      resolveCmsPreviewCollectionValues(options),
+      new Promise((resolve) => {
+        timeoutId = setTimeout(() => resolve({}), timeoutMs)
+      }),
+    ])
+  }
+  catch {
+    return {}
+  }
+  finally {
+    if (timeoutId)
+      clearTimeout(timeoutId)
+  }
 }
 
 const getSitePagePreviewPageRowsSignature = (pageDoc) => {
@@ -4229,7 +4504,7 @@ const readPreviewRenderContext = async ({ orgId, siteId, pageId, source = 'draft
   const themeId = String(siteData?.theme || '').trim()
   const themeSnap = themeId ? await orgRef.collection('themes').doc(themeId).get() : null
   const themeData = themeSnap?.exists ? themeSnap.data() || {} : {}
-  const blockIds = Array.isArray(pageData?.blockIds) ? pageData.blockIds.filter(Boolean) : []
+  const blockIds = collectPreviewBlockIds(pageData)
   const blocksById = {}
   await Promise.all(blockIds.map(async (blockId) => {
     const snap = await orgRef.collection('blocks').doc(String(blockId)).get()
@@ -4258,17 +4533,27 @@ exports.getPreviewRenderPayload = onCall({ timeoutSeconds: 60, memory: '512MiB' 
   const pageId = String(data.pageId || '').trim()
   const signature = String(data.signature || '').trim()
   const source = String(data.source || '').trim() === 'published' ? 'published' : 'draft'
+  const routeLastSegment = String(data.routeLastSegment || '').trim()
   if (!orgId || !siteId || !pageId || !signature)
     throw new HttpsError('invalid-argument', 'Missing preview render payload fields.')
   if (signature !== getCmsPreviewRenderSignature({ orgId, siteId, pageId }))
     throw new HttpsError('permission-denied', 'Invalid preview signature.')
 
   const context = await readPreviewRenderContext({ orgId, siteId, pageId, source })
+  const collectionValues = await resolveCmsPreviewCollectionValuesWithTimeout({
+    orgId,
+    siteId,
+    pageId,
+    pageData: context.pageData,
+    blocksById: context.blocksById,
+    routeLastSegment,
+  })
   return {
     site: serializePreviewPayload(context.siteData),
     page: serializePreviewPayload({ ...context.pageData, docId: pageId }),
     theme: serializePreviewPayload(context.themeData),
     blocks: serializePreviewPayload(context.blocksById),
+    collectionValues: serializePreviewPayload(collectionValues),
     renderContext: await fetchPreviewRenderContext({ orgId, siteId }),
   }
 })
@@ -4466,7 +4751,7 @@ const renderCmsPagePreviewThumbnail = async ({ orgId, siteId, pageId, baseUrl, f
       updatedAtISO: new Date().toISOString(),
     }
     await context.pageRef.set({ [thumbnailField]: previewThumbnail }, { merge: true })
-    return { skipped: false, status: 'ready', pageId: normalizedPageId, url, field: thumbnailField }
+    return { skipped: false, status: 'ready', pageId: normalizedPageId, url, field: thumbnailField, thumbnail: serializePreviewPayload(previewThumbnail) }
   }
   catch (error) {
     await context.pageRef.set({

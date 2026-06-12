@@ -179,7 +179,6 @@ const SITE_PAGE_PREVIEW_JPEG_ENABLED = false
 const showPreviewSnapshotStatus = computed(() => Boolean(edgeGlobal.edgeState.devOverride))
 const showPreviewRenderTools = computed(() => Boolean(edgeGlobal.edgeState.devOverride))
 const SITE_PAGE_PREVIEW_BASE_WIDTH = 1600
-const EDGE_CMS_PREVIEW_RENDER_SIGNATURE_SALT = 'edge-cms-preview-render-v1'
 const isPreviewSnapshotDevRefreshEnabled = () => Boolean(edgeGlobal.edgeState.devOverride)
 
 const pageInit = {
@@ -1771,6 +1770,14 @@ const EMPTY_PREVIEW_META = {}
 const resolveBlockForPreview = (block) => {
   if (!block)
     return null
+  if (typeof block === 'string' && blocksCollection.value?.[block]) {
+    const libraryBlock = blocksCollection.value[block]
+    return {
+      content: libraryBlock.content,
+      values: libraryBlock.values || EMPTY_PREVIEW_VALUES,
+      meta: libraryBlock.meta || EMPTY_PREVIEW_META,
+    }
+  }
   if (block.content) {
     return {
       content: block.content,
@@ -1791,7 +1798,7 @@ const resolveBlockForPreview = (block) => {
 
 const resolveTemplateBlockForPreview = (pageDoc, blockRef) => {
   const source = resolveTemplateBlockSource(pageDoc, blockRef)
-  return resolveBlockForPreview(source)
+  return resolveBlockForPreview(source || blockRef)
 }
 
 const hasPreviewSpans = row => (row?.columns || []).some(column => Number.isFinite(Number(column?.span)))
@@ -1900,36 +1907,6 @@ const createPreviewSignatureHash = (value) => {
   for (let index = 0; index < input.length; index++)
     hash = ((hash << 5) + hash) ^ input.charCodeAt(index)
   return String(hash >>> 0)
-}
-
-const getCmsPreviewRenderSignature = ({ orgId, siteId, pageId }) => {
-  return createPreviewSignatureHash({
-    salt: EDGE_CMS_PREVIEW_RENDER_SIGNATURE_SALT,
-    orgId,
-    siteId,
-    pageId,
-  })
-}
-
-const getCmsPreviewRenderUrl = (pageDoc) => {
-  const orgId = String(edgeGlobal.edgeState.currentOrganization || '').trim()
-  const siteId = String(props.site || '').trim()
-  const pageId = String(pageDoc?.docId || '').trim()
-  if (!orgId || !siteId || !pageId)
-    return ''
-  const signature = getCmsPreviewRenderSignature({ orgId, siteId, pageId })
-  const params = new URLSearchParams({
-    orgId,
-    signature,
-  })
-  return `/cms-preview-render/${encodeURIComponent(siteId)}/${encodeURIComponent(pageId)}?${params.toString()}`
-}
-
-const openCmsPreviewRender = (pageDoc) => {
-  const url = getCmsPreviewRenderUrl(pageDoc)
-  if (!url)
-    return
-  globalThis.open?.(url, '_blank', 'noopener,noreferrer')
 }
 
 const getSitePagePreviewBlockSignature = (pageDoc) => {
@@ -2047,14 +2024,28 @@ const isPersistedSitePagePreviewThumbnailDisplayable = (pageDoc, field = 'previe
   )
 }
 
+const getPersistedSitePagePreviewThumbnailUpdatedAt = (thumbnail) => {
+  const timestampSeconds = Number(thumbnail?.updatedAt?.seconds)
+  if (Number.isFinite(timestampSeconds) && timestampSeconds > 0)
+    return timestampSeconds * 1000
+  const timestampMillis = Number(thumbnail?.updatedAt)
+  if (Number.isFinite(timestampMillis) && timestampMillis > 0)
+    return timestampMillis
+  const parsed = Date.parse(String(thumbnail?.updatedAtISO || ''))
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
 const getPreferredSitePagePreviewThumbnailField = (pageDoc) => {
-  if (isPersistedSitePagePreviewThumbnailDisplayable(pageDoc, 'publishedPreviewThumbnail'))
-    return 'publishedPreviewThumbnail'
-  if (isPersistedSitePagePreviewThumbnailDisplayable(pageDoc, 'manualPreviewThumbnail'))
-    return 'manualPreviewThumbnail'
-  if (isPersistedSitePagePreviewThumbnailDisplayable(pageDoc, 'previewThumbnail'))
-    return 'previewThumbnail'
-  return ''
+  const candidates = ['manualPreviewThumbnail', 'publishedPreviewThumbnail', 'previewThumbnail']
+    .filter(field => isPersistedSitePagePreviewThumbnailDisplayable(pageDoc, field))
+    .map(field => ({
+      field,
+      updatedAt: getPersistedSitePagePreviewThumbnailUpdatedAt(getPersistedSitePagePreviewThumbnail(pageDoc, field)),
+    }))
+  if (!candidates.length)
+    return ''
+  candidates.sort((a, b) => b.updatedAt - a.updatedAt)
+  return candidates[0].field
 }
 
 const getPreferredSitePagePreviewThumbnail = (pageDoc) => {
@@ -2656,6 +2647,9 @@ const runBackendSitePagePreviewRefresh = async (pageDoc) => {
     const response = result?.data || result || {}
     const isReady = response?.status === 'ready'
     const url = String(response?.url || '').trim()
+    const responseField = String(response?.field || 'manualPreviewThumbnail').trim()
+    if (isReady && responseField && response?.thumbnail && typeof response.thumbnail === 'object')
+      pageDoc[responseField] = response.thumbnail
     state.sitePagePreviewSnapshots[docId] = {
       status: isReady && url ? 'ready' : 'failed',
       signature,
@@ -4898,13 +4892,6 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                               Preview render
                             </span>
                             <div class="flex shrink-0 items-center gap-1">
-                              <button
-                                type="button"
-                                class="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] leading-none text-slate-500 hover:bg-slate-100 hover:text-slate-800"
-                                @click.stop="openCmsPreviewRender(item)"
-                              >
-                                open
-                              </button>
                               <button
                                 v-if="hasFreshSitePagePreviewImage(item)"
                                 type="button"

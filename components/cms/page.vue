@@ -780,6 +780,42 @@ const getNextVersion = (value) => {
   return Math.max(0, Math.trunc(numericVersion)) + 1
 }
 
+const derivePageBlockIds = (workingDoc = {}) => {
+  const ids = new Set()
+  const collectBlocks = (blocks) => {
+    if (!Array.isArray(blocks))
+      return
+    for (const block of blocks) {
+      const blockId = String(block?.blockId || '').trim()
+      if (blockId)
+        ids.add(blockId)
+    }
+  }
+  const collectStructure = (structure) => {
+    if (!Array.isArray(structure))
+      return
+    for (const row of structure) {
+      for (const column of row?.columns || []) {
+        if (!Array.isArray(column?.blocks))
+          continue
+        for (const block of column.blocks) {
+          const blockId = typeof block === 'string'
+            ? block.trim()
+            : String(block?.blockId || '').trim()
+          if (blockId)
+            ids.add(blockId)
+        }
+      }
+    }
+  }
+
+  collectBlocks(workingDoc.content)
+  collectBlocks(workingDoc.postContent)
+  collectStructure(workingDoc.structure)
+  collectStructure(workingDoc.postStructure)
+  return Array.from(ids)
+}
+
 const editorDocUpdates = (workingDoc) => {
   if (workingDoc && Object.prototype.hasOwnProperty.call(workingDoc, 'restrictionRuleId'))
     delete workingDoc.restrictionRuleId
@@ -798,11 +834,7 @@ const editorDocUpdates = (workingDoc) => {
   }
   if (!hasPostView(workingDoc) && state.previewPageView === 'post')
     state.previewPageView = 'list'
-  const blockIds = (workingDoc.content || []).map(block => block.blockId).filter(id => id)
-  const postBlockIds = workingDoc.postContent ? workingDoc.postContent.map(block => block.blockId).filter(id => id) : []
-  blockIds.push(...postBlockIds)
-  const uniqueBlockIds = [...new Set(blockIds)]
-  state.workingDoc.blockIds = uniqueBlockIds
+  state.workingDoc.blockIds = derivePageBlockIds(workingDoc)
   const storedVersion = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`]?.[props.page]?.version
   const nextVersion = getNextVersion(storedVersion)
   if (state.workingDoc.version !== nextVersion)

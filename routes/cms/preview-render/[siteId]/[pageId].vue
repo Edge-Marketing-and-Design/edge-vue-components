@@ -31,6 +31,7 @@ const siteDoc = computed(() => state.payload?.site || null)
 const pageDoc = computed(() => state.payload?.page || null)
 const blocksCollection = computed(() => state.payload?.blocks || {})
 const themeDoc = computed(() => state.payload?.theme || null)
+const previewCollectionValues = computed(() => state.payload?.collectionValues || {})
 
 const normalizeForCompare = (value) => {
   if (Array.isArray(value))
@@ -154,6 +155,15 @@ const EMPTY_PREVIEW_VALUES = {}
 const EMPTY_PREVIEW_META = {}
 
 const resolveBlockForPreview = (blockRef) => {
+  if (typeof blockRef === 'string' && blocksCollection.value?.[blockRef]) {
+    const libraryBlock = blocksCollection.value[blockRef]
+    return {
+      content: libraryBlock.content,
+      values: libraryBlock.values || EMPTY_PREVIEW_VALUES,
+      meta: libraryBlock.meta || EMPTY_PREVIEW_META,
+    }
+  }
+
   const block = resolveBlockSource(blockRef)
   if (!block)
     return null
@@ -173,6 +183,16 @@ const resolveBlockForPreview = (blockRef) => {
     }
   }
   return null
+}
+
+const resolveBlockValuesForPreview = (blockRef, key) => {
+  const block = resolveBlockForPreview(blockRef)
+  if (!block)
+    return EMPTY_PREVIEW_VALUES
+  return {
+    ...(block.values || EMPTY_PREVIEW_VALUES),
+    ...(previewCollectionValues.value?.[key] || EMPTY_PREVIEW_VALUES),
+  }
 }
 
 const hasPreviewSpans = row => (row?.columns || []).some(column => Number.isFinite(Number(column?.span)))
@@ -271,6 +291,15 @@ const hydratePreviewCollections = (payload) => {
   mergePreviewCollection(`${orgPath.value}/blocks`, payload.blocks || {})
 }
 
+const setPreviewOrganizationContext = () => {
+  if (!organizationId.value)
+    return
+  edgeGlobal.edgeState.currentOrganization = organizationId.value
+  edgeGlobal.edgeState.organizationDocPath = orgPath.value
+  if (import.meta.client)
+    localStorage.setItem('organizationID', organizationId.value)
+}
+
 const loadPreviewData = async () => {
   state.loading = true
   state.error = ''
@@ -297,12 +326,15 @@ const loadPreviewData = async () => {
       return
     }
 
+    setPreviewOrganizationContext()
+
     const response = await edgeFirebase.runFunction('cms-getPreviewRenderPayload', {
       orgId: organizationId.value,
       siteId: siteId.value,
       pageId: pageId.value,
       signature: previewSignature.value,
       source: previewSource.value,
+      routeLastSegment: routeLastSegment.value,
     })
     state.payload = response?.data || response || null
     state.renderContext = state.payload?.renderContext || null
@@ -372,7 +404,7 @@ watch(() => [organizationId.value, siteId.value, pageId.value, previewSignature.
                     :key="`${siteId}:${pageId}:${previewBlockKey(row, rowIndex, column, colIndex, blockIdx)}`"
                     :site-id="siteId"
                     :content="resolveBlockForPreview(blockRef).content"
-                    :values="resolveBlockForPreview(blockRef).values"
+                    :values="resolveBlockValuesForPreview(blockRef, previewBlockKey(row, rowIndex, column, colIndex, blockIdx))"
                     :meta="resolveBlockForPreview(blockRef).meta"
                     :theme="previewTheme"
                     :render-context="state.renderContext"

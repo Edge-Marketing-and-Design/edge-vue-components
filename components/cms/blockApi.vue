@@ -312,6 +312,30 @@ const mergedValues = computed(() => {
   }
 })
 
+const collectionMetaToFetch = computed(() => {
+  const meta = runtimeMeta.value || {}
+  if (!props.standalonePreview)
+    return meta
+
+  const nextMeta = {}
+  for (const [field, cfg] of Object.entries(meta)) {
+    if (!cfg || typeof cfg !== 'object' || !cfg.collection) {
+      nextMeta[field] = cfg
+      continue
+    }
+
+    if (Array.isArray(mergedValues.value?.[field]))
+      continue
+
+    nextMeta[field] = cfg
+  }
+  return nextMeta
+})
+
+const hasCollectionMetaToFetch = computed(() => {
+  return Object.values(collectionMetaToFetch.value || {}).some(cfg => cfg && typeof cfg === 'object' && cfg.collection)
+})
+
 // Map original loading flags into class toggles
 const loadingRender = (content) => {
   const isLoading = anyPending.value
@@ -338,16 +362,24 @@ if (import.meta.client) {
 
 const collectionValues = computedAsync(
   async () => {
+    if (!hasCollectionMetaToFetch.value) {
+      collectionPending.value = false
+      return {}
+    }
+
     const requestId = ++collectionRequestId
     collectionPending.value = true
     try {
       const collectionData = await edgeGlobal.cmsCollectionData(
         edgeFirebase,
-        mergedValues.value,
-        runtimeMeta.value,
+        { ...(mergedValues.value || {}) },
+        collectionMetaToFetch.value,
         props.siteId,
       )
       return collectionData
+    }
+    catch {
+      return {}
     }
     finally {
       if (requestId === collectionRequestId)
