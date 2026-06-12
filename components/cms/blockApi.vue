@@ -149,9 +149,6 @@ const metaUsesRouteLastSegment = computed(() => {
   return metaEntries.some((cfg) => {
     if (!cfg || typeof cfg !== 'object')
       return false
-    const collectionPath = String(cfg?.collection?.path || '').trim().toLowerCase()
-    if (collectionPath !== 'posts' && collectionPath !== 'post')
-      return false
     try {
       return JSON.stringify(cfg).includes('{routeLastSegment}')
     }
@@ -161,20 +158,86 @@ const metaUsesRouteLastSegment = computed(() => {
   })
 })
 
+const routeLastSegmentPreviewConfig = computed(() => {
+  const entries = Object.entries(props.meta || {})
+  for (const [field, cfg] of entries) {
+    if (!cfg || typeof cfg !== 'object' || !cfg.collection)
+      continue
+    let serialized = ''
+    try {
+      serialized = JSON.stringify(cfg)
+    }
+    catch {
+      serialized = ''
+    }
+    if (!serialized.includes('{routeLastSegment}'))
+      continue
+
+    const queryItemEntry = Object.entries(cfg.queryItems || {})
+      .find(([, value]) => typeof value === 'string' && value.includes('{routeLastSegment}'))
+    const queryEntry = Array.isArray(cfg.collection.query)
+      ? cfg.collection.query.find(query => typeof query?.value === 'string' && query.value.includes('{routeLastSegment}'))
+      : null
+
+    return {
+      field,
+      cfg,
+      routeField: String(queryItemEntry?.[0] || queryEntry?.field || 'name').trim() || 'name',
+    }
+  }
+  return null
+})
+
+const getPreviewCollectionPath = (cfg) => {
+  const path = String(cfg?.collection?.path || '').trim()
+  if (!path)
+    return ''
+  if ((path === 'posts' || path === 'post') && props.siteId)
+    return `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.siteId}/published_posts`
+  if (path === 'posts' || path === 'post')
+    return ''
+  return `${edgeGlobal.edgeState.organizationDocPath}/${path}`
+}
+
+const getPreviewFallbackQuery = (cfg) => {
+  const query = Array.isArray(cfg?.collection?.query) ? cfg.collection.query : []
+  return query.filter((item) => {
+    try {
+      return !JSON.stringify(item?.value).includes('{routeLastSegment}')
+    }
+    catch {
+      return true
+    }
+  })
+}
+
 watch(
-  [() => props.routeLastSegment, metaUsesRouteLastSegment, () => props.siteId],
+  [() => props.routeLastSegment, routeLastSegmentPreviewConfig, () => props.siteId],
   async () => {
     const manualValue = String(props.routeLastSegment || '').trim()
     if (manualValue) {
       fallbackRouteLastSegment.value = ''
       return
     }
-    if (!metaUsesRouteLastSegment.value || !props.siteId) {
+    const previewConfig = routeLastSegmentPreviewConfig.value
+    if (!previewConfig) {
       fallbackRouteLastSegment.value = ''
       return
     }
 
-    const cacheKey = `${edgeGlobal.edgeState.currentOrganization}:${props.siteId}`
+    const collectionPath = getPreviewCollectionPath(previewConfig.cfg)
+    if (!collectionPath) {
+      fallbackRouteLastSegment.value = ''
+      return
+    }
+
+    const cacheKey = [
+      edgeGlobal.edgeState.currentOrganization,
+      props.siteId,
+      previewConfig.field,
+      collectionPath,
+      previewConfig.routeField,
+    ].join(':')
     const cached = String(previewRouteSegmentCache.value?.[cacheKey] || '').trim()
     if (cached) {
       fallbackRouteLastSegment.value = cached
@@ -183,13 +246,12 @@ watch(
 
     try {
       const staticSearch = new edgeFirebase.SearchStaticData()
-      const collectionPath = `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.siteId}/published_posts`
-      await staticSearch.getData(collectionPath, [], [], 1)
-      const firstPost = Object.values(staticSearch.results?.data || {})[0]
-      const firstName = String(firstPost?.name || '').trim()
-      if (firstName)
-        previewRouteSegmentCache.value[cacheKey] = firstName
-      fallbackRouteLastSegment.value = firstName
+      await staticSearch.getData(collectionPath, getPreviewFallbackQuery(previewConfig.cfg), previewConfig.cfg.collection.order, 1)
+      const firstRecord = Object.values(staticSearch.results?.data || {})[0]
+      const firstRouteValue = String(getByPath(firstRecord, previewConfig.routeField) || '').trim()
+      if (firstRouteValue)
+        previewRouteSegmentCache.value[cacheKey] = firstRouteValue
+      fallbackRouteLastSegment.value = firstRouteValue
     }
     catch {
       fallbackRouteLastSegment.value = ''

@@ -1,6 +1,6 @@
+const { randomUUID } = require('crypto')
 const axios = require('axios')
 const Stripe = require('stripe')
-const { randomUUID } = require('crypto')
 const chromium = require('@sparticuz/chromium').default
 const puppeteer = require('puppeteer-core')
 const {
@@ -2685,11 +2685,15 @@ exports.onUserWritten = createKvMirrorHandler({
     const resolvedUserId = slug(data?.userId) || slug(userId)
     if (resolvedUserId)
       keys.push(`idx:users:userId:${orgId}:${resolvedUserId}`)
+    const resolvedName = slug(data?.name)
+    if (resolvedName)
+      keys.push(`idx:users:name:${orgId}:${resolvedName}`)
     return keys
   },
   serialize: data => JSON.stringify(data),
   makeMetadata: data => ({
     title: data?.title || '',
+    profilephoto: data?.profilephoto || '',
     contactPhone: data?.contactPhone || data?.phone || '',
     contactEmail: data?.contactEmail || data?.email || '',
     doc_created_at: data?.doc_created_at || '',
@@ -8837,9 +8841,9 @@ const syncSiteDomainRecords = async ({ orgId, siteId, domains, trigger = 'manual
         dnsRecords: nextDnsRecords,
         dnsGuidance,
       }
-      payload.apexError = apexError ? apexError : Firestore.FieldValue.delete()
-      payload.wwwError = wwwError ? wwwError : Firestore.FieldValue.delete()
-      payload.dnsSyncError = dnsSyncError ? dnsSyncError : Firestore.FieldValue.delete()
+      payload.apexError = apexError || Firestore.FieldValue.delete()
+      payload.wwwError = wwwError || Firestore.FieldValue.delete()
+      payload.dnsSyncError = dnsSyncError || Firestore.FieldValue.delete()
       registryWrites.push(registryRef.set(payload, { merge: true })
         .then(async () => {
           const updatedSnap = await registryRef.get()

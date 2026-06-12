@@ -5070,6 +5070,9 @@ const hasUnsavedChanges = (changes) => {
             v-model="state.routeLastSegmentDraft"
             placeholder="example-post-name"
           />
+          <p class="text-xs text-muted-foreground">
+            Preview uses this value exactly as typed. Live pages may use a URL slug, but this test value is not converted.
+          </p>
         </div>
         <div class="flex items-center justify-end gap-2">
           <edge-shad-button type="button" variant="outline" @click="clearRouteLastSegment">
