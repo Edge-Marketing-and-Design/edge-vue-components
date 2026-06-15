@@ -1748,6 +1748,8 @@ const handleBlockImport = async (event) => {
   color: rgba(255, 255, 255, 0.6);
   display: grid;
   place-items: center;
+  padding: 0 24px;
+  text-align: center;
   font-size: 13px;
   letter-spacing: 0.01em;
 }
