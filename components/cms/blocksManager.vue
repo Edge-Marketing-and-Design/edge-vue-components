@@ -36,8 +36,6 @@ const state = reactive({
   creatingBlock: false,
   previewRenderContext: null,
   blocksLoaded: [],
-  visiblePreviewKeys: {},
-  previewVisibilityVersion: 0,
 })
 
 const rawInitBlockFiles = import.meta.glob('./init_blocks/*.html', {
@@ -389,15 +387,6 @@ const loadPreviewRenderContext = async () => {
   state.previewRenderContext = null
 }
 
-watch(
-  [() => edgeGlobal.edgeState.currentOrganization, blockPreviewSiteId],
-  async () => {
-    resetVisibleBlockPreviews()
-    await loadPreviewRenderContext()
-  },
-  { immediate: true },
-)
-
 const tagOptions = computed(() => {
   const tagsSet = new Set()
   const blocks = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`] || {}
@@ -607,92 +596,18 @@ const getPreviewSelectionKey = (docId) => {
   return `${String(docId || 'preview')}:${siteId}:${themeId}`
 }
 
-const normalizePreviewKey = key => String(key || '').trim()
-
-const isPreviewVisible = key => Boolean(state.visiblePreviewKeys[normalizePreviewKey(key)])
-
-const getPreviewVisibilityBinding = key => ({
-  key: normalizePreviewKey(key),
-  version: state.previewVisibilityVersion,
-})
-
-const resolvePreviewVisibilityBinding = (bindingValue) => {
-  if (bindingValue && typeof bindingValue === 'object') {
-    return {
-      key: normalizePreviewKey(bindingValue.key),
-      version: Number(bindingValue.version) || 0,
-    }
-  }
-  return {
-    key: normalizePreviewKey(bindingValue),
-    version: 0,
-  }
-}
-
-const markPreviewVisible = (key) => {
-  const normalizedKey = normalizePreviewKey(key)
-  if (!normalizedKey || state.visiblePreviewKeys[normalizedKey])
-    return
-  state.visiblePreviewKeys[normalizedKey] = true
-}
-
 function resetVisibleBlockPreviews() {
   state.blocksLoaded = []
-  state.visiblePreviewKeys = {}
-  state.previewVisibilityVersion += 1
 }
 
-const observePreviewVisibility = (el, bindingValue) => {
-  const { key: normalizedKey, version } = resolvePreviewVisibilityBinding(bindingValue)
-  if (!el || !normalizedKey || isPreviewVisible(normalizedKey))
-    return
-
-  if (typeof IntersectionObserver === 'undefined') {
-    markPreviewVisible(normalizedKey)
-    return
-  }
-
-  const observer = new IntersectionObserver((entries) => {
-    if (!entries.some(entry => entry.isIntersecting || entry.intersectionRatio > 0))
-      return
-    markPreviewVisible(normalizedKey)
-    observer.disconnect()
-    delete el.__edgeBlockPreviewObserver
-  }, {
-    root: null,
-    rootMargin: '600px 0px',
-    threshold: 0.01,
-  })
-
-  el.__edgeBlockPreviewObserver = observer
-  el.__edgeBlockPreviewBinding = { key: normalizedKey, version }
-  observer.observe(el)
-}
-
-const disconnectPreviewVisibilityObserver = (el) => {
-  if (!el?.__edgeBlockPreviewObserver)
-    return
-  el.__edgeBlockPreviewObserver.disconnect()
-  delete el.__edgeBlockPreviewObserver
-  delete el.__edgeBlockPreviewBinding
-}
-
-const vPreviewVisible = {
-  mounted(el, binding) {
-    observePreviewVisibility(el, binding.value)
+watch(
+  [() => edgeGlobal.edgeState.currentOrganization, blockPreviewSiteId],
+  async () => {
+    resetVisibleBlockPreviews()
+    await loadPreviewRenderContext()
   },
-  updated(el, binding) {
-    const nextBinding = resolvePreviewVisibilityBinding(binding.value)
-    const oldBinding = resolvePreviewVisibilityBinding(binding.oldValue)
-    if (nextBinding.key === oldBinding.key && nextBinding.version === oldBinding.version)
-      return
-    disconnectPreviewVisibilityObserver(el)
-    observePreviewVisibility(el, binding.value)
-  },
-  beforeUnmount(el) {
-    disconnectPreviewVisibilityObserver(el)
-  },
-}
+  { immediate: true },
+)
 
 watch(
   () => [
@@ -706,13 +621,6 @@ watch(
   },
   { deep: true },
 )
-
-const listFilters = computed(() => {
-  const filters = []
-  if (state.themesFilter.length)
-    filters.push({ filterFields: ['themes'], value: state.themesFilter })
-  return filters
-})
 
 const applyTagSelectionFilter = (items = []) => {
   const selectedFilters = Array.isArray(state.picksFilter) ? state.picksFilter : []
@@ -780,6 +688,7 @@ const visibleBlockItems = computed(() => {
     : items.filter(item => [item?.name, item?.docId].some(value => String(value || '').toLowerCase().includes(query)))
   return applyListSelectionFilters(filteredByQuery)
 })
+const shouldRenderBlockPreviews = computed(() => visibleBlockItems.value.length <= 10)
 const selectedBlockSet = computed(() => new Set(state.selectedBlockDocIds))
 const selectedBlockCount = computed(() => state.selectedBlockDocIds.length)
 const addBlockTemplateItems = computed(() => [blankBlockTemplate, ...INITIAL_BLOCK_TEMPLATES])
@@ -1277,8 +1186,8 @@ const handleBlockImport = async (event) => {
     v-if="edgeGlobal.edgeState.organizationDocPath && state.mounted"
   >
     <edge-dashboard
-      :filter="state.filter"
-      :filters="listFilters"
+      filter=""
+      :filters="[]"
       collection="blocks"
       class="pt-0 flex-1"
     >
@@ -1355,7 +1264,15 @@ const handleBlockImport = async (event) => {
         </div>
       </template>
       <template #list-header>
-        <div class="w-full mt-4 mx-0 rounded-md border border-slate-300/70 bg-slate-100/95 dark:border-slate-700 dark:bg-slate-900/95 px-3 py-2 space-y-2 backdrop-blur-sm shadow-sm">
+        <edge-shad-form
+          class="w-full mt-4 mx-0 rounded-md border border-slate-300/70 bg-slate-100/95 dark:border-slate-700 dark:bg-slate-900/95 px-3 py-2 space-y-2 backdrop-blur-sm shadow-sm"
+          :initial-values="{
+            filter: state.filter,
+            blockTypeFilter: state.blockTypeFilter,
+            tags: state.picksFilter,
+            themes: state.themesFilter,
+          }"
+        >
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="flex items-center gap-2">
               <Checkbox
@@ -1424,10 +1341,16 @@ const handleBlockImport = async (event) => {
               />
             </div>
           </div>
-        </div>
+        </edge-shad-form>
       </template>
       <template #list>
         <div class="w-full pt-2 space-y-3 h-[calc(100vh-310px)]">
+          <div
+            v-if="!shouldRenderBlockPreviews"
+            class="rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300"
+          >
+            Showing {{ visibleBlockItems.length }} blocks. Filter to 10 or fewer to see live previews.
+          </div>
           <div
             class="grid gap-4 w-full"
             style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));"
@@ -1469,21 +1392,14 @@ const handleBlockImport = async (event) => {
                     </edge-shad-button>
                   </div>
                   <div
-                    v-if="item.content"
-                    v-preview-visible="getPreviewVisibilityBinding(item.docId)"
+                    v-if="item.content && shouldRenderBlockPreviews"
                     class="block-preview"
                     :class="previewSurfaceClass(item.previewType)"
                   >
                     <div class="scale-wrapper">
                       <div class="scale-inner scale p-4 block-list-preview-content">
-                        <div
-                          v-if="!isPreviewVisible(item.docId)"
-                          class="flex h-full min-h-[200px] items-center justify-center text-center text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500"
-                        >
-                          Preview loads when visible
-                        </div>
                         <edge-cms-block-api
-                          v-else
+                          :key="getPreviewSelectionKey(item.docId)"
                           :site-id="blockPreviewSiteId"
                           :content="item.content"
                           :values="item.values"
@@ -1493,19 +1409,12 @@ const handleBlockImport = async (event) => {
                           :standalone-preview="true"
                           @pending="blockLoaded($event, item.docId)"
                         />
-                        <edge-cms-block-render
-                          v-if="isPreviewVisible(item.docId) && !state.blocksLoaded.includes(item.docId)"
-                          :key="`${getPreviewSelectionKey(item.docId)}:fallback`"
-                          :content="loadingRender(item.content)"
-                          :values="item.values"
-                          :meta="item.meta"
-                          :theme="selectedPreviewTheme"
-                          :render-context="state.previewRenderContext"
-                          :standalone-preview="true"
-                        />
                       </div>
                     </div>
                     <div class="preview-overlay" />
+                  </div>
+                  <div v-else-if="item.content" class="block-preview-empty" :class="previewSurfaceClass(item.previewType)">
+                    Filter to 10 or fewer blocks to see previews.
                   </div>
                   <div v-else class="block-preview-empty" :class="previewSurfaceClass(item.previewType)">
                     Preview unavailable for this block.
