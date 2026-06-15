@@ -909,11 +909,6 @@ const sanitizeQueryItems = (meta) => {
       delete cfg.height
     }
 
-    const hasQueryOptions = Array.isArray(cfg?.queryOptions) && cfg.queryOptions.length > 0
-    if (cfg?.api && !hasQueryOptions && cfg?.queryItems && typeof cfg.queryItems === 'object') {
-      delete cfg.queryItems
-      continue
-    }
     if (!cfg?.queryItems || typeof cfg.queryItems !== 'object')
       continue
 

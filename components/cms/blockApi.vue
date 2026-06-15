@@ -59,6 +59,30 @@ const getByPath = (obj, path) => {
   return path.split('.').reduce((acc, key) => ((acc && acc[key] !== undefined) ? acc[key] : undefined), obj)
 }
 
+const looksLikeApiRecord = (value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return false
+
+  return ['id', 'docId', 'rupid', 'property_id', 'display_address'].some(key => Object.prototype.hasOwnProperty.call(value, key))
+}
+
+const normalizeApiArrayData = (data) => {
+  if (Array.isArray(data))
+    return data
+
+  if (!data || typeof data !== 'object')
+    return []
+
+  if (looksLikeApiRecord(data))
+    return [data]
+
+  const values = Object.values(data)
+  if (values.length && values.every(item => item && typeof item === 'object' && !Array.isArray(item)))
+    return values
+
+  return [data]
+}
+
 // Build URL combining existing query string, template query, and runtime overrides
 const buildUrlWithQuery = (base, query, queryItems = {}) => {
   const safeBase = String(base || '')
@@ -116,16 +140,12 @@ const fetchAllArrays = async (meta, baseValues) => {
       if (!cfg || cfg.type !== 'array' || !cfg.api)
         return
 
-      const hasRuntimeQueryOptions = Array.isArray(cfg.queryOptions) && cfg.queryOptions.length > 0
-      const runtimeQueryItems = hasRuntimeQueryOptions ? (cfg.queryItems || {}) : {}
+      const runtimeQueryItems = (cfg.queryItems && typeof cfg.queryItems === 'object') ? cfg.queryItems : {}
       const url = buildUrlWithQuery(String(cfg.api), String(cfg.apiQuery || ''), runtimeQueryItems)
       // use $fetch for SSR-friendly HTTP
       const json = await $fetch(url, { method: 'GET' })
 
-      let data = getByPath(json, cfg.apiField || '')
-      if (!Array.isArray(data)) {
-        data = (data && typeof data === 'object') ? Object.values(data) : []
-      }
+      let data = normalizeApiArrayData(getByPath(json, cfg.apiField || ''))
 
       const limit = Number(cfg.limit)
       if (Number.isFinite(limit) && limit > 0) {
@@ -144,24 +164,10 @@ const fetchAllArrays = async (meta, baseValues) => {
   return out
 }
 
-const metaUsesRouteLastSegment = computed(() => {
-  const metaEntries = Object.values(props.meta || {})
-  return metaEntries.some((cfg) => {
-    if (!cfg || typeof cfg !== 'object')
-      return false
-    try {
-      return JSON.stringify(cfg).includes('{routeLastSegment}')
-    }
-    catch {
-      return false
-    }
-  })
-})
-
 const routeLastSegmentPreviewConfig = computed(() => {
   const entries = Object.entries(props.meta || {})
   for (const [field, cfg] of entries) {
-    if (!cfg || typeof cfg !== 'object' || !cfg.collection)
+    if (!cfg || typeof cfg !== 'object')
       continue
     let serialized = ''
     try {
@@ -175,13 +181,32 @@ const routeLastSegmentPreviewConfig = computed(() => {
 
     const queryItemEntry = Object.entries(cfg.queryItems || {})
       .find(([, value]) => typeof value === 'string' && value.includes('{routeLastSegment}'))
-    const queryEntry = Array.isArray(cfg.collection.query)
+    const queryEntry = Array.isArray(cfg.collection?.query)
       ? cfg.collection.query.find(query => typeof query?.value === 'string' && query.value.includes('{routeLastSegment}'))
       : null
+
+    if (cfg.api && queryItemEntry) {
+      const routeField = String(queryItemEntry[0] || 'name').trim() || 'name'
+      const previewItems = (cfg.previewQueryItems && typeof cfg.previewQueryItems === 'object') ? cfg.previewQueryItems : {}
+      const previewValue = Object.prototype.hasOwnProperty.call(previewItems, routeField)
+        ? previewItems[routeField]
+        : getByPath(previewItems, routeField)
+      return {
+        field,
+        cfg,
+        source: 'api',
+        routeField,
+        previewValue,
+      }
+    }
+
+    if (!cfg.collection)
+      continue
 
     return {
       field,
       cfg,
+      source: 'collection',
       routeField: String(queryItemEntry?.[0] || queryEntry?.field || 'name').trim() || 'name',
     }
   }
@@ -211,6 +236,36 @@ const getPreviewFallbackQuery = (cfg) => {
   })
 }
 
+const getPreviewFallbackQueryItems = (cfg) => {
+  const queryItems = (cfg?.queryItems && typeof cfg.queryItems === 'object') ? cfg.queryItems : {}
+  return Object.fromEntries(
+    Object.entries(queryItems).filter(([, value]) => {
+      try {
+        return !JSON.stringify(value).includes('{routeLastSegment}')
+      }
+      catch {
+        return true
+      }
+    }),
+  )
+}
+
+const fetchPreviewApiFallbackRecord = async (cfg) => {
+  if (!cfg?.api)
+    return null
+  const preparedCfg = edgeGlobal.prepareCmsMetaForRuntime({ preview: cfg }, props.siteId, {
+    routeLastSegment: '',
+  })?.preview || cfg
+  const url = buildUrlWithQuery(
+    String(preparedCfg.api),
+    String(preparedCfg.apiQuery || ''),
+    getPreviewFallbackQueryItems(preparedCfg),
+  )
+  const json = await $fetch(url, { method: 'GET' })
+  const data = normalizeApiArrayData(getByPath(json, preparedCfg.apiField || ''))
+  return data[0] || null
+}
+
 watch(
   [() => props.routeLastSegment, routeLastSegmentPreviewConfig, () => props.siteId],
   async () => {
@@ -225,18 +280,18 @@ watch(
       return
     }
 
-    const collectionPath = getPreviewCollectionPath(previewConfig.cfg)
-    if (!collectionPath) {
-      fallbackRouteLastSegment.value = ''
-      return
-    }
-
     const cacheKey = [
       edgeGlobal.edgeState.currentOrganization,
       props.siteId,
       previewConfig.field,
-      collectionPath,
+      previewConfig.source,
+      previewConfig.source === 'api'
+        ? String(previewConfig.cfg?.api || '')
+        : getPreviewCollectionPath(previewConfig.cfg),
+      String(previewConfig.cfg?.apiQuery || ''),
+      String(previewConfig.cfg?.apiField || ''),
       previewConfig.routeField,
+      JSON.stringify(previewConfig.cfg?.previewQueryItems || {}),
     ].join(':')
     const cached = String(previewRouteSegmentCache.value?.[cacheKey] || '').trim()
     if (cached) {
@@ -245,9 +300,27 @@ watch(
     }
 
     try {
-      const staticSearch = new edgeFirebase.SearchStaticData()
-      await staticSearch.getData(collectionPath, getPreviewFallbackQuery(previewConfig.cfg), previewConfig.cfg.collection.order, 1)
-      const firstRecord = Object.values(staticSearch.results?.data || {})[0]
+      const configuredPreviewValue = String(previewConfig.previewValue || '').trim()
+      if (configuredPreviewValue) {
+        previewRouteSegmentCache.value[cacheKey] = configuredPreviewValue
+        fallbackRouteLastSegment.value = configuredPreviewValue
+        return
+      }
+
+      let firstRecord = null
+      if (previewConfig.source === 'api') {
+        firstRecord = await fetchPreviewApiFallbackRecord(previewConfig.cfg)
+      }
+      else {
+        const collectionPath = getPreviewCollectionPath(previewConfig.cfg)
+        if (!collectionPath) {
+          fallbackRouteLastSegment.value = ''
+          return
+        }
+        const staticSearch = new edgeFirebase.SearchStaticData()
+        await staticSearch.getData(collectionPath, getPreviewFallbackQuery(previewConfig.cfg), previewConfig.cfg.collection.order, 1)
+        firstRecord = Object.values(staticSearch.results?.data || {})[0]
+      }
       const firstRouteValue = String(getByPath(firstRecord, previewConfig.routeField) || '').trim()
       if (firstRouteValue)
         previewRouteSegmentCache.value[cacheKey] = firstRouteValue
@@ -265,18 +338,9 @@ const effectiveRouteLastSegment = computed(() => {
 })
 
 const runtimeMeta = computed(() => {
-  const prepared = edgeGlobal.prepareCmsMetaForRuntime(props.meta, props.siteId, {
+  return edgeGlobal.prepareCmsMetaForRuntime(props.meta, props.siteId, {
     routeLastSegment: effectiveRouteLastSegment.value,
   })
-  if (import.meta.client && metaUsesRouteLastSegment.value) {
-    console.log('[cms routeLastSegment] blockApi runtimeMeta', {
-      routeLastSegmentProp: props.routeLastSegment,
-      effectiveRouteLastSegment: effectiveRouteLastSegment.value,
-      siteId: props.siteId,
-      preparedMeta: prepared,
-    })
-  }
-  return prepared
 })
 
 /* ---------------- async data (SSR + client) ---------------- */
