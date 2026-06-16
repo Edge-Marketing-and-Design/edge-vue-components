@@ -644,7 +644,10 @@ const organizationName = computed(() => String(currentOrgData.value?.name || '')
             </div>
           </TabsContent>
           <TabsContent value="emailTemplates" class="mt-0 min-h-0 flex-1">
-            <edge-email-templates :organization-id="targetOrganizationId" />
+            <edge-email-templates
+              :organization-id="targetOrganizationId"
+              protected-template-ids="lead-notification"
+            />
           </TabsContent>
         </Tabs>
       </CardContent>

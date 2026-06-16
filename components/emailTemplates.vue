@@ -7,6 +7,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  protectedTemplateIds: {
+    type: [Array, String],
+    default: () => [],
+  },
 })
 
 const edgeFirebase = inject('edgeFirebase')
@@ -67,7 +71,7 @@ const state = reactive({
   loading: false,
   selectedTemplateId: DEFAULT_TEMPLATE_ID,
   workingTemplate: edgeGlobal.dupObject(defaultTemplate),
-  previewMode: false,
+  previewMode: true,
   deleteDialog: false,
   helpOpen: false,
   editorTab: 'settings',
@@ -100,6 +104,18 @@ const selectedTemplate = computed(() =>
   templates.value.find(template => template.docId === state.selectedTemplateId) || templates.value[0] || null,
 )
 const isDefaultTemplate = computed(() => state.workingTemplate?.docId === DEFAULT_TEMPLATE_ID)
+const protectedTemplateIds = computed(() => {
+  const configuredIds = Array.isArray(props.protectedTemplateIds)
+    ? props.protectedTemplateIds
+    : [props.protectedTemplateIds]
+  return new Set([
+    DEFAULT_TEMPLATE_ID,
+    ...configuredIds,
+  ].map(id => String(id || '').trim()).filter(Boolean))
+})
+const isProtectedTemplate = computed(() =>
+  protectedTemplateIds.value.has(String(state.workingTemplate?.docId || '').trim()),
+)
 const activeEditorValue = computed({
   get: () => state.editorTab === 'text' ? state.workingTemplate.text : state.workingTemplate.html,
   set: (value) => {
@@ -410,13 +426,13 @@ const saveTemplate = async () => {
 }
 
 const confirmDeleteTemplate = () => {
-  if (isDefaultTemplate.value)
+  if (isProtectedTemplate.value)
     return
   state.deleteDialog = true
 }
 
 const deleteTemplate = async () => {
-  if (!collectionPath.value || isDefaultTemplate.value)
+  if (!collectionPath.value || isProtectedTemplate.value)
     return
   const docId = state.workingTemplate.docId
   await edgeFirebase.removeDoc(collectionPath.value, docId)
@@ -530,7 +546,7 @@ onBeforeUnmount(() => {
               <edge-shad-button
                 variant="outline"
                 class="h-9 border-red-200 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/70"
-                :disabled="isDefaultTemplate"
+                :disabled="isProtectedTemplate"
                 @click="confirmDeleteTemplate"
               >
                 <Trash2 class="mr-2 h-4 w-4" />
