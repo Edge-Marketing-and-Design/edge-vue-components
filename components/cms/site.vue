@@ -3652,17 +3652,8 @@ const isSiteSettingPublished = computed(() => {
   return !!publishedSite
 })
 
-const cacheVerificationNow = ref(Date.now())
-let cacheVerificationTimer = null
-onMounted(() => {
-  cacheVerificationTimer = setInterval(() => {
-    cacheVerificationNow.value = Date.now()
-  }, 1000)
-})
 onBeforeUnmount(() => {
   sitePagePreviewSnapshotQueueStopped = true
-  if (cacheVerificationTimer)
-    clearInterval(cacheVerificationTimer)
   sitePagePreviewSnapshotTimers.forEach(timer => clearTimeout(timer))
   sitePagePreviewSnapshotTimers.clear()
   sitePagePreviewSnapshotQueue.splice(0, sitePagePreviewSnapshotQueue.length)
@@ -3672,95 +3663,6 @@ onBeforeUnmount(() => {
   sitePagePreviewSnapshotUploads.clear()
   sitePagePreviewScaleObservers.forEach(observer => observer.disconnect())
   sitePagePreviewScaleObservers.clear()
-})
-
-const cacheVerificationStatus = computed(() => publishedSiteSettings.value?.cacheVerification || {})
-const cacheVerificationVerifiedRecently = computed(() => {
-  const status = cacheVerificationStatus.value || {}
-  if (status.status !== 'verified')
-    return false
-  const completedAt = Number(status.completedAt || status.lastCheckedAt || 0)
-  return Number.isFinite(completedAt) && cacheVerificationNow.value - completedAt <= 10000
-})
-const showCacheVerificationStatus = computed(() => {
-  if (!edgeGlobal.edgeState.devOverride)
-    return false
-  const status = String(cacheVerificationStatus.value?.status || '')
-  return ['pending', 'running', 'delayed', 'failed', 'skipped'].includes(status) || cacheVerificationVerifiedRecently.value
-})
-const cacheVerificationLabel = computed(() => {
-  const status = cacheVerificationStatus.value || {}
-  const label = String(status.activeLabel || '').trim()
-  if (!label)
-    return 'Cache Refresh'
-  if (status.status === 'verified')
-    return `Cache Verified: ${label}`
-  if (status.status === 'delayed')
-    return `Still Refreshing: ${label}`
-  if (status.status === 'failed')
-    return `Cache Check Failed: ${label}`
-  if (status.status === 'skipped')
-    return `Cache Check Skipped: ${label}`
-  const total = Number(status.total)
-  const completed = Number(status.completed)
-  if (status.status === 'running' && Number.isFinite(total) && total > 1 && Number.isFinite(completed))
-    return `Refreshing Cache: ${label} ${Math.min(completed + 1, total)} of ${total}`
-  return `Refreshing Cache: ${label}`
-})
-const cacheVerificationDetail = computed(() => {
-  const status = cacheVerificationStatus.value || {}
-  const parts = []
-  const state = String(status.status || '').trim()
-  const path = String(status.activePath || '').trim()
-  const error = String(status.error || '').trim()
-  const headers = (status.headers && typeof status.headers === 'object') ? status.headers : {}
-  const expectedSiteVersion = status.expectedSiteVersion ?? ''
-  const expectedPageVersion = status.expectedPageVersion ?? ''
-  const attempts = Number(status.attempts)
-  const nextRunAt = Number(status.nextRunAt || 0)
-  const lastCheckedAt = Number(status.lastCheckedAt || 0)
-
-  if (state)
-    parts.push(`Status: ${state}`)
-  if (path)
-    parts.push(`Path: ${path}`)
-  if (expectedSiteVersion !== null && expectedSiteVersion !== undefined && expectedSiteVersion !== '')
-    parts.push(`Expected site version: ${expectedSiteVersion}`)
-  if (expectedPageVersion !== null && expectedPageVersion !== undefined && expectedPageVersion !== '')
-    parts.push(`Expected page version: ${expectedPageVersion}`)
-  if (headers.siteVersion)
-    parts.push(`Live site version: ${headers.siteVersion}`)
-  if (headers.pageVersion)
-    parts.push(`Live page version: ${headers.pageVersion}`)
-  if (headers.cacheStatus)
-    parts.push(`Live cache status: ${headers.cacheStatus}`)
-  if (Number.isFinite(attempts) && attempts > 0)
-    parts.push(`Checks: ${attempts}`)
-  if (Number.isFinite(lastCheckedAt) && lastCheckedAt > 0)
-    parts.push(`Last checked: ${formatTemplatePageDate(lastCheckedAt)}`)
-  if (Number.isFinite(nextRunAt) && nextRunAt > cacheVerificationNow.value)
-    parts.push(`Next check: ${formatTemplatePageDate(nextRunAt)}`)
-  if (error)
-    parts.push(`Error: ${error}`)
-
-  return parts.join('\n')
-})
-
-const cacheVerificationPillClass = computed(() => {
-  const status = String(cacheVerificationStatus.value?.status || '')
-  if (status === 'verified')
-    return 'bg-green-100 text-green-800'
-  if (status === 'failed')
-    return 'bg-red-100 text-red-800'
-  if (status === 'skipped')
-    return 'bg-slate-100 text-slate-700'
-  if (status === 'delayed')
-    return 'bg-amber-100 text-amber-800'
-  return 'bg-sky-100 text-sky-800'
-})
-
-const isCacheVerificationSpinning = computed(() => {
-  return ['pending', 'running', 'delayed'].includes(String(cacheVerificationStatus.value?.status || ''))
 })
 
 const isAnyPagesDiff = computed(() => {
@@ -4400,40 +4302,12 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                     <FolderUp v-else class="h-3.5 w-3.5" />
                     Publish Site
                   </edge-shad-button>
-                  <div
-                    v-if="showCacheVerificationStatus"
-                    class="flex gap-1 items-center text-xs py-1 px-3 rounded"
-                    :title="cacheVerificationDetail"
-                    :aria-label="cacheVerificationDetail || cacheVerificationLabel"
-                    :class="cacheVerificationPillClass"
-                  >
-                    <Loader2 v-if="isCacheVerificationSpinning" class="w-3 h-3 animate-spin" />
-                    <FileCheck v-else-if="cacheVerificationStatus.status === 'verified'" class="w-3 h-3" />
-                    <CircleAlert v-else class="w-3 h-3" />
-                    <span class="font-medium text-[10px]">
-                      {{ cacheVerificationLabel }}
-                    </span>
-                  </div>
                 </div>
                 <div v-else key="published" class="flex gap-2 items-center">
                   <div class="flex gap-1 items-center bg-green-100 text-xs py-1 px-3 text-green-800 rounded">
                     <FileCheck class="!text-green-800 w-3 h-6" />
                     <span class="font-medium text-[10px]">
                       {{ useMenuPublishLabels ? 'Menu Published' : 'Settings Published' }}
-                    </span>
-                  </div>
-                  <div
-                    v-if="showCacheVerificationStatus"
-                    class="flex gap-1 items-center text-xs py-1 px-3 rounded"
-                    :title="cacheVerificationDetail"
-                    :aria-label="cacheVerificationDetail || cacheVerificationLabel"
-                    :class="cacheVerificationPillClass"
-                  >
-                    <Loader2 v-if="isCacheVerificationSpinning" class="w-3 h-3 animate-spin" />
-                    <FileCheck v-else-if="cacheVerificationStatus.status === 'verified'" class="w-3 h-3" />
-                    <CircleAlert v-else class="w-3 h-3" />
-                    <span class="font-medium text-[10px]">
-                      {{ cacheVerificationLabel }}
                     </span>
                   </div>
                 </div>

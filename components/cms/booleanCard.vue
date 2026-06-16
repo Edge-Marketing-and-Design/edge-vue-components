@@ -72,8 +72,8 @@ const toggleValue = (handleChange) => {
         tabindex="0"
         :class="cn(
           props.stretch
-            ? 'group flex h-full flex-col justify-between rounded-xl border p-4 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
-            : 'group rounded-xl border p-4 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+            ? 'group flex h-full min-h-[68px] flex-col justify-center rounded-xl border px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+            : 'group min-h-[68px] rounded-xl border px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
           props.disabled
             ? 'cursor-not-allowed opacity-60'
             : 'cursor-pointer hover:border-slate-400 hover:bg-slate-50 dark:hover:border-slate-500 dark:hover:bg-slate-900/60',
@@ -86,12 +86,12 @@ const toggleValue = (handleChange) => {
         @keyup.enter.prevent="toggleValue(handleChange)"
         @keyup.space.prevent="toggleValue(handleChange)"
       >
-        <div class="flex items-start justify-between gap-4">
+        <div class="flex min-h-10 items-center justify-between gap-4">
           <div class="min-w-0 space-y-1 text-left">
             <FormLabel class="text-sm font-semibold leading-none text-foreground">
               {{ props.label }}
             </FormLabel>
-            <FormDescription v-if="$slots.default || props.description" class="text-sm text-muted-foreground">
+            <FormDescription v-if="$slots.default || props.description" class="text-xs leading-snug text-muted-foreground">
               <slot>
                 {{ props.description }}
               </slot>
