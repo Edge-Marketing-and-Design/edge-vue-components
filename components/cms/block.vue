@@ -1042,6 +1042,77 @@ const parseBlockContentModel = (html) => {
   return { values, meta }
 }
 
+const isTemplateV2BlockDoc = doc => Number(doc?.templateVersion) === 2
+
+const normalizeTemplateV2SchemaItem = (field, config = {}) => {
+  let rawConfig = { type: String(config || 'text') }
+  if (config && typeof config === 'object' && !Array.isArray(config))
+    rawConfig = config
+  const {
+    value: _value,
+    label,
+    title,
+    schema,
+    ...rest
+  } = rawConfig
+
+  const normalized = {
+    ...rest,
+    type: rawConfig.type || rawConfig.value || 'text',
+    title: title || label || '',
+  }
+
+  if (schema !== undefined)
+    normalized.schema = normalizeTemplateV2ArraySchema(schema)
+
+  return normalized
+}
+
+function normalizeTemplateV2ArraySchema(schema) {
+  if (Array.isArray(schema)) {
+    return schema
+      .filter(item => item?.field)
+      .map(item => ({
+        field: String(item.field),
+        ...normalizeTemplateV2SchemaItem(item.field, item),
+      }))
+  }
+
+  if (schema && typeof schema === 'object') {
+    return Object.entries(schema).map(([field, config]) => ({
+      field,
+      ...normalizeTemplateV2SchemaItem(field, config),
+    }))
+  }
+
+  return []
+}
+
+const buildMetaFromTemplateV2Schema = (schema = {}) => {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema))
+    return {}
+
+  return Object.entries(schema).reduce((acc, [field, config]) => {
+    acc[field] = normalizeTemplateV2SchemaItem(field, config)
+    return acc
+  }, {})
+}
+
+const collectTemplateV2SchemaDefaults = (schema = {}) => {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema))
+    return {}
+
+  return Object.entries(schema).reduce((acc, [field, config]) => {
+    if (config && typeof config === 'object' && Object.prototype.hasOwnProperty.call(config, 'value'))
+      acc[field] = edgeGlobal.dupObject(config.value)
+    else if (config?.type === 'array')
+      acc[field] = []
+    else
+      acc[field] = ''
+    return acc
+  }, {})
+}
+
 const buildUpdatedBlockDocFromContent = (content, sourceDoc = {}) => {
   const parsed = parseBlockContentModel(content)
   const previousValues = sourceDoc?.values || {}
@@ -1710,9 +1781,14 @@ const openEditor = async (event, options = {}) => {
     }
   }
   const blockData = edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[modelValue.value.blockId]
-  const templateMeta = blockData?.meta || modelValue.value?.meta || {}
+  const templateIsV2 = isTemplateV2BlockDoc(blockData) || isTemplateV2BlockDoc(modelValue.value)
+  const templateSchema = blockData?.schema || modelValue.value?.schema || {}
+  const templateMeta = templateIsV2
+    ? buildMetaFromTemplateV2Schema(templateSchema)
+    : (blockData?.meta || modelValue.value?.meta || {})
   const storedMeta = modelValue.value?.meta || {}
   const mergedMeta = edgeGlobal.dupObject(templateMeta) || {}
+  const schemaDefaults = templateIsV2 ? collectTemplateV2SchemaDefaults(templateSchema) : {}
 
   for (const key of Object.keys(mergedMeta)) {
     const storedField = storedMeta?.[key]
@@ -1738,13 +1814,17 @@ const openEditor = async (event, options = {}) => {
     }
   }
 
-  state.draft = JSON.parse(JSON.stringify(modelValue.value?.values || {}))
+  state.draft = JSON.parse(JSON.stringify({
+    ...schemaDefaults,
+    ...(blockData?.values || {}),
+    ...(modelValue.value?.values || {}),
+  }))
   state.meta = JSON.parse(JSON.stringify(mergedMeta || {}))
   ensureQueryItemsDefaults(state.meta)
   removeIgnoredMetaEntries(state.meta)
   state.metaUpdate = edgeGlobal.dupObject(mergedMeta) || {}
   removeIgnoredMetaEntries(state.metaUpdate)
-  if (blockData?.values) {
+  if (!templateIsV2 && blockData?.values) {
     for (const key of Object.keys(blockData.values)) {
       if (!(key in state.draft)) {
         state.draft[key] = blockData.values[key]
@@ -2222,13 +2302,13 @@ const getTagsFromPosts = computed(() => {
             />
             <edge-shad-button
               v-if="canShowPreviewContentControl"
-            type="button"
-            size="sm"
-            variant="ghost"
-            class="h-7 px-2 text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
-            :class="canShowPreviewDevControls ? '' : 'w-full justify-center'"
-            @click.stop.prevent="openEditor(null, { allowPreviewFieldEditor: true })"
-          >
+              type="button"
+              size="sm"
+              variant="ghost"
+              class="h-7 px-2 text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+              :class="canShowPreviewDevControls ? '' : 'w-full justify-center'"
+              @click.stop.prevent="openEditor(null, { allowPreviewFieldEditor: true })"
+            >
               <Pencil class="h-3.5 w-3.5" />
               {{ canShowPreviewDevControls ? 'Edit Block Contents' : 'Edit Block' }}
             </edge-shad-button>

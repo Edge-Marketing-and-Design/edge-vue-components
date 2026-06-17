@@ -1,5 +1,5 @@
 <script setup>
-import { Download, HelpCircle, History, Loader2, Maximize2, Monitor, RotateCcw, Smartphone, Tablet } from 'lucide-vue-next'
+import { Download, HelpCircle, History, Loader2, Maximize2, Monitor, RotateCcw, Smartphone, Tablet, Wand2 } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 const props = defineProps({
@@ -13,6 +13,7 @@ const emit = defineEmits(['head'])
 
 const edgeFirebase = inject('edgeFirebase')
 const { saveJsonFile } = useJsonFileSave()
+const { convertLegacyBlockToTemplateV2 } = useCmsTemplateV2Conversion()
 const { blocks: blockNewDocSchema } = useCmsNewDocs()
 const blockEditorPostPreviewCache = useState('edge-cms-block-editor-post-preview-cache', () => ({}))
 const BLOCK_INSTRUCTIONS_FIELD_KEY = 'Instructions'
@@ -54,6 +55,20 @@ const state = reactive({
   showHistoryDiffDialog: false,
   instructionsDialogOpen: false,
   aiInstructionsDialogOpen: false,
+  templateEditorTab: 'template',
+  templateJsonErrors: {},
+  templateVersionTouched: false,
+  v2DynamicContentDialogOpen: false,
+  v2DynamicField: {
+    field: '',
+    type: 'text',
+    label: '',
+    sourceName: '',
+    sourceType: 'manual',
+    sourcePath: '',
+    api: '',
+    apiField: '',
+  },
 })
 const isGlobalAdmin = computed(() => edgeGlobal.isAdminGlobal(edgeFirebase).value)
 const instructionsEnabledToggles = computed(() => {
@@ -89,9 +104,104 @@ const blockTypeOptions = [
   { name: 'Page', title: 'Page' },
   { name: 'Post', title: 'Post' },
 ]
+const v2DynamicFieldTypeOptions = [
+  { name: 'text', title: 'Text' },
+  { name: 'textarea', title: 'Textarea' },
+  { name: 'richtext', title: 'Rich Text' },
+  { name: 'image', title: 'Image' },
+  { name: 'array', title: 'Array' },
+]
+const v2DynamicSourceTypeOptions = [
+  { name: 'manual', title: 'Manual' },
+  { name: 'collection', title: 'Collection' },
+  { name: 'api', title: 'API' },
+]
 
 const normalizePreviewType = (value) => {
   return value === 'dark' ? 'dark' : 'light'
+}
+
+const normalizeTemplateVersion = (value) => {
+  return Number(value) === 2 ? 2 : 1
+}
+
+const blocks = computed(() => {
+  return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`] || null
+})
+
+const currentBlock = computed(() => blocks.value?.[props.blockId] || null)
+
+const hasExplicitTemplateVersion = (doc) => {
+  return !!doc && Object.prototype.hasOwnProperty.call(doc, 'templateVersion')
+}
+
+const isSavedTemplateV2Block = computed(() => {
+  if (props.blockId === 'new')
+    return false
+  return hasExplicitTemplateVersion(currentBlock.value) && normalizeTemplateVersion(currentBlock.value?.templateVersion) === 2
+})
+
+const isWorkingTemplateV2Doc = (doc) => {
+  if (!doc)
+    return false
+  if (doc.templateConversion)
+    return true
+  if (props.blockId === 'new')
+    return normalizeTemplateVersion(doc.templateVersion) === 2
+  if (state.templateVersionTouched)
+    return normalizeTemplateVersion(doc.templateVersion) === 2
+  return isSavedTemplateV2Block.value
+}
+
+const getWorkingTemplateVersion = (doc) => {
+  return isWorkingTemplateV2Doc(doc) ? 2 : 1
+}
+
+const hasLegacyInlineTags = (content) => {
+  return /\{\{\{#[A-Za-z0-9_-]+\s*\{/.test(String(content || ''))
+}
+
+const ensureTemplateV2Fields = (doc) => {
+  if (!doc || !isWorkingTemplateV2Doc(doc))
+    return
+  if (typeof doc.template !== 'string')
+    doc.template = typeof doc.content === 'string' ? doc.content : ''
+  if (!doc.schema || typeof doc.schema !== 'object' || Array.isArray(doc.schema))
+    doc.schema = {}
+  if (!doc.dataSources || typeof doc.dataSources !== 'object' || Array.isArray(doc.dataSources))
+    doc.dataSources = {}
+  if (!doc.values || typeof doc.values !== 'object' || Array.isArray(doc.values))
+    doc.values = {}
+}
+
+const formatJson = (value) => {
+  try {
+    return JSON.stringify(value || {}, null, 2)
+  }
+  catch {
+    return '{}'
+  }
+}
+
+const updateJsonDocField = (workingDoc, field, value) => {
+  try {
+    const parsed = value ? JSON.parse(value) : {}
+    const parsedIsObject = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    workingDoc[field] = parsedIsObject ? parsed : {}
+    if (state.templateJsonErrors[field])
+      delete state.templateJsonErrors[field]
+  }
+  catch (error) {
+    state.templateJsonErrors[field] = error?.message || 'Invalid JSON.'
+  }
+}
+
+const syncWorkingTemplateContent = (workingDoc, value) => {
+  if (!workingDoc)
+    return
+  workingDoc.content = value
+  if (isWorkingTemplateV2Doc(workingDoc))
+    workingDoc.template = value
 }
 
 function normalizeForCompare(value) {
@@ -205,12 +315,6 @@ const getPreviewSurfaceClass = (block) => {
 
 const previewSurfaceClass = computed(() => getPreviewSurfaceClass(state.previewBlock))
 
-const previewCanvasClass = computed(() => {
-  const content = String(state.previewBlock?.content || '')
-  const hasFixedContent = /\bfixed\b/.test(content)
-  return hasFixedContent ? 'h-[calc(100vh-370px)]' : 'h-[calc(100vh-370px)] overflow-y-auto'
-})
-
 const previewBlockTypes = computed(() => normalizeBlockTypes(state.editorWorkingDoc?.type))
 const previewNeedsPostContext = computed(() => previewBlockTypes.value.includes('Post'))
 
@@ -244,8 +348,8 @@ const loadPreviewRenderContext = async () => {
       return
     }
   }
-  catch (error) {
-    console.error('Failed to load block editor post preview context', error)
+  catch {
+    state.previewRenderContext = null
   }
 
   state.previewRenderContext = null
@@ -260,6 +364,10 @@ const PLACEHOLDERS = {
   textarea: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.',
   richtext: '<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>',
   image: 'https://imagedelivery.net/h7EjKG0X9kOxmLp41mxOng/f1f7f610-dfa9-4011-08a3-7a98d95e7500/thumbnail',
+}
+
+const isLegacyPlaceholderValue = (value) => {
+  return value === PLACEHOLDERS.text || value === PLACEHOLDERS.textarea || value === PLACEHOLDERS.richtext
 }
 
 const contentEditorRef = ref(null)
@@ -358,10 +466,113 @@ function insertBlockContentSnippet(snippet) {
     return
   const editor = contentEditorRef.value
   if (!editor || typeof editor.insertSnippet !== 'function') {
-    console.warn('Block content editor is not ready for snippet insertion')
+    edgeFirebase?.toast?.error?.('Block content editor is not ready.')
     return
   }
   editor.insertSnippet(snippet)
+}
+
+const resetV2DynamicField = () => {
+  state.v2DynamicField = {
+    field: '',
+    type: 'text',
+    label: '',
+    sourceName: '',
+    sourceType: 'manual',
+    sourcePath: '',
+    api: '',
+    apiField: '',
+  }
+}
+
+const openV2DynamicContentDialog = () => {
+  resetV2DynamicField()
+  state.v2DynamicContentDialogOpen = true
+}
+
+const sanitizeV2FieldName = (value) => {
+  return String(value || '')
+    .trim()
+    .replace(/[^A-Za-z0-9_$]+/g, ' ')
+    .replace(/\s+([A-Za-z0-9_$])/g, (_, char) => char.toUpperCase())
+    .replace(/^[^A-Za-z_$]+/, '')
+}
+
+const v2FieldExists = (workingDoc, field) => {
+  const normalizedField = String(field || '').trim()
+  if (!normalizedField)
+    return false
+  return Object.prototype.hasOwnProperty.call(workingDoc?.schema || {}, normalizedField)
+    || Object.prototype.hasOwnProperty.call(workingDoc?.dataSources || {}, normalizedField)
+}
+
+const buildV2DynamicSnippet = (fieldConfig) => {
+  const field = sanitizeV2FieldName(fieldConfig.field)
+  const sourceName = sanitizeV2FieldName(fieldConfig.sourceName || field)
+  if (fieldConfig.type === 'array' && fieldConfig.sourceType !== 'manual') {
+    return `{{#for item in source("${sourceName}")}}\n  {{ item.name }}\n{{/for}}`
+  }
+  if (fieldConfig.type === 'array')
+    return `{{#for item in ${field}}}\n  {{ item }}\n{{/for}}`
+  return `{{ ${field} }}`
+}
+
+const addV2DynamicContent = (workingDoc) => {
+  if (!workingDoc)
+    return
+
+  const field = sanitizeV2FieldName(state.v2DynamicField.field)
+  if (!field) {
+    edgeFirebase?.toast?.error?.('Enter a field name.')
+    return
+  }
+  if (v2FieldExists(workingDoc, field)) {
+    edgeFirebase?.toast?.error?.(`"${field}" already exists in this block.`)
+    return
+  }
+
+  ensureTemplateV2Fields(workingDoc)
+  const label = String(state.v2DynamicField.label || '').trim()
+  workingDoc.schema[field] = {
+    type: state.v2DynamicField.type,
+    label: label || field,
+  }
+  if (state.v2DynamicField.type === 'array') {
+    workingDoc.schema[field].schema = {}
+    if (state.v2DynamicField.sourceType !== 'manual') {
+      const sourceName = sanitizeV2FieldName(state.v2DynamicField.sourceName || field)
+      if (sourceName !== field && v2FieldExists(workingDoc, sourceName)) {
+        edgeFirebase?.toast?.error?.(`"${sourceName}" already exists in this block.`)
+        return
+      }
+      workingDoc.dataSources[sourceName] = {
+        type: state.v2DynamicField.sourceType,
+        value: [],
+      }
+      if (state.v2DynamicField.sourceType === 'collection')
+        workingDoc.dataSources[sourceName].path = String(state.v2DynamicField.sourcePath || '').trim()
+      if (state.v2DynamicField.sourceType === 'api') {
+        workingDoc.dataSources[sourceName].api = String(state.v2DynamicField.api || '').trim()
+        workingDoc.dataSources[sourceName].apiField = String(state.v2DynamicField.apiField || '').trim()
+      }
+    }
+  }
+
+  const snippet = buildV2DynamicSnippet({ ...state.v2DynamicField, field })
+  const currentContent = String(workingDoc.content || workingDoc.template || '')
+  const nextContent = currentContent
+    ? `${currentContent}\n${snippet}`
+    : snippet
+  syncWorkingTemplateContent(workingDoc, nextContent)
+  Object.assign(state.workingDoc, {
+    content: nextContent,
+    template: nextContent,
+    schema: workingDoc.schema,
+    dataSources: workingDoc.dataSources,
+  })
+  state.templateEditorTab = 'template'
+  state.v2DynamicContentDialogOpen = false
+  resetV2DynamicField()
 }
 
 const updateWorkingPreviewType = (nextValue) => {
@@ -704,7 +915,11 @@ const buildPreviewBlock = (workingDoc, parsed) => {
     name: workingDoc?.name || state.previewBlock?.name || '',
     previewType: normalizePreviewType(workingDoc?.previewType),
     content,
-    values: nextValues,
+    templateVersion: getWorkingTemplateVersion(workingDoc),
+    template: workingDoc?.template || '',
+    schema: edgeGlobal.dupObject(workingDoc?.schema || {}),
+    dataSources: edgeGlobal.dupObject(workingDoc?.dataSources || {}),
+    values: isWorkingTemplateV2Doc(workingDoc) ? edgeGlobal.dupObject(workingDoc?.values || {}) : nextValues,
     meta: nextMeta,
     synced: !!workingDoc?.synced,
   }
@@ -754,6 +969,17 @@ watch(headObject, (newHeadElements) => {
 }, { immediate: true, deep: true })
 
 const editorDocUpdates = (workingDoc) => {
+  if (workingDoc && props.blockId === 'new' && workingDoc.templateVersion === undefined)
+    workingDoc.templateVersion = 2
+  if (
+    workingDoc
+    && props.blockId === 'new'
+    && !workingDoc.templateConversion
+    && hasLegacyInlineTags(workingDoc.content)
+  ) {
+    convertWorkingDocToTemplateV2(workingDoc, { notify: false })
+  }
+  ensureTemplateV2Fields(workingDoc)
   let normalizedTypes = normalizeBlockTypes(workingDoc?.type)
   if (!normalizedTypes.length)
     normalizedTypes = ['Page']
@@ -764,10 +990,14 @@ const editorDocUpdates = (workingDoc) => {
   state.workingDoc = {
     ...parsed,
     type: normalizedTypes,
+    templateVersion: workingDoc?.templateVersion,
+    template: workingDoc?.template,
+    schema: workingDoc?.schema,
+    dataSources: workingDoc?.dataSources,
+    values: isWorkingTemplateV2Doc(workingDoc) ? workingDoc?.values : parsed.values,
   }
   state.previewBlock = buildPreviewBlock(workingDoc, parsed)
-  state.previewSourceValues = edgeGlobal.dupObject(parsed.values || {})
-  console.log('Editor workingDoc update:', state.workingDoc)
+  state.previewSourceValues = edgeGlobal.dupObject(isWorkingTemplateV2Doc(workingDoc) ? (workingDoc?.values || {}) : (parsed.values || {}))
 }
 
 const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -781,6 +1011,7 @@ const syncEditorStateFromBlockDoc = (doc) => {
   if (!normalizedTypes.length)
     normalizedTypes = ['Page']
   restoredDoc.type = normalizedTypes
+  ensureTemplateV2Fields(restoredDoc)
   if (!restoredDoc.docId)
     restoredDoc.docId = props.blockId
 
@@ -789,9 +1020,14 @@ const syncEditorStateFromBlockDoc = (doc) => {
   state.workingDoc = {
     ...parsed,
     type: normalizedTypes,
+    templateVersion: restoredDoc.templateVersion,
+    template: restoredDoc.template,
+    schema: restoredDoc.schema,
+    dataSources: restoredDoc.dataSources,
+    values: isWorkingTemplateV2Doc(restoredDoc) ? restoredDoc.values : parsed.values,
   }
   state.previewBlock = buildPreviewBlock(restoredDoc, parsed)
-  state.previewSourceValues = edgeGlobal.dupObject(parsed.values || {})
+  state.previewSourceValues = edgeGlobal.dupObject(isWorkingTemplateV2Doc(restoredDoc) ? (restoredDoc.values || {}) : (parsed.values || {}))
   state.editorHasUnsavedChanges = false
 
   const collectionPath = `${edgeGlobal.edgeState.organizationDocPath}/blocks`
@@ -801,16 +1037,11 @@ const syncEditorStateFromBlockDoc = (doc) => {
 }
 
 onBeforeMount(async () => {
-  console.log('Block Editor mounting - starting snapshots if needed')
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`]) {
     await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`)
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites`]) {
-    console.log('Starting sites snapshot for block editor')
     await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites`)
-  }
-  else {
-    console.log('Themes and Sites snapshots already started')
   }
   state.mounted = true
 })
@@ -907,12 +1138,6 @@ watch (sites, async (newSites) => {
   state.loading = false
 }, { immediate: true, deep: true })
 
-const blocks = computed(() => {
-  return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`] || null
-})
-
-const currentBlock = computed(() => blocks.value?.[props.blockId] || null)
-
 const currentBlockPath = computed(() => {
   const orgPath = String(edgeGlobal.edgeState.organizationDocPath || '').trim()
   const blockId = String(props.blockId || '').trim()
@@ -969,6 +1194,53 @@ const notifyError = (message) => {
   edgeFirebase?.toast?.error?.(message)
 }
 
+function convertWorkingDocToTemplateV2(workingDoc, options = {}) {
+  if (!workingDoc)
+    return
+
+  const parsed = blockModel(workingDoc.content || '')
+  const existingValues = {
+    ...(parsed.values || {}),
+    ...(state.previewBlock?.values || {}),
+    ...(workingDoc.values || {}),
+  }
+  const converted = convertLegacyBlockToTemplateV2(workingDoc.content || '')
+  const mergedValues = {
+    ...(converted.values || {}),
+    ...Object.entries(existingValues).reduce((acc, [key, value]) => {
+      if (value !== undefined && value !== null && value !== '' && !isLegacyPlaceholderValue(value))
+        acc[key] = value
+      return acc
+    }, {}),
+  }
+  state.templateVersionTouched = true
+  workingDoc.templateVersion = 2
+  workingDoc.template = converted.template
+  workingDoc.content = converted.template
+  workingDoc.schema = converted.schema
+  workingDoc.dataSources = converted.dataSources
+  workingDoc.values = mergedValues
+  workingDoc.templateConversion = converted.conversion
+  ensureTemplateV2Fields(workingDoc)
+  Object.assign(state.workingDoc, {
+    templateVersion: 2,
+    template: converted.template,
+    content: converted.template,
+    schema: converted.schema,
+    dataSources: converted.dataSources,
+    values: mergedValues,
+  })
+  state.previewBlock = buildPreviewBlock(workingDoc, parsed)
+  state.previewSourceValues = edgeGlobal.dupObject(mergedValues || {})
+  state.templateEditorTab = 'template'
+
+  const warningCount = converted.conversion?.warnings?.length || 0
+  if (warningCount)
+    notifyError(`Converted to Template v2 with ${warningCount} item${warningCount === 1 ? '' : 's'} to review.`)
+  else if (options.notify !== false)
+    notifySuccess('Converted to Template v2 draft.')
+}
+
 const getHistoryTimestampMs = (value) => {
   if (typeof value === 'number' && Number.isFinite(value))
     return value
@@ -1012,6 +1284,10 @@ const buildComparableBlockDiffDoc = (doc) => {
   return {
     name: doc.name ?? '',
     content: doc.content ?? '',
+    templateVersion: doc.templateVersion ?? 1,
+    template: doc.template ?? '',
+    schema: doc.schema ?? {},
+    dataSources: doc.dataSources ?? {},
     tags: Array.isArray(doc.tags) ? doc.tags : [],
     type: normalizeBlockTypes(doc.type, { fallbackToPage: false }),
     themes: Array.isArray(doc.themes) ? doc.themes : [],
@@ -1037,7 +1313,11 @@ const buildHistoryPreviewBlock = (doc) => {
     name: doc.name || '',
     previewType: normalizePreviewType(doc.previewType),
     content: doc.content || '',
-    values: edgeGlobal.dupObject(parsed.values || {}),
+    templateVersion: getWorkingTemplateVersion(doc),
+    template: doc.template || '',
+    schema: edgeGlobal.dupObject(doc.schema || {}),
+    dataSources: edgeGlobal.dupObject(doc.dataSources || {}),
+    values: isWorkingTemplateV2Doc(doc) ? edgeGlobal.dupObject(doc.values || {}) : edgeGlobal.dupObject(parsed.values || {}),
     meta: edgeGlobal.dupObject(parsed.meta || {}),
     synced: !!doc.synced,
   }
@@ -1240,7 +1520,11 @@ const buildBlockChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel 
     { key: 'themes', label: 'Allowed Themes' },
     { key: 'synced', label: 'Synced Block' },
     { key: 'previewType', label: 'Preview Surface', transform: value => normalizePreviewType(value) },
+    { key: 'templateVersion', label: 'Template Version', transform: value => normalizeTemplateVersion(value) },
     { key: 'content', label: 'Block Content' },
+    { key: 'template', label: 'Template v2 Markup' },
+    { key: 'schema', label: 'Template v2 Schema' },
+    { key: 'dataSources', label: 'Template v2 Data Sources' },
   ]
 
   fields.forEach((field) => {
@@ -1316,8 +1600,7 @@ const loadBlockHistory = async () => {
     state.historySelectedId = nextSelectedId
     syncHistoryPreviewBlock(selectedHistoryEntry.value)
   }
-  catch (error) {
-    console.error('Failed to load block history', error)
+  catch {
     state.historyItems = []
     state.historySelectedId = ''
     state.historyPreviewBlock = null
@@ -1363,8 +1646,7 @@ const restoreHistoryVersion = async () => {
     state.editorKey += 1
     notifySuccess(`Restored block from ${formatHistoryEntryLabel(historyEntry)}.`)
   }
-  catch (error) {
-    console.error('Failed to restore block history', error)
+  catch {
     state.historyError = 'Failed to restore this version.'
     notifyError('Failed to restore block history.')
   }
@@ -1531,77 +1813,235 @@ const exportCurrentBlock = async () => {
               </edge-shad-checkbox>
             </div>
           </div>
+          <div class="mb-3 flex flex-wrap items-end gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-slate-900 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100">
+            <div class="mb-5">
+              <span class="inline-flex rounded border border-slate-300 bg-white px-2 py-1 text-xs font-semibold uppercase tracking-wide text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                Template v{{ getWorkingTemplateVersion(slotProps.workingDoc) }}
+              </span>
+            </div>
+            <edge-shad-button
+              v-if="!isWorkingTemplateV2Doc(slotProps.workingDoc)"
+              type="button"
+              size="sm"
+              variant="outline"
+              class="mb-5 gap-2"
+              :disabled="isWorkingTemplateV2Doc(slotProps.workingDoc) || !slotProps.workingDoc.content"
+              @click="convertWorkingDocToTemplateV2(slotProps.workingDoc)"
+            >
+              <Wand2 class="h-4 w-4" />
+              Convert to Template v2
+            </edge-shad-button>
+            <div v-if="slotProps.workingDoc.templateConversion?.warnings?.length" class="mb-5 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              Review {{ slotProps.workingDoc.templateConversion.warnings.length }} conversion note{{ slotProps.workingDoc.templateConversion.warnings.length === 1 ? '' : 's' }} before saving.
+            </div>
+          </div>
           <div class="flex gap-4">
             <div class="w-1/2">
+              <div class="mb-3 flex flex-wrap items-center gap-2">
+                <edge-shad-button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  class="h-8 px-3 text-[11px] uppercase tracking-wide rounded border border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100"
+                  @click="state.instructionsDialogOpen = true"
+                >
+                  <HelpCircle class="mr-1 h-3.5 w-3.5" />
+                  Instructions
+                </edge-shad-button>
+                <edge-shad-button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  class="h-8 px-3 text-[11px] uppercase tracking-wide rounded border border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100"
+                  @click="state.aiInstructionsDialogOpen = true"
+                >
+                  <HelpCircle class="mr-1 h-3.5 w-3.5" />
+                  AI Instructions
+                </edge-shad-button>
+                <edge-shad-button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  class="h-8 px-3 text-[11px] uppercase tracking-wide rounded border border-slate-300 bg-slate-900 text-white dark:border-slate-700 dark:bg-slate-200 dark:text-slate-900 gap-2"
+                  @click="state.helpOpen = true"
+                >
+                  <HelpCircle class="w-4 h-4" />
+                  Block Help
+                </edge-shad-button>
+              </div>
+              <Tabs v-if="isWorkingTemplateV2Doc(slotProps.workingDoc)" v-model="state.templateEditorTab" class="mb-3 w-full">
+                <TabsList class="grid w-full grid-cols-3 rounded-sm border border-slate-300 bg-slate-200 dark:border-slate-700 dark:bg-slate-800">
+                  <TabsTrigger value="template" class="w-full text-xs text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
+                    Template
+                  </TabsTrigger>
+                  <TabsTrigger value="dataSources" class="w-full text-xs text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
+                    Data Sources
+                  </TabsTrigger>
+                  <TabsTrigger value="schema" class="w-full text-xs text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
+                    Schema
+                  </TabsTrigger>
+                </TabsList>
+                <TabsContent value="dataSources" class="mt-3">
+                  <edge-cms-code-editor
+                    :model-value="formatJson(slotProps.workingDoc.dataSources)"
+                    title="Data Sources (JSON)"
+                    language="json"
+                    name="dataSources"
+                    validate-json
+                    height="calc(100vh - 356px)"
+                    @update:model-value="updateJsonDocField(slotProps.workingDoc, 'dataSources', $event)"
+                  />
+                  <p v-if="state.templateJsonErrors.dataSources" class="mt-2 text-xs text-red-600">
+                    {{ state.templateJsonErrors.dataSources }}
+                  </p>
+                </TabsContent>
+                <TabsContent value="schema" class="mt-3">
+                  <edge-cms-code-editor
+                    :model-value="formatJson(slotProps.workingDoc.schema)"
+                    title="Schema (JSON)"
+                    language="json"
+                    name="schema"
+                    validate-json
+                    height="calc(100vh - 356px)"
+                    @update:model-value="updateJsonDocField(slotProps.workingDoc, 'schema', $event)"
+                  />
+                  <p v-if="state.templateJsonErrors.schema" class="mt-2 text-xs text-red-600">
+                    {{ state.templateJsonErrors.schema }}
+                  </p>
+                </TabsContent>
+              </Tabs>
               <edge-cms-code-editor
+                v-if="!isWorkingTemplateV2Doc(slotProps.workingDoc) || state.templateEditorTab === 'template'"
                 ref="contentEditorRef"
-                v-model="slotProps.workingDoc.content"
-                title="Block Content"
+                :model-value="slotProps.workingDoc.content"
+                :title="isWorkingTemplateV2Doc(slotProps.workingDoc) ? 'Template v2 Markup' : 'Block Content'"
                 language="handlebars"
                 name="content"
                 :enable-formatting="false"
                 height="calc(100vh - 316px)"
                 class="mb-0 flex-1"
+                @update:model-value="syncWorkingTemplateContent(slotProps.workingDoc, $event)"
                 @line-click="payload => handleEditorLineClick(payload, slotProps.workingDoc)"
               >
                 <template #end-actions>
-                  <div class="flex items-center gap-2">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger as-child>
-                        <edge-shad-button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          class="h-8 px-3 text-[11px] uppercase tracking-wide rounded border border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100"
-                        >
-                          Dynamic Content
-                        </edge-shad-button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" class="w-72">
-                        <DropdownMenuItem
-                          v-for="snippet in BLOCK_CONTENT_SNIPPETS"
-                          :key="snippet.label"
-                          class="cursor-pointer flex-col items-start gap-0.5"
-                          @click="insertBlockContentSnippet(snippet.snippet)"
-                        >
-                          <span class="text-sm font-medium">{{ snippet.label }}</span>
-                          <span class="text-xs text-muted-foreground whitespace-normal">{{ snippet.description }}</span>
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                    <edge-shad-button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      class="h-8 px-3 text-[11px] uppercase tracking-wide rounded border border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100"
-                      @click="state.instructionsDialogOpen = true"
-                    >
-                      <HelpCircle class="mr-1 h-3.5 w-3.5" />
-                      Instructions
-                    </edge-shad-button>
-                    <edge-shad-button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      class="h-8 px-3 text-[11px] uppercase tracking-wide rounded border border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100"
-                      @click="state.aiInstructionsDialogOpen = true"
-                    >
-                      <HelpCircle class="mr-1 h-3.5 w-3.5" />
-                      AI Instructions
-                    </edge-shad-button>
-                  </div>
+                  <DropdownMenu v-if="!isWorkingTemplateV2Doc(slotProps.workingDoc)">
+                    <DropdownMenuTrigger as-child>
+                      <edge-shad-button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        class="h-8 px-3 text-[11px] uppercase tracking-wide rounded border border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100"
+                      >
+                        Dynamic Content
+                      </edge-shad-button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" class="w-72">
+                      <DropdownMenuItem
+                        v-for="snippet in BLOCK_CONTENT_SNIPPETS"
+                        :key="snippet.label"
+                        class="cursor-pointer flex-col items-start gap-0.5"
+                        @click="insertBlockContentSnippet(snippet.snippet)"
+                      >
+                        <span class="text-sm font-medium">{{ snippet.label }}</span>
+                        <span class="text-xs text-muted-foreground whitespace-normal">{{ snippet.description }}</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                   <edge-shad-button
+                    v-else
                     type="button"
                     size="sm"
                     variant="ghost"
-                    class="h-8 px-3 text-[11px] uppercase tracking-wide rounded border border-slate-300 bg-slate-900 text-white dark:border-slate-700 dark:bg-slate-200 dark:text-slate-900 gap-2"
-                    @click="state.helpOpen = true"
+                    class="h-8 px-3 text-[11px] uppercase tracking-wide rounded border border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100"
+                    @click="openV2DynamicContentDialog"
                   >
-                    <HelpCircle class="w-4 h-4" />
-                    Block Help
+                    Dynamic Content
                   </edge-shad-button>
                 </template>
               </edge-cms-code-editor>
+              <div v-if="isWorkingTemplateV2Doc(slotProps.workingDoc) && slotProps.workingDoc.templateConversion?.warnings?.length" class="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                <div class="mb-1 font-semibold uppercase tracking-wide">
+                  Conversion Notes
+                </div>
+                <ul class="list-disc space-y-1 pl-4">
+                  <li v-for="warning in slotProps.workingDoc.templateConversion.warnings" :key="warning">
+                    {{ warning }}
+                  </li>
+                </ul>
+              </div>
+              <edge-shad-dialog v-model="state.v2DynamicContentDialogOpen">
+                <DialogContent class="max-w-[680px]">
+                  <DialogHeader>
+                    <DialogTitle>Add Dynamic Content</DialogTitle>
+                    <DialogDescription>
+                      Create a v2 field, update this block schema, and insert the matching template token.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div class="grid gap-3 md:grid-cols-2">
+                    <edge-shad-input
+                      v-model="state.v2DynamicField.field"
+                      name="v2DynamicFieldName"
+                      label="Field Name"
+                      placeholder="heading"
+                    />
+                    <edge-shad-select
+                      v-model="state.v2DynamicField.type"
+                      name="v2DynamicFieldType"
+                      label="Field Type"
+                      :items="v2DynamicFieldTypeOptions"
+                    />
+                    <edge-shad-input
+                      v-model="state.v2DynamicField.label"
+                      name="v2DynamicFieldLabel"
+                      label="Label"
+                      placeholder="Heading"
+                    />
+                    <edge-shad-select
+                      v-if="state.v2DynamicField.type === 'array'"
+                      v-model="state.v2DynamicField.sourceType"
+                      name="v2DynamicSourceType"
+                      label="Array Source"
+                      :items="v2DynamicSourceTypeOptions"
+                    />
+                    <edge-shad-input
+                      v-if="state.v2DynamicField.type === 'array' && state.v2DynamicField.sourceType !== 'manual'"
+                      v-model="state.v2DynamicField.sourceName"
+                      name="v2DynamicSourceName"
+                      label="Source Name"
+                      placeholder="agents"
+                    />
+                    <edge-shad-input
+                      v-if="state.v2DynamicField.type === 'array' && state.v2DynamicField.sourceType === 'collection'"
+                      v-model="state.v2DynamicField.sourcePath"
+                      name="v2DynamicSourcePath"
+                      label="Collection Path"
+                      placeholder="users"
+                    />
+                    <edge-shad-input
+                      v-if="state.v2DynamicField.type === 'array' && state.v2DynamicField.sourceType === 'api'"
+                      v-model="state.v2DynamicField.api"
+                      name="v2DynamicApi"
+                      label="API URL"
+                      placeholder="https://api.example.com/items"
+                    />
+                    <edge-shad-input
+                      v-if="state.v2DynamicField.type === 'array' && state.v2DynamicField.sourceType === 'api'"
+                      v-model="state.v2DynamicField.apiField"
+                      name="v2DynamicApiField"
+                      label="API Field"
+                      placeholder="data"
+                    />
+                  </div>
+                  <DialogFooter class="pt-4 flex justify-between">
+                    <edge-shad-button type="button" variant="outline" @click="state.v2DynamicContentDialogOpen = false">
+                      Cancel
+                    </edge-shad-button>
+                    <edge-shad-button type="button" class="bg-slate-800 text-white hover:bg-slate-700" @click="addV2DynamicContent(slotProps.workingDoc)">
+                      Add Field
+                    </edge-shad-button>
+                  </DialogFooter>
+                </DialogContent>
+              </edge-shad-dialog>
               <edge-shad-dialog v-model="state.instructionsDialogOpen">
                 <DialogContent class="max-w-[760px]">
                   <DialogHeader>
@@ -1651,25 +2091,25 @@ const exportCurrentBlock = async () => {
                 <span class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Viewport</span>
                 <div class="ml-auto flex shrink-0 items-center gap-2">
                   <div class="flex shrink-0 items-center gap-1 flex-nowrap">
-                  <edge-shad-select
-                    v-model="state.previewScale"
-                    :items="previewScaleOptions"
-                    placeholder="%"
-                    class="w-[84px] shrink-0"
-                    trigger-class="!h-7 min-h-7 px-2 py-1 text-xs"
-                  />
-                  <edge-shad-button
-                    v-for="option in previewViewportOptions"
-                    :key="option.id"
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    class="h-[28px] w-[28px] shrink-0 text-xs border transition-colors"
-                    :class="state.previewViewport === option.id ? 'bg-slate-700 text-white border-slate-700 shadow-sm dark:bg-slate-200 dark:text-slate-900 dark:border-slate-200' : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700 dark:hover:bg-slate-800'"
-                    @click="setPreviewViewport(option.id)"
-                  >
-                    <component :is="option.icon" class="w-3.5 h-3.5" />
-                  </edge-shad-button>
+                    <edge-shad-select
+                      v-model="state.previewScale"
+                      :items="previewScaleOptions"
+                      placeholder="%"
+                      class="w-[84px] shrink-0"
+                      trigger-class="!h-7 min-h-7 px-2 py-1 text-xs"
+                    />
+                    <edge-shad-button
+                      v-for="option in previewViewportOptions"
+                      :key="option.id"
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      class="h-[28px] w-[28px] shrink-0 text-xs border transition-colors"
+                      :class="state.previewViewport === option.id ? 'bg-slate-700 text-white border-slate-700 shadow-sm dark:bg-slate-200 dark:text-slate-900 dark:border-slate-200' : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:border-slate-700 dark:hover:bg-slate-800'"
+                      @click="setPreviewViewport(option.id)"
+                    >
+                      <component :is="option.icon" class="w-3.5 h-3.5" />
+                    </edge-shad-button>
                   </div>
                   <label v-if="previewAuthToggleVisible" class="inline-flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded-md border border-slate-300 bg-white/90 px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:bg-slate-800">
                     <Checkbox
