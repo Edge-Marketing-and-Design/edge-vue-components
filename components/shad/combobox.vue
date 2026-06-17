@@ -189,7 +189,7 @@ const triggerTitle = computed(() => {
 
 <template>
   <FormField :name="props.name">
-    <FormItem class="flex flex-col space-y-1">
+    <FormItem class="flex flex-col space-y-2">
       <FormLabel>{{ props.label }}</FormLabel>
       <Popover v-model:open="open">
         <PopoverTrigger as-child>
@@ -241,7 +241,7 @@ const triggerTitle = computed(() => {
           </Command>
         </PopoverContent>
       </Popover>
-      <FormDescription>
+      <FormDescription v-if="props.description">
         {{ props.description }}
       </FormDescription>
       <FormMessage />
