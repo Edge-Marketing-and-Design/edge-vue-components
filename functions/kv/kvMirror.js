@@ -148,6 +148,7 @@ function createKvMirrorHandler({
   makeMetadata,
   serialize = json,
   timeoutSeconds = 180,
+  canonicalMetadata = true,
 }) {
   return onDocumentWritten({ document, timeoutSeconds }, async (event) => {
     const after = event.data?.after
@@ -202,12 +203,12 @@ function createKvMirrorHandler({
 
     const serializedData = serialize(data)
     await safeKvOperation({
-      run: () => kv.put(canonicalKey, serializedData, { metadata: metaValue }),
+      run: () => kv.put(canonicalKey, serializedData, canonicalMetadata ? { metadata: metaValue } : undefined),
       payload: {
         op: 'put',
         key: canonicalKey,
         value: serializedData,
-        opts: { metadata: metaValue },
+        ...(canonicalMetadata ? { opts: { metadata: metaValue } } : {}),
         source: 'kvMirror',
       },
       label: `put:${canonicalKey}`,
@@ -283,6 +284,7 @@ function createKvMirrorHandlerFromFields({
   metadataKeys = [],
   metaKeyTruncate = {},
   serialize = json,
+  canonicalMetadata = true,
 }) {
   if (!uniqueKey || typeof uniqueKey !== 'string') {
     throw new Error('createKvMirrorHandlerFromFields requires uniqueKey (e.g. "{orgId}:{siteId}")')
@@ -389,6 +391,7 @@ function createKvMirrorHandlerFromFields({
     makeMetadata: metadataKeys.length ? makeMetadata : undefined,
     serialize,
     timeoutSeconds: 180,
+    canonicalMetadata,
   })
 }
 
