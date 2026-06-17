@@ -60,6 +60,47 @@ const { toast } = useToast()
 const edgeFirebase = inject('edgeFirebase')
 // const edgeGlobal = inject('edgeGlobal')
 
+const GEO_FIND_NOTIFICATION_TEMPLATE_ID = 'geo-find-notification'
+const geoFindNotificationTemplate = {
+  docId: GEO_FIND_NOTIFICATION_TEMPLATE_ID,
+  name: 'Geo Find Notification',
+  subject: 'Clearwater Expedition {{findStatusLabel}}: {{city}} - {{leadName}}',
+  html: [
+    '<div style="margin:0; padding:28px; background:#f3f6f8; font-family:Arial,Helvetica,sans-serif; color:#1f2933;">',
+    '  <div style="max-width:680px; margin:0 auto; background:#ffffff; border:1px solid #d8dee5; border-radius:6px; overflow:hidden;">',
+    '    <div style="background:#003e52; color:#ffffff; padding:22px 26px;">',
+    '      <div style="margin:0 0 7px; color:#c9d45e; font-size:11px; font-weight:700; letter-spacing:0.16em; text-transform:uppercase;">Clearwater Expedition</div>',
+    '      <h1 style="margin:0; font-size:22px; line-height:1.3;">{{findStatusLabel}}</h1>',
+    '      <p style="margin:8px 0 0; color:#d9e4e9; font-size:14px;">{{leadName}} submitted code {{code}} for {{city}}.</p>',
+    '    </div>',
+    '    <div style="padding:24px 26px 28px;">',
+    '      <p style="margin:0 0 20px;"><a href="{{geoLeadCmsUrl}}" style="display:inline-block; border-radius:4px; background:#003e52; color:#ffffff; font-size:13px; font-weight:700; line-height:1; padding:12px 16px; text-decoration:none;">Open Geo lead in Hub</a></p>',
+    '      {{#isInvalidFind}}<div style="margin:0 0 20px; border:1px solid #fecdd3; background:#fff1f2; color:#7f1d1d; border-radius:6px; padding:14px 16px; font-size:14px; line-height:1.55;">This registered phone number was not selected for this city/date when the code was submitted.</div>{{/isInvalidFind}}',
+    '      {{#isWinner}}<div style="margin:0 0 20px; border:1px solid #fde68a; background:#fffbeb; color:#78350f; border-radius:6px; padding:14px 16px; font-size:14px; line-height:1.55;">This submission was recorded as a valid winning find.</div>{{/isWinner}}',
+    '      {{{all_fields_html}}}',
+    '    </div>',
+    '  </div>',
+    '</div>',
+  ].join('\n'),
+  text: '{{findStatusLabel}}\n\n{{all_fields}}',
+  sampleData: {
+    findStatusLabel: 'Invalid Find',
+    isWinner: false,
+    isInvalidFind: true,
+    leadName: 'Taylor Demo',
+    leadEmail: 'taylor.demo@example.com',
+    leadPhone: '+14065550123',
+    city: 'Seeley Lake',
+    selectionDate: '2026-06-17',
+    code: 'SL-001',
+    submittedAt: 'Jun 17, 2026, 10:30 AM',
+    geoLeadCmsUrl: 'https://hub.clearwaterproperties.com/app/dashboard/geo?lead=14065550123',
+    recipientEmails: 'manager@example.com',
+  },
+  systemDefault: true,
+  geoFindNotificationTemplateVersion: 1,
+}
+
 const state = reactive({
   data: {},
   org: '',
@@ -646,7 +687,8 @@ const organizationName = computed(() => String(currentOrgData.value?.name || '')
           <TabsContent value="emailTemplates" class="mt-0 min-h-0 flex-1">
             <edge-email-templates
               :organization-id="targetOrganizationId"
-              protected-template-ids="lead-notification"
+              :protected-template-ids="['lead-notification', 'geo-find-notification']"
+              :system-templates="[geoFindNotificationTemplate]"
             />
           </TabsContent>
         </Tabs>

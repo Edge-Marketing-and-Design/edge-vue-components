@@ -11,6 +11,10 @@ const props = defineProps({
     type: [Array, String],
     default: () => [],
   },
+  systemTemplates: {
+    type: Array,
+    default: () => [],
+  },
 })
 
 const edgeFirebase = inject('edgeFirebase')
@@ -390,9 +394,21 @@ const ensureDefaultTemplate = async () => {
   if (!collectionPath.value)
     return
   const existing = collectionData.value?.[DEFAULT_TEMPLATE_ID]
-  if (existing)
-    return
-  await edgeFirebase.storeDoc(collectionPath.value, defaultTemplate, DEFAULT_TEMPLATE_ID)
+  if (!existing)
+    await edgeFirebase.storeDoc(collectionPath.value, defaultTemplate, DEFAULT_TEMPLATE_ID)
+
+  for (const template of props.systemTemplates || []) {
+    const docId = String(template?.docId || '').trim()
+    if (!docId || collectionData.value?.[docId])
+      continue
+    await edgeFirebase.storeDoc(collectionPath.value, {
+      ...edgeGlobal.dupObject(template),
+      docId,
+      systemDefault: template.systemDefault !== false,
+      doc_created_at: Date.now(),
+      doc_updated_at: Date.now(),
+    }, docId)
+  }
 }
 
 const createTemplate = async () => {
@@ -414,7 +430,7 @@ const saveTemplate = async () => {
   state.loading = true
   const payload = {
     ...edgeGlobal.dupObject(state.workingTemplate),
-    systemDefault: state.workingTemplate.docId === DEFAULT_TEMPLATE_ID,
+    systemDefault: isProtectedTemplate.value,
     sampleData: previewSampleData.value,
     doc_updated_at: Date.now(),
   }
