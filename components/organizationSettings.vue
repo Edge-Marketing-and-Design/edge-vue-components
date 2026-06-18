@@ -61,6 +61,7 @@ const edgeFirebase = inject('edgeFirebase')
 // const edgeGlobal = inject('edgeGlobal')
 
 const GEO_FIND_NOTIFICATION_TEMPLATE_ID = 'geo-find-notification'
+const GEO_INVALID_PHONE_TEMPLATE_ID = 'geo-invalid-phone'
 const geoFindNotificationTemplate = {
   docId: GEO_FIND_NOTIFICATION_TEMPLATE_ID,
   name: 'Geo Find Notification',
@@ -99,6 +100,58 @@ const geoFindNotificationTemplate = {
   },
   systemDefault: true,
   geoFindNotificationTemplateVersion: 1,
+}
+
+const geoInvalidPhoneTemplate = {
+  docId: GEO_INVALID_PHONE_TEMPLATE_ID,
+  name: 'Geo Invalid Phone',
+  subject: 'Please update your Clearwater Expedition phone number',
+  html: [
+    '<div style="margin:0; padding:28px; background:#f3f6f8; font-family:Arial,Helvetica,sans-serif; color:#1f2933;">',
+    '  <div style="max-width:680px; margin:0 auto; background:#ffffff; border:1px solid #d8dee5; border-radius:6px; overflow:hidden;">',
+    '    <div style="background:#003e52; color:#ffffff; padding:22px 26px;">',
+    '      <div style="margin:0 0 7px; color:#c9d45e; font-size:11px; font-weight:700; letter-spacing:0.16em; text-transform:uppercase;">Clearwater Expedition</div>',
+    '      <h1 style="margin:0; font-size:22px; line-height:1.3;">Please update your phone number</h1>',
+    '      <p style="margin:8px 0 0; color:#d9e4e9; font-size:14px;">We could not reach {{phone}} by text message.</p>',
+    '    </div>',
+    '    <div style="padding:24px 26px 28px; font-size:15px; line-height:1.65; color:#1f2933;">',
+    '      <p style="margin:0 0 16px;">Hi {{name}},</p>',
+    '      <p style="margin:0 0 16px;">We tried to send Clearwater Expedition text updates to {{phone}}, but the mobile carrier reported that the number could not be reached.</p>',
+    '      <p style="margin:0 0 20px;">To make sure you can receive selection notices and find instructions, please register again using a mobile number that can receive SMS text messages.</p>',
+    '      <p style="margin:0 0 20px;"><a href="{{registrationUrl}}" style="display:inline-block; border-radius:4px; background:#003e52; color:#ffffff; font-size:13px; font-weight:700; line-height:1; padding:12px 16px; text-decoration:none;">Register again</a></p>',
+    '      <p style="margin:0 0 18px;">If this number is correct, please check that the phone is active, has service, and can receive text messages.</p>',
+    '      {{#cityList}}<p style="margin:0; color:#64748b; font-size:13px;">Current city registration: {{cityList}}</p>{{/cityList}}',
+    '    </div>',
+    '  </div>',
+    '</div>',
+  ].join('\n'),
+  text: [
+    'Hi {{name}},',
+    '',
+    'We tried to send Clearwater Expedition text updates to {{phone}}, but the mobile carrier reported that the number could not be reached.',
+    '',
+    'To make sure you can receive selection notices and find instructions, please register again using a mobile number that can receive SMS text messages:',
+    '',
+    '{{registrationUrl}}',
+    '',
+    'If this number is correct, please check that the phone is active, has service, and can receive text messages.',
+    '',
+    '{{#cityList}}Current city registration: {{cityList}}{{/cityList}}',
+  ].join('\n'),
+  sampleData: {
+    name: 'Taylor Demo',
+    email: 'taylor.demo@example.com',
+    phone: '+14065550123',
+    phoneKey: '14065550123',
+    registrationUrl: 'https://expedition.clearwaterproperties.com',
+    cityList: 'Seeley Lake, Whitefish',
+    lastSmsStatus: 'undelivered',
+    lastSmsErrorCode: '30003',
+    lastSmsErrorMessage: 'Unreachable destination handset',
+    geoLeadCmsUrl: 'https://hub.clearwaterproperties.com/app/dashboard/geo?lead=14065550123',
+  },
+  systemDefault: true,
+  geoInvalidPhoneTemplateVersion: 1,
 }
 
 const state = reactive({
@@ -687,8 +740,8 @@ const organizationName = computed(() => String(currentOrgData.value?.name || '')
           <TabsContent value="emailTemplates" class="mt-0 min-h-0 flex-1">
             <edge-email-templates
               :organization-id="targetOrganizationId"
-              :protected-template-ids="['lead-notification', 'geo-find-notification']"
-              :system-templates="[geoFindNotificationTemplate]"
+              :protected-template-ids="['lead-notification', 'geo-find-notification', 'geo-invalid-phone']"
+              :system-templates="[geoFindNotificationTemplate, geoInvalidPhoneTemplate]"
             />
           </TabsContent>
         </Tabs>
