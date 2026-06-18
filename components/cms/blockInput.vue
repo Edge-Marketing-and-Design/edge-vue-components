@@ -11,6 +11,11 @@ const props = defineProps({
     type: String,
     required: true,
   },
+  placeholder: {
+    type: String,
+    required: false,
+    default: '',
+  },
   modelValue: {
     type: [Object, String, Array, Number, Boolean],
     required: true,
@@ -203,7 +208,7 @@ onBeforeMount(async () => {
       </edge-shad-dialog>
     </div>
     <div v-else-if="props.type === 'textarea'">
-      <edge-shad-textarea v-model="modelValue" :name="field" :label="label" />
+      <edge-shad-textarea v-model="modelValue" :name="field" :label="label" :placeholder="props.placeholder" />
     </div>
     <div v-else-if="props.type === 'array'">
       <edge-shad-tags v-model="modelValue" :label="label" :name="field" />
@@ -273,7 +278,7 @@ onBeforeMount(async () => {
       </div>
     </div>
     <div v-else>
-      <edge-shad-input v-model="modelValue" :name="field" :label="label" />
+      <edge-shad-input v-model="modelValue" :name="field" :label="label" :placeholder="props.placeholder" />
     </div>
   </div>
 </template>

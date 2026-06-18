@@ -21,6 +21,22 @@ const props = defineProps({
     type: Object,
     default: () => ({}),
   },
+  templateVersion: {
+    type: Number,
+    default: 1,
+  },
+  template: {
+    type: String,
+    default: '',
+  },
+  schema: {
+    type: Object,
+    default: () => ({}),
+  },
+  dataSources: {
+    type: Object,
+    default: () => ({}),
+  },
   theme: {
     type: Object,
     default: null,
@@ -81,6 +97,40 @@ const normalizeApiArrayData = (data) => {
     return values
 
   return [data]
+}
+
+const dataSourceToPreviewMetaConfig = (source) => {
+  if (!source || typeof source !== 'object' || Array.isArray(source))
+    return null
+
+  const cfg = {
+    ...source,
+  }
+
+  const collectionSource = source.type === 'collection' || source.collection || source.path || source.query || source.canonicalLookup
+  if (collectionSource) {
+    const hasSourceCollection = !!source.collection && typeof source.collection === 'object' && !Array.isArray(source.collection)
+    const sourceCollection = hasSourceCollection ? source.collection : {}
+    cfg.collection = {
+      ...sourceCollection,
+    }
+    const collectionKeys = ['path', 'baseKey', 'uniqueKey', 'canonicalLookup', 'query', 'order', 'orgLevel']
+    collectionKeys.forEach((key) => {
+      if (source[key] !== undefined)
+        cfg.collection[key] = source[key]
+    })
+  }
+
+  return cfg
+}
+
+const getRouteLastSegmentPreviewEntries = () => {
+  const metaEntries = Object.entries(props.meta || {})
+  const dataSourceEntries = Object.entries(props.dataSources || {})
+    .map(([field, source]) => [field, dataSourceToPreviewMetaConfig(source)])
+    .filter(([, cfg]) => !!cfg)
+
+  return [...metaEntries, ...dataSourceEntries]
 }
 
 // Build URL combining existing query string, template query, and runtime overrides
@@ -165,7 +215,7 @@ const fetchAllArrays = async (meta, baseValues) => {
 }
 
 const routeLastSegmentPreviewConfig = computed(() => {
-  const entries = Object.entries(props.meta || {})
+  const entries = getRouteLastSegmentPreviewEntries()
   for (const [field, cfg] of entries) {
     if (!cfg || typeof cfg !== 'object')
       continue
@@ -465,6 +515,12 @@ const finalValues = computed(() => {
   <edge-cms-block-render
     :theme="props.theme"
     :content="loadingRender(props.content)"
+    :template-version="props.templateVersion"
+    :template="props.template"
+    :schema="props.schema"
+    :data-sources="props.dataSources"
+    :site-id="props.siteId"
+    :route-last-segment="effectiveRouteLastSegment"
     :values="finalValues"
     :meta="runtimeMeta"
     :viewport-mode="props.viewportMode"

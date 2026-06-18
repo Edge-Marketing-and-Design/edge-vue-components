@@ -1774,14 +1774,22 @@ const resolveBlockForPreview = (block) => {
   if (typeof block === 'string' && blocksCollection.value?.[block]) {
     const libraryBlock = blocksCollection.value[block]
     return {
-      content: libraryBlock.content,
+      content: libraryBlock.content || libraryBlock.template || '',
+      templateVersion: Number(libraryBlock.templateVersion) === 2 ? 2 : 1,
+      template: libraryBlock.template || '',
+      schema: libraryBlock.schema || {},
+      dataSources: libraryBlock.dataSources || {},
       values: libraryBlock.values || EMPTY_PREVIEW_VALUES,
       meta: libraryBlock.meta || EMPTY_PREVIEW_META,
     }
   }
-  if (block.content) {
+  if (block.content || block.template) {
     return {
-      content: block.content,
+      content: block.content || block.template || '',
+      templateVersion: Number(block.templateVersion) === 2 ? 2 : 1,
+      template: block.template || '',
+      schema: block.schema || {},
+      dataSources: block.dataSources || {},
       values: block.values || EMPTY_PREVIEW_VALUES,
       meta: block.meta || EMPTY_PREVIEW_META,
     }
@@ -1789,7 +1797,11 @@ const resolveBlockForPreview = (block) => {
   if (block.blockId && blocksCollection.value?.[block.blockId]) {
     const libraryBlock = blocksCollection.value[block.blockId]
     return {
-      content: libraryBlock.content,
+      content: libraryBlock.content || libraryBlock.template || '',
+      templateVersion: Number(libraryBlock.templateVersion) === 2 ? 2 : 1,
+      template: libraryBlock.template || '',
+      schema: libraryBlock.schema || {},
+      dataSources: libraryBlock.dataSources || {},
       values: block.values || libraryBlock.values || EMPTY_PREVIEW_VALUES,
       meta: block.meta || libraryBlock.meta || EMPTY_PREVIEW_META,
     }
@@ -4101,6 +4113,10 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                                       :key="`${getTemplatePagePreviewKey(item.docId)}:${blockIdx}`"
                                       :site-id="selectedTemplatePreviewSiteId"
                                       :content="resolveTemplateBlockForPreview(item, blockRef).content"
+                                      :template-version="resolveTemplateBlockForPreview(item, blockRef).templateVersion"
+                                      :template="resolveTemplateBlockForPreview(item, blockRef).template"
+                                      :schema="resolveTemplateBlockForPreview(item, blockRef).schema"
+                                      :data-sources="resolveTemplateBlockForPreview(item, blockRef).dataSources"
                                       :values="resolveTemplateBlockForPreview(item, blockRef).values"
                                       :meta="resolveTemplateBlockForPreview(item, blockRef).meta"
                                       :theme="selectedTemplatePreviewTheme"
@@ -4757,6 +4773,10 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                                             :key="`${getSitePagePreviewKey(item.docId)}:${blockIdx}`"
                                             :site-id="props.site"
                                             :content="resolveTemplateBlockForPreview(item, blockRef).content"
+                                            :template-version="resolveTemplateBlockForPreview(item, blockRef).templateVersion"
+                                            :template="resolveTemplateBlockForPreview(item, blockRef).template"
+                                            :schema="resolveTemplateBlockForPreview(item, blockRef).schema"
+                                            :data-sources="resolveTemplateBlockForPreview(item, blockRef).dataSources"
                                             :values="resolveTemplateBlockForPreview(item, blockRef).values"
                                             :meta="resolveTemplateBlockForPreview(item, blockRef).meta"
                                             :theme="sitePreviewTheme"

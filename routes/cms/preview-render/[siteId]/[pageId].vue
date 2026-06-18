@@ -158,7 +158,11 @@ const resolveBlockForPreview = (blockRef) => {
   if (typeof blockRef === 'string' && blocksCollection.value?.[blockRef]) {
     const libraryBlock = blocksCollection.value[blockRef]
     return {
-      content: libraryBlock.content,
+      content: libraryBlock.content || libraryBlock.template || '',
+      templateVersion: Number(libraryBlock.templateVersion) === 2 ? 2 : 1,
+      template: libraryBlock.template || '',
+      schema: libraryBlock.schema || {},
+      dataSources: libraryBlock.dataSources || {},
       values: libraryBlock.values || EMPTY_PREVIEW_VALUES,
       meta: libraryBlock.meta || EMPTY_PREVIEW_META,
     }
@@ -169,7 +173,11 @@ const resolveBlockForPreview = (blockRef) => {
     return null
   if (block.content) {
     return {
-      content: block.content,
+      content: block.content || block.template || '',
+      templateVersion: Number(block.templateVersion) === 2 ? 2 : 1,
+      template: block.template || '',
+      schema: block.schema || {},
+      dataSources: block.dataSources || {},
       values: block.values || EMPTY_PREVIEW_VALUES,
       meta: block.meta || EMPTY_PREVIEW_META,
     }
@@ -177,7 +185,11 @@ const resolveBlockForPreview = (blockRef) => {
   if (block.blockId && blocksCollection.value?.[block.blockId]) {
     const libraryBlock = blocksCollection.value[block.blockId]
     return {
-      content: libraryBlock.content,
+      content: libraryBlock.content || libraryBlock.template || '',
+      templateVersion: Number(libraryBlock.templateVersion) === 2 ? 2 : 1,
+      template: libraryBlock.template || '',
+      schema: libraryBlock.schema || {},
+      dataSources: libraryBlock.dataSources || {},
       values: block.values || libraryBlock.values || EMPTY_PREVIEW_VALUES,
       meta: block.meta || libraryBlock.meta || EMPTY_PREVIEW_META,
     }
@@ -227,8 +239,8 @@ const previewBlockKey = (row, rowIndex, column, colIndex, blockIdx) => {
 const previewBlockKeys = computed(() => {
   const keys = []
   previewRows.value.forEach((row, rowIndex) => {
-    ;(row.columns || []).forEach((column, colIndex) => {
-      ;(column.blocks || []).forEach((blockRef, blockIdx) => {
+    (row.columns || []).forEach((column, colIndex) => {
+      (column.blocks || []).forEach((blockRef, blockIdx) => {
         if (resolveBlockForPreview(blockRef))
           keys.push(previewBlockKey(row, rowIndex, column, colIndex, blockIdx))
       })
@@ -404,6 +416,10 @@ watch(() => [organizationId.value, siteId.value, pageId.value, previewSignature.
                     :key="`${siteId}:${pageId}:${previewBlockKey(row, rowIndex, column, colIndex, blockIdx)}`"
                     :site-id="siteId"
                     :content="resolveBlockForPreview(blockRef).content"
+                    :template-version="resolveBlockForPreview(blockRef).templateVersion"
+                    :template="resolveBlockForPreview(blockRef).template"
+                    :schema="resolveBlockForPreview(blockRef).schema"
+                    :data-sources="resolveBlockForPreview(blockRef).dataSources"
                     :values="resolveBlockValuesForPreview(blockRef, previewBlockKey(row, rowIndex, column, colIndex, blockIdx))"
                     :meta="resolveBlockForPreview(blockRef).meta"
                     :theme="previewTheme"

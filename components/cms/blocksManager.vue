@@ -211,6 +211,7 @@ const blockImportDocIdResolver = ref(null)
 const blockImportConflictResolver = ref(null)
 const DEFAULT_BLOCK_IMPORT_ERROR_MESSAGE = 'Failed to import block JSON.'
 const OPTIONAL_BLOCK_IMPORT_KEYS = new Set(['previewType', 'type'])
+const TEMPLATE_V2_BLOCK_IMPORT_KEYS = new Set(['templateVersion', 'template', 'schema', 'dataSources'])
 
 const openAddBlockDialog = () => {
   resetAddBlockDialogState()
@@ -885,6 +886,29 @@ const getDocDefaultsFromSchema = (schema = {}) => {
 
 const getBlockDocDefaults = () => getDocDefaultsFromSchema(blockNewDocSchema.value || {})
 
+const normalizeImportedBlockVersion = (doc) => {
+  const normalizedVersion = Number(doc?.templateVersion) === 2 ? 2 : 1
+  doc.templateVersion = normalizedVersion
+
+  if (normalizedVersion === 2) {
+    if (typeof doc.template !== 'string')
+      doc.template = typeof doc.content === 'string' ? doc.content : ''
+    if (!isPlainObject(doc.schema))
+      doc.schema = {}
+    if (!isPlainObject(doc.dataSources))
+      doc.dataSources = {}
+    return doc
+  }
+
+  if (typeof doc.template !== 'string')
+    doc.template = ''
+  if (!isPlainObject(doc.schema))
+    doc.schema = {}
+  if (!isPlainObject(doc.dataSources))
+    doc.dataSources = {}
+  return doc
+}
+
 const slugifyBlockDocId = (value) => {
   return String(value || '')
     .trim()
@@ -951,8 +975,11 @@ const validateImportedBlockDoc = (doc) => {
   if (!isPlainObject(doc))
     throw new Error('Invalid block document. Expected an object.')
 
+  normalizeImportedBlockVersion(doc)
+
   const requiredKeys = Object.keys(blockNewDocSchema.value || {})
     .filter(key => !OPTIONAL_BLOCK_IMPORT_KEYS.has(key))
+    .filter(key => doc.templateVersion === 2 || !TEMPLATE_V2_BLOCK_IMPORT_KEYS.has(key))
   const missing = requiredKeys.filter(key => !Object.prototype.hasOwnProperty.call(doc, key))
   if (missing.length)
     throw new Error(`Missing required block key(s): ${missing.join(', ')}`)
@@ -1402,6 +1429,10 @@ const handleBlockImport = async (event) => {
                           :key="getPreviewSelectionKey(item.docId)"
                           :site-id="blockPreviewSiteId"
                           :content="item.content"
+                          :template-version="item.templateVersion"
+                          :template="item.template"
+                          :schema="item.schema"
+                          :data-sources="item.dataSources"
                           :values="item.values"
                           :meta="item.meta"
                           :theme="selectedPreviewTheme"
@@ -1584,6 +1615,10 @@ const handleBlockImport = async (event) => {
                               :key="getPreviewSelectionKey(getTemplatePreviewKey(template.docId))"
                               :site-id="blockPreviewSiteId"
                               :content="template.content"
+                              :template-version="template.templateVersion"
+                              :template="template.template"
+                              :schema="template.schema"
+                              :data-sources="template.dataSources"
                               :values="template.values"
                               :meta="template.meta"
                               :theme="selectedPreviewTheme"
@@ -1595,6 +1630,10 @@ const handleBlockImport = async (event) => {
                               v-if="!state.blocksLoaded.includes(getTemplatePreviewKey(template.docId))"
                               :key="`${getPreviewSelectionKey(getTemplatePreviewKey(template.docId))}:fallback`"
                               :content="loadingRender(template.content)"
+                              :template-version="template.templateVersion"
+                              :template="template.template"
+                              :schema="template.schema"
+                              :data-sources="template.dataSources"
                               :values="template.values"
                               :meta="template.meta"
                               :theme="selectedPreviewTheme"
@@ -1639,6 +1678,10 @@ const handleBlockImport = async (event) => {
                               :key="`${getPreviewSelectionKey(block.docId)}:existing-picker`"
                               :site-id="blockPreviewSiteId"
                               :content="block.content"
+                              :template-version="block.templateVersion"
+                              :template="block.template"
+                              :schema="block.schema"
+                              :data-sources="block.dataSources"
                               :values="block.values"
                               :meta="block.meta"
                               :theme="selectedPreviewTheme"
@@ -1650,6 +1693,10 @@ const handleBlockImport = async (event) => {
                               v-if="!state.blocksLoaded.includes(`existing:${block.docId}`)"
                               :key="`${getPreviewSelectionKey(block.docId)}:existing-picker:fallback`"
                               :content="loadingRender(block.content)"
+                              :template-version="block.templateVersion"
+                              :template="block.template"
+                              :schema="block.schema"
+                              :data-sources="block.dataSources"
                               :values="block.values"
                               :meta="block.meta"
                               :theme="selectedPreviewTheme"

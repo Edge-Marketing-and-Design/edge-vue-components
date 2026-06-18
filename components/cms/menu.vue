@@ -716,16 +716,24 @@ const EMPTY_PREVIEW_META = {}
 const resolveBlockForPreview = (block) => {
   if (!block)
     return null
-  if (block.content)
+  if (block.content || block.template)
     return {
-      content: block.content,
+      content: block.content || block.template || '',
+      templateVersion: Number(block.templateVersion) === 2 ? 2 : 1,
+      template: block.template || '',
+      schema: block.schema || {},
+      dataSources: block.dataSources || {},
       values: block.values || EMPTY_PREVIEW_VALUES,
       meta: block.meta || EMPTY_PREVIEW_META,
     }
   if (block.blockId && blocksCollection.value?.[block.blockId]) {
     const libraryBlock = blocksCollection.value[block.blockId]
     return {
-      content: libraryBlock.content,
+      content: libraryBlock.content || libraryBlock.template || '',
+      templateVersion: Number(libraryBlock.templateVersion) === 2 ? 2 : 1,
+      template: libraryBlock.template || '',
+      schema: libraryBlock.schema || {},
+      dataSources: libraryBlock.dataSources || {},
       values: block.values || libraryBlock.values || EMPTY_PREVIEW_VALUES,
       meta: block.meta || libraryBlock.meta || EMPTY_PREVIEW_META,
     }
@@ -1723,6 +1731,10 @@ const theme = computed(() => {
                                     <edge-cms-block-api
                                       v-if="resolveTemplateBlockForPreview(template, blockRef)"
                                       :content="resolveTemplateBlockForPreview(template, blockRef).content"
+                                      :template-version="resolveTemplateBlockForPreview(template, blockRef).templateVersion"
+                                      :template="resolveTemplateBlockForPreview(template, blockRef).template"
+                                      :schema="resolveTemplateBlockForPreview(template, blockRef).schema"
+                                      :data-sources="resolveTemplateBlockForPreview(template, blockRef).dataSources"
                                       :values="resolveTemplateBlockForPreview(template, blockRef).values"
                                       :meta="resolveTemplateBlockForPreview(template, blockRef).meta"
                                       :theme="theme"
@@ -1791,6 +1803,10 @@ const theme = computed(() => {
                                     <edge-cms-block-render
                                       v-if="resolveTemplateBlockForPreview(existingPage, blockRef)"
                                       :content="resolveTemplateBlockForPreview(existingPage, blockRef).content"
+                                      :template-version="resolveTemplateBlockForPreview(existingPage, blockRef).templateVersion"
+                                      :template="resolveTemplateBlockForPreview(existingPage, blockRef).template"
+                                      :schema="resolveTemplateBlockForPreview(existingPage, blockRef).schema"
+                                      :data-sources="resolveTemplateBlockForPreview(existingPage, blockRef).dataSources"
                                       :values="resolveTemplateBlockForPreview(existingPage, blockRef).values"
                                       :meta="resolveTemplateBlockForPreview(existingPage, blockRef).meta"
                                       :theme="theme"

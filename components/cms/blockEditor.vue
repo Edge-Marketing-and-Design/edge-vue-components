@@ -1,5 +1,5 @@
 <script setup>
-import { Download, HelpCircle, History, Loader2, Maximize2, Monitor, RotateCcw, Smartphone, Tablet, Wand2 } from 'lucide-vue-next'
+import { Code2, Download, HelpCircle, History, Loader2, Maximize2, Monitor, Plus, RotateCcw, Smartphone, Tablet, Trash2, Wand2 } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 const props = defineProps({
@@ -57,6 +57,18 @@ const state = reactive({
   aiInstructionsDialogOpen: false,
   templateEditorTab: 'template',
   templateJsonErrors: {},
+  templateRawJsonOpen: {
+    schema: false,
+    dataSources: false,
+  },
+  templateDeleteDialogOpen: false,
+  templateDeleteTarget: null,
+  dataSourceWizardOpen: false,
+  dataSourceWizardStep: 1,
+  dataSourceWizardError: '',
+  dataSourceWizardDraft: null,
+  dataSourceWizardMode: 'add',
+  dataSourceWizardOriginalName: '',
   templateVersionTouched: false,
   v2DynamicContentDialogOpen: false,
   v2DynamicField: {
@@ -109,13 +121,77 @@ const v2DynamicFieldTypeOptions = [
   { name: 'textarea', title: 'Textarea' },
   { name: 'richtext', title: 'Rich Text' },
   { name: 'image', title: 'Image' },
+  { name: 'money', title: 'Money' },
+  { name: 'number', title: 'Number' },
+  { name: 'integer', title: 'Integer' },
+  { name: 'date', title: 'Date' },
+  { name: 'datetime', title: 'Date & Time' },
+  { name: 'lower', title: 'Lowercase Text' },
+  { name: 'upper', title: 'Uppercase Text' },
+  { name: 'trim', title: 'Trimmed Text' },
+  { name: 'slug', title: 'Slug' },
+  { name: 'title', title: 'Title Case' },
+  { name: 'deslug', title: 'Deslug' },
   { name: 'array', title: 'Array' },
 ]
+const v2SchemaTypeOptions = [
+  { name: 'text', title: 'Text' },
+  { name: 'textarea', title: 'Textarea' },
+  { name: 'richtext', title: 'Rich Text' },
+  { name: 'image', title: 'Image' },
+  { name: 'number', title: 'Number' },
+  { name: 'array', title: 'Array' },
+  { name: 'boolean', title: 'Boolean' },
+  { name: 'select', title: 'Select' },
+]
+const v2SchemaFormatterOptions = [
+  { name: '', title: 'None' },
+  { name: 'money', title: 'Money' },
+  { name: 'number', title: 'Number' },
+  { name: 'integer', title: 'Integer' },
+  { name: 'date', title: 'Date' },
+  { name: 'datetime', title: 'Date & Time' },
+  { name: 'lower', title: 'Lowercase Text' },
+  { name: 'upper', title: 'Uppercase Text' },
+  { name: 'trim', title: 'Trimmed Text' },
+  { name: 'slug', title: 'Slug' },
+  { name: 'title', title: 'Title Case' },
+  { name: 'deslug', title: 'Deslug' },
+  { name: 'default', title: 'Default' },
+  { name: 'richtext', title: 'Rich Text' },
+]
+const v2InlineFormatterFieldTypes = new Set([
+  'money',
+  'number',
+  'integer',
+  'date',
+  'datetime',
+  'lower',
+  'upper',
+  'trim',
+  'slug',
+  'title',
+  'deslug',
+  'richtext',
+])
+const v2DynamicFieldSchemaTypeMap = {
+  money: 'number',
+  integer: 'number',
+  date: 'text',
+  datetime: 'text',
+  lower: 'text',
+  upper: 'text',
+  trim: 'text',
+  slug: 'text',
+  title: 'text',
+  deslug: 'text',
+}
 const v2DynamicSourceTypeOptions = [
   { name: 'manual', title: 'Manual' },
   { name: 'collection', title: 'Collection' },
   { name: 'api', title: 'API' },
 ]
+const v2DataSourceTypeOptions = v2DynamicSourceTypeOptions
 
 const normalizePreviewType = (value) => {
   return value === 'dark' ? 'dark' : 'light'
@@ -170,8 +246,6 @@ const ensureTemplateV2Fields = (doc) => {
     doc.schema = {}
   if (!doc.dataSources || typeof doc.dataSources !== 'object' || Array.isArray(doc.dataSources))
     doc.dataSources = {}
-  if (!doc.values || typeof doc.values !== 'object' || Array.isArray(doc.values))
-    doc.values = {}
 }
 
 const formatJson = (value) => {
@@ -193,6 +267,756 @@ const updateJsonDocField = (workingDoc, field, value) => {
   }
   catch (error) {
     state.templateJsonErrors[field] = error?.message || 'Invalid JSON.'
+  }
+}
+
+const titleFromKey = (value) => {
+  return String(value || '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .trim()
+    .replace(/\b\w/g, char => char.toUpperCase())
+}
+
+function sanitizeV2FieldName(value) {
+  return String(value || '')
+    .trim()
+    .replace(/[^A-Za-z0-9_$]+/g, ' ')
+    .replace(/\s+([A-Za-z0-9_$])/g, (_, char) => char.toUpperCase())
+    .replace(/^[^A-Za-z_$]+/, '')
+}
+
+const notifyTemplateV2EditorError = (message) => {
+  edgeFirebase?.toast?.error?.(message)
+}
+
+const createTemplateV2DataSourceWizardDraft = () => ({
+  sourceName: 'items',
+  type: 'collection',
+  api: '',
+  apiField: 'data',
+  apiQuery: '',
+  path: '',
+  baseKey: '',
+  uniqueKey: '{orgId}',
+  canonicalLookupKey: '',
+  limit: '',
+  queryItems: [
+    { key: '', value: '' },
+  ],
+  previewQueryItems: [],
+  filters: [],
+  sort: [],
+  valueJson: '[]',
+  controls: [],
+})
+
+const v2DataSourceScopeOptions = [
+  { name: '{orgId}', title: 'Organization level' },
+  { name: '{orgId}:{siteId}', title: 'Site level' },
+]
+
+const v2DataSourceFilterOperatorOptions = [
+  { name: '==', title: 'Equals' },
+  { name: '!=', title: 'Does Not Equal' },
+  { name: '>', title: 'Greater Than' },
+  { name: '>=', title: 'Greater Than Or Equal' },
+  { name: '<', title: 'Less Than' },
+  { name: '<=', title: 'Less Than Or Equal' },
+  { name: 'array-contains', title: 'Array Contains' },
+  { name: 'in', title: 'In List' },
+  { name: 'not-in', title: 'Not In List' },
+  { name: 'array-contains-any', title: 'Array Contains Any' },
+  { name: 'array-contains-all', title: 'Array Contains All' },
+]
+
+const v2DataSourceFilterArrayValueOperators = new Set([
+  'in',
+  'not-in',
+  'array-contains-any',
+  'array-contains-all',
+])
+
+const getV2DataSourceFilterValueLabel = (operator) => {
+  return v2DataSourceFilterArrayValueOperators.has(String(operator || '').trim().toLowerCase()) ? 'Values' : 'Value'
+}
+
+const getV2DataSourceFilterValuePlaceholder = (operator) => {
+  return v2DataSourceFilterArrayValueOperators.has(String(operator || '').trim().toLowerCase()) ? 'Add values' : 'published'
+}
+
+const getV2DataSourceFilterValueHelper = (operator) => {
+  const normalizedOperator = String(operator || '').trim().toLowerCase()
+  if (v2DataSourceFilterArrayValueOperators.has(normalizedOperator))
+    return 'Add each value separately. These are saved as an array.'
+  if (normalizedOperator === 'array-contains')
+    return 'Enter one value to match inside an array field.'
+  return ''
+}
+
+const isV2DataSourceFilterArrayOperator = (operator) => {
+  return v2DataSourceFilterArrayValueOperators.has(String(operator || '').trim().toLowerCase())
+}
+
+const v2DataSourceSortDirectionOptions = [
+  { name: 'asc', title: 'Ascending' },
+  { name: 'desc', title: 'Descending' },
+]
+
+const v2DataSourceControlTypeOptions = [
+  { name: 'text', title: 'Text Input' },
+  { name: 'select', title: 'Select' },
+]
+
+const v2DataSourceControlOptionModeOptions = [
+  { name: 'manual', title: 'Manual Options' },
+  { name: 'collection', title: 'Collection Options' },
+]
+
+const getV2DataSourceControlKeyLabel = (type) => {
+  if (type === 'api')
+    return 'Query String Key'
+  if (type === 'collection')
+    return 'Indexed Lookup Field'
+  return 'Control Key'
+}
+
+const getV2DataSourceControlKeyPlaceholder = (type) => {
+  if (type === 'api')
+    return 'filter[status]'
+  if (type === 'collection')
+    return 'status'
+  return 'filterKey'
+}
+
+const getV2DataSourceControlKeyHelper = (type) => {
+  if (type === 'api')
+    return 'This becomes the query string parameter sent to the API when the page editor sets this control.'
+  if (type === 'collection')
+    return 'Choose a field that is indexed for fast filtering. This narrows the list before records are returned.'
+  return 'This is the key used to store the editor control value for this manual source.'
+}
+
+const dataSourceWizardStepItems = [
+  { step: 1, title: 'Source' },
+  { step: 2, title: 'Location' },
+  { step: 3, title: 'Filtering' },
+  { step: 4, title: 'Controls' },
+  { step: 5, title: 'Review' },
+]
+
+const resetTemplateV2DataSourceWizard = () => {
+  state.dataSourceWizardStep = 1
+  state.dataSourceWizardError = ''
+  state.dataSourceWizardDraft = createTemplateV2DataSourceWizardDraft()
+  state.dataSourceWizardMode = 'add'
+  state.dataSourceWizardOriginalName = ''
+}
+
+const openTemplateV2DataSourceWizard = () => {
+  resetTemplateV2DataSourceWizard()
+  state.dataSourceWizardOpen = true
+}
+
+const objectToMapRows = (value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return []
+  return Object.entries(value).map(([key, itemValue]) => ({
+    key,
+    value: typeof itemValue === 'string' ? itemValue : JSON.stringify(itemValue),
+  }))
+}
+
+const stringifyWizardValue = (value) => {
+  if (value === undefined || value === null)
+    return ''
+  if (typeof value === 'string')
+    return value
+  return JSON.stringify(value)
+}
+
+const parseWizardValue = (value) => {
+  if (Array.isArray(value))
+    return value
+  const trimmedValue = String(value ?? '').trim()
+  if (!trimmedValue)
+    return ''
+  try {
+    return JSON.parse(trimmedValue)
+  }
+  catch {
+    return trimmedValue
+  }
+}
+
+const queryArrayToFilterRows = (value) => {
+  if (!Array.isArray(value))
+    return []
+  return value.map(item => ({
+    field: String(item?.field || '').trim(),
+    operator: String(item?.operator || '==').trim() || '==',
+    value: (isV2DataSourceFilterArrayOperator(item?.operator) && Array.isArray(item?.value)) ? item.value : stringifyWizardValue(item?.value),
+  }))
+}
+
+const getV2DataSourceFilterArrayValues = (value) => {
+  if (Array.isArray(value))
+    return value.map(item => String(item || '').trim()).filter(Boolean)
+  const trimmedValue = String(value ?? '').trim()
+  if (!trimmedValue)
+    return []
+  try {
+    const parsed = JSON.parse(trimmedValue)
+    if (Array.isArray(parsed))
+      return parsed.map(item => String(item || '').trim()).filter(Boolean)
+  }
+  catch {}
+  return trimmedValue.split(',').map(item => item.trim()).filter(Boolean)
+}
+
+const updateV2DataSourceFilterArrayValues = (row, value) => {
+  if (!row)
+    return
+  row.value = Array.isArray(value) ? value.map(item => String(item || '').trim()).filter(Boolean) : []
+}
+
+const orderArrayToSortRows = (value) => {
+  if (!Array.isArray(value))
+    return []
+  return value.map(item => ({
+    field: String(item?.field || '').trim(),
+    direction: String(item?.direction || 'asc').trim().toLowerCase() === 'desc' ? 'desc' : 'asc',
+  }))
+}
+
+const controlsObjectToRows = (value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return []
+  return Object.entries(value).map(([key, control]) => {
+    const normalizedControl = (control && typeof control === 'object' && !Array.isArray(control)) ? control : {}
+    const manualOptions = Array.isArray(normalizedControl.options) ? normalizedControl.options : []
+    const hasCollectionOptions = typeof normalizedControl.options === 'string' || normalizedControl.sourceType === 'collection' || !!normalizedControl.collection
+    return {
+      key,
+      title: normalizedControl.title || normalizedControl.label || titleFromKey(key),
+      input: normalizedControl.input || normalizedControl.type || ((hasCollectionOptions || manualOptions.length) ? 'select' : 'text'),
+      placeholder: normalizedControl.placeholder || '',
+      optionMode: hasCollectionOptions ? 'collection' : 'manual',
+      options: manualOptions.map(option => ({
+        label: String(option?.label ?? option?.title ?? ''),
+        value: String(option?.value ?? option?.name ?? ''),
+      })),
+      optionsCollection: typeof normalizedControl.options === 'string' ? normalizedControl.options : (normalizedControl.collection || ''),
+      optionsKey: normalizedControl.optionsKey || 'label',
+      optionsValue: normalizedControl.optionsValue || 'value',
+      extra: edgeGlobal.dupObject(normalizedControl),
+    }
+  })
+}
+
+const inferTemplateV2DataSourceType = (source) => {
+  if (source?.type)
+    return source.type
+  if (source?.api)
+    return 'api'
+  if (source?.path || source?.collection)
+    return 'collection'
+  return 'manual'
+}
+
+const createTemplateV2DataSourceWizardDraftFromSource = (sourceName, source = {}) => {
+  const sourceType = inferTemplateV2DataSourceType(source)
+  return {
+    sourceName,
+    type: sourceType,
+    api: source.api || '',
+    apiField: source.apiField || 'data',
+    apiQuery: source.apiQuery || '',
+    path: source.path || source.collection?.path || '',
+    baseKey: source.baseKey || source.collection?.baseKey || '',
+    uniqueKey: source.uniqueKey || source.collection?.uniqueKey || '{orgId}',
+    canonicalLookupKey: source.canonicalLookup?.key || source.collection?.canonicalLookup?.key || '',
+    limit: source.limit == null ? '' : String(source.limit),
+    queryItems: objectToMapRows(source.queryItems).length ? objectToMapRows(source.queryItems) : [{ key: '', value: '' }],
+    previewQueryItems: objectToMapRows(source.previewQueryItems),
+    filters: queryArrayToFilterRows(source.query || source.collection?.query || []),
+    sort: orderArrayToSortRows(source.order || source.collection?.order || []),
+    valueJson: JSON.stringify(source.value ?? [], null, 2),
+    controls: controlsObjectToRows(source.controls || {}),
+  }
+}
+
+const openTemplateV2DataSourceWizardForEdit = (sourceName, source) => {
+  state.dataSourceWizardStep = 1
+  state.dataSourceWizardError = ''
+  state.dataSourceWizardMode = 'edit'
+  state.dataSourceWizardOriginalName = sourceName
+  state.dataSourceWizardDraft = createTemplateV2DataSourceWizardDraftFromSource(sourceName, source)
+  state.dataSourceWizardOpen = true
+}
+
+const closeTemplateV2DataSourceWizard = () => {
+  state.dataSourceWizardOpen = false
+  state.dataSourceWizardError = ''
+}
+
+const addTemplateV2WizardMapRow = (field) => {
+  if (!state.dataSourceWizardDraft)
+    resetTemplateV2DataSourceWizard()
+  state.dataSourceWizardDraft[field].push({ key: '', value: '' })
+}
+
+const removeTemplateV2WizardMapRow = (field, index) => {
+  if (!Array.isArray(state.dataSourceWizardDraft?.[field]))
+    return
+  state.dataSourceWizardDraft[field].splice(index, 1)
+}
+
+const addTemplateV2WizardFilterRow = () => {
+  if (!state.dataSourceWizardDraft)
+    resetTemplateV2DataSourceWizard()
+  state.dataSourceWizardDraft.filters.push({ field: '', operator: '==', value: '' })
+}
+
+const removeTemplateV2WizardFilterRow = (index) => {
+  if (!Array.isArray(state.dataSourceWizardDraft?.filters))
+    return
+  state.dataSourceWizardDraft.filters.splice(index, 1)
+}
+
+const addTemplateV2WizardSortRow = () => {
+  if (!state.dataSourceWizardDraft)
+    resetTemplateV2DataSourceWizard()
+  state.dataSourceWizardDraft.sort.push({ field: '', direction: 'asc' })
+}
+
+const removeTemplateV2WizardSortRow = (index) => {
+  if (!Array.isArray(state.dataSourceWizardDraft?.sort))
+    return
+  state.dataSourceWizardDraft.sort.splice(index, 1)
+}
+
+const addTemplateV2WizardControlRow = () => {
+  if (!state.dataSourceWizardDraft)
+    resetTemplateV2DataSourceWizard()
+  state.dataSourceWizardDraft.controls.push({
+    key: '',
+    title: '',
+    input: 'text',
+    placeholder: '',
+    optionMode: 'manual',
+    options: [],
+    optionsCollection: '',
+    optionsKey: 'label',
+    optionsValue: 'value',
+  })
+}
+
+const removeTemplateV2WizardControlRow = (index) => {
+  if (!Array.isArray(state.dataSourceWizardDraft?.controls))
+    return
+  state.dataSourceWizardDraft.controls.splice(index, 1)
+}
+
+const addTemplateV2WizardControlOptionRow = (control) => {
+  if (!Array.isArray(control.options))
+    control.options = []
+  control.options.push({ label: '', value: '' })
+}
+
+const removeTemplateV2WizardControlOptionRow = (control, index) => {
+  if (!Array.isArray(control?.options))
+    return
+  control.options.splice(index, 1)
+}
+
+const mapRowsToObject = (rows = []) => {
+  return rows.reduce((acc, row) => {
+    const key = String(row?.key || '').trim()
+    if (!key)
+      return acc
+    acc[key] = String(row?.value ?? '')
+    return acc
+  }, {})
+}
+
+const filterRowsToQueryArray = (rows = []) => {
+  return rows.reduce((acc, row) => {
+    const field = String(row?.field || '').trim()
+    if (!field)
+      return acc
+    acc.push({
+      field,
+      operator: String(row?.operator || '==').trim() || '==',
+      value: parseWizardValue(row?.value),
+    })
+    return acc
+  }, [])
+}
+
+const sortRowsToOrderArray = (rows = []) => {
+  return rows.reduce((acc, row) => {
+    const field = String(row?.field || '').trim()
+    if (!field)
+      return acc
+    acc.push({
+      field,
+      direction: String(row?.direction || 'asc').trim().toLowerCase() === 'desc' ? 'desc' : 'asc',
+    })
+    return acc
+  }, [])
+}
+
+const controlRowsToObject = (rows = []) => {
+  return rows.reduce((acc, row) => {
+    const key = sanitizeV2FieldName(row?.key)
+    if (!key)
+      return acc
+    const control = (row?.extra && typeof row.extra === 'object' && !Array.isArray(row.extra))
+      ? edgeGlobal.dupObject(row.extra)
+      : {}
+    Object.assign(control, {
+      field: key,
+      title: String(row?.title || '').trim() || titleFromKey(key),
+    })
+    const input = String(row?.input || '').trim()
+    if (input)
+      control.type = input
+    const placeholder = String(row?.placeholder || '').trim()
+    if (placeholder)
+      control.placeholder = placeholder
+    if (control.type === 'select') {
+      control.optionsKey = String(row?.optionsKey || 'label').trim() || 'label'
+      control.optionsValue = String(row?.optionsValue || 'value').trim() || 'value'
+      if (row?.optionMode === 'collection') {
+        const optionsCollection = String(row?.optionsCollection || '').trim()
+        if (optionsCollection)
+          control.options = optionsCollection
+      }
+      else {
+        const options = (Array.isArray(row?.options) ? row.options : []).reduce((optionAcc, option) => {
+          const label = String(option?.label || '').trim()
+          const value = String(option?.value || '').trim()
+          if (!label && !value)
+            return optionAcc
+          optionAcc.push({
+            label: label || value,
+            value: value || label,
+          })
+          return optionAcc
+        }, [])
+        if (options.length)
+          control.options = options
+      }
+    }
+    acc[key] = control
+    return acc
+  }, {})
+}
+
+const parseWizardJsonField = (field, fallback) => {
+  const raw = String(state.dataSourceWizardDraft?.[field] || '').trim()
+  if (!raw)
+    return fallback
+  return JSON.parse(raw)
+}
+
+const buildTemplateV2WizardDataSource = () => {
+  const draft = state.dataSourceWizardDraft || createTemplateV2DataSourceWizardDraft()
+  const source = {
+    type: draft.type || 'collection',
+  }
+
+  if (source.type === 'api') {
+    source.api = String(draft.api || '').trim()
+    source.apiField = String(draft.apiField || '').trim()
+    if (String(draft.apiQuery || '').trim())
+      source.apiQuery = String(draft.apiQuery || '').trim()
+  }
+  else if (source.type === 'collection') {
+    source.path = String(draft.path || '').trim()
+    if (String(draft.baseKey || '').trim())
+      source.baseKey = String(draft.baseKey || '').trim()
+    source.uniqueKey = String(draft.uniqueKey || '').trim() || '{orgId}'
+    const canonicalLookupKey = String(draft.canonicalLookupKey || '').trim()
+    if (canonicalLookupKey)
+      source.canonicalLookup = { key: canonicalLookupKey }
+    const query = filterRowsToQueryArray(draft.filters)
+    if (Array.isArray(query) && query.length)
+      source.query = query
+    const order = sortRowsToOrderArray(draft.sort)
+    if (Array.isArray(order) && order.length)
+      source.order = order
+  }
+
+  const queryItems = mapRowsToObject(draft.queryItems)
+  if (Object.keys(queryItems).length)
+    source.queryItems = queryItems
+  const previewQueryItems = mapRowsToObject(draft.previewQueryItems)
+  if (Object.keys(previewQueryItems).length)
+    source.previewQueryItems = previewQueryItems
+
+  const limit = Number(draft.limit)
+  if (Number.isFinite(limit) && limit > 0)
+    source.limit = Math.floor(limit)
+
+  const value = parseWizardJsonField('valueJson', [])
+  source.value = value
+
+  const controls = controlRowsToObject(draft.controls)
+  if (controls && typeof controls === 'object' && !Array.isArray(controls) && Object.keys(controls).length)
+    source.controls = controls
+
+  return source
+}
+
+const previewTemplateV2WizardDataSourceJson = computed(() => {
+  try {
+    return JSON.stringify(buildTemplateV2WizardDataSource(), null, 2)
+  }
+  catch {
+    return '{}'
+  }
+})
+
+const validateTemplateV2WizardStep = () => {
+  const draft = state.dataSourceWizardDraft || {}
+  state.dataSourceWizardError = ''
+  if (state.dataSourceWizardStep === 1) {
+    const sourceName = sanitizeV2FieldName(draft.sourceName)
+    if (!sourceName) {
+      state.dataSourceWizardError = 'Enter a source name.'
+      return false
+    }
+    return true
+  }
+  if (state.dataSourceWizardStep === 2) {
+    if (draft.type === 'api' && !String(draft.api || '').trim()) {
+      state.dataSourceWizardError = 'Enter the API URL.'
+      return false
+    }
+    if (draft.type === 'collection' && !String(draft.path || '').trim()) {
+      state.dataSourceWizardError = 'Enter the collection path.'
+      return false
+    }
+  }
+  try {
+    parseWizardJsonField('valueJson', [])
+  }
+  catch (error) {
+    state.dataSourceWizardError = error?.message || 'The manual value JSON is invalid.'
+    return false
+  }
+  return true
+}
+
+const goTemplateV2WizardStep = (step) => {
+  if (state.dataSourceWizardMode === 'edit') {
+    state.dataSourceWizardStep = step
+    state.dataSourceWizardError = ''
+    return
+  }
+  if (step > state.dataSourceWizardStep && !validateTemplateV2WizardStep())
+    return
+  state.dataSourceWizardStep = step
+}
+
+const addTemplateV2DataSourceFromWizard = (workingDoc) => {
+  if (!validateTemplateV2WizardStep())
+    return
+  ensureTemplateV2Fields(workingDoc)
+  const sourceName = sanitizeV2FieldName(state.dataSourceWizardDraft?.sourceName)
+  if (!sourceName) {
+    state.dataSourceWizardError = 'Enter a source name.'
+    return
+  }
+  const originalName = String(state.dataSourceWizardOriginalName || '').trim()
+  const isRename = state.dataSourceWizardMode === 'edit' && originalName && originalName !== sourceName
+  const sourceNameExists = Object.prototype.hasOwnProperty.call(workingDoc.dataSources || {}, sourceName)
+  if ((state.dataSourceWizardMode === 'add' || isRename) && sourceNameExists) {
+    state.dataSourceWizardError = `A data source named "${sourceName}" already exists.`
+    return
+  }
+  try {
+    if (isRename)
+      delete workingDoc.dataSources[originalName]
+    workingDoc.dataSources[sourceName] = buildTemplateV2WizardDataSource()
+    closeTemplateV2DataSourceWizard()
+  }
+  catch (error) {
+    state.dataSourceWizardError = error?.message || 'Unable to build data source.'
+  }
+}
+
+const templateV2DataSourceList = (workingDoc) => {
+  const dataSources = workingDoc?.dataSources || {}
+  if (!dataSources || typeof dataSources !== 'object' || Array.isArray(dataSources))
+    return []
+  return Object.entries(dataSources).map(([name, source]) => {
+    const hasSourceObject = !!source && typeof source === 'object' && !Array.isArray(source)
+    const normalizedSource = hasSourceObject ? source : { type: 'manual', value: source }
+    return {
+      name,
+      source: normalizedSource,
+      type: inferTemplateV2DataSourceType(normalizedSource),
+    }
+  })
+}
+
+const getUniqueTemplateV2Key = (container, baseKey) => {
+  const base = sanitizeV2FieldName(baseKey) || 'field'
+  if (!Object.prototype.hasOwnProperty.call(container || {}, base))
+    return base
+  let index = 2
+  for (;;) {
+    const candidate = `${base}${index}`
+    if (!Object.prototype.hasOwnProperty.call(container || {}, candidate))
+      return candidate
+    index += 1
+  }
+}
+
+const normalizeTemplateV2SchemaEntry = (schema, field) => {
+  if (!schema || !field)
+    return {}
+  const current = schema[field]
+  if (!current || typeof current !== 'object' || Array.isArray(current)) {
+    const hasCurrentStringType = typeof current === 'string' && !!current
+    const currentType = hasCurrentStringType ? current : 'text'
+    schema[field] = {
+      type: currentType,
+      label: titleFromKey(field),
+    }
+  }
+  else {
+    if (!schema[field].type)
+      schema[field].type = 'text'
+    if (!schema[field].label)
+      schema[field].label = titleFromKey(field)
+  }
+  return schema[field]
+}
+
+const getTemplateV2SchemaEntries = (workingDoc) => {
+  const schema = workingDoc?.schema || {}
+  return Object.keys(schema).map(field => ({
+    field,
+    entry: normalizeTemplateV2SchemaEntry(schema, field),
+  }))
+}
+
+const addTemplateV2SchemaField = (workingDoc) => {
+  ensureTemplateV2Fields(workingDoc)
+  const field = getUniqueTemplateV2Key(workingDoc.schema, 'field')
+  workingDoc.schema[field] = {
+    type: 'text',
+    label: titleFromKey(field),
+  }
+}
+
+const renameTemplateV2SchemaField = (workingDoc, oldField, nextValue) => {
+  const nextField = sanitizeV2FieldName(nextValue)
+  if (!workingDoc?.schema || !oldField || !nextField || nextField === oldField)
+    return
+  if (Object.prototype.hasOwnProperty.call(workingDoc.schema, nextField)) {
+    notifyTemplateV2EditorError(`"${nextField}" already exists in this schema.`)
+    return
+  }
+  workingDoc.schema[nextField] = workingDoc.schema[oldField]
+  delete workingDoc.schema[oldField]
+}
+
+const removeTemplateV2SchemaField = (workingDoc, field) => {
+  if (!workingDoc?.schema || !field)
+    return
+  delete workingDoc.schema[field]
+}
+
+const updateTemplateV2SchemaFormatter = (entry, value) => {
+  if (!entry || typeof entry !== 'object')
+    return
+  const formatter = String(value || '').trim()
+  if (formatter)
+    entry.formatter = formatter
+  else
+    delete entry.formatter
+}
+
+const openTemplateV2DeleteDialog = (target) => {
+  state.templateDeleteTarget = target
+  state.templateDeleteDialogOpen = true
+}
+
+const closeTemplateV2DeleteDialog = () => {
+  state.templateDeleteDialogOpen = false
+  state.templateDeleteTarget = null
+}
+
+const templateV2DeleteDialogTitle = computed(() => {
+  const type = state.templateDeleteTarget?.type
+  if (type === 'schema')
+    return 'Delete schema field?'
+  if (type === 'dataSource')
+    return 'Delete data source?'
+  if (type === 'queryItem')
+    return 'Delete query item?'
+  if (type === 'previewQueryItem')
+    return 'Delete preview query item?'
+  if (type === 'control')
+    return 'Delete control?'
+  return 'Delete item?'
+})
+
+const templateV2DeleteDialogDescription = computed(() => {
+  const target = state.templateDeleteTarget || {}
+  const label = target.label || target.field || target.sourceName || target.key || 'this item'
+  if (target.type === 'schema')
+    return `This removes "${label}" from the block schema. Template markup using that field will not be changed automatically.`
+  if (target.type === 'dataSource')
+    return `This removes "${label}" and any template source loops that depend on it will stop rendering data.`
+  if (target.type === 'control')
+    return `This removes the "${label}" block-click control from this data source.`
+  return `This removes "${label}" from this data source.`
+})
+
+const confirmTemplateV2Delete = () => {
+  const target = state.templateDeleteTarget
+  if (!target)
+    return
+  if (target.type === 'schema')
+    removeTemplateV2SchemaField(target.workingDoc, target.field)
+  else if (target.type === 'dataSource' && target.workingDoc?.dataSources && target.sourceName)
+    delete target.workingDoc.dataSources[target.sourceName]
+  else if (target.type === 'queryItem' && target.source?.queryItems && target.key)
+    delete target.source.queryItems[target.key]
+  else if (target.type === 'previewQueryItem' && target.source?.previewQueryItems && target.key)
+    delete target.source.previewQueryItems[target.key]
+  else if (target.type === 'control' && target.source?.controls && target.key)
+    delete target.source.controls[target.key]
+  closeTemplateV2DeleteDialog()
+}
+
+const updateTemplateV2JsonSubfield = (target, field, value, errorKey, fallbackValue) => {
+  try {
+    const parsed = value ? JSON.parse(value) : fallbackValue
+    if (parsed === undefined)
+      delete target[field]
+    else
+      target[field] = parsed
+    if (state.templateJsonErrors[errorKey])
+      delete state.templateJsonErrors[errorKey]
+  }
+  catch (error) {
+    state.templateJsonErrors[errorKey] = error?.message || 'Invalid JSON.'
+  }
+}
+
+const addTemplateV2DataSource = (workingDoc) => {
+  ensureTemplateV2Fields(workingDoc)
+  const sourceName = getUniqueTemplateV2Key(workingDoc.dataSources, 'source')
+  workingDoc.dataSources[sourceName] = {
+    type: 'manual',
+    value: [],
   }
 }
 
@@ -490,20 +1314,25 @@ const openV2DynamicContentDialog = () => {
   state.v2DynamicContentDialogOpen = true
 }
 
-const sanitizeV2FieldName = (value) => {
-  return String(value || '')
-    .trim()
-    .replace(/[^A-Za-z0-9_$]+/g, ' ')
-    .replace(/\s+([A-Za-z0-9_$])/g, (_, char) => char.toUpperCase())
-    .replace(/^[^A-Za-z_$]+/, '')
-}
-
 const v2FieldExists = (workingDoc, field) => {
   const normalizedField = String(field || '').trim()
   if (!normalizedField)
     return false
   return Object.prototype.hasOwnProperty.call(workingDoc?.schema || {}, normalizedField)
     || Object.prototype.hasOwnProperty.call(workingDoc?.dataSources || {}, normalizedField)
+}
+
+const buildV2DynamicFieldToken = (fieldConfig) => {
+  const field = sanitizeV2FieldName(fieldConfig.field)
+  const type = String(fieldConfig.type || '').trim().toLowerCase()
+  return v2InlineFormatterFieldTypes.has(type)
+    ? `{{ ${type}(${field}) }}`
+    : `{{ ${field} }}`
+}
+
+const getV2DynamicSchemaType = (fieldType) => {
+  const type = String(fieldType || '').trim().toLowerCase()
+  return v2DynamicFieldSchemaTypeMap[type] || type || 'text'
 }
 
 const buildV2DynamicSnippet = (fieldConfig) => {
@@ -514,7 +1343,7 @@ const buildV2DynamicSnippet = (fieldConfig) => {
   }
   if (fieldConfig.type === 'array')
     return `{{#for item in ${field}}}\n  {{ item }}\n{{/for}}`
-  return `{{ ${field} }}`
+  return buildV2DynamicFieldToken({ ...fieldConfig, field })
 }
 
 const addV2DynamicContent = (workingDoc) => {
@@ -533,10 +1362,14 @@ const addV2DynamicContent = (workingDoc) => {
 
   ensureTemplateV2Fields(workingDoc)
   const label = String(state.v2DynamicField.label || '').trim()
+  const fieldType = String(state.v2DynamicField.type || '').trim().toLowerCase()
+  const schemaType = getV2DynamicSchemaType(fieldType)
   workingDoc.schema[field] = {
-    type: state.v2DynamicField.type,
+    type: schemaType,
     label: label || field,
   }
+  if (v2InlineFormatterFieldTypes.has(fieldType))
+    workingDoc.schema[field].formatter = fieldType
   if (state.v2DynamicField.type === 'array') {
     workingDoc.schema[field].schema = {}
     if (state.v2DynamicField.sourceType !== 'manual') {
@@ -895,6 +1728,10 @@ const buildPreviewBlock = (workingDoc, parsed) => {
       nextValues[field] = clonePreviewValue(previousValues[field])
   })
 
+  const templateV2PreviewValues = isSameBlockContext
+    ? edgeGlobal.dupObject(previousValues || {})
+    : {}
+
   const previousMeta = state.previewBlock?.meta || {}
   const nextMeta = {}
   Object.keys(parsed.meta || {}).forEach((field) => {
@@ -919,7 +1756,7 @@ const buildPreviewBlock = (workingDoc, parsed) => {
     template: workingDoc?.template || '',
     schema: edgeGlobal.dupObject(workingDoc?.schema || {}),
     dataSources: edgeGlobal.dupObject(workingDoc?.dataSources || {}),
-    values: isWorkingTemplateV2Doc(workingDoc) ? edgeGlobal.dupObject(workingDoc?.values || {}) : nextValues,
+    values: isWorkingTemplateV2Doc(workingDoc) ? templateV2PreviewValues : nextValues,
     meta: nextMeta,
     synced: !!workingDoc?.synced,
   }
@@ -994,10 +1831,10 @@ const editorDocUpdates = (workingDoc) => {
     template: workingDoc?.template,
     schema: workingDoc?.schema,
     dataSources: workingDoc?.dataSources,
-    values: isWorkingTemplateV2Doc(workingDoc) ? workingDoc?.values : parsed.values,
+    values: isWorkingTemplateV2Doc(workingDoc) ? undefined : parsed.values,
   }
   state.previewBlock = buildPreviewBlock(workingDoc, parsed)
-  state.previewSourceValues = edgeGlobal.dupObject(isWorkingTemplateV2Doc(workingDoc) ? (workingDoc?.values || {}) : (parsed.values || {}))
+  state.previewSourceValues = edgeGlobal.dupObject(isWorkingTemplateV2Doc(workingDoc) ? {} : (parsed.values || {}))
 }
 
 const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -1024,10 +1861,10 @@ const syncEditorStateFromBlockDoc = (doc) => {
     template: restoredDoc.template,
     schema: restoredDoc.schema,
     dataSources: restoredDoc.dataSources,
-    values: isWorkingTemplateV2Doc(restoredDoc) ? restoredDoc.values : parsed.values,
+    values: isWorkingTemplateV2Doc(restoredDoc) ? undefined : parsed.values,
   }
   state.previewBlock = buildPreviewBlock(restoredDoc, parsed)
-  state.previewSourceValues = edgeGlobal.dupObject(isWorkingTemplateV2Doc(restoredDoc) ? (restoredDoc.values || {}) : (parsed.values || {}))
+  state.previewSourceValues = edgeGlobal.dupObject(isWorkingTemplateV2Doc(restoredDoc) ? {} : (parsed.values || {}))
   state.editorHasUnsavedChanges = false
 
   const collectionPath = `${edgeGlobal.edgeState.organizationDocPath}/blocks`
@@ -1219,7 +2056,7 @@ function convertWorkingDocToTemplateV2(workingDoc, options = {}) {
   workingDoc.content = converted.template
   workingDoc.schema = converted.schema
   workingDoc.dataSources = converted.dataSources
-  workingDoc.values = mergedValues
+  workingDoc.values = undefined
   workingDoc.templateConversion = converted.conversion
   ensureTemplateV2Fields(workingDoc)
   Object.assign(state.workingDoc, {
@@ -1228,10 +2065,12 @@ function convertWorkingDocToTemplateV2(workingDoc, options = {}) {
     content: converted.template,
     schema: converted.schema,
     dataSources: converted.dataSources,
-    values: mergedValues,
+    values: undefined,
   })
   state.previewBlock = buildPreviewBlock(workingDoc, parsed)
-  state.previewSourceValues = edgeGlobal.dupObject(mergedValues || {})
+  if (state.previewBlock)
+    state.previewBlock.values = edgeGlobal.dupObject(mergedValues || {})
+  state.previewSourceValues = {}
   state.templateEditorTab = 'template'
 
   const warningCount = converted.conversion?.warnings?.length || 0
@@ -1813,31 +2652,21 @@ const exportCurrentBlock = async () => {
               </edge-shad-checkbox>
             </div>
           </div>
-          <div class="mb-3 flex flex-wrap items-end gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-slate-900 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100">
-            <div class="mb-5">
-              <span class="inline-flex rounded border border-slate-300 bg-white px-2 py-1 text-xs font-semibold uppercase tracking-wide text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
-                Template v{{ getWorkingTemplateVersion(slotProps.workingDoc) }}
-              </span>
-            </div>
-            <edge-shad-button
-              v-if="!isWorkingTemplateV2Doc(slotProps.workingDoc)"
-              type="button"
-              size="sm"
-              variant="outline"
-              class="mb-5 gap-2"
-              :disabled="isWorkingTemplateV2Doc(slotProps.workingDoc) || !slotProps.workingDoc.content"
-              @click="convertWorkingDocToTemplateV2(slotProps.workingDoc)"
-            >
-              <Wand2 class="h-4 w-4" />
-              Convert to Template v2
-            </edge-shad-button>
-            <div v-if="slotProps.workingDoc.templateConversion?.warnings?.length" class="mb-5 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-              Review {{ slotProps.workingDoc.templateConversion.warnings.length }} conversion note{{ slotProps.workingDoc.templateConversion.warnings.length === 1 ? '' : 's' }} before saving.
-            </div>
-          </div>
           <div class="flex gap-4">
             <div class="w-1/2">
-              <div class="mb-3 flex flex-wrap items-center gap-2">
+              <div class="mb-3 flex flex-wrap items-center justify-end gap-2">
+                <edge-shad-button
+                  v-if="!isWorkingTemplateV2Doc(slotProps.workingDoc)"
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  class="h-8 gap-2 px-3 text-[11px] uppercase tracking-wide"
+                  :disabled="isWorkingTemplateV2Doc(slotProps.workingDoc) || !slotProps.workingDoc.content"
+                  @click="convertWorkingDocToTemplateV2(slotProps.workingDoc)"
+                >
+                  <Wand2 class="h-4 w-4" />
+                  Convert to Template v2
+                </edge-shad-button>
                 <edge-shad-button
                   type="button"
                   size="sm"
@@ -1882,7 +2711,35 @@ const exportCurrentBlock = async () => {
                   </TabsTrigger>
                 </TabsList>
                 <TabsContent value="dataSources" class="mt-3">
+                  <div class="mb-3 flex items-center justify-between gap-2">
+                    <div class="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                      Data Sources
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <edge-shad-button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        class="h-8 gap-2 px-3 text-[11px] uppercase tracking-wide"
+                        @click="openTemplateV2DataSourceWizard"
+                      >
+                        <Plus class="h-3.5 w-3.5" />
+                        Add Data Source
+                      </edge-shad-button>
+                      <edge-shad-button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        class="h-8 gap-2 rounded border border-slate-300 bg-white px-3 text-[11px] uppercase tracking-wide text-slate-900 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100"
+                        @click="state.templateRawJsonOpen.dataSources = !state.templateRawJsonOpen.dataSources"
+                      >
+                        <Code2 class="h-3.5 w-3.5" />
+                        {{ state.templateRawJsonOpen.dataSources ? 'Use List' : 'Show JSON' }}
+                      </edge-shad-button>
+                    </div>
+                  </div>
                   <edge-cms-code-editor
+                    v-if="state.templateRawJsonOpen.dataSources"
                     :model-value="formatJson(slotProps.workingDoc.dataSources)"
                     title="Data Sources (JSON)"
                     language="json"
@@ -1891,12 +2748,65 @@ const exportCurrentBlock = async () => {
                     height="calc(100vh - 356px)"
                     @update:model-value="updateJsonDocField(slotProps.workingDoc, 'dataSources', $event)"
                   />
+                  <div v-else class="max-h-[calc(100vh_-_356px)] space-y-3 overflow-auto pr-1">
+                    <div
+                      v-if="!templateV2DataSourceList(slotProps.workingDoc).length"
+                      class="rounded-md border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400"
+                    >
+                      No data sources yet.
+                    </div>
+                    <button
+                      v-for="sourceItem in templateV2DataSourceList(slotProps.workingDoc)"
+                      :key="sourceItem.name"
+                      type="button"
+                      class="flex w-full items-center justify-between gap-3 rounded-md border border-slate-200 bg-white p-3 text-left shadow-sm hover:border-slate-400 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:hover:border-slate-600 dark:hover:bg-slate-900"
+                      @click="openTemplateV2DataSourceWizardForEdit(sourceItem.name, sourceItem.source)"
+                    >
+                      <span>
+                        <span class="block text-sm font-semibold text-slate-900 dark:text-slate-100">{{ sourceItem.name }}</span>
+                        <span class="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+                          {{ sourceItem.type === 'api' ? sourceItem.source.api || 'API source' : sourceItem.type === 'collection' ? sourceItem.source.path || 'Collection source' : 'Manual source' }}
+                        </span>
+                      </span>
+                      <span class="rounded border border-slate-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-700">
+                        {{ sourceItem.type }}
+                      </span>
+                    </button>
+                  </div>
                   <p v-if="state.templateJsonErrors.dataSources" class="mt-2 text-xs text-red-600">
                     {{ state.templateJsonErrors.dataSources }}
                   </p>
                 </TabsContent>
                 <TabsContent value="schema" class="mt-3">
+                  <div class="mb-3 flex items-center justify-between gap-2">
+                    <div class="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                      Schema Fields
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <edge-shad-button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        class="h-8 gap-2 px-3 text-[11px] uppercase tracking-wide"
+                        @click="addTemplateV2SchemaField(slotProps.workingDoc)"
+                      >
+                        <Plus class="h-3.5 w-3.5" />
+                        Add Field
+                      </edge-shad-button>
+                      <edge-shad-button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        class="h-8 gap-2 rounded border border-slate-300 bg-white px-3 text-[11px] uppercase tracking-wide text-slate-900 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100"
+                        @click="state.templateRawJsonOpen.schema = !state.templateRawJsonOpen.schema"
+                      >
+                        <Code2 class="h-3.5 w-3.5" />
+                        {{ state.templateRawJsonOpen.schema ? 'Use Form' : 'Show JSON' }}
+                      </edge-shad-button>
+                    </div>
+                  </div>
                   <edge-cms-code-editor
+                    v-if="state.templateRawJsonOpen.schema"
                     :model-value="formatJson(slotProps.workingDoc.schema)"
                     title="Schema (JSON)"
                     language="json"
@@ -1905,11 +2815,572 @@ const exportCurrentBlock = async () => {
                     height="calc(100vh - 356px)"
                     @update:model-value="updateJsonDocField(slotProps.workingDoc, 'schema', $event)"
                   />
+                  <div v-else class="max-h-[calc(100vh_-_356px)] space-y-3 overflow-auto pr-1">
+                    <div
+                      v-if="!getTemplateV2SchemaEntries(slotProps.workingDoc).length"
+                      class="rounded-md border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400"
+                    >
+                      No schema fields yet.
+                    </div>
+                    <details
+                      v-for="schemaItem in getTemplateV2SchemaEntries(slotProps.workingDoc)"
+                      :key="schemaItem.field"
+                      class="rounded-md border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950"
+                      open
+                    >
+                      <summary class="flex cursor-pointer items-center justify-between gap-3 border-b border-slate-100 px-3 py-2 text-sm font-semibold text-slate-900 dark:border-slate-800 dark:text-slate-100">
+                        <span>{{ schemaItem.entry.label || schemaItem.field }}</span>
+                        <span class="rounded border border-slate-200 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-500 dark:border-slate-700">
+                          {{ schemaItem.entry.formatter || schemaItem.entry.type || 'text' }}
+                        </span>
+                      </summary>
+                      <div class="space-y-3 p-3">
+                      <div class="grid gap-3 md:grid-cols-[1fr_1fr_150px_150px_auto]">
+                        <edge-shad-input
+                          :model-value="schemaItem.field"
+                          :name="`schemaField-${schemaItem.field}`"
+                          label="Field Key"
+                          placeholder="heading"
+                          @blur="renameTemplateV2SchemaField(slotProps.workingDoc, schemaItem.field, $event.target.value)"
+                        />
+                        <edge-shad-input
+                          v-model="schemaItem.entry.label"
+                          :name="`schemaLabel-${schemaItem.field}`"
+                          label="Label"
+                          placeholder="Heading"
+                        />
+                        <edge-shad-select
+                          v-model="schemaItem.entry.type"
+                          :name="`schemaType-${schemaItem.field}`"
+                          label="Type"
+                          :items="v2SchemaTypeOptions"
+                        />
+                        <edge-shad-select
+                          :model-value="schemaItem.entry.formatter || ''"
+                          :name="`schemaFormatter-${schemaItem.field}`"
+                          label="Formatter"
+                          :items="v2SchemaFormatterOptions"
+                          @update:model-value="updateTemplateV2SchemaFormatter(schemaItem.entry, $event)"
+                        />
+                        <edge-shad-button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          class="mt-7 h-9 w-9 rounded border border-red-200 text-red-600 hover:bg-red-50"
+                          aria-label="Remove schema field"
+                          @click="openTemplateV2DeleteDialog({ type: 'schema', workingDoc: slotProps.workingDoc, field: schemaItem.field, label: schemaItem.entry.label || schemaItem.field })"
+                        >
+                          <Trash2 class="h-4 w-4" />
+                        </edge-shad-button>
+                      </div>
+                      <div class="grid gap-3 md:grid-cols-2">
+                        <edge-shad-input
+                          v-model="schemaItem.entry.value"
+                          :name="`schemaDefault-${schemaItem.field}`"
+                          label="Default Value"
+                          placeholder="Optional default"
+                        />
+                        <edge-shad-textarea
+                          v-if="schemaItem.entry.type === 'array'"
+                          :model-value="formatJson(schemaItem.entry.schema || {})"
+                          :name="`schemaNested-${schemaItem.field}`"
+                          label="Nested Schema JSON"
+                          class="min-h-[90px] font-mono text-xs"
+                          @update:model-value="updateTemplateV2JsonSubfield(schemaItem.entry, 'schema', $event, `schemaNested-${schemaItem.field}`, {})"
+                        />
+                        <edge-shad-textarea
+                          v-else-if="schemaItem.entry.type === 'select'"
+                          :model-value="formatJson(schemaItem.entry.options || [])"
+                          :name="`schemaOptions-${schemaItem.field}`"
+                          label="Options JSON"
+                          class="min-h-[90px] font-mono text-xs"
+                          placeholder='[{"label":"Yes","value":"yes"}]'
+                          @update:model-value="updateTemplateV2JsonSubfield(schemaItem.entry, 'options', $event, `schemaOptions-${schemaItem.field}`, [])"
+                        />
+                      </div>
+                      <p v-if="state.templateJsonErrors[`schemaNested-${schemaItem.field}`]" class="mt-2 text-xs text-red-600">
+                        {{ state.templateJsonErrors[`schemaNested-${schemaItem.field}`] }}
+                      </p>
+                      <p v-if="state.templateJsonErrors[`schemaOptions-${schemaItem.field}`]" class="mt-2 text-xs text-red-600">
+                        {{ state.templateJsonErrors[`schemaOptions-${schemaItem.field}`] }}
+                      </p>
+                      </div>
+                    </details>
+                  </div>
                   <p v-if="state.templateJsonErrors.schema" class="mt-2 text-xs text-red-600">
                     {{ state.templateJsonErrors.schema }}
                   </p>
                 </TabsContent>
               </Tabs>
+              <edge-shad-dialog v-model="state.dataSourceWizardOpen">
+                <DialogContent v-if="state.dataSourceWizardDraft" class="max-w-[860px]">
+                  <DialogHeader>
+                    <DialogTitle>{{ state.dataSourceWizardMode === 'edit' ? 'Edit Data Source' : 'Add Data Source' }}</DialogTitle>
+                    <DialogDescription>
+                      {{ state.dataSourceWizardMode === 'edit' ? 'Edit any section, then save it back to the JSON for this block.' : 'Build a data source step by step, then insert it into the JSON for this block.' }}
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  <div class="mb-4 grid grid-cols-5 gap-2">
+                    <button
+                      v-for="stepItem in dataSourceWizardStepItems"
+                      :key="stepItem.step"
+                      type="button"
+                      class="rounded border px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide"
+                      :class="state.dataSourceWizardStep === stepItem.step ? 'border-slate-800 bg-slate-800 text-white dark:border-slate-200 dark:bg-slate-200 dark:text-slate-900' : 'border-slate-200 bg-white text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300'"
+                      @click="goTemplateV2WizardStep(stepItem.step)"
+                    >
+                      {{ stepItem.step }}. {{ stepItem.title }}
+                    </button>
+                  </div>
+
+                  <div v-if="state.dataSourceWizardStep === 1" class="space-y-4">
+                    <div class="grid gap-3 md:grid-cols-2">
+                      <edge-shad-input
+                        v-model="state.dataSourceWizardDraft.sourceName"
+                        name="dataSourceWizardSourceName"
+                        label="Source Name"
+                        placeholder="items"
+                      />
+                      <edge-shad-select
+                        v-model="state.dataSourceWizardDraft.type"
+                        name="dataSourceWizardType"
+                        label="Source Type"
+                        :items="v2DataSourceTypeOptions"
+                      />
+                    </div>
+                    <div class="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
+                      Use a source name that matches the template loop, for example <code>source("items")</code>. Manual data is pasted JSON. API data comes from an HTTP endpoint. Collection data comes from the site KV index.
+                    </div>
+                  </div>
+
+                  <div v-else-if="state.dataSourceWizardStep === 2" class="space-y-4">
+                    <div v-if="state.dataSourceWizardDraft.type === 'api'" class="grid gap-3 md:grid-cols-2">
+                      <edge-shad-input
+                        v-model="state.dataSourceWizardDraft.api"
+                        name="dataSourceWizardApi"
+                        label="API URL"
+                        placeholder="https://api.example.com/items"
+                      />
+                      <edge-shad-input
+                        v-model="state.dataSourceWizardDraft.apiField"
+                        name="dataSourceWizardApiField"
+                        label="Response Field"
+                        placeholder="data"
+                      />
+                      <edge-shad-input
+                        v-model="state.dataSourceWizardDraft.apiQuery"
+                        name="dataSourceWizardApiQuery"
+                        label="Static API Query"
+                        placeholder="?limit=6"
+                      />
+                      <edge-shad-input
+                        v-model="state.dataSourceWizardDraft.limit"
+                        name="dataSourceWizardApiLimit"
+                        type="number"
+                        label="Limit"
+                        placeholder="6"
+                      />
+                    </div>
+
+                    <div v-else-if="state.dataSourceWizardDraft.type === 'collection'" class="space-y-4">
+                      <div class="grid gap-3 md:grid-cols-2">
+                        <edge-shad-input
+                          v-model="state.dataSourceWizardDraft.path"
+                          name="dataSourceWizardPath"
+                          label="Collection Path"
+                          placeholder="items"
+                        />
+                        <edge-shad-input
+                          v-model="state.dataSourceWizardDraft.baseKey"
+                          name="dataSourceWizardBaseKey"
+                          label="Base Key Override"
+                          placeholder="Optional index key"
+                        />
+                        <edge-shad-select
+                          v-model="state.dataSourceWizardDraft.uniqueKey"
+                          name="dataSourceWizardUniqueKey"
+                          label="Where is the collection located?"
+                          :items="v2DataSourceScopeOptions"
+                        />
+                        <edge-shad-input
+                          v-model="state.dataSourceWizardDraft.limit"
+                          name="dataSourceWizardCollectionLimit"
+                          type="number"
+                          label="Limit"
+                          placeholder="80"
+                        />
+                      </div>
+                      <div class="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
+                        Choose organization level for data shared across the org. Choose site level for data that belongs to the selected site. Use the JSON editor for custom index keys.
+                      </div>
+                      <edge-shad-input
+                        v-model="state.dataSourceWizardDraft.canonicalLookupKey"
+                        name="dataSourceWizardCanonicalLookup"
+                        label="Fetch Exact Record Key"
+                        placeholder="{orgId}:{siteId}"
+                      />
+                      <div class="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
+                        Leave the exact record key blank for normal list queries. Use it only when you already know the exact canonical record to fetch.
+                      </div>
+                    </div>
+
+                    <edge-shad-textarea
+                      v-else
+                      v-model="state.dataSourceWizardDraft.valueJson"
+                      name="dataSourceWizardManualValue"
+                      label="Manual Value JSON"
+                      class="min-h-[180px] font-mono text-xs"
+                      placeholder="[]"
+                    />
+                  </div>
+
+                  <div v-else-if="state.dataSourceWizardStep === 3" class="space-y-4">
+                    <div v-if="state.dataSourceWizardDraft.type !== 'manual'" class="grid gap-4 xl:grid-cols-2">
+                      <div class="rounded-md border border-slate-200 p-3 dark:border-slate-800">
+                        <div class="mb-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
+                          Indexed Lookup Values
+                        </div>
+                        <p class="mb-3 text-xs text-slate-600 dark:text-slate-400">
+                          Use these when the field is indexed in KV, like category = Featured or slug = route segment. This narrows the fetch before records are returned.
+                        </p>
+                        <div class="space-y-2">
+                          <div v-for="(row, index) in state.dataSourceWizardDraft.queryItems" :key="`wizard-query-${index}`" class="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+                            <edge-shad-input v-model="row.key" :name="`wizardQueryKey-${index}`" label="Field" placeholder="category" />
+                            <edge-shad-input v-model="row.value" :name="`wizardQueryValue-${index}`" label="Value" placeholder="Featured" />
+                            <edge-shad-button type="button" size="icon" variant="ghost" class="mt-7 h-9 w-9 text-red-600" aria-label="Remove query item" @click="removeTemplateV2WizardMapRow('queryItems', index)">
+                              <Trash2 class="h-4 w-4" />
+                            </edge-shad-button>
+                          </div>
+                        </div>
+                        <edge-shad-button type="button" size="sm" variant="outline" class="mt-3 h-8 gap-2" @click="addTemplateV2WizardMapRow('queryItems')">
+                          <Plus class="h-3.5 w-3.5" />
+                          Add Indexed Lookup
+                        </edge-shad-button>
+                      </div>
+
+                      <div class="rounded-md border border-slate-200 p-3 dark:border-slate-800">
+                        <div class="mb-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
+                          Preview Lookup Values
+                        </div>
+                        <p class="mb-3 text-xs text-slate-600 dark:text-slate-400">
+                          Use these only to make editor previews work when a route token like <code>{routeLastSegment}</code> does not exist in the block editor.
+                        </p>
+                        <div class="space-y-2">
+                          <div v-for="(row, index) in state.dataSourceWizardDraft.previewQueryItems" :key="`wizard-preview-query-${index}`" class="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+                            <edge-shad-input v-model="row.key" :name="`wizardPreviewQueryKey-${index}`" label="Field" placeholder="slug" />
+                            <edge-shad-input v-model="row.value" :name="`wizardPreviewQueryValue-${index}`" label="Preview Value" placeholder="sample-item" />
+                            <edge-shad-button type="button" size="icon" variant="ghost" class="mt-7 h-9 w-9 text-red-600" aria-label="Remove preview query item" @click="removeTemplateV2WizardMapRow('previewQueryItems', index)">
+                              <Trash2 class="h-4 w-4" />
+                            </edge-shad-button>
+                          </div>
+                        </div>
+                        <edge-shad-button type="button" size="sm" variant="outline" class="mt-3 h-8 gap-2" @click="addTemplateV2WizardMapRow('previewQueryItems')">
+                          <Plus class="h-3.5 w-3.5" />
+                          Add Preview Value
+                        </edge-shad-button>
+                      </div>
+                    </div>
+
+                    <div v-if="state.dataSourceWizardDraft.type === 'collection'" class="grid gap-4 md:grid-cols-2">
+                      <div class="rounded-md border border-slate-200 p-3 dark:border-slate-800">
+                        <div class="mb-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
+                          After-Fetch Filters
+                        </div>
+                        <p class="mb-3 text-xs text-slate-600 dark:text-slate-400">
+                          These filter records after the fetch. Use indexed lookup values above when the field is indexed.
+                        </p>
+                        <div class="space-y-2">
+                          <div
+                            v-for="(row, index) in state.dataSourceWizardDraft.filters"
+                            :key="`wizard-filter-${index}`"
+                            class="grid gap-2 rounded border border-slate-100 p-2 md:grid-cols-[1fr_180px_auto] dark:border-slate-800"
+                          >
+                            <edge-shad-input
+                              v-model="row.field"
+                              :name="`wizardFilterField-${index}`"
+                              label="Field"
+                              placeholder="status"
+                            />
+                            <edge-shad-select
+                              v-model="row.operator"
+                              :name="`wizardFilterOperator-${index}`"
+                              label="Operator"
+                              :items="v2DataSourceFilterOperatorOptions"
+                            />
+                            <edge-shad-button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              class="mt-7 h-9 w-9 text-red-600"
+                              aria-label="Remove after-fetch filter"
+                              @click="removeTemplateV2WizardFilterRow(index)"
+                            >
+                              <Trash2 class="h-4 w-4" />
+                            </edge-shad-button>
+                            <div class="md:col-span-3">
+                              <edge-shad-select-tags
+                                v-if="isV2DataSourceFilterArrayOperator(row.operator)"
+                                :model-value="getV2DataSourceFilterArrayValues(row.value)"
+                                :name="`wizardFilterValues-${index}`"
+                                :label="getV2DataSourceFilterValueLabel(row.operator)"
+                                :placeholder="getV2DataSourceFilterValuePlaceholder(row.operator)"
+                                :items="[]"
+                                value-as="array"
+                                :allow-additions="true"
+                                @update:model-value="updateV2DataSourceFilterArrayValues(row, $event)"
+                              />
+                              <edge-shad-input
+                                v-else
+                                v-model="row.value"
+                                :name="`wizardFilterValue-${index}`"
+                                :label="getV2DataSourceFilterValueLabel(row.operator)"
+                                :placeholder="getV2DataSourceFilterValuePlaceholder(row.operator)"
+                              />
+                              <p
+                                v-if="getV2DataSourceFilterValueHelper(row.operator)"
+                                class="mt-1 text-xs text-slate-600 dark:text-slate-400"
+                              >
+                                {{ getV2DataSourceFilterValueHelper(row.operator) }}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                        <edge-shad-button type="button" size="sm" variant="outline" class="mt-3 h-8 gap-2" @click="addTemplateV2WizardFilterRow">
+                          <Plus class="h-3.5 w-3.5" />
+                          Add Filter
+                        </edge-shad-button>
+                      </div>
+
+                      <div class="rounded-md border border-slate-200 p-3 dark:border-slate-800">
+                        <div class="mb-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
+                          Sort
+                        </div>
+                        <p class="mb-3 text-xs text-slate-600 dark:text-slate-400">
+                          Choose the field order returned to the template.
+                        </p>
+                        <div class="space-y-2">
+                          <div
+                            v-for="(row, index) in state.dataSourceWizardDraft.sort"
+                            :key="`wizard-sort-${index}`"
+                            class="grid gap-2 md:grid-cols-[1fr_160px_auto]"
+                          >
+                            <edge-shad-input
+                              v-model="row.field"
+                              :name="`wizardSortField-${index}`"
+                              label="Field"
+                              placeholder="name"
+                            />
+                            <edge-shad-select
+                              v-model="row.direction"
+                              :name="`wizardSortDirection-${index}`"
+                              label="Direction"
+                              :items="v2DataSourceSortDirectionOptions"
+                            />
+                            <edge-shad-button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              class="mt-7 h-9 w-9 text-red-600"
+                              aria-label="Remove sort"
+                              @click="removeTemplateV2WizardSortRow(index)"
+                            >
+                              <Trash2 class="h-4 w-4" />
+                            </edge-shad-button>
+                          </div>
+                        </div>
+                        <edge-shad-button type="button" size="sm" variant="outline" class="mt-3 h-8 gap-2" @click="addTemplateV2WizardSortRow">
+                          <Plus class="h-3.5 w-3.5" />
+                          Add Sort
+                        </edge-shad-button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div v-else-if="state.dataSourceWizardStep === 4" class="space-y-4">
+                    <div class="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
+                      Controls appear when someone clicks the block in the page editor. For API sources they become query string values. For collection sources they should usually map to indexed lookup fields.
+                    </div>
+                    <div class="space-y-3">
+                      <div
+                        v-for="(control, controlIndex) in state.dataSourceWizardDraft.controls"
+                        :key="`wizard-control-${controlIndex}`"
+                        class="rounded-md border border-slate-200 p-3 dark:border-slate-800"
+                      >
+                        <div class="grid gap-3 md:grid-cols-[1fr_1fr_150px_auto]">
+                          <edge-shad-input
+                            v-model="control.key"
+                            :name="`wizardControlKey-${controlIndex}`"
+                            :label="getV2DataSourceControlKeyLabel(state.dataSourceWizardDraft.type)"
+                            :placeholder="getV2DataSourceControlKeyPlaceholder(state.dataSourceWizardDraft.type)"
+                          />
+                          <edge-shad-input
+                            v-model="control.title"
+                            :name="`wizardControlTitle-${controlIndex}`"
+                            label="Label"
+                            placeholder="Category"
+                          />
+                          <edge-shad-select
+                            v-model="control.input"
+                            :name="`wizardControlInput-${controlIndex}`"
+                            label="Type"
+                            :items="v2DataSourceControlTypeOptions"
+                          />
+                          <edge-shad-button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            class="mt-7 h-9 w-9 text-red-600"
+                            aria-label="Remove control"
+                            @click="removeTemplateV2WizardControlRow(controlIndex)"
+                          >
+                            <Trash2 class="h-4 w-4" />
+                          </edge-shad-button>
+                        </div>
+                        <p class="mt-2 text-xs text-slate-600 dark:text-slate-400">
+                          {{ getV2DataSourceControlKeyHelper(state.dataSourceWizardDraft.type) }}
+                        </p>
+                        <div class="mt-3 grid gap-3 md:grid-cols-2">
+                          <edge-shad-input
+                            v-model="control.placeholder"
+                            :name="`wizardControlPlaceholder-${controlIndex}`"
+                            label="Placeholder"
+                            placeholder="Optional placeholder"
+                          />
+                          <edge-shad-select
+                            v-if="control.input === 'select'"
+                            v-model="control.optionMode"
+                            :name="`wizardControlOptionMode-${controlIndex}`"
+                            label="Select Options"
+                            :items="v2DataSourceControlOptionModeOptions"
+                          />
+                        </div>
+                        <div v-if="control.input === 'select' && control.optionMode === 'collection'" class="mt-3 grid gap-3 md:grid-cols-3">
+                          <edge-shad-input
+                            v-model="control.optionsCollection"
+                            :name="`wizardControlOptionsCollection-${controlIndex}`"
+                            label="Options Collection"
+                            placeholder="categories"
+                          />
+                          <edge-shad-input
+                            v-model="control.optionsKey"
+                            :name="`wizardControlOptionsKey-${controlIndex}`"
+                            label="Label Field"
+                            placeholder="label"
+                          />
+                          <edge-shad-input
+                            v-model="control.optionsValue"
+                            :name="`wizardControlOptionsValue-${controlIndex}`"
+                            label="Value Field"
+                            placeholder="value"
+                          />
+                        </div>
+                        <div v-else-if="control.input === 'select'" class="mt-3 space-y-2">
+                          <div
+                            v-for="(option, optionIndex) in control.options"
+                            :key="`wizard-control-${controlIndex}-option-${optionIndex}`"
+                            class="grid gap-2 md:grid-cols-[1fr_1fr_auto]"
+                          >
+                            <edge-shad-input
+                              v-model="option.label"
+                              :name="`wizardControlOptionLabel-${controlIndex}-${optionIndex}`"
+                              label="Option Label"
+                              placeholder="Featured"
+                            />
+                            <edge-shad-input
+                              v-model="option.value"
+                              :name="`wizardControlOptionValue-${controlIndex}-${optionIndex}`"
+                              label="Option Value"
+                              placeholder="featured"
+                            />
+                            <edge-shad-button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              class="mt-7 h-9 w-9 text-red-600"
+                              aria-label="Remove option"
+                              @click="removeTemplateV2WizardControlOptionRow(control, optionIndex)"
+                            >
+                              <Trash2 class="h-4 w-4" />
+                            </edge-shad-button>
+                          </div>
+                          <edge-shad-button type="button" size="sm" variant="outline" class="h-8 gap-2" @click="addTemplateV2WizardControlOptionRow(control)">
+                            <Plus class="h-3.5 w-3.5" />
+                            Add Option
+                          </edge-shad-button>
+                        </div>
+                      </div>
+                    </div>
+                    <edge-shad-button type="button" size="sm" variant="outline" class="h-8 gap-2" @click="addTemplateV2WizardControlRow">
+                      <Plus class="h-3.5 w-3.5" />
+                      Add Control
+                    </edge-shad-button>
+                  </div>
+
+                  <div v-else class="space-y-4">
+                    <div class="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
+                      Review the data source JSON that will be inserted. Use the main JSON editor for advanced fields such as a custom fallback value.
+                    </div>
+                    <div>
+                      <div class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                        JSON to insert
+                      </div>
+                      <pre class="max-h-[240px] overflow-auto rounded-md bg-slate-950 p-3 text-xs text-slate-50"><code>{{ previewTemplateV2WizardDataSourceJson }}</code></pre>
+                    </div>
+                  </div>
+
+                  <p v-if="state.dataSourceWizardError" class="text-sm text-red-600">
+                    {{ state.dataSourceWizardError }}
+                  </p>
+
+                  <DialogFooter>
+                    <edge-shad-button type="button" variant="outline" @click="closeTemplateV2DataSourceWizard">
+                      Cancel
+                    </edge-shad-button>
+                    <edge-shad-button
+                      v-if="state.dataSourceWizardMode === 'add' && state.dataSourceWizardStep > 1"
+                      type="button"
+                      variant="outline"
+                      @click="state.dataSourceWizardStep -= 1"
+                    >
+                      Back
+                    </edge-shad-button>
+                    <edge-shad-button
+                      v-if="state.dataSourceWizardMode === 'add' && state.dataSourceWizardStep < 5"
+                      type="button"
+                      @click="goTemplateV2WizardStep(state.dataSourceWizardStep + 1)"
+                    >
+                      Next
+                    </edge-shad-button>
+                    <edge-shad-button
+                      v-if="state.dataSourceWizardMode === 'edit' || state.dataSourceWizardStep === 5"
+                      type="button"
+                      class="bg-slate-900 text-white hover:bg-slate-700"
+                      @click="addTemplateV2DataSourceFromWizard(slotProps.workingDoc)"
+                    >
+                      {{ state.dataSourceWizardMode === 'edit' ? 'Save to JSON' : 'Add to JSON' }}
+                    </edge-shad-button>
+                  </DialogFooter>
+                </DialogContent>
+              </edge-shad-dialog>
+              <edge-shad-dialog v-model="state.templateDeleteDialogOpen">
+                <DialogContent class="max-w-[460px]">
+                  <DialogHeader>
+                    <DialogTitle>{{ templateV2DeleteDialogTitle }}</DialogTitle>
+                    <DialogDescription>
+                      {{ templateV2DeleteDialogDescription }}
+                    </DialogDescription>
+                  </DialogHeader>
+                  <DialogFooter>
+                    <edge-shad-button type="button" variant="outline" @click="closeTemplateV2DeleteDialog">
+                      Cancel
+                    </edge-shad-button>
+                    <edge-shad-button type="button" class="bg-red-700 text-white hover:bg-red-600" @click="confirmTemplateV2Delete">
+                      Delete
+                    </edge-shad-button>
+                  </DialogFooter>
+                </DialogContent>
+              </edge-shad-dialog>
               <edge-cms-code-editor
                 v-if="!isWorkingTemplateV2Doc(slotProps.workingDoc) || state.templateEditorTab === 'template'"
                 ref="contentEditorRef"
@@ -1923,6 +3394,11 @@ const exportCurrentBlock = async () => {
                 @update:model-value="syncWorkingTemplateContent(slotProps.workingDoc, $event)"
                 @line-click="payload => handleEditorLineClick(payload, slotProps.workingDoc)"
               >
+                <template #title-actions>
+                  <span class="inline-flex rounded border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                    Template v{{ getWorkingTemplateVersion(slotProps.workingDoc) }}
+                  </span>
+                </template>
                 <template #end-actions>
                   <DropdownMenu v-if="!isWorkingTemplateV2Doc(slotProps.workingDoc)">
                     <DropdownMenuTrigger as-child>
@@ -2598,15 +4074,18 @@ const exportCurrentBlock = async () => {
                     <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{ date(post.publishDate) }}
 {{ datetime(post.publishDate, "short") }}
 {{ money(post.budget) }}
+{{ number(post.squareFeet) }}
+{{ integer(post.bedrooms) }}
 {{ lower(menuItem.menuTitle) }}
 {{ trim(site.tagline) }}
 {{ slug(post.title) }}
 {{ title(post.slug) }}
+{{ richtext(post.body) }}
 {{ default(post.summary, "Summary coming soon") }}</code></pre>
                     <div class="text-sm text-foreground space-y-1">
-                      <div>Supported formatter names: <code>date(value, options?)</code>, <code>datetime(value, options?)</code>, <code>money(value, options?)</code>, <code>lower(value)</code>, <code>upper(value)</code>, <code>trim(value)</code>, <code>slug(value)</code>, <code>title(value)</code>, <code>deslug(value)</code>, <code>default(value, fallback)</code>.</div>
+                      <div>Supported formatter names: <code>date(value, options?)</code>, <code>datetime(value, options?)</code>, <code>money(value, options?)</code>, <code>number(value)</code>, <code>integer(value)</code>, <code>lower(value)</code>, <code>upper(value)</code>, <code>trim(value)</code>, <code>slug(value)</code>, <code>title(value)</code>, <code>deslug(value)</code>, <code>richtext(value)</code>, <code>default(value, fallback)</code>.</div>
                       <div>Existing schema/meta formatting (<code>number</code>, <code>money</code>, <code>richtext</code>, etc.) still works unchanged.</div>
-                      <div>Inline formatter output is HTML-escaped by default (same safety behavior as normal text placeholders).</div>
+                      <div>Inline formatter output is HTML-escaped by default; <code>richtext(value)</code> inserts trusted HTML.</div>
                     </div>
 
                     <h4 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -2846,7 +4325,8 @@ const exportCurrentBlock = async () => {
                       <div><code>queryItems</code> also stays saved as authored. The same runtime tokens can be used there and are resolved in memory only.</div>
                       <div><code>uniqueKey</code> supports runtime tokens such as <code>{orgId}</code> and <code>{siteId}</code>. It is resolved in memory for runtime fetches and does not need to be persisted as a concrete value in the saved block.</div>
                       <div><code>collection.canonicalLookup.key</code> is optional. It also supports runtime tokens and CMS preview resolves them in memory before fetching the matching document directly.</div>
-                      <div><code>query</code> handles the final required filters.</div>
+                      <div>Prefer <code>queryItems</code> for any field that can be looked up through the KV index. Use <code>query</code> only when the index is missing or the filter cannot be represented as a <code>queryItems</code> lookup.</div>
+                      <div><code>query</code> handles final after-fetch filters only after <code>queryItems</code> has limited the candidate list.</div>
                       <div><code>order</code> controls the final sort order.</div>
                       <div><code>limit</code> caps the results.</div>
                     </div>
@@ -2908,6 +4388,7 @@ const exportCurrentBlock = async () => {
                       <li>For a query key to work, that field must be included in your KV mirror config (in <code>indexKeys</code> and in <code>metadataKeys</code> for list rendering).</li>
                       <li>If you have more than one <code>queryItems</code> field, the runtime unions those matches into one candidate list (OR behavior at this stage).</li>
                       <li>Duplicate records are removed by <code>canonical</code>, so the same item only shows up once.</li>
+                      <li>Only use <code>collection.query</code> when a needed filter cannot use <code>queryItems</code>, usually because the field is not indexed yet or the condition cannot be represented as a KV indexed lookup.</li>
                       <li>After that, <code>collection.query</code> filters candidates in JavaScript; all query clauses must pass for a record to survive (AND behavior across <code>collection.query</code> rules).</li>
                       <li>Finally, <code>collection.order</code> sorts the remaining records.</li>
                       <li>The finished array is written to <code>values[field]</code>.</li>
@@ -2929,8 +4410,8 @@ const exportCurrentBlock = async () => {
                       Use this setup when you want array queries to stay fast and predictable.
                     </p>
                     <div class="text-sm text-foreground space-y-1">
-                      <div>1. Put the most selective indexed filters in <code>queryItems</code>. These should cut the candidate list down as early as possible.</div>
-                      <div>2. Put must-match rules in <code>collection.query</code>. Think of this as the final narrowing step.</div>
+                      <div>1. Put every possible list-limiting indexed filter in <code>queryItems</code>. These should cut the candidate list down before KV returns records.</div>
+                      <div>2. Use <code>collection.query</code> only for fields missing from the KV index or for conditions <code>queryItems</code> cannot express. Think of this as an exception path, not the default.</div>
                       <div>3. Use <code>collection.canonicalLookup.key</code> when you already know the exact document to fetch.</div>
                       <div>4. Put final sorting in <code>collection.order</code>.</div>
                       <div>5. Treat <code>queryOptions</code> as the editor UI for choosing filters. At runtime, the actual filtering is driven by <code>collection.query</code> and <code>queryItems</code>.</div>

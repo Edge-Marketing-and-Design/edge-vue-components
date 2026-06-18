@@ -1,5 +1,5 @@
 <script setup>
-import { renderTemplate } from '@edgedev/template-engine'
+import { pageRender, renderTemplate } from '@edgedev/template-engine'
 
 const props = defineProps({
   content: {
@@ -13,6 +13,30 @@ const props = defineProps({
   meta: {
     type: Object,
     default: () => ({}),
+  },
+  templateVersion: {
+    type: Number,
+    default: 1,
+  },
+  template: {
+    type: String,
+    default: '',
+  },
+  schema: {
+    type: Object,
+    default: () => ({}),
+  },
+  dataSources: {
+    type: Object,
+    default: () => ({}),
+  },
+  siteId: {
+    type: String,
+    default: '',
+  },
+  routeLastSegment: {
+    type: String,
+    default: '',
   },
   theme: {
     type: Object,
@@ -39,6 +63,8 @@ const props = defineProps({
 const emit = defineEmits(['loaded'])
 const renderInstanceId = `cms-block-render-${Math.random().toString(36).slice(2, 10)}`
 const htmlReady = ref(false)
+const templateV2Html = ref('')
+let templateV2RenderToken = 0
 
 const defaultTheme = {
   extend: {
@@ -68,6 +94,7 @@ const defaultTheme = {
 }
 
 const theme = computed(() => props.theme ?? defaultTheme)
+const isTemplateV2 = computed(() => Number(props.templateVersion) === 2)
 const renderValues = computed(() => {
   const baseValues = props.values || {}
   if (!props.renderContext || typeof props.renderContext !== 'object' || Array.isArray(props.renderContext))
@@ -80,6 +107,121 @@ const renderValues = computed(() => {
     ...baseValues,
   }
 })
+
+const templateV2RuntimeTokens = computed(() => ({
+  orgId: String(edgeGlobal.edgeState.currentOrganization || ''),
+  siteId: String(props.siteId || ''),
+  routeLastSegment: String(props.routeLastSegment || props.renderContext?.routeLastSegment || ''),
+  pageId: String(props.renderContext?.pageId || ''),
+  postId: String(props.renderContext?.postId || ''),
+}))
+
+const normalizeTemplateV2Schema = (schema) => {
+  if (!schema || typeof schema !== 'object')
+    return {}
+  if (Array.isArray(schema))
+    return schema
+  return Object.entries(schema).reduce((normalized, [field, config]) => {
+    if (config && typeof config === 'object' && !Array.isArray(config))
+      normalized[field] = config.type || config.value || config
+    else
+      normalized[field] = config
+    return normalized
+  }, {})
+}
+
+const getTemplateV2SchemaDefaults = (schema) => {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema))
+    return {}
+  return Object.entries(schema).reduce((defaults, [field, config]) => {
+    if (config && typeof config === 'object' && !Array.isArray(config) && Object.prototype.hasOwnProperty.call(config, 'value'))
+      defaults[field] = config.value
+    return defaults
+  }, {})
+}
+
+const normalizeTemplateV2Values = (values, schema) => {
+  const defaults = getTemplateV2SchemaDefaults(schema)
+  const normalized = { ...defaults, ...(values || {}) }
+  Object.entries(defaults).forEach(([field, value]) => {
+    if (normalized[field] === '')
+      normalized[field] = value
+  })
+  return normalized
+}
+
+const replaceTemplateV2RuntimeTokens = (value, tokens) => {
+  if (typeof value === 'string') {
+    return Object.entries(tokens || {}).reduce((resolved, [key, tokenValue]) => {
+      if (!tokenValue)
+        return resolved
+      return resolved.replaceAll(`{${key}}`, tokenValue)
+    }, value)
+  }
+  if (Array.isArray(value))
+    return value.map(item => replaceTemplateV2RuntimeTokens(item, tokens))
+  if (value && typeof value === 'object') {
+    return Object.entries(value).reduce((acc, [key, child]) => {
+      acc[key] = replaceTemplateV2RuntimeTokens(child, tokens)
+      return acc
+    }, {})
+  }
+  return value
+}
+
+const applyTemplateV2DataSourceControlValues = (dataSources, values, tokens) => {
+  const controlValues = values?.dataSources
+  if (!dataSources || typeof dataSources !== 'object' || Array.isArray(dataSources))
+    return {}
+
+  return Object.entries(dataSources).reduce((acc, [sourceName, sourceConfig]) => {
+    const sourceControlValues = controlValues?.[sourceName]
+    if (!sourceControlValues || typeof sourceControlValues !== 'object' || Array.isArray(sourceControlValues)) {
+      acc[sourceName] = replaceTemplateV2RuntimeTokens(sourceConfig, tokens)
+      return acc
+    }
+    const mergedSource = {
+      ...(sourceConfig || {}),
+      queryItems: {
+        ...(sourceConfig?.queryItems || {}),
+        ...sourceControlValues,
+      },
+    }
+    acc[sourceName] = replaceTemplateV2RuntimeTokens(mergedSource, tokens)
+    return acc
+  }, {})
+}
+
+const templateV2Values = computed(() => ({
+  ...templateV2RuntimeTokens.value,
+  ...normalizeTemplateV2Values(renderValues.value, props.schema),
+}))
+
+const templateV2HydrateOptions = computed(() => {
+  const fetchImpl = globalThis.fetch?.bind(globalThis)
+  if (!fetchImpl)
+    return null
+
+  const uniqueKey = [
+    templateV2RuntimeTokens.value.orgId,
+    props.siteId || 'preview',
+  ].filter(Boolean).join(':') || 'preview'
+
+  return {
+    uniqueKey,
+    clientOptions: {
+      fetch: fetchImpl,
+    },
+  }
+})
+
+const templateV2Block = computed(() => ({
+  templateVersion: 2,
+  template: props.template || props.content || '',
+  values: templateV2Values.value,
+  schema: normalizeTemplateV2Schema(props.schema),
+  dataSources: applyTemplateV2DataSourceControlValues(props.dataSources, templateV2Values.value, templateV2RuntimeTokens.value),
+}))
 
 function normalizeConfigLiteral(str) {
   return String(str || '')
@@ -169,6 +311,9 @@ const renderHtmlSegment = (content) => {
 }
 
 const renderedBlock = computed(() => {
+  if (isTemplateV2.value)
+    return { html: templateV2Html.value, publications: [] }
+
   const content = String(props.content || '')
   let html = ''
   const publications = []
@@ -208,6 +353,28 @@ const renderedBlock = computed(() => {
 
   return { html, publications }
 })
+
+watch(
+  templateV2Block,
+  async (block) => {
+    if (!isTemplateV2.value) {
+      templateV2Html.value = ''
+      return
+    }
+
+    const renderToken = ++templateV2RenderToken
+    try {
+      const result = await pageRender([block], theme.value || {}, '', templateV2HydrateOptions.value)
+      if (renderToken === templateV2RenderToken)
+        templateV2Html.value = result?.html || ''
+    }
+    catch {
+      if (renderToken === templateV2RenderToken)
+        templateV2Html.value = ''
+    }
+  },
+  { immediate: true, deep: true },
+)
 
 watch(() => renderedBlock.value.html, () => {
   htmlReady.value = false

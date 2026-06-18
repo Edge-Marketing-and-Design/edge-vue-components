@@ -2,6 +2,33 @@ const LEGACY_TAG_RE = /\{\{\{\#([A-Za-z0-9_-]+)(?::([A-Za-z0-9_-]+))?\s*\{/g
 const LEGACY_CLOSE_RE = type => new RegExp(`\\{\\{\\{/${type}\\}\\}\\}`, 'g')
 
 const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value)
+const INLINE_SCHEMA_FORMATTERS = new Set([
+  'date',
+  'datetime',
+  'money',
+  'number',
+  'integer',
+  'lower',
+  'upper',
+  'trim',
+  'slug',
+  'title',
+  'deslug',
+  'default',
+  'richtext',
+])
+const SCHEMA_FORMATTER_TYPE_MAP = {
+  money: 'number',
+  integer: 'number',
+  date: 'text',
+  datetime: 'text',
+  lower: 'text',
+  upper: 'text',
+  trim: 'text',
+  slug: 'text',
+  title: 'text',
+  deslug: 'text',
+}
 
 const cloneValue = (value) => {
   if (Array.isArray(value) || isPlainObject(value))
@@ -178,16 +205,37 @@ const inferSubarrayAlias = (fieldPath, usedAliases) => {
   return uniqueAlias(singular || 'subItem', usedAliases)
 }
 
+const getSchemaEntryType = (config) => {
+  if (typeof config === 'string')
+    return config
+  if (isPlainObject(config))
+    return config.type || config.value || ''
+  return ''
+}
+
+const getEditorSchemaType = (type) => {
+  const normalized = String(type || '').trim().toLowerCase()
+  return SCHEMA_FORMATTER_TYPE_MAP[normalized] || normalized || 'text'
+}
+
+const addSchemaFormatter = (schemaEntry, type) => {
+  const normalized = String(type || '').trim().toLowerCase()
+  if (INLINE_SCHEMA_FORMATTERS.has(normalized))
+    schemaEntry.formatter = normalized
+  return schemaEntry
+}
+
 const convertSchemaDefinition = (schema) => {
   if (Array.isArray(schema)) {
     return schema.reduce((acc, item) => {
       if (!item?.field)
         return acc
       const field = String(item.field)
-      acc[field] = {
-        type: item.type || item.value || 'text',
+      const schemaType = getSchemaEntryType(item) || 'text'
+      acc[field] = addSchemaFormatter({
+        type: getEditorSchemaType(schemaType),
         label: item.title || item.label || toTitle(field),
-      }
+      }, schemaType)
       if (Object.prototype.hasOwnProperty.call(item, 'value') && item.type)
         acc[field].value = cloneValue(item.value)
       return acc
@@ -197,14 +245,15 @@ const convertSchemaDefinition = (schema) => {
   if (isPlainObject(schema)) {
     return Object.entries(schema).reduce((acc, [field, config]) => {
       if (typeof config === 'string') {
-        acc[field] = { type: config, label: toTitle(field) }
+        acc[field] = addSchemaFormatter({ type: getEditorSchemaType(config), label: toTitle(field) }, config)
         return acc
       }
       if (isPlainObject(config)) {
-        acc[field] = {
-          type: config.type || config.value || 'text',
+        const schemaType = getSchemaEntryType(config) || 'text'
+        acc[field] = addSchemaFormatter({
+          type: getEditorSchemaType(schemaType),
           label: config.title || config.label || toTitle(field),
-        }
+        }, schemaType)
         if (Object.prototype.hasOwnProperty.call(config, 'value') && config.type)
           acc[field].value = cloneValue(config.value)
       }
@@ -215,12 +264,60 @@ const convertSchemaDefinition = (schema) => {
   return {}
 }
 
+const getSchemaFormatterMap = (schema) => {
+  const formatterMap = {}
+  const addFormatter = (field, type) => {
+    const formatter = String(type || '').trim().toLowerCase()
+    if (field && INLINE_SCHEMA_FORMATTERS.has(formatter))
+      formatterMap[String(field)] = formatter
+  }
+
+  if (Array.isArray(schema)) {
+    schema.forEach((item) => {
+      if (item?.field)
+        addFormatter(item.field, getSchemaEntryType(item))
+    })
+    return formatterMap
+  }
+
+  if (isPlainObject(schema)) {
+    Object.entries(schema).forEach(([field, config]) => {
+      addFormatter(field, getSchemaEntryType(config))
+    })
+  }
+
+  return formatterMap
+}
+
+const getScopedFieldExpression = (expression, scopeAlias = 'item') => {
+  const path = String(expression || '').trim()
+  if (!path)
+    return ''
+
+  const alias = String(scopeAlias || '').trim()
+  if (alias && path.startsWith(`${alias}.`))
+    return path.slice(alias.length + 1)
+  if (path.startsWith('item.'))
+    return path.slice(5)
+  return path
+}
+
+const applySchemaFormatter = (expression, schemaFormatters = {}, scopeAlias = 'item') => {
+  const path = getScopedFieldExpression(expression, scopeAlias)
+  if (!path || /^[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(path))
+    return expression
+
+  const rootField = path.split('.')[0]
+  const formatter = schemaFormatters[path] || schemaFormatters[rootField]
+  return formatter ? `${formatter}(${path})` : path
+}
+
 const legacyFieldToSchema = (type, cfg, field) => {
   const schemaType = type === 'textarea' ? 'textarea' : type
-  const schema = {
-    type: schemaType,
+  const schema = addSchemaFormatter({
+    type: getEditorSchemaType(schemaType),
     label: cfg.title || cfg.label || toTitle(field),
-  }
+  }, schemaType)
   if (cfg.option)
     schema.option = cloneValue(cfg.option)
   if (Object.prototype.hasOwnProperty.call(cfg, 'value'))
@@ -247,13 +344,18 @@ const buildControlsFromQueryOptions = (queryOptions = []) => {
     if (!option?.field)
       return acc
     const field = String(option.field)
+    const controlType = option.input === 'text' ? 'text' : (option.type || 'select')
     acc[field] = {
-      type: option.type || 'select',
+      type: controlType,
       label: option.title || option.label || toTitle(field),
-      options: cloneValue(option.options || []),
-      optionsKey: option.optionsKey || 'label',
-      optionsValue: option.optionsValue || 'value',
     }
+    if (controlType !== 'text') {
+      acc[field].options = cloneValue(option.options || [])
+      acc[field].optionsKey = option.optionsKey || 'label'
+      acc[field].optionsValue = option.optionsValue || 'value'
+    }
+    if (option.placeholder)
+      acc[field].placeholder = option.placeholder
     if (option.operator)
       acc[field].operator = option.operator
     return acc
@@ -292,7 +394,7 @@ const buildDataSource = (name, cfg, values) => {
     source.type = 'manual'
   }
 
-  const sourceKeys = ['queryItems', 'query', 'canonicalLookup', 'order', 'limit', 'value']
+  const sourceKeys = ['queryItems', 'previewQueryItems', 'query', 'canonicalLookup', 'order', 'limit', 'value']
   sourceKeys.forEach((key) => {
     if (cfg[key] !== undefined)
       source[key] = cloneValue(cfg[key])
@@ -311,7 +413,7 @@ const buildDataSource = (name, cfg, values) => {
   return source
 }
 
-const normalizeLegacyReferences = (content, fromAlias = '', toAlias = '') => {
+const normalizeLegacyReferences = (content, fromAlias = '', toAlias = '', schemaFormatters = {}, scopeAlias = 'item') => {
   let normalized = String(content || '')
 
   if (fromAlias && toAlias && fromAlias !== toAlias) {
@@ -319,8 +421,8 @@ const normalizeLegacyReferences = (content, fromAlias = '', toAlias = '') => {
     normalized = normalized.replace(new RegExp(`\\{\\{\\s*${fromAlias}\\s*\\}\\}`, 'g'), `{{ ${toAlias} }}`)
   }
 
-  normalized = normalized.replace(/\{\{\{\s*([^{}#/][^{}]*?)\s*\}\}\}/g, (_, expression) => `{{ ${String(expression).trim()} }}`)
-  normalized = normalized.replace(/\{\{\s*([^{}#/][^{}]*?)\s*\}\}/g, (_, expression) => `{{ ${String(expression).trim()} }}`)
+  normalized = normalized.replace(/\{\{\{\s*([^{}#/][^{}]*?)\s*\}\}\}/g, (_, expression) => `{{ ${applySchemaFormatter(expression, schemaFormatters, scopeAlias)} }}`)
+  normalized = normalized.replace(/\{\{\s*([^{}#/][^{}]*?)\s*\}\}/g, (_, expression) => `{{ ${applySchemaFormatter(expression, schemaFormatters, scopeAlias)} }}`)
   return normalized
 }
 
@@ -335,17 +437,18 @@ export const useCmsTemplateV2Conversion = () => {
 
     const convertSegment = (segment, options = {}) => {
       const scopeAlias = options.scopeAlias || 'item'
+      const schemaFormatters = options.schemaFormatters || {}
       let cursor = 0
       let output = ''
 
       for (;;) {
         const tag = findNextLegacyTag(segment, cursor)
         if (!tag) {
-          output += normalizeLegacyReferences(segment.slice(cursor), options.rewriteFromAlias, options.rewriteToAlias)
+          output += normalizeLegacyReferences(segment.slice(cursor), options.rewriteFromAlias, options.rewriteToAlias, schemaFormatters, scopeAlias)
           break
         }
 
-        output += normalizeLegacyReferences(segment.slice(cursor, tag.start), options.rewriteFromAlias, options.rewriteToAlias)
+        output += normalizeLegacyReferences(segment.slice(cursor, tag.start), options.rewriteFromAlias, options.rewriteToAlias, schemaFormatters, scopeAlias)
 
         const cfg = parseJsonConfig(tag.rawConfig)
         if (!cfg) {
@@ -377,8 +480,9 @@ export const useCmsTemplateV2Conversion = () => {
           if (type === 'array') {
             const fieldName = sanitizeIdentifier(field, 'items')
             const alias = sanitizeIdentifier(cfg.as || 'item', 'item')
+            const childSchemaFormatters = getSchemaFormatterMap(cfg.schema)
             usedAliases.add(alias)
-            const convertedBody = convertSegment(body, { scopeAlias: alias })
+            const convertedBody = convertSegment(body, { scopeAlias: alias, schemaFormatters: childSchemaFormatters })
 
             if (cfg.collection || cfg.api) {
               dataSources[fieldName] = buildDataSource(fieldName, cfg, values)
@@ -401,6 +505,7 @@ export const useCmsTemplateV2Conversion = () => {
               scopeAlias: alias,
               rewriteFromAlias: explicitAlias ? '' : scopeAlias,
               rewriteToAlias: explicitAlias ? '' : alias,
+              schemaFormatters,
             })
             if (Number(cfg.limit) > 0)
               warnings.push(`Review subarray limit ${cfg.limit} for "${field}"; v2 loop output was converted without inline slice syntax.`)
@@ -420,7 +525,8 @@ export const useCmsTemplateV2Conversion = () => {
 
         schema[field] = legacyFieldToSchema(type, cfg, field)
         values[field] = Object.prototype.hasOwnProperty.call(cfg, 'value') ? cloneValue(cfg.value) : ''
-        output += `{{ ${field} }}`
+        const inlineFormatter = INLINE_SCHEMA_FORMATTERS.has(type) ? type : ''
+        output += inlineFormatter ? `{{ ${inlineFormatter}(${field}) }}` : `{{ ${field} }}`
         cursor = tag.end
       }
 

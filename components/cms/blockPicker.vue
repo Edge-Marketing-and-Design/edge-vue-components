@@ -397,6 +397,10 @@ const clearTagFilters = () => {
   <div v-if="props.blockOverride" class="pointer-events-none" :class="previewSurfaceClass(blockOverridePreviewType)">
     <edge-cms-block-api
       :content="props.blockOverride.content"
+      :template-version="props.blockOverride.templateVersion"
+      :template="props.blockOverride.template"
+      :schema="props.blockOverride.schema"
+      :data-sources="props.blockOverride.dataSources"
       :values="props.blockOverride.values"
       :meta="props.blockOverride.meta"
       :theme="pickerTheme"
@@ -409,6 +413,10 @@ const clearTagFilters = () => {
       <edge-cms-block-render
         v-if="!pickerState.blocksLoaded.includes('block')"
         :content="loadingRender(props.blockOverride.content)"
+        :template-version="props.blockOverride.templateVersion"
+        :template="props.blockOverride.template"
+        :schema="props.blockOverride.schema"
+        :data-sources="props.blockOverride.dataSources"
         :values="props.blockOverride.values"
         :meta="props.blockOverride.meta"
         :theme="pickerTheme"
@@ -459,10 +467,14 @@ const clearTagFilters = () => {
                 <div class="text-4xl relative text-inherit text-center">
                   {{ block.name }}
                 </div>
-                <edge-cms-block-api :site-id="activeSiteId" :content="block.content" :theme="pickerTheme" :values="block.values" :meta="block.meta" :viewport-mode="pickerViewport" :render-context="pickerRenderContext" :standalone-preview="true" @pending="blockLoaded($event, block.docId)" />
+                <edge-cms-block-api :site-id="activeSiteId" :content="block.content" :template-version="block.templateVersion" :template="block.template" :schema="block.schema" :data-sources="block.dataSources" :theme="pickerTheme" :values="block.values" :meta="block.meta" :viewport-mode="pickerViewport" :render-context="pickerRenderContext" :standalone-preview="true" @pending="blockLoaded($event, block.docId)" />
                 <edge-cms-block-render
                   v-if="!pickerState.blocksLoaded.includes(block.docId)"
                   :content="loadingRender(block.content)"
+                  :template-version="block.templateVersion"
+                  :template="block.template"
+                  :schema="block.schema"
+                  :data-sources="block.dataSources"
                   :values="block.values"
                   :meta="block.meta"
                   :theme="pickerTheme"
@@ -540,10 +552,14 @@ const clearTagFilters = () => {
                 <div class="text-4xl relative text-inherit text-center">
                   {{ block.name }}
                 </div>
-                <edge-cms-block-api :site-id="activeSiteId" :content="block.content" :theme="pickerTheme" :values="block.values" :meta="block.meta" :viewport-mode="pickerViewport" :render-context="pickerRenderContext" :standalone-preview="true" @pending="blockLoaded($event, block.docId)" />
+                <edge-cms-block-api :site-id="activeSiteId" :content="block.content" :template-version="block.templateVersion" :template="block.template" :schema="block.schema" :data-sources="block.dataSources" :theme="pickerTheme" :values="block.values" :meta="block.meta" :viewport-mode="pickerViewport" :render-context="pickerRenderContext" :standalone-preview="true" @pending="blockLoaded($event, block.docId)" />
                 <edge-cms-block-render
                   v-if="!pickerState.blocksLoaded.includes(block.docId)"
                   :content="loadingRender(block.content)"
+                  :template-version="block.templateVersion"
+                  :template="block.template"
+                  :schema="block.schema"
+                  :data-sources="block.dataSources"
                   :values="block.values"
                   :meta="block.meta"
                   :theme="pickerTheme"

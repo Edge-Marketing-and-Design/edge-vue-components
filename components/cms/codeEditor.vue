@@ -403,8 +403,9 @@ onBeforeUnmount(() => {
             </Card>
           </PopoverContent>
         </Popover>
-        <span class="text-base font-semibold text-slate-900 dark:text-slate-50">
-          {{ props.title }}
+        <span class="inline-flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-50">
+          <span>{{ props.title }}</span>
+          <slot name="title-actions" />
         </span>
       </template>
       <template #center>
