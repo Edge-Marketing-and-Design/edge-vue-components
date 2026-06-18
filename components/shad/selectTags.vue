@@ -256,7 +256,7 @@ const onSelectItem = (ev) => {
             <slot name="icon" />
           </span>
         </div>
-        <FormDescription>
+        <FormDescription v-if="props.description">
           {{ props.description }}
         </FormDescription>
         <FormMessage />
@@ -293,7 +293,7 @@ const onSelectItem = (ev) => {
           <slot name="icon" />
         </span>
       </div>
-      <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">
+      <p v-if="props.description" class="text-sm text-slate-500 dark:text-slate-400 mt-1">
         {{ props.description }}
       </p>
     </div>

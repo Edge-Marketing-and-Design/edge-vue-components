@@ -129,7 +129,7 @@ onMounted(() => {
             </span>
           </div>
         </FormControl>
-        <FormDescription>
+        <FormDescription v-if="props.description || $slots.description">
           {{ props.description }}
           <slot name="description" />
         </FormDescription>
