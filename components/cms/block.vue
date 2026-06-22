@@ -294,6 +294,100 @@ function extractFieldsInOrder(template) {
   return fields
 }
 
+const addOrderedField = (items, seen, field, index) => {
+  const normalizedField = String(field || '').trim()
+  if (!normalizedField || seen.has(normalizedField))
+    return
+  items.push({ field: normalizedField, index })
+  seen.add(normalizedField)
+}
+
+const expressionMatchesTemplateV2Field = (expression, field) => {
+  const expr = String(expression || '').trim()
+  const key = String(field || '').trim()
+  if (!expr || !key)
+    return false
+  if (expr === key || expr.startsWith(`${key}.`))
+    return true
+
+  const functionMatch = expr.match(/^[A-Za-z_$][\w$]*\s*\((.*)\)$/)
+  if (!functionMatch)
+    return false
+
+  const firstArg = String(functionMatch[1] || '').split(',')[0]?.trim()
+  return firstArg === key || firstArg?.startsWith(`${key}.`)
+}
+
+function extractTemplateV2FieldsInOrder(template, fields = []) {
+  if (!template || typeof template !== 'string')
+    return []
+
+  const fieldSet = new Set(fields.map(field => String(field || '').trim()).filter(Boolean))
+  const ordered = []
+  const seen = new Set()
+
+  const TAG_START_RE = /\{\{\{\#([A-Za-z0-9_-]+)\s*\{/g
+  TAG_START_RE.lastIndex = 0
+  for (;;) {
+    const m = TAG_START_RE.exec(template)
+    if (!m)
+      break
+
+    const type = String(m[1] || '').toLowerCase()
+    if (shouldIgnoreTagType(type))
+      continue
+
+    const configStart = TAG_START_RE.lastIndex - 1
+    if (configStart < 0 || template[configStart] !== '{')
+      continue
+
+    const configEnd = findMatchingBrace(template, configStart)
+    if (configEnd === -1)
+      continue
+
+    const rawCfg = template.slice(configStart, configEnd + 1)
+    const parsedCfg = safeParseTagConfig(rawCfg)
+    const field = String(parsedCfg?.field || '').trim()
+    if (fieldSet.has(field))
+      addOrderedField(ordered, seen, field, m.index)
+
+    const closeTriple = template.indexOf('}}}', configEnd + 1)
+    TAG_START_RE.lastIndex = closeTriple !== -1 ? closeTriple + 3 : configEnd + 1
+  }
+
+  const forRe = /\{\{\#for\s+([A-Za-z_$][\w$]*)\s+in\s+([^}]+?)\s*\}\}/g
+  for (;;) {
+    const m = forRe.exec(template)
+    if (!m)
+      break
+
+    const sourceExpression = String(m[2] || '').trim()
+    const sourceMatch = sourceExpression.match(/^source\(\s*["']([^"']+)["']\s*\)$/)
+    const field = sourceMatch?.[1] || sourceExpression
+    if (fieldSet.has(field))
+      addOrderedField(ordered, seen, field, m.index)
+  }
+
+  const tokenRe = /\{\{\s*([^{}#/][^{}]*?)\s*\}\}/g
+  for (;;) {
+    const m = tokenRe.exec(template)
+    if (!m)
+      break
+
+    const expression = String(m[1] || '').trim()
+    for (const field of fieldSet) {
+      if (expressionMatchesTemplateV2Field(expression, field)) {
+        addOrderedField(ordered, seen, field, m.index)
+        break
+      }
+    }
+  }
+
+  return ordered
+    .sort((a, b) => a.index - b.index)
+    .map(item => item.field)
+}
+
 const modelValue = useVModel(props, 'modelValue', emit)
 const blockFormRef = ref(null)
 const previewContentEditorRef = ref(null)
@@ -507,6 +601,10 @@ const sourceBlockDocId = computed(() => {
     return direct
   return String(props.blockId || '').trim()
 })
+
+const hasObjectEntries = (value) => {
+  return !!value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length > 0
+}
 
 const inheritedPreviewType = computed(() => {
   const explicit = modelValue.value?.previewType
@@ -944,6 +1042,34 @@ const setPublicationFieldSelection = (field, item) => {
   state.publicationOpenByKey[field] = false
 }
 
+const getOptionDefaultValue = (schemaItem) => {
+  if (schemaItem?.value !== undefined && schemaItem?.value !== null && schemaItem?.value !== '')
+    return schemaItem.value
+  let option = {}
+  if (schemaItem?.option && typeof schemaItem.option === 'object' && !Array.isArray(schemaItem.option))
+    option = schemaItem.option
+  const itemTitle = option.optionsKey || 'label'
+  const itemValue = option.optionsValue || 'value'
+  let firstOption = null
+  if (Array.isArray(option.options)) {
+    firstOption = option.options.find((item) => {
+      if (typeof item === 'string')
+        return item.trim()
+      if (!item || typeof item !== 'object')
+        return false
+      const value = item[itemValue] ?? item.value ?? item.name ?? item.id ?? item[itemTitle]
+      return String(value || '').trim()
+    })
+  }
+  if (typeof firstOption === 'string')
+    return firstOption.trim()
+  if (firstOption && typeof firstOption === 'object') {
+    const value = firstOption[itemValue] ?? firstOption.value ?? firstOption.name ?? firstOption.id ?? firstOption[itemTitle]
+    return String(value || '').trim()
+  }
+  return ''
+}
+
 const resetArrayItems = (field, metaSource = null) => {
   const meta = metaSource || modelValue.value?.meta || {}
   const fieldMeta = meta?.[field]
@@ -965,6 +1091,9 @@ const resetArrayItems = (field, metaSource = null) => {
     }
     else if (schemaItem.type === 'image') {
       state.arrayItems[field][schemaItem.field] = ''
+    }
+    else if (schemaItem.type === 'option') {
+      state.arrayItems[field][schemaItem.field] = getOptionDefaultValue(schemaItem)
     }
   }
 }
@@ -1044,6 +1173,7 @@ const parseBlockContentModel = (html) => {
 
 const isTemplateV2BlockDoc = doc => Number(doc?.templateVersion) === 2
 const DATA_SOURCE_CONTROL_FIELD_PREFIX = '__dataSourceControl__'
+const DATA_SOURCE_LIMIT_CONTROL_FIELD = '__limit'
 
 const makeDataSourceControlField = (sourceName, controlField) => {
   return `${DATA_SOURCE_CONTROL_FIELD_PREFIX}${sourceName}__${controlField}`
@@ -1131,37 +1261,93 @@ const buildMetaFromTemplateV2DataSourceControls = (dataSources = {}) => {
 
   return Object.entries(dataSources).reduce((acc, [sourceName, sourceConfig]) => {
     const controls = sourceConfig?.controls
-    if (!controls || typeof controls !== 'object' || Array.isArray(controls))
-      return acc
 
-    Object.entries(controls).forEach(([controlField, controlConfig]) => {
-      const control = (controlConfig && typeof controlConfig === 'object' && !Array.isArray(controlConfig))
-        ? controlConfig
-        : { type: 'text' }
-      const field = makeDataSourceControlField(sourceName, controlField)
-      const controlType = String(control.type || '').trim().toLowerCase()
-      const hasOptions = controlType !== 'text' && (Array.isArray(control.options) || typeof control.options === 'string')
+    if (controls && typeof controls === 'object' && !Array.isArray(controls)) {
+      Object.entries(controls).forEach(([controlField, controlConfig]) => {
+        const control = (controlConfig && typeof controlConfig === 'object' && !Array.isArray(controlConfig))
+          ? controlConfig
+          : { type: 'text' }
+        const field = makeDataSourceControlField(sourceName, controlField)
+        const controlType = String(control.type || '').trim().toLowerCase()
+        const hasOptions = controlType !== 'text' && (Array.isArray(control.options) || typeof control.options === 'string')
+        acc[field] = {
+          type: hasOptions ? 'option' : (control.type === 'number' ? 'number' : 'text'),
+          title: control.label || control.title || titleFromFieldName(controlField),
+          placeholder: control.placeholder || '',
+          dataSourceControl: {
+            sourceName,
+            field: controlField,
+          },
+        }
+        if (hasOptions) {
+          acc[field].option = {
+            field,
+            options: control.options || [],
+            optionsKey: control.optionsKey || 'label',
+            optionsValue: control.optionsValue || 'value',
+            multiple: !!control.multiple,
+          }
+        }
+      })
+    }
+
+    const sourceLimit = Number(sourceConfig?.limit)
+    if (Number.isFinite(sourceLimit) && sourceLimit > 0 && sourceLimit !== 1) {
+      const field = makeDataSourceControlField(sourceName, DATA_SOURCE_LIMIT_CONTROL_FIELD)
       acc[field] = {
-        type: hasOptions ? 'option' : (control.type === 'number' ? 'number' : 'text'),
-        title: control.label || control.title || titleFromFieldName(controlField),
-        placeholder: control.placeholder || '',
+        type: 'number',
+        title: 'Limit',
         dataSourceControl: {
           sourceName,
-          field: controlField,
+          field: DATA_SOURCE_LIMIT_CONTROL_FIELD,
+          target: 'limit',
         },
       }
-      if (hasOptions) {
-        acc[field].option = {
-          field,
-          options: control.options || [],
-          optionsKey: control.optionsKey || 'label',
-          optionsValue: control.optionsValue || 'value',
-          multiple: !!control.multiple,
-        }
-      }
-    })
+    }
+
     return acc
   }, {})
+}
+
+const getTemplateV2DataSourceControlTarget = control => control?.target || (control?.field === DATA_SOURCE_LIMIT_CONTROL_FIELD ? 'limit' : 'queryItem')
+
+const getDataSourceControlDefault = (dataSources, sourceName, controlField, target = 'queryItem', instanceMeta = {}) => {
+  const instanceSourceMeta = instanceMeta?.[sourceName]
+  if (target === 'limit') {
+    if (instanceSourceMeta?.limit !== undefined)
+      return edgeGlobal.dupObject(instanceSourceMeta.limit)
+    const sourceLimit = dataSources?.[sourceName]?.limit
+    return sourceLimit !== undefined ? edgeGlobal.dupObject(sourceLimit) : ''
+  }
+  const instanceQueryItemValue = instanceSourceMeta?.queryItems?.[controlField]
+  if (instanceQueryItemValue !== undefined)
+    return edgeGlobal.dupObject(instanceQueryItemValue)
+  const queryItemValue = dataSources?.[sourceName]?.queryItems?.[controlField]
+  if (queryItemValue !== undefined)
+    return edgeGlobal.dupObject(queryItemValue)
+  const controlValue = dataSources?.[sourceName]?.controls?.[controlField]?.value
+  if (controlValue !== undefined)
+    return edgeGlobal.dupObject(controlValue)
+  return ''
+}
+
+const applyDataSourceControlDraftMeta = (meta = {}, draft = {}) => {
+  const nextMeta = edgeGlobal.dupObject(meta || {})
+  Object.entries(meta || {}).forEach(([field, fieldMeta]) => {
+    const control = fieldMeta?.dataSourceControl || parseDataSourceControlField(field)
+    if (!control?.sourceName || !control?.field)
+      return
+    if (!nextMeta[control.sourceName] || typeof nextMeta[control.sourceName] !== 'object' || Array.isArray(nextMeta[control.sourceName]))
+      nextMeta[control.sourceName] = {}
+    if (getTemplateV2DataSourceControlTarget(control) === 'limit') {
+      nextMeta[control.sourceName].limit = edgeGlobal.dupObject(draft?.[field])
+      return
+    }
+    if (!nextMeta[control.sourceName].queryItems || typeof nextMeta[control.sourceName].queryItems !== 'object' || Array.isArray(nextMeta[control.sourceName].queryItems))
+      nextMeta[control.sourceName].queryItems = {}
+    nextMeta[control.sourceName].queryItems[control.field] = edgeGlobal.dupObject(draft?.[field])
+  })
+  return nextMeta
 }
 
 const collectTemplateV2SchemaDefaults = (schema = {}) => {
@@ -1177,34 +1363,6 @@ const collectTemplateV2SchemaDefaults = (schema = {}) => {
       acc[field] = ''
     return acc
   }, {})
-}
-
-const getDataSourceControlDefault = (dataSources, values, sourceName, controlField) => {
-  const nestedValue = values?.dataSources?.[sourceName]?.[controlField]
-  if (nestedValue !== undefined)
-    return edgeGlobal.dupObject(nestedValue)
-  const queryItemValue = dataSources?.[sourceName]?.queryItems?.[controlField]
-  if (queryItemValue !== undefined)
-    return edgeGlobal.dupObject(queryItemValue)
-  const controlValue = dataSources?.[sourceName]?.controls?.[controlField]?.value
-  if (controlValue !== undefined)
-    return edgeGlobal.dupObject(controlValue)
-  return ''
-}
-
-const applyDataSourceControlDraftValues = (values, draft, meta = {}) => {
-  const nextValues = edgeGlobal.dupObject(values || {})
-  Object.entries(meta || {}).forEach(([field, fieldMeta]) => {
-    const control = fieldMeta?.dataSourceControl || parseDataSourceControlField(field)
-    if (!control?.sourceName || !control?.field)
-      return
-    if (!nextValues.dataSources || typeof nextValues.dataSources !== 'object' || Array.isArray(nextValues.dataSources))
-      nextValues.dataSources = {}
-    if (!nextValues.dataSources[control.sourceName] || typeof nextValues.dataSources[control.sourceName] !== 'object' || Array.isArray(nextValues.dataSources[control.sourceName]))
-      nextValues.dataSources[control.sourceName] = {}
-    nextValues.dataSources[control.sourceName][control.field] = edgeGlobal.dupObject(draft?.[field])
-  })
-  return nextValues
 }
 
 const buildUpdatedBlockDocFromContent = (content, sourceDoc = {}) => {
@@ -1245,6 +1403,31 @@ const blockContentSourceDoc = computed(() => {
   if (!blockDocId)
     return null
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[blockDocId] || null
+})
+
+const resolvedRenderBlock = computed(() => {
+  const instance = modelValue.value || {}
+  const sourceDoc = blockContentSourceDoc.value || {}
+  const templateIsV2 = isTemplateV2BlockDoc(instance) || isTemplateV2BlockDoc(sourceDoc)
+  const templateVersion = templateIsV2 ? 2 : (Number(instance.templateVersion || sourceDoc.templateVersion) || 1)
+
+  return {
+    ...sourceDoc,
+    ...instance,
+    content: instance.content || sourceDoc.content || sourceDoc.template || '',
+    templateVersion,
+    template: instance.template || sourceDoc.template || '',
+    schema: hasObjectEntries(instance.schema) ? instance.schema : (sourceDoc.schema || {}),
+    dataSources: hasObjectEntries(instance.dataSources) ? instance.dataSources : (sourceDoc.dataSources || {}),
+    values: {
+      ...(sourceDoc.values || {}),
+      ...(instance.values || {}),
+    },
+    meta: {
+      ...(sourceDoc.meta || {}),
+      ...(instance.meta || {}),
+    },
+  }
 })
 
 const editorInstructionsHtml = computed(() => {
@@ -1364,7 +1547,7 @@ const previewContentCanvasClass = computed(() => {
 
 const fieldEditorPreviewBlock = computed(() => {
   return {
-    ...JSON.parse(JSON.stringify(modelValue.value || {})),
+    ...JSON.parse(JSON.stringify(resolvedRenderBlock.value || {})),
     previewType: effectivePreviewType.value,
     values: JSON.parse(JSON.stringify(state.draft || {})),
     meta: sanitizeQueryItems(state.meta),
@@ -1928,9 +2111,10 @@ const openEditor = async (event, options = {}) => {
         return
       state.draft[field] = getDataSourceControlDefault(
         templateDataSources,
-        state.draft,
         control.sourceName,
         control.field,
+        getTemplateV2DataSourceControlTarget(control),
+        storedMeta,
       )
     })
   }
@@ -2030,8 +2214,14 @@ const validateValueAgainstRules = (value, rules, label, typeHint) => {
 
 const orderedMeta = computed(() => {
   const metaObj = state.metaUpdate || {}
-  const tpl = modelValue.value?.content || ''
-  const orderedFields = extractFieldsInOrder(tpl)
+  const blockData = edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[modelValue.value?.blockId]
+  const templateIsV2 = isTemplateV2BlockDoc(blockData) || isTemplateV2BlockDoc(modelValue.value)
+  const tpl = templateIsV2
+    ? (blockData?.template || modelValue.value?.template || '')
+    : (modelValue.value?.content || '')
+  const orderedFields = templateIsV2
+    ? extractTemplateV2FieldsInOrder(tpl, Object.keys(metaObj))
+    : extractFieldsInOrder(tpl)
 
   const out = []
   const picked = new Set()
@@ -2132,11 +2322,13 @@ const save = () => {
   dataSourceControlFields.forEach((field) => {
     delete draftValues[field]
   })
-  const updatedValues = applyDataSourceControlDraftValues(draftValues, state.draft, state.meta)
-  const updatedMeta = sanitizeQueryItems(state.meta)
+  const updatedValues = draftValues
+  let updatedMeta = sanitizeQueryItems(state.meta)
+  updatedMeta = applyDataSourceControlDraftMeta(updatedMeta, state.draft)
   dataSourceControlFields.forEach((field) => {
     delete updatedMeta[field]
   })
+  updatedMeta = sanitizeQueryItems(updatedMeta)
   const updated = {
     ...modelValue.value,
     values: updatedValues,
@@ -2365,16 +2557,16 @@ const getTagsFromPosts = computed(() => {
     >
       <!-- Content -->
       <div class="relative z-0" :class="props.editMode && props.overrideClicksInEditMode ? 'pointer-events-none' : ''">
-        <edge-cms-block-api :site-id="props.siteId" :route-last-segment="props.routeLastSegment" :theme="props.theme" :content="modelValue?.content" :template-version="modelValue?.templateVersion" :template="modelValue?.template" :schema="modelValue?.schema" :data-sources="modelValue?.dataSources" :values="modelValue?.values" :meta="modelValue?.meta" :viewport-mode="props.viewportMode" :render-context="props.renderContext" :standalone-preview="props.standalonePreview" @pending="state.loading = $event" />
+        <edge-cms-block-api :site-id="props.siteId" :route-last-segment="props.routeLastSegment" :theme="props.theme" :content="resolvedRenderBlock.content" :template-version="resolvedRenderBlock.templateVersion" :template="resolvedRenderBlock.template" :schema="resolvedRenderBlock.schema" :data-sources="resolvedRenderBlock.dataSources" :values="resolvedRenderBlock.values" :meta="resolvedRenderBlock.meta" :viewport-mode="props.viewportMode" :render-context="props.renderContext" :standalone-preview="props.standalonePreview" @pending="state.loading = $event" />
         <edge-cms-block-render
           v-if="state.loading"
-          :content="loadingRender(modelValue?.content)"
-          :template-version="modelValue?.templateVersion"
-          :template="modelValue?.template"
-          :schema="modelValue?.schema"
-          :data-sources="modelValue?.dataSources"
-          :values="modelValue?.values"
-          :meta="modelValue?.meta"
+          :content="loadingRender(resolvedRenderBlock.content)"
+          :template-version="resolvedRenderBlock.templateVersion"
+          :template="resolvedRenderBlock.template"
+          :schema="resolvedRenderBlock.schema"
+          :data-sources="resolvedRenderBlock.dataSources"
+          :values="resolvedRenderBlock.values"
+          :meta="resolvedRenderBlock.meta"
           :theme="props.theme"
           :viewport-mode="props.viewportMode"
           :render-context="props.renderContext"

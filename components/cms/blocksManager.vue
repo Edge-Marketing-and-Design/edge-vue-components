@@ -4,6 +4,7 @@ const emit = defineEmits(['head'])
 const edgeFirebase = inject('edgeFirebase')
 const { saveJsonFiles } = useJsonFileSave()
 const { blocks: blockNewDocSchema } = useCmsNewDocs()
+const { convertLegacyBlockToTemplateV2 } = useCmsTemplateV2Conversion()
 const BLANK_BLOCK_TEMPLATE_ID = '__blank__'
 const state = reactive({
   filter: '',
@@ -928,6 +929,35 @@ const makeUniqueBlockDocIdFromName = (name, docsMap = {}) => {
   return nextDocId
 }
 
+const hasLegacyInlineTags = (content) => {
+  return /\{\{\{#[A-Za-z0-9_-]+\s*\{/.test(String(content || ''))
+}
+
+const buildStarterBlockPayload = (template, nextDocId, nextBlockName) => {
+  const content = typeof template?.content === 'string' ? template.content : ''
+  const payload = {
+    ...getBlockDocDefaults(),
+    docId: nextDocId,
+    name: nextBlockName,
+    content,
+  }
+
+  if (!content || !hasLegacyInlineTags(content))
+    return payload
+
+  const converted = convertLegacyBlockToTemplateV2(content)
+  return {
+    ...payload,
+    templateVersion: 2,
+    template: converted.template,
+    content: converted.template,
+    schema: converted.schema,
+    dataSources: converted.dataSources,
+    values: undefined,
+    templateConversion: converted.conversion,
+  }
+}
+
 watch(addExistingBlockItems, (items) => {
   const selectedDocId = String(state.selectedExistingBlockDocId || '').trim()
   const hasSelectedDocId = items.some(item => item.docId === selectedDocId)
@@ -950,12 +980,7 @@ const createBlockFromTemplate = async () => {
         docId: nextDocId,
         name: nextBlockName,
       }
-    : {
-        ...getBlockDocDefaults(),
-        docId: nextDocId,
-        name: nextBlockName,
-        content: typeof selectedInitBlockTemplate.value?.content === 'string' ? selectedInitBlockTemplate.value.content : '',
-      }
+    : buildStarterBlockPayload(selectedInitBlockTemplate.value, nextDocId, nextBlockName)
 
   try {
     await edgeFirebase.storeDoc(blockCollectionPath.value, payload, nextDocId)

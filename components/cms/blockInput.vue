@@ -18,7 +18,8 @@ const props = defineProps({
   },
   modelValue: {
     type: [Object, String, Array, Number, Boolean],
-    required: true,
+    required: false,
+    default: '',
   },
   type: {
     type: String,
@@ -84,6 +85,46 @@ const resolvedImageUrl = computed(() => {
 
 const hasImageValue = computed(() => String(resolvedImageUrl.value || '').trim().length > 0)
 
+const optionConfig = computed(() => {
+  let option = {}
+  if (props.schema?.option && typeof props.schema.option === 'object' && !Array.isArray(props.schema.option))
+    option = props.schema.option
+  const itemTitle = String(option.optionsKey || 'label').trim() || 'label'
+  const itemValue = String(option.optionsValue || 'value').trim() || 'value'
+  let items = []
+  if (Array.isArray(option.options)) {
+    items = option.options
+      .map((item) => {
+        if (typeof item === 'string') {
+          const value = item.trim()
+          return value ? { [itemTitle]: value, [itemValue]: value } : null
+        }
+        if (!item || typeof item !== 'object')
+          return null
+        const label = item[itemTitle] ?? item.label ?? item.title ?? item.name ?? item[itemValue] ?? item.value ?? ''
+        const value = item[itemValue] ?? item.value ?? item.name ?? item.id ?? label
+        if (String(label || '').trim() === '' && String(value || '').trim() === '')
+          return null
+        return {
+          [itemTitle]: String(label || value).trim(),
+          [itemValue]: String(value || label).trim(),
+        }
+      })
+      .filter(item => item && String(item[itemValue] || '').trim() !== '')
+  }
+  return {
+    itemTitle,
+    itemValue,
+    items,
+  }
+})
+
+const getOptionDefaultValue = () => {
+  if (props.schema?.value !== undefined && props.schema?.value !== null && props.schema?.value !== '')
+    return props.schema.value
+  return optionConfig.value.items[0]?.[optionConfig.value.itemValue] || ''
+}
+
 const normalizeSelectedImageUrl = (url) => {
   if (typeof url === 'string')
     return url
@@ -129,7 +170,7 @@ const selectRichtextFile = async (url) => {
 
 onBeforeMount(async () => {
   if (props.type === 'option' && !modelValue.value) {
-    modelValue.value = props.schema.value
+    modelValue.value = getOptionDefaultValue()
   }
   await nextTick()
   state.mounted = true
@@ -217,7 +258,7 @@ onBeforeMount(async () => {
       <edge-shad-number v-model="modelValue" :name="field" :label="label" />
     </div>
     <div v-else-if="props.type === 'option'">
-      <edge-shad-select v-model="modelValue" :name="field" :label="label" :item-title="props.schema.option.optionsKey" :item-value="props.schema.option.optionsValue" :items="props.schema.option.options" />
+      <edge-shad-select v-model="modelValue" :name="field" :label="label" :item-title="optionConfig.itemTitle" :item-value="optionConfig.itemValue" :items="optionConfig.items" />
     </div>
     <div v-else-if="props.type === 'image'" class="space-y-2">
       <div class="mb-2 text-sm font-medium text-foreground">

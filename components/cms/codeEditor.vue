@@ -1,4 +1,6 @@
 <script setup>
+import { cn } from '@/lib/utils'
+
 const props = defineProps({
   modelValue: {
     type: [String, Object],
@@ -49,6 +51,14 @@ const props = defineProps({
     default: 'json',
   },
   title: {
+    type: String,
+    default: '',
+  },
+  titleClass: {
+    type: String,
+    default: 'text-base font-semibold text-slate-900 dark:text-slate-50',
+  },
+  menuClass: {
     type: String,
     default: '',
   },
@@ -331,12 +341,94 @@ const insertBlock = (text) => {
 
   const op = { range, text, forceMoveMarkers: true }
   editor.executeEdits('insert-block', [op])
+  localModelValue.value = editor.getValue()
   editor.focus()
   state.insertDialog = false
 }
 
+const formatInlineExpression = (text, formatter) => {
+  const expression = String(text || '').trim()
+  const name = String(formatter || '').trim()
+  if (!expression)
+    return `${name}()`
+  const tokenMatch = expression.match(/^(\{\{\{?)\s*(.*?)\s*(\}\}\}?)$/s)
+  if (tokenMatch)
+    return `${tokenMatch[1]} ${name}(${tokenMatch[2].trim()}) ${tokenMatch[3]}`
+  return `${name}(${expression})`
+}
+
+const applyInlineFormatter = (formatter) => {
+  const name = String(formatter || '').trim()
+  if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name))
+    return
+  const editor = editorInstanceRef.value
+  if (!editor)
+    return
+  const model = editor.getModel()
+  if (!model)
+    return
+
+  const selection = editor.getSelection()
+  if (selection && !selection.isEmpty()) {
+    editor.executeEdits('apply-inline-formatter', [{
+      range: selection,
+      text: formatInlineExpression(model.getValueInRange(selection), name),
+      forceMoveMarkers: true,
+    }])
+    localModelValue.value = editor.getValue()
+    editor.focus()
+    return
+  }
+
+  const position = editor.getPosition()
+  if (!position)
+    return
+  const lineText = model.getLineContent(position.lineNumber)
+  const cursorIndex = position.column - 1
+  const tokenStart = lineText.lastIndexOf('{{', cursorIndex)
+  const tokenEnd = lineText.indexOf('}}', cursorIndex)
+  if (tokenStart !== -1 && tokenEnd !== -1 && tokenEnd > tokenStart) {
+    const innerStartColumn = tokenStart + 3
+    const innerEndColumn = tokenEnd + 1
+    const inner = lineText.slice(tokenStart + 2, tokenEnd).trim()
+    editor.executeEdits('apply-inline-formatter', [{
+      range: {
+        startLineNumber: position.lineNumber,
+        startColumn: innerStartColumn,
+        endLineNumber: position.lineNumber,
+        endColumn: innerEndColumn,
+      },
+      text: ` ${name}(${inner}) `,
+      forceMoveMarkers: true,
+    }])
+    localModelValue.value = editor.getValue()
+    editor.focus()
+    return
+  }
+
+  const word = model.getWordAtPosition(position)
+  const range = word
+    ? {
+        startLineNumber: position.lineNumber,
+        startColumn: word.startColumn,
+        endLineNumber: position.lineNumber,
+        endColumn: word.endColumn,
+      }
+    : {
+        startLineNumber: position.lineNumber,
+        startColumn: position.column,
+        endLineNumber: position.lineNumber,
+        endColumn: position.column,
+      }
+  const text = word ? `${name}(${word.word})` : `${name}()`
+  editor.executeEdits('apply-inline-formatter', [{ range, text, forceMoveMarkers: true }])
+  localModelValue.value = editor.getValue()
+  editor.focus()
+}
+
 defineExpose({
   insertSnippet: insertBlock,
+  applyInlineFormatter,
 })
 
 const diffEditorRef = shallowRef()
@@ -363,7 +455,7 @@ onBeforeUnmount(() => {
 
 <template>
   <Card class="border-0 px-0 shadow-none">
-    <edge-menu class="border-0 shadow-none py-3 px-4 bg-white/90 dark:bg-slate-900/80 border-b border-slate-200 dark:border-slate-800 rounded-t-[10px]">
+    <edge-menu :class="cn('border-0 shadow-none py-3 px-4 bg-white/90 dark:bg-slate-900/80 border-b border-slate-200 dark:border-slate-800 rounded-t-[10px]', props.menuClass)">
       <template #start>
         <Popover v-if="props.chatgpt">
           <PopoverTrigger as-child>
@@ -403,7 +495,7 @@ onBeforeUnmount(() => {
             </Card>
           </PopoverContent>
         </Popover>
-        <span class="inline-flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-50">
+        <span :class="cn('inline-flex items-center gap-2', props.titleClass)">
           <span>{{ props.title }}</span>
           <slot name="title-actions" />
         </span>

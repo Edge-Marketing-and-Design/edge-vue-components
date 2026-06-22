@@ -169,14 +169,16 @@ const replaceTemplateV2RuntimeTokens = (value, tokens) => {
   return value
 }
 
-const applyTemplateV2DataSourceControlValues = (dataSources, values, tokens) => {
-  const controlValues = values?.dataSources
+const applyTemplateV2DataSourceMeta = (dataSources, meta, tokens) => {
   if (!dataSources || typeof dataSources !== 'object' || Array.isArray(dataSources))
     return {}
 
   return Object.entries(dataSources).reduce((acc, [sourceName, sourceConfig]) => {
-    const sourceControlValues = controlValues?.[sourceName]
-    if (!sourceControlValues || typeof sourceControlValues !== 'object' || Array.isArray(sourceControlValues)) {
+    const sourceMeta = meta?.[sourceName]
+    const queryItems = sourceMeta?.queryItems
+    const hasQueryItems = queryItems && typeof queryItems === 'object' && !Array.isArray(queryItems)
+    const hasLimit = sourceMeta?.limit !== undefined && sourceMeta.limit !== null && sourceMeta.limit !== ''
+    if (!hasQueryItems && !hasLimit) {
       acc[sourceName] = replaceTemplateV2RuntimeTokens(sourceConfig, tokens)
       return acc
     }
@@ -184,9 +186,11 @@ const applyTemplateV2DataSourceControlValues = (dataSources, values, tokens) => 
       ...(sourceConfig || {}),
       queryItems: {
         ...(sourceConfig?.queryItems || {}),
-        ...sourceControlValues,
+        ...(hasQueryItems ? queryItems : {}),
       },
     }
+    if (hasLimit)
+      mergedSource.limit = sourceMeta.limit
     acc[sourceName] = replaceTemplateV2RuntimeTokens(mergedSource, tokens)
     return acc
   }, {})
@@ -220,7 +224,7 @@ const templateV2Block = computed(() => ({
   template: props.template || props.content || '',
   values: templateV2Values.value,
   schema: normalizeTemplateV2Schema(props.schema),
-  dataSources: applyTemplateV2DataSourceControlValues(props.dataSources, templateV2Values.value, templateV2RuntimeTokens.value),
+  dataSources: applyTemplateV2DataSourceMeta(props.dataSources, props.meta, templateV2RuntimeTokens.value),
 }))
 
 function normalizeConfigLiteral(str) {
@@ -310,11 +314,17 @@ const renderHtmlSegment = (content) => {
   return renderTemplate(content, renderValues.value, props.meta)
 }
 
-const renderedBlock = computed(() => {
-  if (isTemplateV2.value)
-    return { html: templateV2Html.value, publications: [] }
+const getPublicationMeta = (field) => {
+  if (isTemplateV2.value) {
+    const schemaEntry = props.schema?.[field]
+    if (schemaEntry && typeof schemaEntry === 'object' && !Array.isArray(schemaEntry))
+      return schemaEntry
+    return {}
+  }
+  return props.meta?.[field] || {}
+}
 
-  const content = String(props.content || '')
+const renderPublicationContent = (content, values, renderSegment) => {
   let html = ''
   const publications = []
   let cursor = 0
@@ -326,12 +336,12 @@ const renderedBlock = computed(() => {
 
     const before = content.slice(cursor, tag.tagStart)
     if (before)
-      html += renderHtmlSegment(before)
+      html += renderSegment(before)
 
     const cfg = safeParseTagConfig(tag.rawCfg)
     const field = String(cfg?.field || '').trim()
-    const fieldMeta = props.meta?.[field] || {}
-    const pages = renderValues.value?.[field] || cfg?.value || {}
+    const fieldMeta = getPublicationMeta(field)
+    const pages = values?.[field] || cfg?.value || {}
     const effect = fieldMeta.effect || cfg?.effect || 'flip'
     const targetId = `${renderInstanceId}-publication-${publicationIndex}`
 
@@ -349,9 +359,25 @@ const renderedBlock = computed(() => {
 
   const after = content.slice(cursor)
   if (after || !html)
-    html += renderHtmlSegment(after)
+    html += renderSegment(after)
 
   return { html, publications }
+}
+
+const renderedBlock = computed(() => {
+  if (isTemplateV2.value) {
+    return renderPublicationContent(
+      String(templateV2Html.value || ''),
+      templateV2Values.value,
+      segment => segment,
+    )
+  }
+
+  return renderPublicationContent(
+    String(props.content || ''),
+    renderValues.value,
+    renderHtmlSegment,
+  )
 })
 
 watch(

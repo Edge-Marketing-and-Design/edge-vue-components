@@ -311,19 +311,20 @@ const resolveTemplateBlockSource = (pageDoc, blockRef) => {
 const resolveBlockForPreview = (block) => {
   if (!block)
     return null
+  const libraryBlock = block?.blockId ? blocksCollection.value?.[block.blockId] : null
   if (block.content || block.template) {
+    const templateIsV2 = Number(block.templateVersion) === 2 || Number(libraryBlock?.templateVersion) === 2
     return {
-      content: block.content || block.template || '',
-      templateVersion: Number(block.templateVersion) === 2 ? 2 : 1,
-      template: block.template || '',
-      schema: block.schema || {},
-      dataSources: block.dataSources || {},
-      values: block.values || {},
-      meta: block.meta || {},
+      content: block.content || libraryBlock?.content || libraryBlock?.template || block.template || '',
+      templateVersion: templateIsV2 ? 2 : 1,
+      template: block.template || libraryBlock?.template || '',
+      schema: (block.schema && Object.keys(block.schema).length) ? block.schema : (libraryBlock?.schema || {}),
+      dataSources: (block.dataSources && Object.keys(block.dataSources).length) ? block.dataSources : (libraryBlock?.dataSources || {}),
+      values: { ...(libraryBlock?.values || {}), ...(block.values || {}) },
+      meta: { ...(libraryBlock?.meta || {}), ...(block.meta || {}) },
     }
   }
-  if (block.blockId && blocksCollection.value?.[block.blockId]) {
-    const libraryBlock = blocksCollection.value[block.blockId]
+  if (libraryBlock) {
     return {
       content: libraryBlock.content || libraryBlock.template || '',
       templateVersion: Number(libraryBlock.templateVersion) === 2 ? 2 : 1,

@@ -69,17 +69,19 @@ const state = reactive({
   dataSourceWizardDraft: null,
   dataSourceWizardMode: 'add',
   dataSourceWizardOriginalName: '',
+  dataSourceWizardActiveControlIndex: -1,
+  schemaWizardOpen: false,
+  schemaWizardStep: 1,
+  schemaWizardError: '',
+  schemaWizardDraft: null,
+  schemaWizardMode: 'add',
+  schemaWizardOriginalField: '',
+  schemaWizardActiveItemFieldIndex: -1,
+  schemaWizardActiveDefaultItemIndex: -1,
   templateVersionTouched: false,
   v2DynamicContentDialogOpen: false,
   v2DynamicField: {
-    field: '',
-    type: 'text',
-    label: '',
-    sourceName: '',
-    sourceType: 'manual',
-    sourcePath: '',
-    api: '',
-    apiField: '',
+    selectedKey: '',
   },
 })
 const isGlobalAdmin = computed(() => edgeGlobal.isAdminGlobal(edgeFirebase).value)
@@ -116,24 +118,6 @@ const blockTypeOptions = [
   { name: 'Page', title: 'Page' },
   { name: 'Post', title: 'Post' },
 ]
-const v2DynamicFieldTypeOptions = [
-  { name: 'text', title: 'Text' },
-  { name: 'textarea', title: 'Textarea' },
-  { name: 'richtext', title: 'Rich Text' },
-  { name: 'image', title: 'Image' },
-  { name: 'money', title: 'Money' },
-  { name: 'number', title: 'Number' },
-  { name: 'integer', title: 'Integer' },
-  { name: 'date', title: 'Date' },
-  { name: 'datetime', title: 'Date & Time' },
-  { name: 'lower', title: 'Lowercase Text' },
-  { name: 'upper', title: 'Uppercase Text' },
-  { name: 'trim', title: 'Trimmed Text' },
-  { name: 'slug', title: 'Slug' },
-  { name: 'title', title: 'Title Case' },
-  { name: 'deslug', title: 'Deslug' },
-  { name: 'array', title: 'Array' },
-]
 const v2SchemaTypeOptions = [
   { name: 'text', title: 'Text' },
   { name: 'textarea', title: 'Textarea' },
@@ -141,11 +125,26 @@ const v2SchemaTypeOptions = [
   { name: 'image', title: 'Image' },
   { name: 'number', title: 'Number' },
   { name: 'array', title: 'Array' },
-  { name: 'boolean', title: 'Boolean' },
-  { name: 'select', title: 'Select' },
+  { name: 'option', title: 'Select' },
+  { name: 'publication', title: 'Publication' },
 ]
-const v2SchemaFormatterOptions = [
-  { name: '', title: 'None' },
+const v2ArrayItemSchemaTypeOptions = [
+  { name: 'text', title: 'Text' },
+  { name: 'textarea', title: 'Textarea' },
+  { name: 'richtext', title: 'Rich Text' },
+  { name: 'image', title: 'Image' },
+  { name: 'number', title: 'Number' },
+  { name: 'option', title: 'Select' },
+]
+const v2ImageVariantOptions = [
+  { name: 'public', title: 'Public' },
+  { name: 'thumbnail', title: 'Thumbnail' },
+]
+const v2PublicationEffectOptions = [
+  { name: 'flip', title: 'Flip' },
+  { name: 'slide', title: 'Slide' },
+]
+const v2TemplateFormatterOptions = [
   { name: 'money', title: 'Money' },
   { name: 'number', title: 'Number' },
   { name: 'integer', title: 'Integer' },
@@ -160,38 +159,10 @@ const v2SchemaFormatterOptions = [
   { name: 'default', title: 'Default' },
   { name: 'richtext', title: 'Rich Text' },
 ]
-const v2InlineFormatterFieldTypes = new Set([
-  'money',
-  'number',
-  'integer',
-  'date',
-  'datetime',
-  'lower',
-  'upper',
-  'trim',
-  'slug',
-  'title',
-  'deslug',
-  'richtext',
-])
-const v2DynamicFieldSchemaTypeMap = {
-  money: 'number',
-  integer: 'number',
-  date: 'text',
-  datetime: 'text',
-  lower: 'text',
-  upper: 'text',
-  trim: 'text',
-  slug: 'text',
-  title: 'text',
-  deslug: 'text',
-}
-const v2DynamicSourceTypeOptions = [
-  { name: 'manual', title: 'Manual' },
+const v2DataSourceTypeOptions = [
   { name: 'collection', title: 'Collection' },
   { name: 'api', title: 'API' },
 ]
-const v2DataSourceTypeOptions = v2DynamicSourceTypeOptions
 
 const normalizePreviewType = (value) => {
   return value === 'dark' ? 'dark' : 'light'
@@ -404,6 +375,18 @@ const dataSourceWizardStepItems = [
   { step: 4, title: 'Controls' },
   { step: 5, title: 'Review' },
 ]
+const getTemplateV2SchemaWizardSteps = (entry) => {
+  const type = String(entry?.type || 'text').trim() || 'text'
+  const steps = [{ step: 1, title: 'Field' }]
+  if (!['array', 'publication'].includes(type))
+    steps.push({ step: 2, title: 'Default' })
+  if (['array', 'image', 'richtext', 'publication', 'option'].includes(type))
+    steps.push({ step: 3, title: 'Settings' })
+  steps.push({ step: 4, title: 'Review' })
+  return steps
+}
+
+const activeSchemaWizardStepItems = computed(() => getTemplateV2SchemaWizardSteps(state.schemaWizardDraft?.entry))
 
 const resetTemplateV2DataSourceWizard = () => {
   state.dataSourceWizardStep = 1
@@ -411,6 +394,7 @@ const resetTemplateV2DataSourceWizard = () => {
   state.dataSourceWizardDraft = createTemplateV2DataSourceWizardDraft()
   state.dataSourceWizardMode = 'add'
   state.dataSourceWizardOriginalName = ''
+  state.dataSourceWizardActiveControlIndex = -1
 }
 
 const openTemplateV2DataSourceWizard = () => {
@@ -552,6 +536,7 @@ const openTemplateV2DataSourceWizardForEdit = (sourceName, source) => {
   state.dataSourceWizardMode = 'edit'
   state.dataSourceWizardOriginalName = sourceName
   state.dataSourceWizardDraft = createTemplateV2DataSourceWizardDraftFromSource(sourceName, source)
+  state.dataSourceWizardActiveControlIndex = -1
   state.dataSourceWizardOpen = true
 }
 
@@ -610,12 +595,17 @@ const addTemplateV2WizardControlRow = () => {
     optionsKey: 'label',
     optionsValue: 'value',
   })
+  state.dataSourceWizardActiveControlIndex = state.dataSourceWizardDraft.controls.length - 1
 }
 
 const removeTemplateV2WizardControlRow = (index) => {
   if (!Array.isArray(state.dataSourceWizardDraft?.controls))
     return
   state.dataSourceWizardDraft.controls.splice(index, 1)
+  if (state.dataSourceWizardActiveControlIndex === index)
+    state.dataSourceWizardActiveControlIndex = -1
+  else if (state.dataSourceWizardActiveControlIndex > index)
+    state.dataSourceWizardActiveControlIndex -= 1
 }
 
 const addTemplateV2WizardControlOptionRow = (control) => {
@@ -800,13 +790,6 @@ const validateTemplateV2WizardStep = () => {
       return false
     }
   }
-  try {
-    parseWizardJsonField('valueJson', [])
-  }
-  catch (error) {
-    state.dataSourceWizardError = error?.message || 'The manual value JSON is invalid.'
-    return false
-  }
   return true
 }
 
@@ -876,6 +859,26 @@ const getUniqueTemplateV2Key = (container, baseKey) => {
   }
 }
 
+const normalizeTemplateV2PublicationEffect = (effect) => {
+  const normalized = String(effect || '').trim().toLowerCase()
+  return v2PublicationEffectOptions.some(option => option.name === normalized) ? normalized : 'flip'
+}
+
+const ensureTemplateV2SchemaOption = (entry) => {
+  if (!entry || typeof entry !== 'object')
+    return {}
+  if (!entry.option || typeof entry.option !== 'object' || Array.isArray(entry.option))
+    entry.option = {}
+  if (!Array.isArray(entry.option.options))
+    entry.option.options = Array.isArray(entry.options) ? entry.options : []
+  if (!entry.option.optionsKey)
+    entry.option.optionsKey = 'label'
+  if (!entry.option.optionsValue)
+    entry.option.optionsValue = 'value'
+  delete entry.options
+  return entry.option
+}
+
 const normalizeTemplateV2SchemaEntry = (schema, field) => {
   if (!schema || !field)
     return {}
@@ -894,6 +897,14 @@ const normalizeTemplateV2SchemaEntry = (schema, field) => {
     if (!schema[field].label)
       schema[field].label = titleFromKey(field)
   }
+  if (schema[field].type === 'select')
+    schema[field].type = 'option'
+  if (schema[field].type === 'option')
+    ensureTemplateV2SchemaOption(schema[field])
+  if (schema[field].type === 'publication') {
+    schema[field].effect = normalizeTemplateV2PublicationEffect(schema[field].effect)
+    delete schema[field].height
+  }
   return schema[field]
 }
 
@@ -905,13 +916,428 @@ const getTemplateV2SchemaEntries = (workingDoc) => {
   }))
 }
 
-const addTemplateV2SchemaField = (workingDoc) => {
+const normalizeTemplateV2SchemaConfig = (field, config) => {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    return {
+      type: (typeof config === 'string' && config) ? config : 'text',
+      label: titleFromKey(field),
+    }
+  }
+  const normalized = config
+  if (!normalized.type)
+    normalized.type = 'text'
+  if (normalized.type === 'select')
+    normalized.type = 'option'
+  if (!normalized.label && !normalized.title)
+    normalized.label = titleFromKey(field)
+  if (normalized.type === 'option')
+    ensureTemplateV2SchemaOption(normalized)
+  return normalized
+}
+
+const createTemplateV2SchemaWizardDraft = (field = 'field', entry = null) => {
+  const normalizedField = sanitizeV2FieldName(field) || 'field'
+  const normalizedEntry = normalizeTemplateV2SchemaConfig(normalizedField, entry || {
+    type: 'text',
+    label: titleFromKey(normalizedField),
+  })
+  return {
+    field: normalizedField,
+    entry: edgeGlobal.dupObject(normalizedEntry),
+  }
+}
+
+const openTemplateV2SchemaWizard = (workingDoc) => {
   ensureTemplateV2Fields(workingDoc)
   const field = getUniqueTemplateV2Key(workingDoc.schema, 'field')
-  workingDoc.schema[field] = {
+  state.schemaWizardStep = 1
+  state.schemaWizardError = ''
+  state.schemaWizardMode = 'add'
+  state.schemaWizardOriginalField = ''
+  state.schemaWizardActiveItemFieldIndex = -1
+  state.schemaWizardActiveDefaultItemIndex = -1
+  state.schemaWizardDraft = createTemplateV2SchemaWizardDraft(field)
+  state.schemaWizardOpen = true
+}
+
+const openTemplateV2SchemaWizardForEdit = (field, entry) => {
+  state.schemaWizardStep = 1
+  state.schemaWizardError = ''
+  state.schemaWizardMode = 'edit'
+  state.schemaWizardOriginalField = field
+  state.schemaWizardActiveItemFieldIndex = -1
+  state.schemaWizardActiveDefaultItemIndex = -1
+  state.schemaWizardDraft = createTemplateV2SchemaWizardDraft(field, entry)
+  state.schemaWizardOpen = true
+}
+
+const closeTemplateV2SchemaWizard = () => {
+  state.schemaWizardOpen = false
+  state.schemaWizardError = ''
+  state.schemaWizardActiveItemFieldIndex = -1
+  state.schemaWizardActiveDefaultItemIndex = -1
+}
+
+const validateTemplateV2SchemaWizardStep = () => {
+  state.schemaWizardError = ''
+  const field = sanitizeV2FieldName(state.schemaWizardDraft?.field)
+  if (!field) {
+    state.schemaWizardError = 'Enter a field key.'
+    return false
+  }
+  return true
+}
+
+const goTemplateV2SchemaWizardStep = (step) => {
+  const allowedSteps = activeSchemaWizardStepItems.value.map(item => item.step)
+  const targetStep = allowedSteps.includes(step) ? step : allowedSteps[allowedSteps.length - 1]
+  if (state.schemaWizardMode === 'edit') {
+    state.schemaWizardStep = targetStep
+    state.schemaWizardError = ''
+    return
+  }
+  if (targetStep > state.schemaWizardStep && !validateTemplateV2SchemaWizardStep())
+    return
+  state.schemaWizardStep = targetStep
+}
+
+const getAdjacentTemplateV2SchemaWizardStep = (direction) => {
+  const steps = activeSchemaWizardStepItems.value.map(item => item.step)
+  const currentIndex = steps.indexOf(state.schemaWizardStep)
+  const safeIndex = currentIndex === -1 ? 0 : currentIndex
+  const nextIndex = Math.min(Math.max(safeIndex + direction, 0), steps.length - 1)
+  return steps[nextIndex] || 1
+}
+
+const hasPreviousTemplateV2SchemaWizardStep = computed(() => {
+  return activeSchemaWizardStepItems.value.map(item => item.step).indexOf(state.schemaWizardStep) > 0
+})
+
+const hasNextTemplateV2SchemaWizardStep = computed(() => {
+  const steps = activeSchemaWizardStepItems.value.map(item => item.step)
+  const currentIndex = steps.indexOf(state.schemaWizardStep)
+  return currentIndex !== -1 && currentIndex < steps.length - 1
+})
+
+const buildTemplateV2WizardSchemaEntry = () => {
+  const draft = state.schemaWizardDraft || createTemplateV2SchemaWizardDraft()
+  return normalizeTemplateV2SchemaConfig(draft.field, edgeGlobal.dupObject(draft.entry || {}))
+}
+
+const previewTemplateV2WizardSchemaJson = computed(() => {
+  try {
+    return JSON.stringify(buildTemplateV2WizardSchemaEntry(), null, 2)
+  }
+  catch {
+    return '{}'
+  }
+})
+
+const saveTemplateV2SchemaFromWizard = (workingDoc) => {
+  if (!validateTemplateV2SchemaWizardStep())
+    return
+  ensureTemplateV2Fields(workingDoc)
+  const field = sanitizeV2FieldName(state.schemaWizardDraft?.field)
+  const originalField = String(state.schemaWizardOriginalField || '').trim()
+  const isRename = state.schemaWizardMode === 'edit' && originalField && originalField !== field
+  const fieldExists = Object.prototype.hasOwnProperty.call(workingDoc.schema || {}, field)
+  if ((state.schemaWizardMode === 'add' || isRename) && fieldExists) {
+    state.schemaWizardError = `An input named "${field}" already exists.`
+    return
+  }
+  if (isRename)
+    delete workingDoc.schema[originalField]
+  workingDoc.schema[field] = buildTemplateV2WizardSchemaEntry()
+  closeTemplateV2SchemaWizard()
+}
+
+const ensureTemplateV2ArraySchemaObject = (entry) => {
+  if (!entry || typeof entry !== 'object')
+    return {}
+  if (Array.isArray(entry.schema)) {
+    entry.schema = entry.schema.reduce((acc, item) => {
+      const field = sanitizeV2FieldName(item?.field)
+      if (!field)
+        return acc
+      const { field: _field, ...rest } = item
+      acc[field] = normalizeTemplateV2SchemaConfig(field, rest)
+      return acc
+    }, {})
+  }
+  else if (!entry.schema || typeof entry.schema !== 'object') {
+    entry.schema = {}
+  }
+  else {
+    Object.keys(entry.schema).forEach((field) => {
+      entry.schema[field] = normalizeTemplateV2SchemaConfig(field, entry.schema[field])
+    })
+  }
+  return entry.schema
+}
+
+const getTemplateV2ArraySchemaEntries = (entry) => {
+  const schema = (entry?.schema && typeof entry.schema === 'object' && !Array.isArray(entry.schema)) ? entry.schema : {}
+  return Object.entries(schema).map(([field, itemEntry]) => ({
+    field,
+    entry: itemEntry,
+  }))
+}
+
+const addTemplateV2ArraySchemaField = (entry) => {
+  const schema = ensureTemplateV2ArraySchemaObject(entry)
+  const field = getUniqueTemplateV2Key(schema, 'field')
+  schema[field] = {
     type: 'text',
     label: titleFromKey(field),
   }
+  state.schemaWizardActiveItemFieldIndex = Object.keys(schema).indexOf(field)
+}
+
+const renameTemplateV2ArraySchemaField = (entry, oldField, nextValue) => {
+  const schema = ensureTemplateV2ArraySchemaObject(entry)
+  const nextField = sanitizeV2FieldName(nextValue)
+  if (!oldField || !nextField || nextField === oldField)
+    return
+  if (Object.prototype.hasOwnProperty.call(schema, nextField)) {
+    notifyTemplateV2EditorError(`"${nextField}" already exists in this item schema.`)
+    return
+  }
+  schema[nextField] = schema[oldField]
+  delete schema[oldField]
+  if (Array.isArray(entry.value)) {
+    entry.value.forEach((item) => {
+      if (!item || typeof item !== 'object' || Array.isArray(item))
+        return
+      item[nextField] = item[oldField]
+      delete item[oldField]
+    })
+  }
+}
+
+const removeTemplateV2ArraySchemaField = (entry, field) => {
+  const schema = ensureTemplateV2ArraySchemaObject(entry)
+  const removedIndex = Object.keys(schema).indexOf(field)
+  delete schema[field]
+  if (Array.isArray(entry.value)) {
+    entry.value.forEach((item) => {
+      if (item && typeof item === 'object' && !Array.isArray(item))
+        delete item[field]
+    })
+  }
+  if (state.schemaWizardActiveItemFieldIndex === removedIndex)
+    state.schemaWizardActiveItemFieldIndex = -1
+  else if (state.schemaWizardActiveItemFieldIndex > removedIndex)
+    state.schemaWizardActiveItemFieldIndex -= 1
+}
+
+const getTemplateV2ArraySchemaFieldSummary = (arraySchemaItem) => {
+  const type = arraySchemaItem?.entry?.type || 'text'
+  const label = arraySchemaItem?.entry?.label || titleFromKey(arraySchemaItem?.field)
+  return `${label} - ${type === 'option' ? 'select' : type}`
+}
+
+const getTemplateV2SchemaOption = (entry) => {
+  const option = (entry?.option && typeof entry.option === 'object' && !Array.isArray(entry.option))
+    ? entry.option
+    : {}
+  return {
+    ...option,
+    options: Array.isArray(option.options) ? option.options : [],
+    optionsKey: option.optionsKey || 'label',
+    optionsValue: option.optionsValue || 'value',
+  }
+}
+
+const slugOptionValue = (value) => {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+const getTemplateV2SchemaSelectOptions = (entry) => {
+  const option = getTemplateV2SchemaOption(entry)
+  const options = option.options
+    .map((row) => {
+      if (typeof row === 'string') {
+        const value = row.trim()
+        return value ? { [option.optionsKey]: value, [option.optionsValue]: value } : null
+      }
+      if (!row || typeof row !== 'object')
+        return null
+      const label = row[option.optionsKey] ?? row.label ?? row.title ?? row.name ?? row[option.optionsValue] ?? row.value ?? ''
+      const value = row[option.optionsValue] ?? row.value ?? row.name ?? row.id ?? label
+      if (String(label || '').trim() === '' && String(value || '').trim() === '')
+        return null
+      return {
+        [option.optionsKey]: String(label || value).trim(),
+        [option.optionsValue]: String(value || label).trim(),
+      }
+    })
+    .filter(row => row && String(row[option.optionsValue] || '').trim() !== '')
+  return {
+    ...option,
+    options,
+  }
+}
+
+const addTemplateV2SchemaOptionRow = (entry) => {
+  const option = ensureTemplateV2SchemaOption(entry)
+  option.options.push({
+    label: '',
+    value: '',
+  })
+}
+
+const removeTemplateV2SchemaOptionRow = (entry, index) => {
+  const option = ensureTemplateV2SchemaOption(entry)
+  option.options.splice(index, 1)
+}
+
+const updateTemplateV2SchemaOptionField = (entry, field, value) => {
+  const option = ensureTemplateV2SchemaOption(entry)
+  option[field] = String(value || '').trim() || (field === 'optionsKey' ? 'label' : 'value')
+}
+
+const getTemplateV2SchemaOptionRowField = (entry, row, field) => {
+  if (!row || typeof row !== 'object')
+    return ''
+  const option = getTemplateV2SchemaOption(entry)
+  if (field === 'label')
+    return row.label ?? row[option.optionsKey] ?? row.title ?? row.name ?? ''
+  return row.value ?? row[option.optionsValue] ?? row.name ?? row.id ?? row.label ?? row[option.optionsKey] ?? ''
+}
+
+const updateTemplateV2SchemaOptionRowField = (entry, index, field, value) => {
+  const option = ensureTemplateV2SchemaOption(entry)
+  const row = option.options[index]
+  if (!row || typeof row !== 'object')
+    return
+  row[field] = value
+  if (field === 'label' && option.optionsKey && option.optionsKey !== 'label')
+    row[option.optionsKey] = value
+  if (field === 'value' && option.optionsValue && option.optionsValue !== 'value')
+    row[option.optionsValue] = value
+  if (field === 'label' && !String(row.value || '').trim())
+    row.value = slugOptionValue(value)
+  if (field === 'label' && option.optionsValue && option.optionsValue !== 'value' && !String(row[option.optionsValue] || '').trim())
+    row[option.optionsValue] = row.value
+}
+
+const updateTemplateV2SchemaType = (entry, value) => {
+  if (!entry || typeof entry !== 'object')
+    return
+  const type = String(value || 'text').trim() || 'text'
+  entry.type = type === 'select' ? 'option' : type
+  if (entry.type === 'option')
+    ensureTemplateV2SchemaOption(entry)
+  else
+    delete entry.option
+  if (entry.type !== 'array')
+    delete entry.schema
+  if (entry.type !== 'publication')
+    delete entry.effect
+  if (!['image', 'richtext'].includes(entry.type)) {
+    delete entry.tags
+    delete entry.variant
+  }
+  if (entry.type === 'publication')
+    entry.effect = normalizeTemplateV2PublicationEffect(entry.effect)
+  if (state.schemaWizardDraft?.entry === entry) {
+    const allowedSteps = getTemplateV2SchemaWizardSteps(entry).map(item => item.step)
+    if (!allowedSteps.includes(state.schemaWizardStep))
+      state.schemaWizardStep = allowedSteps[0] || 1
+  }
+}
+
+const updateTemplateV2ArraySchemaType = (entry, value) => {
+  if (!entry || typeof entry !== 'object')
+    return
+  const type = String(value || 'text').trim() || 'text'
+  entry.type = type === 'select' ? 'option' : type
+  if (entry.type === 'option')
+    ensureTemplateV2SchemaOption(entry)
+  else
+    delete entry.option
+  if (!['image', 'richtext'].includes(entry.type)) {
+    delete entry.tags
+    delete entry.variant
+  }
+}
+
+const updateTemplateV2SchemaArrayField = (entry, field, value) => {
+  if (!entry || typeof entry !== 'object')
+    return
+  const normalized = Array.isArray(value) ? value.map(item => String(item || '').trim()).filter(Boolean) : []
+  if (normalized.length)
+    entry[field] = normalized
+  else
+    delete entry[field]
+}
+
+const updateTemplateV2SchemaVariant = (entry, value) => {
+  if (!entry || typeof entry !== 'object')
+    return
+  const variant = String(value || 'public').trim() || 'public'
+  entry.variant = variant
+}
+
+const getTemplateV2ArrayDefaultItems = (entry) => {
+  if (!Array.isArray(entry?.value))
+    return []
+  return entry.value.filter(item => item && typeof item === 'object' && !Array.isArray(item))
+}
+
+const getTemplateV2ArrayDefaultFieldValue = (item, field) => {
+  if (!item || typeof item !== 'object')
+    return ''
+  return item[field] ?? ''
+}
+
+const updateTemplateV2ArrayDefaultFieldValue = (item, field, value, type = 'text') => {
+  if (!item || typeof item !== 'object')
+    return
+  if (type === 'number') {
+    const numberValue = Number(value)
+    item[field] = Number.isFinite(numberValue) ? numberValue : 0
+    return
+  }
+  item[field] = value
+}
+
+const addTemplateV2ArrayDefaultItem = (entry) => {
+  if (!entry || typeof entry !== 'object')
+    return
+  if (!Array.isArray(entry.value))
+    entry.value = []
+  entry.value = entry.value.map(item => (item && typeof item === 'object' && !Array.isArray(item)) ? item : {})
+  const item = {}
+  getTemplateV2ArraySchemaEntries(entry).forEach((schemaItem) => {
+    item[schemaItem.field] = schemaItem.entry.type === 'number' ? 0 : ''
+  })
+  entry.value.push(item)
+  state.schemaWizardActiveDefaultItemIndex = entry.value.length - 1
+}
+
+const removeTemplateV2ArrayDefaultItem = (entry, index) => {
+  if (!Array.isArray(entry?.value))
+    return
+  entry.value.splice(index, 1)
+  if (state.schemaWizardActiveDefaultItemIndex === index)
+    state.schemaWizardActiveDefaultItemIndex = -1
+  else if (state.schemaWizardActiveDefaultItemIndex > index)
+    state.schemaWizardActiveDefaultItemIndex -= 1
+}
+
+const getTemplateV2ArrayDefaultItemSummary = (entry, item) => {
+  const filledFields = getTemplateV2ArraySchemaEntries(entry).filter((schemaItem) => {
+    const value = item?.[schemaItem.field]
+    if (Array.isArray(value))
+      return value.length > 0
+    return value !== undefined && value !== null && String(value).trim() !== ''
+  })
+  return filledFields.length ? `${filledFields.length} field${filledFields.length === 1 ? '' : 's'} filled` : 'Empty item'
 }
 
 const renameTemplateV2SchemaField = (workingDoc, oldField, nextValue) => {
@@ -932,14 +1358,22 @@ const removeTemplateV2SchemaField = (workingDoc, field) => {
   delete workingDoc.schema[field]
 }
 
-const updateTemplateV2SchemaFormatter = (entry, value) => {
-  if (!entry || typeof entry !== 'object')
-    return
-  const formatter = String(value || '').trim()
-  if (formatter)
-    entry.formatter = formatter
-  else
-    delete entry.formatter
+const isTemplateV2JsonDefaultType = (type) => {
+  return false
+}
+
+const getTemplateV2SchemaDefaultFallback = (entry) => {
+  if (entry?.type === 'array')
+    return []
+  if (entry?.type === 'publication')
+    return {}
+  return ''
+}
+
+const formatTemplateV2SchemaDefault = (entry) => {
+  const fallback = getTemplateV2SchemaDefaultFallback(entry)
+  const hasValue = entry && typeof entry === 'object' && Object.prototype.hasOwnProperty.call(entry, 'value')
+  return formatJson(hasValue ? entry.value : fallback)
 }
 
 const openTemplateV2DeleteDialog = (target) => {
@@ -955,7 +1389,7 @@ const closeTemplateV2DeleteDialog = () => {
 const templateV2DeleteDialogTitle = computed(() => {
   const type = state.templateDeleteTarget?.type
   if (type === 'schema')
-    return 'Delete schema field?'
+    return 'Delete input?'
   if (type === 'dataSource')
     return 'Delete data source?'
   if (type === 'queryItem')
@@ -971,7 +1405,7 @@ const templateV2DeleteDialogDescription = computed(() => {
   const target = state.templateDeleteTarget || {}
   const label = target.label || target.field || target.sourceName || target.key || 'this item'
   if (target.type === 'schema')
-    return `This removes "${label}" from the block schema. Template markup using that field will not be changed automatically.`
+    return `This removes "${label}" from the block inputs. Template markup using that field will not be changed automatically.`
   if (target.type === 'dataSource')
     return `This removes "${label}" and any template source loops that depend on it will stop rendering data.`
   if (target.type === 'control')
@@ -1008,15 +1442,6 @@ const updateTemplateV2JsonSubfield = (target, field, value, errorKey, fallbackVa
   }
   catch (error) {
     state.templateJsonErrors[errorKey] = error?.message || 'Invalid JSON.'
-  }
-}
-
-const addTemplateV2DataSource = (workingDoc) => {
-  ensureTemplateV2Fields(workingDoc)
-  const sourceName = getUniqueTemplateV2Key(workingDoc.dataSources, 'source')
-  workingDoc.dataSources[sourceName] = {
-    type: 'manual',
-    value: [],
   }
 }
 
@@ -1296,51 +1721,82 @@ function insertBlockContentSnippet(snippet) {
   editor.insertSnippet(snippet)
 }
 
+const applyTemplateInlineFormatter = (formatter) => {
+  const editor = contentEditorRef.value
+  if (!editor || typeof editor.applyInlineFormatter !== 'function') {
+    edgeFirebase?.toast?.error?.('Template editor is not ready.')
+    return
+  }
+  editor.applyInlineFormatter(formatter)
+}
+
 const resetV2DynamicField = () => {
   state.v2DynamicField = {
-    field: '',
-    type: 'text',
-    label: '',
-    sourceName: '',
-    sourceType: 'manual',
-    sourcePath: '',
-    api: '',
-    apiField: '',
+    selectedKey: '',
   }
 }
 
-const openV2DynamicContentDialog = () => {
+const getV2DynamicContentItems = (workingDoc) => {
+  const schemaItems = Object.entries(workingDoc?.schema || {})
+    .map(([field, entry]) => {
+      const normalizedEntry = (entry && typeof entry === 'object' && !Array.isArray(entry)) ? entry : { type: entry || 'text' }
+      const type = String(normalizedEntry.type || 'text').trim().toLowerCase()
+      return {
+        name: `schema:${field}`,
+        title: `${normalizedEntry.label || titleFromKey(field)} (${field})`,
+        description: 'Input',
+        field,
+        sourceType: 'schema',
+        type,
+      }
+    })
+
+  const sourceItems = Object.entries(workingDoc?.dataSources || {})
+    .map(([field, source]) => ({
+      name: `source:${field}`,
+      title: `${titleFromKey(field)} (${field})`,
+      description: `${inferTemplateV2DataSourceType(source)} data source`,
+      field,
+      sourceType: 'dataSource',
+      type: 'array',
+    }))
+
+  return [...schemaItems, ...sourceItems]
+}
+
+const getSelectedV2DynamicContentItem = (workingDoc) => {
+  const items = getV2DynamicContentItems(workingDoc)
+  return items.find(item => item.name === state.v2DynamicField.selectedKey) || items[0] || null
+}
+
+const openV2DynamicContentDialog = (workingDoc) => {
   resetV2DynamicField()
+  state.v2DynamicField.selectedKey = getV2DynamicContentItems(workingDoc)[0]?.name || ''
   state.v2DynamicContentDialogOpen = true
 }
 
-const v2FieldExists = (workingDoc, field) => {
-  const normalizedField = String(field || '').trim()
-  if (!normalizedField)
-    return false
-  return Object.prototype.hasOwnProperty.call(workingDoc?.schema || {}, normalizedField)
-    || Object.prototype.hasOwnProperty.call(workingDoc?.dataSources || {}, normalizedField)
+const goToTemplateV2SchemaFromDynamicContent = () => {
+  state.v2DynamicContentDialogOpen = false
+  state.templateEditorTab = 'schema'
+}
+
+const goToTemplateV2DataSourcesFromDynamicContent = () => {
+  state.v2DynamicContentDialogOpen = false
+  state.templateEditorTab = 'dataSources'
+  openTemplateV2DataSourceWizard()
 }
 
 const buildV2DynamicFieldToken = (fieldConfig) => {
   const field = sanitizeV2FieldName(fieldConfig.field)
-  const type = String(fieldConfig.type || '').trim().toLowerCase()
-  return v2InlineFormatterFieldTypes.has(type)
-    ? `{{ ${type}(${field}) }}`
-    : `{{ ${field} }}`
-}
-
-const getV2DynamicSchemaType = (fieldType) => {
-  const type = String(fieldType || '').trim().toLowerCase()
-  return v2DynamicFieldSchemaTypeMap[type] || type || 'text'
+  return `{{ ${field} }}`
 }
 
 const buildV2DynamicSnippet = (fieldConfig) => {
   const field = sanitizeV2FieldName(fieldConfig.field)
-  const sourceName = sanitizeV2FieldName(fieldConfig.sourceName || field)
-  if (fieldConfig.type === 'array' && fieldConfig.sourceType !== 'manual') {
-    return `{{#for item in source("${sourceName}")}}\n  {{ item.name }}\n{{/for}}`
-  }
+  if (fieldConfig.sourceType === 'dataSource')
+    return `{{#for item in source("${field}")}}\n  {{ item.name }}\n{{/for}}`
+  if (fieldConfig.type === 'publication')
+    return `{{{#publication {"field":"${field}"}}}}`
   if (fieldConfig.type === 'array')
     return `{{#for item in ${field}}}\n  {{ item }}\n{{/for}}`
   return buildV2DynamicFieldToken({ ...fieldConfig, field })
@@ -1350,61 +1806,31 @@ const addV2DynamicContent = (workingDoc) => {
   if (!workingDoc)
     return
 
-  const field = sanitizeV2FieldName(state.v2DynamicField.field)
-  if (!field) {
-    edgeFirebase?.toast?.error?.('Enter a field name.')
-    return
-  }
-  if (v2FieldExists(workingDoc, field)) {
-    edgeFirebase?.toast?.error?.(`"${field}" already exists in this block.`)
+  const selectedItem = getSelectedV2DynamicContentItem(workingDoc)
+  if (!selectedItem) {
+    edgeFirebase?.toast?.error?.('Add an input or data source first.')
     return
   }
 
-  ensureTemplateV2Fields(workingDoc)
-  const label = String(state.v2DynamicField.label || '').trim()
-  const fieldType = String(state.v2DynamicField.type || '').trim().toLowerCase()
-  const schemaType = getV2DynamicSchemaType(fieldType)
-  workingDoc.schema[field] = {
-    type: schemaType,
-    label: label || field,
-  }
-  if (v2InlineFormatterFieldTypes.has(fieldType))
-    workingDoc.schema[field].formatter = fieldType
-  if (state.v2DynamicField.type === 'array') {
-    workingDoc.schema[field].schema = {}
-    if (state.v2DynamicField.sourceType !== 'manual') {
-      const sourceName = sanitizeV2FieldName(state.v2DynamicField.sourceName || field)
-      if (sourceName !== field && v2FieldExists(workingDoc, sourceName)) {
-        edgeFirebase?.toast?.error?.(`"${sourceName}" already exists in this block.`)
-        return
-      }
-      workingDoc.dataSources[sourceName] = {
-        type: state.v2DynamicField.sourceType,
-        value: [],
-      }
-      if (state.v2DynamicField.sourceType === 'collection')
-        workingDoc.dataSources[sourceName].path = String(state.v2DynamicField.sourcePath || '').trim()
-      if (state.v2DynamicField.sourceType === 'api') {
-        workingDoc.dataSources[sourceName].api = String(state.v2DynamicField.api || '').trim()
-        workingDoc.dataSources[sourceName].apiField = String(state.v2DynamicField.apiField || '').trim()
-      }
-    }
-  }
-
-  const snippet = buildV2DynamicSnippet({ ...state.v2DynamicField, field })
-  const currentContent = String(workingDoc.content || workingDoc.template || '')
-  const nextContent = currentContent
-    ? `${currentContent}\n${snippet}`
-    : snippet
-  syncWorkingTemplateContent(workingDoc, nextContent)
-  Object.assign(state.workingDoc, {
-    content: nextContent,
-    template: nextContent,
-    schema: workingDoc.schema,
-    dataSources: workingDoc.dataSources,
-  })
+  const snippet = buildV2DynamicSnippet(selectedItem)
   state.templateEditorTab = 'template'
   state.v2DynamicContentDialogOpen = false
+  nextTick(() => {
+    const editor = contentEditorRef.value
+    if (editor && typeof editor.insertSnippet === 'function') {
+      editor.insertSnippet(snippet)
+      return
+    }
+    const currentContent = String(workingDoc.content || workingDoc.template || '')
+    const nextContent = currentContent
+      ? `${currentContent}\n${snippet}`
+      : snippet
+    syncWorkingTemplateContent(workingDoc, nextContent)
+    Object.assign(state.workingDoc, {
+      content: nextContent,
+      template: nextContent,
+    })
+  })
   resetV2DynamicField()
 }
 
@@ -2041,15 +2467,14 @@ function convertWorkingDocToTemplateV2(workingDoc, options = {}) {
     ...(state.previewBlock?.values || {}),
     ...(workingDoc.values || {}),
   }
-  const converted = convertLegacyBlockToTemplateV2(workingDoc.content || '')
-  const mergedValues = {
-    ...(converted.values || {}),
-    ...Object.entries(existingValues).reduce((acc, [key, value]) => {
-      if (value !== undefined && value !== null && value !== '' && !isLegacyPlaceholderValue(value))
+  const converted = convertLegacyBlockToTemplateV2({
+    ...workingDoc,
+    values: Object.entries(existingValues).reduce((acc, [key, value]) => {
+      if (value !== undefined && value !== null && !isLegacyPlaceholderValue(value))
         acc[key] = value
       return acc
     }, {}),
-  }
+  })
   state.templateVersionTouched = true
   workingDoc.templateVersion = 2
   workingDoc.template = converted.template
@@ -2069,7 +2494,7 @@ function convertWorkingDocToTemplateV2(workingDoc, options = {}) {
   })
   state.previewBlock = buildPreviewBlock(workingDoc, parsed)
   if (state.previewBlock)
-    state.previewBlock.values = edgeGlobal.dupObject(mergedValues || {})
+    state.previewBlock.values = {}
   state.previewSourceValues = {}
   state.templateEditorTab = 'template'
 
@@ -2362,7 +2787,7 @@ const buildBlockChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel 
     { key: 'templateVersion', label: 'Template Version', transform: value => normalizeTemplateVersion(value) },
     { key: 'content', label: 'Block Content' },
     { key: 'template', label: 'Template v2 Markup' },
-    { key: 'schema', label: 'Template v2 Schema' },
+    { key: 'schema', label: 'Template v2 Inputs' },
     { key: 'dataSources', label: 'Template v2 Data Sources' },
   ]
 
@@ -2707,7 +3132,7 @@ const exportCurrentBlock = async () => {
                     Data Sources
                   </TabsTrigger>
                   <TabsTrigger value="schema" class="w-full text-xs text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
-                    Schema
+                    Inputs
                   </TabsTrigger>
                 </TabsList>
                 <TabsContent value="dataSources" class="mt-3">
@@ -2780,7 +3205,7 @@ const exportCurrentBlock = async () => {
                 <TabsContent value="schema" class="mt-3">
                   <div class="mb-3 flex items-center justify-between gap-2">
                     <div class="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                      Schema Fields
+                      Block Inputs
                     </div>
                     <div class="flex items-center gap-2">
                       <edge-shad-button
@@ -2788,10 +3213,10 @@ const exportCurrentBlock = async () => {
                         size="sm"
                         variant="outline"
                         class="h-8 gap-2 px-3 text-[11px] uppercase tracking-wide"
-                        @click="addTemplateV2SchemaField(slotProps.workingDoc)"
+                        @click="openTemplateV2SchemaWizard(slotProps.workingDoc)"
                       >
                         <Plus class="h-3.5 w-3.5" />
-                        Add Field
+                        Add Input
                       </edge-shad-button>
                       <edge-shad-button
                         type="button"
@@ -2801,14 +3226,14 @@ const exportCurrentBlock = async () => {
                         @click="state.templateRawJsonOpen.schema = !state.templateRawJsonOpen.schema"
                       >
                         <Code2 class="h-3.5 w-3.5" />
-                        {{ state.templateRawJsonOpen.schema ? 'Use Form' : 'Show JSON' }}
+                        {{ state.templateRawJsonOpen.schema ? 'Use Inputs' : 'Show JSON' }}
                       </edge-shad-button>
                     </div>
                   </div>
                   <edge-cms-code-editor
                     v-if="state.templateRawJsonOpen.schema"
                     :model-value="formatJson(slotProps.workingDoc.schema)"
-                    title="Schema (JSON)"
+                    title="Inputs (Schema JSON)"
                     language="json"
                     name="schema"
                     validate-json
@@ -2820,22 +3245,26 @@ const exportCurrentBlock = async () => {
                       v-if="!getTemplateV2SchemaEntries(slotProps.workingDoc).length"
                       class="rounded-md border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400"
                     >
-                      No schema fields yet.
+                      No inputs yet.
                     </div>
                     <details
                       v-for="schemaItem in getTemplateV2SchemaEntries(slotProps.workingDoc)"
                       :key="schemaItem.field"
                       class="rounded-md border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950"
-                      open
                     >
-                      <summary class="flex cursor-pointer items-center justify-between gap-3 border-b border-slate-100 px-3 py-2 text-sm font-semibold text-slate-900 dark:border-slate-800 dark:text-slate-100">
+                      <summary
+                        class="flex cursor-pointer items-center justify-between gap-3 border-b border-slate-100 px-3 py-2 text-sm font-semibold text-slate-900 dark:border-slate-800 dark:text-slate-100"
+                        @click.prevent="openTemplateV2SchemaWizardForEdit(schemaItem.field, schemaItem.entry)"
+                        @keydown.enter.prevent="openTemplateV2SchemaWizardForEdit(schemaItem.field, schemaItem.entry)"
+                        @keydown.space.prevent="openTemplateV2SchemaWizardForEdit(schemaItem.field, schemaItem.entry)"
+                      >
                         <span>{{ schemaItem.entry.label || schemaItem.field }}</span>
                         <span class="rounded border border-slate-200 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-500 dark:border-slate-700">
-                          {{ schemaItem.entry.formatter || schemaItem.entry.type || 'text' }}
+                          {{ schemaItem.entry.type || 'text' }}
                         </span>
                       </summary>
                       <div class="space-y-3 p-3">
-                      <div class="grid gap-3 md:grid-cols-[1fr_1fr_150px_150px_auto]">
+                      <div class="grid gap-3 md:grid-cols-[1fr_1fr_150px_auto]">
                         <edge-shad-input
                           :model-value="schemaItem.field"
                           :name="`schemaField-${schemaItem.field}`"
@@ -2850,17 +3279,11 @@ const exportCurrentBlock = async () => {
                           placeholder="Heading"
                         />
                         <edge-shad-select
-                          v-model="schemaItem.entry.type"
+                          :model-value="schemaItem.entry.type"
                           :name="`schemaType-${schemaItem.field}`"
                           label="Type"
                           :items="v2SchemaTypeOptions"
-                        />
-                        <edge-shad-select
-                          :model-value="schemaItem.entry.formatter || ''"
-                          :name="`schemaFormatter-${schemaItem.field}`"
-                          label="Formatter"
-                          :items="v2SchemaFormatterOptions"
-                          @update:model-value="updateTemplateV2SchemaFormatter(schemaItem.entry, $event)"
+                          @update:model-value="updateTemplateV2SchemaType(schemaItem.entry, $event)"
                         />
                         <edge-shad-button
                           type="button"
@@ -2874,35 +3297,293 @@ const exportCurrentBlock = async () => {
                         </edge-shad-button>
                       </div>
                       <div class="grid gap-3 md:grid-cols-2">
+                        <edge-shad-textarea
+                          v-if="isTemplateV2JsonDefaultType(schemaItem.entry.type)"
+                          :model-value="formatTemplateV2SchemaDefault(schemaItem.entry)"
+                          :name="`schemaDefault-${schemaItem.field}`"
+                          label="Default Value JSON"
+                          class="min-h-[90px] font-mono text-xs"
+                          :placeholder="schemaItem.entry.type === 'array' ? '[]' : '{}'"
+                          @update:model-value="updateTemplateV2JsonSubfield(schemaItem.entry, 'value', $event, `schemaDefault-${schemaItem.field}`, getTemplateV2SchemaDefaultFallback(schemaItem.entry))"
+                        />
                         <edge-shad-input
+                          v-else-if="schemaItem.entry.type !== 'array'"
                           v-model="schemaItem.entry.value"
                           :name="`schemaDefault-${schemaItem.field}`"
                           label="Default Value"
                           placeholder="Optional default"
                         />
-                        <edge-shad-textarea
-                          v-if="schemaItem.entry.type === 'array'"
-                          :model-value="formatJson(schemaItem.entry.schema || {})"
-                          :name="`schemaNested-${schemaItem.field}`"
-                          label="Nested Schema JSON"
-                          class="min-h-[90px] font-mono text-xs"
-                          @update:model-value="updateTemplateV2JsonSubfield(schemaItem.entry, 'schema', $event, `schemaNested-${schemaItem.field}`, {})"
+                      </div>
+                      <div v-if="schemaItem.entry.type === 'array'" class="space-y-4 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/40">
+                        <div class="flex items-center justify-between gap-3">
+                          <div>
+                            <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                              Item Fields
+                            </div>
+                            <p class="text-xs text-slate-500 dark:text-slate-400">
+                              These fields define each item a user can add to this array.
+                            </p>
+                          </div>
+                          <edge-shad-button type="button" size="sm" variant="outline" class="h-8 gap-2" @click="addTemplateV2ArraySchemaField(schemaItem.entry)">
+                            <Plus class="h-3.5 w-3.5" />
+                            Add Item Field
+                          </edge-shad-button>
+                        </div>
+                        <div
+                          v-if="!getTemplateV2ArraySchemaEntries(schemaItem.entry).length"
+                          class="rounded border border-dashed border-slate-300 bg-white p-3 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400"
+                        >
+                          Add item fields before creating default items.
+                        </div>
+                        <div class="space-y-3">
+                          <div
+                            v-for="arraySchemaItem in getTemplateV2ArraySchemaEntries(schemaItem.entry)"
+                            :key="`array-schema-${schemaItem.field}-${arraySchemaItem.field}`"
+                            class="space-y-3 rounded border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950"
+                          >
+                            <div class="grid gap-3 md:grid-cols-[1fr_1fr_150px_auto]">
+                              <edge-shad-input
+                                :model-value="arraySchemaItem.field"
+                                :name="`arraySchemaField-${schemaItem.field}-${arraySchemaItem.field}`"
+                                label="Field Key"
+                                placeholder="heading"
+                                @blur="renameTemplateV2ArraySchemaField(schemaItem.entry, arraySchemaItem.field, $event.target.value)"
+                              />
+                              <edge-shad-input
+                                v-model="arraySchemaItem.entry.label"
+                                :name="`arraySchemaLabel-${schemaItem.field}-${arraySchemaItem.field}`"
+                                label="Label"
+                                placeholder="Heading"
+                              />
+                              <edge-shad-select
+                                :model-value="arraySchemaItem.entry.type"
+                                :name="`arraySchemaType-${schemaItem.field}-${arraySchemaItem.field}`"
+                                label="Type"
+                                :items="v2ArrayItemSchemaTypeOptions"
+                                @update:model-value="updateTemplateV2ArraySchemaType(arraySchemaItem.entry, $event)"
+                              />
+                              <edge-shad-button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                class="mt-7 h-9 w-9 text-red-600"
+                                aria-label="Remove item field"
+                                @click="removeTemplateV2ArraySchemaField(schemaItem.entry, arraySchemaItem.field)"
+                              >
+                                <Trash2 class="h-4 w-4" />
+                              </edge-shad-button>
+                            </div>
+                            <div v-if="['image', 'richtext'].includes(arraySchemaItem.entry.type)" class="grid gap-3 md:grid-cols-2">
+                              <edge-shad-tags
+                                :model-value="arraySchemaItem.entry.tags || []"
+                                :name="`arraySchemaTags-${schemaItem.field}-${arraySchemaItem.field}`"
+                                label="Default Media Tags"
+                                placeholder="Backgrounds"
+                                value-as="array"
+                                @update:model-value="updateTemplateV2SchemaArrayField(arraySchemaItem.entry, 'tags', $event)"
+                              />
+                              <edge-shad-select
+                                :model-value="arraySchemaItem.entry.variant || 'public'"
+                                :name="`arraySchemaVariant-${schemaItem.field}-${arraySchemaItem.field}`"
+                                label="Image Variant"
+                                :items="v2ImageVariantOptions"
+                                @update:model-value="updateTemplateV2SchemaVariant(arraySchemaItem.entry, $event)"
+                              />
+                            </div>
+                            <div v-if="arraySchemaItem.entry.type === 'option'" class="space-y-3 rounded border border-slate-100 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/40">
+                              <div
+                                v-for="(optionRow, optionIndex) in getTemplateV2SchemaOption(arraySchemaItem.entry).options"
+                                :key="`array-schema-option-${schemaItem.field}-${arraySchemaItem.field}-${optionIndex}`"
+                                class="grid gap-2 md:grid-cols-[1fr_1fr_auto]"
+                              >
+                                <edge-shad-input
+                                  :model-value="getTemplateV2SchemaOptionRowField(arraySchemaItem.entry, optionRow, 'label')"
+                                  :name="`arraySchemaOptionLabel-${schemaItem.field}-${arraySchemaItem.field}-${optionIndex}`"
+                                  label="Label"
+                                  placeholder="Featured"
+                                  @update:model-value="updateTemplateV2SchemaOptionRowField(arraySchemaItem.entry, optionIndex, 'label', $event)"
+                                />
+                                <edge-shad-input
+                                  :model-value="getTemplateV2SchemaOptionRowField(arraySchemaItem.entry, optionRow, 'value')"
+                                  :name="`arraySchemaOptionValue-${schemaItem.field}-${arraySchemaItem.field}-${optionIndex}`"
+                                  label="Value"
+                                  placeholder="featured"
+                                  @update:model-value="updateTemplateV2SchemaOptionRowField(arraySchemaItem.entry, optionIndex, 'value', $event)"
+                                />
+                                <edge-shad-button
+                                  type="button"
+                                  size="icon"
+                                  variant="ghost"
+                                  class="mt-7 h-9 w-9 text-red-600"
+                                  aria-label="Remove option"
+                                  @click="removeTemplateV2SchemaOptionRow(arraySchemaItem.entry, optionIndex)"
+                                >
+                                  <Trash2 class="h-4 w-4" />
+                                </edge-shad-button>
+                              </div>
+                              <edge-shad-button type="button" size="sm" variant="outline" class="h-8 gap-2" @click="addTemplateV2SchemaOptionRow(arraySchemaItem.entry)">
+                                <Plus class="h-3.5 w-3.5" />
+                                Add Option
+                              </edge-shad-button>
+                            </div>
+                          </div>
+                        </div>
+                        <div class="border-t border-slate-200 pt-4 dark:border-slate-800">
+                          <div class="mb-3 flex items-center justify-between gap-3">
+                            <div>
+                              <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                                Default Items
+                              </div>
+                              <p class="text-xs text-slate-500 dark:text-slate-400">
+                                These optional rows become the array's default value.
+                              </p>
+                            </div>
+                            <edge-shad-button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              class="h-8 gap-2"
+                              :disabled="!getTemplateV2ArraySchemaEntries(schemaItem.entry).length"
+                              @click="addTemplateV2ArrayDefaultItem(schemaItem.entry)"
+                            >
+                              <Plus class="h-3.5 w-3.5" />
+                              Add Default Item
+                            </edge-shad-button>
+                          </div>
+                          <div
+                            v-if="!getTemplateV2ArrayDefaultItems(schemaItem.entry).length"
+                            class="rounded border border-dashed border-slate-300 bg-white p-3 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400"
+                          >
+                            No default items.
+                          </div>
+                          <div class="space-y-3">
+                            <div
+                              v-for="(defaultItem, defaultIndex) in getTemplateV2ArrayDefaultItems(schemaItem.entry)"
+                              :key="`array-default-${schemaItem.field}-${defaultIndex}`"
+                              class="space-y-3 rounded border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950"
+                            >
+                              <div class="flex items-center justify-between">
+                                <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                  Item {{ defaultIndex + 1 }}
+                                </div>
+                                <edge-shad-button
+                                  type="button"
+                                  size="icon"
+                                  variant="ghost"
+                                  class="h-8 w-8 text-red-600"
+                                  aria-label="Remove default item"
+                                  @click="removeTemplateV2ArrayDefaultItem(schemaItem.entry, defaultIndex)"
+                                >
+                                  <Trash2 class="h-4 w-4" />
+                                </edge-shad-button>
+                              </div>
+                              <div class="grid gap-3 md:grid-cols-2">
+                                <template
+                                  v-for="arraySchemaItem in getTemplateV2ArraySchemaEntries(schemaItem.entry)"
+                                  :key="`array-default-field-${schemaItem.field}-${defaultIndex}-${arraySchemaItem.field}`"
+                                >
+                                  <edge-shad-textarea
+                                    v-if="['textarea', 'richtext'].includes(arraySchemaItem.entry.type)"
+                                    :model-value="getTemplateV2ArrayDefaultFieldValue(defaultItem, arraySchemaItem.field)"
+                                    :name="`arrayDefault-${schemaItem.field}-${defaultIndex}-${arraySchemaItem.field}`"
+                                    :label="arraySchemaItem.entry.label || titleFromKey(arraySchemaItem.field)"
+                                    @update:model-value="updateTemplateV2ArrayDefaultFieldValue(defaultItem, arraySchemaItem.field, $event, arraySchemaItem.entry.type)"
+                                  />
+                                  <edge-shad-select
+                                    v-else-if="arraySchemaItem.entry.type === 'option'"
+                                    :model-value="getTemplateV2ArrayDefaultFieldValue(defaultItem, arraySchemaItem.field)"
+                                    :name="`arrayDefault-${schemaItem.field}-${defaultIndex}-${arraySchemaItem.field}`"
+                                    :label="arraySchemaItem.entry.label || titleFromKey(arraySchemaItem.field)"
+                                    :items="getTemplateV2SchemaSelectOptions(arraySchemaItem.entry).options"
+                                    :item-title="getTemplateV2SchemaSelectOptions(arraySchemaItem.entry).optionsKey"
+                                    :item-value="getTemplateV2SchemaSelectOptions(arraySchemaItem.entry).optionsValue"
+                                    @update:model-value="updateTemplateV2ArrayDefaultFieldValue(defaultItem, arraySchemaItem.field, $event, arraySchemaItem.entry.type)"
+                                  />
+                                  <edge-shad-input
+                                    v-else
+                                    :model-value="getTemplateV2ArrayDefaultFieldValue(defaultItem, arraySchemaItem.field)"
+                                    :name="`arrayDefault-${schemaItem.field}-${defaultIndex}-${arraySchemaItem.field}`"
+                                    :label="arraySchemaItem.entry.label || titleFromKey(arraySchemaItem.field)"
+                                    :type="arraySchemaItem.entry.type === 'number' ? 'number' : 'text'"
+                                    @update:model-value="updateTemplateV2ArrayDefaultFieldValue(defaultItem, arraySchemaItem.field, $event, arraySchemaItem.entry.type)"
+                                  />
+                                </template>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div v-if="['image', 'richtext'].includes(schemaItem.entry.type)" class="grid gap-3 md:grid-cols-2">
+                        <edge-shad-tags
+                          :model-value="schemaItem.entry.tags || []"
+                          :name="`schemaTags-${schemaItem.field}`"
+                          label="Default Media Tags"
+                          placeholder="Backgrounds"
+                          value-as="array"
+                          @update:model-value="updateTemplateV2SchemaArrayField(schemaItem.entry, 'tags', $event)"
                         />
-                        <edge-shad-textarea
-                          v-else-if="schemaItem.entry.type === 'select'"
-                          :model-value="formatJson(schemaItem.entry.options || [])"
-                          :name="`schemaOptions-${schemaItem.field}`"
-                          label="Options JSON"
-                          class="min-h-[90px] font-mono text-xs"
-                          placeholder='[{"label":"Yes","value":"yes"}]'
-                          @update:model-value="updateTemplateV2JsonSubfield(schemaItem.entry, 'options', $event, `schemaOptions-${schemaItem.field}`, [])"
+                        <edge-shad-select
+                          :model-value="schemaItem.entry.variant || 'public'"
+                          :name="`schemaVariant-${schemaItem.field}`"
+                          label="Image Variant"
+                          :items="v2ImageVariantOptions"
+                          @update:model-value="updateTemplateV2SchemaVariant(schemaItem.entry, $event)"
                         />
                       </div>
+                      <div v-if="schemaItem.entry.type === 'publication'" class="grid gap-3 md:grid-cols-2">
+                        <edge-shad-select
+                          v-model="schemaItem.entry.effect"
+                          :name="`schemaPublicationEffect-${schemaItem.field}`"
+                          label="Publication Effect"
+                          :items="v2PublicationEffectOptions"
+                        />
+                        <p class="self-end pb-2 text-xs text-slate-500 dark:text-slate-400">
+                          Publication fields open the publication picker and store selected page image data.
+                        </p>
+                      </div>
+                      <div v-if="schemaItem.entry.type === 'option'" class="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/40">
+                        <div class="space-y-2">
+                          <div
+                            v-for="(optionRow, optionIndex) in getTemplateV2SchemaOption(schemaItem.entry).options"
+                            :key="`schema-option-${schemaItem.field}-${optionIndex}`"
+                            class="grid gap-2 md:grid-cols-[1fr_1fr_auto]"
+                          >
+                            <edge-shad-input
+                              :model-value="getTemplateV2SchemaOptionRowField(schemaItem.entry, optionRow, 'label')"
+                              :name="`schemaOptionLabel-${schemaItem.field}-${optionIndex}`"
+                              label="Label"
+                              placeholder="Featured"
+                              @update:model-value="updateTemplateV2SchemaOptionRowField(schemaItem.entry, optionIndex, 'label', $event)"
+                            />
+                            <edge-shad-input
+                              :model-value="getTemplateV2SchemaOptionRowField(schemaItem.entry, optionRow, 'value')"
+                              :name="`schemaOptionValue-${schemaItem.field}-${optionIndex}`"
+                              label="Value"
+                              placeholder="featured"
+                              @update:model-value="updateTemplateV2SchemaOptionRowField(schemaItem.entry, optionIndex, 'value', $event)"
+                            />
+                            <edge-shad-button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              class="mt-7 h-9 w-9 text-red-600"
+                              aria-label="Remove option"
+                              @click="removeTemplateV2SchemaOptionRow(schemaItem.entry, optionIndex)"
+                            >
+                              <Trash2 class="h-4 w-4" />
+                            </edge-shad-button>
+                          </div>
+                        </div>
+                        <edge-shad-button type="button" size="sm" variant="outline" class="h-8 gap-2" @click="addTemplateV2SchemaOptionRow(schemaItem.entry)">
+                          <Plus class="h-3.5 w-3.5" />
+                          Add Option
+                        </edge-shad-button>
+                      </div>
+                      <p v-if="state.templateJsonErrors[`schemaDefault-${schemaItem.field}`]" class="mt-2 text-xs text-red-600">
+                        {{ state.templateJsonErrors[`schemaDefault-${schemaItem.field}`] }}
+                      </p>
                       <p v-if="state.templateJsonErrors[`schemaNested-${schemaItem.field}`]" class="mt-2 text-xs text-red-600">
                         {{ state.templateJsonErrors[`schemaNested-${schemaItem.field}`] }}
-                      </p>
-                      <p v-if="state.templateJsonErrors[`schemaOptions-${schemaItem.field}`]" class="mt-2 text-xs text-red-600">
-                        {{ state.templateJsonErrors[`schemaOptions-${schemaItem.field}`] }}
                       </p>
                       </div>
                     </details>
@@ -2912,6 +3593,458 @@ const exportCurrentBlock = async () => {
                   </p>
                 </TabsContent>
               </Tabs>
+              <edge-shad-dialog v-model="state.schemaWizardOpen">
+                <DialogContent v-if="state.schemaWizardDraft" class="max-w-[860px]">
+                  <DialogHeader>
+                    <DialogTitle>{{ state.schemaWizardMode === 'edit' ? 'Edit Input' : 'Add Input' }}</DialogTitle>
+                    <DialogDescription>
+                      {{ state.schemaWizardMode === 'edit' ? 'Edit any section, then save it back to the inputs JSON for this block.' : 'Build an input step by step, then insert it into the inputs JSON for this block.' }}
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  <div class="mb-4 grid gap-2" :class="activeSchemaWizardStepItems.length === 4 ? 'grid-cols-4' : activeSchemaWizardStepItems.length === 3 ? 'grid-cols-3' : 'grid-cols-2'">
+                    <button
+                      v-for="stepItem in activeSchemaWizardStepItems"
+                      :key="stepItem.step"
+                      type="button"
+                      class="rounded border px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide"
+                      :class="state.schemaWizardStep === stepItem.step ? 'border-slate-800 bg-slate-800 text-white dark:border-slate-200 dark:bg-slate-200 dark:text-slate-900' : 'border-slate-200 bg-white text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300'"
+                      @click="goTemplateV2SchemaWizardStep(stepItem.step)"
+                    >
+                      {{ stepItem.step }}. {{ stepItem.title }}
+                    </button>
+                  </div>
+
+                  <div v-if="state.schemaWizardStep === 1" class="space-y-4">
+                    <div class="grid gap-3 md:grid-cols-[1fr_1fr_160px]">
+                      <edge-shad-input
+                        v-model="state.schemaWizardDraft.field"
+                        name="schemaWizardField"
+                        label="Field Key"
+                        placeholder="heading"
+                      />
+                      <edge-shad-input
+                        v-model="state.schemaWizardDraft.entry.label"
+                        name="schemaWizardLabel"
+                        label="Label"
+                        placeholder="Heading"
+                      />
+                      <edge-shad-select
+                        :model-value="state.schemaWizardDraft.entry.type"
+                        name="schemaWizardType"
+                        label="Type"
+                        :items="v2SchemaTypeOptions"
+                        @update:model-value="updateTemplateV2SchemaType(state.schemaWizardDraft.entry, $event)"
+                      />
+                    </div>
+                    <div class="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
+                      The field key is the token name used in the template, for example <code>{{ state.schemaWizardDraft.field || 'heading' }}</code>.
+                    </div>
+                    <edge-shad-button
+                      v-if="state.schemaWizardMode === 'edit'"
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      class="h-8 gap-2 border-red-200 text-red-600 hover:bg-red-50"
+                      @click="openTemplateV2DeleteDialog({ type: 'schema', workingDoc: slotProps.workingDoc, field: state.schemaWizardOriginalField, label: state.schemaWizardDraft.entry.label || state.schemaWizardOriginalField }); closeTemplateV2SchemaWizard()"
+                    >
+                      <Trash2 class="h-3.5 w-3.5" />
+                      Delete Input
+                    </edge-shad-button>
+                  </div>
+
+                  <div v-else-if="state.schemaWizardStep === 2" class="space-y-4">
+                    <div class="grid gap-3 md:grid-cols-2">
+                      <edge-shad-textarea
+                        v-if="isTemplateV2JsonDefaultType(state.schemaWizardDraft.entry.type)"
+                        :model-value="formatTemplateV2SchemaDefault(state.schemaWizardDraft.entry)"
+                        name="schemaWizardDefaultJson"
+                        label="Default Value JSON"
+                        class="min-h-[120px] font-mono text-xs"
+                        :placeholder="state.schemaWizardDraft.entry.type === 'array' ? '[]' : '{}'"
+                        @update:model-value="updateTemplateV2JsonSubfield(state.schemaWizardDraft.entry, 'value', $event, 'schemaWizardDefaultJson', getTemplateV2SchemaDefaultFallback(state.schemaWizardDraft.entry))"
+                      />
+                      <edge-shad-input
+                        v-else-if="state.schemaWizardDraft.entry.type !== 'array'"
+                        v-model="state.schemaWizardDraft.entry.value"
+                        name="schemaWizardDefault"
+                        label="Default Value"
+                        placeholder="Optional default"
+                      />
+                    </div>
+                    <div
+                      v-if="state.schemaWizardDraft.entry.type === 'array'"
+                      class="rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300"
+                    >
+                      Array defaults are edited in Settings after item fields are defined.
+                    </div>
+                  </div>
+
+                  <div v-else-if="state.schemaWizardStep === 3" class="space-y-4">
+                    <div v-if="state.schemaWizardDraft.entry.type === 'array'" class="space-y-4 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/40">
+                      <div class="flex items-center justify-between gap-3">
+                        <div>
+                          <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                            Item Fields
+                          </div>
+                          <p class="text-xs text-slate-500 dark:text-slate-400">
+                            These fields define each item a user can add to this array.
+                          </p>
+                        </div>
+                        <edge-shad-button type="button" size="sm" variant="outline" class="h-8 gap-2" @click="addTemplateV2ArraySchemaField(state.schemaWizardDraft.entry)">
+                          <Plus class="h-3.5 w-3.5" />
+                          Add Item Field
+                        </edge-shad-button>
+                      </div>
+                      <div
+                        v-if="!getTemplateV2ArraySchemaEntries(state.schemaWizardDraft.entry).length"
+                        class="rounded border border-dashed border-slate-300 bg-white p-3 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400"
+                      >
+                        Add item fields before creating default items.
+                      </div>
+                      <div class="max-h-[280px] space-y-3 overflow-y-auto pr-1">
+                        <div
+                          v-for="(arraySchemaItem, arraySchemaIndex) in getTemplateV2ArraySchemaEntries(state.schemaWizardDraft.entry)"
+                          :key="`schema-wizard-array-${arraySchemaItem.field}`"
+                          class="overflow-hidden rounded border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950"
+                        >
+                          <div class="flex items-center justify-between gap-2">
+                            <button
+                              type="button"
+                              class="flex min-w-0 flex-1 items-center justify-between gap-3 p-3 text-left hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 dark:hover:bg-slate-900"
+                              @click="state.schemaWizardActiveItemFieldIndex = state.schemaWizardActiveItemFieldIndex === arraySchemaIndex ? -1 : arraySchemaIndex"
+                            >
+                              <span class="min-w-0">
+                                <span class="block truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+                                  {{ arraySchemaItem.field }}
+                                </span>
+                                <span class="mt-1 block truncate text-xs text-slate-500 dark:text-slate-400">
+                                  {{ getTemplateV2ArraySchemaFieldSummary(arraySchemaItem) }}
+                                </span>
+                              </span>
+                              <span class="shrink-0 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                {{ state.schemaWizardActiveItemFieldIndex === arraySchemaIndex ? 'Open' : 'Edit' }}
+                              </span>
+                            </button>
+                            <edge-shad-button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              class="mr-2 h-8 w-8 shrink-0 text-red-600"
+                              aria-label="Remove item field"
+                              @click="removeTemplateV2ArraySchemaField(state.schemaWizardDraft.entry, arraySchemaItem.field)"
+                            >
+                              <Trash2 class="h-4 w-4" />
+                            </edge-shad-button>
+                          </div>
+                          <div
+                            v-if="state.schemaWizardActiveItemFieldIndex === arraySchemaIndex"
+                            class="space-y-3 border-t border-slate-200 p-3 dark:border-slate-800"
+                          >
+                            <div class="grid gap-3 md:grid-cols-[1fr_1fr_150px]">
+                              <edge-shad-input
+                                :model-value="arraySchemaItem.field"
+                                :name="`schemaWizardArrayField-${arraySchemaItem.field}`"
+                                label="Field Key"
+                                placeholder="heading"
+                                @blur="renameTemplateV2ArraySchemaField(state.schemaWizardDraft.entry, arraySchemaItem.field, $event.target.value)"
+                              />
+                              <edge-shad-input
+                                v-model="arraySchemaItem.entry.label"
+                                :name="`schemaWizardArrayLabel-${arraySchemaItem.field}`"
+                                label="Label"
+                                placeholder="Heading"
+                              />
+                              <edge-shad-select
+                                :model-value="arraySchemaItem.entry.type"
+                                :name="`schemaWizardArrayType-${arraySchemaItem.field}`"
+                                label="Type"
+                                :items="v2ArrayItemSchemaTypeOptions"
+                                @update:model-value="updateTemplateV2ArraySchemaType(arraySchemaItem.entry, $event)"
+                              />
+                            </div>
+                            <div v-if="['image', 'richtext'].includes(arraySchemaItem.entry.type)" class="grid gap-3 md:grid-cols-2">
+                              <edge-shad-tags
+                                :model-value="arraySchemaItem.entry.tags || []"
+                                :name="`schemaWizardArrayTags-${arraySchemaItem.field}`"
+                                label="Default Media Tags"
+                                placeholder="Backgrounds"
+                                value-as="array"
+                                @update:model-value="updateTemplateV2SchemaArrayField(arraySchemaItem.entry, 'tags', $event)"
+                              />
+                              <edge-shad-select
+                                :model-value="arraySchemaItem.entry.variant || 'public'"
+                                :name="`schemaWizardArrayVariant-${arraySchemaItem.field}`"
+                                label="Image Variant"
+                                :items="v2ImageVariantOptions"
+                                @update:model-value="updateTemplateV2SchemaVariant(arraySchemaItem.entry, $event)"
+                              />
+                            </div>
+                            <div v-if="arraySchemaItem.entry.type === 'option'" class="space-y-3 rounded border border-slate-100 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/40">
+                              <div
+                                v-for="(optionRow, optionIndex) in getTemplateV2SchemaOption(arraySchemaItem.entry).options"
+                                :key="`schema-wizard-array-option-${arraySchemaItem.field}-${optionIndex}`"
+                                class="grid gap-2 md:grid-cols-[1fr_1fr_auto]"
+                              >
+                                <edge-shad-input
+                                  :model-value="getTemplateV2SchemaOptionRowField(arraySchemaItem.entry, optionRow, 'label')"
+                                  :name="`schemaWizardArrayOptionLabel-${arraySchemaItem.field}-${optionIndex}`"
+                                  label="Label"
+                                  placeholder="Featured"
+                                  @update:model-value="updateTemplateV2SchemaOptionRowField(arraySchemaItem.entry, optionIndex, 'label', $event)"
+                                />
+                                <edge-shad-input
+                                  :model-value="getTemplateV2SchemaOptionRowField(arraySchemaItem.entry, optionRow, 'value')"
+                                  :name="`schemaWizardArrayOptionValue-${arraySchemaItem.field}-${optionIndex}`"
+                                  label="Value"
+                                  placeholder="featured"
+                                  @update:model-value="updateTemplateV2SchemaOptionRowField(arraySchemaItem.entry, optionIndex, 'value', $event)"
+                                />
+                                <edge-shad-button
+                                  type="button"
+                                  size="icon"
+                                  variant="ghost"
+                                  class="mt-7 h-9 w-9 text-red-600"
+                                  aria-label="Remove option"
+                                  @click="removeTemplateV2SchemaOptionRow(arraySchemaItem.entry, optionIndex)"
+                                >
+                                  <Trash2 class="h-4 w-4" />
+                                </edge-shad-button>
+                              </div>
+                              <edge-shad-button type="button" size="sm" variant="outline" class="h-8 gap-2" @click="addTemplateV2SchemaOptionRow(arraySchemaItem.entry)">
+                                <Plus class="h-3.5 w-3.5" />
+                                Add Option
+                              </edge-shad-button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      <div class="border-t border-slate-200 pt-4 dark:border-slate-800">
+                        <div class="mb-3 flex items-center justify-between gap-3">
+                          <div>
+                            <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                              Default Items
+                            </div>
+                            <p class="text-xs text-slate-500 dark:text-slate-400">
+                              These optional rows become the array's default value.
+                            </p>
+                          </div>
+                          <edge-shad-button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            class="h-8 gap-2"
+                            :disabled="!getTemplateV2ArraySchemaEntries(state.schemaWizardDraft.entry).length"
+                            @click="addTemplateV2ArrayDefaultItem(state.schemaWizardDraft.entry)"
+                          >
+                            <Plus class="h-3.5 w-3.5" />
+                            Add Default Item
+                          </edge-shad-button>
+                        </div>
+                        <div
+                          v-if="!getTemplateV2ArrayDefaultItems(state.schemaWizardDraft.entry).length"
+                          class="rounded border border-dashed border-slate-300 bg-white p-3 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400"
+                        >
+                          No default items.
+                        </div>
+                        <div class="max-h-[280px] space-y-3 overflow-y-auto pr-1">
+                          <div
+                            v-for="(defaultItem, defaultIndex) in getTemplateV2ArrayDefaultItems(state.schemaWizardDraft.entry)"
+                            :key="`schema-wizard-array-default-${defaultIndex}`"
+                            class="overflow-hidden rounded border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950"
+                          >
+                            <div class="flex items-center justify-between gap-2">
+                              <button
+                                type="button"
+                                class="flex min-w-0 flex-1 items-center justify-between gap-3 p-3 text-left hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 dark:hover:bg-slate-900"
+                                @click="state.schemaWizardActiveDefaultItemIndex = state.schemaWizardActiveDefaultItemIndex === defaultIndex ? -1 : defaultIndex"
+                              >
+                                <span class="min-w-0">
+                                  <span class="block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                    Item {{ defaultIndex + 1 }}
+                                  </span>
+                                  <span class="mt-1 block truncate text-xs text-slate-400">
+                                    {{ getTemplateV2ArrayDefaultItemSummary(state.schemaWizardDraft.entry, defaultItem) }}
+                                  </span>
+                                </span>
+                                <span class="shrink-0 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                  {{ state.schemaWizardActiveDefaultItemIndex === defaultIndex ? 'Open' : 'Edit' }}
+                                </span>
+                              </button>
+                              <edge-shad-button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                class="mr-2 h-8 w-8 shrink-0 text-red-600"
+                                aria-label="Remove default item"
+                                @click="removeTemplateV2ArrayDefaultItem(state.schemaWizardDraft.entry, defaultIndex)"
+                              >
+                                <Trash2 class="h-4 w-4" />
+                              </edge-shad-button>
+                            </div>
+                            <div
+                              v-if="state.schemaWizardActiveDefaultItemIndex === defaultIndex"
+                              class="grid gap-3 border-t border-slate-200 p-3 md:grid-cols-2 dark:border-slate-800"
+                            >
+                              <template
+                                v-for="arraySchemaItem in getTemplateV2ArraySchemaEntries(state.schemaWizardDraft.entry)"
+                                :key="`schema-wizard-array-default-field-${defaultIndex}-${arraySchemaItem.field}`"
+                              >
+                                <edge-shad-textarea
+                                  v-if="['textarea', 'richtext'].includes(arraySchemaItem.entry.type)"
+                                  :model-value="getTemplateV2ArrayDefaultFieldValue(defaultItem, arraySchemaItem.field)"
+                                  :name="`schemaWizardArrayDefault-${defaultIndex}-${arraySchemaItem.field}`"
+                                  :label="arraySchemaItem.entry.label || titleFromKey(arraySchemaItem.field)"
+                                  @update:model-value="updateTemplateV2ArrayDefaultFieldValue(defaultItem, arraySchemaItem.field, $event, arraySchemaItem.entry.type)"
+                                />
+                                <edge-shad-select
+                                  v-else-if="arraySchemaItem.entry.type === 'option'"
+                                  :model-value="getTemplateV2ArrayDefaultFieldValue(defaultItem, arraySchemaItem.field)"
+                                  :name="`schemaWizardArrayDefault-${defaultIndex}-${arraySchemaItem.field}`"
+                                  :label="arraySchemaItem.entry.label || titleFromKey(arraySchemaItem.field)"
+                                  :items="getTemplateV2SchemaSelectOptions(arraySchemaItem.entry).options"
+                                  :item-title="getTemplateV2SchemaSelectOptions(arraySchemaItem.entry).optionsKey"
+                                  :item-value="getTemplateV2SchemaSelectOptions(arraySchemaItem.entry).optionsValue"
+                                  @update:model-value="updateTemplateV2ArrayDefaultFieldValue(defaultItem, arraySchemaItem.field, $event, arraySchemaItem.entry.type)"
+                                />
+                                <edge-shad-input
+                                  v-else
+                                  :model-value="getTemplateV2ArrayDefaultFieldValue(defaultItem, arraySchemaItem.field)"
+                                  :name="`schemaWizardArrayDefault-${defaultIndex}-${arraySchemaItem.field}`"
+                                  :label="arraySchemaItem.entry.label || titleFromKey(arraySchemaItem.field)"
+                                  :type="arraySchemaItem.entry.type === 'number' ? 'number' : 'text'"
+                                  @update:model-value="updateTemplateV2ArrayDefaultFieldValue(defaultItem, arraySchemaItem.field, $event, arraySchemaItem.entry.type)"
+                                />
+                              </template>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div v-else-if="['image', 'richtext'].includes(state.schemaWizardDraft.entry.type)" class="grid gap-3 md:grid-cols-2">
+                      <edge-shad-tags
+                        :model-value="state.schemaWizardDraft.entry.tags || []"
+                        name="schemaWizardTags"
+                        label="Default Media Tags"
+                        placeholder="Backgrounds"
+                        value-as="array"
+                        @update:model-value="updateTemplateV2SchemaArrayField(state.schemaWizardDraft.entry, 'tags', $event)"
+                      />
+                      <edge-shad-select
+                        :model-value="state.schemaWizardDraft.entry.variant || 'public'"
+                        name="schemaWizardVariant"
+                        label="Image Variant"
+                        :items="v2ImageVariantOptions"
+                        @update:model-value="updateTemplateV2SchemaVariant(state.schemaWizardDraft.entry, $event)"
+                      />
+                    </div>
+
+                    <div v-else-if="state.schemaWizardDraft.entry.type === 'publication'" class="grid gap-3 md:grid-cols-2">
+                      <edge-shad-select
+                        v-model="state.schemaWizardDraft.entry.effect"
+                        name="schemaWizardPublicationEffect"
+                        label="Publication Effect"
+                        :items="v2PublicationEffectOptions"
+                      />
+                      <p class="self-end pb-2 text-xs text-slate-500 dark:text-slate-400">
+                        Publication fields open the publication picker and store selected page image data.
+                      </p>
+                    </div>
+
+                    <div v-else-if="state.schemaWizardDraft.entry.type === 'option'" class="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-900/40">
+                      <div class="space-y-2">
+                        <div
+                          v-for="(optionRow, optionIndex) in getTemplateV2SchemaOption(state.schemaWizardDraft.entry).options"
+                          :key="`schema-wizard-option-${optionIndex}`"
+                          class="grid gap-2 md:grid-cols-[1fr_1fr_auto]"
+                        >
+                          <edge-shad-input
+                            :model-value="getTemplateV2SchemaOptionRowField(state.schemaWizardDraft.entry, optionRow, 'label')"
+                            :name="`schemaWizardOptionLabel-${optionIndex}`"
+                            label="Label"
+                            placeholder="Featured"
+                            @update:model-value="updateTemplateV2SchemaOptionRowField(state.schemaWizardDraft.entry, optionIndex, 'label', $event)"
+                          />
+                          <edge-shad-input
+                            :model-value="getTemplateV2SchemaOptionRowField(state.schemaWizardDraft.entry, optionRow, 'value')"
+                            :name="`schemaWizardOptionValue-${optionIndex}`"
+                            label="Value"
+                            placeholder="featured"
+                            @update:model-value="updateTemplateV2SchemaOptionRowField(state.schemaWizardDraft.entry, optionIndex, 'value', $event)"
+                          />
+                          <edge-shad-button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            class="mt-7 h-9 w-9 text-red-600"
+                            aria-label="Remove option"
+                            @click="removeTemplateV2SchemaOptionRow(state.schemaWizardDraft.entry, optionIndex)"
+                          >
+                            <Trash2 class="h-4 w-4" />
+                          </edge-shad-button>
+                        </div>
+                      </div>
+                      <edge-shad-button type="button" size="sm" variant="outline" class="h-8 gap-2" @click="addTemplateV2SchemaOptionRow(state.schemaWizardDraft.entry)">
+                        <Plus class="h-3.5 w-3.5" />
+                        Add Option
+                      </edge-shad-button>
+                    </div>
+
+                    <div
+                      v-else
+                      class="rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300"
+                    >
+                      This field type has no additional settings.
+                    </div>
+                  </div>
+
+                  <div v-else class="space-y-4">
+                    <div class="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
+                      Review the input JSON that will be inserted. Use the main JSON editor for advanced field shapes.
+                    </div>
+                    <div>
+                      <div class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                        JSON to insert
+                      </div>
+                      <pre class="max-h-[240px] overflow-auto rounded-md bg-slate-950 p-3 text-xs text-slate-50"><code>{{ previewTemplateV2WizardSchemaJson }}</code></pre>
+                    </div>
+                  </div>
+
+                  <p v-if="state.schemaWizardError" class="text-sm text-red-600">
+                    {{ state.schemaWizardError }}
+                  </p>
+
+                  <DialogFooter>
+                    <edge-shad-button type="button" variant="outline" @click="closeTemplateV2SchemaWizard">
+                      Cancel
+                    </edge-shad-button>
+                    <edge-shad-button
+                      v-if="state.schemaWizardMode === 'add' && hasPreviousTemplateV2SchemaWizardStep"
+                      type="button"
+                      variant="outline"
+                      @click="state.schemaWizardStep = getAdjacentTemplateV2SchemaWizardStep(-1)"
+                    >
+                      Back
+                    </edge-shad-button>
+                    <edge-shad-button
+                      v-if="state.schemaWizardMode === 'add' && hasNextTemplateV2SchemaWizardStep"
+                      type="button"
+                      @click="goTemplateV2SchemaWizardStep(getAdjacentTemplateV2SchemaWizardStep(1))"
+                    >
+                      Next
+                    </edge-shad-button>
+                    <edge-shad-button
+                      v-if="state.schemaWizardMode === 'edit' || !hasNextTemplateV2SchemaWizardStep"
+                      type="button"
+                      class="bg-slate-900 text-white hover:bg-slate-700"
+                      @click="saveTemplateV2SchemaFromWizard(slotProps.workingDoc)"
+                    >
+                      {{ state.schemaWizardMode === 'edit' ? 'Save' : 'Add' }}
+                    </edge-shad-button>
+                  </DialogFooter>
+                </DialogContent>
+              </edge-shad-dialog>
               <edge-shad-dialog v-model="state.dataSourceWizardOpen">
                 <DialogContent v-if="state.dataSourceWizardDraft" class="max-w-[860px]">
                   <DialogHeader>
@@ -2950,8 +4083,19 @@ const exportCurrentBlock = async () => {
                       />
                     </div>
                     <div class="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
-                      Use a source name that matches the template loop, for example <code>source("items")</code>. Manual data is pasted JSON. API data comes from an HTTP endpoint. Collection data comes from the site KV index.
+                      Use a source name that matches the template loop, for example <code>source("items")</code>. API data comes from an HTTP endpoint. Collection data comes from the site KV index.
                     </div>
+                    <edge-shad-button
+                      v-if="state.dataSourceWizardMode === 'edit'"
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      class="h-8 gap-2 border-red-200 text-red-600 hover:bg-red-50"
+                      @click="openTemplateV2DeleteDialog({ type: 'dataSource', workingDoc: slotProps.workingDoc, sourceName: state.dataSourceWizardOriginalName, label: state.dataSourceWizardDraft.sourceName || state.dataSourceWizardOriginalName }); closeTemplateV2DataSourceWizard()"
+                    >
+                      <Trash2 class="h-3.5 w-3.5" />
+                      Delete Data Source
+                    </edge-shad-button>
                   </div>
 
                   <div v-else-if="state.dataSourceWizardStep === 2" class="space-y-4">
@@ -3025,14 +4169,12 @@ const exportCurrentBlock = async () => {
                       </div>
                     </div>
 
-                    <edge-shad-textarea
+                    <div
                       v-else
-                      v-model="state.dataSourceWizardDraft.valueJson"
-                      name="dataSourceWizardManualValue"
-                      label="Manual Value JSON"
-                      class="min-h-[180px] font-mono text-xs"
-                      placeholder="[]"
-                    />
+                      class="rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300"
+                    >
+                      Manual data sources are advanced and can be edited in the JSON editor.
+                    </div>
                   </div>
 
                   <div v-else-if="state.dataSourceWizardStep === 3" class="space-y-4">
@@ -3205,109 +4347,136 @@ const exportCurrentBlock = async () => {
                       <div
                         v-for="(control, controlIndex) in state.dataSourceWizardDraft.controls"
                         :key="`wizard-control-${controlIndex}`"
-                        class="rounded-md border border-slate-200 p-3 dark:border-slate-800"
+                        class="overflow-hidden rounded-md border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950"
                       >
-                        <div class="grid gap-3 md:grid-cols-[1fr_1fr_150px_auto]">
-                          <edge-shad-input
-                            v-model="control.key"
-                            :name="`wizardControlKey-${controlIndex}`"
-                            :label="getV2DataSourceControlKeyLabel(state.dataSourceWizardDraft.type)"
-                            :placeholder="getV2DataSourceControlKeyPlaceholder(state.dataSourceWizardDraft.type)"
-                          />
-                          <edge-shad-input
-                            v-model="control.title"
-                            :name="`wizardControlTitle-${controlIndex}`"
-                            label="Label"
-                            placeholder="Category"
-                          />
-                          <edge-shad-select
-                            v-model="control.input"
-                            :name="`wizardControlInput-${controlIndex}`"
-                            label="Type"
-                            :items="v2DataSourceControlTypeOptions"
-                          />
-                          <edge-shad-button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            class="mt-7 h-9 w-9 text-red-600"
-                            aria-label="Remove control"
-                            @click="removeTemplateV2WizardControlRow(controlIndex)"
-                          >
-                            <Trash2 class="h-4 w-4" />
-                          </edge-shad-button>
-                        </div>
-                        <p class="mt-2 text-xs text-slate-600 dark:text-slate-400">
-                          {{ getV2DataSourceControlKeyHelper(state.dataSourceWizardDraft.type) }}
-                        </p>
-                        <div class="mt-3 grid gap-3 md:grid-cols-2">
-                          <edge-shad-input
-                            v-model="control.placeholder"
-                            :name="`wizardControlPlaceholder-${controlIndex}`"
-                            label="Placeholder"
-                            placeholder="Optional placeholder"
-                          />
-                          <edge-shad-select
-                            v-if="control.input === 'select'"
-                            v-model="control.optionMode"
-                            :name="`wizardControlOptionMode-${controlIndex}`"
-                            label="Select Options"
-                            :items="v2DataSourceControlOptionModeOptions"
-                          />
-                        </div>
-                        <div v-if="control.input === 'select' && control.optionMode === 'collection'" class="mt-3 grid gap-3 md:grid-cols-3">
-                          <edge-shad-input
-                            v-model="control.optionsCollection"
-                            :name="`wizardControlOptionsCollection-${controlIndex}`"
-                            label="Options Collection"
-                            placeholder="categories"
-                          />
-                          <edge-shad-input
-                            v-model="control.optionsKey"
-                            :name="`wizardControlOptionsKey-${controlIndex}`"
-                            label="Label Field"
-                            placeholder="label"
-                          />
-                          <edge-shad-input
-                            v-model="control.optionsValue"
-                            :name="`wizardControlOptionsValue-${controlIndex}`"
-                            label="Value Field"
-                            placeholder="value"
-                          />
-                        </div>
-                        <div v-else-if="control.input === 'select'" class="mt-3 space-y-2">
-                          <div
-                            v-for="(option, optionIndex) in control.options"
-                            :key="`wizard-control-${controlIndex}-option-${optionIndex}`"
-                            class="grid gap-2 md:grid-cols-[1fr_1fr_auto]"
-                          >
+                        <button
+                          type="button"
+                          class="flex w-full items-center justify-between gap-3 p-3 text-left hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 dark:hover:bg-slate-900"
+                          @click="state.dataSourceWizardActiveControlIndex = state.dataSourceWizardActiveControlIndex === controlIndex ? -1 : controlIndex"
+                        >
+                          <span class="min-w-0">
+                            <span class="block truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+                              {{ control.title || control.key || `Control ${controlIndex + 1}` }}
+                            </span>
+                            <span class="mt-1 block truncate text-xs text-slate-500 dark:text-slate-400">
+                              {{ control.key || 'No key set' }}
+                              <span v-if="control.input === 'select'">
+                                - {{ control.optionMode === 'collection' ? control.optionsCollection || 'Collection options' : `${Array.isArray(control.options) ? control.options.length : 0} manual options` }}
+                              </span>
+                            </span>
+                          </span>
+                          <span class="flex shrink-0 items-center gap-2">
+                            <span class="rounded border border-slate-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:border-slate-700">
+                              {{ control.input || 'text' }}
+                            </span>
+                            <span class="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                              {{ state.dataSourceWizardActiveControlIndex === controlIndex ? 'Open' : 'Edit' }}
+                            </span>
+                          </span>
+                        </button>
+                        <div v-if="state.dataSourceWizardActiveControlIndex === controlIndex" class="border-t border-slate-200 p-3 dark:border-slate-800">
+                          <div class="grid gap-3 md:grid-cols-[1fr_1fr_150px_auto]">
                             <edge-shad-input
-                              v-model="option.label"
-                              :name="`wizardControlOptionLabel-${controlIndex}-${optionIndex}`"
-                              label="Option Label"
-                              placeholder="Featured"
+                              v-model="control.key"
+                              :name="`wizardControlKey-${controlIndex}`"
+                              :label="getV2DataSourceControlKeyLabel(state.dataSourceWizardDraft.type)"
+                              :placeholder="getV2DataSourceControlKeyPlaceholder(state.dataSourceWizardDraft.type)"
                             />
                             <edge-shad-input
-                              v-model="option.value"
-                              :name="`wizardControlOptionValue-${controlIndex}-${optionIndex}`"
-                              label="Option Value"
-                              placeholder="featured"
+                              v-model="control.title"
+                              :name="`wizardControlTitle-${controlIndex}`"
+                              label="Label"
+                              placeholder="Category"
+                            />
+                            <edge-shad-select
+                              v-model="control.input"
+                              :name="`wizardControlInput-${controlIndex}`"
+                              label="Type"
+                              :items="v2DataSourceControlTypeOptions"
                             />
                             <edge-shad-button
                               type="button"
                               size="icon"
                               variant="ghost"
                               class="mt-7 h-9 w-9 text-red-600"
-                              aria-label="Remove option"
-                              @click="removeTemplateV2WizardControlOptionRow(control, optionIndex)"
+                              aria-label="Remove control"
+                              @click="removeTemplateV2WizardControlRow(controlIndex)"
                             >
                               <Trash2 class="h-4 w-4" />
                             </edge-shad-button>
                           </div>
-                          <edge-shad-button type="button" size="sm" variant="outline" class="h-8 gap-2" @click="addTemplateV2WizardControlOptionRow(control)">
-                            <Plus class="h-3.5 w-3.5" />
-                            Add Option
-                          </edge-shad-button>
+                          <p class="mt-2 text-xs text-slate-600 dark:text-slate-400">
+                            {{ getV2DataSourceControlKeyHelper(state.dataSourceWizardDraft.type) }}
+                          </p>
+                          <div class="mt-3 grid gap-3 md:grid-cols-2">
+                            <edge-shad-input
+                              v-model="control.placeholder"
+                              :name="`wizardControlPlaceholder-${controlIndex}`"
+                              label="Placeholder"
+                              placeholder="Optional placeholder"
+                            />
+                            <edge-shad-select
+                              v-if="control.input === 'select'"
+                              v-model="control.optionMode"
+                              :name="`wizardControlOptionMode-${controlIndex}`"
+                              label="Select Options"
+                              :items="v2DataSourceControlOptionModeOptions"
+                            />
+                          </div>
+                          <div v-if="control.input === 'select' && control.optionMode === 'collection'" class="mt-3 grid gap-3 md:grid-cols-3">
+                            <edge-shad-input
+                              v-model="control.optionsCollection"
+                              :name="`wizardControlOptionsCollection-${controlIndex}`"
+                              label="Options Collection"
+                              placeholder="categories"
+                            />
+                            <edge-shad-input
+                              v-model="control.optionsKey"
+                              :name="`wizardControlOptionsKey-${controlIndex}`"
+                              label="Label Field"
+                              placeholder="label"
+                            />
+                            <edge-shad-input
+                              v-model="control.optionsValue"
+                              :name="`wizardControlOptionsValue-${controlIndex}`"
+                              label="Value Field"
+                              placeholder="value"
+                            />
+                          </div>
+                          <div v-else-if="control.input === 'select'" class="mt-3 space-y-2">
+                            <div
+                              v-for="(option, optionIndex) in control.options"
+                              :key="`wizard-control-${controlIndex}-option-${optionIndex}`"
+                              class="grid gap-2 md:grid-cols-[1fr_1fr_auto]"
+                            >
+                              <edge-shad-input
+                                v-model="option.label"
+                                :name="`wizardControlOptionLabel-${controlIndex}-${optionIndex}`"
+                                label="Option Label"
+                                placeholder="Featured"
+                              />
+                              <edge-shad-input
+                                v-model="option.value"
+                                :name="`wizardControlOptionValue-${controlIndex}-${optionIndex}`"
+                                label="Option Value"
+                                placeholder="featured"
+                              />
+                              <edge-shad-button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                class="mt-7 h-9 w-9 text-red-600"
+                                aria-label="Remove option"
+                                @click="removeTemplateV2WizardControlOptionRow(control, optionIndex)"
+                              >
+                                <Trash2 class="h-4 w-4" />
+                              </edge-shad-button>
+                            </div>
+                            <edge-shad-button type="button" size="sm" variant="outline" class="h-8 gap-2" @click="addTemplateV2WizardControlOptionRow(control)">
+                              <Plus class="h-3.5 w-3.5" />
+                              Add Option
+                            </edge-shad-button>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -3358,7 +4527,7 @@ const exportCurrentBlock = async () => {
                       class="bg-slate-900 text-white hover:bg-slate-700"
                       @click="addTemplateV2DataSourceFromWizard(slotProps.workingDoc)"
                     >
-                      {{ state.dataSourceWizardMode === 'edit' ? 'Save to JSON' : 'Add to JSON' }}
+                      {{ state.dataSourceWizardMode === 'edit' ? 'Save' : 'Add' }}
                     </edge-shad-button>
                   </DialogFooter>
                 </DialogContent>
@@ -3385,7 +4554,9 @@ const exportCurrentBlock = async () => {
                 v-if="!isWorkingTemplateV2Doc(slotProps.workingDoc) || state.templateEditorTab === 'template'"
                 ref="contentEditorRef"
                 :model-value="slotProps.workingDoc.content"
-                :title="isWorkingTemplateV2Doc(slotProps.workingDoc) ? 'Template v2 Markup' : 'Block Content'"
+                :title="isWorkingTemplateV2Doc(slotProps.workingDoc) ? 'Template' : 'Block Content'"
+                :title-class="isWorkingTemplateV2Doc(slotProps.workingDoc) ? 'text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300' : undefined"
+                :menu-class="isWorkingTemplateV2Doc(slotProps.workingDoc) ? 'px-0 pt-0 pb-3 bg-transparent dark:bg-transparent border-b-0 rounded-none' : undefined"
                 language="handlebars"
                 name="content"
                 :enable-formatting="false"
@@ -3394,11 +4565,6 @@ const exportCurrentBlock = async () => {
                 @update:model-value="syncWorkingTemplateContent(slotProps.workingDoc, $event)"
                 @line-click="payload => handleEditorLineClick(payload, slotProps.workingDoc)"
               >
-                <template #title-actions>
-                  <span class="inline-flex rounded border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
-                    Template v{{ getWorkingTemplateVersion(slotProps.workingDoc) }}
-                  </span>
-                </template>
                 <template #end-actions>
                   <DropdownMenu v-if="!isWorkingTemplateV2Doc(slotProps.workingDoc)">
                     <DropdownMenuTrigger as-child>
@@ -3408,7 +4574,7 @@ const exportCurrentBlock = async () => {
                         variant="ghost"
                         class="h-8 px-3 text-[11px] uppercase tracking-wide rounded border border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100"
                       >
-                        Dynamic Content
+                        Dynamic Fields
                       </edge-shad-button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" class="w-72">
@@ -3423,16 +4589,39 @@ const exportCurrentBlock = async () => {
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
-                  <edge-shad-button
-                    v-else
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    class="h-8 px-3 text-[11px] uppercase tracking-wide rounded border border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100"
-                    @click="openV2DynamicContentDialog"
-                  >
-                    Dynamic Content
-                  </edge-shad-button>
+                  <template v-else>
+                    <edge-shad-button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      class="h-8 gap-2 rounded border border-slate-300 bg-white px-3 text-[11px] uppercase tracking-wide text-slate-900 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100"
+                      @click="openV2DynamicContentDialog(slotProps.workingDoc)"
+                    >
+                      Dynamic Fields
+                    </edge-shad-button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger as-child>
+                        <edge-shad-button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          class="h-8 gap-2 rounded border border-slate-300 bg-white px-3 text-[11px] uppercase tracking-wide text-slate-900 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100"
+                        >
+                          Formatter
+                        </edge-shad-button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" class="w-56">
+                        <DropdownMenuItem
+                          v-for="formatter in v2TemplateFormatterOptions"
+                          :key="formatter.name"
+                          class="cursor-pointer"
+                          @click="applyTemplateInlineFormatter(formatter.name)"
+                        >
+                          {{ formatter.title }}
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </template>
                 </template>
               </edge-cms-code-editor>
               <div v-if="isWorkingTemplateV2Doc(slotProps.workingDoc) && slotProps.workingDoc.templateConversion?.warnings?.length" class="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
@@ -3448,72 +4637,48 @@ const exportCurrentBlock = async () => {
               <edge-shad-dialog v-model="state.v2DynamicContentDialogOpen">
                 <DialogContent class="max-w-[680px]">
                   <DialogHeader>
-                    <DialogTitle>Add Dynamic Content</DialogTitle>
+                    <DialogTitle>Add Dynamic Field</DialogTitle>
                     <DialogDescription>
-                      Create a v2 field, update this block schema, and insert the matching template token.
+                      Insert a token or loop for a field that already exists in this block.
                     </DialogDescription>
                   </DialogHeader>
-                  <div class="grid gap-3 md:grid-cols-2">
-                    <edge-shad-input
-                      v-model="state.v2DynamicField.field"
-                      name="v2DynamicFieldName"
-                      label="Field Name"
-                      placeholder="heading"
-                    />
+                  <div class="space-y-4">
                     <edge-shad-select
-                      v-model="state.v2DynamicField.type"
-                      name="v2DynamicFieldType"
-                      label="Field Type"
-                      :items="v2DynamicFieldTypeOptions"
+                      v-if="getV2DynamicContentItems(slotProps.workingDoc).length"
+                      v-model="state.v2DynamicField.selectedKey"
+                      name="v2DynamicContentField"
+                      label="Field"
+                      :items="getV2DynamicContentItems(slotProps.workingDoc)"
                     />
-                    <edge-shad-input
-                      v-model="state.v2DynamicField.label"
-                      name="v2DynamicFieldLabel"
-                      label="Label"
-                      placeholder="Heading"
-                    />
-                    <edge-shad-select
-                      v-if="state.v2DynamicField.type === 'array'"
-                      v-model="state.v2DynamicField.sourceType"
-                      name="v2DynamicSourceType"
-                      label="Array Source"
-                      :items="v2DynamicSourceTypeOptions"
-                    />
-                    <edge-shad-input
-                      v-if="state.v2DynamicField.type === 'array' && state.v2DynamicField.sourceType !== 'manual'"
-                      v-model="state.v2DynamicField.sourceName"
-                      name="v2DynamicSourceName"
-                      label="Source Name"
-                      placeholder="agents"
-                    />
-                    <edge-shad-input
-                      v-if="state.v2DynamicField.type === 'array' && state.v2DynamicField.sourceType === 'collection'"
-                      v-model="state.v2DynamicField.sourcePath"
-                      name="v2DynamicSourcePath"
-                      label="Collection Path"
-                      placeholder="users"
-                    />
-                    <edge-shad-input
-                      v-if="state.v2DynamicField.type === 'array' && state.v2DynamicField.sourceType === 'api'"
-                      v-model="state.v2DynamicField.api"
-                      name="v2DynamicApi"
-                      label="API URL"
-                      placeholder="https://api.example.com/items"
-                    />
-                    <edge-shad-input
-                      v-if="state.v2DynamicField.type === 'array' && state.v2DynamicField.sourceType === 'api'"
-                      v-model="state.v2DynamicField.apiField"
-                      name="v2DynamicApiField"
-                      label="API Field"
-                      placeholder="data"
-                    />
+                    <div
+                      v-else
+                      class="rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300"
+                    >
+                      Add an input or data source first, then return here to insert it.
+                    </div>
+                    <div class="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
+                      To add new fields, use the Inputs tab or add a Data Source first. Dynamic Fields only inserts fields that already exist in this block.
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                      <edge-shad-button type="button" size="sm" variant="outline" @click="goToTemplateV2SchemaFromDynamicContent">
+                        Add Input
+                      </edge-shad-button>
+                      <edge-shad-button type="button" size="sm" variant="outline" @click="goToTemplateV2DataSourcesFromDynamicContent">
+                        Add Data Source
+                      </edge-shad-button>
+                    </div>
                   </div>
                   <DialogFooter class="pt-4 flex justify-between">
                     <edge-shad-button type="button" variant="outline" @click="state.v2DynamicContentDialogOpen = false">
                       Cancel
                     </edge-shad-button>
-                    <edge-shad-button type="button" class="bg-slate-800 text-white hover:bg-slate-700" @click="addV2DynamicContent(slotProps.workingDoc)">
-                      Add Field
+                    <edge-shad-button
+                      type="button"
+                      class="bg-slate-800 text-white hover:bg-slate-700"
+                      :disabled="!getV2DynamicContentItems(slotProps.workingDoc).length"
+                      @click="addV2DynamicContent(slotProps.workingDoc)"
+                    >
+                      Insert
                     </edge-shad-button>
                   </DialogFooter>
                 </DialogContent>
@@ -3891,9 +5056,12 @@ const exportCurrentBlock = async () => {
                     </div>
                     <div class="mt-2 flex flex-wrap gap-2 text-xs">
                       <a href="#block-overview" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Overview</a>
-                      <a href="#fields-built" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Fields</a>
-                      <a href="#basic-tags" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Basic Tags</a>
-                      <a href="#tag-format" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Tag Format</a>
+                      <a href="#v2-workflow" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Template v2 Flow</a>
+                      <a href="#v2-template" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Template</a>
+                      <a href="#v2-inputs" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Inputs</a>
+                      <a href="#v2-data-sources" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Data Sources</a>
+                      <a href="#v2-dynamic-fields" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Dynamic Fields</a>
+                      <a href="#legacy-tags" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Legacy Tags</a>
                       <a href="#block-settings" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Settings</a>
                       <a href="#input-types" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Inputs</a>
                       <a href="#image-fields" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Images</a>
@@ -3913,52 +5081,105 @@ const exportCurrentBlock = async () => {
                       What A Block Is
                     </h3>
                     <p class="text-sm text-foreground">
-                      A block is HTML plus special tags. The editor scans those tags and builds the form for CMS users.
-                      Any tag with a <code>field</code> becomes an editable input.
+                      A block is a reusable piece of page markup. In Template v2, the block has three main parts:
+                      the Template, Inputs, and Data Sources.
                     </p>
                     <p class="text-sm text-foreground">
-                      Your HTML is the template. The CMS form is the data. The preview renders the data inside the template.
+                      The Template controls the HTML that renders. Inputs are the fields a page editor can fill out.
+                      Data Sources load lists or records from an API or collection. The preview renders all of that together.
                     </p>
                   </section>
 
-                  <section id="fields-built" class="space-y-2">
+                  <section id="v2-workflow" class="space-y-3">
                     <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                      How The CMS Builds Fields
+                      Template v2 Workflow
                     </h3>
                     <div class="text-sm text-foreground space-y-1">
-                      <div>The editor scans the HTML for triple‑brace tags like <code v-pre>{{{#text ...}}}</code>.</div>
-                      <div>The <code>field</code> key becomes the saved data key.</div>
-                      <div>Fields appear in the order they are first found in the HTML.</div>
-                      <div>Only triple‑brace tags create inputs. Plain <code v-pre>{{...}}</code> does not.</div>
-                      <div>When you edit a block, template meta + stored meta are merged. Filters and limits persist.</div>
+                      <div><strong>1. Template:</strong> Write the HTML and place tokens where values should render.</div>
+                      <div><strong>2. Inputs:</strong> Add fields the page editor can fill out, such as text, image, select, array, or publication.</div>
+                      <div><strong>3. Data Sources:</strong> Add API or collection data when the block needs a list or record from outside the page editor.</div>
+                      <div><strong>4. Dynamic Fields:</strong> Insert existing Inputs or Data Sources into the template without typing tokens by hand.</div>
+                      <div><strong>5. Formatter:</strong> Apply display formatting such as money, number, date, integer, or rich text where the value is used.</div>
+                    </div>
+                    <div class="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
+                      For Template v2 blocks, do not create editable fields by adding old triple-brace tags. Add fields in the Inputs tab, then insert them into the Template with Dynamic Fields.
                     </div>
                   </section>
 
-                  <section id="basic-tags" class="space-y-3">
+                  <section id="v2-template" class="space-y-3">
                     <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                      Basic Field Tags
+                      Template Tab
                     </h3>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div>The Template tab is where the block's HTML lives.</div>
+                      <div>Use <code v-pre>{{ heading }}</code> for an Input named <code>heading</code>.</div>
+                      <div>Use <code v-pre>{{ money(price) }}</code>, <code v-pre>{{ number(count) }}</code>, or <code v-pre>{{ richtext(body) }}</code> when a value needs display formatting.</div>
+                      <div>When looping over a Data Source, use the alias in the loop and on the values inside the loop.</div>
+                    </div>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;section class="space-y-4"&gt;
+  &lt;h2&gt;{{ heading }}&lt;/h2&gt;
+  &lt;div&gt;{{ richtext(body) }}&lt;/div&gt;
+
+  {{#for property in source("featuredProperties")}}
+    &lt;article&gt;
+      &lt;h3&gt;{{ property.display_address }}&lt;/h3&gt;
+      &lt;p&gt;{{ money(property.listing_price) }}&lt;/p&gt;
+    &lt;/article&gt;
+  {{/for}}
+&lt;/section&gt;</code></pre>
+                  </section>
+
+                  <section id="v2-inputs" class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Inputs Tab
+                    </h3>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div>Inputs are the fields a page editor sees when they click the block on a page.</div>
+                      <div>Use <strong>Add Input</strong> to create a new field. Click an existing input row to edit it.</div>
+                      <div>The Field Key is the token name used in the Template. Keep it short and predictable, such as <code>heading</code>, <code>buttonText</code>, or <code>heroImage</code>.</div>
+                      <div>The Label is what the page editor sees.</div>
+                      <div>The Default tab appears only when that input type supports a useful default value.</div>
+                      <div>The Settings tab appears only when the input type has extra settings, such as image tags, select options, array item fields, or publication effect.</div>
+                    </div>
+                  </section>
+
+                  <section id="v2-data-sources" class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Data Sources Tab
+                    </h3>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div>Data Sources load information that the page editor should not type manually.</div>
+                      <div>Use an API source for an outside URL that returns JSON.</div>
+                      <div>Use a Collection source for records in the site or organization data store.</div>
+                      <div>Use Indexed Lookup Values when a field is indexed and can narrow the fetch before records are returned.</div>
+                      <div>Use After-Fetch Filters only when the index is missing or when the filter cannot be done as an indexed lookup.</div>
+                      <div>Controls are optional fields shown when someone edits the block on a page. They can change API query string values or collection lookup values.</div>
+                    </div>
+                  </section>
+
+                  <section id="v2-dynamic-fields" class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Dynamic Fields And Formatter
+                    </h3>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div><strong>Dynamic Fields</strong> inserts an existing Input or Data Source into the Template.</div>
+                      <div>Dynamic Fields does not create new fields. Add the Input or Data Source first, then insert it.</div>
+                      <div><strong>Formatter</strong> wraps the selected token or value with a display formatter.</div>
+                      <div>If the cursor is inside <code v-pre>{{ price }}</code> and you choose Money, the editor changes it to <code v-pre>{{ money(price) }}</code>.</div>
+                    </div>
+                  </section>
+
+                  <section id="legacy-tags" class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Legacy Tags
+                    </h3>
+                    <div class="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      These triple-brace tags are the older block format. They are still useful when reading or converting older blocks, but Template v2 blocks should use Inputs and Data Sources instead.
+                    </div>
                     <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#text {"field":"headline","value":"Hello","title":"Headline"}}}}
 {{{#textarea {"field":"intro","value":""}}}}
 {{{#richtext {"field":"body","value":""}}}}
 {{{#image {"field":"heroImage","value":"https://example.com/hero.jpg"}}}}</code></pre>
-                    <div class="text-sm text-foreground space-y-1">
-                      <div><code>field</code> is the key stored in the block.</div>
-                      <div><code>value</code> is the default value when nothing is saved yet.</div>
-                      <div><code>title</code> sets the label shown to CMS users. If missing, the field name is used.</div>
-                    </div>
-                  </section>
-
-                  <section id="tag-format" class="space-y-2">
-                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                      Tag Format (Be Exact)
-                    </h3>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#text {"field":"title","value":"My Title","title":"Title"}}}}</code></pre>
-                    <div class="text-sm text-foreground space-y-1">
-                      <div>Tags start with <code v-pre>{{{#</code> and end with <code v-pre>}}}</code>.</div>
-                      <div>Config inside the tag is JSON. Use double quotes around keys and strings.</div>
-                      <div>Commas are required between fields in the config object.</div>
-                    </div>
                   </section>
 
                   <section id="block-settings" class="space-y-2">
@@ -3991,67 +5212,70 @@ const exportCurrentBlock = async () => {
                     </p>
                   </section>
 
-                  <section id="image-fields" class="space-y-3">
-                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                      Image Fields (Media Picker)
-                    </h3>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#image {"field":"heroImage","value":"","tags":["Backgrounds"]}}}}</code></pre>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#image {
-  "field":"cardImage",
-  "value":"",
-  "tags":["Cards"],
-  "variant":"thumbnail"
-}}}</code></pre>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#image {
-  "field":"squareHeadshot",
-  "value":"",
-  "tags":["Headshots"],
-  "variant":"width=320,height=320,fit=cover,quality=85"
-}}}</code></pre>
-                    <div class="text-sm text-foreground space-y-1">
-                      <div><code>tags</code> filters the media manager to specific tag groups.</div>
-                      <div><code>variant</code> chooses the Cloudflare Images variant saved into the block when the image is selected.</div>
-                      <div>Current named Cloudflare variants used by this CMS are <code>public</code>, <code>thumbnail</code>, and <code>highres</code>. If <code>variant</code> is omitted, the media picker uses <code>public</code>.</div>
-                      <div>Flexible variants are enabled. You can pass a Cloudflare flexible variant string such as <code>width=320,height=180,fit=cover,quality=85</code>; the CMS will replace the final variant segment of the selected Cloudflare Images URL.</div>
+                    <section id="image-fields" class="space-y-3">
+                      <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                        Image Fields (Media Picker)
+                      </h3>
+                      <p class="text-sm text-foreground">
+                        Add image fields from the Inputs tab. The Template uses the field key like any other Input.
+                      </p>
+                      <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;img src="{{ heroImage }}" alt="{{ heroAlt }}" class="w-full object-cover" /&gt;</code></pre>
+                      <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{
+  "heroImage": {
+    "type": "image",
+    "label": "Hero Image",
+    "value": "",
+    "tags": ["Backgrounds"],
+    "variant": "public"
+  },
+  "cardImage": {
+    "type": "image",
+    "label": "Card Image",
+    "value": "",
+    "tags": ["Cards"],
+    "variant": "thumbnail"
+  }
+}</code></pre>
+                      <div class="text-sm text-foreground space-y-1">
+                        <div><code>tags</code> filters the media manager to specific tag groups.</div>
+                        <div><code>variant</code> chooses the Cloudflare Images variant saved into the block when the image is selected.</div>
+                        <div>Current named Cloudflare variants used by this CMS are <code>public</code>, <code>thumbnail</code>, and <code>highres</code>. If <code>variant</code> is omitted, the media picker uses <code>public</code>.</div>
+                        <div>Flexible variants are enabled. You can pass a Cloudflare flexible variant string such as <code>width=320,height=180,fit=cover,quality=85</code>; the CMS will replace the final variant segment of the selected Cloudflare Images URL.</div>
                       <div>The stored value is the image URL.</div>
                     </div>
                   </section>
 
-                  <section id="select-options" class="space-y-3">
-                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                      Select / Options Fields
-                    </h3>
-                    <p class="text-sm text-foreground">
-                      Add an <code>option</code> object to a field to show a select. Options can be static or pulled from a collection.
-                    </p>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#text {
-  "field":"layout",
-  "title":"Layout",
-  "option":{
-    "field":"layout",
-    "options":[{"title":"Left","name":"left"},{"title":"Right","name":"right"}],
-    "optionsKey":"title",
-    "optionsValue":"name"
+                    <section id="select-options" class="space-y-3">
+                      <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                        Select / Options Fields
+                      </h3>
+                      <p class="text-sm text-foreground">
+                        Choose Select in the Inputs editor when a page editor should pick from a fixed list. The friendly editor writes <code>type: "option"</code> in the schema JSON.
+                      </p>
+                      <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;section class="{{ layout }}"&gt;
+  {{ heading }}
+&lt;/section&gt;</code></pre>
+                      <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{
+  "layout": {
+    "type": "option",
+    "label": "Layout",
+    "value": "left",
+    "option": {
+      "options": [
+        { "label": "Left", "value": "left" },
+        { "label": "Right", "value": "right" }
+      ],
+      "optionsKey": "label",
+      "optionsValue": "value"
+    }
   }
-}}}</code></pre>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#text {
-  "field":"agentId",
-  "title":"Agent",
-  "option":{
-    "field":"agentId",
-    "options":"users",
-    "optionsKey":"name",
-    "optionsValue":"userId",
-    "multiple":true
-  }
-}}}</code></pre>
-                    <div class="text-sm text-foreground space-y-1">
-                      <div><code>options</code> can be a static array or a collection name.</div>
-                      <div><code>optionsKey</code> is the label shown in the dropdown.</div>
-                      <div><code>optionsValue</code> is the stored value.</div>
-                      <div><code>multiple: true</code> saves an array of values.</div>
-                    </div>
-                  </section>
+}</code></pre>
+                      <div class="text-sm text-foreground space-y-1">
+                        <div>The friendly editor shows Label and Value for each option.</div>
+                        <div>Advanced option shapes such as custom label/value keys can still be edited in JSON.</div>
+                        <div>For options loaded from a collection, use Data Source Controls instead of a fixed Input option list.</div>
+                      </div>
+                    </section>
 
                   <section id="rendering-rules" class="space-y-2">
                     <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
@@ -4118,44 +5342,61 @@ const exportCurrentBlock = async () => {
   }) }}
 &lt;/p&gt;</code></pre>
 
-                    <h4 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Arrays / Subarrays Example
-                    </h4>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {"field":"events","as":"event"} }}}
+                      <h4 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Arrays / Subarrays Example
+                      </h4>
+                      <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{#for event in events}}
   &lt;article&gt;
     &lt;h3&gt;{{ trim(event.title) }}&lt;/h3&gt;
     &lt;p&gt;{{ date(event.startAt, { locale: "en-US", month: "long", day: "numeric", year: "numeric" }) }}&lt;/p&gt;
     &lt;a href="/events/{{ slug(event.title) }}"&gt;Read more&lt;/a&gt;
   &lt;/article&gt;
-{{{/array}}}</code></pre>
-                  </section>
+{{/for}}</code></pre>
+                    </section>
 
                   <section id="loading-tokens" class="space-y-2">
                     <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                       Loading Tokens
                     </h3>
-                    <div class="text-sm text-foreground space-y-1">
-                      <div><code v-pre>{{loading}}</code> is empty while loading and <code>hidden</code> when loaded.</div>
-                      <div><code v-pre>{{loaded}}</code> is <code>hidden</code> while loading and empty when loaded.</div>
-                      <div>These tokens only change when the block is waiting on API or collection data.</div>
-                    </div>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {"field":"list","api":"https://api.example.com/items","apiField":"data","value":[]}}}}
-  &lt;div class="skeleton {{loading}}"&gt;Loading items...&lt;/div&gt;
-  &lt;div class="{{loaded}}"&gt;
-    &lt;div&gt;{{item.title}}&lt;/div&gt;
-  &lt;/div&gt;
-{{{/array}}}</code></pre>
-                  </section>
+                      <div class="text-sm text-foreground space-y-1">
+                        <div><code v-pre>{{loading}}</code> is empty while loading and <code>hidden</code> when loaded.</div>
+                        <div><code v-pre>{{loaded}}</code> is <code>hidden</code> while loading and empty when loaded.</div>
+                        <div>These tokens only change when the block is waiting on API or collection data.</div>
+                      </div>
+                      <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;div class="skeleton {{ loading }}"&gt;Loading items...&lt;/div&gt;
+&lt;div class="{{ loaded }}"&gt;
+  {{#for item in source("items")}}
+    &lt;div&gt;{{ item.title }}&lt;/div&gt;
+  {{/for}}
+&lt;/div&gt;</code></pre>
+                    </section>
 
-                  <section id="validation" class="space-y-2">
-                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                      Validation Rules
-                    </h3>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#text {"field":"title","validation":{"required":true,"min":5,"max":80}}}}}
-{{{#array {"field":"items","schema":[{"field":"name","type":"text","validation":{"required":true}}]}}}}</code></pre>
-                    <div class="text-sm text-foreground space-y-1">
-                      <div><code>required</code>, <code>min</code>, <code>max</code> are supported.</div>
-                      <div>For numbers, <code>min</code>/<code>max</code> are numeric. For text/arrays they are length or item count.</div>
+                    <section id="validation" class="space-y-2">
+                      <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                        Validation Rules
+                      </h3>
+                      <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{
+  "title": {
+    "type": "text",
+    "label": "Title",
+    "validation": { "required": true, "min": 5, "max": 80 }
+  },
+  "items": {
+    "type": "array",
+    "label": "Items",
+    "schema": {
+      "name": {
+        "type": "text",
+        "label": "Name",
+        "validation": { "required": true }
+      }
+    },
+    "value": []
+  }
+}</code></pre>
+                      <div class="text-sm text-foreground space-y-1">
+                        <div><code>required</code>, <code>min</code>, <code>max</code> are supported.</div>
+                        <div>For numbers, <code>min</code>/<code>max</code> are numeric. For text/arrays they are length or item count.</div>
                     </div>
                   </section>
 
@@ -4182,11 +5423,14 @@ const exportCurrentBlock = async () => {
 
                   <section id="json-editor" class="space-y-2">
                     <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                      JSON Field Editor
+                      JSON Editors
                     </h3>
                     <p class="text-sm text-foreground">
-                      Click a line inside the code editor to open the JSON Field Editor for that tag.
-                      Fix JSON errors there and save to update the tag.
+                      Template v2 keeps the friendly controls and the raw JSON connected. Use <strong>Show JSON</strong>
+                      on Inputs or Data Sources only when you need an advanced setting that the guided editor does not show.
+                    </p>
+                    <p class="text-sm text-foreground">
+                      For older triple-brace blocks, clicking a line inside the code editor can still open the JSON Field Editor for that tag.
                     </p>
                   </section>
 
@@ -4195,10 +5439,11 @@ const exportCurrentBlock = async () => {
                       Common Mistakes
                     </h3>
                     <div class="text-sm text-foreground space-y-1">
-                      <div>Missing a <code>field</code> key in a tag.</div>
-                      <div>Invalid JSON (missing commas or quotes).</div>
-                      <div>Using a schema object instead of a schema array (the editor expects an array).</div>
-                      <div>Using <code>order</code> without the right Firestore index.</div>
+                      <div>Typing a token in the Template before adding the matching Input or Data Source.</div>
+                      <div>Using an unqualified value inside a Data Source loop. Prefer <code v-pre>{{ item.title }}</code> or the loop alias, such as <code v-pre>{{ property.title }}</code>.</div>
+                      <div>Using After-Fetch Filters when an Indexed Lookup Value would narrow the fetch earlier.</div>
+                      <div>Editing raw JSON and leaving invalid JSON, such as missing commas or quotes.</div>
+                      <div>Using collection sort/order without confirming the matching index exists.</div>
                     </div>
                   </section>
 
@@ -4261,72 +5506,80 @@ const exportCurrentBlock = async () => {
 
                   <section id="arrays-manual" class="space-y-3">
                     <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                      Arrays (Manual Lists)
+                      Arrays (Editable Lists)
                     </h3>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {"field":"list","value":[]}}}}
-  {{item}}
-{{{/array}}}</code></pre>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {
-  "field":"cards",
-  "schema":[
-    {"field":"title","type":"text"},
-    {"field":"body","type":"richtext"},
-    {"field":"image","type":"image"}
-  ],
-  "value":[]
-}}}}
-  <h3>{{item.title}}</h3>
-  <div>{{item.body}}</div>
-  <img :src="item.image">
-{{{/array}}}</code></pre>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {
-  "field":"statics",
-  "value":[
-    "First item",
-    "Second item",
-    "Third item"
-  ]
-}}}}
-  <li>{{item}}</li>
-{{{/array}}}</code></pre>
+                    <p class="text-sm text-foreground">
+                      Use an Array Input when a page editor should manually manage a repeatable list. Add the array from the Inputs tab, define Item Fields in Settings, and add optional Default Items there.
+                    </p>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{#for card in cards}}
+  &lt;article class="space-y-2"&gt;
+    &lt;img src="{{ card.image }}" alt="{{ card.title }}" /&gt;
+    &lt;h3&gt;{{ card.title }}&lt;/h3&gt;
+    &lt;div&gt;{{ richtext(card.body) }}&lt;/div&gt;
+  &lt;/article&gt;
+{{/for}}</code></pre>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{
+  "cards": {
+    "type": "array",
+    "label": "Cards",
+    "schema": {
+      "title": { "type": "text", "label": "Title" },
+      "body": { "type": "richtext", "label": "Body" },
+      "image": { "type": "image", "label": "Image", "variant": "public" }
+    },
+    "value": [
+      { "title": "First Card", "body": "", "image": "" }
+    ]
+  }
+}</code></pre>
                     <p class="text-sm text-foreground">
                       Use <code>schema</code> when each item needs its own fields.
                       Supported item inputs are <code>text</code>, <code>textarea</code>, <code>richtext</code>, <code>image</code>, <code>number</code>, and <code>option</code>.
                     </p>
                     <div class="text-sm text-foreground space-y-1">
                       <div>Manual arrays show an Add Entry form, drag handles for sorting, and delete buttons.</div>
-                      <div>Use <code>number</code> for numeric item fields.</div>
-                      <div><code>limit</code> shows only the first N items when the block renders.</div>
+                      <div>Default Items are saved on the array input as <code>value</code>. They seed new uses of the block but are not the same as page-specific edited values.</div>
+                      <div>Inside the loop, use the alias you chose in the Template, such as <code v-pre>{{ card.title }}</code>.</div>
                     </div>
-                    <p class="text-sm text-foreground">
-                      Inside the loop, render <code v-pre>{{item}}</code> for simple values or <code v-pre>{{item.fieldName}}</code> for object fields.
-                    </p>
                   </section>
 
                   <section id="arrays-firestore" class="space-y-3">
                     <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                      Arrays from Firestore
+                      Collection Data Sources
                     </h3>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {
-  "field":"list",
-  "schema":[{"field":"name","type":"text"},{"field":"role","type":"text"}],
-  "collection":{
-    "path":"team",
-    "uniqueKey":"{orgId}",
-    "query":[{"field":"active","operator":"==","value":true}],
-    "order":[{"field":"name","direction":"asc"}]
+                    <p class="text-sm text-foreground">
+                      Use a Collection Data Source when records come from the site or organization data store. Add it from the Data Sources tab, then loop with <code>source("name")</code>.
+                    </p>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{#for person in source("teamMembers")}}
+  &lt;article&gt;
+    &lt;h3&gt;{{ person.name }}&lt;/h3&gt;
+    &lt;p&gt;{{ person.role }}&lt;/p&gt;
+  &lt;/article&gt;
+{{/for}}</code></pre>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{
+  "teamMembers": {
+    "type": "collection",
+    "path": "team",
+    "uniqueKey": "{orgId}:{siteId}",
+    "queryItems": {
+      "active": true
+    },
+    "query": [
+      { "field": "department", "operator": "==", "value": "sales" }
+    ],
+    "order": [
+      { "field": "name", "direction": "asc" }
+    ],
+    "limit": 6,
+    "value": []
   },
-  "limit":6,
-  "value":[]
-}}}}</code></pre>
+}</code></pre>
                     <div class="text-sm text-foreground space-y-1">
                       <div><code>path</code> is under <code>organizations/{orgId}</code>.</div>
-                      <div><code>query</code> stays exactly as authored in the saved block. Supported runtime tokens include <code>{orgId}</code>, <code>{siteId}</code>, and <code>{routeLastSegment}</code>.</div>
-                      <div><code>queryItems</code> also stays saved as authored. The same runtime tokens can be used there and are resolved in memory only.</div>
+                      <div><code>queryItems</code> should be the first choice for indexed lookups so the candidate list is narrowed before records are returned.</div>
+                      <div><code>query</code> is an after-fetch filter. Use it only when the index is missing or the condition cannot be expressed as a lookup value.</div>
                       <div><code>uniqueKey</code> supports runtime tokens such as <code>{orgId}</code> and <code>{siteId}</code>. It is resolved in memory for runtime fetches and does not need to be persisted as a concrete value in the saved block.</div>
                       <div><code>collection.canonicalLookup.key</code> is optional. It also supports runtime tokens and CMS preview resolves them in memory before fetching the matching document directly.</div>
-                      <div>Prefer <code>queryItems</code> for any field that can be looked up through the KV index. Use <code>query</code> only when the index is missing or the filter cannot be represented as a <code>queryItems</code> lookup.</div>
-                      <div><code>query</code> handles final after-fetch filters only after <code>queryItems</code> has limited the candidate list.</div>
                       <div><code>order</code> controls the final sort order.</div>
                       <div><code>limit</code> caps the results.</div>
                     </div>
@@ -4334,47 +5587,74 @@ const exportCurrentBlock = async () => {
 
                   <section id="arrays-api" class="space-y-3">
                     <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                      Arrays from an API
+                      API Data Sources
                     </h3>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {
-  "field":"list",
-  "api":"https://api.example.com/items",
-  "apiField":"data",
-  "apiQuery":"?limit=4",
-  "limit":4,
-  "value":[]
-}}}}</code></pre>
+                    <p class="text-sm text-foreground">
+                      Use an API Data Source when records come from a JSON endpoint. Add it from the Data Sources tab and loop it with <code>source("name")</code>.
+                    </p>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{#for article in source("articles")}}
+  &lt;article&gt;
+    &lt;h3&gt;{{ article.title }}&lt;/h3&gt;
+    &lt;p&gt;{{ article.summary }}&lt;/p&gt;
+  &lt;/article&gt;
+{{/for}}</code></pre>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{
+  "articles": {
+    "type": "api",
+    "api": "https://api.example.com/items",
+    "apiField": "data",
+    "apiQuery": "?limit=4",
+    "limit": 4,
+    "value": []
+  }
+}</code></pre>
                     <div class="text-sm text-foreground space-y-1">
                       <div><code>api</code> is the base URL without the query string.</div>
                       <div><code>apiQuery</code> is appended to the URL.</div>
                       <div><code>apiField</code> tells the block which array to read from the response.</div>
                     </div>
                     <p class="text-sm text-foreground">
-                      Filters from <code>queryOptions</code> become query string parameters at runtime.
+                      Data Source Controls can become query string parameters at runtime.
                     </p>
                   </section>
 
                   <section id="arrays-filters" class="space-y-3">
                     <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                      Filters for Arrays (queryOptions)
+                      Data Source Controls
                     </h3>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>"queryOptions":[
-  {
-    "field":"users",
-    "operator":"array-contains-any",
-    "options":"users",
-    "optionsKey":"name",
-    "optionsValue":"userId",
-    "multiple":true
+                    <p class="text-sm text-foreground">
+                      Controls are optional fields shown when someone edits the block on a page. For API sources, the control key is a query string key. For collection sources, the control key should usually match an indexed lookup field.
+                    </p>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{
+  "properties": {
+    "type": "api",
+    "api": "https://api.example.com/properties",
+    "apiField": "data",
+    "controls": {
+      "sort": {
+        "type": "select",
+        "label": "Sort",
+        "options": [
+          { "label": "Newest", "value": "-createdAt" },
+          { "label": "Price", "value": "price" }
+        ],
+        "optionsKey": "label",
+        "optionsValue": "value"
+      },
+      "city": {
+        "type": "text",
+        "label": "City",
+        "placeholder": "Enter city"
+      }
+    },
+    "value": []
   }
-]</code></pre>
+}</code></pre>
                     <div class="text-sm text-foreground space-y-1">
-                      <div><code>queryOptions</code> adds filter controls for CMS users.</div>
-                      <div>The selected values are stored in <code>meta.queryItems</code>.</div>
-                      <div>If you manually author a key in <code>queryItems</code>, that value takes priority over a <code>queryOption</code> on the same key.</div>
-                      <div>In practice, you generally should not manually set a <code>queryItems</code> key if you want that same key to stay editable by CMS users.</div>
-                      <div><code>options</code> can be a collection name or a static array.</div>
-                      <div><code>multiple: true</code> saves an array of selected values.</div>
+                      <div>Use the Data Source wizard to add controls instead of hand-writing JSON.</div>
+                      <div>For collection sources, prefer controls that map to indexed lookup fields.</div>
+                      <div>For API sources, controls become query string values.</div>
+                      <div>Manual option lists use Label and Value. Collection-backed options can be set in the Controls tab.</div>
                     </div>
                   </section>
 
@@ -4383,16 +5663,16 @@ const exportCurrentBlock = async () => {
                       How Array Queries Work
                     </h3>
                     <ol class="list-decimal pl-5 text-sm text-foreground space-y-1">
-                      <li>Before runtime fetches, tokens in <code>collection.query</code>, <code>queryItems</code>, <code>uniqueKey</code>, and <code>collection.canonicalLookup.key</code> are resolved in memory only. Supported tokens include <code>{orgId}</code>, <code>{siteId}</code>, and <code>{routeLastSegment}</code>. The saved block keeps the original tokens.</li>
-                      <li>Each entry in <code>queryItems</code> makes its own indexed lookup through <code>kvClient.queryIndex</code>.</li>
+                      <li>Before runtime fetches, tokens in <code>query</code>, <code>queryItems</code>, <code>uniqueKey</code>, and <code>canonicalLookup.key</code> are resolved in memory only. Supported tokens include <code>{orgId}</code>, <code>{siteId}</code>, and <code>{routeLastSegment}</code>. The saved block keeps the original tokens.</li>
+                      <li>Each entry in <code>queryItems</code> makes an indexed lookup through the KV index.</li>
                       <li>For a query key to work, that field must be included in your KV mirror config (in <code>indexKeys</code> and in <code>metadataKeys</code> for list rendering).</li>
                       <li>If you have more than one <code>queryItems</code> field, the runtime unions those matches into one candidate list (OR behavior at this stage).</li>
                       <li>Duplicate records are removed by <code>canonical</code>, so the same item only shows up once.</li>
-                      <li>Only use <code>collection.query</code> when a needed filter cannot use <code>queryItems</code>, usually because the field is not indexed yet or the condition cannot be represented as a KV indexed lookup.</li>
-                      <li>After that, <code>collection.query</code> filters candidates in JavaScript; all query clauses must pass for a record to survive (AND behavior across <code>collection.query</code> rules).</li>
-                      <li>Finally, <code>collection.order</code> sorts the remaining records.</li>
-                      <li>The finished array is written to <code>values[field]</code>.</li>
-                      <li>If the collection cannot be loaded, the block falls back to the inline <code>value</code> you provided, or to an empty array if there is no fallback value.</li>
+                      <li>Only use <code>query</code> when a needed filter cannot use <code>queryItems</code>, usually because the field is not indexed yet or the condition cannot be represented as a KV indexed lookup.</li>
+                      <li>After that, <code>query</code> filters candidates in JavaScript; all query clauses must pass for a record to survive.</li>
+                      <li>Finally, <code>order</code> sorts the remaining records.</li>
+                      <li>The finished list is available in the Template through <code>source("dataSourceName")</code>.</li>
+                      <li>If the source cannot be loaded, the block falls back to the source <code>value</code>, or to an empty array if there is no fallback value.</li>
                     </ol>
                     <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>exports.onListingWritten = createKvMirrorHandlerFromFields({
   documentPath: 'organizations/{orgId}/listings',
@@ -4417,17 +5697,19 @@ const exportCurrentBlock = async () => {
                       <div>5. Treat <code>queryOptions</code> as the editor UI for choosing filters. At runtime, the actual filtering is driven by <code>collection.query</code> and <code>queryItems</code>.</div>
                     </div>
                     <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{
-  "field": "eventsList",
-  "collection": {
+  "eventsList": {
+    "type": "collection",
     "path": "posts",
+    "uniqueKey": "{orgId}:{siteId}",
+    "queryItems": {
+      "tags": ["program-spotlight"]
+    },
     "query": [
       { "field": "type", "operator": "==", "value": "event" },
       { "field": "event.isPast", "operator": "==", "value": true }
     ],
-    "order": [{ "field": "event.startAt", "direction": "asc" }]
-  },
-  "queryItems": {
-    "tags": ["program-spotlight"]
+    "order": [{ "field": "event.startAt", "direction": "asc" }],
+    "value": []
   }
 }</code></pre>
                     <div class="text-sm text-foreground space-y-1">
@@ -4435,9 +5717,19 @@ const exportCurrentBlock = async () => {
                       <div><code>collection.query</code> then keeps only records that are actually events and already in the past.</div>
                       <div><code>collection.order</code> sorts those remaining records by start date.</div>
                     </div>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {"field":"siteDoc","collection":{"path":"sites","canonicalLookup":{"key":"{orgId}:{siteId}"},"order":[]},"value":[]}}}}</code></pre>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{
+  "siteDoc": {
+    "type": "collection",
+    "path": "sites",
+    "canonicalLookup": {
+      "key": "{orgId}:{siteId}"
+    },
+    "order": [],
+    "value": []
+  }
+}</code></pre>
                     <div class="text-sm text-foreground space-y-1">
-                      <div>Use <code>collection.canonicalLookup.key</code> when the exact document key is already known.</div>
+                      <div>Use <code>canonicalLookup.key</code> when the exact document key is already known.</div>
                       <div>For canonical-only fetches, <code>uniqueKey</code> and <code>limit</code> are not required.</div>
                     </div>
                   </section>
@@ -4446,17 +5738,16 @@ const exportCurrentBlock = async () => {
                     <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                       Conditionals (Inside Arrays)
                     </h3>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#if {"cond":"item.price > 0"} }}}
-  <div>Price: {{item.price}}</div>
-{{{#else}}}
-  <div>Contact for pricing</div>
-{{{/if}}}</code></pre>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#if {"cond":"item contains 'thing'"} }}}
-  <div>Contains thing</div>
-{{{/if}}}</code></pre>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{#for property in source("properties")}}
+  {{#if property.price}}
+    &lt;div&gt;Price: {{ money(property.price) }}&lt;/div&gt;
+  {{#else}}
+    &lt;div&gt;Contact for pricing&lt;/div&gt;
+  {{/if}}
+{{/for}}</code></pre>
                     <div class="text-sm text-foreground space-y-1">
-                      <div><code>cond</code> works with <code>item.*</code> inside array and subarray templates.</div>
-                      <div>Supported operators are <code>==</code>, <code>!=</code>, <code>&gt;</code>, <code>&lt;</code>, <code>&gt;=</code>, <code>&lt;=</code>, and <code>contains</code>.</div>
+                      <div>Prefer simple Template v2 conditionals around the field that controls the display.</div>
+                      <div>Inside loops, qualify values with the loop alias, such as <code v-pre>{{ property.price }}</code>.</div>
                     </div>
                   </section>
 
@@ -4464,14 +5755,14 @@ const exportCurrentBlock = async () => {
                     <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                       Subarrays (Nested Lists)
                     </h3>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {"field":"items","value":[],"as":"card"}}}}
-  <h3>{{card.title}}</h3>
-  {{{#subarray:child {"field":"item.children","limit":0 }}}}
-    <div>{{child}}</div>
-  {{{/subarray}}}
-{{{/array}}}</code></pre>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{#for card in cards}}
+  &lt;h3&gt;{{ card.title }}&lt;/h3&gt;
+  {{#for child in card.children}}
+    &lt;div&gt;{{ child.title }}&lt;/div&gt;
+  {{/for}}
+{{/for}}</code></pre>
                     <p class="text-sm text-foreground">
-                      Use <code>as</code> to create a clearer alias like <code v-pre>{{card.title}}</code>. Use <code>subarray</code> to loop over nested arrays.
+                      Use clear aliases in each loop so nested values are unambiguous, such as <code v-pre>{{ card.title }}</code> and <code v-pre>{{ child.title }}</code>.
                     </p>
                   </section>
 
@@ -4480,49 +5771,30 @@ const exportCurrentBlock = async () => {
                       Render Blocks (Post/Page Block Content)
                     </h3>
                     <p class="text-sm text-foreground">
-                      Use <code>renderBlocks</code> when an object inside the array contains CMS block content, such as a post body.
-                    </p>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#renderBlocks {"field":"item"}}}}</code></pre>
-                    <p class="text-sm text-foreground">
-                      Inside an array loop, <code>item</code> is the current record.
+                      Use rendered block content only when an object inside the source contains CMS block content, such as a post body.
                     </p>
                     <p class="text-sm text-foreground">
-                      Inside that block render, use <code v-pre>{{renderItem.someField}}</code> to output values directly from the current item passed into <code>renderBlocks</code>.
+                      This is still a specialized/advanced path. For normal lists, render fields directly inside the <code>#for</code> loop.
                     </p>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#array {"field":"list","collection":{"path":"posts","uniqueKey":"{orgId}:{siteId}","order":[]},"queryOptions":[],"queryItems":{"name":"{routeLastSegment}"},"limit":1,"value":[]}}}}
-  <article>
-    <h2>{{item.name}}</h2>
-    {{{#renderBlocks {"field":"item"}}}}
-  </article>
-{{{/array}}}</code></pre>
-                    <p class="text-sm text-foreground">
-                      Example block content rendered by <code>renderBlocks</code>:
-                    </p>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;article&gt;
-  &lt;h2&gt;{{renderItem.name}}&lt;/h2&gt;
-  {{{content}}}
-&lt;/article&gt;</code></pre>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{#for post in source("posts")}}
+  &lt;article&gt;
+    &lt;h2&gt;{{ post.name }}&lt;/h2&gt;
+    &lt;div&gt;{{ richtext(post.summary) }}&lt;/div&gt;
+  &lt;/article&gt;
+{{/for}}</code></pre>
                   </section>
 
                   <section id="entries" class="space-y-3">
                     <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                       Entries (Object Key/Value Loops)
                     </h3>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#entries:pair {"field":"settings","value":{"theme":"dark","ctaText":"Contact Us"}}}}}
-  <div><strong>{{pair.key}}</strong>: {{pair.value}}</div>
-{{{/entries}}}
-
-{{{#entries:group {"field":"groupedItems","value":{"featured":["One","Two"],"archive":["Three"]}}}}}
-  <h4>{{group.key}}</h4>
-  {{{#subarray:child {"field":"item.value","value":[]}}}}
-    <div>{{child}}</div>
-  {{{/subarray}}}
-{{{/entries}}}</code></pre>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{#for setting in entries(settings)}}
+  &lt;div&gt;&lt;strong&gt;{{ setting.key }}&lt;/strong&gt;: {{ setting.value }}&lt;/div&gt;
+{{/for}}</code></pre>
                     <div class="text-sm text-foreground space-y-1">
-                      <div><code>entries</code> loops over object fields instead of arrays.</div>
-                      <div>Each loop gives you <code>item.key</code> and <code>item.value</code>, plus alias access like <code v-pre>{{pair.key}}</code>.</div>
-                      <div>If one of those values is an array, use a nested <code>subarray</code> on <code>item.value</code>.</div>
-                      <div>If <code>field</code> is not an object, nothing is rendered.</div>
+                      <div>Use entries-style loops only when a value is an object and you need its keys as labels.</div>
+                      <div>Each row should expose a key and value. If the value is an array, use a normal nested <code>#for</code> loop over that value.</div>
+                      <div>If the object shape is predictable, an Array Input is usually easier for page editors.</div>
                     </div>
                   </section>
                 </div>
@@ -4552,23 +5824,37 @@ const exportCurrentBlock = async () => {
   data-carousel-interval="4000"
   data-carousel-loop
   data-carousel-slides-to-scroll="1"
-  data-carousel-slides-to-scroll-lg="3"
-&gt;
-  &lt;div data-carousel-track class="flex"&gt;
-    {{{#array {"field":"List","schema":[{"field":"header","type":"text"}],"value":[{"header":"One"},{"header":"Two"},{"header":"Three"},{"header":"Four"}]}}}}
-      &lt;div class="shrink-0 min-w-0 flex-[0_0_100%] lg:flex-[0_0_33.333%] p-4"&gt;
-        &lt;div class="bg-white shadow rounded p-6 h-40 flex items-center justify-center"&gt;
-          {{item.header}}
+    data-carousel-slides-to-scroll-lg="3"
+  &gt;
+    &lt;div data-carousel-track class="flex"&gt;
+      {{#for slide in slides}}
+        &lt;div class="shrink-0 min-w-0 flex-[0_0_100%] lg:flex-[0_0_33.333%] p-4"&gt;
+          &lt;div class="bg-white shadow rounded p-6 h-40 flex items-center justify-center"&gt;
+            {{ slide.header }}
+          &lt;/div&gt;
         &lt;/div&gt;
-      &lt;/div&gt;
-    {{{/array}}}
-  &lt;/div&gt;
+      {{/for}}
+    &lt;/div&gt;
 
   &lt;button type="button" data-carousel-prev class="absolute left-2 top-1/2 -translate-y-1/2 p-2 bg-black/60 text-white rounded-full"&gt;‹&lt;/button&gt;
   &lt;button type="button" data-carousel-next class="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-black/60 text-white rounded-full"&gt;›&lt;/button&gt;
   &lt;div data-carousel-dots class="mt-3 flex justify-center gap-2"&gt;&lt;/div&gt;
-&lt;/div&gt;</code></pre>
-                  </section>
+  &lt;/div&gt;</code></pre>
+                      <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{
+  "slides": {
+    "type": "array",
+    "label": "Slides",
+    "schema": {
+      "header": { "type": "text", "label": "Header" }
+    },
+    "value": [
+      { "header": "One" },
+      { "header": "Two" },
+      { "header": "Three" }
+    ]
+  }
+}</code></pre>
+                    </section>
 
                   <section class="space-y-2">
                     <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
@@ -4743,197 +6029,81 @@ const exportCurrentBlock = async () => {
 &lt;/nav&gt;</code></pre>
                   </section>
 
-                  <section class="space-y-3">
-                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                      Nav Block Template (Copy / Paste)
-                    </h3>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;div class="cms-nav-root cms-nav-sticky" data-cms-nav-root data-cms-nav-position="{{{#text {"field":"navPosition","title":"Menu Position","option":{"field":"navPosition","options":[{"title":"Right","name":"right"},{"title":"Left","name":"left"},{"title":"Center","name":"center"}],"optionsKey":"title","optionsValue":"name"},"value":"right"}}}}" data-cms-nav-close-on-link="true" data-cms-nav-top-class="bg-transparent border-transparent" data-cms-nav-scrolled-class="bg-navBg/80 backdrop-blur-lg shadow-lg" data-cms-nav-top-row-class="h-[64px] md:h-[88px] py-6 md:py-8" data-cms-nav-scrolled-row-class="h-[56px] md:h-[68px] py-5 md:py-4"&gt;
-  {{{#array {"field":"siteDoc","collection":{"path":"sites","canonicalLookup":{"key":"{orgId}:{siteId}"},"order":[]},"value":[]}}}}
-  &lt;nav class="cms-nav-main fixed inset-x-0 top-0 z-30 w-full bg-transparent text-navText"&gt;
-    &lt;div class="relative w-full px-6 md:px-12"&gt;
-      &lt;div class="cms-nav-layout flex h-[64px] md:h-[88px] items-center justify-between gap-6 py-6 md:py-8"&gt;
-        &lt;a href="/" class="cms-nav-logo cursor-pointer text-xl text-navText"&gt;
-          {{{#if {"cond":"item.logoLight"}}}}
-          &lt;img src="{{item.logoLight}}" class="h-[56px] md:h-[72px] py-3" /&gt;
-          {{{#else}}}
-          &lt;img src="{{item.logo}}" class="h-[56px] md:h-[72px] py-3" /&gt;
-          {{{/if}}}
+                    <section class="space-y-3">
+                      <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                        Nav Block Template (Copy / Paste)
+                      </h3>
+                      <p class="text-sm text-foreground">
+                        This is a compact Template v2 example. Keep larger nav builds in reusable starter blocks instead of pasting a giant template into the guide.
+                      </p>
+                      <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;div
+  class="cms-nav-root cms-nav-sticky"
+  data-cms-nav-root
+  data-cms-nav-position="{{ navPosition }}"
+  data-cms-nav-close-on-link="true"
+&gt;
+  {{#for site in source("siteDoc")}}
+    &lt;nav class="cms-nav-main fixed inset-x-0 top-0 z-30 w-full bg-transparent text-navText"&gt;
+      &lt;div class="cms-nav-layout flex h-[64px] items-center justify-between px-6"&gt;
+        &lt;a href="/" class="cms-nav-logo"&gt;
+          &lt;img src="{{ default(site.logoLight, site.logo) }}" alt="{{ site.name }}" class="h-12" /&gt;
         &lt;/a&gt;
 
-        &lt;div class="cms-nav-desktop ml-auto flex items-center gap-2"&gt;
-          &lt;ul class="hidden lg:flex items-center gap-x-[20px] pt-1 text-sm uppercase tracking-widest list-none m-0 p-0 [&amp;&gt;li]:m-0 [&amp;&gt;li&gt;a]:m-0"&gt;
-            {{{#subarray:menuItem {"field":"item.menus.Site Root","limit":5,"value":[]}}}}
-            &lt;li class="relative group cms-nav-folder cms-nav-item" data-cms-nav-folder&gt;
-              {{{#if {"cond":"menuItem.item.type == 'external'"}}}}
-              &lt;a href="{{menuItem.item.url}}" class="cursor-pointer"&gt;{{menuItem.name}}&lt;/a&gt;
-              {{{#else}}}
-              {{{#if {"cond":"menuItem.item == '[object Object]'"}}}}
-              {{{#entries:folderEntry {"field":"menuItem.item","value":{}}}}}
-              {{{#if {"cond":"folderEntry.key == 'home'"}}}}
-              &lt;a href="/" class="cms-nav-link cms-nav-folder-toggle cursor-pointer text-sideNavText hover:text-navActive" data-cms-nav-folder-toggle data-cms-nav-current-class="!text-navActive"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
-              {{{#else}}}
-              &lt;a href="/{{folderEntry.key}}" class="cms-nav-link cms-nav-folder-toggle cursor-pointer text-sideNavText hover:text-navActive" data-cms-nav-folder-toggle data-cms-nav-current-class="!text-navActive"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
-              {{{/if}}}
-              &lt;div class="cms-nav-folder-menu absolute left-0 top-full z-40 hidden min-w-max whitespace-nowrap bg-sideNavBg text-sideNavText py-2 text-left px-12 normal-case tracking-normal shadow-xl" data-cms-nav-folder-menu&gt;
-              &lt;ul&gt;
-                {{{#subarray:folderChild {"field":"item.value","value":[]}}}}
-                &lt;li class="py-1 cms-nav-item"&gt;
-                  {{{#if {"cond":"folderChild.item.type == 'external'"}}}}
-                  &lt;a href="{{folderChild.item.url}}" class="block cursor-pointer whitespace-nowrap text-sideNavText"&gt;{{folderChild.name}}&lt;/a&gt;
-                  {{{#else}}}
-                  {{{#if {"cond":"folderChild.menuTitle"}}}}
-                  &lt;a href="/{{folderEntry.key}}/{{folderChild.name}}" class="cms-nav-link block cursor-pointer whitespace-nowrap text-sideNavText hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{folderChild.menuTitle}}&lt;/a&gt;
-                  {{{#else}}}
-                  &lt;a href="/{{folderEntry.key}}/{{folderChild.name}}" class="cms-nav-link block cursor-pointer whitespace-nowrap text-sideNavText hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{folderChild.name}}&lt;/a&gt;
-                  {{{/if}}}
-                  {{{/if}}}
-                &lt;/li&gt;
-                {{{/subarray}}}
-              &lt;/ul&gt;
-              &lt;/div&gt;
-              {{{/entries}}}
-              {{{#else}}}
-              {{{#if {"cond":"menuItem.name == 'home'"}}}}
-              {{{#if {"cond":"menuItem.menuTitle"}}}}
-              &lt;a href="/" class="cms-nav-link cursor-pointer hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
-              {{{#else}}}
-              &lt;a href="/" class="cms-nav-link cursor-pointer hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{menuItem.name}}&lt;/a&gt;
-              {{{/if}}}
-              {{{#else}}}
-              {{{#if {"cond":"menuItem.menuTitle"}}}}
-              &lt;a href="/{{menuItem.name}}" class="cms-nav-link cursor-pointer hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
-              {{{#else}}}
-              &lt;a href="/{{menuItem.name}}" class="cms-nav-link cursor-pointer hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{menuItem.name}}&lt;/a&gt;
-              {{{/if}}}
-              {{{/if}}}
-              {{{/if}}}
-              {{{/if}}}
-            &lt;/li&gt;
-            {{{/subarray}}}
-          &lt;/ul&gt;
-
-          &lt;button class="cms-nav-toggle flex h-12 w-12 items-center justify-center rounded-full text-navText" type="button" aria-label="Open Menu"&gt;
-            &lt;svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" xmlns="http://www.w3.org/2000/svg"&gt;
-              &lt;path d="M4 6h16M4 12h16M4 18h16" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /&gt;
-            &lt;/svg&gt;
-          &lt;/button&gt;
-        &lt;/div&gt;
-      &lt;/div&gt;
-    &lt;/div&gt;
-  &lt;/nav&gt;
-
-  &lt;div class="cms-nav-overlay fixed inset-0 z-[110] bg-black/50 transition-opacity duration-300 opacity-0 pointer-events-none"&gt;&lt;/div&gt;
-
-  &lt;aside class="cms-nav-panel fixed inset-y-0 right-0 z-[120] w-full max-w-md bg-sideNavBg text-sideNavText transition-all duration-300 translate-x-full opacity-0 pointer-events-none"&gt;
-    &lt;div class="relative flex h-full flex-col overflow-y-auto px-8 py-10 text-center"&gt;
-      &lt;button type="button" class="cms-nav-close absolute right-6 top-6 text-4xl text-sideNavText"&gt;&amp;times;&lt;/button&gt;
-
-      &lt;div class="mb-8 mt-2 flex items-center justify-center gap-4"&gt;
-        &lt;a href="/" class="flex items-center gap-4 text-navText"&gt;
-          &lt;img src="{{item.logo}}" class="h-[30px] w-auto max-w-full object-contain" /&gt;
-          {{{#if {"cond":"item.brandLogoDark"}}}}
-          &lt;span class="h-10 w-px bg-black" aria-hidden="true"&gt;&lt;/span&gt;
-          &lt;img src="{{item.brandLogoDark}}" class="h-[30px] w-auto max-w-full object-contain" /&gt;
-          {{{/if}}}
-        &lt;/a&gt;
-      &lt;/div&gt;
-
-      &lt;ul class="w-full space-y-4 border-b border-black pb-4 uppercase"&gt;
-        {{{#subarray:menuItem {"field":"item.menus.Site Root","value":[]}}}}
-        &lt;li class="border-t border-black pt-4 cms-nav-item"&gt;
-          {{{#if {"cond":"menuItem.item.type == 'external'"}}}}
-          &lt;a href="{{menuItem.item.url}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm hover:text-navActive"&gt;{{menuItem.name}}&lt;/a&gt;
-          {{{#else}}}
-          {{{#if {"cond":"menuItem.item == '[object Object]'"}}}}
-          {{{#entries:folderEntry {"field":"menuItem.item","value":{}}}}}
-          {{{#if {"cond":"folderEntry.key == 'home'"}}}}
-          &lt;a href="/" class="cms-nav-link block text-sideNavText tracking-widest text-sm hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
-          {{{#else}}}
-          &lt;a href="/{{folderEntry.key}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
-          {{{/if}}}
-          &lt;ul class="mt-2 space-y-2 border-l border-black/40 pl-4"&gt;
-            {{{#subarray:folderChild {"field":"item.value","value":[]}}}}
+        &lt;ul class="cms-nav-desktop hidden items-center gap-5 lg:flex"&gt;
+          {{#for menuItem in site.menuItems}}
             &lt;li class="cms-nav-item"&gt;
-              {{{#if {"cond":"folderChild.item.type == 'external'"}}}}
-              &lt;a href="{{folderChild.item.url}}" class="cms-nav-link block text-sideNavText tracking-widest text-xs hover:text-navActive"&gt;{{folderChild.name}}&lt;/a&gt;
-              {{{#else}}}
-              {{{#if {"cond":"folderChild.menuTitle"}}}}
-              &lt;a href="/{{folderEntry.key}}/{{folderChild.name}}" class="cms-nav-link block text-sideNavText tracking-widest text-xs hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{folderChild.menuTitle}}&lt;/a&gt;
-              {{{#else}}}
-              &lt;a href="/{{folderEntry.key}}/{{folderChild.name}}" class="cms-nav-link block text-sideNavText tracking-widest text-xs hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{folderChild.name}}&lt;/a&gt;
-              {{{/if}}}
-              {{{/if}}}
+              &lt;a
+                href="{{ menuItem.url }}"
+                class="cms-nav-link"
+                data-cms-nav-current-class="!text-navActive"
+              &gt;
+                {{ default(menuItem.menuTitle, menuItem.name) }}
+              &lt;/a&gt;
             &lt;/li&gt;
-            {{{/subarray}}}
-          &lt;/ul&gt;
-          {{{/entries}}}
-          {{{#else}}}
-          {{{#if {"cond":"menuItem.name == 'home'"}}}}
-          {{{#if {"cond":"menuItem.menuTitle"}}}}
-          &lt;a href="/" class="cms-nav-link block text-sideNavText tracking-widest text-sm hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
-          {{{#else}}}
-          &lt;a href="/" class="cms-nav-link block text-sideNavText tracking-widest text-sm hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{menuItem.name}}&lt;/a&gt;
-          {{{/if}}}
-          {{{#else}}}
-          {{{#if {"cond":"menuItem.menuTitle"}}}}
-          &lt;a href="/{{menuItem.name}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{menuItem.menuTitle}}&lt;/a&gt;
-          {{{#else}}}
-          &lt;a href="/{{menuItem.name}}" class="cms-nav-link block text-sideNavText tracking-widest text-sm hover:text-navActive" data-cms-nav-current-class="!text-navActive"&gt;{{menuItem.name}}&lt;/a&gt;
-          {{{/if}}}
-          {{{/if}}}
-          {{{/if}}}
-          {{{/if}}}
-        &lt;/li&gt;
-        {{{/subarray}}}
-      &lt;/ul&gt;
+          {{/for}}
+        &lt;/ul&gt;
 
-      &lt;div class="mt-10 flex w-full items-center justify-center gap-4"&gt;
-        {{{#if {"cond":"item.socialFacebook"}}}}
-        &lt;a href="{{item.socialFacebook}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText transition-colors duration-200 hover:bg-sideNavText hover:text-sideNavBg"&gt;
-          &lt;span class="sr-only"&gt;Facebook&lt;/span&gt;
-          &lt;span class="h-5 w-5 [&amp;&gt;svg]:h-5 [&amp;&gt;svg]:w-5 [&amp;&gt;svg]:fill-current" aria-hidden="true"&gt;
-            &lt;svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"&gt;
-              &lt;path d="M80 299.3V512H196V299.3h86.5l18-97.8H196V166.9c0-51.7 20.3-71.5 72.7-71.5c16.3 0 29.4 .4 37 1.2V7.9C291.4 4 256.4 0 236.2 0C129.3 0 80 50.5 80 159.4v42.1H14v97.8H80z"&gt;&lt;/path&gt;
-            &lt;/svg&gt;
-          &lt;/span&gt;
-        &lt;/a&gt;
-        {{{/if}}}
-        {{{#if {"cond":"item.socialInstagram"}}}}
-        &lt;a href="{{item.socialInstagram}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText transition-colors duration-200 hover:bg-sideNavText hover:text-sideNavBg"&gt;
-          &lt;span class="sr-only"&gt;Instagram&lt;/span&gt;
-          &lt;span class="h-5 w-5 [&amp;&gt;svg]:h-5 [&amp;&gt;svg]:w-5 [&amp;&gt;svg]:fill-current" aria-hidden="true"&gt;
-            &lt;svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"&gt;
-              &lt;path d="M224.1 141c-63.6 0-114.9 51.3-114.9 114.9s51.3 114.9 114.9 114.9S339 319.5 339 255.9 287.7 141 224.1 141zm0 189.6c-41.1 0-74.7-33.5-74.7-74.7s33.5-74.7 74.7-74.7 74.7 33.5 74.7 74.7-33.6 74.7-74.7 74.7zm146.4-194.3c0 14.9-12 26.8-26.8 26.8-14.9 0-26.8-12-26.8-26.8s12-26.8 26.8-26.8 26.8 12 26.8 26.8zm76.1 27.2c-1.7-35.9-9.9-67.7-36.2-93.9-26.2-26.2-58-34.4-93.9-36.2-37-2.1-147.9-2.1-184.9 0-35.8 1.7-67.6 9.9-93.9 36.1s-34.4 58-36.2 93.9c-2.1 37-2.1 147.9 0 184.9 1.7 35.9 9.9 67.7 36.2 93.9s58 34.4 93.9 36.2c37 2.1 147.9 2.1 184.9 0 35.9-1.7 67.7-9.9 93.9-36.2 26.2-26.2 34.4-58 36.2-93.9 2.1-37 2.1-147.8 0-184.8zM398.8 388c-7.8 19.6-22.9 34.7-42.6 42.6-29.5 11.7-99.5 9-132.1 9s-102.7 2.6-132.1-9c-19.6-7.8-34.7-22.9-42.6-42.6-11.7-29.5-9-99.5-9-132.1s-2.6-102.7 9-132.1c7.8-19.6 22.9-34.7 42.6-42.6 29.5-11.7 99.5-9 132.1-9s102.7-2.6 132.1 9c19.6 7.8 34.7 22.9 42.6 42.6 11.7 29.5 9 99.5 9 132.1s2.7 102.7-9 132.1z"&gt;&lt;/path&gt;
-            &lt;/svg&gt;
-          &lt;/span&gt;
-        &lt;/a&gt;
-        {{{/if}}}
-        {{{#if {"cond":"item.socialLinkedIn"}}}}
-        &lt;a href="{{item.socialLinkedIn}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText transition-colors duration-200 hover:bg-sideNavText hover:text-sideNavBg"&gt;
-          &lt;span class="sr-only"&gt;LinkedIn&lt;/span&gt;
-          &lt;span class="h-5 w-5 [&amp;&gt;svg]:h-5 [&amp;&gt;svg]:w-5 [&amp;&gt;svg]:fill-current" aria-hidden="true"&gt;
-            &lt;svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"&gt;
-              &lt;path d="M100.28 448H7.4V148.9h92.88zM53.79 108.1C24.09 108.1 0 83.5 0 53.8a53.79 53.79 0 0 1 107.58 0c0 29.7-24.1 54.3-53.79 54.3zM447.9 448h-92.68V302.4c0-34.7-.7-79.2-48.29-79.2-48.29 0-55.69 37.7-55.69 76.7V448h-92.78V148.9h89.08v40.8h1.3c12.4-23.5 42.69-48.3 87.88-48.3 94 0 111.28 61.9 111.28 142.3V448z"&gt;&lt;/path&gt;
-            &lt;/svg&gt;
-          &lt;/span&gt;
-        &lt;/a&gt;
-        {{{/if}}}
-        {{{#if {"cond":"item.socialYouTube"}}}}
-        &lt;a href="{{item.socialYouTube}}" target="_blank" rel="noopener" class="flex h-10 w-10 items-center justify-center rounded-full border border-sideNavText text-sideNavText transition-colors duration-200 hover:bg-sideNavText hover:text-sideNavBg"&gt;
-          &lt;span class="sr-only"&gt;YouTube&lt;/span&gt;
-          &lt;span class="h-5 w-5 [&amp;&gt;svg]:h-5 [&amp;&gt;svg]:w-5 [&amp;&gt;svg]:fill-current" aria-hidden="true"&gt;
-            &lt;svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"&gt;
-              &lt;path d="M549.655 124.083c-6.281-23.65-24.787-42.276-48.284-48.597C458.781 64 288 64 288 64S117.22 64 74.629 75.486c-23.497 6.322-42.003 24.947-48.284 48.597-11.412 42.867-11.412 132.305-11.412 132.305s0 89.438 11.412 132.305c6.281 23.65 24.787 41.5 48.284 47.821C117.22 448 288 448 288 448s170.78 0 213.371-11.486c23.497-6.321 42.003-24.171 48.284-47.821 11.412-42.867 11.412-132.305 11.412-132.305s0-89.438-11.412-132.305zm-317.51 213.508V175.185l142.739 81.205-142.739 81.201z"&gt;&lt;/path&gt;
-            &lt;/svg&gt;
-          &lt;/span&gt;
-        &lt;/a&gt;
-        {{{/if}}}
+        &lt;button class="cms-nav-toggle" type="button" aria-label="Open Menu"&gt;Menu&lt;/button&gt;
       &lt;/div&gt;
-    &lt;/div&gt;
-  &lt;/aside&gt;
-  {{{/array}}}
+    &lt;/nav&gt;
+
+    &lt;div class="cms-nav-overlay fixed inset-0 z-[110] bg-black/50 opacity-0 pointer-events-none"&gt;&lt;/div&gt;
+    &lt;aside class="cms-nav-panel fixed inset-y-0 right-0 z-[120] w-full max-w-md translate-x-full bg-sideNavBg"&gt;
+      &lt;button type="button" class="cms-nav-close"&gt;Close&lt;/button&gt;
+      {{#for menuItem in site.menuItems}}
+        &lt;a href="{{ menuItem.url }}" class="cms-nav-link block"&gt;
+          {{ default(menuItem.menuTitle, menuItem.name) }}
+        &lt;/a&gt;
+      {{/for}}
+    &lt;/aside&gt;
+  {{/for}}
 &lt;/div&gt;</code></pre>
-                  </section>
+                      <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{
+  "navPosition": {
+    "type": "option",
+    "label": "Menu Position",
+    "value": "right",
+    "option": {
+      "options": [
+        { "label": "Right", "value": "right" },
+        { "label": "Left", "value": "left" },
+        { "label": "Center", "value": "center" }
+      ],
+      "optionsKey": "label",
+      "optionsValue": "value"
+    }
+  }
+}</code></pre>
+                      <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{
+  "siteDoc": {
+    "type": "collection",
+    "path": "sites",
+    "canonicalLookup": { "key": "{orgId}:{siteId}" },
+    "order": [],
+    "value": []
+  }
+}</code></pre>
+                    </section>
 
                   <section class="space-y-2">
                     <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
@@ -5007,23 +6177,23 @@ const exportCurrentBlock = async () => {
                     </p>
                   </section>
 
-                  <section class="space-y-3">
-                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                      Contact Form Example (Block HTML)
-                    </h3>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;section
+                    <section class="space-y-3">
+                      <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                        Contact Form Example (Block HTML)
+                      </h3>
+                      <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;section
   class="relative cms-block cms-block-contact-form-placeholder rounded-2xl border border-dashed border-slate-300 bg-slate-50/70 px-4 py-6 sm:px-6 sm:py-8"
   data-block-type="contact-form-placeholder"
 &gt;
   &lt;div class="mx-auto max-w-3xl pt-6"&gt;
-    &lt;div class="mb-6 space-y-2 text-center sm:text-left"&gt;
-      &lt;h2 class="text-xl font-semibold text-slate-900"&gt;
-        {{{#text {"field":"formHeader","title":"Form Header","value":"Contact Us"}}}}
-      &lt;/h2&gt;
-      &lt;p class="text-sm text-slate-600"&gt;
-        {{{#text {"field":"formSubheader","title":"Form Subheader","value":"Subheader content"}}}}
-      &lt;/p&gt;
-    &lt;/div&gt;
+      &lt;div class="mb-6 space-y-2 text-center sm:text-left"&gt;
+        &lt;h2 class="text-xl font-semibold text-slate-900"&gt;
+          {{ formHeader }}
+        &lt;/h2&gt;
+        &lt;p class="text-sm text-slate-600"&gt;
+          {{ formSubheader }}
+        &lt;/p&gt;
+      &lt;/div&gt;
 
     &lt;form
       class="cms-form space-y-4"
@@ -5043,55 +6213,103 @@ const exportCurrentBlock = async () => {
       &lt;/div&gt;
       &lt;input type="hidden" name="subject" value="New Website Contact Form Submission" /&gt;
 
-      &lt;div class="space-y-4"&gt;
-        {{{#array {"field":"formFields","schema":[{"field":"fieldName","type":"text","title":"Field Label"},{"field":"fieldType","type":"option","title":"Field Type","option":{"optionsKey":"title","optionsValue":"value","options":[{"title":"Text","value":"text"},{"title":"Email","value":"email"},{"title":"Phone","value":"tel"},{"title":"Textarea","value":"textarea"}]},"value":"text"},{"field":"fieldRequired","type":"option","title":"Required","option":{"optionsKey":"title","optionsValue":"value","options":[{"title":"Yes","value":"true"},{"title":"No","value":"false"}]},"value":"true"}],"value":[{"fieldName":"Name","fieldType":"text","fieldRequired":"true"},{"fieldName":"Email","fieldType":"email","fieldRequired":"true"},{"fieldName":"Message","fieldType":"textarea","fieldRequired":"true"}]}}}}
-          &lt;div class="space-y-1"&gt;
-            &lt;label class="text-xs font-medium uppercase tracking-wide text-slate-600"&gt;
-              {{item.fieldName}}
-            &lt;/label&gt;
+        &lt;div class="space-y-4"&gt;
+          {{#for field in formFields}}
+            &lt;div class="space-y-1"&gt;
+              &lt;label class="text-xs font-medium uppercase tracking-wide text-slate-600"&gt;
+                {{ field.fieldName }}
+              &lt;/label&gt;
 
-            {{{#if {"cond":"item.fieldType == 'textarea'"}}}}
-              &lt;textarea
-                class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
-                data-cms-required="{{item.fieldRequired}}"
-                name="{{item.fieldName}}"
-                placeholder="{{item.fieldName}}"
-                rows="6"
-              &gt;&lt;/textarea&gt;
-            {{{#else}}}
-              &lt;input
-                class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
-                data-cms-required="{{item.fieldRequired}}"
-                type="{{item.fieldType}}"
-                name="{{item.fieldName}}"
-                placeholder="{{item.fieldName}}"
-              /&gt;
-            {{{/if}}}
-          &lt;/div&gt;
-        {{{/array}}}
-      &lt;/div&gt;
+              {{#if field.isTextarea}}
+                &lt;textarea
+                  class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
+                  data-cms-required="{{ field.fieldRequired }}"
+                  name="{{ field.fieldName }}"
+                  placeholder="{{ field.fieldName }}"
+                  rows="6"
+                &gt;&lt;/textarea&gt;
+              {{#else}}
+                &lt;input
+                  class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
+                  data-cms-required="{{ field.fieldRequired }}"
+                  type="{{ field.fieldType }}"
+                  name="{{ field.fieldName }}"
+                  placeholder="{{ field.fieldName }}"
+                /&gt;
+              {{/if}}
+            &lt;/div&gt;
+          {{/for}}
+        &lt;/div&gt;
 
       &lt;div class="mt-6"&gt;
         &lt;button
           type="submit"
           class="cms-form-submit inline-flex w-full items-center justify-center rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
-          data-cms-form-submit
-        &gt;
-          {{{#text {"field":"buttonText","title":"Button Text","value":"Send Message"}}}}
-        &lt;/button&gt;
-      &lt;/div&gt;
+            data-cms-form-submit
+          &gt;
+            {{ buttonText }}
+          &lt;/button&gt;
+        &lt;/div&gt;
 
-      &lt;p class="cms-form-message hidden text-sm" data-cms-form-message&gt;&lt;/p&gt;
-    &lt;/form&gt;
-
-    &lt;div class="hidden"&gt;
-      {{{#array {"field":"emailTo","value":["test@testing.com"]}}}}
-       <!-- nothing here ! -->
-      {{{/array}}}
+        &lt;p class="cms-form-message hidden text-sm" data-cms-form-message&gt;&lt;/p&gt;
+      &lt;/form&gt;
     &lt;/div&gt;
-  &lt;/div&gt;
-&lt;/section&gt;</code></pre>
-                  </section>
+  &lt;/section&gt;</code></pre>
+                      <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{
+  "formHeader": { "type": "text", "label": "Form Header", "value": "Contact Us" },
+  "formSubheader": { "type": "text", "label": "Form Subheader", "value": "Subheader content" },
+  "buttonText": { "type": "text", "label": "Button Text", "value": "Send Message" },
+  "formFields": {
+    "type": "array",
+    "label": "Form Fields",
+    "schema": {
+      "fieldName": { "type": "text", "label": "Field Label" },
+      "fieldType": {
+        "type": "option",
+        "label": "Field Type",
+        "option": {
+          "options": [
+            { "label": "Text", "value": "text" },
+            { "label": "Email", "value": "email" },
+            { "label": "Phone", "value": "tel" }
+          ],
+          "optionsKey": "label",
+          "optionsValue": "value"
+        }
+      },
+      "isTextarea": {
+        "type": "option",
+        "label": "Textarea",
+        "option": {
+          "options": [
+            { "label": "No", "value": "" },
+            { "label": "Yes", "value": "true" }
+          ],
+          "optionsKey": "label",
+          "optionsValue": "value"
+        }
+      },
+      "fieldRequired": {
+        "type": "option",
+        "label": "Required",
+        "option": {
+          "options": [
+            { "label": "Yes", "value": "true" },
+            { "label": "No", "value": "false" }
+          ],
+          "optionsKey": "label",
+          "optionsValue": "value"
+        }
+      }
+    },
+    "value": [
+      { "fieldName": "Name", "fieldType": "text", "isTextarea": "", "fieldRequired": "true" },
+      { "fieldName": "Email", "fieldType": "email", "isTextarea": "", "fieldRequired": "true" },
+      { "fieldName": "Message", "fieldType": "text", "isTextarea": "true", "fieldRequired": "true" }
+    ]
+  }
+}</code></pre>
+                    </section>
                 </div>
               </div>
             </TabsContent>
@@ -5103,18 +6321,26 @@ const exportCurrentBlock = async () => {
                     <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                       Publication Fields
                     </h3>
-                    <p class="text-sm text-foreground">
-                      Use a publication field when the CMS user should select an already processed PDF publication.
-                      The picker opens the media manager filtered to publications and saves the selected publication's
-                      page output map as the field value.
-                    </p>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#publication {"field":"publicationPages","effect":"flip","value":{}}}}}</code></pre>
-                    <div class="text-sm text-foreground space-y-1">
-                      <div><code>field</code> is the saved data key for the selected publication pages object.</div>
-                      <div><code>value</code> is the default pages object. Use <code>{}</code> when the CMS user should choose one.</div>
-                      <div><code>effect</code> is the default editor choice. Page editors can save either <code>flip</code> or <code>slide</code> for each publication field.</div>
-                    </div>
-                  </section>
+                      <p class="text-sm text-foreground">
+                        Use a publication field when the CMS user should select an already processed PDF publication.
+                        The picker opens the media manager filtered to publications and saves the selected publication's
+                        page output map as the field value.
+                      </p>
+                      <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#publication {"field":"publicationPages"}}}}</code></pre>
+                      <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{
+  "publicationPages": {
+    "type": "publication",
+    "label": "Publication",
+    "effect": "flip"
+  }
+}</code></pre>
+                      <div class="text-sm text-foreground space-y-1">
+                        <div>The field key is the saved data key for the selected publication pages object.</div>
+                        <div>Publication inputs do not need a default selection. The page editor chooses the publication.</div>
+                        <div>The publication preview is rendered by the special <code>#publication</code> tag. Dynamic Fields inserts this tag with only the field name.</div>
+                        <div><code>effect</code> belongs on the Input settings, not in the Template marker. Page editors can save either <code>flip</code> or <code>slide</code>.</div>
+                      </div>
+                    </section>
                 </div>
               </div>
             </TabsContent>

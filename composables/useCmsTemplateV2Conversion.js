@@ -17,6 +17,10 @@ const INLINE_SCHEMA_FORMATTERS = new Set([
   'default',
   'richtext',
 ])
+const UNSCOPED_TEMPLATE_TOKENS = new Set([
+  'loading',
+  'loaded',
+])
 const SCHEMA_FORMATTER_TYPE_MAP = {
   money: 'number',
   integer: 'number',
@@ -29,11 +33,16 @@ const SCHEMA_FORMATTER_TYPE_MAP = {
   title: 'text',
   deslug: 'text',
 }
+const PUBLICATION_EFFECTS = new Set(['flip', 'slide'])
 
 const cloneValue = (value) => {
   if (Array.isArray(value) || isPlainObject(value))
     return JSON.parse(JSON.stringify(value))
   return value
+}
+
+const hasOwnValue = (source, field) => {
+  return isPlainObject(source) && Object.prototype.hasOwnProperty.call(source, field)
 }
 
 const findMatchingBrace = (text, startIndex) => {
@@ -80,7 +89,14 @@ const parseJsonConfig = (rawConfig) => {
     return JSON.parse(rawConfig)
   }
   catch {
-    return null
+    const normalizedConfig = String(rawConfig || '')
+      .replace(/([{,]\s*)([A-Za-z_$][\w$-]*)(\s*:)/g, '$1"$2"$3')
+    try {
+      return JSON.parse(normalizedConfig)
+    }
+    catch {
+      return null
+    }
   }
 }
 
@@ -302,14 +318,32 @@ const getScopedFieldExpression = (expression, scopeAlias = 'item') => {
   return path
 }
 
-const applySchemaFormatter = (expression, schemaFormatters = {}, scopeAlias = 'item') => {
+const isSimpleFieldExpression = (expression) => {
+  const value = String(expression || '').trim()
+  if (!value)
+    return false
+  if (/^(true|false|null|undefined)$/i.test(value))
+    return false
+  if (UNSCOPED_TEMPLATE_TOKENS.has(value))
+    return false
+  if (/^-?\d+(\.\d+)?$/.test(value))
+    return false
+  if (/^['"`]/.test(value))
+    return false
+  return /^[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*$/.test(value)
+}
+
+const applySchemaFormatter = (expression, schemaFormatters = {}, scopeAlias = 'item', qualifyScope = false) => {
+  const rawExpression = String(expression || '').trim()
   const path = getScopedFieldExpression(expression, scopeAlias)
   if (!path || /^[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(path))
     return expression
 
   const rootField = path.split('.')[0]
   const formatter = schemaFormatters[path] || schemaFormatters[rootField]
-  return formatter ? `${formatter}(${path})` : path
+  const alias = String(scopeAlias || '').trim()
+  const qualifiedPath = (qualifyScope && alias && isSimpleFieldExpression(rawExpression)) ? `${alias}.${path}` : path
+  return formatter ? `${formatter}(${qualifiedPath})` : qualifiedPath
 }
 
 const legacyFieldToSchema = (type, cfg, field) => {
@@ -325,15 +359,24 @@ const legacyFieldToSchema = (type, cfg, field) => {
   return schema
 }
 
-const setValueAtPath = (target, path, value) => {
-  const parts = path.filter(Boolean)
-  let cursor = target
-  parts.slice(0, -1).forEach((part) => {
-    if (!isPlainObject(cursor[part]))
-      cursor[part] = {}
-    cursor = cursor[part]
-  })
-  cursor[parts[parts.length - 1]] = value
+const normalizePublicationEffect = (effect) => {
+  const normalized = String(effect || '').trim().toLowerCase()
+  return PUBLICATION_EFFECTS.has(normalized) ? normalized : 'flip'
+}
+
+const legacyPublicationToSchema = (cfg, field) => {
+  const schema = {
+    type: 'publication',
+    label: cfg.title || cfg.label || toTitle(field),
+    effect: normalizePublicationEffect(cfg.effect),
+  }
+  if (Object.prototype.hasOwnProperty.call(cfg, 'value'))
+    schema.value = cloneValue(cfg.value)
+  return schema
+}
+
+const buildPublicationMarker = (field) => {
+  return `{{{#publication ${JSON.stringify({ field })}}}}`
 }
 
 const buildControlsFromQueryOptions = (queryOptions = []) => {
@@ -362,7 +405,7 @@ const buildControlsFromQueryOptions = (queryOptions = []) => {
   }, {})
 }
 
-const buildDataSource = (name, cfg, values) => {
+const buildDataSource = (cfg) => {
   const source = {}
   let collection = null
   if (cfg.collection && isPlainObject(cfg.collection))
@@ -404,16 +447,10 @@ const buildDataSource = (name, cfg, values) => {
   if (Object.keys(controls).length)
     source.controls = controls
 
-  if (isPlainObject(cfg.queryItems)) {
-    Object.entries(cfg.queryItems).forEach(([field, value]) => {
-      setValueAtPath(values, ['dataSources', name, field], cloneValue(value))
-    })
-  }
-
   return source
 }
 
-const normalizeLegacyReferences = (content, fromAlias = '', toAlias = '', schemaFormatters = {}, scopeAlias = 'item') => {
+const normalizeLegacyReferences = (content, fromAlias = '', toAlias = '', schemaFormatters = {}, scopeAlias = 'item', qualifyScope = false) => {
   let normalized = String(content || '')
 
   if (fromAlias && toAlias && fromAlias !== toAlias) {
@@ -421,14 +458,16 @@ const normalizeLegacyReferences = (content, fromAlias = '', toAlias = '', schema
     normalized = normalized.replace(new RegExp(`\\{\\{\\s*${fromAlias}\\s*\\}\\}`, 'g'), `{{ ${toAlias} }}`)
   }
 
-  normalized = normalized.replace(/\{\{\{\s*([^{}#/][^{}]*?)\s*\}\}\}/g, (_, expression) => `{{ ${applySchemaFormatter(expression, schemaFormatters, scopeAlias)} }}`)
-  normalized = normalized.replace(/\{\{\s*([^{}#/][^{}]*?)\s*\}\}/g, (_, expression) => `{{ ${applySchemaFormatter(expression, schemaFormatters, scopeAlias)} }}`)
+  normalized = normalized.replace(/\{\{\{\s*([^{}#/][^{}]*?)\s*\}\}\}/g, (_, expression) => `{{ ${applySchemaFormatter(expression, schemaFormatters, scopeAlias, qualifyScope)} }}`)
+  normalized = normalized.replace(/\{\{\s*([^{}#/][^{}]*?)\s*\}\}/g, (_, expression) => `{{ ${applySchemaFormatter(expression, schemaFormatters, scopeAlias, qualifyScope)} }}`)
   return normalized
 }
 
 export const useCmsTemplateV2Conversion = () => {
   const convertLegacyBlockToTemplateV2 = (legacyContent = {}) => {
-    const content = typeof legacyContent === 'string' ? legacyContent : String(legacyContent?.content || '')
+    const legacyDoc = isPlainObject(legacyContent) ? legacyContent : {}
+    const content = typeof legacyContent === 'string' ? legacyContent : String(legacyDoc.content || '')
+    const legacyValues = isPlainObject(legacyDoc.values) ? legacyDoc.values : {}
     const schema = {}
     const dataSources = {}
     const values = {}
@@ -444,11 +483,11 @@ export const useCmsTemplateV2Conversion = () => {
       for (;;) {
         const tag = findNextLegacyTag(segment, cursor)
         if (!tag) {
-          output += normalizeLegacyReferences(segment.slice(cursor), options.rewriteFromAlias, options.rewriteToAlias, schemaFormatters, scopeAlias)
+          output += normalizeLegacyReferences(segment.slice(cursor), options.rewriteFromAlias, options.rewriteToAlias, schemaFormatters, scopeAlias, options.qualifyScope)
           break
         }
 
-        output += normalizeLegacyReferences(segment.slice(cursor, tag.start), options.rewriteFromAlias, options.rewriteToAlias, schemaFormatters, scopeAlias)
+        output += normalizeLegacyReferences(segment.slice(cursor, tag.start), options.rewriteFromAlias, options.rewriteToAlias, schemaFormatters, scopeAlias, options.qualifyScope)
 
         const cfg = parseJsonConfig(tag.rawConfig)
         if (!cfg) {
@@ -482,10 +521,10 @@ export const useCmsTemplateV2Conversion = () => {
             const alias = sanitizeIdentifier(cfg.as || 'item', 'item')
             const childSchemaFormatters = getSchemaFormatterMap(cfg.schema)
             usedAliases.add(alias)
-            const convertedBody = convertSegment(body, { scopeAlias: alias, schemaFormatters: childSchemaFormatters })
+            const convertedBody = convertSegment(body, { scopeAlias: alias, schemaFormatters: childSchemaFormatters, qualifyScope: true })
 
             if (cfg.collection || cfg.api) {
-              dataSources[fieldName] = buildDataSource(fieldName, cfg, values)
+              dataSources[fieldName] = buildDataSource(cfg)
               output += `{{#for ${alias} in source("${fieldName}")}}${convertedBody}{{/for}}`
             }
             else {
@@ -494,7 +533,10 @@ export const useCmsTemplateV2Conversion = () => {
                 label: cfg.title || cfg.label || toTitle(fieldName),
                 schema: convertSchemaDefinition(cfg.schema),
               }
-              values[fieldName] = Array.isArray(cfg.value) ? cloneValue(cfg.value) : []
+              if (hasOwnValue(legacyValues, fieldName))
+                schema[fieldName].value = cloneValue(legacyValues[fieldName])
+              else if (Object.prototype.hasOwnProperty.call(cfg, 'value'))
+                schema[fieldName].value = cloneValue(cfg.value)
               output += `{{#for ${alias} in ${fieldName}}}${convertedBody}{{/for}}`
             }
           }
@@ -506,6 +548,7 @@ export const useCmsTemplateV2Conversion = () => {
               rewriteFromAlias: explicitAlias ? '' : scopeAlias,
               rewriteToAlias: explicitAlias ? '' : alias,
               schemaFormatters,
+              qualifyScope: true,
             })
             if (Number(cfg.limit) > 0)
               warnings.push(`Review subarray limit ${cfg.limit} for "${field}"; v2 loop output was converted without inline slice syntax.`)
@@ -523,8 +566,18 @@ export const useCmsTemplateV2Conversion = () => {
           continue
         }
 
+        if (type === 'publication') {
+          schema[field] = legacyPublicationToSchema(cfg, field)
+          if (hasOwnValue(legacyValues, field))
+            schema[field].value = cloneValue(legacyValues[field])
+          output += buildPublicationMarker(field)
+          cursor = tag.end
+          continue
+        }
+
         schema[field] = legacyFieldToSchema(type, cfg, field)
-        values[field] = Object.prototype.hasOwnProperty.call(cfg, 'value') ? cloneValue(cfg.value) : ''
+        if (hasOwnValue(legacyValues, field))
+          schema[field].value = cloneValue(legacyValues[field])
         const inlineFormatter = INLINE_SCHEMA_FORMATTERS.has(type) ? type : ''
         output += inlineFormatter ? `{{ ${inlineFormatter}(${field}) }}` : `{{ ${field} }}`
         cursor = tag.end

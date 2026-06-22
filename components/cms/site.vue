@@ -1767,10 +1767,14 @@ const resolveTemplateBlockSource = (pageDoc, blockRef) => {
 
 const EMPTY_PREVIEW_VALUES = {}
 const EMPTY_PREVIEW_META = {}
+const hasPreviewObjectEntries = (value) => {
+  return !!value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length > 0
+}
 
 const resolveBlockForPreview = (block) => {
   if (!block)
     return null
+  const libraryBlock = block?.blockId ? blocksCollection.value?.[block.blockId] : null
   if (typeof block === 'string' && blocksCollection.value?.[block]) {
     const libraryBlock = blocksCollection.value[block]
     return {
@@ -1784,18 +1788,18 @@ const resolveBlockForPreview = (block) => {
     }
   }
   if (block.content || block.template) {
+    const templateIsV2 = Number(block.templateVersion) === 2 || Number(libraryBlock?.templateVersion) === 2
     return {
-      content: block.content || block.template || '',
-      templateVersion: Number(block.templateVersion) === 2 ? 2 : 1,
-      template: block.template || '',
-      schema: block.schema || {},
-      dataSources: block.dataSources || {},
-      values: block.values || EMPTY_PREVIEW_VALUES,
-      meta: block.meta || EMPTY_PREVIEW_META,
+      content: block.content || libraryBlock?.content || libraryBlock?.template || block.template || '',
+      templateVersion: templateIsV2 ? 2 : 1,
+      template: block.template || libraryBlock?.template || '',
+      schema: hasPreviewObjectEntries(block.schema) ? block.schema : (libraryBlock?.schema || {}),
+      dataSources: hasPreviewObjectEntries(block.dataSources) ? block.dataSources : (libraryBlock?.dataSources || {}),
+      values: { ...(libraryBlock?.values || {}), ...(block.values || {}) },
+      meta: { ...(libraryBlock?.meta || {}), ...(block.meta || {}) },
     }
   }
-  if (block.blockId && blocksCollection.value?.[block.blockId]) {
-    const libraryBlock = blocksCollection.value[block.blockId]
+  if (libraryBlock) {
     return {
       content: libraryBlock.content || libraryBlock.template || '',
       templateVersion: Number(libraryBlock.templateVersion) === 2 ? 2 : 1,
@@ -1941,6 +1945,10 @@ const getSitePagePreviewBlockSignature = (pageDoc) => {
         const block = resolveTemplateBlockForPreview(pageDoc, blockRef)
         return {
           content: block?.content || null,
+          templateVersion: block?.templateVersion || null,
+          template: block?.template || null,
+          schema: block?.schema || null,
+          dataSources: block?.dataSources || null,
           values: block?.values || null,
           meta: block?.meta || null,
         }
