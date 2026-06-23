@@ -1434,6 +1434,12 @@ const handleBlockImport = async (event) => {
                     <p class="text-lg font-semibold leading-snug line-clamp-2 text-slate-900 dark:text-slate-100 flex-1">
                       {{ item.name }}
                     </p>
+                    <edge-chip
+                      v-if="Number(item.templateVersion) === 2"
+                      class="mt-1 shrink-0 border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                    >
+                      v2
+                    </edge-chip>
                     <edge-shad-button
                       size="icon"
                       variant="ghost"

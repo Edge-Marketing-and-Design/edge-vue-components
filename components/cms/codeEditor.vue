@@ -426,9 +426,24 @@ const applyInlineFormatter = (formatter) => {
   editor.focus()
 }
 
+const getEditorValue = () => {
+  return editorInstanceRef.value?.getValue?.() || localModelValue.value || ''
+}
+
+const getCursorOffset = () => {
+  const editor = editorInstanceRef.value
+  const model = editor?.getModel?.()
+  const position = editor?.getPosition?.()
+  if (!model || !position || typeof model.getOffsetAt !== 'function')
+    return null
+  return model.getOffsetAt(position)
+}
+
 defineExpose({
   insertSnippet: insertBlock,
   applyInlineFormatter,
+  getEditorValue,
+  getCursorOffset,
 })
 
 const diffEditorRef = shallowRef()

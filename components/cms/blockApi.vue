@@ -124,11 +124,33 @@ const dataSourceToPreviewMetaConfig = (source) => {
   return cfg
 }
 
-const getRouteLastSegmentPreviewEntries = () => {
-  const metaEntries = Object.entries(props.meta || {})
-  const dataSourceEntries = Object.entries(props.dataSources || {})
+const dataSourcesToRuntimeMeta = (dataSources, meta) => {
+  const sourceEntries = Object.entries(dataSources || {})
     .map(([field, source]) => [field, dataSourceToPreviewMetaConfig(source)])
     .filter(([, cfg]) => !!cfg)
+
+  return sourceEntries.reduce((acc, [field, cfg]) => {
+    const sourceMeta = meta?.[field]
+    const queryItems = sourceMeta?.queryItems
+    const hasQueryItems = queryItems && typeof queryItems === 'object' && !Array.isArray(queryItems)
+    const hasLimit = sourceMeta?.limit !== undefined && sourceMeta.limit !== null && sourceMeta.limit !== ''
+
+    acc[field] = {
+      ...cfg,
+      queryItems: {
+        ...(cfg.queryItems || {}),
+        ...(hasQueryItems ? queryItems : {}),
+      },
+    }
+    if (hasLimit)
+      acc[field].limit = sourceMeta.limit
+    return acc
+  }, {})
+}
+
+const getRouteLastSegmentPreviewEntries = () => {
+  const metaEntries = Object.entries(props.meta || {})
+  const dataSourceEntries = Object.entries(dataSourcesToRuntimeMeta(props.dataSources, props.meta))
 
   return [...metaEntries, ...dataSourceEntries]
 }
@@ -388,7 +410,10 @@ const effectiveRouteLastSegment = computed(() => {
 })
 
 const runtimeMeta = computed(() => {
-  return edgeGlobal.prepareCmsMetaForRuntime(props.meta, props.siteId, {
+  return edgeGlobal.prepareCmsMetaForRuntime({
+    ...(props.meta || {}),
+    ...dataSourcesToRuntimeMeta(props.dataSources, props.meta),
+  }, props.siteId, {
     routeLastSegment: effectiveRouteLastSegment.value,
   })
 })

@@ -70,6 +70,7 @@ const state = reactive({
   dataSourceWizardMode: 'add',
   dataSourceWizardOriginalName: '',
   dataSourceWizardActiveControlIndex: -1,
+  dataSourceWizardKey: 0,
   schemaWizardOpen: false,
   schemaWizardStep: 1,
   schemaWizardError: '',
@@ -82,6 +83,11 @@ const state = reactive({
   v2DynamicContentDialogOpen: false,
   v2DynamicField: {
     selectedKey: '',
+    useParentArrayLookup: false,
+    parentArrayLookupMode: 'canonical',
+    parentArrayField: '',
+    indexedLookupField: '',
+    canonicalLookupLimit: '0',
   },
 })
 const isGlobalAdmin = computed(() => edgeGlobal.isAdminGlobal(edgeFirebase).value)
@@ -249,6 +255,21 @@ const titleFromKey = (value) => {
     .replace(/\b\w/g, char => char.toUpperCase())
 }
 
+const handleGuideShortcutClick = (event) => {
+  const link = event.target?.closest?.('a[href^="#"]')
+  if (!link)
+    return
+  const targetId = String(link.getAttribute('href') || '').slice(1)
+  if (!targetId)
+    return
+  const target = document.getElementById(targetId)
+  if (!target)
+    return
+  event.preventDefault()
+  event.stopPropagation()
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
 function sanitizeV2FieldName(value) {
   return String(value || '')
     .trim()
@@ -299,6 +320,11 @@ const v2DataSourceFilterOperatorOptions = [
   { name: 'not-in', title: 'Not In List' },
   { name: 'array-contains-any', title: 'Array Contains Any' },
   { name: 'array-contains-all', title: 'Array Contains All' },
+]
+
+const v2DynamicParentArrayLookupModeOptions = [
+  { name: 'canonical', title: 'Exact Record Key' },
+  { name: 'queryItems', title: 'Indexed Field' },
 ]
 
 const v2DataSourceFilterArrayValueOperators = new Set([
@@ -395,6 +421,7 @@ const resetTemplateV2DataSourceWizard = () => {
   state.dataSourceWizardMode = 'add'
   state.dataSourceWizardOriginalName = ''
   state.dataSourceWizardActiveControlIndex = -1
+  state.dataSourceWizardKey += 1
 }
 
 const openTemplateV2DataSourceWizard = () => {
@@ -510,6 +537,7 @@ const inferTemplateV2DataSourceType = (source) => {
 
 const createTemplateV2DataSourceWizardDraftFromSource = (sourceName, source = {}) => {
   const sourceType = inferTemplateV2DataSourceType(source)
+  const canonicalLookupKey = source.canonicalLookup?.key || source.collection?.canonicalLookup?.key || ''
   return {
     sourceName,
     type: sourceType,
@@ -519,7 +547,7 @@ const createTemplateV2DataSourceWizardDraftFromSource = (sourceName, source = {}
     path: source.path || source.collection?.path || '',
     baseKey: source.baseKey || source.collection?.baseKey || '',
     uniqueKey: source.uniqueKey || source.collection?.uniqueKey || '{orgId}',
-    canonicalLookupKey: source.canonicalLookup?.key || source.collection?.canonicalLookup?.key || '',
+    canonicalLookupKey,
     limit: source.limit == null ? '' : String(source.limit),
     queryItems: objectToMapRows(source.queryItems).length ? objectToMapRows(source.queryItems) : [{ key: '', value: '' }],
     previewQueryItems: objectToMapRows(source.previewQueryItems),
@@ -533,16 +561,21 @@ const createTemplateV2DataSourceWizardDraftFromSource = (sourceName, source = {}
 const openTemplateV2DataSourceWizardForEdit = (sourceName, source) => {
   state.dataSourceWizardStep = 1
   state.dataSourceWizardError = ''
+  state.dataSourceWizardDraft = null
   state.dataSourceWizardMode = 'edit'
   state.dataSourceWizardOriginalName = sourceName
   state.dataSourceWizardDraft = createTemplateV2DataSourceWizardDraftFromSource(sourceName, source)
   state.dataSourceWizardActiveControlIndex = -1
+  state.dataSourceWizardKey += 1
   state.dataSourceWizardOpen = true
 }
 
 const closeTemplateV2DataSourceWizard = () => {
   state.dataSourceWizardOpen = false
   state.dataSourceWizardError = ''
+  state.dataSourceWizardDraft = null
+  state.dataSourceWizardOriginalName = ''
+  state.dataSourceWizardActiveControlIndex = -1
 }
 
 const addTemplateV2WizardMapRow = (field) => {
@@ -657,9 +690,10 @@ const sortRowsToOrderArray = (rows = []) => {
   }, [])
 }
 
-const controlRowsToObject = (rows = []) => {
+const controlRowsToObject = (rows = [], sourceType = '') => {
   return rows.reduce((acc, row) => {
-    const key = sanitizeV2FieldName(row?.key)
+    const rawKey = String(row?.key || '').trim()
+    const key = sourceType === 'api' ? rawKey : sanitizeV2FieldName(rawKey)
     if (!key)
       return acc
     const control = (row?.extra && typeof row.extra === 'object' && !Array.isArray(row.extra))
@@ -753,7 +787,7 @@ const buildTemplateV2WizardDataSource = () => {
   const value = parseWizardJsonField('valueJson', [])
   source.value = value
 
-  const controls = controlRowsToObject(draft.controls)
+  const controls = controlRowsToObject(draft.controls, source.type)
   if (controls && typeof controls === 'object' && !Array.isArray(controls) && Object.keys(controls).length)
     source.controls = controls
 
@@ -1733,6 +1767,11 @@ const applyTemplateInlineFormatter = (formatter) => {
 const resetV2DynamicField = () => {
   state.v2DynamicField = {
     selectedKey: '',
+    useParentArrayLookup: false,
+    parentArrayLookupMode: 'canonical',
+    parentArrayField: '',
+    indexedLookupField: '',
+    canonicalLookupLimit: '0',
   }
 }
 
@@ -1769,10 +1808,87 @@ const getSelectedV2DynamicContentItem = (workingDoc) => {
   return items.find(item => item.name === state.v2DynamicField.selectedKey) || items[0] || null
 }
 
+const getWorkingTemplateText = (workingDoc) => {
+  return String(workingDoc?.content || workingDoc?.template || '')
+}
+
+const getTemplateEditorContext = (workingDoc) => {
+  const editor = contentEditorRef.value
+  const template = typeof editor?.getEditorValue === 'function'
+    ? String(editor.getEditorValue() || '')
+    : getWorkingTemplateText(workingDoc)
+  const cursorOffset = typeof editor?.getCursorOffset === 'function'
+    ? editor.getCursorOffset()
+    : null
+  return {
+    template,
+    cursorOffset: Number.isFinite(cursorOffset) ? cursorOffset : template.length,
+  }
+}
+
+const getActiveV2LoopAliases = (workingDoc) => {
+  const { template, cursorOffset } = getTemplateEditorContext(workingDoc)
+  const stack = []
+  const pattern = /\{\{#for\s+([A-Za-z_$][A-Za-z0-9_$]*)\s+in\b|\{\{\/for\}\}/g
+  let match = pattern.exec(template)
+  while (match && match.index < cursorOffset) {
+    if (match[1])
+      stack.push(match[1])
+    else
+      stack.pop()
+    match = pattern.exec(template)
+  }
+  return stack
+}
+
+const getNextV2LoopAlias = (workingDoc, extraAliases = []) => {
+  const aliases = getActiveV2LoopAliases(workingDoc)
+  const used = new Set([...aliases, ...extraAliases])
+  if (!used.has('item'))
+    return 'item'
+
+  let index = 2
+  while (used.has(`item${index}`))
+    index += 1
+  return `item${index}`
+}
+
+const getV2ParentLoopAlias = (workingDoc) => {
+  const aliases = getActiveV2LoopAliases(workingDoc)
+  return aliases[aliases.length - 1] || ''
+}
+
+const isSelectedV2DynamicDataSource = (workingDoc) => {
+  return getSelectedV2DynamicContentItem(workingDoc)?.sourceType === 'dataSource'
+}
+
+const isSelectedV2DynamicNestedDataSource = (workingDoc) => {
+  return isSelectedV2DynamicDataSource(workingDoc) && !!getV2ParentLoopAlias(workingDoc)
+}
+
+const applyV2DynamicFieldDefaults = () => {
+  state.v2DynamicField.useParentArrayLookup = false
+  state.v2DynamicField.parentArrayLookupMode = 'canonical'
+  state.v2DynamicField.parentArrayField = ''
+  state.v2DynamicField.indexedLookupField = ''
+  state.v2DynamicField.canonicalLookupLimit = '0'
+}
+
 const openV2DynamicContentDialog = (workingDoc) => {
   resetV2DynamicField()
   state.v2DynamicField.selectedKey = getV2DynamicContentItems(workingDoc)[0]?.name || ''
+  applyV2DynamicFieldDefaults()
   state.v2DynamicContentDialogOpen = true
+}
+
+const handleV2DynamicFieldSelected = (value) => {
+  state.v2DynamicField.selectedKey = value
+  applyV2DynamicFieldDefaults()
+}
+
+const handleV2DynamicLookupModeSelected = (value) => {
+  const mode = (typeof value === 'object' && value !== null) ? value.name : value
+  state.v2DynamicField.parentArrayLookupMode = mode === 'queryItems' ? 'queryItems' : 'canonical'
 }
 
 const goToTemplateV2SchemaFromDynamicContent = () => {
@@ -1791,14 +1907,78 @@ const buildV2DynamicFieldToken = (fieldConfig) => {
   return `{{ ${field} }}`
 }
 
-const buildV2DynamicSnippet = (fieldConfig) => {
+const normalizeV2ParentLookupField = (workingDoc) => {
+  const parentAlias = getV2ParentLoopAlias(workingDoc)
+  let field = String(state.v2DynamicField.parentArrayField || '')
+    .trim()
+    .replace(/^\{\{\s*/, '')
+    .replace(/\s*\}\}$/, '')
+    .replace(/^\{parent\./, '')
+    .replace(/\}$/, '')
+    .replace(/^parent\./, '')
+  if (parentAlias && field.startsWith(`${parentAlias}.`))
+    field = field.slice(parentAlias.length + 1)
+  return field
+}
+
+const normalizeV2IndexedLookupField = () => {
+  return String(state.v2DynamicField.indexedLookupField || '').trim()
+}
+
+const getV2CanonicalLookupLimit = () => {
+  const limit = Number(state.v2DynamicField.canonicalLookupLimit)
+  if (!Number.isFinite(limit) || limit <= 0)
+    return 0
+  return Math.floor(limit)
+}
+
+const buildV2SourceOptionsLines = (lookupConfig, limit) => {
+  const lines = [`  ${lookupConfig}`]
+  if (limit > 0)
+    lines.push(`  limit: ${limit}`)
+  return lines.join(',\n')
+}
+
+const buildV2NestedParentLookupSnippet = (field, workingDoc) => {
+  const parentAlias = getV2ParentLoopAlias(workingDoc)
+  const parentLookupField = normalizeV2ParentLookupField(workingDoc)
+  const parentLookupExpression = `${parentAlias}.${parentLookupField}`
+  const itemAlias = getNextV2LoopAlias(workingDoc)
+  const limit = getV2CanonicalLookupLimit()
+  const lookupMode = state.v2DynamicField.parentArrayLookupMode === 'queryItems' ? 'queryItems' : 'canonical'
+  const lookupConfig = lookupMode === 'queryItems'
+    ? `queryItems: { ${JSON.stringify(normalizeV2IndexedLookupField())}: ${parentLookupExpression} }`
+    : `canonicalLookup: { key: ${parentLookupExpression} }`
+  return `{{#for ${itemAlias} in source("${field}", {\n${buildV2SourceOptionsLines(lookupConfig, limit)}\n})}}\n  {{ ${itemAlias}.name }}\n{{/for}}`
+}
+
+const canInsertV2DynamicContent = (workingDoc) => {
+  if (!getV2DynamicContentItems(workingDoc).length)
+    return false
+  const selectedItem = getSelectedV2DynamicContentItem(workingDoc)
+  if (!selectedItem)
+    return false
+  if (selectedItem.sourceType !== 'dataSource' || !state.v2DynamicField.useParentArrayLookup)
+    return true
+  if (!normalizeV2ParentLookupField(workingDoc))
+    return false
+  if (state.v2DynamicField.parentArrayLookupMode === 'queryItems' && !normalizeV2IndexedLookupField())
+    return false
+  return true
+}
+
+const buildV2DynamicSnippet = (fieldConfig, workingDoc) => {
   const field = sanitizeV2FieldName(fieldConfig.field)
-  if (fieldConfig.sourceType === 'dataSource')
-    return `{{#for item in source("${field}")}}\n  {{ item.name }}\n{{/for}}`
+  const alias = getNextV2LoopAlias(workingDoc)
+  if (fieldConfig.sourceType === 'dataSource') {
+    if (state.v2DynamicField.useParentArrayLookup && getV2ParentLoopAlias(workingDoc))
+      return buildV2NestedParentLookupSnippet(field, workingDoc)
+    return `{{#for ${alias} in source("${field}")}}\n  {{ ${alias}.name }}\n{{/for}}`
+  }
   if (fieldConfig.type === 'publication')
     return `{{{#publication {"field":"${field}"}}}}`
   if (fieldConfig.type === 'array')
-    return `{{#for item in ${field}}}\n  {{ item }}\n{{/for}}`
+    return `{{#for ${alias} in ${field}}}\n  {{ ${alias} }}\n{{/for}}`
   return buildV2DynamicFieldToken({ ...fieldConfig, field })
 }
 
@@ -1811,8 +1991,16 @@ const addV2DynamicContent = (workingDoc) => {
     edgeFirebase?.toast?.error?.('Add an input or data source first.')
     return
   }
+  if (selectedItem.sourceType === 'dataSource' && state.v2DynamicField.useParentArrayLookup && !normalizeV2ParentLookupField(workingDoc)) {
+    edgeFirebase?.toast?.error?.('Enter the parent lookup field.')
+    return
+  }
+  if (selectedItem.sourceType === 'dataSource' && state.v2DynamicField.useParentArrayLookup && state.v2DynamicField.parentArrayLookupMode === 'queryItems' && !normalizeV2IndexedLookupField()) {
+    edgeFirebase?.toast?.error?.('Enter the indexed field.')
+    return
+  }
 
-  const snippet = buildV2DynamicSnippet(selectedItem)
+  const snippet = buildV2DynamicSnippet(selectedItem, workingDoc)
   state.templateEditorTab = 'template'
   state.v2DynamicContentDialogOpen = false
   nextTick(() => {
@@ -2923,6 +3111,33 @@ const handleUnsavedChanges = (changes) => {
   state.editorHasUnsavedChanges = changes === true
 }
 
+const clearTemplateConversionAfterSave = async (payload) => {
+  const savedDoc = payload?.data
+  const docId = String(payload?.docId || savedDoc?.docId || '').trim()
+  if (!docId || !savedDoc?.templateConversion)
+    return
+
+  const collectionPath = `${edgeGlobal.edgeState.organizationDocPath}/blocks`
+  const cleanedDoc = edgeGlobal.dupObject(savedDoc)
+  delete cleanedDoc.templateConversion
+  cleanedDoc.docId = docId
+
+  try {
+    await edgeFirebase.storeDoc(collectionPath, cleanedDoc)
+    if (state.editorWorkingDoc?.docId === docId)
+      delete state.editorWorkingDoc.templateConversion
+    if (state.workingDoc?.docId === docId)
+      delete state.workingDoc.templateConversion
+    if (state.previewBlock?.blockId === docId || state.previewBlock?.id === docId)
+      delete state.previewBlock.templateConversion
+    if (edgeFirebase.data?.[collectionPath]?.[docId])
+      delete edgeFirebase.data[collectionPath][docId].templateConversion
+  }
+  catch {
+    notifyError('Saved block, but could not clear conversion notes.')
+  }
+}
+
 const exportCurrentBlock = async () => {
   const doc = blocks.value?.[props.blockId]
   if (!doc || !doc.docId) {
@@ -2954,6 +3169,7 @@ const exportCurrentBlock = async () => {
       :working-doc-overrides="state.workingDoc"
       @working-doc="editorDocUpdates"
       @unsaved-changes="handleUnsavedChanges"
+      @saved="clearTemplateConversionAfterSave"
     >
       <template #header-start="slotProps">
         <FilePenLine class="mr-2" />
@@ -3992,7 +4208,7 @@ const exportCurrentBlock = async () => {
                     </div>
 
                     <div
-                      v-else
+                      v-if="!getV2DynamicContentItems(slotProps.workingDoc).length"
                       class="rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300"
                     >
                       This field type has no additional settings.
@@ -4046,7 +4262,7 @@ const exportCurrentBlock = async () => {
                 </DialogContent>
               </edge-shad-dialog>
               <edge-shad-dialog v-model="state.dataSourceWizardOpen">
-                <DialogContent v-if="state.dataSourceWizardDraft" class="max-w-[860px]">
+                <DialogContent v-if="state.dataSourceWizardDraft" :key="state.dataSourceWizardKey" class="max-w-[860px]">
                   <DialogHeader>
                     <DialogTitle>{{ state.dataSourceWizardMode === 'edit' ? 'Edit Data Source' : 'Add Data Source' }}</DialogTitle>
                     <DialogDescription>
@@ -4165,7 +4381,7 @@ const exportCurrentBlock = async () => {
                         placeholder="{orgId}:{siteId}"
                       />
                       <div class="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
-                        Leave the exact record key blank for normal list queries. Use it only when you already know the exact canonical record to fetch.
+                        Leave this blank for normal list queries. Use Fetch Exact Record Key only when this source always loads one known record. For parent-based lookups, insert the relationship in the Template with Dynamic Fields so the queried field is visible.
                       </div>
                     </div>
 
@@ -4184,7 +4400,7 @@ const exportCurrentBlock = async () => {
                           Indexed Lookup Values
                         </div>
                         <p class="mb-3 text-xs text-slate-600 dark:text-slate-400">
-                          Use these when the field is indexed in KV, like category = Featured or slug = route segment. This narrows the fetch before records are returned.
+                          Use these when the field is indexed, like category = Featured or slug = route segment. This narrows the fetch before records are returned.
                         </p>
                         <div class="space-y-2">
                           <div v-for="(row, index) in state.dataSourceWizardDraft.queryItems" :key="`wizard-query-${index}`" class="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
@@ -4574,7 +4790,7 @@ const exportCurrentBlock = async () => {
                         variant="ghost"
                         class="h-8 px-3 text-[11px] uppercase tracking-wide rounded border border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100"
                       >
-                        Dynamic Fields
+                        Insert Field
                       </edge-shad-button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" class="w-72">
@@ -4597,7 +4813,7 @@ const exportCurrentBlock = async () => {
                       class="h-8 gap-2 rounded border border-slate-300 bg-white px-3 text-[11px] uppercase tracking-wide text-slate-900 dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-100"
                       @click="openV2DynamicContentDialog(slotProps.workingDoc)"
                     >
-                      Dynamic Fields
+                      Insert Field
                     </edge-shad-button>
                     <DropdownMenu>
                       <DropdownMenuTrigger as-child>
@@ -4649,9 +4865,71 @@ const exportCurrentBlock = async () => {
                       name="v2DynamicContentField"
                       label="Field"
                       :items="getV2DynamicContentItems(slotProps.workingDoc)"
+                      @update:model-value="handleV2DynamicFieldSelected"
                     />
                     <div
-                      v-else
+                      v-if="isSelectedV2DynamicNestedDataSource(slotProps.workingDoc)"
+                      class="rounded-md border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950"
+                    >
+                      <edge-shad-checkbox
+                        v-model="state.v2DynamicField.useParentArrayLookup"
+                        name="v2DynamicUseParentArrayLookup"
+                        label="Use parent lookup?"
+                        class="border-slate-400 bg-white text-slate-900 data-[state=checked]:bg-slate-700 data-[state=checked]:text-white dark:border-slate-500 dark:bg-slate-800 dark:text-slate-100 dark:data-[state=checked]:bg-slate-200 dark:data-[state=checked]:text-slate-900"
+                      >
+                        <span class="text-sm text-slate-900 dark:text-slate-100">Build a nested lookup from the parent item</span>
+                      </edge-shad-checkbox>
+                      <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                        Use this when the nested source should load records from a field on the current parent item.
+                      </p>
+                      <div v-if="state.v2DynamicField.useParentArrayLookup" class="mt-3 grid gap-3">
+                        <div class="grid gap-3 md:grid-cols-[1fr_96px]">
+                          <edge-shad-select
+                            v-model="state.v2DynamicField.parentArrayLookupMode"
+                            name="v2DynamicParentArrayLookupMode"
+                            label="Lookup Type"
+                            :items="v2DynamicParentArrayLookupModeOptions"
+                            @update:model-value="handleV2DynamicLookupModeSelected"
+                          />
+                          <edge-shad-input
+                            v-model="state.v2DynamicField.canonicalLookupLimit"
+                            name="v2DynamicCanonicalLookupLimit"
+                            type="number"
+                            label="Limit"
+                            placeholder="0"
+                          />
+                        </div>
+                        <div class="space-y-1 md:col-span-2">
+                          <edge-shad-input
+                            v-model="state.v2DynamicField.parentArrayField"
+                            name="v2DynamicParentArrayField"
+                            label="Parent Lookup Field"
+                            placeholder="relatedIds"
+                          />
+                          <p class="text-xs text-slate-500 dark:text-slate-400">
+                            The field on the current parent item that provides the lookup value. If the parent loop is <code>agent</code> and this is <code>credentials</code>, the inserted Template uses <code>agent.credentials</code>.
+                          </p>
+                        </div>
+                        <template v-if="state.v2DynamicField.parentArrayLookupMode === 'queryItems'">
+                          <div class="space-y-1 md:col-span-2">
+                            <edge-shad-input
+                              v-model="state.v2DynamicField.indexedLookupField"
+                              name="v2DynamicIndexedLookupField"
+                              label="Indexed Field"
+                              placeholder="categoryId"
+                            />
+                            <p class="text-xs text-slate-500 dark:text-slate-400">
+                              The indexed field on the records being loaded. The generated query matches this field against the parent lookup field above.
+                            </p>
+                          </div>
+                        </template>
+                        <p class="text-xs text-slate-500 md:col-span-2 dark:text-slate-400">
+                          The inserted Template calls <code>source(...)</code> with either <code>canonicalLookup</code> or <code>queryItems</code>, using the current parent item for the lookup value.
+                        </p>
+                      </div>
+                    </div>
+                    <div
+                      v-if="!getV2DynamicContentItems(slotProps.workingDoc).length"
                       class="rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300"
                     >
                       Add an input or data source first, then return here to insert it.
@@ -4675,8 +4953,8 @@ const exportCurrentBlock = async () => {
                     <edge-shad-button
                       type="button"
                       class="bg-slate-800 text-white hover:bg-slate-700"
-                      :disabled="!getV2DynamicContentItems(slotProps.workingDoc).length"
-                      @click="addV2DynamicContent(slotProps.workingDoc)"
+                      :disabled="!canInsertV2DynamicContent(slotProps.workingDoc)"
+                      @click.stop.prevent="addV2DynamicContent(slotProps.workingDoc)"
                     >
                       Insert
                     </edge-shad-button>
@@ -5018,7 +5296,7 @@ const exportCurrentBlock = async () => {
             Everything about blocks: how fields are built, how data loads, which options exist, and how the editor renders.
           </SheetDescription>
         </SheetHeader>
-        <div class="px-6 pb-6">
+        <div class="px-6 pb-6" @click="handleGuideShortcutClick">
           <Tabs class="w-full" default-value="guide">
             <TabsList class="w-full mt-3 rounded-sm grid grid-cols-8 border border-slate-300 bg-slate-200 dark:border-slate-700 dark:bg-slate-800">
               <TabsTrigger value="guide" class="w-full text-slate-700 dark:text-slate-200 data-[state=active]:bg-slate-700 data-[state=active]:text-white dark:data-[state=active]:bg-slate-200 dark:data-[state=active]:text-slate-900">
@@ -5499,6 +5777,7 @@ const exportCurrentBlock = async () => {
                       <a href="#arrays-query-flow" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Query Strategy</a>
                       <a href="#conditionals" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Conditionals</a>
                       <a href="#subarrays" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Subarrays</a>
+                      <a href="#nested-data-sources" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Nested Data Sources</a>
                       <a href="#render-blocks" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Render Blocks</a>
                       <a href="#entries" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Entries</a>
                     </div>
@@ -5764,6 +6043,53 @@ const exportCurrentBlock = async () => {
                     <p class="text-sm text-foreground">
                       Use clear aliases in each loop so nested values are unambiguous, such as <code v-pre>{{ card.title }}</code> and <code v-pre>{{ child.title }}</code>.
                     </p>
+                  </section>
+
+                  <section id="nested-data-sources" class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Nested Data Sources
+                    </h3>
+                    <p class="text-sm text-foreground">
+                      Use a nested Data Source when the inner list needs a separate API or collection fetch. Pass the value from the outer loop into the nested <code>source(...)</code> call, and put the result limit on the nested Data Source.
+                    </p>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{#for author in source("authors")}}
+  &lt;article&gt;
+    &lt;h3&gt;{{ author.name }}&lt;/h3&gt;
+
+    {{#for post in source("authorPosts", {
+      queryItems: { authorId: author.id }
+    })}}
+      &lt;a href="/posts/{{ post.slug }}"&gt;{{ post.title }}&lt;/a&gt;
+    {{/for}}
+  &lt;/article&gt;
+{{/for}}</code></pre>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{
+  "authors": {
+    "type": "collection",
+    "path": "authors",
+    "uniqueKey": "{orgId}:{siteId}",
+    "queryItems": {
+      "active": true
+    },
+    "order": [{ "field": "name", "direction": "asc" }],
+    "limit": 12,
+    "value": []
+  },
+  "authorPosts": {
+    "type": "collection",
+    "path": "posts",
+    "uniqueKey": "{orgId}:{siteId}",
+    "order": [{ "field": "publishedAt", "direction": "desc" }],
+    "limit": 3,
+    "value": []
+  }
+}</code></pre>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div>Use normal subarray loops when the nested list is already on the current item, such as <code>author.links</code>.</div>
+                      <div>Use nested Data Sources when the nested list must be fetched separately.</div>
+                      <div>The scoped <code>queryItems</code> passed in the Template narrows the nested source for the current outer item.</div>
+                      <div>The nested source <code>limit</code> stays in <code>dataSources</code>, so it is managed with the source instead of hidden inside the loop.</div>
+                    </div>
                   </section>
 
                   <section id="render-blocks" class="space-y-3">

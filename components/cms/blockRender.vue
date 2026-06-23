@@ -1,5 +1,5 @@
 <script setup>
-import { pageRender, renderTemplate } from '@edgedev/template-engine'
+import { renderTemplate, renderTemplateAsync } from '@edgedev/template-engine'
 
 const props = defineProps({
   content: {
@@ -201,30 +201,359 @@ const templateV2Values = computed(() => ({
   ...normalizeTemplateV2Values(renderValues.value, props.schema),
 }))
 
-const templateV2HydrateOptions = computed(() => {
-  const fetchImpl = globalThis.fetch?.bind(globalThis)
-  if (!fetchImpl)
+const templateV2CmsDataSources = computed(() => {
+  return Object.entries(applyTemplateV2DataSourceMeta(props.dataSources, props.meta, templateV2RuntimeTokens.value))
+    .reduce((acc, [sourceName, sourceConfig]) => {
+      acc[sourceName] = {
+        ...(sourceConfig || {}),
+        value: Array.isArray(templateV2Values.value?.[sourceName])
+          ? templateV2Values.value[sourceName]
+          : [],
+      }
+      return acc
+    }, {})
+})
+
+const TEMPLATE_V2_FOR_TAG_RE = /\{\{\s*(?:#for\s+(?:([A-Za-z_][A-Za-z0-9_]*)\s+in\s+)?([\s\S]*?)|\/for)\s*\}\}/g
+
+const getTemplateV2ValueByPath = (source, path) => {
+  if (!path || typeof path !== 'string')
+    return source
+  return path.split('.').reduce((acc, key) => {
+    if (acc == null || typeof acc !== 'object')
+      return undefined
+    return acc[key]
+  }, source)
+}
+
+const splitTemplateV2InlineArgs = (input) => {
+  const args = []
+  let current = ''
+  let depth = 0
+  let quote = null
+  let escape = false
+  for (const ch of String(input || '')) {
+    if (quote) {
+      current += ch
+      if (escape) {
+        escape = false
+        continue
+      }
+      if (ch === '\\') {
+        escape = true
+        continue
+      }
+      if (ch === quote)
+        quote = null
+      continue
+    }
+    if (ch === '"' || ch === '\'') {
+      quote = ch
+      current += ch
+      continue
+    }
+    if (ch === '(' || ch === '{' || ch === '[')
+      depth += 1
+    else if (ch === ')' || ch === '}' || ch === ']')
+      depth = Math.max(0, depth - 1)
+    if (ch === ',' && depth === 0) {
+      args.push(current.trim())
+      current = ''
+      continue
+    }
+    current += ch
+  }
+  if (current.trim() || input)
+    args.push(current.trim())
+  return args
+}
+
+const parseTemplateV2QuotedString = (input) => {
+  const value = String(input || '').trim()
+  const quote = value[0]
+  if ((quote !== '"' && quote !== '\'') || value[value.length - 1] !== quote)
+    return ''
+  return value.slice(1, -1)
+}
+
+const resolveTemplateV2ScopedPath = (path, scope) => {
+  return getTemplateV2ValueByPath(scope, path)
+}
+
+const parseTemplateV2ScopedObjectLiteral = (raw, scope) => {
+  const input = String(raw || '').trim()
+  if (!input.startsWith('{') || !input.endsWith('}'))
     return null
 
-  const uniqueKey = [
-    templateV2RuntimeTokens.value.orgId,
-    props.siteId || 'preview',
-  ].filter(Boolean).join(':') || 'preview'
-
-  return {
-    uniqueKey,
-    clientOptions: {
-      fetch: fetchImpl,
-    },
+  let output = ''
+  let quote = null
+  let escape = false
+  const readIdentifier = (start) => {
+    let end = start
+    while (end < input.length && /[A-Za-z0-9_.$-]/.test(input[end]))
+      end += 1
+    return { token: input.slice(start, end), end }
   }
-})
+
+  for (let i = 0; i < input.length;) {
+    const ch = input[i]
+    if (quote) {
+      output += ch
+      if (escape) {
+        escape = false
+        i += 1
+        continue
+      }
+      if (ch === '\\') {
+        escape = true
+        i += 1
+        continue
+      }
+      if (ch === quote)
+        quote = null
+      i += 1
+      continue
+    }
+
+    if (ch === '"' || ch === '\'') {
+      quote = ch
+      output += ch
+      i += 1
+      continue
+    }
+
+    if (/[A-Za-z_]/.test(ch)) {
+      const { token, end } = readIdentifier(i)
+      let cursor = end
+      while (cursor < input.length && /\s/.test(input[cursor]))
+        cursor += 1
+
+      if (input[cursor] === ':') {
+        output += JSON.stringify(token)
+        i = end
+        continue
+      }
+
+      if (token === 'true' || token === 'false' || token === 'null') {
+        output += token
+        i = end
+        continue
+      }
+
+      output += JSON.stringify(resolveTemplateV2ScopedPath(token, scope))
+      i = end
+      continue
+    }
+
+    output += ch
+    i += 1
+  }
+
+  try {
+    const parsed = JSON.parse(output)
+    const parsedIsObject = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+    return parsedIsObject ? parsed : null
+  }
+  catch {
+    return null
+  }
+}
+
+const parseTemplateV2SourceExpression = (expression, scope) => {
+  const match = String(expression || '').trim().match(/^source\(([\s\S]*)\)$/)
+  if (!match)
+    return null
+  const args = splitTemplateV2InlineArgs(match[1] || '')
+  const name = parseTemplateV2QuotedString(args[0] || '')
+  if (!name)
+    return null
+  const parsedOverrides = args[1] ? parseTemplateV2ScopedObjectLiteral(args[1], scope) : null
+  const overrides = parsedOverrides || {}
+  return { name, overrides }
+}
+
+const findNextTemplateV2ForBlock = (input) => {
+  const tagRe = new RegExp(TEMPLATE_V2_FOR_TAG_RE.source, 'g')
+  const open = tagRe.exec(input)
+  if (!open || !open[2])
+    return null
+
+  let depth = 1
+  let close = tagRe.exec(input)
+  while (close) {
+    if (close[2]) {
+      depth += 1
+      close = tagRe.exec(input)
+      continue
+    }
+
+    depth -= 1
+    if (depth === 0) {
+      return {
+        start: open.index,
+        end: close.index + close[0].length,
+        alias: open[1] || 'item',
+        expression: open[2],
+        innerTpl: input.slice(open.index + open[0].length, close.index),
+      }
+    }
+    close = tagRe.exec(input)
+  }
+  return null
+}
+
+const valuesMatchTemplateV2Query = (recordValue, queryValue) => {
+  if (Array.isArray(recordValue))
+    return recordValue.some(item => valuesMatchTemplateV2Query(item, queryValue))
+  if (Array.isArray(queryValue))
+    return queryValue.some(item => valuesMatchTemplateV2Query(recordValue, item))
+  return recordValue === queryValue || String(recordValue ?? '') === String(queryValue ?? '')
+}
+
+const resolveTemplateV2ParentToken = (value, scope) => {
+  if (typeof value !== 'string')
+    return value
+  const trimmed = value.trim()
+  const parentMatch = trimmed.match(/^\{parent\.([^}]+)\}$/)
+  if (parentMatch)
+    return getTemplateV2ValueByPath(scope, parentMatch[1])
+  return value
+}
+
+const getTemplateV2CanonicalDocIds = (canonicalLookup, scope) => {
+  const rawKey = resolveTemplateV2ParentToken(canonicalLookup?.key, scope)
+  const keys = Array.isArray(rawKey) ? rawKey : [rawKey]
+  return keys.map((key) => {
+    const stringKey = String(key || '').trim()
+    if (!stringKey)
+      return ''
+    const segments = stringKey.split(':').filter(Boolean)
+    return segments[segments.length - 1] || stringKey
+  }).filter(Boolean)
+}
+
+const compareTemplateV2OrderValues = (aValue, bValue) => {
+  if (aValue == null && bValue == null)
+    return 0
+  if (aValue == null)
+    return 1
+  if (bValue == null)
+    return -1
+  const aNum = Number(aValue)
+  const bNum = Number(bValue)
+  if (Number.isFinite(aNum) && Number.isFinite(bNum))
+    return aNum === bNum ? 0 : aNum > bNum ? 1 : -1
+  return String(aValue).localeCompare(String(bValue), undefined, { numeric: true, sensitivity: 'base' })
+}
+
+const applyTemplateV2SourceOrder = (records, orderList) => {
+  if (!Array.isArray(orderList) || !orderList.length)
+    return records
+  const validOrders = orderList.filter(order => order && typeof order.field === 'string' && order.field.trim())
+  if (!validOrders.length)
+    return records
+  return [...records].sort((a, b) => {
+    for (const order of validOrders) {
+      const direction = String(order.direction || 'asc').toLowerCase() === 'desc' ? -1 : 1
+      const compared = compareTemplateV2OrderValues(
+        getTemplateV2ValueByPath(a, order.field),
+        getTemplateV2ValueByPath(b, order.field),
+      )
+      if (compared !== 0)
+        return compared * direction
+    }
+    return 0
+  })
+}
+
+const applyTemplateV2SourceOverrides = (items, sourceConfig, overrides, scope) => {
+  let records = Array.isArray(items) ? [...items] : []
+  const canonicalLookup = overrides?.canonicalLookup || sourceConfig?.canonicalLookup
+  const canonicalDocIds = getTemplateV2CanonicalDocIds(canonicalLookup, scope)
+  if (canonicalLookup && !canonicalDocIds.length)
+    return []
+  if (canonicalDocIds.length) {
+    const canonicalSet = new Set(canonicalDocIds.map(id => String(id)))
+    records = records.filter((record) => {
+      const recordDocId = getTemplateV2ValueByPath(record, 'docId') ?? getTemplateV2ValueByPath(record, 'id')
+      return canonicalSet.has(String(recordDocId ?? ''))
+    })
+  }
+  const mergedQueryItems = {
+    ...((sourceConfig?.queryItems && typeof sourceConfig.queryItems === 'object' && !Array.isArray(sourceConfig.queryItems)) ? sourceConfig.queryItems : {}),
+    ...((overrides?.queryItems && typeof overrides.queryItems === 'object' && !Array.isArray(overrides.queryItems)) ? overrides.queryItems : {}),
+  }
+  const hasQueryItems = Object.keys(mergedQueryItems).length > 0
+  const queryItems = hasQueryItems
+    ? mergedQueryItems
+    : {}
+  for (const [field, value] of Object.entries(queryItems)) {
+    const resolvedValue = resolveTemplateV2ParentToken(value, scope)
+    if (resolvedValue === undefined || resolvedValue === null || resolvedValue === '')
+      continue
+    records = records.filter(record => valuesMatchTemplateV2Query(getTemplateV2ValueByPath(record, field), resolvedValue))
+  }
+  records = applyTemplateV2SourceOrder(records, overrides?.order || sourceConfig?.order)
+  const limit = Number(overrides?.limit ?? sourceConfig?.limit)
+  if (Number.isFinite(limit) && limit > 0)
+    records = records.slice(0, Math.floor(limit))
+  return records
+}
+
+const resolveTemplateV2CmsForItems = (expression, scope, dataSources) => {
+  const sourceCall = parseTemplateV2SourceExpression(expression, scope)
+  if (sourceCall) {
+    const sourceConfig = dataSources?.[sourceCall.name] || {}
+    return applyTemplateV2SourceOverrides(sourceConfig.value, sourceConfig, sourceCall.overrides, scope)
+  }
+  return Array.isArray(resolveTemplateV2ScopedPath(String(expression || '').trim(), scope))
+    ? resolveTemplateV2ScopedPath(String(expression || '').trim(), scope)
+    : []
+}
+
+const createTemplateV2ChildScope = (scope, alias, entry) => {
+  const nextScope = {
+    ...(scope || {}),
+    [alias || 'item']: entry,
+  }
+  if (entry && typeof entry === 'object' && !Array.isArray(entry))
+    Object.assign(nextScope, entry)
+  return nextScope
+}
+
+const renderTemplateV2CmsSection = async (template, scope, dataSources, schema, renderOptions) => {
+  let output = String(template || '')
+  let forBlock = findNextTemplateV2ForBlock(output)
+  while (forBlock) {
+    const items = resolveTemplateV2CmsForItems(forBlock.expression, scope, dataSources).slice(0, 500)
+    const renderedItems = []
+    for (const entry of items) {
+      const childScope = createTemplateV2ChildScope(scope, forBlock.alias, entry)
+      renderedItems.push(await renderTemplateV2CmsSection(forBlock.innerTpl, childScope, dataSources, schema, renderOptions))
+    }
+    output = `${output.slice(0, forBlock.start)}${renderedItems.join('')}${output.slice(forBlock.end)}`
+    forBlock = findNextTemplateV2ForBlock(output)
+  }
+  return renderTemplateAsync(
+    output,
+    scope || {},
+    {},
+    {
+      ...renderOptions,
+      hydrateOptions: null,
+      dataSources,
+      schema,
+      templateVersion: 2,
+    },
+  )
+}
 
 const templateV2Block = computed(() => ({
   templateVersion: 2,
   template: props.template || props.content || '',
   values: templateV2Values.value,
   schema: normalizeTemplateV2Schema(props.schema),
-  dataSources: applyTemplateV2DataSourceMeta(props.dataSources, props.meta, templateV2RuntimeTokens.value),
+  dataSources: templateV2CmsDataSources.value,
 }))
 
 function normalizeConfigLiteral(str) {
@@ -390,9 +719,18 @@ watch(
 
     const renderToken = ++templateV2RenderToken
     try {
-      const result = await pageRender([block], theme.value || {}, '', templateV2HydrateOptions.value)
+      const result = await renderTemplateV2CmsSection(
+        block.template || '',
+        block.values || {},
+        block.dataSources || {},
+        block.schema || {},
+        {
+          theme: theme.value || {},
+          extraHtml: '',
+        },
+      )
       if (renderToken === templateV2RenderToken)
-        templateV2Html.value = result?.html || ''
+        templateV2Html.value = result || ''
     }
     catch {
       if (renderToken === templateV2RenderToken)
