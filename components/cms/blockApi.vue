@@ -105,6 +105,7 @@ const dataSourceToPreviewMetaConfig = (source) => {
 
   const cfg = {
     ...source,
+    type: 'array',
   }
 
   const collectionSource = source.type === 'collection' || source.collection || source.path || source.query || source.canonicalLookup
@@ -463,7 +464,8 @@ const collectionMetaToFetch = computed(() => {
       continue
     }
 
-    if (Array.isArray(mergedValues.value?.[field]))
+    const existingValue = mergedValues.value?.[field]
+    if (Array.isArray(existingValue) && existingValue.length > 0)
       continue
 
     nextMeta[field] = cfg
@@ -479,12 +481,12 @@ const hasCollectionMetaToFetch = computed(() => {
 const loadingRender = (content) => {
   const isLoading = anyPending.value
   if (isLoading) {
-    content = content.replaceAll('{{loading}}', '')
-    content = content.replaceAll('{{loaded}}', 'hidden')
+    content = content.replace(/\{\{\s*loading\s*\}\}/g, '')
+    content = content.replace(/\{\{\s*loaded\s*\}\}/g, 'hidden')
   }
   else {
-    content = content.replaceAll('{{loading}}', 'hidden')
-    content = content.replaceAll('{{loaded}}', '')
+    content = content.replace(/\{\{\s*loading\s*\}\}/g, 'hidden')
+    content = content.replace(/\{\{\s*loaded\s*\}\}/g, '')
   }
   return content
 }
@@ -541,7 +543,7 @@ const finalValues = computed(() => {
     :theme="props.theme"
     :content="loadingRender(props.content)"
     :template-version="props.templateVersion"
-    :template="props.template"
+    :template="loadingRender(props.template)"
     :schema="props.schema"
     :data-sources="props.dataSources"
     :site-id="props.siteId"

@@ -343,7 +343,8 @@ const applySchemaFormatter = (expression, schemaFormatters = {}, scopeAlias = 'i
   const formatter = schemaFormatters[path] || schemaFormatters[rootField]
   const alias = String(scopeAlias || '').trim()
   const qualifiedPath = (qualifyScope && alias && isSimpleFieldExpression(rawExpression)) ? `${alias}.${path}` : path
-  return formatter ? `${formatter}(${qualifiedPath})` : qualifiedPath
+  const outputPath = qualifyScope ? qualifiedPath : rawExpression
+  return formatter ? `${formatter}(${outputPath})` : outputPath
 }
 
 const legacyFieldToSchema = (type, cfg, field) => {
@@ -450,13 +451,28 @@ const buildDataSource = (cfg) => {
   return source
 }
 
+const escapeRegExp = (value) => {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+const rewriteAliasReferences = (content, fromAlias = '', toAlias = '') => {
+  let normalized = String(content || '')
+  if (fromAlias && toAlias && fromAlias !== toAlias) {
+    const escapedAlias = escapeRegExp(fromAlias)
+    normalized = normalized.replace(new RegExp(`\\b${escapedAlias}\\.`, 'g'), `${toAlias}.`)
+    normalized = normalized.replace(new RegExp(`\\{\\{\\s*${escapedAlias}\\s*\\}\\}`, 'g'), `{{ ${toAlias} }}`)
+  }
+  return normalized
+}
+
+const rewriteFieldExpression = (field, fromAlias = '', toAlias = '') => {
+  return rewriteAliasReferences(field, fromAlias, toAlias).trim()
+}
+
 const normalizeLegacyReferences = (content, fromAlias = '', toAlias = '', schemaFormatters = {}, scopeAlias = 'item', qualifyScope = false) => {
   let normalized = String(content || '')
 
-  if (fromAlias && toAlias && fromAlias !== toAlias) {
-    normalized = normalized.replace(new RegExp(`\\b${fromAlias}\\.`, 'g'), `${toAlias}.`)
-    normalized = normalized.replace(new RegExp(`\\{\\{\\s*${fromAlias}\\s*\\}\\}`, 'g'), `{{ ${toAlias} }}`)
-  }
+  normalized = rewriteAliasReferences(normalized, fromAlias, toAlias)
 
   normalized = normalized.replace(/\{\{\{\s*([^{}#/][^{}]*?)\s*\}\}\}/g, (_, expression) => `{{ ${applySchemaFormatter(expression, schemaFormatters, scopeAlias, qualifyScope)} }}`)
   normalized = normalized.replace(/\{\{\s*([^{}#/][^{}]*?)\s*\}\}/g, (_, expression) => `{{ ${applySchemaFormatter(expression, schemaFormatters, scopeAlias, qualifyScope)} }}`)
@@ -492,7 +508,7 @@ export const useCmsTemplateV2Conversion = () => {
         const cfg = parseJsonConfig(tag.rawConfig)
         if (!cfg) {
           warnings.push(`Could not parse ${tag.type} tag near offset ${tag.start}.`)
-          output += segment.slice(tag.start, tag.end)
+          output += normalizeLegacyReferences(segment.slice(tag.start, tag.end), options.rewriteFromAlias, options.rewriteToAlias, schemaFormatters, scopeAlias, false)
           cursor = tag.end
           continue
         }
@@ -543,25 +559,58 @@ export const useCmsTemplateV2Conversion = () => {
           else {
             const explicitAlias = String(tag.alias || cfg.as || '').trim()
             const alias = explicitAlias ? uniqueAlias(explicitAlias, usedAliases) : inferSubarrayAlias(field, usedAliases)
+            const bodyRewriteFromAlias = explicitAlias || scopeAlias
             const convertedBody = convertSegment(body, {
               scopeAlias: alias,
-              rewriteFromAlias: explicitAlias ? '' : scopeAlias,
-              rewriteToAlias: explicitAlias ? '' : alias,
+              rewriteFromAlias: bodyRewriteFromAlias,
+              rewriteToAlias: alias,
               schemaFormatters,
               qualifyScope: true,
             })
-            if (Number(cfg.limit) > 0)
-              warnings.push(`Review subarray limit ${cfg.limit} for "${field}"; v2 loop output was converted without inline slice syntax.`)
-            output += `{{#for ${alias} in ${field}}}${convertedBody}{{/for}}`
+            const fieldExpression = rewriteFieldExpression(field, options.rewriteFromAlias, options.rewriteToAlias)
+            const limit = Number(cfg.limit)
+            const hasLimit = Number.isFinite(limit) && limit > 0
+            const loopOptions = hasLimit
+              ? `, { limit: ${Math.floor(limit)} }`
+              : ''
+            output += `{{#for ${alias} in ${fieldExpression}${loopOptions}}}${convertedBody}{{/for}}`
           }
 
           cursor = closeTag.end
           continue
         }
 
+        if (type === 'entries') {
+          const closeTag = findLegacyCloseTag(segment, type, tag.end)
+          if (!closeTag) {
+            warnings.push(`Could not find closing tag for ${type} field "${cfg.field || ''}".`)
+            output += segment.slice(tag.start, tag.end)
+            cursor = tag.end
+            continue
+          }
+
+          const body = segment.slice(tag.end, closeTag.start)
+          const alias = String(tag.alias || cfg.as || '').trim()
+          if (alias)
+            usedAliases.add(alias)
+          const entriesRewriteFromAlias = alias ? 'item' : ''
+          const entriesRewriteToAlias = alias || ''
+          const convertedBody = convertSegment(body, {
+            scopeAlias: alias || scopeAlias,
+            rewriteFromAlias: entriesRewriteFromAlias,
+            rewriteToAlias: entriesRewriteToAlias,
+            schemaFormatters,
+            qualifyScope: false,
+          })
+          const openTag = normalizeLegacyReferences(segment.slice(tag.start, tag.end), options.rewriteFromAlias, options.rewriteToAlias, schemaFormatters, scopeAlias, false)
+          output += `${openTag}${convertedBody}${segment.slice(closeTag.start, closeTag.end)}`
+          cursor = closeTag.end
+          continue
+        }
+
         const field = String(cfg.field || '').trim()
         if (!field) {
-          output += segment.slice(tag.start, tag.end)
+          output += normalizeLegacyReferences(segment.slice(tag.start, tag.end), options.rewriteFromAlias, options.rewriteToAlias, schemaFormatters, scopeAlias, false)
           cursor = tag.end
           continue
         }

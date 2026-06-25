@@ -1217,11 +1217,14 @@ function mergeSyncedBlockMeta(currentMeta, existingMeta) {
     return nextMeta
 
   Object.entries(existingMeta).forEach(([key, value]) => {
-    if (!isPlainObject(value) || !isPlainObject(value.queryItems))
+    if (!isPlainObject(value))
       return
     if (!isPlainObject(nextMeta[key]))
       nextMeta[key] = {}
-    nextMeta[key].queryItems = edgeGlobal.dupObject(value.queryItems)
+    if (isPlainObject(value.queryItems))
+      nextMeta[key].queryItems = edgeGlobal.dupObject(value.queryItems)
+    if (Object.prototype.hasOwnProperty.call(value, 'limit'))
+      nextMeta[key].limit = edgeGlobal.dupObject(value.limit)
   })
 
   return nextMeta

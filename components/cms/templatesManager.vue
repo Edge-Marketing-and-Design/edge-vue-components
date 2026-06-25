@@ -191,7 +191,7 @@ const exportAllTemplates = async () => {
   const selectedDocIds = [...state.selectedTemplateDocIds].filter(docId => templatePagesCollection.value?.[docId])
   const files = selectedDocIds
     .sort((leftId, rightId) => String(leftId).localeCompare(String(rightId)))
-    .map((docId) => ({
+    .map(docId => ({
       suggestedName: `template-${docId}.json`,
       payload: {
         ...edgeGlobal.dupObject(templatePagesCollection.value?.[docId] || {}),
@@ -314,12 +314,21 @@ const resolveBlockForPreview = (block) => {
   const libraryBlock = block?.blockId ? blocksCollection.value?.[block.blockId] : null
   if (block.content || block.template) {
     const templateIsV2 = Number(block.templateVersion) === 2 || Number(libraryBlock?.templateVersion) === 2
+    const useLibraryDefinition = templateIsV2 && !!libraryBlock && typeof libraryBlock === 'object'
     return {
-      content: block.content || libraryBlock?.content || libraryBlock?.template || block.template || '',
+      content: useLibraryDefinition
+        ? (libraryBlock.content || libraryBlock.template || '')
+        : (block.content || libraryBlock?.content || libraryBlock?.template || block.template || ''),
       templateVersion: templateIsV2 ? 2 : 1,
-      template: block.template || libraryBlock?.template || '',
-      schema: (block.schema && Object.keys(block.schema).length) ? block.schema : (libraryBlock?.schema || {}),
-      dataSources: (block.dataSources && Object.keys(block.dataSources).length) ? block.dataSources : (libraryBlock?.dataSources || {}),
+      template: useLibraryDefinition
+        ? (libraryBlock.template || '')
+        : (block.template || libraryBlock?.template || ''),
+      schema: useLibraryDefinition
+        ? (libraryBlock.schema || {})
+        : ((block.schema && Object.keys(block.schema).length) ? block.schema : (libraryBlock?.schema || {})),
+      dataSources: useLibraryDefinition
+        ? (libraryBlock.dataSources || {})
+        : ((block.dataSources && Object.keys(block.dataSources).length) ? block.dataSources : (libraryBlock?.dataSources || {})),
       values: { ...(libraryBlock?.values || {}), ...(block.values || {}) },
       meta: { ...(libraryBlock?.meta || {}), ...(block.meta || {}) },
     }
@@ -373,6 +382,19 @@ const getTemplatePagePreviewKey = (docId) => {
   const siteId = String(selectedTemplatePreviewSiteId.value || 'no-site')
   const themeVersion = getThemePreviewVersion(themeCollection.value?.[themeId] || null)
   return `${String(docId || 'template-page')}:${siteId}:${themeId}:${themeVersion}`
+}
+
+const hashTemplatePreviewSignature = (value) => {
+  const input = JSON.stringify(value || {})
+  let hash = 0
+  for (let i = 0; i < input.length; i += 1)
+    hash = ((hash << 5) - hash + input.charCodeAt(i)) | 0
+  return Math.abs(hash).toString(36)
+}
+
+const getTemplatePreviewBlockRenderKey = (baseKey, pageDoc, blockRef, blockIdx) => {
+  const block = resolveTemplateBlockForPreview(pageDoc, blockRef)
+  return `${baseKey}:${blockIdx}:${hashTemplatePreviewSignature(block)}`
 }
 
 const getTemplatePageAllowedThemes = item => (Array.isArray(item?.allowedThemes) ? item.allowedThemes : [])
@@ -1200,7 +1222,7 @@ watch(themeCollection, () => {
                                 >
                                   <edge-cms-block-api
                                     v-if="resolveTemplateBlockForPreview(item, blockRef)"
-                                    :key="`${getTemplatePagePreviewKey(item.docId)}:${blockIdx}`"
+                                    :key="getTemplatePreviewBlockRenderKey(getTemplatePagePreviewKey(item.docId), item, blockRef, blockIdx)"
                                     :site-id="selectedTemplatePreviewSiteId"
                                     :content="resolveTemplateBlockForPreview(item, blockRef).content"
                                     :template-version="resolveTemplateBlockForPreview(item, blockRef).templateVersion"
@@ -1363,7 +1385,7 @@ watch(themeCollection, () => {
                                 >
                                   <edge-cms-block-api
                                     v-if="resolveTemplateBlockForPreview(template, blockRef)"
-                                    :key="`${getTemplatePagePreviewKey(template.docId)}:${blockIdx}`"
+                                    :key="getTemplatePreviewBlockRenderKey(getTemplatePagePreviewKey(template.docId), template, blockRef, blockIdx)"
                                     :site-id="selectedTemplatePreviewSiteId"
                                     :content="resolveTemplateBlockForPreview(template, blockRef).content"
                                     :template-version="resolveTemplateBlockForPreview(template, blockRef).templateVersion"

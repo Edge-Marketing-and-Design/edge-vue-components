@@ -79,7 +79,6 @@ const state = reactive({
   schemaWizardOriginalField: '',
   schemaWizardActiveItemFieldIndex: -1,
   schemaWizardActiveDefaultItemIndex: -1,
-  templateVersionTouched: false,
   v2DynamicContentDialogOpen: false,
   v2DynamicField: {
     selectedKey: '',
@@ -199,10 +198,8 @@ const isWorkingTemplateV2Doc = (doc) => {
     return false
   if (doc.templateConversion)
     return true
-  if (props.blockId === 'new')
-    return normalizeTemplateVersion(doc.templateVersion) === 2
-  if (state.templateVersionTouched)
-    return normalizeTemplateVersion(doc.templateVersion) === 2
+  if (normalizeTemplateVersion(doc.templateVersion) === 2)
+    return true
   return isSavedTemplateV2Block.value
 }
 
@@ -212,6 +209,24 @@ const getWorkingTemplateVersion = (doc) => {
 
 const hasLegacyInlineTags = (content) => {
   return /\{\{\{#[A-Za-z0-9_-]+\s*\{/.test(String(content || ''))
+}
+
+const hasLegacyInlineTagsInDoc = (doc) => {
+  return hasLegacyInlineTags(doc?.content) || hasLegacyInlineTags(doc?.template)
+}
+
+const hasTemplateV2Definitions = (doc) => {
+  const schemaKeys = (doc?.schema && typeof doc.schema === 'object' && !Array.isArray(doc.schema)) ? Object.keys(doc.schema) : []
+  const dataSourceKeys = (doc?.dataSources && typeof doc.dataSources === 'object' && !Array.isArray(doc.dataSources)) ? Object.keys(doc.dataSources) : []
+  return schemaKeys.length > 0 || dataSourceKeys.length > 0
+}
+
+const shouldAutoConvertTemplateV2Doc = (doc) => {
+  if (!doc || doc.templateConversion || !hasLegacyInlineTagsInDoc(doc))
+    return false
+  if (props.blockId === 'new')
+    return true
+  return normalizeTemplateVersion(doc.templateVersion) === 2 && !hasTemplateV2Definitions(doc)
 }
 
 const ensureTemplateV2Fields = (doc) => {
@@ -283,7 +298,7 @@ const notifyTemplateV2EditorError = (message) => {
 }
 
 const createTemplateV2DataSourceWizardDraft = () => ({
-  sourceName: 'items',
+  sourceName: '',
   type: 'collection',
   api: '',
   apiField: 'data',
@@ -370,6 +385,28 @@ const v2DataSourceControlOptionModeOptions = [
   { name: 'collection', title: 'Collection Options' },
 ]
 
+const normalizeSelectModelValue = (value) => {
+  return (typeof value === 'object' && value !== null) ? String(value.name || '').trim() : String(value || '').trim()
+}
+
+const updateV2DataSourceControlInput = (control, value) => {
+  if (!control)
+    return
+  const input = normalizeSelectModelValue(value) || 'text'
+  control.input = input === 'select' ? 'select' : 'text'
+  if (control.input !== 'select')
+    control.optionMode = 'manual'
+}
+
+const updateV2DataSourceControlOptionMode = (control, value) => {
+  if (!control)
+    return
+  const mode = normalizeSelectModelValue(value) === 'collection' ? 'collection' : 'manual'
+  control.optionMode = mode
+  if (mode === 'collection')
+    control.input = 'select'
+}
+
 const getV2DataSourceControlKeyLabel = (type) => {
   if (type === 'api')
     return 'Query String Key'
@@ -424,7 +461,11 @@ const resetTemplateV2DataSourceWizard = () => {
   state.dataSourceWizardKey += 1
 }
 
-const openTemplateV2DataSourceWizard = () => {
+const openTemplateV2DataSourceWizard = async () => {
+  state.dataSourceWizardOpen = false
+  state.dataSourceWizardDraft = null
+  state.dataSourceWizardKey += 1
+  await nextTick()
   resetTemplateV2DataSourceWizard()
   state.dataSourceWizardOpen = true
 }
@@ -1479,14 +1520,6 @@ const updateTemplateV2JsonSubfield = (target, field, value, errorKey, fallbackVa
   }
 }
 
-const syncWorkingTemplateContent = (workingDoc, value) => {
-  if (!workingDoc)
-    return
-  workingDoc.content = value
-  if (isWorkingTemplateV2Doc(workingDoc))
-    workingDoc.template = value
-}
-
 function normalizeForCompare(value) {
   if (Array.isArray(value))
     return value.map(normalizeForCompare)
@@ -1600,10 +1633,33 @@ const previewSurfaceClass = computed(() => getPreviewSurfaceClass(state.previewB
 
 const previewBlockTypes = computed(() => normalizeBlockTypes(state.editorWorkingDoc?.type))
 const previewNeedsPostContext = computed(() => previewBlockTypes.value.includes('Post'))
+const editorWorkingDocOverrides = computed(() => {
+  return state.editorWorkingDoc ? edgeGlobal.dupObject(state.editorWorkingDoc) : null
+})
+const getSelectedPreviewSiteContext = () => {
+  const siteId = String(edgeGlobal.edgeState.blockEditorSite || '').trim()
+  if (!siteId)
+    return null
+
+  const siteDoc = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[siteId]
+  if (!siteDoc || typeof siteDoc !== 'object' || Array.isArray(siteDoc))
+    return {
+      siteId,
+      docId: siteId,
+      id: siteId,
+    }
+
+  return {
+    ...edgeGlobal.dupObject(siteDoc),
+    siteId,
+    docId: siteDoc.docId || siteId,
+    id: siteDoc.id || siteId,
+  }
+}
 
 const loadPreviewRenderContext = async () => {
   if (!previewNeedsPostContext.value) {
-    state.previewRenderContext = null
+    state.previewRenderContext = getSelectedPreviewSiteContext()
     return
   }
 
@@ -1632,10 +1688,10 @@ const loadPreviewRenderContext = async () => {
     }
   }
   catch {
-    state.previewRenderContext = null
+    state.previewRenderContext = getSelectedPreviewSiteContext()
   }
 
-  state.previewRenderContext = null
+  state.previewRenderContext = getSelectedPreviewSiteContext()
 }
 
 onMounted(() => {
@@ -2361,7 +2417,7 @@ const buildPreviewBlock = (workingDoc, parsed) => {
   })
 
   return {
-    id: state.previewBlock?.id || 'preview',
+    id: 'preview',
     blockId: props.blockId,
     name: workingDoc?.name || state.previewBlock?.name || '',
     previewType: normalizePreviewType(workingDoc?.previewType),
@@ -2374,6 +2430,18 @@ const buildPreviewBlock = (workingDoc, parsed) => {
     meta: nextMeta,
     synced: !!workingDoc?.synced,
   }
+}
+
+function syncWorkingTemplateContent(workingDoc, value) {
+  if (!workingDoc)
+    return
+  workingDoc.content = value
+  if (isWorkingTemplateV2Doc(workingDoc))
+    workingDoc.template = value
+
+  const parsed = blockModel(value || '')
+  state.previewBlock = buildPreviewBlock(workingDoc, parsed)
+  state.previewSourceValues = edgeGlobal.dupObject(isWorkingTemplateV2Doc(workingDoc) ? {} : (parsed.values || {}))
 }
 
 const theme = computed(() => {
@@ -2423,10 +2491,7 @@ const editorDocUpdates = (workingDoc) => {
   if (workingDoc && props.blockId === 'new' && workingDoc.templateVersion === undefined)
     workingDoc.templateVersion = 2
   if (
-    workingDoc
-    && props.blockId === 'new'
-    && !workingDoc.templateConversion
-    && hasLegacyInlineTags(workingDoc.content)
+    shouldAutoConvertTemplateV2Doc(workingDoc)
   ) {
     convertWorkingDocToTemplateV2(workingDoc, { notify: false })
   }
@@ -2458,6 +2523,16 @@ const syncEditorStateFromBlockDoc = (doc) => {
     return
 
   const restoredDoc = edgeGlobal.dupObject(doc)
+  if (shouldAutoConvertTemplateV2Doc(restoredDoc)) {
+    const converted = convertLegacyBlockToTemplateV2(restoredDoc)
+    restoredDoc.templateVersion = 2
+    restoredDoc.template = converted.template
+    restoredDoc.content = converted.template
+    restoredDoc.schema = converted.schema
+    restoredDoc.dataSources = converted.dataSources
+    restoredDoc.values = undefined
+    restoredDoc.templateConversion = converted.conversion
+  }
   let normalizedTypes = normalizeBlockTypes(restoredDoc.type)
   if (!normalizedTypes.length)
     normalizedTypes = ['Page']
@@ -2585,6 +2660,7 @@ watch (sites, async (newSites) => {
     edgeGlobal.edgeState.blockEditorSite = newSites[0].docId
   else if (!newSites.length)
     edgeGlobal.edgeState.blockEditorSite = ''
+  await loadPreviewRenderContext()
   await nextTick()
   state.loading = false
 }, { immediate: true, deep: true })
@@ -2663,7 +2739,6 @@ function convertWorkingDocToTemplateV2(workingDoc, options = {}) {
       return acc
     }, {}),
   })
-  state.templateVersionTouched = true
   workingDoc.templateVersion = 2
   workingDoc.template = converted.template
   workingDoc.content = converted.template
@@ -3118,20 +3193,30 @@ const clearTemplateConversionAfterSave = async (payload) => {
     return
 
   const collectionPath = `${edgeGlobal.edgeState.organizationDocPath}/blocks`
-  const cleanedDoc = edgeGlobal.dupObject(savedDoc)
+  const currentStoredDoc = edgeFirebase.data?.[collectionPath]?.[docId] || {}
+  const cleanedDoc = edgeGlobal.dupObject({
+    ...currentStoredDoc,
+    ...(savedDoc || {}),
+    ...(state.workingDoc || {}),
+    ...(state.editorWorkingDoc || {}),
+  })
   delete cleanedDoc.templateConversion
   cleanedDoc.docId = docId
 
   try {
     await edgeFirebase.storeDoc(collectionPath, cleanedDoc)
-    if (state.editorWorkingDoc?.docId === docId)
+    if (state.editorWorkingDoc?.docId === docId) {
+      Object.assign(state.editorWorkingDoc, edgeGlobal.dupObject(cleanedDoc))
       delete state.editorWorkingDoc.templateConversion
-    if (state.workingDoc?.docId === docId)
+    }
+    if (state.workingDoc?.docId === docId) {
+      Object.assign(state.workingDoc, edgeGlobal.dupObject(cleanedDoc))
       delete state.workingDoc.templateConversion
+    }
     if (state.previewBlock?.blockId === docId || state.previewBlock?.id === docId)
       delete state.previewBlock.templateConversion
     if (edgeFirebase.data?.[collectionPath]?.[docId])
-      delete edgeFirebase.data[collectionPath][docId].templateConversion
+      edgeFirebase.data[collectionPath][docId] = edgeGlobal.dupObject(cleanedDoc)
   }
   catch {
     notifyError('Saved block, but could not clear conversion notes.')
@@ -3166,7 +3251,7 @@ const exportCurrentBlock = async () => {
       card-content-class="px-0 pb-0"
       :show-footer="false"
       :no-close-after-save="true"
-      :working-doc-overrides="state.workingDoc"
+      :working-doc-overrides="editorWorkingDocOverrides"
       @working-doc="editorDocUpdates"
       @unsaved-changes="handleUnsavedChanges"
       @saved="clearTemplateConversionAfterSave"
@@ -4261,7 +4346,7 @@ const exportCurrentBlock = async () => {
                   </DialogFooter>
                 </DialogContent>
               </edge-shad-dialog>
-              <edge-shad-dialog v-model="state.dataSourceWizardOpen">
+              <edge-shad-dialog :key="`data-source-dialog-${state.dataSourceWizardKey}`" v-model="state.dataSourceWizardOpen">
                 <DialogContent v-if="state.dataSourceWizardDraft" :key="state.dataSourceWizardKey" class="max-w-[860px]">
                   <DialogHeader>
                     <DialogTitle>{{ state.dataSourceWizardMode === 'edit' ? 'Edit Data Source' : 'Add Data Source' }}</DialogTitle>
@@ -4286,14 +4371,16 @@ const exportCurrentBlock = async () => {
                   <div v-if="state.dataSourceWizardStep === 1" class="space-y-4">
                     <div class="grid gap-3 md:grid-cols-2">
                       <edge-shad-input
+                        :key="`data-source-name-${state.dataSourceWizardKey}`"
                         v-model="state.dataSourceWizardDraft.sourceName"
-                        name="dataSourceWizardSourceName"
+                        :name="`dataSourceWizardSourceName-${state.dataSourceWizardKey}`"
                         label="Source Name"
                         placeholder="items"
                       />
                       <edge-shad-select
+                        :key="`data-source-type-${state.dataSourceWizardKey}`"
                         v-model="state.dataSourceWizardDraft.type"
-                        name="dataSourceWizardType"
+                        :name="`dataSourceWizardType-${state.dataSourceWizardKey}`"
                         label="Source Type"
                         :items="v2DataSourceTypeOptions"
                       />
@@ -4609,6 +4696,7 @@ const exportCurrentBlock = async () => {
                               :name="`wizardControlInput-${controlIndex}`"
                               label="Type"
                               :items="v2DataSourceControlTypeOptions"
+                              @update:model-value="updateV2DataSourceControlInput(control, $event)"
                             />
                             <edge-shad-button
                               type="button"
@@ -4637,6 +4725,7 @@ const exportCurrentBlock = async () => {
                               :name="`wizardControlOptionMode-${controlIndex}`"
                               label="Select Options"
                               :items="v2DataSourceControlOptionModeOptions"
+                              @update:model-value="updateV2DataSourceControlOptionMode(control, $event)"
                             />
                           </div>
                           <div v-if="control.input === 'select' && control.optionMode === 'collection'" class="mt-3 grid gap-3 md:grid-cols-3">
@@ -4646,18 +4735,28 @@ const exportCurrentBlock = async () => {
                               label="Options Collection"
                               placeholder="categories"
                             />
-                            <edge-shad-input
-                              v-model="control.optionsKey"
-                              :name="`wizardControlOptionsKey-${controlIndex}`"
-                              label="Label Field"
-                              placeholder="label"
-                            />
-                            <edge-shad-input
-                              v-model="control.optionsValue"
-                              :name="`wizardControlOptionsValue-${controlIndex}`"
-                              label="Value Field"
-                              placeholder="value"
-                            />
+                            <div class="space-y-1">
+                              <edge-shad-input
+                                v-model="control.optionsKey"
+                                :name="`wizardControlOptionsKey-${controlIndex}`"
+                                label="Label Field"
+                                placeholder="label"
+                              />
+                              <p class="text-xs text-slate-500 dark:text-slate-400">
+                                Field name from each record in the options collection to show as the dropdown label.
+                              </p>
+                            </div>
+                            <div class="space-y-1">
+                              <edge-shad-input
+                                v-model="control.optionsValue"
+                                :name="`wizardControlOptionsValue-${controlIndex}`"
+                                label="Value Field"
+                                placeholder="value"
+                              />
+                              <p class="text-xs text-slate-500 dark:text-slate-400">
+                                Field name from each record in the options collection to save as the selected value.
+                              </p>
+                            </div>
                           </div>
                           <div v-else-if="control.input === 'select'" class="mt-3 space-y-2">
                             <div
@@ -4775,7 +4874,7 @@ const exportCurrentBlock = async () => {
                 :menu-class="isWorkingTemplateV2Doc(slotProps.workingDoc) ? 'px-0 pt-0 pb-3 bg-transparent dark:bg-transparent border-b-0 rounded-none' : undefined"
                 language="handlebars"
                 name="content"
-                :enable-formatting="false"
+                :enable-formatting="!isWorkingTemplateV2Doc(slotProps.workingDoc)"
                 height="calc(100vh - 316px)"
                 class="mb-0 flex-1"
                 @update:model-value="syncWorkingTemplateContent(slotProps.workingDoc, $event)"
@@ -5777,6 +5876,7 @@ const exportCurrentBlock = async () => {
                       <a href="#arrays-query-flow" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Query Strategy</a>
                       <a href="#conditionals" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Conditionals</a>
                       <a href="#subarrays" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Subarrays</a>
+                      <a href="#plain-array-limits" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Array Limits</a>
                       <a href="#nested-data-sources" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Nested Data Sources</a>
                       <a href="#render-blocks" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Render Blocks</a>
                       <a href="#entries" class="px-2 py-1 rounded border border-border bg-background hover:bg-muted transition">Entries</a>
@@ -5819,6 +5919,7 @@ const exportCurrentBlock = async () => {
                       <div>Manual arrays show an Add Entry form, drag handles for sorting, and delete buttons.</div>
                       <div>Default Items are saved on the array input as <code>value</code>. They seed new uses of the block but are not the same as page-specific edited values.</div>
                       <div>Inside the loop, use the alias you chose in the Template, such as <code v-pre>{{ card.title }}</code>.</div>
+                      <div>Use an inline loop limit when only the first few items should render.</div>
                     </div>
                   </section>
 
@@ -6045,12 +6146,31 @@ const exportCurrentBlock = async () => {
                     </p>
                   </section>
 
+                  <section id="plain-array-limits" class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Plain Array Limits
+                    </h3>
+                    <p class="text-sm text-foreground">
+                      Use an inline limit when the list is already on the current item or Input value and you only want to render the first few rows.
+                    </p>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{#for child in card.children, { limit: 3 }}}
+  &lt;div&gt;{{ child.title }}&lt;/div&gt;
+{{/for}}</code></pre>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{#for menuItem in site.menuItems, { limit: 5 }}}
+  &lt;a href="{{ menuItem.url }}"&gt;{{ menuItem.name }}&lt;/a&gt;
+{{/for}}</code></pre>
+                    <div class="text-sm text-foreground space-y-1">
+                      <div>This is for plain arrays already available in the current Template scope.</div>
+                      <div>Data Source loops can also use limits, but those limits usually belong on the Data Source itself or in the <code>source(...)</code> override.</div>
+                    </div>
+                  </section>
+
                   <section id="nested-data-sources" class="space-y-3">
                     <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                       Nested Data Sources
                     </h3>
                     <p class="text-sm text-foreground">
-                      Use a nested Data Source when the inner list needs a separate API or collection fetch. Pass the value from the outer loop into the nested <code>source(...)</code> call, and put the result limit on the nested Data Source.
+                      Use a nested Data Source when the inner list needs a separate API or collection fetch. Pass the value from the outer loop into the nested <code>source(...)</code> call, and put normal result limits on the nested Data Source or source override.
                     </p>
                     <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{#for author in source("authors")}}
   &lt;article&gt;
@@ -6088,7 +6208,7 @@ const exportCurrentBlock = async () => {
                       <div>Use normal subarray loops when the nested list is already on the current item, such as <code>author.links</code>.</div>
                       <div>Use nested Data Sources when the nested list must be fetched separately.</div>
                       <div>The scoped <code>queryItems</code> passed in the Template narrows the nested source for the current outer item.</div>
-                      <div>The nested source <code>limit</code> stays in <code>dataSources</code>, so it is managed with the source instead of hidden inside the loop.</div>
+                      <div>The nested source <code>limit</code> can stay in <code>dataSources</code>, or be passed inline when the limit depends on the loop context.</div>
                     </div>
                   </section>
 

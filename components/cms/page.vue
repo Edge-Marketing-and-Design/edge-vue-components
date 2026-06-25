@@ -1943,11 +1943,14 @@ function mergeSyncedBlockMeta(currentMeta, existingMeta) {
     return nextMeta
 
   Object.entries(existingMeta).forEach(([key, value]) => {
-    if (!isObjectRecord(value) || !isObjectRecord(value.queryItems))
+    if (!isObjectRecord(value))
       return
     if (!isObjectRecord(nextMeta[key]))
       nextMeta[key] = {}
-    nextMeta[key].queryItems = edgeGlobal.dupObject(value.queryItems)
+    if (isObjectRecord(value.queryItems))
+      nextMeta[key].queryItems = edgeGlobal.dupObject(value.queryItems)
+    if (Object.prototype.hasOwnProperty.call(value, 'limit'))
+      nextMeta[key].limit = edgeGlobal.dupObject(value.limit)
   })
 
   return nextMeta

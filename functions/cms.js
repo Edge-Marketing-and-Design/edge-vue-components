@@ -1904,6 +1904,7 @@ const collectSyncedBlocks = (content, postContent) => {
 }
 
 const BLOCK_META_EXCLUDE_KEYS = new Set(['limit'])
+const BLOCK_DEFINITION_SYNC_FIELDS = ['content', 'template', 'templateVersion', 'schema', 'dataSources', 'blockUpdatedAt']
 
 const updateBlocksInArray = (blocks, blockId, beforeData, afterData) => {
   let touched = false
@@ -1913,8 +1914,12 @@ const updateBlocksInArray = (blocks, blockId, beforeData, afterData) => {
     if (block?.blockId !== blockId)
       continue
 
-    if (afterData.content !== undefined)
-      block.content = afterData.content
+    for (const field of BLOCK_DEFINITION_SYNC_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(afterData, field))
+        block[field] = cloneValue(afterData[field])
+      else if (field !== 'content')
+        delete block[field]
+    }
 
     block.meta = block.meta || {}
     const srcMeta = afterMeta

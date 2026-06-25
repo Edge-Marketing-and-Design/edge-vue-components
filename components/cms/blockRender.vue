@@ -214,8 +214,6 @@ const templateV2CmsDataSources = computed(() => {
     }, {})
 })
 
-const TEMPLATE_V2_FOR_TAG_RE = /\{\{\s*(?:#for\s+(?:([A-Za-z_][A-Za-z0-9_]*)\s+in\s+)?([\s\S]*?)|\/for)\s*\}\}/g
-
 const getTemplateV2ValueByPath = (source, path) => {
   if (!path || typeof path !== 'string')
     return source
@@ -224,6 +222,61 @@ const getTemplateV2ValueByPath = (source, path) => {
       return undefined
     return acc[key]
   }, source)
+}
+
+const looksLikeTemplateV2ApiRecord = (value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return false
+  return ['id', 'docId', 'rupid', 'property_id', 'display_address'].some(key => Object.prototype.hasOwnProperty.call(value, key))
+}
+
+const normalizeTemplateV2ApiArrayData = (data) => {
+  if (Array.isArray(data))
+    return data
+  if (!data || typeof data !== 'object')
+    return []
+  if (looksLikeTemplateV2ApiRecord(data))
+    return [data]
+  const values = Object.values(data)
+  if (values.length && values.every(item => item && typeof item === 'object' && !Array.isArray(item)))
+    return values
+  return [data]
+}
+
+const buildTemplateV2ApiUrl = (base, query, queryItems = {}) => {
+  const safeBase = String(base || '')
+  const hashIndex = safeBase.indexOf('#')
+  const hash = hashIndex !== -1 ? safeBase.slice(hashIndex) : ''
+  const baseWithoutHash = hashIndex !== -1 ? safeBase.slice(0, hashIndex) : safeBase
+  const questionIndex = baseWithoutHash.indexOf('?')
+  const basePath = questionIndex === -1 ? baseWithoutHash : baseWithoutHash.slice(0, questionIndex)
+  const baseQuery = questionIndex === -1 ? '' : baseWithoutHash.slice(questionIndex + 1)
+  const params = new URLSearchParams(baseQuery)
+  const templateQuery = typeof query === 'string' ? query.trim() : ''
+  if (templateQuery) {
+    const cleaned = templateQuery.startsWith('?') ? templateQuery.slice(1) : templateQuery
+    if (cleaned) {
+      const templateParams = new URLSearchParams(cleaned)
+      for (const [key, value] of templateParams.entries())
+        params.set(key, value)
+    }
+  }
+
+  for (const [key, value] of Object.entries(queryItems || {})) {
+    if (value === undefined || value === null || value === '') {
+      params.delete(key)
+      continue
+    }
+    params.delete(key)
+    const values = Array.isArray(value) ? value : [value]
+    values.forEach((item) => {
+      if (item !== undefined && item !== null && item !== '')
+        params.append(key, String(item))
+    })
+  }
+
+  const paramString = params.toString()
+  return `${basePath}${paramString ? `?${paramString}` : ''}${hash}`
 }
 
 const splitTemplateV2InlineArgs = (input) => {
@@ -372,32 +425,138 @@ const parseTemplateV2SourceExpression = (expression, scope) => {
   return { name, overrides }
 }
 
+const replaceTemplateLoadingStateTokens = (template, state = 'loaded') => {
+  const loadingClass = state === 'loading' ? '' : 'hidden'
+  const loadedClass = state === 'loaded' ? '' : 'hidden'
+  return String(template || '')
+    .replace(/\{\{\s*loading\s*\}\}/g, loadingClass)
+    .replace(/\{\{\s*loaded\s*\}\}/g, loadedClass)
+}
+
+const readTemplateV2ForTagAt = (input, start) => {
+  if (!input.startsWith('{{', start))
+    return null
+
+  let cursor = start + 2
+  while (/\s/.test(input[cursor] || ''))
+    cursor += 1
+
+  if (input.startsWith('/for', cursor)) {
+    const close = input.indexOf('}}', cursor + 4)
+    if (close === -1)
+      return null
+    return {
+      start,
+      end: close + 2,
+      isOpen: false,
+    }
+  }
+
+  if (!input.startsWith('#for', cursor))
+    return null
+
+  const expressionStart = cursor + 4
+  let quote = null
+  let escape = false
+  let braceDepth = 0
+  let bracketDepth = 0
+  let parenDepth = 0
+
+  for (let i = expressionStart; i < input.length; i += 1) {
+    const ch = input[i]
+
+    if (quote) {
+      if (escape) {
+        escape = false
+        continue
+      }
+      if (ch === '\\') {
+        escape = true
+        continue
+      }
+      if (ch === quote)
+        quote = null
+      continue
+    }
+
+    if (ch === '\'' || ch === '"') {
+      quote = ch
+      continue
+    }
+
+    if (ch === '}' && input[i + 1] === '}' && braceDepth === 0 && bracketDepth === 0 && parenDepth === 0) {
+      const rawExpression = input.slice(expressionStart, i).trim()
+      const match = rawExpression.match(/^(?:([A-Za-z_][A-Za-z0-9_]*)\s+in\s+)?([\s\S]+)$/)
+      if (!match || !match[2])
+        return null
+      return {
+        start,
+        end: i + 2,
+        isOpen: true,
+        alias: match[1] || 'item',
+        expression: match[2],
+      }
+    }
+
+    if (ch === '{')
+      braceDepth += 1
+    else if (ch === '}' && braceDepth > 0)
+      braceDepth -= 1
+    else if (ch === '[')
+      bracketDepth += 1
+    else if (ch === ']' && bracketDepth > 0)
+      bracketDepth -= 1
+    else if (ch === '(')
+      parenDepth += 1
+    else if (ch === ')' && parenDepth > 0)
+      parenDepth -= 1
+  }
+
+  return null
+}
+
+const readNextTemplateV2ForTag = (input, from = 0) => {
+  let cursor = from
+  while (cursor < input.length) {
+    const start = input.indexOf('{{', cursor)
+    if (start === -1)
+      return null
+    const tag = readTemplateV2ForTagAt(input, start)
+    if (tag)
+      return tag
+    cursor = start + 2
+  }
+  return null
+}
+
 const findNextTemplateV2ForBlock = (input) => {
-  const tagRe = new RegExp(TEMPLATE_V2_FOR_TAG_RE.source, 'g')
-  const open = tagRe.exec(input)
-  if (!open || !open[2])
+  const open = readNextTemplateV2ForTag(input, 0)
+  if (!open?.isOpen || !open.expression)
     return null
 
   let depth = 1
-  let close = tagRe.exec(input)
+  let cursor = open.end
+  let close = readNextTemplateV2ForTag(input, cursor)
   while (close) {
-    if (close[2]) {
+    if (close.isOpen) {
       depth += 1
-      close = tagRe.exec(input)
+      cursor = close.end
+      close = readNextTemplateV2ForTag(input, cursor)
       continue
     }
 
     depth -= 1
     if (depth === 0) {
       return {
-        start: open.index,
-        end: close.index + close[0].length,
-        alias: open[1] || 'item',
-        expression: open[2],
-        innerTpl: input.slice(open.index + open[0].length, close.index),
+        start: open.start,
+        end: close.end,
+        alias: open.alias || 'item',
+        expression: open.expression,
+        innerTpl: input.slice(open.end, close.start),
       }
     }
-    close = tagRe.exec(input)
+    cursor = close.end
+    close = readNextTemplateV2ForTag(input, cursor)
   }
   return null
 }
@@ -418,6 +577,15 @@ const resolveTemplateV2ParentToken = (value, scope) => {
   if (parentMatch)
     return getTemplateV2ValueByPath(scope, parentMatch[1])
   return value
+}
+
+const resolveTemplateV2ScopedQueryItems = (queryItems, scope) => {
+  if (!queryItems || typeof queryItems !== 'object' || Array.isArray(queryItems))
+    return {}
+  return Object.entries(queryItems).reduce((acc, [field, value]) => {
+    acc[field] = resolveTemplateV2ParentToken(value, scope)
+    return acc
+  }, {})
 }
 
 const getTemplateV2CanonicalDocIds = (canonicalLookup, scope) => {
@@ -500,15 +668,78 @@ const applyTemplateV2SourceOverrides = (items, sourceConfig, overrides, scope) =
   return records
 }
 
-const resolveTemplateV2CmsForItems = (expression, scope, dataSources) => {
+const fetchTemplateV2ApiSource = async (sourceConfig, overrides, scope, renderOptions = {}) => {
+  if (!sourceConfig?.api)
+    return null
+
+  const mergedQueryItems = {
+    ...resolveTemplateV2ScopedQueryItems(sourceConfig.queryItems, scope),
+    ...resolveTemplateV2ScopedQueryItems(overrides?.queryItems, scope),
+  }
+  const url = buildTemplateV2ApiUrl(
+    sourceConfig.api,
+    overrides?.apiQuery ?? sourceConfig.apiQuery ?? '',
+    mergedQueryItems,
+  )
+  const apiField = String(overrides?.apiField || sourceConfig.apiField || '')
+  const cache = renderOptions.templateV2ApiRequestCache || (renderOptions.templateV2ApiRequestCache = new Map())
+  const cacheKey = JSON.stringify({ url, apiField })
+  if (cache.has(cacheKey))
+    return cache.get(cacheKey)
+
+  const load = (async () => {
+    try {
+      const json = await $fetch(url, { method: 'GET' })
+      let records = normalizeTemplateV2ApiArrayData(getTemplateV2ValueByPath(json, apiField))
+      records = applyTemplateV2SourceOrder(records, overrides?.order || sourceConfig?.order)
+      const limit = Number(overrides?.limit ?? sourceConfig?.limit)
+      if (Number.isFinite(limit) && limit > 0)
+        records = records.slice(0, Math.floor(limit))
+      return records
+    }
+    catch {
+      return []
+    }
+  })()
+  cache.set(cacheKey, load)
+  return load
+}
+
+const parseTemplateV2LoopExpression = (expression, scope) => {
+  const parts = splitTemplateV2InlineArgs(String(expression || ''))
+  if (parts.length < 2)
+    return { expression: String(expression || '').trim(), options: {} }
+
+  const options = parseTemplateV2ScopedObjectLiteral(parts[parts.length - 1] || '', scope)
+  if (!options)
+    return { expression: String(expression || '').trim(), options: {} }
+
+  return {
+    expression: parts.slice(0, -1).join(', ').trim(),
+    options,
+  }
+}
+
+const resolveTemplateV2CmsForItems = async (expression, scope, dataSources, renderOptions) => {
   const sourceCall = parseTemplateV2SourceExpression(expression, scope)
   if (sourceCall) {
     const sourceConfig = dataSources?.[sourceCall.name] || {}
+    if (sourceConfig?.api) {
+      const apiItems = await fetchTemplateV2ApiSource(sourceConfig, sourceCall.overrides, scope, renderOptions)
+      if (apiItems)
+        return apiItems
+    }
     return applyTemplateV2SourceOverrides(sourceConfig.value, sourceConfig, sourceCall.overrides, scope)
   }
-  return Array.isArray(resolveTemplateV2ScopedPath(String(expression || '').trim(), scope))
-    ? resolveTemplateV2ScopedPath(String(expression || '').trim(), scope)
-    : []
+  const loopExpression = parseTemplateV2LoopExpression(expression, scope)
+  const resolved = resolveTemplateV2ScopedPath(loopExpression.expression, scope)
+  if (!Array.isArray(resolved))
+    return []
+
+  const limit = Number(loopExpression.options?.limit)
+  if (Number.isFinite(limit) && limit > 0)
+    return resolved.slice(0, Math.floor(limit))
+  return resolved
 }
 
 const createTemplateV2ChildScope = (scope, alias, entry) => {
@@ -522,10 +753,10 @@ const createTemplateV2ChildScope = (scope, alias, entry) => {
 }
 
 const renderTemplateV2CmsSection = async (template, scope, dataSources, schema, renderOptions) => {
-  let output = String(template || '')
+  let output = replaceTemplateLoadingStateTokens(template, 'loaded')
   let forBlock = findNextTemplateV2ForBlock(output)
   while (forBlock) {
-    const items = resolveTemplateV2CmsForItems(forBlock.expression, scope, dataSources).slice(0, 500)
+    const items = (await resolveTemplateV2CmsForItems(forBlock.expression, scope, dataSources, renderOptions)).slice(0, 500)
     const renderedItems = []
     for (const entry of items) {
       const childScope = createTemplateV2ChildScope(scope, forBlock.alias, entry)

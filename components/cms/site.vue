@@ -1789,12 +1789,21 @@ const resolveBlockForPreview = (block) => {
   }
   if (block.content || block.template) {
     const templateIsV2 = Number(block.templateVersion) === 2 || Number(libraryBlock?.templateVersion) === 2
+    const useLibraryDefinition = templateIsV2 && hasPreviewObjectEntries(libraryBlock)
     return {
-      content: block.content || libraryBlock?.content || libraryBlock?.template || block.template || '',
+      content: useLibraryDefinition
+        ? (libraryBlock.content || libraryBlock.template || '')
+        : (block.content || libraryBlock?.content || libraryBlock?.template || block.template || ''),
       templateVersion: templateIsV2 ? 2 : 1,
-      template: block.template || libraryBlock?.template || '',
-      schema: hasPreviewObjectEntries(block.schema) ? block.schema : (libraryBlock?.schema || {}),
-      dataSources: hasPreviewObjectEntries(block.dataSources) ? block.dataSources : (libraryBlock?.dataSources || {}),
+      template: useLibraryDefinition
+        ? (libraryBlock.template || '')
+        : (block.template || libraryBlock?.template || ''),
+      schema: useLibraryDefinition
+        ? (libraryBlock.schema || {})
+        : (hasPreviewObjectEntries(block.schema) ? block.schema : (libraryBlock?.schema || {})),
+      dataSources: useLibraryDefinition
+        ? (libraryBlock.dataSources || {})
+        : (hasPreviewObjectEntries(block.dataSources) ? block.dataSources : (libraryBlock?.dataSources || {})),
       values: { ...(libraryBlock?.values || {}), ...(block.values || {}) },
       meta: { ...(libraryBlock?.meta || {}), ...(block.meta || {}) },
     }
@@ -1933,6 +1942,11 @@ const createPreviewSignatureHash = (value) => {
   for (let index = 0; index < input.length; index++)
     hash = ((hash << 5) + hash) ^ input.charCodeAt(index)
   return String(hash >>> 0)
+}
+
+const getPagePreviewBlockRenderKey = (baseKey, pageDoc, blockRef, blockIdx) => {
+  const block = resolveTemplateBlockForPreview(pageDoc, blockRef)
+  return `${baseKey}:${blockIdx}:${createPreviewSignatureHash(block || {})}`
 }
 
 const getSitePagePreviewBlockSignature = (pageDoc) => {
@@ -4118,7 +4132,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                                   >
                                     <edge-cms-block-api
                                       v-if="resolveTemplateBlockForPreview(item, blockRef)"
-                                      :key="`${getTemplatePagePreviewKey(item.docId)}:${blockIdx}`"
+                                      :key="getPagePreviewBlockRenderKey(getTemplatePagePreviewKey(item.docId), item, blockRef, blockIdx)"
                                       :site-id="selectedTemplatePreviewSiteId"
                                       :content="resolveTemplateBlockForPreview(item, blockRef).content"
                                       :template-version="resolveTemplateBlockForPreview(item, blockRef).templateVersion"
@@ -4778,7 +4792,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                                         >
                                           <edge-cms-block-api
                                             v-if="resolveTemplateBlockForPreview(item, blockRef)"
-                                            :key="`${getSitePagePreviewKey(item.docId)}:${blockIdx}`"
+                                            :key="getPagePreviewBlockRenderKey(getSitePagePreviewKey(item.docId), item, blockRef, blockIdx)"
                                             :site-id="props.site"
                                             :content="resolveTemplateBlockForPreview(item, blockRef).content"
                                             :template-version="resolveTemplateBlockForPreview(item, blockRef).templateVersion"

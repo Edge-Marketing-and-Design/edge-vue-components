@@ -592,10 +592,44 @@ const selectedPreviewTheme = computed(() => {
   const selectedThemeId = selectedPreviewThemeId.value
   return parsedThemesById.value?.[selectedThemeId] || parsedThemesById.value?.[firstThemeId.value] || null
 })
-const getPreviewSelectionKey = (docId) => {
+const hashPreviewSignature = (value) => {
+  const input = String(value || '')
+  let hash = 0
+  for (let i = 0; i < input.length; i += 1)
+    hash = ((hash << 5) - hash + input.charCodeAt(i)) | 0
+  return Math.abs(hash).toString(36)
+}
+const getBlockPreviewContent = (block) => {
+  if (Number(block?.templateVersion) === 2)
+    return block?.template || block?.content || ''
+  return block?.content || block?.template || ''
+}
+const hasBlockPreviewContent = block => String(getBlockPreviewContent(block) || '').trim().length > 0
+const getBlockPreviewSignature = (block) => {
+  if (!block || typeof block !== 'object')
+    return 'empty'
+  try {
+    return hashPreviewSignature(JSON.stringify([
+      block.templateVersion,
+      block.content,
+      block.template,
+      block.schema,
+      block.dataSources,
+      block.values,
+      block.meta,
+      block.previewType,
+    ]))
+  }
+  catch {
+    return hashPreviewSignature(`${block.templateVersion || ''}:${getBlockPreviewContent(block)}:${block.previewType || ''}`)
+  }
+}
+const getPreviewSelectionKey = (docId, block = null, suffix = '') => {
   const themeId = String(selectedPreviewThemeId.value || 'no-theme')
   const siteId = String(blockPreviewSiteId.value || 'no-site')
-  return `${String(docId || 'preview')}:${siteId}:${themeId}`
+  const signature = getBlockPreviewSignature(block)
+  const suffixPart = suffix ? `:${suffix}` : ''
+  return `${String(docId || 'preview')}:${siteId}:${themeId}:${signature}${suffixPart}`
 }
 
 function resetVisibleBlockPreviews() {
@@ -1450,16 +1484,16 @@ const handleBlockImport = async (event) => {
                     </edge-shad-button>
                   </div>
                   <div
-                    v-if="item.content && shouldRenderBlockPreviews"
+                    v-if="hasBlockPreviewContent(item) && shouldRenderBlockPreviews"
                     class="block-preview"
                     :class="previewSurfaceClass(item.previewType)"
                   >
                     <div class="scale-wrapper">
                       <div class="scale-inner scale p-4 block-list-preview-content">
                         <edge-cms-block-api
-                          :key="getPreviewSelectionKey(item.docId)"
+                          :key="getPreviewSelectionKey(item.docId, item)"
                           :site-id="blockPreviewSiteId"
-                          :content="item.content"
+                          :content="getBlockPreviewContent(item)"
                           :template-version="item.templateVersion"
                           :template="item.template"
                           :schema="item.schema"
@@ -1475,7 +1509,7 @@ const handleBlockImport = async (event) => {
                     </div>
                     <div class="preview-overlay" />
                   </div>
-                  <div v-else-if="item.content" class="block-preview-empty" :class="previewSurfaceClass(item.previewType)">
+                  <div v-else-if="hasBlockPreviewContent(item)" class="block-preview-empty" :class="previewSurfaceClass(item.previewType)">
                     Filter to 10 or fewer blocks to see previews.
                   </div>
                   <div v-else class="block-preview-empty" :class="previewSurfaceClass(item.previewType)">
@@ -1639,13 +1673,13 @@ const handleBlockImport = async (event) => {
                           {{ template.docId === BLANK_BLOCK_TEMPLATE_ID ? 'Blank' : 'Template' }}
                         </span>
                       </div>
-                      <div v-if="template.content" class="block-preview" :class="previewSurfaceClass(template.previewType)">
+                      <div v-if="hasBlockPreviewContent(template)" class="block-preview" :class="previewSurfaceClass(template.previewType)">
                         <div class="scale-wrapper">
                           <div class="scale-inner scale p-4 block-list-preview-content">
                             <edge-cms-block-api
-                              :key="getPreviewSelectionKey(getTemplatePreviewKey(template.docId))"
+                              :key="getPreviewSelectionKey(getTemplatePreviewKey(template.docId), template)"
                               :site-id="blockPreviewSiteId"
-                              :content="template.content"
+                              :content="getBlockPreviewContent(template)"
                               :template-version="template.templateVersion"
                               :template="template.template"
                               :schema="template.schema"
@@ -1659,8 +1693,8 @@ const handleBlockImport = async (event) => {
                             />
                             <edge-cms-block-render
                               v-if="!state.blocksLoaded.includes(getTemplatePreviewKey(template.docId))"
-                              :key="`${getPreviewSelectionKey(getTemplatePreviewKey(template.docId))}:fallback`"
-                              :content="loadingRender(template.content)"
+                              :key="getPreviewSelectionKey(getTemplatePreviewKey(template.docId), template, 'fallback')"
+                              :content="loadingRender(getBlockPreviewContent(template))"
                               :template-version="template.templateVersion"
                               :template="template.template"
                               :schema="template.schema"
@@ -1702,13 +1736,13 @@ const handleBlockImport = async (event) => {
                         <span class="truncate font-semibold">{{ block.name || block.docId }}</span>
                         <span class="text-[10px] uppercase tracking-wide text-muted-foreground">Duplicate</span>
                       </div>
-                      <div v-if="block.content" class="block-preview" :class="previewSurfaceClass(block.previewType)">
+                      <div v-if="hasBlockPreviewContent(block)" class="block-preview" :class="previewSurfaceClass(block.previewType)">
                         <div class="scale-wrapper">
                           <div class="scale-inner scale p-4 block-list-preview-content">
                             <edge-cms-block-api
-                              :key="`${getPreviewSelectionKey(block.docId)}:existing-picker`"
+                              :key="getPreviewSelectionKey(block.docId, block, 'existing-picker')"
                               :site-id="blockPreviewSiteId"
-                              :content="block.content"
+                              :content="getBlockPreviewContent(block)"
                               :template-version="block.templateVersion"
                               :template="block.template"
                               :schema="block.schema"
@@ -1722,8 +1756,8 @@ const handleBlockImport = async (event) => {
                             />
                             <edge-cms-block-render
                               v-if="!state.blocksLoaded.includes(`existing:${block.docId}`)"
-                              :key="`${getPreviewSelectionKey(block.docId)}:existing-picker:fallback`"
-                              :content="loadingRender(block.content)"
+                              :key="getPreviewSelectionKey(block.docId, block, 'existing-picker:fallback')"
+                              :content="loadingRender(getBlockPreviewContent(block))"
                               :template-version="block.templateVersion"
                               :template="block.template"
                               :schema="block.schema"
