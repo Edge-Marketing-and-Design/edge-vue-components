@@ -224,6 +224,8 @@ const schemas = {
     trackingFacebookPixel: z.string().optional(),
     trackingGoogleAnalytics: z.string().optional(),
     trackingAdroll: z.string().optional(),
+    trackingConsentEnabled: z.boolean().optional(),
+    trackingConsentMessage: z.string().optional(),
     sureFeedURL: z.string().optional(),
     socialFacebook: z.string().optional(),
     socialInstagram: z.string().optional(),
@@ -1275,7 +1277,8 @@ onBeforeMount(async () => {
 
 const isSiteDiff = computed(() => {
   const publishedSite = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`]?.[props.site]
-  const defaultRestrictedContent = createSiteSettingsDefaults().restrictedContent || {}
+  const defaultSiteSettings = createSiteSettingsDefaults()
+  const defaultRestrictedContent = defaultSiteSettings.restrictedContent || {}
   if (!publishedSite && siteData.value) {
     return true
   }
@@ -1305,6 +1308,8 @@ const isSiteDiff = computed(() => {
       trackingFacebookPixel: publishedSite.trackingFacebookPixel,
       trackingGoogleAnalytics: publishedSite.trackingGoogleAnalytics,
       trackingAdroll: publishedSite.trackingAdroll,
+      trackingConsentEnabled: publishedSite.trackingConsentEnabled !== false,
+      trackingConsentMessage: publishedSite.trackingConsentMessage || defaultSiteSettings.trackingConsentMessage,
       sureFeedURL: publishedSite.sureFeedURL,
       socialFacebook: publishedSite.socialFacebook,
       socialInstagram: publishedSite.socialInstagram,
@@ -1336,6 +1341,8 @@ const isSiteDiff = computed(() => {
       trackingFacebookPixel: siteData.value.trackingFacebookPixel,
       trackingGoogleAnalytics: siteData.value.trackingGoogleAnalytics,
       trackingAdroll: siteData.value.trackingAdroll,
+      trackingConsentEnabled: siteData.value.trackingConsentEnabled !== false,
+      trackingConsentMessage: siteData.value.trackingConsentMessage || defaultSiteSettings.trackingConsentMessage,
       sureFeedURL: siteData.value.sureFeedURL,
       socialFacebook: siteData.value.socialFacebook,
       socialInstagram: siteData.value.socialInstagram,
@@ -1372,6 +1379,8 @@ const SITE_SETTINGS_DIFF_FIELDS = [
   { key: 'trackingFacebookPixel', label: 'Facebook Pixel' },
   { key: 'trackingGoogleAnalytics', label: 'Google Analytics' },
   { key: 'trackingAdroll', label: 'Adroll' },
+  { key: 'trackingConsentEnabled', label: 'Require Tracking Consent', format: 'boolean' },
+  { key: 'trackingConsentMessage', label: 'Tracking Consent Message' },
   { key: 'sureFeedURL', label: 'SureFeed URL' },
   { key: 'socialFacebook', label: 'Facebook' },
   { key: 'socialInstagram', label: 'Instagram' },
@@ -1428,15 +1437,24 @@ const summarizeSiteSettingsValue = (value, format = '') => {
 const siteSettingsDiffDetails = computed(() => {
   const base = publishedSiteSettings.value || {}
   const compare = siteData.value || {}
+  const defaultSiteSettings = createSiteSettingsDefaults()
   const details = []
 
   SITE_SETTINGS_DIFF_FIELDS.forEach((field) => {
-    const baseValue = field.key === 'contactSpam'
+    let baseValue = field.key === 'contactSpam'
       ? contactSpamDiffValue(base)
       : base?.[field.key]
-    const compareValue = field.key === 'contactSpam'
+    let compareValue = field.key === 'contactSpam'
       ? contactSpamDiffValue(compare)
       : compare?.[field.key]
+    if (field.key === 'trackingConsentEnabled') {
+      baseValue = baseValue !== false
+      compareValue = compareValue !== false
+    }
+    if (field.key === 'trackingConsentMessage') {
+      baseValue = baseValue || defaultSiteSettings.trackingConsentMessage
+      compareValue = compareValue || defaultSiteSettings.trackingConsentMessage
+    }
     if (areEqualNormalized(baseValue, compareValue))
       return
     details.push({
@@ -1453,8 +1471,11 @@ const siteSettingsDiffDetails = computed(() => {
 const publishSiteSettings = async ({ siteVersion = null, bumpVersion = true } = {}) => {
   console.log('Publishing site settings for site:', props.site)
   const nextVersion = siteVersion || (bumpVersion ? getNextVersion(siteData.value?.version) : siteData.value?.version)
+  const defaultSiteSettings = createSiteSettingsDefaults()
   const payload = {
     ...siteData.value,
+    trackingConsentEnabled: siteData.value?.trackingConsentEnabled !== false,
+    trackingConsentMessage: siteData.value?.trackingConsentMessage || defaultSiteSettings.trackingConsentMessage,
     version: nextVersion,
   }
   if (bumpVersion) {
@@ -1470,8 +1491,9 @@ const discardSiteSettings = async () => {
   console.log('Discarding site settings for site:', props.site)
   const publishedSite = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`]?.[props.site]
   if (publishedSite) {
-    const defaultRestrictedContent = createSiteSettingsDefaults().restrictedContent || {}
-    const defaultContactSpam = createSiteSettingsDefaults().contactSpam || {}
+    const defaultSiteSettings = createSiteSettingsDefaults()
+    const defaultRestrictedContent = defaultSiteSettings.restrictedContent || {}
+    const defaultContactSpam = defaultSiteSettings.contactSpam || {}
     await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, {
       domains: publishedSite.domains || [],
       menus: publishedSite.menus || {},
@@ -1494,6 +1516,8 @@ const discardSiteSettings = async () => {
       trackingFacebookPixel: publishedSite.trackingFacebookPixel || '',
       trackingGoogleAnalytics: publishedSite.trackingGoogleAnalytics || '',
       trackingAdroll: publishedSite.trackingAdroll || '',
+      trackingConsentEnabled: publishedSite.trackingConsentEnabled !== false,
+      trackingConsentMessage: publishedSite.trackingConsentMessage || defaultSiteSettings.trackingConsentMessage,
       sureFeedURL: publishedSite.sureFeedURL || '',
       socialFacebook: publishedSite.socialFacebook || '',
       socialInstagram: publishedSite.socialInstagram || '',

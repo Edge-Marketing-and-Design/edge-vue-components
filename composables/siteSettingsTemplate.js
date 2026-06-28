@@ -2,6 +2,7 @@ import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTem
 
 export const useSiteSettingsTemplate = () => {
   const { buildSiteStructuredData } = useStructuredDataTemplates()
+  const defaultTrackingConsentMessage = 'We use analytics, advertising, and feedback tools to understand how visitors use this site, improve our marketing, and collect website feedback. These tools may collect information such as pages visited, browser and device details, and interactions with the site. You can choose whether to allow this tracking.'
   const createRestrictedContentDefaults = () => ({
     enabled: false,
     allowSelfRegistration: true,
@@ -43,6 +44,8 @@ export const useSiteSettingsTemplate = () => {
     trackingFacebookPixel: '',
     trackingGoogleAnalytics: '',
     trackingAdroll: '',
+    trackingConsentEnabled: true,
+    trackingConsentMessage: defaultTrackingConsentMessage,
     sureFeedURL: '',
     socialFacebook: '',
     socialInstagram: '',
@@ -82,6 +85,8 @@ export const useSiteSettingsTemplate = () => {
       trackingFacebookPixel: { bindings: { 'field-type': 'text', 'label': 'Facebook Pixel ID' }, cols: '12', value: defaults.trackingFacebookPixel },
       trackingGoogleAnalytics: { bindings: { 'field-type': 'text', 'label': 'Google Analytics ID' }, cols: '12', value: defaults.trackingGoogleAnalytics },
       trackingAdroll: { bindings: { 'field-type': 'text', 'label': 'AdRoll ID' }, cols: '12', value: defaults.trackingAdroll },
+      trackingConsentEnabled: { bindings: { 'field-type': 'boolean', 'label': 'Require Tracking Consent' }, cols: '12', value: defaults.trackingConsentEnabled },
+      trackingConsentMessage: { bindings: { 'field-type': 'textarea', 'label': 'Tracking Consent Message' }, cols: '12', value: defaults.trackingConsentMessage },
       sureFeedURL: { bindings: { 'field-type': 'text', 'label': 'Sure Feedback' }, cols: '12', value: defaults.sureFeedURL },
       socialFacebook: { bindings: { 'field-type': 'text', 'label': 'Facebook URL' }, cols: '12', value: defaults.socialFacebook },
       socialInstagram: { bindings: { 'field-type': 'text', 'label': 'Instagram URL' }, cols: '12', value: defaults.socialInstagram },
@@ -103,6 +108,7 @@ export const useSiteSettingsTemplate = () => {
     createRestrictedContentDefaults,
     createContactSpamDefaults,
     createNewDocSchema,
+    defaultTrackingConsentMessage,
     settingsKeys,
   }
 }
