@@ -198,8 +198,8 @@ const isWorkingTemplateV2Doc = (doc) => {
     return false
   if (doc.templateConversion)
     return true
-  if (normalizeTemplateVersion(doc.templateVersion) === 2)
-    return true
+  if (props.blockId === 'new')
+    return normalizeTemplateVersion(doc.templateVersion) === 2
   return isSavedTemplateV2Block.value
 }
 
@@ -207,26 +207,8 @@ const getWorkingTemplateVersion = (doc) => {
   return isWorkingTemplateV2Doc(doc) ? 2 : 1
 }
 
-const hasLegacyInlineTags = (content) => {
-  return /\{\{\{#[A-Za-z0-9_-]+\s*\{/.test(String(content || ''))
-}
-
-const hasLegacyInlineTagsInDoc = (doc) => {
-  return hasLegacyInlineTags(doc?.content) || hasLegacyInlineTags(doc?.template)
-}
-
-const hasTemplateV2Definitions = (doc) => {
-  const schemaKeys = (doc?.schema && typeof doc.schema === 'object' && !Array.isArray(doc.schema)) ? Object.keys(doc.schema) : []
-  const dataSourceKeys = (doc?.dataSources && typeof doc.dataSources === 'object' && !Array.isArray(doc.dataSources)) ? Object.keys(doc.dataSources) : []
-  return schemaKeys.length > 0 || dataSourceKeys.length > 0
-}
-
-const shouldAutoConvertTemplateV2Doc = (doc) => {
-  if (!doc || doc.templateConversion || !hasLegacyInlineTagsInDoc(doc))
-    return false
-  if (props.blockId === 'new')
-    return true
-  return normalizeTemplateVersion(doc.templateVersion) === 2 && !hasTemplateV2Definitions(doc)
+const shouldAutoConvertTemplateV2Doc = () => {
+  return false
 }
 
 const ensureTemplateV2Fields = (doc) => {
