@@ -46,7 +46,7 @@ const defaultTemplate = {
     '<div style="margin:0; padding:24px; background:#f8fafc; font-family:Arial,Helvetica,sans-serif; color:#111827;">',
     '  <div style="max-width:680px; margin:0 auto; background:#ffffff; border:1px solid #e5e7eb; border-radius:8px; overflow:hidden;">',
     '    <div style="background:#111827; color:#ffffff; padding:20px 24px;">',
-    '      <h1 style="margin:0; font-size:20px; line-height:1.35;">{{subject}}</h1>',
+    '      <h1 style="margin:0; overflow-wrap:break-word; word-wrap:break-word; word-break:break-word; font-size:20px; line-height:1.35;">{{subject}}</h1>',
     '    </div>',
     '    <div style="padding:24px;">',
     '      <p style="margin:0 0 18px; color:#4b5563; font-size:14px; line-height:1.6;">A new submission was received.</p>',
@@ -298,11 +298,11 @@ const buildTemplateContext = (data, template) => {
     : '(no fields provided)'
   context.all_fields_html = entries.length
     ? [
-        '<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%; border-collapse:collapse; border:1px solid #e5e7eb;">',
+        '<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%; table-layout:fixed; border-collapse:collapse; border:1px solid #e5e7eb;">',
         ...entries.map((entry, index) => [
           `<tr style="background:${index % 2 === 0 ? '#ffffff' : '#f9fafb'};">`,
           `<td style="width:36%; padding:10px 12px; border-bottom:1px solid #e5e7eb; font-weight:700; color:#374151; vertical-align:top;">${escapeHtml(entry.label)}</td>`,
-          `<td style="padding:10px 12px; border-bottom:1px solid #e5e7eb; color:#111827; white-space:pre-wrap;">${escapeHtml(formatValue(entry.value))}</td>`,
+          `<td style="padding:10px 12px; border-bottom:1px solid #e5e7eb; color:#111827; white-space:pre-wrap; overflow-wrap:break-word; word-wrap:break-word; word-break:break-word;">${escapeHtml(formatValue(entry.value))}</td>`,
           '</tr>',
         ].join('')),
         '</table>',
