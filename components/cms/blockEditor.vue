@@ -193,6 +193,33 @@ const isSavedTemplateV2Block = computed(() => {
   return hasExplicitTemplateVersion(currentBlock.value) && normalizeTemplateVersion(currentBlock.value?.templateVersion) === 2
 })
 
+const isSavedLegacyTemplateBlock = () => {
+  if (props.blockId === 'new')
+    return false
+  return !isSavedTemplateV2Block.value
+}
+
+const stripTemplateV2DefaultsFromLegacyBlock = (doc) => {
+  if (!doc || !isSavedLegacyTemplateBlock())
+    return doc
+  if (doc.templateConversion)
+    return doc
+
+  const savedDoc = currentBlock.value || {}
+  if (hasExplicitTemplateVersion(savedDoc))
+    doc.templateVersion = normalizeTemplateVersion(savedDoc.templateVersion)
+  else
+    delete doc.templateVersion
+
+  const templateV2Fields = ['template', 'schema', 'dataSources']
+  templateV2Fields.forEach((field) => {
+    if (!edgeGlobal.objHas(savedDoc, field))
+      delete doc[field]
+  })
+
+  return doc
+}
+
 const isWorkingTemplateV2Doc = (doc) => {
   if (!doc)
     return false
@@ -1616,7 +1643,7 @@ const previewSurfaceClass = computed(() => getPreviewSurfaceClass(state.previewB
 const previewBlockTypes = computed(() => normalizeBlockTypes(state.editorWorkingDoc?.type))
 const previewNeedsPostContext = computed(() => previewBlockTypes.value.includes('Post'))
 const editorWorkingDocOverrides = computed(() => {
-  return state.editorWorkingDoc ? edgeGlobal.dupObject(state.editorWorkingDoc) : null
+  return state.editorWorkingDoc ? stripTemplateV2DefaultsFromLegacyBlock(edgeGlobal.dupObject(state.editorWorkingDoc)) : null
 })
 const getSelectedPreviewSiteContext = () => {
   const siteId = String(edgeGlobal.edgeState.blockEditorSite || '').trim()
@@ -2478,6 +2505,7 @@ const editorDocUpdates = (workingDoc) => {
     convertWorkingDocToTemplateV2(workingDoc, { notify: false })
   }
   ensureTemplateV2Fields(workingDoc)
+  stripTemplateV2DefaultsFromLegacyBlock(workingDoc)
   let normalizedTypes = normalizeBlockTypes(workingDoc?.type)
   if (!normalizedTypes.length)
     normalizedTypes = ['Page']
