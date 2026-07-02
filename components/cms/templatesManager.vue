@@ -191,7 +191,7 @@ const exportAllTemplates = async () => {
   const selectedDocIds = [...state.selectedTemplateDocIds].filter(docId => templatePagesCollection.value?.[docId])
   const files = selectedDocIds
     .sort((leftId, rightId) => String(leftId).localeCompare(String(rightId)))
-    .map((docId) => ({
+    .map(docId => ({
       suggestedName: `template-${docId}.json`,
       payload: {
         ...edgeGlobal.dupObject(templatePagesCollection.value?.[docId] || {}),
@@ -311,17 +311,35 @@ const resolveTemplateBlockSource = (pageDoc, blockRef) => {
 const resolveBlockForPreview = (block) => {
   if (!block)
     return null
-  if (block.content) {
+  const libraryBlock = block?.blockId ? blocksCollection.value?.[block.blockId] : null
+  if (block.content || block.template) {
+    const templateIsV2 = Number(block.templateVersion) === 2 || Number(libraryBlock?.templateVersion) === 2
+    const useLibraryDefinition = templateIsV2 && !!libraryBlock && typeof libraryBlock === 'object'
     return {
-      content: block.content,
-      values: block.values || {},
-      meta: block.meta || {},
+      content: useLibraryDefinition
+        ? (libraryBlock.content || libraryBlock.template || '')
+        : (block.content || libraryBlock?.content || libraryBlock?.template || block.template || ''),
+      templateVersion: templateIsV2 ? 2 : 1,
+      template: useLibraryDefinition
+        ? (libraryBlock.template || '')
+        : (block.template || libraryBlock?.template || ''),
+      schema: useLibraryDefinition
+        ? (libraryBlock.schema || {})
+        : ((block.schema && Object.keys(block.schema).length) ? block.schema : (libraryBlock?.schema || {})),
+      dataSources: useLibraryDefinition
+        ? (libraryBlock.dataSources || {})
+        : ((block.dataSources && Object.keys(block.dataSources).length) ? block.dataSources : (libraryBlock?.dataSources || {})),
+      values: { ...(libraryBlock?.values || {}), ...(block.values || {}) },
+      meta: { ...(libraryBlock?.meta || {}), ...(block.meta || {}) },
     }
   }
-  if (block.blockId && blocksCollection.value?.[block.blockId]) {
-    const libraryBlock = blocksCollection.value[block.blockId]
+  if (libraryBlock) {
     return {
-      content: libraryBlock.content,
+      content: libraryBlock.content || libraryBlock.template || '',
+      templateVersion: Number(libraryBlock.templateVersion) === 2 ? 2 : 1,
+      template: libraryBlock.template || '',
+      schema: libraryBlock.schema || {},
+      dataSources: libraryBlock.dataSources || {},
       values: block.values || libraryBlock.values || {},
       meta: block.meta || libraryBlock.meta || {},
     }
@@ -364,6 +382,19 @@ const getTemplatePagePreviewKey = (docId) => {
   const siteId = String(selectedTemplatePreviewSiteId.value || 'no-site')
   const themeVersion = getThemePreviewVersion(themeCollection.value?.[themeId] || null)
   return `${String(docId || 'template-page')}:${siteId}:${themeId}:${themeVersion}`
+}
+
+const hashTemplatePreviewSignature = (value) => {
+  const input = JSON.stringify(value || {})
+  let hash = 0
+  for (let i = 0; i < input.length; i += 1)
+    hash = ((hash << 5) - hash + input.charCodeAt(i)) | 0
+  return Math.abs(hash).toString(36)
+}
+
+const getTemplatePreviewBlockRenderKey = (baseKey, pageDoc, blockRef, blockIdx) => {
+  const block = resolveTemplateBlockForPreview(pageDoc, blockRef)
+  return `${baseKey}:${blockIdx}:${hashTemplatePreviewSignature(block)}`
 }
 
 const getTemplatePageAllowedThemes = item => (Array.isArray(item?.allowedThemes) ? item.allowedThemes : [])
@@ -1191,9 +1222,13 @@ watch(themeCollection, () => {
                                 >
                                   <edge-cms-block-api
                                     v-if="resolveTemplateBlockForPreview(item, blockRef)"
-                                    :key="`${getTemplatePagePreviewKey(item.docId)}:${blockIdx}`"
+                                    :key="getTemplatePreviewBlockRenderKey(getTemplatePagePreviewKey(item.docId), item, blockRef, blockIdx)"
                                     :site-id="selectedTemplatePreviewSiteId"
                                     :content="resolveTemplateBlockForPreview(item, blockRef).content"
+                                    :template-version="resolveTemplateBlockForPreview(item, blockRef).templateVersion"
+                                    :template="resolveTemplateBlockForPreview(item, blockRef).template"
+                                    :schema="resolveTemplateBlockForPreview(item, blockRef).schema"
+                                    :data-sources="resolveTemplateBlockForPreview(item, blockRef).dataSources"
                                     :values="resolveTemplateBlockForPreview(item, blockRef).values"
                                     :meta="resolveTemplateBlockForPreview(item, blockRef).meta"
                                     :theme="selectedTemplatePreviewTheme"
@@ -1350,9 +1385,13 @@ watch(themeCollection, () => {
                                 >
                                   <edge-cms-block-api
                                     v-if="resolveTemplateBlockForPreview(template, blockRef)"
-                                    :key="`${getTemplatePagePreviewKey(template.docId)}:${blockIdx}`"
+                                    :key="getTemplatePreviewBlockRenderKey(getTemplatePagePreviewKey(template.docId), template, blockRef, blockIdx)"
                                     :site-id="selectedTemplatePreviewSiteId"
                                     :content="resolveTemplateBlockForPreview(template, blockRef).content"
+                                    :template-version="resolveTemplateBlockForPreview(template, blockRef).templateVersion"
+                                    :template="resolveTemplateBlockForPreview(template, blockRef).template"
+                                    :schema="resolveTemplateBlockForPreview(template, blockRef).schema"
+                                    :data-sources="resolveTemplateBlockForPreview(template, blockRef).dataSources"
                                     :values="resolveTemplateBlockForPreview(template, blockRef).values"
                                     :meta="resolveTemplateBlockForPreview(template, blockRef).meta"
                                     :theme="selectedTemplatePreviewTheme"

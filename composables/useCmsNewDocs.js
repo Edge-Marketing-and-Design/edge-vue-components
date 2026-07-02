@@ -4,6 +4,11 @@ export const useCmsNewDocs = () => {
   const blocks = useState('edge-cms-new-docs-blocks', () => ({
     name: { value: '' },
     content: { value: '' },
+    templateVersion: { value: 2 },
+    template: { value: '' },
+    schema: { value: {} },
+    dataSources: { value: {} },
+    values: { value: {} },
     tags: { value: [] },
     themes: { value: [] },
     type: { value: ['Page'] },

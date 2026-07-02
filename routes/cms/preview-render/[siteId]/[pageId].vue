@@ -12,6 +12,8 @@ const state = reactive({
   error: '',
   payload: null,
   renderContext: null,
+  blockPending: {},
+  blockLoaded: {},
 })
 
 const EDGE_CMS_PREVIEW_RENDER_SIGNATURE_SALT = 'edge-cms-preview-render-v1'
@@ -29,6 +31,7 @@ const siteDoc = computed(() => state.payload?.site || null)
 const pageDoc = computed(() => state.payload?.page || null)
 const blocksCollection = computed(() => state.payload?.blocks || {})
 const themeDoc = computed(() => state.payload?.theme || null)
+const previewCollectionValues = computed(() => state.payload?.collectionValues || {})
 
 const normalizeForCompare = (value) => {
   if (Array.isArray(value))
@@ -152,12 +155,29 @@ const EMPTY_PREVIEW_VALUES = {}
 const EMPTY_PREVIEW_META = {}
 
 const resolveBlockForPreview = (blockRef) => {
+  if (typeof blockRef === 'string' && blocksCollection.value?.[blockRef]) {
+    const libraryBlock = blocksCollection.value[blockRef]
+    return {
+      content: libraryBlock.content || libraryBlock.template || '',
+      templateVersion: Number(libraryBlock.templateVersion) === 2 ? 2 : 1,
+      template: libraryBlock.template || '',
+      schema: libraryBlock.schema || {},
+      dataSources: libraryBlock.dataSources || {},
+      values: libraryBlock.values || EMPTY_PREVIEW_VALUES,
+      meta: libraryBlock.meta || EMPTY_PREVIEW_META,
+    }
+  }
+
   const block = resolveBlockSource(blockRef)
   if (!block)
     return null
   if (block.content) {
     return {
-      content: block.content,
+      content: block.content || block.template || '',
+      templateVersion: Number(block.templateVersion) === 2 ? 2 : 1,
+      template: block.template || '',
+      schema: block.schema || {},
+      dataSources: block.dataSources || {},
       values: block.values || EMPTY_PREVIEW_VALUES,
       meta: block.meta || EMPTY_PREVIEW_META,
     }
@@ -165,12 +185,26 @@ const resolveBlockForPreview = (blockRef) => {
   if (block.blockId && blocksCollection.value?.[block.blockId]) {
     const libraryBlock = blocksCollection.value[block.blockId]
     return {
-      content: libraryBlock.content,
+      content: libraryBlock.content || libraryBlock.template || '',
+      templateVersion: Number(libraryBlock.templateVersion) === 2 ? 2 : 1,
+      template: libraryBlock.template || '',
+      schema: libraryBlock.schema || {},
+      dataSources: libraryBlock.dataSources || {},
       values: block.values || libraryBlock.values || EMPTY_PREVIEW_VALUES,
       meta: block.meta || libraryBlock.meta || EMPTY_PREVIEW_META,
     }
   }
   return null
+}
+
+const resolveBlockValuesForPreview = (blockRef, key) => {
+  const block = resolveBlockForPreview(blockRef)
+  if (!block)
+    return EMPTY_PREVIEW_VALUES
+  return {
+    ...(block.values || EMPTY_PREVIEW_VALUES),
+    ...(previewCollectionValues.value?.[key] || EMPTY_PREVIEW_VALUES),
+  }
 }
 
 const hasPreviewSpans = row => (row?.columns || []).some(column => Number.isFinite(Number(column?.span)))
@@ -196,6 +230,49 @@ const previewColumnStyle = (column) => {
     return {}
   const safeSpan = Math.min(Math.max(span, 1), 6)
   return { gridColumn: `span ${safeSpan} / span ${safeSpan}` }
+}
+
+const previewBlockKey = (row, rowIndex, column, colIndex, blockIdx) => {
+  return `${row?.id || rowIndex}:${column?.id || colIndex}:${blockIdx}`
+}
+
+const previewBlockKeys = computed(() => {
+  const keys = []
+  previewRows.value.forEach((row, rowIndex) => {
+    (row.columns || []).forEach((column, colIndex) => {
+      (column.blocks || []).forEach((blockRef, blockIdx) => {
+        if (resolveBlockForPreview(blockRef))
+          keys.push(previewBlockKey(row, rowIndex, column, colIndex, blockIdx))
+      })
+    })
+  })
+  return keys
+})
+
+const previewReady = computed(() => {
+  if (state.loading || state.error || !pageDoc.value || !previewThemeReady.value)
+    return false
+  const keys = previewBlockKeys.value
+  if (!keys.length)
+    return true
+  return keys.every(key => state.blockLoaded[key] && !state.blockPending[key])
+})
+
+const setPreviewBlockPending = (key, pending) => {
+  if (!key)
+    return
+  if (pending) {
+    state.blockPending[key] = true
+    delete state.blockLoaded[key]
+    return
+  }
+  delete state.blockPending[key]
+}
+
+const setPreviewBlockLoaded = (key) => {
+  if (!key || state.blockPending[key])
+    return
+  state.blockLoaded[key] = true
 }
 
 const mergePreviewCollection = (collectionPath, docs) => {
@@ -226,10 +303,21 @@ const hydratePreviewCollections = (payload) => {
   mergePreviewCollection(`${orgPath.value}/blocks`, payload.blocks || {})
 }
 
+const setPreviewOrganizationContext = () => {
+  if (!organizationId.value)
+    return
+  edgeGlobal.edgeState.currentOrganization = organizationId.value
+  edgeGlobal.edgeState.organizationDocPath = orgPath.value
+  if (import.meta.client)
+    localStorage.setItem('organizationID', organizationId.value)
+}
+
 const loadPreviewData = async () => {
   state.loading = true
   state.error = ''
   state.payload = null
+  state.blockPending = {}
+  state.blockLoaded = {}
   try {
     state.bootstrapped = true
 
@@ -250,12 +338,15 @@ const loadPreviewData = async () => {
       return
     }
 
+    setPreviewOrganizationContext()
+
     const response = await edgeFirebase.runFunction('cms-getPreviewRenderPayload', {
       orgId: organizationId.value,
       siteId: siteId.value,
       pageId: pageId.value,
       signature: previewSignature.value,
       source: previewSource.value,
+      routeLastSegment: routeLastSegment.value,
     })
     state.payload = response?.data || response || null
     state.renderContext = state.payload?.renderContext || null
@@ -300,6 +391,7 @@ watch(() => [organizationId.value, siteId.value, pageId.value, previewSignature.
     <div
       v-else
       :class="isThumbnailMode ? 'cms-preview-thumbnail-capture cms-auth-preview-logged-in' : 'cms-preview-render-page cms-auth-preview-logged-in'"
+      :data-preview-ready="previewReady ? 'true' : 'false'"
     >
       <div :class="isThumbnailMode ? 'cms-preview-render-page cms-preview-thumbnail-content' : ''">
         <template v-if="previewRows.length">
@@ -321,15 +413,21 @@ watch(() => [organizationId.value, siteId.value, pageId.value, previewSignature.
                 >
                   <edge-cms-block-api
                     v-if="resolveBlockForPreview(blockRef)"
-                    :key="`${siteId}:${pageId}:${blockIdx}`"
+                    :key="`${siteId}:${pageId}:${previewBlockKey(row, rowIndex, column, colIndex, blockIdx)}`"
                     :site-id="siteId"
                     :content="resolveBlockForPreview(blockRef).content"
-                    :values="resolveBlockForPreview(blockRef).values"
+                    :template-version="resolveBlockForPreview(blockRef).templateVersion"
+                    :template="resolveBlockForPreview(blockRef).template"
+                    :schema="resolveBlockForPreview(blockRef).schema"
+                    :data-sources="resolveBlockForPreview(blockRef).dataSources"
+                    :values="resolveBlockValuesForPreview(blockRef, previewBlockKey(row, rowIndex, column, colIndex, blockIdx))"
                     :meta="resolveBlockForPreview(blockRef).meta"
                     :theme="previewTheme"
                     :render-context="state.renderContext"
                     :route-last-segment="routeLastSegment"
                     :standalone-preview="true"
+                    @pending="setPreviewBlockPending(previewBlockKey(row, rowIndex, column, colIndex, blockIdx), $event)"
+                    @loaded="setPreviewBlockLoaded(previewBlockKey(row, rowIndex, column, colIndex, blockIdx))"
                   />
                 </div>
               </div>

@@ -186,7 +186,6 @@ onBeforeRouteUpdate((to, from, next) => {
 })
 
 watch(() => unsavedChanges.value, (newVal) => {
-  console.log('test', newVal)
   emit('unsavedChanges', newVal)
   if (newVal) {
     state.successMessage = ''
@@ -297,44 +296,51 @@ const title = computed(() => {
 const onSubmit = async () => {
   state.successMessage = ''
   const workingDocOverrides = props.workingDocOverrides
-  if (workingDocOverrides) {
-    Object.keys(workingDocOverrides).forEach((key) => {
-      state.workingDoc[key] = workingDocOverrides[key]
-    })
+  const finalWorkingDoc = {
+    ...edgeGlobal.dupObject(state.workingDoc || {}),
+    ...(workingDocOverrides ? edgeGlobal.dupObject(workingDocOverrides) : {}),
   }
   // console.log(state.workingDoc)
   state.submitting = true
   state.bypassUnsavedChanges = true
-  Object.keys(state.workingDoc).forEach((key) => {
+  Object.keys(finalWorkingDoc).forEach((key) => {
     const schemaFieldType = props.newDocSchema[key]?.bindings?.['field-type']
-    if (typeof state.workingDoc[key] === 'string' && props.stringsToUpperCase) {
+    if (typeof finalWorkingDoc[key] === 'string' && props.stringsToUpperCase) {
       if (key !== 'docId') {
-        state.workingDoc[key] = state.workingDoc[key].toUpperCase()
+        finalWorkingDoc[key] = finalWorkingDoc[key].toUpperCase()
       }
     }
     if (schemaFieldType === 'money') {
-      state.workingDoc[key] = Number(parseFloat(state.workingDoc[key]).toFixed(2))
+      finalWorkingDoc[key] = Number(parseFloat(finalWorkingDoc[key]).toFixed(2))
     }
   })
   if (props.customDocId) {
-    state.workingDoc.docId = state.workingDoc[props.customDocId]
+    finalWorkingDoc.docId = finalWorkingDoc[props.customDocId]
   }
   // console.log('saving', state.workingDoc)
   const savePath = `${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`
-  const result = await edgeFirebase.storeDoc(savePath, state.workingDoc)
-  state.workingDoc.docId = result.meta.docId
+  const result = await edgeFirebase.storeDoc(savePath, finalWorkingDoc)
+  finalWorkingDoc.docId = result.meta.docId
+  state.workingDoc = edgeGlobal.dupObject(finalWorkingDoc)
+  const savedDoc = edgeGlobal.dupObject(finalWorkingDoc)
+  state.collectionData = {
+    ...(state.collectionData || {}),
+    [state.workingDoc.docId]: savedDoc,
+  }
   emit('saved', {
     collection: props.collection,
     docId: state.workingDoc.docId,
-    data: edgeGlobal.dupObject(state.workingDoc),
+    data: edgeGlobal.dupObject(savedDoc),
   })
-  edgeGlobal.edgeState.lastPaginatedDoc = JSON.parse(JSON.stringify(state.workingDoc))
-  console.log('save result', result)
+  edgeGlobal.edgeState.lastPaginatedDoc = JSON.parse(JSON.stringify(savedDoc))
   if (state.overrideClose) {
     state.submitting = false
     // state.overrideClose = false
     // state.workingDoc = edgeGlobal.dupObject(state.collectionData[props.docId])
-    state.collectionData = edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`]
+    state.collectionData = {
+      ...(edgeFirebase.data?.[savePath] || {}),
+      [state.workingDoc.docId]: savedDoc,
+    }
     emit('unsavedChanges', false)
     // console.log('bypassUnsavedChanges', state.bypassUnsavedChanges)
     edgeGlobal.edgeState.changeTracker = {}

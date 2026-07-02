@@ -7,6 +7,14 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  protectedTemplateIds: {
+    type: [Array, String],
+    default: () => [],
+  },
+  systemTemplates: {
+    type: Array,
+    default: () => [],
+  },
 })
 
 const edgeFirebase = inject('edgeFirebase')
@@ -38,7 +46,7 @@ const defaultTemplate = {
     '<div style="margin:0; padding:24px; background:#f8fafc; font-family:Arial,Helvetica,sans-serif; color:#111827;">',
     '  <div style="max-width:680px; margin:0 auto; background:#ffffff; border:1px solid #e5e7eb; border-radius:8px; overflow:hidden;">',
     '    <div style="background:#111827; color:#ffffff; padding:20px 24px;">',
-    '      <h1 style="margin:0; font-size:20px; line-height:1.35;">{{subject}}</h1>',
+    '      <h1 style="margin:0; overflow-wrap:break-word; word-wrap:break-word; word-break:break-word; font-size:20px; line-height:1.35;">{{subject}}</h1>',
     '    </div>',
     '    <div style="padding:24px;">',
     '      <p style="margin:0 0 18px; color:#4b5563; font-size:14px; line-height:1.6;">A new submission was received.</p>',
@@ -67,7 +75,7 @@ const state = reactive({
   loading: false,
   selectedTemplateId: DEFAULT_TEMPLATE_ID,
   workingTemplate: edgeGlobal.dupObject(defaultTemplate),
-  previewMode: false,
+  previewMode: true,
   deleteDialog: false,
   helpOpen: false,
   editorTab: 'settings',
@@ -100,6 +108,18 @@ const selectedTemplate = computed(() =>
   templates.value.find(template => template.docId === state.selectedTemplateId) || templates.value[0] || null,
 )
 const isDefaultTemplate = computed(() => state.workingTemplate?.docId === DEFAULT_TEMPLATE_ID)
+const protectedTemplateIds = computed(() => {
+  const configuredIds = Array.isArray(props.protectedTemplateIds)
+    ? props.protectedTemplateIds
+    : [props.protectedTemplateIds]
+  return new Set([
+    DEFAULT_TEMPLATE_ID,
+    ...configuredIds,
+  ].map(id => String(id || '').trim()).filter(Boolean))
+})
+const isProtectedTemplate = computed(() =>
+  protectedTemplateIds.value.has(String(state.workingTemplate?.docId || '').trim()),
+)
 const activeEditorValue = computed({
   get: () => state.editorTab === 'text' ? state.workingTemplate.text : state.workingTemplate.html,
   set: (value) => {
@@ -278,11 +298,11 @@ const buildTemplateContext = (data, template) => {
     : '(no fields provided)'
   context.all_fields_html = entries.length
     ? [
-        '<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%; border-collapse:collapse; border:1px solid #e5e7eb;">',
+        '<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%; table-layout:fixed; border-collapse:collapse; border:1px solid #e5e7eb;">',
         ...entries.map((entry, index) => [
           `<tr style="background:${index % 2 === 0 ? '#ffffff' : '#f9fafb'};">`,
           `<td style="width:36%; padding:10px 12px; border-bottom:1px solid #e5e7eb; font-weight:700; color:#374151; vertical-align:top;">${escapeHtml(entry.label)}</td>`,
-          `<td style="padding:10px 12px; border-bottom:1px solid #e5e7eb; color:#111827; white-space:pre-wrap;">${escapeHtml(formatValue(entry.value))}</td>`,
+          `<td style="padding:10px 12px; border-bottom:1px solid #e5e7eb; color:#111827; white-space:pre-wrap; overflow-wrap:break-word; word-wrap:break-word; word-break:break-word;">${escapeHtml(formatValue(entry.value))}</td>`,
           '</tr>',
         ].join('')),
         '</table>',
@@ -374,9 +394,21 @@ const ensureDefaultTemplate = async () => {
   if (!collectionPath.value)
     return
   const existing = collectionData.value?.[DEFAULT_TEMPLATE_ID]
-  if (existing)
-    return
-  await edgeFirebase.storeDoc(collectionPath.value, defaultTemplate, DEFAULT_TEMPLATE_ID)
+  if (!existing)
+    await edgeFirebase.storeDoc(collectionPath.value, defaultTemplate, DEFAULT_TEMPLATE_ID)
+
+  for (const template of props.systemTemplates || []) {
+    const docId = String(template?.docId || '').trim()
+    if (!docId || collectionData.value?.[docId])
+      continue
+    await edgeFirebase.storeDoc(collectionPath.value, {
+      ...edgeGlobal.dupObject(template),
+      docId,
+      systemDefault: template.systemDefault !== false,
+      doc_created_at: Date.now(),
+      doc_updated_at: Date.now(),
+    }, docId)
+  }
 }
 
 const createTemplate = async () => {
@@ -398,7 +430,7 @@ const saveTemplate = async () => {
   state.loading = true
   const payload = {
     ...edgeGlobal.dupObject(state.workingTemplate),
-    systemDefault: state.workingTemplate.docId === DEFAULT_TEMPLATE_ID,
+    systemDefault: isProtectedTemplate.value,
     sampleData: previewSampleData.value,
     doc_updated_at: Date.now(),
   }
@@ -410,13 +442,13 @@ const saveTemplate = async () => {
 }
 
 const confirmDeleteTemplate = () => {
-  if (isDefaultTemplate.value)
+  if (isProtectedTemplate.value)
     return
   state.deleteDialog = true
 }
 
 const deleteTemplate = async () => {
-  if (!collectionPath.value || isDefaultTemplate.value)
+  if (!collectionPath.value || isProtectedTemplate.value)
     return
   const docId = state.workingTemplate.docId
   await edgeFirebase.removeDoc(collectionPath.value, docId)
@@ -530,7 +562,7 @@ onBeforeUnmount(() => {
               <edge-shad-button
                 variant="outline"
                 class="h-9 border-red-200 bg-red-50 text-red-700 hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/70"
-                :disabled="isDefaultTemplate"
+                :disabled="isProtectedTemplate"
                 @click="confirmDeleteTemplate"
               >
                 <Trash2 class="mr-2 h-4 w-4" />

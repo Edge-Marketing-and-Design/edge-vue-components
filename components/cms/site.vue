@@ -156,6 +156,7 @@ const state = reactive({
   sitePageRenderContext: null,
   pagePreviewsLoading: true,
   sitePagePreviewSnapshots: {},
+  sitePagePreviewPendingBlocks: {},
 })
 
 const pageImportInputRef = ref(null)
@@ -169,16 +170,16 @@ const sitePagePreviewSnapshotQueue = []
 const sitePagePreviewSnapshotQueued = new Set()
 const sitePagePreviewBackendQueued = new Set()
 const sitePagePreviewForcedRendered = ref(new Set())
-const sitePagePreviewScale = ref(0.18)
+const sitePagePreviewScales = ref({})
 let html2canvasModulePromise = null
 let sitePagePreviewSnapshotQueueRunning = false
 let sitePagePreviewSnapshotQueueStopped = false
 const SITE_PAGE_PREVIEW_THUMBNAIL_VERSION = 'backend-puppeteer-v1'
 const SITE_PAGE_PREVIEW_JPEG_ENABLED = false
-const showPreviewSnapshotStatus = computed(() => Boolean(edgeGlobal.edgeState.devOverride))
-const showPreviewRenderTools = computed(() => Boolean(edgeGlobal.edgeState.devOverride))
+const SITE_PAGE_PREVIEW_BACKEND_JPEG_ENABLED = false
+const showPreviewSnapshotStatus = computed(() => false)
+const showPreviewRenderTools = computed(() => false)
 const SITE_PAGE_PREVIEW_BASE_WIDTH = 1600
-const EDGE_CMS_PREVIEW_RENDER_SIGNATURE_SALT = 'edge-cms-preview-render-v1'
 const isPreviewSnapshotDevRefreshEnabled = () => Boolean(edgeGlobal.edgeState.devOverride)
 
 const pageInit = {
@@ -223,6 +224,8 @@ const schemas = {
     trackingFacebookPixel: z.string().optional(),
     trackingGoogleAnalytics: z.string().optional(),
     trackingAdroll: z.string().optional(),
+    trackingConsentEnabled: z.boolean().optional(),
+    trackingConsentMessage: z.string().optional(),
     sureFeedURL: z.string().optional(),
     socialFacebook: z.string().optional(),
     socialInstagram: z.string().optional(),
@@ -1274,7 +1277,8 @@ onBeforeMount(async () => {
 
 const isSiteDiff = computed(() => {
   const publishedSite = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`]?.[props.site]
-  const defaultRestrictedContent = createSiteSettingsDefaults().restrictedContent || {}
+  const defaultSiteSettings = createSiteSettingsDefaults()
+  const defaultRestrictedContent = defaultSiteSettings.restrictedContent || {}
   if (!publishedSite && siteData.value) {
     return true
   }
@@ -1304,6 +1308,8 @@ const isSiteDiff = computed(() => {
       trackingFacebookPixel: publishedSite.trackingFacebookPixel,
       trackingGoogleAnalytics: publishedSite.trackingGoogleAnalytics,
       trackingAdroll: publishedSite.trackingAdroll,
+      trackingConsentEnabled: publishedSite.trackingConsentEnabled !== false,
+      trackingConsentMessage: publishedSite.trackingConsentMessage || defaultSiteSettings.trackingConsentMessage,
       sureFeedURL: publishedSite.sureFeedURL,
       socialFacebook: publishedSite.socialFacebook,
       socialInstagram: publishedSite.socialInstagram,
@@ -1335,6 +1341,8 @@ const isSiteDiff = computed(() => {
       trackingFacebookPixel: siteData.value.trackingFacebookPixel,
       trackingGoogleAnalytics: siteData.value.trackingGoogleAnalytics,
       trackingAdroll: siteData.value.trackingAdroll,
+      trackingConsentEnabled: siteData.value.trackingConsentEnabled !== false,
+      trackingConsentMessage: siteData.value.trackingConsentMessage || defaultSiteSettings.trackingConsentMessage,
       sureFeedURL: siteData.value.sureFeedURL,
       socialFacebook: siteData.value.socialFacebook,
       socialInstagram: siteData.value.socialInstagram,
@@ -1371,6 +1379,8 @@ const SITE_SETTINGS_DIFF_FIELDS = [
   { key: 'trackingFacebookPixel', label: 'Facebook Pixel' },
   { key: 'trackingGoogleAnalytics', label: 'Google Analytics' },
   { key: 'trackingAdroll', label: 'Adroll' },
+  { key: 'trackingConsentEnabled', label: 'Require Tracking Consent', format: 'boolean' },
+  { key: 'trackingConsentMessage', label: 'Tracking Consent Message' },
   { key: 'sureFeedURL', label: 'SureFeed URL' },
   { key: 'socialFacebook', label: 'Facebook' },
   { key: 'socialInstagram', label: 'Instagram' },
@@ -1427,15 +1437,24 @@ const summarizeSiteSettingsValue = (value, format = '') => {
 const siteSettingsDiffDetails = computed(() => {
   const base = publishedSiteSettings.value || {}
   const compare = siteData.value || {}
+  const defaultSiteSettings = createSiteSettingsDefaults()
   const details = []
 
   SITE_SETTINGS_DIFF_FIELDS.forEach((field) => {
-    const baseValue = field.key === 'contactSpam'
+    let baseValue = field.key === 'contactSpam'
       ? contactSpamDiffValue(base)
       : base?.[field.key]
-    const compareValue = field.key === 'contactSpam'
+    let compareValue = field.key === 'contactSpam'
       ? contactSpamDiffValue(compare)
       : compare?.[field.key]
+    if (field.key === 'trackingConsentEnabled') {
+      baseValue = baseValue !== false
+      compareValue = compareValue !== false
+    }
+    if (field.key === 'trackingConsentMessage') {
+      baseValue = baseValue || defaultSiteSettings.trackingConsentMessage
+      compareValue = compareValue || defaultSiteSettings.trackingConsentMessage
+    }
     if (areEqualNormalized(baseValue, compareValue))
       return
     details.push({
@@ -1452,8 +1471,11 @@ const siteSettingsDiffDetails = computed(() => {
 const publishSiteSettings = async ({ siteVersion = null, bumpVersion = true } = {}) => {
   console.log('Publishing site settings for site:', props.site)
   const nextVersion = siteVersion || (bumpVersion ? getNextVersion(siteData.value?.version) : siteData.value?.version)
+  const defaultSiteSettings = createSiteSettingsDefaults()
   const payload = {
     ...siteData.value,
+    trackingConsentEnabled: siteData.value?.trackingConsentEnabled !== false,
+    trackingConsentMessage: siteData.value?.trackingConsentMessage || defaultSiteSettings.trackingConsentMessage,
     version: nextVersion,
   }
   if (bumpVersion) {
@@ -1469,8 +1491,9 @@ const discardSiteSettings = async () => {
   console.log('Discarding site settings for site:', props.site)
   const publishedSite = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`]?.[props.site]
   if (publishedSite) {
-    const defaultRestrictedContent = createSiteSettingsDefaults().restrictedContent || {}
-    const defaultContactSpam = createSiteSettingsDefaults().contactSpam || {}
+    const defaultSiteSettings = createSiteSettingsDefaults()
+    const defaultRestrictedContent = defaultSiteSettings.restrictedContent || {}
+    const defaultContactSpam = defaultSiteSettings.contactSpam || {}
     await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, {
       domains: publishedSite.domains || [],
       menus: publishedSite.menus || {},
@@ -1493,6 +1516,8 @@ const discardSiteSettings = async () => {
       trackingFacebookPixel: publishedSite.trackingFacebookPixel || '',
       trackingGoogleAnalytics: publishedSite.trackingGoogleAnalytics || '',
       trackingAdroll: publishedSite.trackingAdroll || '',
+      trackingConsentEnabled: publishedSite.trackingConsentEnabled !== false,
+      trackingConsentMessage: publishedSite.trackingConsentMessage || defaultSiteSettings.trackingConsentMessage,
       sureFeedURL: publishedSite.sureFeedURL || '',
       socialFacebook: publishedSite.socialFacebook || '',
       socialInstagram: publishedSite.socialInstagram || '',
@@ -1725,6 +1750,33 @@ const templatePreviewRows = (pageDoc) => {
 
 const templatePageHasPreview = pageDoc => templatePreviewRows(pageDoc).length > 0
 
+const getSitePagePreviewBlockPendingKey = (row, rowIndex, column, colIndex, blockIdx) => {
+  return `${row?.id || rowIndex}:${column?.id || colIndex}:${blockIdx}`
+}
+
+const isSitePagePreviewBlocksPending = (pageDoc) => {
+  const docId = String(pageDoc?.docId || '').trim()
+  if (!docId)
+    return false
+  return Object.values(state.sitePagePreviewPendingBlocks?.[docId] || {}).some(Boolean)
+}
+
+const setSitePagePreviewBlockPending = (pageDoc, key, pending) => {
+  const docId = String(pageDoc?.docId || '').trim()
+  if (!docId || !key)
+    return
+  if (!state.sitePagePreviewPendingBlocks[docId])
+    state.sitePagePreviewPendingBlocks[docId] = {}
+  if (pending) {
+    state.sitePagePreviewPendingBlocks[docId][key] = true
+    return
+  }
+  delete state.sitePagePreviewPendingBlocks[docId][key]
+  if (!Object.keys(state.sitePagePreviewPendingBlocks[docId]).length)
+    delete state.sitePagePreviewPendingBlocks[docId]
+  nextTick(() => scheduleSitePagePreviewSnapshotCapture(pageDoc))
+}
+
 const resolveTemplateBlockSource = (pageDoc, blockRef) => {
   if (!blockRef)
     return null
@@ -1739,21 +1791,54 @@ const resolveTemplateBlockSource = (pageDoc, blockRef) => {
 
 const EMPTY_PREVIEW_VALUES = {}
 const EMPTY_PREVIEW_META = {}
+const hasPreviewObjectEntries = (value) => {
+  return !!value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length > 0
+}
 
 const resolveBlockForPreview = (block) => {
   if (!block)
     return null
-  if (block.content) {
+  const libraryBlock = block?.blockId ? blocksCollection.value?.[block.blockId] : null
+  if (typeof block === 'string' && blocksCollection.value?.[block]) {
+    const libraryBlock = blocksCollection.value[block]
     return {
-      content: block.content,
-      values: block.values || EMPTY_PREVIEW_VALUES,
-      meta: block.meta || EMPTY_PREVIEW_META,
+      content: libraryBlock.content || libraryBlock.template || '',
+      templateVersion: Number(libraryBlock.templateVersion) === 2 ? 2 : 1,
+      template: libraryBlock.template || '',
+      schema: libraryBlock.schema || {},
+      dataSources: libraryBlock.dataSources || {},
+      values: libraryBlock.values || EMPTY_PREVIEW_VALUES,
+      meta: libraryBlock.meta || EMPTY_PREVIEW_META,
     }
   }
-  if (block.blockId && blocksCollection.value?.[block.blockId]) {
-    const libraryBlock = blocksCollection.value[block.blockId]
+  if (block.content || block.template) {
+    const templateIsV2 = Number(block.templateVersion) === 2 || Number(libraryBlock?.templateVersion) === 2
+    const useLibraryDefinition = templateIsV2 && hasPreviewObjectEntries(libraryBlock)
     return {
-      content: libraryBlock.content,
+      content: useLibraryDefinition
+        ? (libraryBlock.content || libraryBlock.template || '')
+        : (block.content || libraryBlock?.content || libraryBlock?.template || block.template || ''),
+      templateVersion: templateIsV2 ? 2 : 1,
+      template: useLibraryDefinition
+        ? (libraryBlock.template || '')
+        : (block.template || libraryBlock?.template || ''),
+      schema: useLibraryDefinition
+        ? (libraryBlock.schema || {})
+        : (hasPreviewObjectEntries(block.schema) ? block.schema : (libraryBlock?.schema || {})),
+      dataSources: useLibraryDefinition
+        ? (libraryBlock.dataSources || {})
+        : (hasPreviewObjectEntries(block.dataSources) ? block.dataSources : (libraryBlock?.dataSources || {})),
+      values: { ...(libraryBlock?.values || {}), ...(block.values || {}) },
+      meta: { ...(libraryBlock?.meta || {}), ...(block.meta || {}) },
+    }
+  }
+  if (libraryBlock) {
+    return {
+      content: libraryBlock.content || libraryBlock.template || '',
+      templateVersion: Number(libraryBlock.templateVersion) === 2 ? 2 : 1,
+      template: libraryBlock.template || '',
+      schema: libraryBlock.schema || {},
+      dataSources: libraryBlock.dataSources || {},
       values: block.values || libraryBlock.values || EMPTY_PREVIEW_VALUES,
       meta: block.meta || libraryBlock.meta || EMPTY_PREVIEW_META,
     }
@@ -1763,7 +1848,7 @@ const resolveBlockForPreview = (block) => {
 
 const resolveTemplateBlockForPreview = (pageDoc, blockRef) => {
   const source = resolveTemplateBlockSource(pageDoc, blockRef)
-  return resolveBlockForPreview(source)
+  return resolveBlockForPreview(source || blockRef)
 }
 
 const hasPreviewSpans = row => (row?.columns || []).some(column => Number.isFinite(Number(column?.span)))
@@ -1791,11 +1876,17 @@ const previewColumnStyle = (column) => {
   return { gridColumn: `span ${safeSpan} / span ${safeSpan}` }
 }
 
-const sitePagePreviewScaleStyle = computed(() => ({
-  transform: `scale(${sitePagePreviewScale.value})`,
-}))
+const getSitePagePreviewScale = (pageDoc) => {
+  const docId = String(pageDoc?.docId || '').trim()
+  return Number(sitePagePreviewScales.value?.[docId] || 0.18)
+}
 
-const updateSitePagePreviewScale = (element) => {
+const sitePagePreviewScaleStyle = pageDoc => ({
+  transform: `translateX(-50%) scale(${getSitePagePreviewScale(pageDoc)})`,
+})
+
+const updateSitePagePreviewScale = (pageDoc, element) => {
+  const docId = String(pageDoc?.docId || '').trim()
   if (!element)
     return
   const width = element.getBoundingClientRect?.().width || 0
@@ -1803,26 +1894,29 @@ const updateSitePagePreviewScale = (element) => {
     return
   const nextScale = Math.max(0.12, Math.min(0.5, width / SITE_PAGE_PREVIEW_BASE_WIDTH))
   const roundedScale = Number(nextScale.toFixed(4))
-  if (sitePagePreviewScale.value !== roundedScale)
-    sitePagePreviewScale.value = roundedScale
+  if (docId && sitePagePreviewScales.value?.[docId] !== roundedScale)
+    sitePagePreviewScales.value = { ...sitePagePreviewScales.value, [docId]: roundedScale }
 }
 
-let sitePagePreviewScaleObserver = null
-const observeSitePagePreviewScale = (element) => {
+const sitePagePreviewScaleObservers = new Map()
+const observeSitePagePreviewScale = (pageDoc, element) => {
+  const docId = String(pageDoc?.docId || '').trim()
   if (!element || typeof ResizeObserver === 'undefined') {
-    updateSitePagePreviewScale(element)
+    updateSitePagePreviewScale(pageDoc, element)
     return
   }
-  if (sitePagePreviewScaleObserver)
-    sitePagePreviewScaleObserver.disconnect()
-  updateSitePagePreviewScale(element)
-  sitePagePreviewScaleObserver = new ResizeObserver((entries) => {
+  if (docId && sitePagePreviewScaleObservers.has(docId))
+    sitePagePreviewScaleObservers.get(docId)?.disconnect?.()
+  updateSitePagePreviewScale(pageDoc, element)
+  const observer = new ResizeObserver((entries) => {
     const entry = entries?.[0]
     if (!entry?.target)
       return
-    updateSitePagePreviewScale(entry.target)
+    updateSitePagePreviewScale(pageDoc, entry.target)
   })
-  sitePagePreviewScaleObserver.observe(element)
+  observer.observe(element)
+  if (docId)
+    sitePagePreviewScaleObservers.set(docId, observer)
 }
 
 const getTemplatePagePreviewKey = (docId) => {
@@ -1874,34 +1968,9 @@ const createPreviewSignatureHash = (value) => {
   return String(hash >>> 0)
 }
 
-const getCmsPreviewRenderSignature = ({ orgId, siteId, pageId }) => {
-  return createPreviewSignatureHash({
-    salt: EDGE_CMS_PREVIEW_RENDER_SIGNATURE_SALT,
-    orgId,
-    siteId,
-    pageId,
-  })
-}
-
-const getCmsPreviewRenderUrl = (pageDoc) => {
-  const orgId = String(edgeGlobal.edgeState.currentOrganization || '').trim()
-  const siteId = String(props.site || '').trim()
-  const pageId = String(pageDoc?.docId || '').trim()
-  if (!orgId || !siteId || !pageId)
-    return ''
-  const signature = getCmsPreviewRenderSignature({ orgId, siteId, pageId })
-  const params = new URLSearchParams({
-    orgId,
-    signature,
-  })
-  return `/cms-preview-render/${encodeURIComponent(siteId)}/${encodeURIComponent(pageId)}?${params.toString()}`
-}
-
-const openCmsPreviewRender = (pageDoc) => {
-  const url = getCmsPreviewRenderUrl(pageDoc)
-  if (!url)
-    return
-  globalThis.open?.(url, '_blank', 'noopener,noreferrer')
+const getPagePreviewBlockRenderKey = (baseKey, pageDoc, blockRef, blockIdx) => {
+  const block = resolveTemplateBlockForPreview(pageDoc, blockRef)
+  return `${baseKey}:${blockIdx}:${createPreviewSignatureHash(block || {})}`
 }
 
 const getSitePagePreviewBlockSignature = (pageDoc) => {
@@ -1914,6 +1983,10 @@ const getSitePagePreviewBlockSignature = (pageDoc) => {
         const block = resolveTemplateBlockForPreview(pageDoc, blockRef)
         return {
           content: block?.content || null,
+          templateVersion: block?.templateVersion || null,
+          template: block?.template || null,
+          schema: block?.schema || null,
+          dataSources: block?.dataSources || null,
           values: block?.values || null,
           meta: block?.meta || null,
         }
@@ -2019,14 +2092,28 @@ const isPersistedSitePagePreviewThumbnailDisplayable = (pageDoc, field = 'previe
   )
 }
 
+const getPersistedSitePagePreviewThumbnailUpdatedAt = (thumbnail) => {
+  const timestampSeconds = Number(thumbnail?.updatedAt?.seconds)
+  if (Number.isFinite(timestampSeconds) && timestampSeconds > 0)
+    return timestampSeconds * 1000
+  const timestampMillis = Number(thumbnail?.updatedAt)
+  if (Number.isFinite(timestampMillis) && timestampMillis > 0)
+    return timestampMillis
+  const parsed = Date.parse(String(thumbnail?.updatedAtISO || ''))
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
 const getPreferredSitePagePreviewThumbnailField = (pageDoc) => {
-  if (isPersistedSitePagePreviewThumbnailDisplayable(pageDoc, 'publishedPreviewThumbnail'))
-    return 'publishedPreviewThumbnail'
-  if (isPersistedSitePagePreviewThumbnailDisplayable(pageDoc, 'manualPreviewThumbnail'))
-    return 'manualPreviewThumbnail'
-  if (isPersistedSitePagePreviewThumbnailDisplayable(pageDoc, 'previewThumbnail'))
-    return 'previewThumbnail'
-  return ''
+  const candidates = ['manualPreviewThumbnail', 'publishedPreviewThumbnail', 'previewThumbnail']
+    .filter(field => isPersistedSitePagePreviewThumbnailDisplayable(pageDoc, field))
+    .map(field => ({
+      field,
+      updatedAt: getPersistedSitePagePreviewThumbnailUpdatedAt(getPersistedSitePagePreviewThumbnail(pageDoc, field)),
+    }))
+  if (!candidates.length)
+    return ''
+  candidates.sort((a, b) => b.updatedAt - a.updatedAt)
+  return candidates[0].field
 }
 
 const getPreferredSitePagePreviewThumbnail = (pageDoc) => {
@@ -2053,10 +2140,15 @@ const isSitePagePreviewSnapshotDisplayable = (pageDoc) => {
 }
 
 const hasFreshSitePagePreviewImage = (pageDoc) => {
-  return !!getPreferredSitePagePreviewThumbnail(pageDoc) || (SITE_PAGE_PREVIEW_JPEG_ENABLED && isSitePagePreviewSnapshotDisplayable(pageDoc))
+  if (!SITE_PAGE_PREVIEW_JPEG_ENABLED && !SITE_PAGE_PREVIEW_BACKEND_JPEG_ENABLED)
+    return false
+  return (SITE_PAGE_PREVIEW_BACKEND_JPEG_ENABLED && !!getPreferredSitePagePreviewThumbnail(pageDoc))
+    || (SITE_PAGE_PREVIEW_JPEG_ENABLED && isSitePagePreviewSnapshotDisplayable(pageDoc))
 }
 
 const getFreshSitePagePreviewImageUrl = (pageDoc) => {
+  if (!SITE_PAGE_PREVIEW_JPEG_ENABLED && !SITE_PAGE_PREVIEW_BACKEND_JPEG_ENABLED)
+    return ''
   const field = getPreferredSitePagePreviewThumbnailField(pageDoc)
   if (field)
     return getPersistedSitePagePreviewThumbnailUrl(pageDoc, field)
@@ -2071,10 +2163,14 @@ const isSitePagePreviewForcedRendered = (pageDoc) => {
 }
 
 const shouldShowSitePagePreviewImage = (pageDoc) => {
+  if (!SITE_PAGE_PREVIEW_JPEG_ENABLED && !SITE_PAGE_PREVIEW_BACKEND_JPEG_ENABLED)
+    return false
   return hasFreshSitePagePreviewImage(pageDoc) && !isSitePagePreviewForcedRendered(pageDoc)
 }
 
 const isSitePagePreviewDecisionPending = (pageDoc) => {
+  if (!SITE_PAGE_PREVIEW_JPEG_ENABLED && !SITE_PAGE_PREVIEW_BACKEND_JPEG_ENABLED)
+    return false
   if (shouldShowSitePagePreviewImage(pageDoc))
     return false
   return !!state.pagePreviewsLoading
@@ -2563,6 +2659,7 @@ const scheduleSitePagePreviewSnapshotCapture = (pageDoc) => {
     !docId
     || !SITE_PAGE_PREVIEW_JPEG_ENABLED
     || state.pagePreviewsLoading
+    || isSitePagePreviewBlocksPending(pageDoc)
     || !templatePageHasPreview(pageDoc)
     || !sitePreviewThemeReady.value
     || hasFreshSitePagePreviewImage(pageDoc)
@@ -2587,8 +2684,6 @@ const scheduleSitePagePreviewSnapshotCapture = (pageDoc) => {
 }
 
 const setSitePagePreviewSnapshotRef = (pageDoc, element) => {
-  if (!SITE_PAGE_PREVIEW_JPEG_ENABLED)
-    return
   const docId = String(pageDoc?.docId || '').trim()
   if (!docId)
     return
@@ -2596,12 +2691,16 @@ const setSitePagePreviewSnapshotRef = (pageDoc, element) => {
     sitePagePreviewSnapshotRefs.delete(docId)
     return
   }
+  observeSitePagePreviewScale(pageDoc, element)
+  if (!SITE_PAGE_PREVIEW_JPEG_ENABLED)
+    return
   sitePagePreviewSnapshotRefs.set(docId, element)
-  observeSitePagePreviewScale(element)
   scheduleSitePagePreviewSnapshotCapture(pageDoc)
 }
 
 const runBackendSitePagePreviewRefresh = async (pageDoc) => {
+  if (!SITE_PAGE_PREVIEW_BACKEND_JPEG_ENABLED)
+    return
   const docId = String(pageDoc?.docId || '').trim()
   const orgId = String(edgeGlobal.edgeState.currentOrganization || '').trim()
   if (!docId || !orgId || !props.site || !edgeGlobal.edgeState.devOverride)
@@ -2627,6 +2726,9 @@ const runBackendSitePagePreviewRefresh = async (pageDoc) => {
     const response = result?.data || result || {}
     const isReady = response?.status === 'ready'
     const url = String(response?.url || '').trim()
+    const responseField = String(response?.field || 'manualPreviewThumbnail').trim()
+    if (isReady && responseField && response?.thumbnail && typeof response.thumbnail === 'object')
+      pageDoc[responseField] = response.thumbnail
     state.sitePagePreviewSnapshots[docId] = {
       status: isReady && url ? 'ready' : 'failed',
       signature,
@@ -2651,6 +2753,8 @@ const runBackendSitePagePreviewRefresh = async (pageDoc) => {
 }
 
 const recaptureSitePagePreviewSnapshot = (pageDoc) => {
+  if (!SITE_PAGE_PREVIEW_BACKEND_JPEG_ENABLED)
+    return
   const docId = String(pageDoc?.docId || '').trim()
   if (!docId || sitePagePreviewBackendQueued.has(docId) || isSitePagePreviewBackendRefreshPending(pageDoc))
     return
@@ -3606,17 +3710,8 @@ const isSiteSettingPublished = computed(() => {
   return !!publishedSite
 })
 
-const cacheVerificationNow = ref(Date.now())
-let cacheVerificationTimer = null
-onMounted(() => {
-  cacheVerificationTimer = setInterval(() => {
-    cacheVerificationNow.value = Date.now()
-  }, 1000)
-})
 onBeforeUnmount(() => {
   sitePagePreviewSnapshotQueueStopped = true
-  if (cacheVerificationTimer)
-    clearInterval(cacheVerificationTimer)
   sitePagePreviewSnapshotTimers.forEach(timer => clearTimeout(timer))
   sitePagePreviewSnapshotTimers.clear()
   sitePagePreviewSnapshotQueue.splice(0, sitePagePreviewSnapshotQueue.length)
@@ -3624,71 +3719,8 @@ onBeforeUnmount(() => {
   sitePagePreviewBackendQueued.clear()
   sitePagePreviewSnapshotRefs.clear()
   sitePagePreviewSnapshotUploads.clear()
-  if (sitePagePreviewScaleObserver)
-    sitePagePreviewScaleObserver.disconnect()
-})
-
-const cacheVerificationStatus = computed(() => publishedSiteSettings.value?.cacheVerification || {})
-const cacheVerificationVerifiedRecently = computed(() => {
-  const status = cacheVerificationStatus.value || {}
-  if (status.status !== 'verified')
-    return false
-  const completedAt = Number(status.completedAt || status.lastCheckedAt || 0)
-  return Number.isFinite(completedAt) && cacheVerificationNow.value - completedAt <= 10000
-})
-const showCacheVerificationStatus = computed(() => {
-  if (!edgeGlobal.edgeState.devOverride)
-    return false
-  const status = String(cacheVerificationStatus.value?.status || '')
-  return ['running', 'timeout', 'failed'].includes(status) || cacheVerificationVerifiedRecently.value
-})
-const cacheVerificationLabel = computed(() => {
-  const status = cacheVerificationStatus.value || {}
-  const label = String(status.activeLabel || '').trim()
-  if (!label)
-    return 'Clear Cache'
-  if (status.status === 'verified')
-    return `Cache Cleared: ${label}`
-  if (status.status === 'timeout')
-    return `Cache Clear Timed Out: ${label}`
-  if (status.status === 'failed')
-    return `Cache Clear Failed: ${label}`
-  if (status.status === 'skipped')
-    return `Cache Clear Skipped: ${label}`
-  const total = Number(status.total)
-  const completed = Number(status.completed)
-  if (status.status === 'running' && Number.isFinite(total) && total > 1 && Number.isFinite(completed))
-    return `Clear Cache: ${label} ${Math.min(completed + 1, total)} of ${total}`
-  return `Clear Cache: ${label}`
-})
-const cacheVerificationDetail = computed(() => {
-  const status = cacheVerificationStatus.value || {}
-  const parts = []
-  const state = String(status.status || '').trim()
-  const path = String(status.activePath || '').trim()
-  const error = String(status.error || '').trim()
-  const headers = (status.headers && typeof status.headers === 'object') ? status.headers : {}
-  const expectedSiteVersion = status.expectedSiteVersion ?? ''
-  const expectedPageVersion = status.expectedPageVersion ?? ''
-
-  if (state)
-    parts.push(`Status: ${state}`)
-  if (path)
-    parts.push(`Path: ${path}`)
-  if (expectedSiteVersion !== null && expectedSiteVersion !== undefined && expectedSiteVersion !== '')
-    parts.push(`Expected site version: ${expectedSiteVersion}`)
-  if (expectedPageVersion !== null && expectedPageVersion !== undefined && expectedPageVersion !== '')
-    parts.push(`Expected page version: ${expectedPageVersion}`)
-  if (headers.siteVersion)
-    parts.push(`Live site version: ${headers.siteVersion}`)
-  if (headers.pageVersion)
-    parts.push(`Live page version: ${headers.pageVersion}`)
-  if (headers.cacheStatus)
-    parts.push(`Live cache status: ${headers.cacheStatus}`)
-  if (error)
-    parts.push(`Error: ${error}`)
-
-  return parts.join('\n')
+  sitePagePreviewScaleObservers.forEach(observer => observer.disconnect())
+  sitePagePreviewScaleObservers.clear()
 })
 
 const isAnyPagesDiff = computed(() => {
@@ -4124,9 +4156,13 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                                   >
                                     <edge-cms-block-api
                                       v-if="resolveTemplateBlockForPreview(item, blockRef)"
-                                      :key="`${getTemplatePagePreviewKey(item.docId)}:${blockIdx}`"
+                                      :key="getPagePreviewBlockRenderKey(getTemplatePagePreviewKey(item.docId), item, blockRef, blockIdx)"
                                       :site-id="selectedTemplatePreviewSiteId"
                                       :content="resolveTemplateBlockForPreview(item, blockRef).content"
+                                      :template-version="resolveTemplateBlockForPreview(item, blockRef).templateVersion"
+                                      :template="resolveTemplateBlockForPreview(item, blockRef).template"
+                                      :schema="resolveTemplateBlockForPreview(item, blockRef).schema"
+                                      :data-sources="resolveTemplateBlockForPreview(item, blockRef).dataSources"
                                       :values="resolveTemplateBlockForPreview(item, blockRef).values"
                                       :meta="resolveTemplateBlockForPreview(item, blockRef).meta"
                                       :theme="selectedTemplatePreviewTheme"
@@ -4328,48 +4364,12 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                     <FolderUp v-else class="h-3.5 w-3.5" />
                     Publish Site
                   </edge-shad-button>
-                  <div
-                    v-if="showCacheVerificationStatus"
-                    class="flex gap-1 items-center text-xs py-1 px-3 rounded"
-                    :title="cacheVerificationDetail"
-                    :aria-label="cacheVerificationDetail || cacheVerificationLabel"
-                    :class="cacheVerificationStatus.status === 'running'
-                      ? 'bg-sky-100 text-sky-800'
-                      : cacheVerificationStatus.status === 'verified'
-                        ? 'bg-green-100 text-green-800'
-                        : 'bg-red-100 text-red-800'"
-                  >
-                    <Loader2 v-if="cacheVerificationStatus.status === 'running'" class="w-3 h-3 animate-spin" />
-                    <FileCheck v-else-if="cacheVerificationStatus.status === 'verified'" class="w-3 h-3" />
-                    <CircleAlert v-else class="w-3 h-3" />
-                    <span class="font-medium text-[10px]">
-                      {{ cacheVerificationLabel }}
-                    </span>
-                  </div>
                 </div>
                 <div v-else key="published" class="flex gap-2 items-center">
                   <div class="flex gap-1 items-center bg-green-100 text-xs py-1 px-3 text-green-800 rounded">
                     <FileCheck class="!text-green-800 w-3 h-6" />
                     <span class="font-medium text-[10px]">
                       {{ useMenuPublishLabels ? 'Menu Published' : 'Settings Published' }}
-                    </span>
-                  </div>
-                  <div
-                    v-if="showCacheVerificationStatus"
-                    class="flex gap-1 items-center text-xs py-1 px-3 rounded"
-                    :title="cacheVerificationDetail"
-                    :aria-label="cacheVerificationDetail || cacheVerificationLabel"
-                    :class="cacheVerificationStatus.status === 'running'
-                      ? 'bg-sky-100 text-sky-800'
-                      : cacheVerificationStatus.status === 'verified'
-                        ? 'bg-green-100 text-green-800'
-                        : 'bg-red-100 text-red-800'"
-                  >
-                    <Loader2 v-if="cacheVerificationStatus.status === 'running'" class="w-3 h-3 animate-spin" />
-                    <FileCheck v-else-if="cacheVerificationStatus.status === 'verified'" class="w-3 h-3" />
-                    <CircleAlert v-else class="w-3 h-3" />
-                    <span class="font-medium text-[10px]">
-                      {{ cacheVerificationLabel }}
                     </span>
                   </div>
                 </div>
@@ -4790,29 +4790,14 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                             </div>
                           </div>
                           <div
-                            v-else-if="shouldShowSitePagePreviewImage(item)"
-                            class="template-scale-wrapper"
-                          >
-                            <img
-                              :src="getFreshSitePagePreviewImageUrl(item)"
-                              :alt="`${item.name || item.docId || 'Page'} preview snapshot`"
-                              class="block w-full max-w-none"
-                            >
-                          </div>
-                          <div
                             v-else
                             :ref="element => setSitePagePreviewSnapshotRef(item, element)"
                             class="template-scale-wrapper"
+                            data-cms-standalone-preview="true"
                           >
                             <div class="template-scale-inner">
-                              <div class="template-scale-content space-y-4" :style="sitePagePreviewScaleStyle">
-                                <template v-if="state.pagePreviewsLoading">
-                                  <div class="flex h-32 flex-col items-center justify-center gap-3 mt-[100px] text-muted-foreground">
-                                    <Loader2 class="h-100 w-100 animate-spin" />
-                                    <span class="text-sm font-medium">Loading preview…</span>
-                                  </div>
-                                </template>
-                                <template v-else-if="templatePageHasPreview(item) && sitePreviewThemeReady">
+                              <div class="template-scale-content space-y-4" :style="sitePagePreviewScaleStyle(item)">
+                                <template v-if="templatePageHasPreview(item) && sitePreviewThemeReady">
                                   <div
                                     v-for="(row, rowIndex) in templatePreviewRows(item)"
                                     :key="`${item.docId}-row-${row.id || rowIndex}`"
@@ -4831,18 +4816,29 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                                         >
                                           <edge-cms-block-api
                                             v-if="resolveTemplateBlockForPreview(item, blockRef)"
-                                            :key="`${getSitePagePreviewKey(item.docId)}:${blockIdx}`"
+                                            :key="getPagePreviewBlockRenderKey(getSitePagePreviewKey(item.docId), item, blockRef, blockIdx)"
                                             :site-id="props.site"
                                             :content="resolveTemplateBlockForPreview(item, blockRef).content"
+                                            :template-version="resolveTemplateBlockForPreview(item, blockRef).templateVersion"
+                                            :template="resolveTemplateBlockForPreview(item, blockRef).template"
+                                            :schema="resolveTemplateBlockForPreview(item, blockRef).schema"
+                                            :data-sources="resolveTemplateBlockForPreview(item, blockRef).dataSources"
                                             :values="resolveTemplateBlockForPreview(item, blockRef).values"
                                             :meta="resolveTemplateBlockForPreview(item, blockRef).meta"
                                             :theme="sitePreviewTheme"
                                             :render-context="state.sitePageRenderContext"
                                             :isolated="true"
+                                            @pending="setSitePagePreviewBlockPending(item, getSitePagePreviewBlockPendingKey(row, rowIndex, column, colIndex, blockIdx), $event)"
                                           />
                                         </div>
                                       </div>
                                     </div>
+                                  </div>
+                                </template>
+                                <template v-else-if="state.pagePreviewsLoading">
+                                  <div class="flex h-32 flex-col items-center justify-center gap-3 mt-[100px] text-muted-foreground">
+                                    <Loader2 class="h-100 w-100 animate-spin" />
+                                    <span class="text-sm font-medium">Loading preview…</span>
                                   </div>
                                 </template>
                                 <template v-else>
@@ -4868,13 +4864,6 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                               Preview render
                             </span>
                             <div class="flex shrink-0 items-center gap-1">
-                              <button
-                                type="button"
-                                class="rounded border border-slate-300 px-1.5 py-0.5 text-[10px] leading-none text-slate-500 hover:bg-slate-100 hover:text-slate-800"
-                                @click.stop="openCmsPreviewRender(item)"
-                              >
-                                open
-                              </button>
                               <button
                                 v-if="hasFreshSitePagePreviewImage(item)"
                                 type="button"
@@ -5217,13 +5206,25 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
 .template-scale-inner,
 .template-page-preview-scale-inner {
   transform-origin: top left;
-  display: inline-block;
+  display: block;
   width: 100%;
   height: 400px;
   overflow: hidden;
+  position: relative;
 }
 
-.template-scale-content,
+.template-scale-content {
+  box-sizing: border-box;
+  width: 1600px;
+  min-height: 820px;
+  padding: 1.5rem;
+  transform-origin: top center;
+  position: absolute;
+  top: 0;
+  left: 50%;
+  margin-bottom: -1312px;
+}
+
 .template-page-preview-content {
   width: 1600px;
   min-height: 820px;

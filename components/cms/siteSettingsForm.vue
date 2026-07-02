@@ -90,7 +90,7 @@ const props = defineProps({
 
 const emit = defineEmits(['pushContactSpamContexts'])
 const edgeFirebase = inject('edgeFirebase')
-const { createContactSpamDefaults } = useSiteSettingsTemplate()
+const { createContactSpamDefaults, createDefaults: createSiteSettingsDefaults } = useSiteSettingsTemplate()
 
 const state = reactive({
   logoPickerOpen: false,
@@ -111,6 +111,8 @@ const CONTACT_SPAM_THRESHOLD_BY_LABEL = {
   normal: 0.75,
   strict: 0.6,
 }
+
+const siteSettingsDefaults = createSiteSettingsDefaults()
 
 const contactSpamStrictnessItems = [
   { value: 'lenient', label: 'Lenient' },
@@ -336,6 +338,21 @@ const forwardApexEnabled = computed({
   get: () => props.settings?.forwardApex !== false,
   set: (value) => {
     props.settings.forwardApex = !!value
+  },
+})
+const trackingConsentEnabled = computed({
+  get: () => props.settings?.trackingConsentEnabled !== false,
+  set: (value) => {
+    Reflect.set(props.settings, 'trackingConsentEnabled', !!value)
+  },
+})
+const trackingConsentMessage = computed({
+  get: () => {
+    const value = String(props.settings?.trackingConsentMessage || '').trim()
+    return value || siteSettingsDefaults.trackingConsentMessage
+  },
+  set: (value) => {
+    Reflect.set(props.settings, 'trackingConsentMessage', String(value || ''))
   },
 })
 
@@ -1353,6 +1370,23 @@ watch(() => [
         <p class="text-sm text-muted-foreground">
           Add tracking IDs for this site.
         </p>
+        <edge-cms-boolean-card
+          v-model="trackingConsentEnabled"
+          name="trackingConsentEnabled"
+          label="Require Tracking Consent"
+          class="w-full"
+          checked-label="Consent Required"
+          unchecked-label="No Consent Required"
+        >
+          Require the front-end consent dialog before loading Google Analytics, Facebook Pixel, AdRoll, or Sure Feedback.
+        </edge-cms-boolean-card>
+        <edge-shad-textarea
+          v-model="trackingConsentMessage"
+          label="Tracking Consent Message"
+          name="trackingConsentMessage"
+          class="min-h-[120px]"
+          description="Default visitor-facing copy for the front-end tracking consent dialog."
+        />
         <edge-shad-input
           v-model="props.settings.trackingFacebookPixel"
           label="Facebook Pixel ID"

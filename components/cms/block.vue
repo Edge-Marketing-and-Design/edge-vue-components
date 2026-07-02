@@ -86,6 +86,7 @@ const props = defineProps({
 })
 const emit = defineEmits(['update:modelValue', 'delete'])
 const edgeFirebase = inject('edgeFirebase')
+const blockSourceSnapshotPending = useState('edge-cms-block-source-snapshot-pending', () => ({}))
 const { getPublicationPageOutputs } = usePublicationMedia()
 const BLOCK_INSTRUCTIONS_FIELD_KEY = 'Instructions'
 const BLOCK_AI_INSTRUCTIONS_FIELD_KEY = 'aiInstructions'
@@ -292,6 +293,100 @@ function extractFieldsInOrder(template) {
   }
 
   return fields
+}
+
+const addOrderedField = (items, seen, field, index) => {
+  const normalizedField = String(field || '').trim()
+  if (!normalizedField || seen.has(normalizedField))
+    return
+  items.push({ field: normalizedField, index })
+  seen.add(normalizedField)
+}
+
+const expressionMatchesTemplateV2Field = (expression, field) => {
+  const expr = String(expression || '').trim()
+  const key = String(field || '').trim()
+  if (!expr || !key)
+    return false
+  if (expr === key || expr.startsWith(`${key}.`))
+    return true
+
+  const functionMatch = expr.match(/^[A-Za-z_$][\w$]*\s*\((.*)\)$/)
+  if (!functionMatch)
+    return false
+
+  const firstArg = String(functionMatch[1] || '').split(',')[0]?.trim()
+  return firstArg === key || firstArg?.startsWith(`${key}.`)
+}
+
+function extractTemplateV2FieldsInOrder(template, fields = []) {
+  if (!template || typeof template !== 'string')
+    return []
+
+  const fieldSet = new Set(fields.map(field => String(field || '').trim()).filter(Boolean))
+  const ordered = []
+  const seen = new Set()
+
+  const TAG_START_RE = /\{\{\{\#([A-Za-z0-9_-]+)\s*\{/g
+  TAG_START_RE.lastIndex = 0
+  for (;;) {
+    const m = TAG_START_RE.exec(template)
+    if (!m)
+      break
+
+    const type = String(m[1] || '').toLowerCase()
+    if (shouldIgnoreTagType(type))
+      continue
+
+    const configStart = TAG_START_RE.lastIndex - 1
+    if (configStart < 0 || template[configStart] !== '{')
+      continue
+
+    const configEnd = findMatchingBrace(template, configStart)
+    if (configEnd === -1)
+      continue
+
+    const rawCfg = template.slice(configStart, configEnd + 1)
+    const parsedCfg = safeParseTagConfig(rawCfg)
+    const field = String(parsedCfg?.field || '').trim()
+    if (fieldSet.has(field))
+      addOrderedField(ordered, seen, field, m.index)
+
+    const closeTriple = template.indexOf('}}}', configEnd + 1)
+    TAG_START_RE.lastIndex = closeTriple !== -1 ? closeTriple + 3 : configEnd + 1
+  }
+
+  const forRe = /\{\{\#for\s+([A-Za-z_$][\w$]*)\s+in\s+([^}]+?)\s*\}\}/g
+  for (;;) {
+    const m = forRe.exec(template)
+    if (!m)
+      break
+
+    const sourceExpression = String(m[2] || '').trim()
+    const sourceMatch = sourceExpression.match(/^source\(\s*["']([^"']+)["']\s*\)$/)
+    const field = sourceMatch?.[1] || sourceExpression
+    if (fieldSet.has(field))
+      addOrderedField(ordered, seen, field, m.index)
+  }
+
+  const tokenRe = /\{\{\s*([^{}#/][^{}]*?)\s*\}\}/g
+  for (;;) {
+    const m = tokenRe.exec(template)
+    if (!m)
+      break
+
+    const expression = String(m[1] || '').trim()
+    for (const field of fieldSet) {
+      if (expressionMatchesTemplateV2Field(expression, field)) {
+        addOrderedField(ordered, seen, field, m.index)
+        break
+      }
+    }
+  }
+
+  return ordered
+    .sort((a, b) => a.index - b.index)
+    .map(item => item.field)
 }
 
 const modelValue = useVModel(props, 'modelValue', emit)
@@ -507,6 +602,47 @@ const sourceBlockDocId = computed(() => {
     return direct
   return String(props.blockId || '').trim()
 })
+const sourceBlocksCollectionPath = computed(() => {
+  const orgPath = String(edgeGlobal.edgeState.organizationDocPath || '').trim()
+  return orgPath ? `${orgPath}/blocks` : ''
+})
+
+const hasObjectEntries = (value) => {
+  return !!value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length > 0
+}
+
+const ensureSourceBlockSnapshot = async () => {
+  const blockDocId = sourceBlockDocId.value
+  const blocksPath = sourceBlocksCollectionPath.value
+  if (!blockDocId || !blocksPath || edgeFirebase.data?.[blocksPath])
+    return
+
+  if (blockSourceSnapshotPending.value[blocksPath])
+    return
+
+  blockSourceSnapshotPending.value[blocksPath] = true
+  try {
+    await edgeFirebase.startSnapshot(blocksPath)
+  }
+  catch {
+    // Non-blocking: the instance can still render its saved copy until the source block snapshot is available.
+  }
+  finally {
+    blockSourceSnapshotPending.value[blocksPath] = false
+  }
+}
+
+const loadSourceBlockDoc = async () => {
+  const blockDocId = sourceBlockDocId.value
+  const blocksPath = sourceBlocksCollectionPath.value
+  if (!blockDocId || !blocksPath)
+    return null
+
+  if (!edgeFirebase.data?.[blocksPath])
+    await edgeFirebase.startSnapshot(blocksPath)
+
+  return edgeFirebase.data?.[blocksPath]?.[blockDocId] || null
+}
 
 const inheritedPreviewType = computed(() => {
   const explicit = modelValue.value?.previewType
@@ -909,11 +1045,6 @@ const sanitizeQueryItems = (meta) => {
       delete cfg.height
     }
 
-    const hasQueryOptions = Array.isArray(cfg?.queryOptions) && cfg.queryOptions.length > 0
-    if (cfg?.api && !hasQueryOptions && cfg?.queryItems && typeof cfg.queryItems === 'object') {
-      delete cfg.queryItems
-      continue
-    }
     if (!cfg?.queryItems || typeof cfg.queryItems !== 'object')
       continue
 
@@ -949,6 +1080,34 @@ const setPublicationFieldSelection = (field, item) => {
   state.publicationOpenByKey[field] = false
 }
 
+const getOptionDefaultValue = (schemaItem) => {
+  if (schemaItem?.value !== undefined && schemaItem?.value !== null && schemaItem?.value !== '')
+    return schemaItem.value
+  let option = {}
+  if (schemaItem?.option && typeof schemaItem.option === 'object' && !Array.isArray(schemaItem.option))
+    option = schemaItem.option
+  const itemTitle = option.optionsKey || 'label'
+  const itemValue = option.optionsValue || 'value'
+  let firstOption = null
+  if (Array.isArray(option.options)) {
+    firstOption = option.options.find((item) => {
+      if (typeof item === 'string')
+        return item.trim()
+      if (!item || typeof item !== 'object')
+        return false
+      const value = item[itemValue] ?? item.value ?? item.name ?? item.id ?? item[itemTitle]
+      return String(value || '').trim()
+    })
+  }
+  if (typeof firstOption === 'string')
+    return firstOption.trim()
+  if (firstOption && typeof firstOption === 'object') {
+    const value = firstOption[itemValue] ?? firstOption.value ?? firstOption.name ?? firstOption.id ?? firstOption[itemTitle]
+    return String(value || '').trim()
+  }
+  return ''
+}
+
 const resetArrayItems = (field, metaSource = null) => {
   const meta = metaSource || modelValue.value?.meta || {}
   const fieldMeta = meta?.[field]
@@ -970,6 +1129,9 @@ const resetArrayItems = (field, metaSource = null) => {
     }
     else if (schemaItem.type === 'image') {
       state.arrayItems[field][schemaItem.field] = ''
+    }
+    else if (schemaItem.type === 'option') {
+      state.arrayItems[field][schemaItem.field] = getOptionDefaultValue(schemaItem)
     }
   }
 }
@@ -1047,6 +1209,227 @@ const parseBlockContentModel = (html) => {
   return { values, meta }
 }
 
+const getLegacyAuthoredBlockModel = (blockData, instance) => {
+  const authoredContent = String(blockData?.content || instance?.content || '')
+  const parsed = parseBlockContentModel(authoredContent)
+  return {
+    values: {
+      ...(blockData?.values || {}),
+      ...(instance?.values || {}),
+      ...(parsed.values || {}),
+    },
+    meta: {
+      ...(blockData?.meta || {}),
+      ...(instance?.meta || {}),
+      ...(parsed.meta || {}),
+    },
+  }
+}
+
+const isTemplateV2BlockDoc = doc => Number(doc?.templateVersion) === 2
+const hasLegacyInlineTags = content => /\{\{\{#[A-Za-z0-9_-]+\s*\{/.test(String(content || ''))
+const hasTemplateV2EditorConfig = (doc) => {
+  return hasObjectEntries(doc?.schema) || hasObjectEntries(doc?.dataSources)
+}
+const isMalformedLegacyTemplateV2Doc = (doc) => {
+  if (!isTemplateV2BlockDoc(doc))
+    return false
+  const source = `${String(doc?.template || '')}\n${String(doc?.content || '')}`
+  return hasLegacyInlineTags(source) && !hasTemplateV2EditorConfig(doc)
+}
+const DATA_SOURCE_CONTROL_FIELD_PREFIX = '__dataSourceControl__'
+const DATA_SOURCE_LIMIT_CONTROL_FIELD = '__limit'
+
+const makeDataSourceControlField = (sourceName, controlField) => {
+  return `${DATA_SOURCE_CONTROL_FIELD_PREFIX}${sourceName}__${controlField}`
+}
+
+const parseDataSourceControlField = (field) => {
+  const value = String(field || '')
+  if (!value.startsWith(DATA_SOURCE_CONTROL_FIELD_PREFIX))
+    return null
+  const remainder = value.slice(DATA_SOURCE_CONTROL_FIELD_PREFIX.length)
+  const separatorIndex = remainder.indexOf('__')
+  if (separatorIndex === -1)
+    return null
+  return {
+    sourceName: remainder.slice(0, separatorIndex),
+    controlField: remainder.slice(separatorIndex + 2),
+  }
+}
+
+const titleFromFieldName = (field) => {
+  return String(field || '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/^./, char => char.toUpperCase())
+}
+
+const normalizeTemplateV2SchemaItem = (field, config = {}) => {
+  let rawConfig = { type: String(config || 'text') }
+  if (config && typeof config === 'object' && !Array.isArray(config))
+    rawConfig = config
+  const {
+    value: _value,
+    label,
+    title,
+    schema,
+    ...rest
+  } = rawConfig
+
+  const normalized = {
+    ...rest,
+    type: rawConfig.type || rawConfig.value || 'text',
+    title: title || label || '',
+  }
+
+  if (schema !== undefined)
+    normalized.schema = normalizeTemplateV2ArraySchema(schema)
+
+  return normalized
+}
+
+function normalizeTemplateV2ArraySchema(schema) {
+  if (Array.isArray(schema)) {
+    return schema
+      .filter(item => item?.field)
+      .map(item => ({
+        field: String(item.field),
+        ...normalizeTemplateV2SchemaItem(item.field, item),
+      }))
+  }
+
+  if (schema && typeof schema === 'object') {
+    return Object.entries(schema).map(([field, config]) => ({
+      field,
+      ...normalizeTemplateV2SchemaItem(field, config),
+    }))
+  }
+
+  return []
+}
+
+const buildMetaFromTemplateV2Schema = (schema = {}) => {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema))
+    return {}
+
+  return Object.entries(schema).reduce((acc, [field, config]) => {
+    acc[field] = normalizeTemplateV2SchemaItem(field, config)
+    return acc
+  }, {})
+}
+
+const buildMetaFromTemplateV2DataSourceControls = (dataSources = {}) => {
+  if (!dataSources || typeof dataSources !== 'object' || Array.isArray(dataSources))
+    return {}
+
+  return Object.entries(dataSources).reduce((acc, [sourceName, sourceConfig]) => {
+    const controls = sourceConfig?.controls
+
+    if (controls && typeof controls === 'object' && !Array.isArray(controls)) {
+      Object.entries(controls).forEach(([controlField, controlConfig]) => {
+        const control = (controlConfig && typeof controlConfig === 'object' && !Array.isArray(controlConfig))
+          ? controlConfig
+          : { type: 'text' }
+        const field = makeDataSourceControlField(sourceName, controlField)
+        const controlType = String(control.type || '').trim().toLowerCase()
+        const hasOptions = controlType !== 'text' && (Array.isArray(control.options) || typeof control.options === 'string')
+        acc[field] = {
+          type: hasOptions ? 'option' : (control.type === 'number' ? 'number' : 'text'),
+          title: control.label || control.title || titleFromFieldName(controlField),
+          placeholder: control.placeholder || '',
+          dataSourceControl: {
+            sourceName,
+            field: controlField,
+          },
+        }
+        if (hasOptions) {
+          acc[field].option = {
+            field,
+            options: control.options || [],
+            optionsKey: control.optionsKey || 'label',
+            optionsValue: control.optionsValue || 'value',
+            multiple: !!control.multiple,
+          }
+        }
+      })
+    }
+
+    const sourceLimit = Number(sourceConfig?.limit)
+    if (Number.isFinite(sourceLimit) && sourceLimit > 0 && sourceLimit !== 1) {
+      const field = makeDataSourceControlField(sourceName, DATA_SOURCE_LIMIT_CONTROL_FIELD)
+      acc[field] = {
+        type: 'number',
+        title: 'Limit',
+        dataSourceControl: {
+          sourceName,
+          field: DATA_SOURCE_LIMIT_CONTROL_FIELD,
+          target: 'limit',
+        },
+      }
+    }
+
+    return acc
+  }, {})
+}
+
+const getTemplateV2DataSourceControlTarget = control => control?.target || (control?.field === DATA_SOURCE_LIMIT_CONTROL_FIELD ? 'limit' : 'queryItem')
+
+const getDataSourceControlDefault = (dataSources, sourceName, controlField, target = 'queryItem', instanceMeta = {}) => {
+  const instanceSourceMeta = instanceMeta?.[sourceName]
+  if (target === 'limit') {
+    if (instanceSourceMeta?.limit !== undefined)
+      return edgeGlobal.dupObject(instanceSourceMeta.limit)
+    const sourceLimit = dataSources?.[sourceName]?.limit
+    return sourceLimit !== undefined ? edgeGlobal.dupObject(sourceLimit) : ''
+  }
+  const instanceQueryItemValue = instanceSourceMeta?.queryItems?.[controlField]
+  if (instanceQueryItemValue !== undefined)
+    return edgeGlobal.dupObject(instanceQueryItemValue)
+  const queryItemValue = dataSources?.[sourceName]?.queryItems?.[controlField]
+  if (queryItemValue !== undefined)
+    return edgeGlobal.dupObject(queryItemValue)
+  const controlValue = dataSources?.[sourceName]?.controls?.[controlField]?.value
+  if (controlValue !== undefined)
+    return edgeGlobal.dupObject(controlValue)
+  return ''
+}
+
+const applyDataSourceControlDraftMeta = (meta = {}, draft = {}) => {
+  const nextMeta = edgeGlobal.dupObject(meta || {})
+  Object.entries(meta || {}).forEach(([field, fieldMeta]) => {
+    const control = fieldMeta?.dataSourceControl || parseDataSourceControlField(field)
+    if (!control?.sourceName || !control?.field)
+      return
+    if (!nextMeta[control.sourceName] || typeof nextMeta[control.sourceName] !== 'object' || Array.isArray(nextMeta[control.sourceName]))
+      nextMeta[control.sourceName] = {}
+    if (getTemplateV2DataSourceControlTarget(control) === 'limit') {
+      nextMeta[control.sourceName].limit = edgeGlobal.dupObject(draft?.[field])
+      return
+    }
+    if (!nextMeta[control.sourceName].queryItems || typeof nextMeta[control.sourceName].queryItems !== 'object' || Array.isArray(nextMeta[control.sourceName].queryItems))
+      nextMeta[control.sourceName].queryItems = {}
+    nextMeta[control.sourceName].queryItems[control.field] = edgeGlobal.dupObject(draft?.[field])
+  })
+  return nextMeta
+}
+
+const collectTemplateV2SchemaDefaults = (schema = {}) => {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema))
+    return {}
+
+  return Object.entries(schema).reduce((acc, [field, config]) => {
+    if (config && typeof config === 'object' && Object.prototype.hasOwnProperty.call(config, 'value'))
+      acc[field] = edgeGlobal.dupObject(config.value)
+    else if (config?.type === 'array')
+      acc[field] = []
+    else
+      acc[field] = ''
+    return acc
+  }, {})
+}
+
 const buildUpdatedBlockDocFromContent = (content, sourceDoc = {}) => {
   const parsed = parseBlockContentModel(content)
   const previousValues = sourceDoc?.values || {}
@@ -1085,6 +1468,42 @@ const blockContentSourceDoc = computed(() => {
   if (!blockDocId)
     return null
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[blockDocId] || null
+})
+
+const resolvedRenderBlock = computed(() => {
+  const instance = modelValue.value || {}
+  const sourceDoc = blockContentSourceDoc.value || {}
+  const sourceIsV2 = isTemplateV2BlockDoc(sourceDoc) && !isMalformedLegacyTemplateV2Doc(sourceDoc)
+  const templateIsV2 = (isTemplateV2BlockDoc(instance) && !isMalformedLegacyTemplateV2Doc(instance)) || sourceIsV2
+  const templateVersion = templateIsV2 ? 2 : (Number(instance.templateVersion || sourceDoc.templateVersion) || 1)
+  const isUnsavedEditorPreview = props.standalonePreview && String(instance.id || '') === 'preview'
+  const useSourceDefinition = sourceIsV2 && hasObjectEntries(sourceDoc) && !isUnsavedEditorPreview
+
+  return {
+    ...sourceDoc,
+    ...instance,
+    content: useSourceDefinition
+      ? (sourceDoc.content || sourceDoc.template || '')
+      : (instance.content || sourceDoc.content || sourceDoc.template || ''),
+    templateVersion,
+    template: useSourceDefinition
+      ? (sourceDoc.template || '')
+      : (instance.template || sourceDoc.template || ''),
+    schema: useSourceDefinition
+      ? (sourceDoc.schema || {})
+      : (hasObjectEntries(instance.schema) ? instance.schema : (sourceDoc.schema || {})),
+    dataSources: useSourceDefinition
+      ? (sourceDoc.dataSources || {})
+      : (hasObjectEntries(instance.dataSources) ? instance.dataSources : (sourceDoc.dataSources || {})),
+    values: {
+      ...(sourceDoc.values || {}),
+      ...(instance.values || {}),
+    },
+    meta: {
+      ...(sourceDoc.meta || {}),
+      ...(instance.meta || {}),
+    },
+  }
 })
 
 const editorInstructionsHtml = computed(() => {
@@ -1168,10 +1587,26 @@ watch(() => [edgeGlobal.edgeState.currentOrganization, props.siteId], async () =
   await ensureSitePostSnapshots()
 }, { immediate: true })
 
+watch(() => [edgeGlobal.edgeState.currentOrganization, sourceBlockDocId.value], async () => {
+  await ensureSourceBlockSnapshot()
+}, { immediate: true })
+
 const blockContentPreviewBlock = computed(() => {
   const content = String(state.blockContentDraft ?? '')
-  const sourceDoc = modelValue.value || blockContentSourceDoc.value || {}
-  const { values, meta } = buildUpdatedBlockDocFromContent(content, sourceDoc)
+  const sourceDoc = blockContentSourceDoc.value || modelValue.value || {}
+  const templateIsV2 = isTemplateV2BlockDoc(sourceDoc) && !isMalformedLegacyTemplateV2Doc(sourceDoc)
+  const { values, meta } = templateIsV2
+    ? {
+        values: {
+          ...(sourceDoc.values || {}),
+          ...(modelValue.value?.values || {}),
+        },
+        meta: {
+          ...(sourceDoc.meta || {}),
+          ...(modelValue.value?.meta || {}),
+        },
+      }
+    : buildUpdatedBlockDocFromContent(content, sourceDoc)
   const previewType = modelValue.value?.previewType ?? blockContentSourceDoc.value?.previewType
   return {
     id: modelValue.value?.id || 'preview-content',
@@ -1179,6 +1614,10 @@ const blockContentPreviewBlock = computed(() => {
     name: previewBlockDisplayName.value,
     previewType: normalizePreviewType(previewType),
     content,
+    templateVersion: sourceDoc.templateVersion,
+    template: templateIsV2 ? content : sourceDoc.template,
+    schema: sourceDoc.schema,
+    dataSources: sourceDoc.dataSources,
     values,
     meta,
     synced: !!sourceDoc?.synced,
@@ -1199,11 +1638,22 @@ const previewContentCanvasClass = computed(() => {
 })
 
 const fieldEditorPreviewBlock = computed(() => {
+  const dataSourceControlFields = Object.keys(state.meta || {}).filter(field => state.meta[field]?.dataSourceControl)
+  const previewValues = JSON.parse(JSON.stringify(state.draft || {}))
+  dataSourceControlFields.forEach((field) => {
+    delete previewValues[field]
+  })
+  let previewMeta = sanitizeQueryItems(state.meta)
+  previewMeta = applyDataSourceControlDraftMeta(previewMeta, state.draft)
+  dataSourceControlFields.forEach((field) => {
+    delete previewMeta[field]
+  })
+  previewMeta = sanitizeQueryItems(previewMeta)
   return {
-    ...JSON.parse(JSON.stringify(modelValue.value || {})),
+    ...JSON.parse(JSON.stringify(resolvedRenderBlock.value || {})),
     previewType: effectivePreviewType.value,
-    values: JSON.parse(JSON.stringify(state.draft || {})),
-    meta: sanitizeQueryItems(state.meta),
+    values: previewValues,
+    meta: previewMeta,
   }
 })
 
@@ -1213,15 +1663,40 @@ const isSingleRichtextOnlyFieldEditor = computed(() => {
   return entries.length === 1 && entries[0]?.[1]?.type === 'richtext'
 })
 
+const selectedSiteRenderContext = computed(() => {
+  const siteId = String(props.siteId || '').trim()
+  if (!siteId)
+    return null
+  const siteDoc = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[siteId]
+  if (!siteDoc || typeof siteDoc !== 'object' || Array.isArray(siteDoc))
+    return {
+      siteId,
+      docId: siteId,
+      id: siteId,
+    }
+  return {
+    ...edgeGlobal.dupObject(siteDoc),
+    siteId,
+    docId: siteDoc.docId || siteId,
+    id: siteDoc.id || siteId,
+  }
+})
+
+const effectiveRenderContext = computed(() => {
+  if (props.renderContext && typeof props.renderContext === 'object' && !Array.isArray(props.renderContext))
+    return props.renderContext
+  return selectedSiteRenderContext.value
+})
+
 const fieldEditorRenderValues = computed(() => {
   const baseValues = fieldEditorPreviewBlock.value?.values || {}
-  if (!props.renderContext || typeof props.renderContext !== 'object' || Array.isArray(props.renderContext))
+  if (!effectiveRenderContext.value)
     return baseValues
 
   return {
-    ...props.renderContext,
-    renderBlocks: props.renderContext,
-    renderItem: props.renderContext,
+    ...effectiveRenderContext.value,
+    renderBlocks: effectiveRenderContext.value,
+    renderItem: effectiveRenderContext.value,
     ...baseValues,
   }
 })
@@ -1630,7 +2105,10 @@ const openPreviewContentEditor = async () => {
 
   state.editorMode = 'content'
   state.blockContentDocId = blockDocId
-  state.blockContentDraft = String(modelValue.value?.content || blockData.content || '')
+  const blockDataIsTemplateV2 = isTemplateV2BlockDoc(blockData) && !isMalformedLegacyTemplateV2Doc(blockData)
+  state.blockContentDraft = String(blockDataIsTemplateV2
+    ? (blockData.template || blockData.content || '')
+    : (modelValue.value?.content || blockData.content || ''))
   state.blockContentError = ''
   state.blockContentUpdating = false
   state.validationErrors = []
@@ -1648,16 +2126,25 @@ const updateBlockContent = async () => {
   const blocksPath = `${edgeGlobal.edgeState.organizationDocPath}/blocks`
   const blockData = edgeFirebase.data?.[blocksPath]?.[blockDocId] || {}
   const nextContent = String(state.blockContentDraft || '')
-  // Update shared block defaults from the source block doc.
-  const { values: blockValues, meta: blockMeta } = buildUpdatedBlockDocFromContent(nextContent, blockData)
-  // Preserve page/block-instance values when editing block content from preview mode.
-  const { values: instanceValues, meta: instanceMeta } = buildUpdatedBlockDocFromContent(nextContent, modelValue.value || {})
+  const templateIsV2 = isTemplateV2BlockDoc(blockData) && !isMalformedLegacyTemplateV2Doc(blockData)
+  const { values: blockValues, meta: blockMeta } = templateIsV2
+    ? {
+        values: blockData.values || {},
+        meta: blockData.meta || {},
+      }
+    : buildUpdatedBlockDocFromContent(nextContent, blockData)
+  const { values: instanceValues, meta: instanceMeta } = templateIsV2
+    ? {
+        values: modelValue.value?.values || {},
+        meta: modelValue.value?.meta || {},
+      }
+    : buildUpdatedBlockDocFromContent(nextContent, modelValue.value || {})
   const blockUpdatedAt = new Date().toISOString()
   const nextType = normalizeBlockTypes(blockData?.type)
   const normalizedNextType = nextType.length ? nextType : ['Page']
 
   const previousModelValue = edgeGlobal.dupObject(modelValue.value || {})
-  modelValue.value = {
+  const nextModelValue = {
     ...(modelValue.value || {}),
     content: nextContent,
     values: instanceValues,
@@ -1665,17 +2152,31 @@ const updateBlockContent = async () => {
     blockUpdatedAt,
     blockId: blockData?.docId || blockDocId,
   }
+  if (templateIsV2) {
+    nextModelValue.templateVersion = 2
+    nextModelValue.template = nextContent
+    nextModelValue.schema = blockData.schema || modelValue.value?.schema || {}
+    nextModelValue.dataSources = blockData.dataSources || modelValue.value?.dataSources || {}
+  }
+  modelValue.value = nextModelValue
 
   state.blockContentError = ''
   state.blockContentUpdating = true
   try {
-    const results = await edgeFirebase.changeDoc(blocksPath, blockDocId, {
+    const updates = {
       content: nextContent,
-      values: blockValues,
-      meta: blockMeta,
       blockUpdatedAt,
       type: normalizedNextType,
-    })
+    }
+    if (templateIsV2) {
+      updates.templateVersion = 2
+      updates.template = nextContent
+    }
+    else {
+      updates.values = blockValues
+      updates.meta = blockMeta
+    }
+    const results = await edgeFirebase.changeDoc(blocksPath, blockDocId, updates)
     if (results?.success === false) {
       throw new Error(results?.error || 'Failed to update block content.')
     }
@@ -1714,10 +2215,29 @@ const openEditor = async (event, options = {}) => {
       return
     }
   }
-  const blockData = edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[modelValue.value.blockId]
-  const templateMeta = blockData?.meta || modelValue.value?.meta || {}
+  let blockData = null
+  try {
+    blockData = await loadSourceBlockDoc()
+  }
+  catch {
+    blockData = null
+  }
+  if (!blockData)
+    blockData = modelValue.value || {}
+  const templateIsV2 = (isTemplateV2BlockDoc(blockData) && !isMalformedLegacyTemplateV2Doc(blockData))
+    || (isTemplateV2BlockDoc(modelValue.value) && !isMalformedLegacyTemplateV2Doc(modelValue.value))
+  const legacyAuthoredModel = templateIsV2 ? { values: {}, meta: {} } : getLegacyAuthoredBlockModel(blockData, modelValue.value)
+  const templateSchema = blockData?.schema || modelValue.value?.schema || {}
+  const templateDataSources = blockData?.dataSources || modelValue.value?.dataSources || {}
+  const templateMeta = templateIsV2
+    ? {
+        ...buildMetaFromTemplateV2Schema(templateSchema),
+        ...buildMetaFromTemplateV2DataSourceControls(templateDataSources),
+      }
+    : (legacyAuthoredModel.meta || {})
   const storedMeta = modelValue.value?.meta || {}
   const mergedMeta = edgeGlobal.dupObject(templateMeta) || {}
+  const schemaDefaults = templateIsV2 ? collectTemplateV2SchemaDefaults(templateSchema) : {}
 
   for (const key of Object.keys(mergedMeta)) {
     const storedField = storedMeta?.[key]
@@ -1743,13 +2263,32 @@ const openEditor = async (event, options = {}) => {
     }
   }
 
-  state.draft = JSON.parse(JSON.stringify(modelValue.value?.values || {}))
+  state.draft = JSON.parse(JSON.stringify({
+    ...schemaDefaults,
+    ...(templateIsV2 ? {} : legacyAuthoredModel.values),
+    ...(blockData?.values || {}),
+    ...(modelValue.value?.values || {}),
+  }))
+  if (templateIsV2) {
+    Object.entries(mergedMeta).forEach(([field, fieldMeta]) => {
+      const control = fieldMeta?.dataSourceControl
+      if (!control?.sourceName || !control?.field)
+        return
+      state.draft[field] = getDataSourceControlDefault(
+        templateDataSources,
+        control.sourceName,
+        control.field,
+        getTemplateV2DataSourceControlTarget(control),
+        storedMeta,
+      )
+    })
+  }
   state.meta = JSON.parse(JSON.stringify(mergedMeta || {}))
   ensureQueryItemsDefaults(state.meta)
   removeIgnoredMetaEntries(state.meta)
   state.metaUpdate = edgeGlobal.dupObject(mergedMeta) || {}
   removeIgnoredMetaEntries(state.metaUpdate)
-  if (blockData?.values) {
+  if (!templateIsV2 && blockData?.values) {
     for (const key of Object.keys(blockData.values)) {
       if (!(key in state.draft)) {
         state.draft[key] = blockData.values[key]
@@ -1840,8 +2379,15 @@ const validateValueAgainstRules = (value, rules, label, typeHint) => {
 
 const orderedMeta = computed(() => {
   const metaObj = state.metaUpdate || {}
-  const tpl = modelValue.value?.content || ''
-  const orderedFields = extractFieldsInOrder(tpl)
+  const blockData = edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[modelValue.value?.blockId]
+  const templateIsV2 = (isTemplateV2BlockDoc(blockData) && !isMalformedLegacyTemplateV2Doc(blockData))
+    || (isTemplateV2BlockDoc(modelValue.value) && !isMalformedLegacyTemplateV2Doc(modelValue.value))
+  const tpl = templateIsV2
+    ? (blockData?.template || modelValue.value?.template || '')
+    : (blockData?.content || modelValue.value?.content || '')
+  const orderedFields = templateIsV2
+    ? extractTemplateV2FieldsInOrder(tpl, Object.keys(metaObj))
+    : extractFieldsInOrder(tpl)
 
   const out = []
   const picked = new Set()
@@ -1937,10 +2483,22 @@ const save = () => {
     return
   }
   state.validationErrors = []
+  const dataSourceControlFields = Object.keys(state.meta || {}).filter(field => state.meta[field]?.dataSourceControl)
+  const draftValues = JSON.parse(JSON.stringify(state.draft))
+  dataSourceControlFields.forEach((field) => {
+    delete draftValues[field]
+  })
+  const updatedValues = draftValues
+  let updatedMeta = sanitizeQueryItems(state.meta)
+  updatedMeta = applyDataSourceControlDraftMeta(updatedMeta, state.draft)
+  dataSourceControlFields.forEach((field) => {
+    delete updatedMeta[field]
+  })
+  updatedMeta = sanitizeQueryItems(updatedMeta)
   const updated = {
     ...modelValue.value,
-    values: JSON.parse(JSON.stringify(state.draft)),
-    meta: sanitizeQueryItems(state.meta),
+    values: updatedValues,
+    meta: updatedMeta,
   }
   const normalizedProtection = normalizeBlockProtection(state.protectionDraft, {
     allowPaidPlan: siteAllowsSelfRegistration.value,
@@ -2120,12 +2678,12 @@ const addToArray = async (field) => {
 
 const loadingRender = (content) => {
   if (state.loading) {
-    content = content.replaceAll('{{loading}}', '')
-    content = content.replaceAll('{{loaded}}', 'hidden')
+    content = content.replace(/\{\{\s*loading\s*\}\}/g, '')
+    content = content.replace(/\{\{\s*loaded\s*\}\}/g, 'hidden')
   }
   else {
-    content = content.replaceAll('{{loading}}', 'hidden')
-    content = content.replaceAll('{{loaded}}', '')
+    content = content.replace(/\{\{\s*loading\s*\}\}/g, 'hidden')
+    content = content.replace(/\{\{\s*loaded\s*\}\}/g, '')
   }
   return content
 }
@@ -2165,15 +2723,19 @@ const getTagsFromPosts = computed(() => {
     >
       <!-- Content -->
       <div class="relative z-0" :class="props.editMode && props.overrideClicksInEditMode ? 'pointer-events-none' : ''">
-        <edge-cms-block-api :site-id="props.siteId" :route-last-segment="props.routeLastSegment" :theme="props.theme" :content="modelValue?.content" :values="modelValue?.values" :meta="modelValue?.meta" :viewport-mode="props.viewportMode" :render-context="props.renderContext" :standalone-preview="props.standalonePreview" @pending="state.loading = $event" />
+        <edge-cms-block-api :site-id="props.siteId" :route-last-segment="props.routeLastSegment" :theme="props.theme" :content="resolvedRenderBlock.content" :template-version="resolvedRenderBlock.templateVersion" :template="resolvedRenderBlock.template" :schema="resolvedRenderBlock.schema" :data-sources="resolvedRenderBlock.dataSources" :values="resolvedRenderBlock.values" :meta="resolvedRenderBlock.meta" :viewport-mode="props.viewportMode" :render-context="effectiveRenderContext" :standalone-preview="props.standalonePreview" @pending="state.loading = $event" />
         <edge-cms-block-render
           v-if="state.loading"
-          :content="loadingRender(modelValue?.content)"
-          :values="modelValue?.values"
-          :meta="modelValue?.meta"
+          :content="loadingRender(resolvedRenderBlock.content)"
+          :template-version="resolvedRenderBlock.templateVersion"
+          :template="loadingRender(resolvedRenderBlock.template)"
+          :schema="resolvedRenderBlock.schema"
+          :data-sources="resolvedRenderBlock.dataSources"
+          :values="resolvedRenderBlock.values"
+          :meta="resolvedRenderBlock.meta"
           :theme="props.theme"
           :viewport-mode="props.viewportMode"
-          :render-context="props.renderContext"
+          :render-context="effectiveRenderContext"
           :standalone-preview="props.standalonePreview"
         />
       </div>
@@ -2227,13 +2789,13 @@ const getTagsFromPosts = computed(() => {
             />
             <edge-shad-button
               v-if="canShowPreviewContentControl"
-            type="button"
-            size="sm"
-            variant="ghost"
-            class="h-7 px-2 text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
-            :class="canShowPreviewDevControls ? '' : 'w-full justify-center'"
-            @click.stop.prevent="openEditor(null, { allowPreviewFieldEditor: true })"
-          >
+              type="button"
+              size="sm"
+              variant="ghost"
+              class="h-7 px-2 text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+              :class="canShowPreviewDevControls ? '' : 'w-full justify-center'"
+              @click.stop.prevent="openEditor(null, { allowPreviewFieldEditor: true })"
+            >
               <Pencil class="h-3.5 w-3.5" />
               {{ canShowPreviewDevControls ? 'Edit Block Contents' : 'Edit Block' }}
             </edge-shad-button>
@@ -2322,7 +2884,7 @@ const getTagsFromPosts = computed(() => {
                   title="Block Content"
                   language="handlebars"
                   name="preview-block-content"
-                  :enable-formatting="false"
+                  :enable-formatting="Number(blockContentPreviewBlock?.templateVersion) !== 2"
                   height="calc(100vh - 295px)"
                   class="h-full min-h-0"
                 >
@@ -2396,10 +2958,14 @@ const getTagsFromPosts = computed(() => {
                         :route-last-segment="props.routeLastSegment"
                         :theme="props.theme"
                         :content="blockContentPreviewBlock.content"
+                        :template-version="blockContentPreviewBlock.templateVersion"
+                        :template="blockContentPreviewBlock.template"
+                        :schema="blockContentPreviewBlock.schema"
+                        :data-sources="blockContentPreviewBlock.dataSources"
                         :values="blockContentPreviewBlock.values"
                         :meta="blockContentPreviewBlock.meta"
                         :viewport-mode="previewViewportMode"
-                        :render-context="props.renderContext"
+                        :render-context="effectiveRenderContext"
                         :standalone-preview="true"
                       />
                     </div>
@@ -2509,10 +3075,14 @@ const getTagsFromPosts = computed(() => {
                         :route-last-segment="props.routeLastSegment"
                         :theme="props.theme"
                         :content="fieldEditorPreviewBlock.content"
+                        :template-version="fieldEditorPreviewBlock.templateVersion"
+                        :template="fieldEditorPreviewBlock.template"
+                        :schema="fieldEditorPreviewBlock.schema"
+                        :data-sources="fieldEditorPreviewBlock.dataSources"
                         :values="fieldEditorPreviewBlock.values"
                         :meta="fieldEditorPreviewBlock.meta"
                         :viewport-mode="previewViewportMode"
-                        :render-context="props.renderContext"
+                        :render-context="effectiveRenderContext"
                         :standalone-preview="true"
                         @loaded="handleFieldEditorPreviewLoaded"
                       />
@@ -2834,6 +3404,7 @@ const getTagsFromPosts = computed(() => {
                           :richtext-auto-height="editableMetaEntries.length === 1 && entry.meta?.type === 'richtext'"
                           :show-richtext-image-toggle="showRichtextImageToggle"
                           :label="genTitleFromField(entry)"
+                          :placeholder="entry.meta?.placeholder || ''"
                         />
                       </div>
                       <div v-else>
@@ -3082,6 +3653,7 @@ const getTagsFromPosts = computed(() => {
                         :richtext-auto-height="editableMetaEntries.length === 1 && entry.meta?.type === 'richtext'"
                         :show-richtext-image-toggle="showRichtextImageToggle"
                         :label="genTitleFromField(entry)"
+                        :placeholder="entry.meta?.placeholder || ''"
                       />
                     </div>
                   </template>

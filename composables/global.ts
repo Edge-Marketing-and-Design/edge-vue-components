@@ -478,14 +478,17 @@ const prepareCmsMetaForRuntime = (meta: any, currentSite: any = '', tokenContext
 
     delete cfg.canonicalLookup
 
+    if (cfg.queryItems && typeof cfg.queryItems === 'object')
+      cfg.queryItems = resolveCmsCollectionTokens(cfg.queryItems, currentSite, tokenContext)
+
+    if (typeof cfg.apiQuery === 'string')
+      cfg.apiQuery = resolveCmsCollectionTokens(cfg.apiQuery, currentSite, tokenContext)
+
     if (!cfg.collection || typeof cfg.collection !== 'object')
       continue
 
     if (Array.isArray(cfg.collection.query))
       cfg.collection.query = resolveCmsCollectionTokens(cfg.collection.query, currentSite, tokenContext)
-
-    if (cfg.queryItems && typeof cfg.queryItems === 'object')
-      cfg.queryItems = resolveCmsCollectionTokens(cfg.queryItems, currentSite, tokenContext)
 
     if (typeof cfg.collection.uniqueKey === 'string')
       cfg.collection.uniqueKey = resolveCmsCollectionTokens(cfg.collection.uniqueKey, currentSite, tokenContext)
@@ -610,29 +613,12 @@ const cmsCollectionData = async (edgeFirebase: any, value: any, meta: any, curre
         collectionPath = `${edgeState.organizationDocPath}/sites/${currentSite}/published_posts`
       }
 
-      if (import.meta.client) {
-        console.log('[cms routeLastSegment] pre-fetch', {
-          field: key,
-          collectionPath,
-          queryItems: meta[key].queryItems || {},
-          currentQuery,
-          canonicalLookupKey,
-        })
-      }
-
       if (canonicalLookupKey) {
         const canonicalSegments = canonicalLookupKey.split(':').filter(Boolean)
         const docId = canonicalSegments[canonicalSegments.length - 1]
         if (docId) {
           const record = await edgeFirebase.getDocData(collectionPath, docId)
           const records = record ? [record] : []
-          if (import.meta.client) {
-            console.log('[cms routeLastSegment] cmsCollectionData canonical result', {
-              field: key,
-              docId,
-              records,
-            })
-          }
           value[key] = applyCmsCollectionOrder(records, meta[key].collection.order)
           continue
         }
@@ -641,16 +627,6 @@ const cmsCollectionData = async (edgeFirebase: any, value: any, meta: any, curre
       await staticSearch.getData(collectionPath, currentQuery, meta[key].collection.order, meta[key].limit)
 
       const records = Object.values(staticSearch.results.data || {})
-      if (import.meta.client) {
-        console.log('[cms routeLastSegment] cmsCollectionData results', {
-          field: key,
-          queryItems: meta[key].queryItems || {},
-          currentQuery,
-          count: records.length,
-          firstRecord: records[0] || null,
-          records,
-        })
-      }
       value[key] = applyCmsCollectionOrder(records, meta[key].collection.order)
     }
   }

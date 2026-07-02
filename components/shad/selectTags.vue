@@ -63,6 +63,11 @@ const props = defineProps({
     required: false,
     default: '',
   },
+  listClass: {
+    type: null,
+    required: false,
+    default: '',
+  },
 })
 
 const emits = defineEmits(['update:modelValue', 'add'])
@@ -214,7 +219,7 @@ const onSelectItem = (ev) => {
                   </ComboboxTrigger>
                 </TagsInput>
 
-                <ComboboxList class="w-[--reka-popper-anchor-width]">
+                <ComboboxList :class="cn('w-[--reka-popper-anchor-width]', props.listClass)">
                   <ComboboxEmpty>
                     <button
                       v-if="props.allowAdditions && searchTerm && searchTerm.trim() && !computedItems.some(item => String(item[props.itemValue]).toLowerCase() === searchTerm.trim().toLowerCase())"
@@ -251,7 +256,7 @@ const onSelectItem = (ev) => {
             <slot name="icon" />
           </span>
         </div>
-        <FormDescription>
+        <FormDescription v-if="props.description">
           {{ props.description }}
         </FormDescription>
         <FormMessage />
@@ -288,7 +293,7 @@ const onSelectItem = (ev) => {
           <slot name="icon" />
         </span>
       </div>
-      <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">
+      <p v-if="props.description" class="text-sm text-slate-500 dark:text-slate-400 mt-1">
         {{ props.description }}
       </p>
     </div>

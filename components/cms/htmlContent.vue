@@ -730,6 +730,7 @@ function initCmsNavHelpers(scope) {
     const panelHiddenClass = position === 'left' ? '-translate-x-full' : 'translate-x-full'
     const previewSurface = root.closest('[data-cms-preview-surface]')
     const shouldContainFixedInPreview = Boolean(previewSurface)
+    const forceTopScrollState = props.standalonePreview || root.closest('[data-cms-standalone-preview="true"]')
     const stickyEnabled = root.classList.contains('cms-nav-sticky') || parseBoolean(root.getAttribute('data-cms-nav-sticky'))
     const getPreviewMode = () => String(previewSurface?.getAttribute('data-cms-preview-mode') || 'preview').toLowerCase()
     const shouldPinInsidePreview = () => shouldContainFixedInPreview && getPreviewMode() === 'preview' && stickyEnabled
@@ -780,6 +781,8 @@ function initCmsNavHelpers(scope) {
       : collectScrollTargets(root)
     const windowScrollY = () => window.scrollY || document.documentElement.scrollTop || 0
     const readScrollY = () => {
+      if (forceTopScrollState)
+        return 0
       if (shouldContainFixedInPreview) {
         refreshPreviewTargets()
         const scopedTargets = Array.from(new Set([previewSurface, previewScrollTarget, previewPinAnchor, ...previewScrollAncestors].filter(Boolean)))

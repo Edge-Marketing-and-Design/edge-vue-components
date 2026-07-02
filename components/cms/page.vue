@@ -780,6 +780,42 @@ const getNextVersion = (value) => {
   return Math.max(0, Math.trunc(numericVersion)) + 1
 }
 
+const derivePageBlockIds = (workingDoc = {}) => {
+  const ids = new Set()
+  const collectBlocks = (blocks) => {
+    if (!Array.isArray(blocks))
+      return
+    for (const block of blocks) {
+      const blockId = String(block?.blockId || '').trim()
+      if (blockId)
+        ids.add(blockId)
+    }
+  }
+  const collectStructure = (structure) => {
+    if (!Array.isArray(structure))
+      return
+    for (const row of structure) {
+      for (const column of row?.columns || []) {
+        if (!Array.isArray(column?.blocks))
+          continue
+        for (const block of column.blocks) {
+          const blockId = typeof block === 'string'
+            ? block.trim()
+            : String(block?.blockId || '').trim()
+          if (blockId)
+            ids.add(blockId)
+        }
+      }
+    }
+  }
+
+  collectBlocks(workingDoc.content)
+  collectBlocks(workingDoc.postContent)
+  collectStructure(workingDoc.structure)
+  collectStructure(workingDoc.postStructure)
+  return Array.from(ids)
+}
+
 const editorDocUpdates = (workingDoc) => {
   if (workingDoc && Object.prototype.hasOwnProperty.call(workingDoc, 'restrictionRuleId'))
     delete workingDoc.restrictionRuleId
@@ -798,11 +834,7 @@ const editorDocUpdates = (workingDoc) => {
   }
   if (!hasPostView(workingDoc) && state.previewPageView === 'post')
     state.previewPageView = 'list'
-  const blockIds = (workingDoc.content || []).map(block => block.blockId).filter(id => id)
-  const postBlockIds = workingDoc.postContent ? workingDoc.postContent.map(block => block.blockId).filter(id => id) : []
-  blockIds.push(...postBlockIds)
-  const uniqueBlockIds = [...new Set(blockIds)]
-  state.workingDoc.blockIds = uniqueBlockIds
+  state.workingDoc.blockIds = derivePageBlockIds(workingDoc)
   const storedVersion = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`]?.[props.page]?.version
   const nextVersion = getNextVersion(storedVersion)
   if (state.workingDoc.version !== nextVersion)
@@ -1911,11 +1943,14 @@ function mergeSyncedBlockMeta(currentMeta, existingMeta) {
     return nextMeta
 
   Object.entries(existingMeta).forEach(([key, value]) => {
-    if (!isObjectRecord(value) || !isObjectRecord(value.queryItems))
+    if (!isObjectRecord(value))
       return
     if (!isObjectRecord(nextMeta[key]))
       nextMeta[key] = {}
-    nextMeta[key].queryItems = edgeGlobal.dupObject(value.queryItems)
+    if (isObjectRecord(value.queryItems))
+      nextMeta[key].queryItems = edgeGlobal.dupObject(value.queryItems)
+    if (Object.prototype.hasOwnProperty.call(value, 'limit'))
+      nextMeta[key].limit = edgeGlobal.dupObject(value.limit)
   })
 
   return nextMeta
@@ -4919,6 +4954,10 @@ const hasUnsavedChanges = (changes) => {
                           v-if="blockIndex(renderedHistoryPreviewDoc, blockId, false) !== -1"
                           :site-id="selectedPreviewContextSiteId"
                           :content="renderedHistoryPreviewDoc.content[blockIndex(renderedHistoryPreviewDoc, blockId, false)]?.content"
+                          :template-version="renderedHistoryPreviewDoc.content[blockIndex(renderedHistoryPreviewDoc, blockId, false)]?.templateVersion"
+                          :template="renderedHistoryPreviewDoc.content[blockIndex(renderedHistoryPreviewDoc, blockId, false)]?.template"
+                          :schema="renderedHistoryPreviewDoc.content[blockIndex(renderedHistoryPreviewDoc, blockId, false)]?.schema"
+                          :data-sources="renderedHistoryPreviewDoc.content[blockIndex(renderedHistoryPreviewDoc, blockId, false)]?.dataSources"
                           :values="renderedHistoryPreviewDoc.content[blockIndex(renderedHistoryPreviewDoc, blockId, false)]?.values"
                           :meta="renderedHistoryPreviewDoc.content[blockIndex(renderedHistoryPreviewDoc, blockId, false)]?.meta"
                           :viewport-mode="previewViewportMode"
@@ -4972,6 +5011,10 @@ const hasUnsavedChanges = (changes) => {
                           v-if="blockIndex(renderedHistoryPreviewDoc, blockId, true) !== -1"
                           :site-id="selectedPreviewContextSiteId"
                           :content="renderedHistoryPreviewDoc.postContent[blockIndex(renderedHistoryPreviewDoc, blockId, true)]?.content"
+                          :template-version="renderedHistoryPreviewDoc.postContent[blockIndex(renderedHistoryPreviewDoc, blockId, true)]?.templateVersion"
+                          :template="renderedHistoryPreviewDoc.postContent[blockIndex(renderedHistoryPreviewDoc, blockId, true)]?.template"
+                          :schema="renderedHistoryPreviewDoc.postContent[blockIndex(renderedHistoryPreviewDoc, blockId, true)]?.schema"
+                          :data-sources="renderedHistoryPreviewDoc.postContent[blockIndex(renderedHistoryPreviewDoc, blockId, true)]?.dataSources"
                           :values="renderedHistoryPreviewDoc.postContent[blockIndex(renderedHistoryPreviewDoc, blockId, true)]?.values"
                           :meta="renderedHistoryPreviewDoc.postContent[blockIndex(renderedHistoryPreviewDoc, blockId, true)]?.meta"
                           :viewport-mode="previewViewportMode"
@@ -5070,6 +5113,9 @@ const hasUnsavedChanges = (changes) => {
             v-model="state.routeLastSegmentDraft"
             placeholder="example-post-name"
           />
+          <p class="text-xs text-muted-foreground">
+            Preview uses this value exactly as typed. Live pages may use a URL slug, but this test value is not converted.
+          </p>
         </div>
         <div class="flex items-center justify-end gap-2">
           <edge-shad-button type="button" variant="outline" @click="clearRouteLastSegment">
@@ -5202,6 +5248,10 @@ const hasUnsavedChanges = (changes) => {
                         <edge-cms-block-api
                           :key="`${blockChange.key}:base`"
                           :content="blockChange.baseBlock?.content"
+                          :template-version="blockChange.baseBlock?.templateVersion"
+                          :template="blockChange.baseBlock?.template"
+                          :schema="blockChange.baseBlock?.schema"
+                          :data-sources="blockChange.baseBlock?.dataSources"
                           :values="blockChange.baseBlock?.values"
                           :meta="blockChange.baseBlock?.meta"
                           :theme="theme"
@@ -5229,6 +5279,10 @@ const hasUnsavedChanges = (changes) => {
                         <edge-cms-block-api
                           :key="`${blockChange.key}:compare`"
                           :content="blockChange.compareBlock?.content"
+                          :template-version="blockChange.compareBlock?.templateVersion"
+                          :template="blockChange.compareBlock?.template"
+                          :schema="blockChange.compareBlock?.schema"
+                          :data-sources="blockChange.compareBlock?.dataSources"
                           :values="blockChange.compareBlock?.values"
                           :meta="blockChange.compareBlock?.meta"
                           :theme="theme"
@@ -5366,6 +5420,10 @@ const hasUnsavedChanges = (changes) => {
                         <edge-cms-block-api
                           :key="`${blockChange.key}:base`"
                           :content="blockChange.baseBlock?.content"
+                          :template-version="blockChange.baseBlock?.templateVersion"
+                          :template="blockChange.baseBlock?.template"
+                          :schema="blockChange.baseBlock?.schema"
+                          :data-sources="blockChange.baseBlock?.dataSources"
                           :values="blockChange.baseBlock?.values"
                           :meta="blockChange.baseBlock?.meta"
                           :theme="theme"
@@ -5393,6 +5451,10 @@ const hasUnsavedChanges = (changes) => {
                         <edge-cms-block-api
                           :key="`${blockChange.key}:compare`"
                           :content="blockChange.compareBlock?.content"
+                          :template-version="blockChange.compareBlock?.templateVersion"
+                          :template="blockChange.compareBlock?.template"
+                          :schema="blockChange.compareBlock?.schema"
+                          :data-sources="blockChange.compareBlock?.dataSources"
                           :values="blockChange.compareBlock?.values"
                           :meta="blockChange.compareBlock?.meta"
                           :theme="theme"

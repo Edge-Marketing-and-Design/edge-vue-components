@@ -4,6 +4,7 @@ const emit = defineEmits(['head'])
 const edgeFirebase = inject('edgeFirebase')
 const { saveJsonFiles } = useJsonFileSave()
 const { blocks: blockNewDocSchema } = useCmsNewDocs()
+const { convertLegacyBlockToTemplateV2 } = useCmsTemplateV2Conversion()
 const BLANK_BLOCK_TEMPLATE_ID = '__blank__'
 const state = reactive({
   filter: '',
@@ -211,6 +212,7 @@ const blockImportDocIdResolver = ref(null)
 const blockImportConflictResolver = ref(null)
 const DEFAULT_BLOCK_IMPORT_ERROR_MESSAGE = 'Failed to import block JSON.'
 const OPTIONAL_BLOCK_IMPORT_KEYS = new Set(['previewType', 'type'])
+const TEMPLATE_V2_BLOCK_IMPORT_KEYS = new Set(['templateVersion', 'template', 'schema', 'dataSources'])
 
 const openAddBlockDialog = () => {
   resetAddBlockDialogState()
@@ -386,15 +388,6 @@ const loadPreviewRenderContext = async () => {
 
   state.previewRenderContext = null
 }
-
-watch(
-  [() => edgeGlobal.edgeState.currentOrganization, blockPreviewSiteId],
-  async () => {
-    state.blocksLoaded = []
-    await loadPreviewRenderContext()
-  },
-  { immediate: true },
-)
 
 const tagOptions = computed(() => {
   const tagsSet = new Set()
@@ -599,18 +592,71 @@ const selectedPreviewTheme = computed(() => {
   const selectedThemeId = selectedPreviewThemeId.value
   return parsedThemesById.value?.[selectedThemeId] || parsedThemesById.value?.[firstThemeId.value] || null
 })
-const getPreviewSelectionKey = (docId) => {
+const hashPreviewSignature = (value) => {
+  const input = String(value || '')
+  let hash = 0
+  for (let i = 0; i < input.length; i += 1)
+    hash = ((hash << 5) - hash + input.charCodeAt(i)) | 0
+  return Math.abs(hash).toString(36)
+}
+const getBlockPreviewContent = (block) => {
+  if (Number(block?.templateVersion) === 2)
+    return block?.template || block?.content || ''
+  return block?.content || block?.template || ''
+}
+const hasBlockPreviewContent = block => String(getBlockPreviewContent(block) || '').trim().length > 0
+const getBlockPreviewSignature = (block) => {
+  if (!block || typeof block !== 'object')
+    return 'empty'
+  try {
+    return hashPreviewSignature(JSON.stringify([
+      block.templateVersion,
+      block.content,
+      block.template,
+      block.schema,
+      block.dataSources,
+      block.values,
+      block.meta,
+      block.previewType,
+    ]))
+  }
+  catch {
+    return hashPreviewSignature(`${block.templateVersion || ''}:${getBlockPreviewContent(block)}:${block.previewType || ''}`)
+  }
+}
+const getPreviewSelectionKey = (docId, block = null, suffix = '') => {
   const themeId = String(selectedPreviewThemeId.value || 'no-theme')
   const siteId = String(blockPreviewSiteId.value || 'no-site')
-  return `${String(docId || 'preview')}:${siteId}:${themeId}`
+  const signature = getBlockPreviewSignature(block)
+  const suffixPart = suffix ? `:${suffix}` : ''
+  return `${String(docId || 'preview')}:${siteId}:${themeId}:${signature}${suffixPart}`
 }
 
-const listFilters = computed(() => {
-  const filters = []
-  if (state.themesFilter.length)
-    filters.push({ filterFields: ['themes'], value: state.themesFilter })
-  return filters
-})
+function resetVisibleBlockPreviews() {
+  state.blocksLoaded = []
+}
+
+watch(
+  [() => edgeGlobal.edgeState.currentOrganization, blockPreviewSiteId],
+  async () => {
+    resetVisibleBlockPreviews()
+    await loadPreviewRenderContext()
+  },
+  { immediate: true },
+)
+
+watch(
+  () => [
+    state.filter,
+    state.blockTypeFilter,
+    JSON.stringify(state.picksFilter || []),
+    JSON.stringify(state.themesFilter || []),
+  ],
+  () => {
+    resetVisibleBlockPreviews()
+  },
+  { deep: true },
+)
 
 const applyTagSelectionFilter = (items = []) => {
   const selectedFilters = Array.isArray(state.picksFilter) ? state.picksFilter : []
@@ -678,6 +724,7 @@ const visibleBlockItems = computed(() => {
     : items.filter(item => [item?.name, item?.docId].some(value => String(value || '').toLowerCase().includes(query)))
   return applyListSelectionFilters(filteredByQuery)
 })
+const shouldRenderBlockPreviews = computed(() => visibleBlockItems.value.length <= 10)
 const selectedBlockSet = computed(() => new Set(state.selectedBlockDocIds))
 const selectedBlockCount = computed(() => state.selectedBlockDocIds.length)
 const addBlockTemplateItems = computed(() => [blankBlockTemplate, ...INITIAL_BLOCK_TEMPLATES])
@@ -874,6 +921,29 @@ const getDocDefaultsFromSchema = (schema = {}) => {
 
 const getBlockDocDefaults = () => getDocDefaultsFromSchema(blockNewDocSchema.value || {})
 
+const normalizeImportedBlockVersion = (doc) => {
+  const normalizedVersion = Number(doc?.templateVersion) === 2 ? 2 : 1
+  doc.templateVersion = normalizedVersion
+
+  if (normalizedVersion === 2) {
+    if (typeof doc.template !== 'string')
+      doc.template = typeof doc.content === 'string' ? doc.content : ''
+    if (!isPlainObject(doc.schema))
+      doc.schema = {}
+    if (!isPlainObject(doc.dataSources))
+      doc.dataSources = {}
+    return doc
+  }
+
+  if (typeof doc.template !== 'string')
+    doc.template = ''
+  if (!isPlainObject(doc.schema))
+    doc.schema = {}
+  if (!isPlainObject(doc.dataSources))
+    doc.dataSources = {}
+  return doc
+}
+
 const slugifyBlockDocId = (value) => {
   return String(value || '')
     .trim()
@@ -891,6 +961,35 @@ const makeUniqueBlockDocIdFromName = (name, docsMap = {}) => {
     suffix += 1
   }
   return nextDocId
+}
+
+const hasLegacyInlineTags = (content) => {
+  return /\{\{\{#[A-Za-z0-9_-]+\s*\{/.test(String(content || ''))
+}
+
+const buildStarterBlockPayload = (template, nextDocId, nextBlockName) => {
+  const content = typeof template?.content === 'string' ? template.content : ''
+  const payload = {
+    ...getBlockDocDefaults(),
+    docId: nextDocId,
+    name: nextBlockName,
+    content,
+  }
+
+  if (!content || !hasLegacyInlineTags(content))
+    return payload
+
+  const converted = convertLegacyBlockToTemplateV2(content)
+  return {
+    ...payload,
+    templateVersion: 2,
+    template: converted.template,
+    content: converted.template,
+    schema: converted.schema,
+    dataSources: converted.dataSources,
+    values: undefined,
+    templateConversion: converted.conversion,
+  }
 }
 
 watch(addExistingBlockItems, (items) => {
@@ -915,12 +1014,7 @@ const createBlockFromTemplate = async () => {
         docId: nextDocId,
         name: nextBlockName,
       }
-    : {
-        ...getBlockDocDefaults(),
-        docId: nextDocId,
-        name: nextBlockName,
-        content: typeof selectedInitBlockTemplate.value?.content === 'string' ? selectedInitBlockTemplate.value.content : '',
-      }
+    : buildStarterBlockPayload(selectedInitBlockTemplate.value, nextDocId, nextBlockName)
 
   try {
     await edgeFirebase.storeDoc(blockCollectionPath.value, payload, nextDocId)
@@ -940,8 +1034,11 @@ const validateImportedBlockDoc = (doc) => {
   if (!isPlainObject(doc))
     throw new Error('Invalid block document. Expected an object.')
 
+  normalizeImportedBlockVersion(doc)
+
   const requiredKeys = Object.keys(blockNewDocSchema.value || {})
     .filter(key => !OPTIONAL_BLOCK_IMPORT_KEYS.has(key))
+    .filter(key => doc.templateVersion === 2 || !TEMPLATE_V2_BLOCK_IMPORT_KEYS.has(key))
   const missing = requiredKeys.filter(key => !Object.prototype.hasOwnProperty.call(doc, key))
   if (missing.length)
     throw new Error(`Missing required block key(s): ${missing.join(', ')}`)
@@ -1175,8 +1272,8 @@ const handleBlockImport = async (event) => {
     v-if="edgeGlobal.edgeState.organizationDocPath && state.mounted"
   >
     <edge-dashboard
-      :filter="state.filter"
-      :filters="listFilters"
+      filter=""
+      :filters="[]"
       collection="blocks"
       class="pt-0 flex-1"
     >
@@ -1253,7 +1350,15 @@ const handleBlockImport = async (event) => {
         </div>
       </template>
       <template #list-header>
-        <div class="w-full mt-4 mx-0 rounded-md border border-slate-300/70 bg-slate-100/95 dark:border-slate-700 dark:bg-slate-900/95 px-3 py-2 space-y-2 backdrop-blur-sm shadow-sm">
+        <edge-shad-form
+          class="w-full mt-4 mx-0 rounded-md border border-slate-300/70 bg-slate-100/95 dark:border-slate-700 dark:bg-slate-900/95 px-3 py-2 space-y-2 backdrop-blur-sm shadow-sm"
+          :initial-values="{
+            filter: state.filter,
+            blockTypeFilter: state.blockTypeFilter,
+            tags: state.picksFilter,
+            themes: state.themesFilter,
+          }"
+        >
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="flex items-center gap-2">
               <Checkbox
@@ -1322,10 +1427,16 @@ const handleBlockImport = async (event) => {
               />
             </div>
           </div>
-        </div>
+        </edge-shad-form>
       </template>
       <template #list>
         <div class="w-full pt-2 space-y-3 h-[calc(100vh-310px)]">
+          <div
+            v-if="!shouldRenderBlockPreviews"
+            class="rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300"
+          >
+            Showing {{ visibleBlockItems.length }} blocks. Filter to 10 or fewer to see live previews.
+          </div>
           <div
             class="grid gap-4 w-full"
             style="grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));"
@@ -1357,6 +1468,12 @@ const handleBlockImport = async (event) => {
                     <p class="text-lg font-semibold leading-snug line-clamp-2 text-slate-900 dark:text-slate-100 flex-1">
                       {{ item.name }}
                     </p>
+                    <edge-chip
+                      v-if="Number(item.templateVersion) === 2"
+                      class="mt-1 shrink-0 border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                    >
+                      v2
+                    </edge-chip>
                     <edge-shad-button
                       size="icon"
                       variant="ghost"
@@ -1366,12 +1483,21 @@ const handleBlockImport = async (event) => {
                       <Trash class="h-4 w-4" />
                     </edge-shad-button>
                   </div>
-                  <div v-if="item.content" class="block-preview" :class="previewSurfaceClass(item.previewType)">
+                  <div
+                    v-if="hasBlockPreviewContent(item) && shouldRenderBlockPreviews"
+                    class="block-preview"
+                    :class="previewSurfaceClass(item.previewType)"
+                  >
                     <div class="scale-wrapper">
                       <div class="scale-inner scale p-4 block-list-preview-content">
                         <edge-cms-block-api
+                          :key="getPreviewSelectionKey(item.docId, item)"
                           :site-id="blockPreviewSiteId"
-                          :content="item.content"
+                          :content="getBlockPreviewContent(item)"
+                          :template-version="item.templateVersion"
+                          :template="item.template"
+                          :schema="item.schema"
+                          :data-sources="item.dataSources"
                           :values="item.values"
                           :meta="item.meta"
                           :theme="selectedPreviewTheme"
@@ -1379,19 +1505,12 @@ const handleBlockImport = async (event) => {
                           :standalone-preview="true"
                           @pending="blockLoaded($event, item.docId)"
                         />
-                        <edge-cms-block-render
-                          v-if="!state.blocksLoaded.includes(item.docId)"
-                          :key="`${getPreviewSelectionKey(item.docId)}:fallback`"
-                          :content="loadingRender(item.content)"
-                          :values="item.values"
-                          :meta="item.meta"
-                          :theme="selectedPreviewTheme"
-                          :render-context="state.previewRenderContext"
-                          :standalone-preview="true"
-                        />
                       </div>
                     </div>
                     <div class="preview-overlay" />
+                  </div>
+                  <div v-else-if="hasBlockPreviewContent(item)" class="block-preview-empty" :class="previewSurfaceClass(item.previewType)">
+                    Filter to 10 or fewer blocks to see previews.
                   </div>
                   <div v-else class="block-preview-empty" :class="previewSurfaceClass(item.previewType)">
                     Preview unavailable for this block.
@@ -1554,13 +1673,17 @@ const handleBlockImport = async (event) => {
                           {{ template.docId === BLANK_BLOCK_TEMPLATE_ID ? 'Blank' : 'Template' }}
                         </span>
                       </div>
-                      <div v-if="template.content" class="block-preview" :class="previewSurfaceClass(template.previewType)">
+                      <div v-if="hasBlockPreviewContent(template)" class="block-preview" :class="previewSurfaceClass(template.previewType)">
                         <div class="scale-wrapper">
                           <div class="scale-inner scale p-4 block-list-preview-content">
                             <edge-cms-block-api
-                              :key="getPreviewSelectionKey(getTemplatePreviewKey(template.docId))"
+                              :key="getPreviewSelectionKey(getTemplatePreviewKey(template.docId), template)"
                               :site-id="blockPreviewSiteId"
-                              :content="template.content"
+                              :content="getBlockPreviewContent(template)"
+                              :template-version="template.templateVersion"
+                              :template="template.template"
+                              :schema="template.schema"
+                              :data-sources="template.dataSources"
                               :values="template.values"
                               :meta="template.meta"
                               :theme="selectedPreviewTheme"
@@ -1570,8 +1693,12 @@ const handleBlockImport = async (event) => {
                             />
                             <edge-cms-block-render
                               v-if="!state.blocksLoaded.includes(getTemplatePreviewKey(template.docId))"
-                              :key="`${getPreviewSelectionKey(getTemplatePreviewKey(template.docId))}:fallback`"
-                              :content="loadingRender(template.content)"
+                              :key="getPreviewSelectionKey(getTemplatePreviewKey(template.docId), template, 'fallback')"
+                              :content="loadingRender(getBlockPreviewContent(template))"
+                              :template-version="template.templateVersion"
+                              :template="template.template"
+                              :schema="template.schema"
+                              :data-sources="template.dataSources"
                               :values="template.values"
                               :meta="template.meta"
                               :theme="selectedPreviewTheme"
@@ -1609,13 +1736,17 @@ const handleBlockImport = async (event) => {
                         <span class="truncate font-semibold">{{ block.name || block.docId }}</span>
                         <span class="text-[10px] uppercase tracking-wide text-muted-foreground">Duplicate</span>
                       </div>
-                      <div v-if="block.content" class="block-preview" :class="previewSurfaceClass(block.previewType)">
+                      <div v-if="hasBlockPreviewContent(block)" class="block-preview" :class="previewSurfaceClass(block.previewType)">
                         <div class="scale-wrapper">
                           <div class="scale-inner scale p-4 block-list-preview-content">
                             <edge-cms-block-api
-                              :key="`${getPreviewSelectionKey(block.docId)}:existing-picker`"
+                              :key="getPreviewSelectionKey(block.docId, block, 'existing-picker')"
                               :site-id="blockPreviewSiteId"
-                              :content="block.content"
+                              :content="getBlockPreviewContent(block)"
+                              :template-version="block.templateVersion"
+                              :template="block.template"
+                              :schema="block.schema"
+                              :data-sources="block.dataSources"
                               :values="block.values"
                               :meta="block.meta"
                               :theme="selectedPreviewTheme"
@@ -1625,8 +1756,12 @@ const handleBlockImport = async (event) => {
                             />
                             <edge-cms-block-render
                               v-if="!state.blocksLoaded.includes(`existing:${block.docId}`)"
-                              :key="`${getPreviewSelectionKey(block.docId)}:existing-picker:fallback`"
-                              :content="loadingRender(block.content)"
+                              :key="getPreviewSelectionKey(block.docId, block, 'existing-picker:fallback')"
+                              :content="loadingRender(getBlockPreviewContent(block))"
+                              :template-version="block.templateVersion"
+                              :template="block.template"
+                              :schema="block.schema"
+                              :data-sources="block.dataSources"
                               :values="block.values"
                               :meta="block.meta"
                               :theme="selectedPreviewTheme"
@@ -1725,6 +1860,8 @@ const handleBlockImport = async (event) => {
   color: rgba(255, 255, 255, 0.6);
   display: grid;
   place-items: center;
+  padding: 0 24px;
+  text-align: center;
   font-size: 13px;
   letter-spacing: 0.01em;
 }

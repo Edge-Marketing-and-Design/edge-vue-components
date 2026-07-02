@@ -1,6 +1,6 @@
+const { randomUUID } = require('crypto')
 const axios = require('axios')
 const Stripe = require('stripe')
-const { randomUUID } = require('crypto')
 const chromium = require('@sparticuz/chromium').default
 const puppeteer = require('puppeteer-core')
 const {
@@ -43,7 +43,6 @@ const SITE_PAGE_PREVIEW_CAPTURE_HEIGHT = 2400
 const SITE_PAGE_PREVIEW_DESKTOP_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36'
 const SITE_PAGE_PREVIEW_LOCK_TTL_MS = 5 * 60 * 1000
 const SITE_PAGE_PREVIEW_BATCH_LIMIT = 100
-
 const SITE_STRUCTURED_DATA_TEMPLATE = JSON.stringify({
   '@context': 'https://schema.org',
   '@type': 'WebSite',
@@ -1293,7 +1292,7 @@ const getBuiltInDefaultEmailTemplate = () => ({
     '<div style="margin:0; padding:24px; background:#f8fafc; font-family:Arial,Helvetica,sans-serif; color:#111827;">',
     '  <div style="max-width:680px; margin:0 auto; background:#ffffff; border:1px solid #e5e7eb; border-radius:8px; overflow:hidden;">',
     '    <div style="background:#111827; color:#ffffff; padding:20px 24px;">',
-    '      <h1 style="margin:0; font-size:20px; line-height:1.35;">{{subject}}</h1>',
+    '      <h1 style="margin:0; overflow-wrap:break-word; word-wrap:break-word; word-break:break-word; font-size:20px; line-height:1.35;">{{subject}}</h1>',
     '    </div>',
     '    <div style="padding:24px;">',
     '      <p style="margin:0 0 18px; color:#4b5563; font-size:14px; line-height:1.6;">A new submission was received.</p>',
@@ -1421,11 +1420,11 @@ const buildEmailTemplateContext = ({ data, entries, subject, template }) => {
     : '(no fields provided)'
   context.all_fields_html = visibleEntries.length
     ? [
-        '<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%; border-collapse:collapse; border:1px solid #e5e7eb;">',
+        '<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%; table-layout:fixed; border-collapse:collapse; border:1px solid #e5e7eb;">',
         ...visibleEntries.map((entry, index) => [
           `<tr style="background:${index % 2 === 0 ? '#ffffff' : '#f9fafb'};">`,
           `<td style="width:36%; padding:10px 12px; border-bottom:1px solid #e5e7eb; font-weight:700; color:#374151; vertical-align:top;">${escapeHtml(entry.label)}</td>`,
-          `<td style="padding:10px 12px; border-bottom:1px solid #e5e7eb; color:#111827; white-space:pre-wrap;">${escapeHtml(formatValue(entry.value))}</td>`,
+          `<td style="padding:10px 12px; border-bottom:1px solid #e5e7eb; color:#111827; white-space:pre-wrap; overflow-wrap:break-word; word-wrap:break-word; word-break:break-word;">${escapeHtml(formatValue(entry.value))}</td>`,
           '</tr>',
         ].join('')),
         '</table>',
@@ -1905,6 +1904,7 @@ const collectSyncedBlocks = (content, postContent) => {
 }
 
 const BLOCK_META_EXCLUDE_KEYS = new Set(['limit'])
+const BLOCK_DEFINITION_SYNC_FIELDS = ['content', 'template', 'templateVersion', 'schema', 'dataSources', 'blockUpdatedAt']
 
 const updateBlocksInArray = (blocks, blockId, beforeData, afterData) => {
   let touched = false
@@ -1914,8 +1914,12 @@ const updateBlocksInArray = (blocks, blockId, beforeData, afterData) => {
     if (block?.blockId !== blockId)
       continue
 
-    if (afterData.content !== undefined)
-      block.content = afterData.content
+    for (const field of BLOCK_DEFINITION_SYNC_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(afterData, field))
+        block[field] = cloneValue(afterData[field])
+      else if (field !== 'content')
+        delete block[field]
+    }
 
     block.meta = block.meta || {}
     const srcMeta = afterMeta
@@ -2685,11 +2689,15 @@ exports.onUserWritten = createKvMirrorHandler({
     const resolvedUserId = slug(data?.userId) || slug(userId)
     if (resolvedUserId)
       keys.push(`idx:users:userId:${orgId}:${resolvedUserId}`)
+    const resolvedName = slug(data?.name)
+    if (resolvedName)
+      keys.push(`idx:users:name:${orgId}:${resolvedName}`)
     return keys
   },
   serialize: data => JSON.stringify(data),
   makeMetadata: data => ({
     title: data?.title || '',
+    profilephoto: data?.profilephoto || '',
     contactPhone: data?.contactPhone || data?.phone || '',
     contactEmail: data?.contactEmail || data?.email || '',
     doc_created_at: data?.doc_created_at || '',
@@ -2713,257 +2721,6 @@ exports.onPublishedPageWritten = createKvMirrorHandler({
     `pages:${orgId}:${siteId}:${pageId}`,
   timeoutSeconds: 180,
 })
-
-const stripCacheVerification = (data = {}) => {
-  const copy = { ...(data || {}) }
-  delete copy.cacheVerification
-  return copy
-}
-
-const isCacheVerificationOnlyWrite = (beforeData = {}, afterData = {}) => {
-  return stableSerialize(stripCacheVerification(beforeData)) === stableSerialize(stripCacheVerification(afterData))
-}
-
-const firstPublishedDomain = (...domainLists) => {
-  for (const domains of domainLists) {
-    if (!Array.isArray(domains))
-      continue
-    for (const domain of domains) {
-      const normalized = normalizeDomain(domain)
-      if (normalized)
-        return normalized
-    }
-  }
-  return ''
-}
-
-const normalizePublishedPathSegment = value => slug(value)
-
-const resolveRootPageIdFromMenus = (menus = {}) => {
-  const siteRoot = Array.isArray(menus?.['Site Root']) ? menus['Site Root'] : []
-  return typeof siteRoot[0]?.item === 'string' ? siteRoot[0].item : ''
-}
-
-const findPublishedPagePathFromMenus = (menus = {}, pageId, folderSegments = [], rootPageId = resolveRootPageIdFromMenus(menus)) => {
-  const targetPageId = String(pageId || '').trim()
-  if (!targetPageId)
-    return ''
-
-  for (const [menuName, items] of Object.entries(menus || {})) {
-    if (!Array.isArray(items))
-      continue
-    const menuSegment = ['Site Root', 'Not In Menu'].includes(menuName) ? '' : normalizePublishedPathSegment(menuName)
-    const nextFolderSegments = menuSegment ? [...folderSegments, menuSegment] : folderSegments
-    for (const entry of items) {
-      if (!entry || typeof entry !== 'object')
-        continue
-      if (typeof entry.item === 'string' && entry.item === targetPageId) {
-        const pageSegment = normalizePublishedPathSegment(entry.name || entry.menuTitle || targetPageId)
-        if (!pageSegment)
-          return ''
-        if (!nextFolderSegments.length && entry.item === rootPageId)
-          return '/'
-        return `/${[...nextFolderSegments, pageSegment].map(encodeURIComponent).join('/')}`
-      }
-      if (entry.item && typeof entry.item === 'object') {
-        for (const [folderName, nestedItems] of Object.entries(entry.item)) {
-          const folderSegment = normalizePublishedPathSegment(folderName)
-          const nested = findPublishedPagePathFromMenus(
-            { 'Site Root': nestedItems },
-            targetPageId,
-            folderSegment ? [...nextFolderSegments, folderSegment] : nextFolderSegments,
-            rootPageId,
-          )
-          if (nested)
-            return nested
-        }
-      }
-    }
-  }
-
-  return ''
-}
-
-const fallbackPublishedPagePath = (pageId, pageData = {}) => {
-  const segment = normalizePublishedPathSegment(pageData.slug || pageData.name || pageId)
-  if (!segment)
-    return '/'
-  return `/${encodeURIComponent(segment)}`
-}
-
-const buildCacheVersionUrl = ({ origin, path }) => {
-  const url = new URL('/api/cache-version', origin)
-  url.searchParams.set('path', path || '/')
-  url.searchParams.set('cacheBust', String(Date.now()))
-  return url.toString()
-}
-
-const getCacheVersionHeaders = response => ({
-  siteVersion: String(response?.headers?.['x-site-version'] || '').trim(),
-  pageVersion: String(response?.headers?.['x-page-version'] || '').trim(),
-  buildVersion: String(response?.headers?.['x-build-version'] || '').trim(),
-  cacheStatus: String(response?.headers?.['x-cache-status'] || '').trim(),
-})
-
-const cacheVersionMatches = ({ headers, target, expectedVersion }) => {
-  const actualVersion = target === 'page' ? headers.pageVersion : headers.siteVersion
-  const cacheStatus = String(headers.cacheStatus || '').trim().toUpperCase()
-  return cacheStatus === 'BYPASS' && String(actualVersion || '').trim() === String(expectedVersion || '').trim()
-}
-
-const updateCacheVerificationStatus = async (ref, payload) => {
-  await ref.set({
-    cacheVerification: {
-      ...payload,
-      lastCheckedAt: Date.now(),
-    },
-  }, { merge: true })
-}
-
-const verifyPublishedCacheVersion = async ({
-  orgId,
-  siteId,
-  target,
-  label,
-  path,
-  expectedVersion,
-  publishedSiteData,
-  draftSiteData,
-}) => {
-  const statusRef = db.collection('organizations').doc(orgId).collection('published-site-settings').doc(siteId)
-  const domain = firstPublishedDomain(publishedSiteData?.domains, draftSiteData?.domains)
-  const origin = domain ? `https://${domain}` : ''
-  const verificationId = `${target}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  const baseStatus = {
-    verificationId,
-    status: 'running',
-    target,
-    activeLabel: label || (target === 'site' ? 'Site Settings' : 'Page'),
-    activePath: path || '/',
-    expectedSiteVersion: target === 'site' ? expectedVersion : null,
-    expectedPageVersion: target === 'page' ? expectedVersion : null,
-    completed: 0,
-    total: 1,
-    failed: 0,
-    startedAt: Date.now(),
-  }
-
-  if (!origin || expectedVersion === null || expectedVersion === undefined || expectedVersion === '') {
-    await updateCacheVerificationStatus(statusRef, {
-      ...baseStatus,
-      status: 'skipped',
-      error: 'Missing live domain or expected version.',
-      completedAt: Date.now(),
-    })
-    return
-  }
-
-  await updateCacheVerificationStatus(statusRef, baseStatus)
-
-  const timeoutMs = 45000
-  const pollMs = 1500
-  const startedAt = Date.now()
-  let lastHeaders = {}
-  let lastError = ''
-
-  while (Date.now() - startedAt <= timeoutMs) {
-    try {
-      const response = await axios.get(buildCacheVersionUrl({ origin, path }), {
-        timeout: 10000,
-        validateStatus: () => true,
-      })
-      lastHeaders = getCacheVersionHeaders(response)
-      if (response.status >= 200 && response.status < 300 && cacheVersionMatches({ headers: lastHeaders, target, expectedVersion })) {
-        await updateCacheVerificationStatus(statusRef, {
-          ...baseStatus,
-          status: 'verified',
-          headers: lastHeaders,
-          completed: 1,
-          completedAt: Date.now(),
-        })
-        return
-      }
-    }
-    catch (error) {
-      lastError = error?.message || 'Cache verification request failed.'
-    }
-
-    await sleep(pollMs)
-  }
-
-  await updateCacheVerificationStatus(statusRef, {
-    ...baseStatus,
-    status: 'timeout',
-    error: lastError || 'Cache verification timed out.',
-    headers: lastHeaders,
-    failed: 1,
-    completedAt: Date.now(),
-  })
-}
-
-exports.verifyPublishedSiteCacheVersion = onDocumentWritten(
-  { document: 'organizations/{orgId}/published-site-settings/{siteId}', timeoutSeconds: 120 },
-  async (event) => {
-    const change = event.data
-    if (!change.after.exists)
-      return
-
-    const beforeData = change.before.exists ? (change.before.data() || {}) : {}
-    const afterData = change.after.data() || {}
-    if (change.before.exists && isCacheVerificationOnlyWrite(beforeData, afterData))
-      return
-
-    const orgId = event.params.orgId
-    const siteId = event.params.siteId
-    const expectedVersion = Number.isFinite(Number(afterData?.version)) ? Math.max(0, Math.trunc(Number(afterData.version))) : ''
-    const draftSnap = await db.collection('organizations').doc(orgId).collection('sites').doc(siteId).get()
-    await verifyPublishedCacheVersion({
-      orgId,
-      siteId,
-      target: 'site',
-      label: 'Site Settings',
-      path: '/',
-      expectedVersion,
-      publishedSiteData: afterData,
-      draftSiteData: draftSnap.exists ? (draftSnap.data() || {}) : {},
-    })
-  },
-)
-
-exports.verifyPublishedPageCacheVersion = onDocumentWritten(
-  { document: 'organizations/{orgId}/sites/{siteId}/published/{pageId}', timeoutSeconds: 120 },
-  async (event) => {
-    const change = event.data
-    if (!change.after.exists)
-      return
-
-    const pageData = change.after.data() || {}
-    const orgId = event.params.orgId
-    const siteId = event.params.siteId
-    const pageId = event.params.pageId
-    const orgRef = db.collection('organizations').doc(orgId)
-    const [publishedSiteSnap, draftSiteSnap] = await Promise.all([
-      orgRef.collection('published-site-settings').doc(siteId).get(),
-      orgRef.collection('sites').doc(siteId).get(),
-    ])
-    const publishedSiteData = publishedSiteSnap.exists ? (publishedSiteSnap.data() || {}) : {}
-    const draftSiteData = draftSiteSnap.exists ? (draftSiteSnap.data() || {}) : {}
-    const menus = publishedSiteData?.menus || draftSiteData?.menus || {}
-    const path = findPublishedPagePathFromMenus(menus, pageId) || fallbackPublishedPagePath(pageId, pageData)
-    const expectedVersion = Number.isFinite(Number(pageData?.version)) ? Math.max(0, Math.trunc(Number(pageData.version))) : ''
-
-    await verifyPublishedCacheVersion({
-      orgId,
-      siteId,
-      target: 'page',
-      label: pageData?.name || pageData?.title || pageId,
-      path,
-      expectedVersion,
-      publishedSiteData,
-      draftSiteData,
-    })
-  },
-)
 
 exports.syncPublishedSyncedBlocks = onDocumentWritten({ document: 'organizations/{orgId}/sites/{siteId}/published/{pageId}', timeoutSeconds: 180 }, async (event) => {
   const change = event.data
@@ -3979,6 +3736,15 @@ const resolveTemplateBlockSourceForSignature = (pageDoc, blockRef) => {
 }
 
 const resolveTemplateBlockForSignature = (pageDoc, blockRef, blocksById = {}) => {
+  if (typeof blockRef === 'string' && blocksById?.[blockRef]) {
+    const libraryBlock = blocksById[blockRef]
+    return {
+      content: libraryBlock.content,
+      values: libraryBlock.values || {},
+      meta: libraryBlock.meta || {},
+    }
+  }
+
   const block = resolveTemplateBlockSourceForSignature(pageDoc, blockRef)
   if (!block)
     return null
@@ -3998,6 +3764,257 @@ const resolveTemplateBlockForSignature = (pageDoc, blockRef, blocksById = {}) =>
     }
   }
   return null
+}
+
+const collectPreviewBlockIds = (pageData = {}) => {
+  const ids = new Set(Array.isArray(pageData?.blockIds) ? pageData.blockIds.filter(Boolean).map(String) : [])
+  const collectBlocks = (blocks) => {
+    if (!Array.isArray(blocks))
+      return
+    for (const block of blocks) {
+      const blockId = String(block?.blockId || '').trim()
+      if (blockId)
+        ids.add(blockId)
+    }
+  }
+  const collectStructure = (structure) => {
+    if (!Array.isArray(structure))
+      return
+    for (const row of structure) {
+      for (const column of row?.columns || []) {
+        if (!Array.isArray(column?.blocks))
+          continue
+        for (const block of column.blocks) {
+          const blockId = typeof block === 'string'
+            ? block.trim()
+            : String(block?.blockId || '').trim()
+          if (blockId)
+            ids.add(blockId)
+        }
+      }
+    }
+  }
+
+  collectBlocks(pageData.content)
+  collectBlocks(pageData.postContent)
+  collectStructure(pageData.structure)
+  collectStructure(pageData.postStructure)
+  return Array.from(ids)
+}
+
+const resolveCmsPreviewCollectionTokens = (input, { orgId, siteId, pageId, routeLastSegment } = {}) => {
+  const replaceTokens = (raw) => {
+    let resolved = String(raw)
+    if (orgId)
+      resolved = resolved.replaceAll('{orgId}', orgId)
+    if (siteId)
+      resolved = resolved.replaceAll('{siteId}', siteId)
+    if (pageId)
+      resolved = resolved.replaceAll('{pageId}', pageId)
+    if (routeLastSegment)
+      resolved = resolved.replaceAll('{routeLastSegment}', routeLastSegment)
+    return resolved
+  }
+
+  if (typeof input === 'string')
+    return replaceTokens(input)
+  if (Array.isArray(input))
+    return input.map(item => resolveCmsPreviewCollectionTokens(item, { orgId, siteId, pageId, routeLastSegment }))
+  if (input && typeof input === 'object') {
+    return Object.entries(input).reduce((acc, [key, value]) => {
+      acc[key] = resolveCmsPreviewCollectionTokens(value, { orgId, siteId, pageId, routeLastSegment })
+      return acc
+    }, {})
+  }
+  return input
+}
+
+const hasUnresolvedCmsPreviewToken = (value) => {
+  try {
+    return JSON.stringify(value).includes('{')
+  }
+  catch {
+    return false
+  }
+}
+
+const getCmsPreviewCollectionPath = ({ orgId, siteId, cfg }) => {
+  const path = String(cfg?.collection?.path || '').trim()
+  if (!path)
+    return ''
+  if (path === 'posts' || path === 'post')
+    return `organizations/${orgId}/sites/${siteId}/published_posts`
+  return `organizations/${orgId}/${path}`
+}
+
+const compareCmsPreviewCollectionValues = (aValue, bValue) => {
+  if (aValue == null && bValue == null)
+    return 0
+  if (aValue == null)
+    return 1
+  if (bValue == null)
+    return -1
+  return String(aValue).localeCompare(String(bValue), undefined, { numeric: true, sensitivity: 'base' })
+}
+
+const getCmsPreviewValueAtPath = (source, path) => {
+  if (!path || typeof path !== 'string')
+    return source
+  return path.split('.').reduce((acc, key) => {
+    if (acc == null || typeof acc !== 'object')
+      return undefined
+    return acc[key]
+  }, source)
+}
+
+const applyCmsPreviewCollectionOrder = (records, orderList = []) => {
+  if (!Array.isArray(records) || !Array.isArray(orderList) || orderList.length === 0)
+    return Array.isArray(records) ? records : []
+
+  const validOrders = orderList.filter(order => order && typeof order.field === 'string' && order.field.trim())
+  if (!validOrders.length)
+    return records
+
+  return [...records].sort((a, b) => {
+    for (const order of validOrders) {
+      const direction = String(order.direction || 'asc').toLowerCase() === 'desc' ? -1 : 1
+      const compared = compareCmsPreviewCollectionValues(
+        getCmsPreviewValueAtPath(a, order.field),
+        getCmsPreviewValueAtPath(b, order.field),
+      )
+      if (compared !== 0)
+        return compared * direction
+    }
+    return 0
+  })
+}
+
+const buildCmsPreviewCollectionQuery = ({ cfg, orgId, siteId, pageId, routeLastSegment }) => {
+  const tokenContext = { orgId, siteId, pageId, routeLastSegment }
+  const currentQuery = Array.isArray(cfg?.collection?.query)
+    ? resolveCmsPreviewCollectionTokens(JSON.parse(JSON.stringify(cfg.collection.query)), tokenContext)
+    : []
+
+  for (const queryKey in cfg?.queryItems || {}) {
+    const rawValue = cfg.queryItems[queryKey]
+    if (!rawValue) {
+      const findIndex = currentQuery.findIndex(q => q.field === queryKey)
+      if (findIndex > -1)
+        currentQuery.splice(findIndex, 1)
+      continue
+    }
+
+    const queryOption = cfg?.queryOptions?.find(option => option.field === queryKey)
+    const operator = queryOption?.operator || '=='
+    let queryValue = resolveCmsPreviewCollectionTokens(rawValue, tokenContext)
+    if (operator === 'array-contains-any' && !Array.isArray(queryValue))
+      queryValue = [queryValue]
+
+    const newQuery = { field: queryKey, operator, value: queryValue }
+    const findIndex = currentQuery.findIndex(q => q.field === queryKey)
+    if (findIndex > -1)
+      currentQuery[findIndex] = newQuery
+    else
+      currentQuery.push(newQuery)
+  }
+
+  return currentQuery.filter(query => query?.field && query?.operator && !hasUnresolvedCmsPreviewToken(query?.value))
+}
+
+const fetchCmsPreviewCollectionField = async ({ cfg, orgId, siteId, pageId, routeLastSegment }) => {
+  const collectionPath = getCmsPreviewCollectionPath({ orgId, siteId, cfg })
+  if (!collectionPath)
+    return []
+
+  const tokenContext = { orgId, siteId, pageId, routeLastSegment }
+  const canonicalLookupKey = String(cfg?.collection?.canonicalLookup?.key || '').trim()
+  const resolvedCanonicalLookupKey = canonicalLookupKey
+    ? resolveCmsPreviewCollectionTokens(canonicalLookupKey, tokenContext)
+    : ''
+
+  if (resolvedCanonicalLookupKey && !hasUnresolvedCmsPreviewToken(resolvedCanonicalLookupKey)) {
+    const canonicalSegments = resolvedCanonicalLookupKey.split(':').filter(Boolean)
+    const docId = canonicalSegments[canonicalSegments.length - 1]
+    if (docId) {
+      const snap = await db.doc(`${collectionPath}/${docId}`).get()
+      return snap.exists ? [{ docId: snap.id, ...(snap.data() || {}) }] : []
+    }
+  }
+
+  let queryRef = db.collection(collectionPath)
+  for (const query of buildCmsPreviewCollectionQuery({ cfg, orgId, siteId, pageId, routeLastSegment }))
+    queryRef = queryRef.where(query.field, query.operator, query.value)
+  for (const order of Array.isArray(cfg?.collection?.order) ? cfg.collection.order : []) {
+    if (order?.field)
+      queryRef = queryRef.orderBy(order.field, String(order.direction || 'asc').toLowerCase() === 'desc' ? 'desc' : 'asc')
+  }
+
+  const limit = Number(cfg?.limit)
+  const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 250) : 250
+  const snap = await queryRef.limit(safeLimit).get()
+  return applyCmsPreviewCollectionOrder(
+    snap.docs.map(doc => ({ docId: doc.id, ...(doc.data() || {}) })),
+    cfg?.collection?.order,
+  )
+}
+
+const resolveCmsPreviewBlockCollectionValues = async ({ block, orgId, siteId, pageId, routeLastSegment }) => {
+  const values = {}
+  const entries = Object.entries(block?.meta || {})
+  await Promise.all(entries.map(async ([field, cfg]) => {
+    if (!cfg || typeof cfg !== 'object' || !cfg.collection)
+      return
+    values[field] = await fetchCmsPreviewCollectionField({ cfg, orgId, siteId, pageId, routeLastSegment })
+  }))
+  return values
+}
+
+const getCmsPreviewBlockKey = (row, rowIndex, column, colIndex, blockIdx) => {
+  return `${row?.id || rowIndex}:${column?.id || colIndex}:${blockIdx}`
+}
+
+const resolveCmsPreviewCollectionValues = async ({ orgId, siteId, pageId, pageData, blocksById, routeLastSegment }) => {
+  const rows = templatePreviewRowsForSignature({ ...pageData, docId: pageId })
+  const valuesByBlockKey = {}
+  const tasks = []
+
+  rows.forEach((row, rowIndex) => {
+    ;(row.columns || []).forEach((column, colIndex) => {
+      ;(column.blocks || []).forEach((blockRef, blockIdx) => {
+        const block = resolveTemplateBlockForSignature(pageData, blockRef, blocksById)
+        if (!block?.meta)
+          return
+        const blockKey = getCmsPreviewBlockKey(row, rowIndex, column, colIndex, blockIdx)
+        tasks.push((async () => {
+          const values = await resolveCmsPreviewBlockCollectionValues({ block, orgId, siteId, pageId, routeLastSegment })
+          if (Object.keys(values).length)
+            valuesByBlockKey[blockKey] = values
+        })())
+      })
+    })
+  })
+
+  await Promise.all(tasks)
+  return valuesByBlockKey
+}
+
+const resolveCmsPreviewCollectionValuesWithTimeout = async (options, timeoutMs = 8000) => {
+  let timeoutId = null
+  try {
+    return await Promise.race([
+      resolveCmsPreviewCollectionValues(options),
+      new Promise((resolve) => {
+        timeoutId = setTimeout(() => resolve({}), timeoutMs)
+      }),
+    ])
+  }
+  catch {
+    return {}
+  }
+  finally {
+    if (timeoutId)
+      clearTimeout(timeoutId)
+  }
 }
 
 const getSitePagePreviewPageRowsSignature = (pageDoc) => {
@@ -4162,7 +4179,7 @@ const readPreviewRenderContext = async ({ orgId, siteId, pageId, source = 'draft
   const themeId = String(siteData?.theme || '').trim()
   const themeSnap = themeId ? await orgRef.collection('themes').doc(themeId).get() : null
   const themeData = themeSnap?.exists ? themeSnap.data() || {} : {}
-  const blockIds = Array.isArray(pageData?.blockIds) ? pageData.blockIds.filter(Boolean) : []
+  const blockIds = collectPreviewBlockIds(pageData)
   const blocksById = {}
   await Promise.all(blockIds.map(async (blockId) => {
     const snap = await orgRef.collection('blocks').doc(String(blockId)).get()
@@ -4191,35 +4208,30 @@ exports.getPreviewRenderPayload = onCall({ timeoutSeconds: 60, memory: '512MiB' 
   const pageId = String(data.pageId || '').trim()
   const signature = String(data.signature || '').trim()
   const source = String(data.source || '').trim() === 'published' ? 'published' : 'draft'
+  const routeLastSegment = String(data.routeLastSegment || '').trim()
   if (!orgId || !siteId || !pageId || !signature)
     throw new HttpsError('invalid-argument', 'Missing preview render payload fields.')
   if (signature !== getCmsPreviewRenderSignature({ orgId, siteId, pageId }))
     throw new HttpsError('permission-denied', 'Invalid preview signature.')
 
   const context = await readPreviewRenderContext({ orgId, siteId, pageId, source })
+  const collectionValues = await resolveCmsPreviewCollectionValuesWithTimeout({
+    orgId,
+    siteId,
+    pageId,
+    pageData: context.pageData,
+    blocksById: context.blocksById,
+    routeLastSegment,
+  })
   return {
     site: serializePreviewPayload(context.siteData),
     page: serializePreviewPayload({ ...context.pageData, docId: pageId }),
     theme: serializePreviewPayload(context.themeData),
     blocks: serializePreviewPayload(context.blocksById),
+    collectionValues: serializePreviewPayload(collectionValues),
     renderContext: await fetchPreviewRenderContext({ orgId, siteId }),
   }
 })
-
-const pageChangeOnlyTouchedPreviewThumbnail = (before = {}, after = {}) => {
-  const keys = new Set([...Object.keys(before || {}), ...Object.keys(after || {})])
-  keys.delete('previewThumbnail')
-  keys.delete('publishedPreviewThumbnail')
-  keys.delete('manualPreviewThumbnail')
-  keys.delete('previewThumbnailUpdatedAt')
-  keys.delete('previewThumbnailRequestedAt')
-  keys.delete('previewThumbnailCaptureLock')
-  for (const key of keys) {
-    if (stableSerialize(before?.[key]) !== stableSerialize(after?.[key]))
-      return false
-  }
-  return true
-}
 
 const pageHasFreshPreviewThumbnail = ({ pageData, pageSignature, fullSignature, field = 'previewThumbnail' }) => {
   const previewThumbnail = pageData?.[field] || {}
@@ -4294,16 +4306,16 @@ const captureCmsPreviewJpeg = async (url) => {
     })
     await page.waitForFunction(() => {
       const bodyText = document.body?.innerText || ''
-      return document.querySelector('.cms-preview-thumbnail-capture')
-        || document.querySelector('.cms-preview-render-page')
+      return document.querySelector('.cms-preview-thumbnail-capture[data-preview-ready="true"]')
+        || document.querySelector('.cms-preview-render-page[data-preview-ready="true"]')
         || /Invalid preview signature|Missing preview signature|Page not found|Unable to load preview/i.test(bodyText)
     }, { timeout: 20000 })
     const errorText = await page.$eval('body', body => body?.innerText || '').catch(() => '')
     if (/Invalid preview signature|Missing preview signature|Page not found|Unable to load preview/i.test(errorText))
       throw new Error(errorText.trim().slice(0, 240))
     await new Promise(resolve => setTimeout(resolve, 350))
-    const captureElement = await page.$('.cms-preview-thumbnail-capture')
-      || await page.$('.cms-preview-render-page')
+    const captureElement = await page.$('.cms-preview-thumbnail-capture[data-preview-ready="true"]')
+      || await page.$('.cms-preview-render-page[data-preview-ready="true"]')
     if (!captureElement)
       throw new Error('Preview capture element was not found.')
     return await captureElement.screenshot({
@@ -4399,7 +4411,7 @@ const renderCmsPagePreviewThumbnail = async ({ orgId, siteId, pageId, baseUrl, f
       updatedAtISO: new Date().toISOString(),
     }
     await context.pageRef.set({ [thumbnailField]: previewThumbnail }, { merge: true })
-    return { skipped: false, status: 'ready', pageId: normalizedPageId, url, field: thumbnailField }
+    return { skipped: false, status: 'ready', pageId: normalizedPageId, url, field: thumbnailField, thumbnail: serializePreviewPayload(previewThumbnail) }
   }
   catch (error) {
     await context.pageRef.set({
@@ -4449,25 +4461,7 @@ const renderCmsSitePreviewThumbnails = async ({ orgId, siteId, trigger, source =
 
 exports.renderPagePreviewThumbnail = onCall({ timeoutSeconds: 300, memory: '2GiB' }, async (request) => {
   assertCallableUser(request)
-  const data = request.data || {}
-  const auth = request.auth || {}
-  const orgId = String(data.orgId || '').trim()
-  const siteId = String(data.siteId || '').trim()
-  const pageId = String(data.pageId || '').trim()
-  if (!orgId || !siteId || !pageId)
-    throw new HttpsError('invalid-argument', 'Missing orgId, siteId, or pageId.')
-  const allowed = await permissionCheck(auth.uid, 'write', `organizations/${orgId}/sites/${siteId}/pages`)
-  if (!allowed)
-    throw new HttpsError('permission-denied', 'Not allowed to render page preview thumbnails.')
-  return renderCmsPagePreviewThumbnail({
-    orgId,
-    siteId,
-    pageId,
-    force: true,
-    trigger: 'manual-dev',
-    source: 'draft',
-    field: 'manualPreviewThumbnail',
-  })
+  return { skipped: true, status: 'disabled', message: 'CMS preview JPEG rendering is disabled.' }
 })
 
 exports.onCmsPageWrittenRenderPreviewThumbnail = onDocumentWritten(
@@ -4477,25 +4471,7 @@ exports.onCmsPageWrittenRenderPreviewThumbnail = onDocumentWritten(
 
 exports.onCmsPublishedPageWrittenRenderPreviewThumbnail = onDocumentWritten(
   { document: 'organizations/{orgId}/sites/{siteId}/published/{pageId}', timeoutSeconds: 300, memory: '2GiB' },
-  async (event) => {
-    if (!event.data?.after?.exists)
-      return db.collection('organizations').doc(event.params.orgId).collection('sites').doc(event.params.siteId).collection('pages').doc(event.params.pageId).set({
-        publishedPreviewThumbnail: admin.firestore.FieldValue.delete(),
-      }, { merge: true })
-    const before = event.data.before.exists ? event.data.before.data() || {} : {}
-    const after = event.data.after.data() || {}
-    if (event.data.before.exists && pageChangeOnlyTouchedPreviewThumbnail(before, after))
-      return
-    await renderCmsPagePreviewThumbnail({
-      orgId: event.params.orgId,
-      siteId: event.params.siteId,
-      pageId: event.params.pageId,
-      force: true,
-      trigger: event.data.before.exists ? 'published-page-update' : 'published-page-create',
-      source: 'published',
-      field: 'publishedPreviewThumbnail',
-    })
-  },
+  async () => {},
 )
 
 exports.onCmsSiteWrittenRenderPreviewThumbnails = onDocumentWritten(
@@ -8837,9 +8813,9 @@ const syncSiteDomainRecords = async ({ orgId, siteId, domains, trigger = 'manual
         dnsRecords: nextDnsRecords,
         dnsGuidance,
       }
-      payload.apexError = apexError ? apexError : Firestore.FieldValue.delete()
-      payload.wwwError = wwwError ? wwwError : Firestore.FieldValue.delete()
-      payload.dnsSyncError = dnsSyncError ? dnsSyncError : Firestore.FieldValue.delete()
+      payload.apexError = apexError || Firestore.FieldValue.delete()
+      payload.wwwError = wwwError || Firestore.FieldValue.delete()
+      payload.dnsSyncError = dnsSyncError || Firestore.FieldValue.delete()
       registryWrites.push(registryRef.set(payload, { merge: true })
         .then(async () => {
           const updatedSnap = await registryRef.get()
