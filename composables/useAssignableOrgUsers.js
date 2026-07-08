@@ -4,6 +4,13 @@ import { useNormalizedOrgUsers } from './useNormalizedOrgUsers'
 
 const normalizeText = value => String(value || '').trim()
 
+const roleStrength = {
+  user: 1,
+  writer: 2,
+  editor: 3,
+  admin: 4,
+}
+
 const normalizeRoles = (roles) => {
   if (Array.isArray(roles))
     return roles
@@ -11,6 +18,8 @@ const normalizeRoles = (roles) => {
     return Object.values(roles)
   return []
 }
+
+const orgCollectionPath = orgId => `organizations-${normalizeText(orgId).replaceAll('/', '-')}`
 
 const getAssignableUserId = user => normalizeText(user?.userId)
 
@@ -36,11 +45,19 @@ export const useAssignableOrgUsers = (edgeFirebase) => {
     return normalizeText(edgeGlobal.getRoleName(normalizeRoles(user?.roles), orgId.value))
   }
 
+  const hasAssistantRole = (user) => {
+    const assistantPath = `${orgCollectionPath(orgId.value)}-assistant`
+    return normalizeRoles(user?.roles).some(role =>
+      normalizeText(role?.collectionPath) === assistantPath
+      && (roleStrength[normalizeText(role?.role)] || 0) >= roleStrength.user,
+    )
+  }
+
   const isAssignableUser = (user) => {
     const userId = getAssignableUserId(user)
     if (!userId)
       return false
-    return getUserRoleName(user).toLowerCase() !== 'assistant'
+    return getUserRoleName(user).toLowerCase() !== 'assistant' && !hasAssistantRole(user)
   }
 
   const assignableUsers = computed(() => {
