@@ -52,7 +52,7 @@ const queryField = computed(() => {
 
 const queryValue = computed(() => {
   if (!isAdmin.value && !cmsMultiOrg.value) {
-    const userId = String(effectiveUserId.value || edgeFirebase?.user?.uid || '').trim()
+    const userId = String(effectiveUserId.value || '').trim()
     return userId ? [userId] : ''
   }
   return ''

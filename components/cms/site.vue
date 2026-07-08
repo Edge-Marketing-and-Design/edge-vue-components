@@ -336,7 +336,7 @@ const siteData = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site] || {}
 })
 const contactSpamClassifierEnabled = computed(() => siteData.value?.contactSpam?.enabled === true)
-const currentSiteAccessUserId = computed(() => String(effectiveUserId.value || edgeFirebase.user?.uid || edgeFirebase.user?.firebaseUser?.uid || '').trim())
+const currentSiteAccessUserId = computed(() => String(effectiveUserId.value || '').trim())
 const currentSiteAssignedUserIds = computed(() =>
   Array.isArray(siteData.value?.users) ? siteData.value.users.map(userId => String(userId || '').trim()).filter(Boolean) : [],
 )
