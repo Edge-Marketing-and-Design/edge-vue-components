@@ -159,6 +159,8 @@ export const useDelegatedUserContext = (edgeFirebase, options = {}) => {
   }
 
   const effectiveUserId = computed(() => {
+    if (currentRoleName.value.toLowerCase() === 'assistant' && !canDelegate.value)
+      return ''
     if (!canDelegate.value)
       return actorUserId.value
     const assigned = delegatedUserIds.value
