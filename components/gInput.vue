@@ -141,6 +141,7 @@ const jsonSchemaStringFormats = [
 const edgeFirebase = inject('edgeFirebase')
 const {
   assignableUserOptions,
+  normalizedUserNameById,
 } = useAssignableOrgUsers(edgeFirebase)
 const state = reactive({
   loaded: false,
@@ -690,16 +691,8 @@ onMounted(() => {
 })
 
 const userItem = (id) => {
-  if (!edgeGlobal.objHas(edgeFirebase.state.users, id)) {
-    return ''
-  }
-  if (!edgeGlobal.objHas(edgeFirebase.state.users[id], 'meta')) {
-    return ''
-  }
-  if (!edgeGlobal.objHas(edgeFirebase.state.users[id].meta, 'name')) {
-    return ''
-  }
-  return edgeFirebase.state.users[id].meta.name
+  const userId = String(id || '').trim()
+  return normalizedUserNameById.value[userId] || userId
 }
 
 const collectionItem = (id) => {

@@ -811,6 +811,7 @@ watch(() => [
         placeholder="Select users"
         class="w-full"
         :multiple="true"
+        :allow-additions="false"
       />
       <edge-cms-boolean-card
         v-if="props.isAdmin"

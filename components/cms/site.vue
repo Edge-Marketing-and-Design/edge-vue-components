@@ -28,7 +28,6 @@ const {
   assignableUsers,
   getAssignableUserId,
   getAssignableUserName,
-  normalizedUsers,
 } = useAssignableOrgUsers(edgeFirebase)
 const { saveJsonFiles } = useJsonFileSave()
 const { createDefaults: createSiteSettingsDefaults, createNewDocSchema: createSiteSettingsNewDocSchema } = useSiteSettingsTemplate()
@@ -793,25 +792,24 @@ const userOptions = computed(() => {
     }))
     .sort((a, b) => a.label.localeCompare(b.label))
 })
-const authUid = computed(() => String(edgeFirebase?.user?.uid || '').trim())
+const userOptionIds = computed(() =>
+  new Set(userOptions.value.map(option => String(option.value || '').trim()).filter(Boolean)),
+)
 const currentOrgUser = computed(() => {
-  if (!authUid.value)
+  const userId = String(effectiveUserId.value || '').trim()
+  if (!userId)
     return null
-  return normalizedUsers.value.find(user => getAssignableUserId(user) === authUid.value) || null
+  return assignableUsers.value.find(user => getAssignableUserId(user) === userId) || null
 })
 const currentOrgUserId = computed(() => {
-  return String(
-    currentOrgUser.value?.userId
-    || authUid.value
-    || '',
-  ).trim()
+  return String(currentOrgUser.value?.userId || '').trim()
 })
 const currentUserOption = computed(() => {
   if (!currentOrgUserId.value)
     return null
   return {
     value: currentOrgUserId.value,
-    label: currentOrgUser.value?.meta?.name || currentOrgUser.value?.meta?.email || currentOrgUserId.value,
+    label: getAssignableUserName(currentOrgUser.value),
   }
 })
 const shouldForceCurrentUserForNewSite = computed(() => !isAdmin.value && props.site === 'new')
@@ -843,7 +841,7 @@ const updateSiteUsersModel = (workingDoc, value) => {
     workingDoc.users = currentOrgUserId.value ? [currentOrgUserId.value] : []
     return
   }
-  workingDoc.users = normalizeUserIds(value)
+  workingDoc.users = normalizeUserIds(value).filter(userId => userOptionIds.value.has(userId))
 }
 
 const themeItemsForAllowed = (allowed, current) => {
@@ -3938,6 +3936,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
             placeholder="Select users"
             class="w-full"
             :multiple="true"
+            :allow-additions="false"
             @update:model-value="value => updateSiteUsersModel(slotProps.workingDoc, value)"
           />
           <div class="rounded-lg border border-dashed border-slate-300 p-4 dark:border-slate-700">
