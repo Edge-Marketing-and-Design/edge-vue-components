@@ -21,6 +21,14 @@ const props = defineProps({
   },
 })
 const edgeFirebase = inject('edgeFirebase')
+const {
+  effectiveAgentUserId,
+} = useActingAgentContext(edgeFirebase)
+const {
+  assignableUsers,
+  getAssignableUserId,
+  getAssignableUserName,
+} = useAssignableOrgUsers(edgeFirebase)
 const { saveJsonFiles } = useJsonFileSave()
 const { createDefaults: createSiteSettingsDefaults, createNewDocSchema: createSiteSettingsNewDocSchema } = useSiteSettingsTemplate()
 const { buildPageStructuredData } = useStructuredDataTemplates()
@@ -328,10 +336,12 @@ const siteData = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site] || {}
 })
 const contactSpamClassifierEnabled = computed(() => siteData.value?.contactSpam?.enabled === true)
-const currentUserId = computed(() => String(edgeFirebase.user?.uid || edgeFirebase.user?.firebaseUser?.uid || '').trim())
+const currentSiteAccessUserId = computed(() => String(effectiveAgentUserId.value || edgeFirebase.user?.uid || edgeFirebase.user?.firebaseUser?.uid || '').trim())
+const currentSiteAssignedUserIds = computed(() =>
+  Array.isArray(siteData.value?.users) ? siteData.value.users.map(userId => String(userId || '').trim()).filter(Boolean) : [],
+)
 const currentUserIsAssignedToSite = computed(() => {
-  const users = Array.isArray(siteData.value?.users) ? siteData.value.users.map(userId => String(userId || '').trim()) : []
-  return Boolean(currentUserId.value && users.includes(currentUserId.value))
+  return Boolean(currentSiteAccessUserId.value && currentSiteAssignedUserIds.value.includes(currentSiteAccessUserId.value))
 })
 const canManageRestrictedContent = computed(() => {
   if (currentUserIsAssignedToSite.value)
@@ -361,6 +371,20 @@ const defaultViewMode = computed(() => {
     return 'media'
   return 'pages'
 })
+
+watch(
+  [currentSiteAccessUserId, currentSiteAssignedUserIds],
+  () => {
+    if (props.site === 'new' || isAdmin.value || cmsMultiOrg.value)
+      return
+    if (!currentSiteAccessUserId.value || !Array.isArray(siteData.value?.users))
+      return
+    if (!currentUserIsAssignedToSite.value)
+      router.replace('/app/dashboard/sites?forceList=1')
+  },
+  { immediate: true },
+)
+
 const restrictedContentEnabled = computed(() => Boolean(siteData.value?.restrictedContent?.enabled))
 const publishedSiteSettings = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`]?.[props.site] || {}
@@ -762,11 +786,10 @@ watch(themeOptions, (options) => {
 
 const orgUsers = computed(() => edgeFirebase.state?.users || {})
 const userOptions = computed(() => {
-  return Object.entries(orgUsers.value || {})
-    .filter(([, user]) => Boolean(user?.userId))
-    .map(([id, user]) => ({
-      value: user?.userId,
-      label: user?.meta?.name || user?.userId || id,
+  return assignableUsers.value
+    .map(user => ({
+      value: getAssignableUserId(user),
+      label: getAssignableUserName(user),
     }))
     .sort((a, b) => a.label.localeCompare(b.label))
 })

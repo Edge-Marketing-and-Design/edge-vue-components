@@ -124,6 +124,18 @@ const state = reactive({
   filterFields: [],
 })
 
+const queryPropsKey = computed(() => JSON.stringify({
+  field: props.queryField,
+  operator: props.queryOperator,
+  value: props.queryValue,
+}))
+
+const syncQueryProps = () => {
+  state.queryField = props.queryField
+  state.queryValue = props.queryValue
+  state.queryOperator = props.queryOperator
+}
+
 const gotoSite = (docId) => {
   router.push(`/app/dashboard/${props.collection}/${docId}`)
 }
@@ -451,15 +463,7 @@ watch (
     state.afterMount = false
     console.log('organizationDocPath changed')
     if (!props.paginated) {
-      if (!state.searchField) {
-        state.queryField = props.queryField
-      }
-      if (!state.queryValue) {
-        state.queryValue = props.queryValue
-      }
-      if (!state.queryOperator) {
-        state.queryOperator = props.queryOperator
-      }
+      syncQueryProps()
       console.log('start snapshot')
       console.log(snapShotQuery.value)
       await edgeFirebase.stopSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
@@ -475,15 +479,7 @@ watch (
 onBeforeMount(async () => {
   console.log('before mount')
   if (!props.paginated) {
-    if (!state.searchField) {
-      state.queryField = props.queryField
-    }
-    if (!state.queryValue) {
-      state.queryValue = props.queryValue
-    }
-    if (!state.queryOperator) {
-      state.queryOperator = props.queryOperator
-    }
+    syncQueryProps()
 
     if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`]) {
       await edgeFirebase.stopSnapshot(`${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`)
@@ -546,6 +542,10 @@ watch(searchQuery, async () => {
     state.staticSearch = new edgeFirebase.SearchStaticData()
     await loadInitialData()
   }
+})
+
+watch(queryPropsKey, async () => {
+  syncQueryProps()
 })
 
 watch (snapShotQuery, async () => {

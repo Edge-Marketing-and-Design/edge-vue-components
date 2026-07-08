@@ -1,16 +1,19 @@
 <script setup>
 import { Loader2 } from 'lucide-vue-next'
 
-const edgeFirebase = inject('edgeFirebase')
-const route = useRoute()
-const router = useRouter()
-const isAiBusy = status => status === 'queued' || status === 'running'
 const props = defineProps({
   siteDeleteDisabled: {
     type: Array,
     default: () => [],
   },
 })
+const edgeFirebase = inject('edgeFirebase')
+const {
+  effectiveAgentUserId,
+} = useActingAgentContext(edgeFirebase)
+const route = useRoute()
+const router = useRouter()
+const isAiBusy = status => status === 'queued' || status === 'running'
 
 const state = reactive({
   filter: '',
@@ -49,7 +52,8 @@ const queryField = computed(() => {
 
 const queryValue = computed(() => {
   if (!isAdmin.value && !cmsMultiOrg.value) {
-    return [edgeFirebase?.user?.uid]
+    const agentUserId = String(effectiveAgentUserId.value || edgeFirebase?.user?.uid || '').trim()
+    return agentUserId ? [agentUserId] : ''
   }
   return ''
 })
@@ -86,6 +90,10 @@ const maybeAutoOpenSingleSite = (items = []) => {
   })
   return true
 }
+
+watch(effectiveAgentUserId, () => {
+  state.autoOpenedSingleSite = false
+})
 </script>
 
 <template>

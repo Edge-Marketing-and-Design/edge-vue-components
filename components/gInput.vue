@@ -139,6 +139,9 @@ const jsonSchemaStringFormats = [
 ]
 // const edgeGlobal = inject('edgeGlobal')
 const edgeFirebase = inject('edgeFirebase')
+const {
+  assignableUsers,
+} = useAssignableOrgUsers(edgeFirebase)
 const state = reactive({
   loaded: false,
   afterMount: false,
@@ -900,7 +903,7 @@ watch(modelValue, () => {
     </Card>
     <edge-shad-select
       v-if="props.fieldType === 'users'" v-model="modelValue" :label="props.label"
-      v-bind="props.bindings" :items="Object.values(edgeFirebase.state.users).filter(user => user.uid !== '')"
+      v-bind="props.bindings" :items="assignableUsers"
       item-title="meta.name" item-value="uid" :disabled="props.disabled" :name="props.name" :description="props.hint"
     >
       <template v-if="props.helper" #icon>

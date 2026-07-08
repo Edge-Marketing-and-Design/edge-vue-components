@@ -77,6 +77,7 @@ const props = defineProps({
     default: null,
   },
 })
+const emit = defineEmits(['validationError'])
 // TODO: If a removed user no longer has roles to any organiztions, need to a create new organization for them with
 // default name of "Personal". This will allow them to continue to use the app.
 
@@ -107,6 +108,7 @@ const state = reactive({
   removeOrgIds: [],
   loaded: false,
   memberDetailTab: 'details',
+  validationErrors: {},
 })
 
 const roleNamesOnly = computed(() => {
@@ -350,6 +352,59 @@ const organizationAccessTitle = computed(() =>
   state.saveButton === 'Invite User' ? 'Add to organizations' : 'Organizations',
 )
 
+const normalizeValidationErrors = (payload) => {
+  const rawErrors = (payload?.errors && typeof payload.errors === 'object')
+    ? payload.errors
+    : payload
+
+  if (!rawErrors || typeof rawErrors !== 'object')
+    return {}
+
+  return Object.entries(rawErrors).reduce((errors, [path, message]) => {
+    const normalizedPath = String(path || '').trim()
+    if (!normalizedPath)
+      return errors
+    errors[normalizedPath] = Array.isArray(message) ? message[0] : String(message || '')
+    return errors
+  }, {})
+}
+
+const validationTabForPath = (path) => {
+  const normalized = String(path || '')
+  if (showOrganizationAccessTab.value && ['inviteOrgIds', 'editOrgIds', 'removeOrgIds'].includes(normalized))
+    return 'organizations'
+  return 'details'
+}
+
+const validationErrorItems = computed(() =>
+  Object.entries(state.validationErrors || {}).map(([path, message]) => ({
+    path,
+    message,
+    tab: validationTabForPath(path),
+  })),
+)
+
+const validationErrorMessages = computed(() => validationErrorItems.value.map(item => item.message).filter(Boolean))
+const memberTabHasValidationError = tab => validationErrorItems.value.some(item => item.tab === tab)
+
+const clearValidationErrors = () => {
+  state.validationErrors = {}
+}
+
+const onValidationError = (payload) => {
+  const errors = normalizeValidationErrors(payload)
+  state.validationErrors = errors
+  const firstPath = Object.keys(errors)[0] || ''
+  const firstTab = validationTabForPath(firstPath)
+  state.memberDetailTab = firstTab
+  emit('validationError', {
+    ...payload,
+    errors,
+    firstPath,
+    firstTab,
+  })
+}
+
 const adminCount = computed(() => {
   return users.value.filter((item) => {
     return item.roles.find((role) => {
@@ -539,6 +594,7 @@ const detailViewKey = computed(() => {
 })
 
 const addItem = () => {
+  clearValidationErrors()
   state.saveButton = 'Invite User'
   const newItem = edgeGlobal.dupObject(state.newItem)
   newItem.meta.email = ''
@@ -558,6 +614,7 @@ const addItem = () => {
 }
 
 const editItem = (item) => {
+  clearValidationErrors()
   state.currentTitle = item.meta.name
   state.saveButton = 'Update User'
   state.workingItem = edgeGlobal.dupObject(item)
@@ -609,6 +666,7 @@ const deleteAction = async () => {
 }
 
 const closeDialog = () => {
+  clearValidationErrors()
   state.dialog = false
   edgeGlobal.edgeState.changeTracker = {}
 }
@@ -647,6 +705,7 @@ const updateRemoveOrgSelection = (orgId, checked) => {
 }
 
 const setFeatureEnabled = (featureKey, checked) => {
+  clearValidationErrors()
   const featureAccess = state.workingItem.featureAccess?.features?.[featureKey]
   if (!featureAccess)
     return
@@ -662,6 +721,7 @@ const setFeatureEnabled = (featureKey, checked) => {
 }
 
 const setFeatureAdmin = (featureKey, checked) => {
+  clearValidationErrors()
   const featureAccess = state.workingItem.featureAccess?.features?.[featureKey]
   if (!featureAccess)
     return
@@ -672,6 +732,7 @@ const setFeatureAdmin = (featureKey, checked) => {
 }
 
 const setFeatureAreaAccess = (featureKey, areaKey, accessKey, checked) => {
+  clearValidationErrors()
   const areaAccess = state.workingItem.featureAccess?.features?.[featureKey]?.areas?.[areaKey]
   const featureAccess = state.workingItem.featureAccess?.features?.[featureKey]
   if (!areaAccess || !featureAccess)
@@ -687,6 +748,7 @@ const setFeatureAreaAccess = (featureKey, areaKey, accessKey, checked) => {
 }
 
 const setFeatureAreaAllowed = (featureKey, areaKey, checked) => {
+  clearValidationErrors()
   const areaAccess = state.workingItem.featureAccess?.features?.[featureKey]?.areas?.[areaKey]
   const featureAccess = state.workingItem.featureAccess?.features?.[featureKey]
   if (!areaAccess || !featureAccess)
@@ -699,6 +761,7 @@ const setFeatureAreaAllowed = (featureKey, areaKey, checked) => {
 }
 
 const setOrgAdminAccess = (checked) => {
+  clearValidationErrors()
   if (!state.workingItem.featureAccess)
     state.workingItem.featureAccess = createDefaultFeatureAccess()
   state.workingItem.featureAccess.orgAdmin = checked === true
@@ -706,6 +769,7 @@ const setOrgAdminAccess = (checked) => {
 }
 
 const onSubmit = async () => {
+  clearValidationErrors()
   state.loading = true
   const selectedOrgIds = state.inviteOrgIds.length > 0
     ? state.inviteOrgIds
@@ -984,6 +1048,7 @@ onBeforeMount(async () => {
                 :schema="computedUserSchema"
                 class="org-members-detail-form flex flex-col h-full bg-slate-100 text-slate-950 dark:bg-slate-950 dark:text-slate-100"
                 @submit="onSubmit"
+                @error="onValidationError"
               >
                 <slot
                   name="edit-header"
@@ -992,6 +1057,10 @@ onBeforeMount(async () => {
                   :current-title="state.currentTitle"
                   :loading="state.loading"
                   :save-button="state.saveButton"
+                  :validation-errors="state.validationErrors"
+                  :validation-error-items="validationErrorItems"
+                  :validation-error-messages="validationErrorMessages"
+                  :member-tab-has-validation-error="memberTabHasValidationError"
                 >
                   <div class="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
                     <div class="px-6 py-6">
@@ -1037,12 +1106,21 @@ onBeforeMount(async () => {
                   </div>
                 </slot>
                 <div class="org-members-detail-body flex-1 overflow-y-auto bg-slate-100 p-6 space-y-4 dark:bg-slate-950">
-                  <slot name="edit-fields" :working-item="state.workingItem">
+                  <slot
+                    name="edit-fields"
+                    :working-item="state.workingItem"
+                    :validation-errors="state.validationErrors"
+                    :validation-error-items="validationErrorItems"
+                    :validation-error-messages="validationErrorMessages"
+                    :member-tab-has-validation-error="memberTabHasValidationError"
+                    :clear-validation-errors="clearValidationErrors"
+                  >
                     <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                       <Tabs class="w-full" :model-value="state.memberDetailTab" @update:model-value="state.memberDetailTab = $event">
                         <TabsList class="mb-4 grid w-full border border-slate-200 bg-slate-100 p-1 dark:border-slate-700 dark:bg-slate-800" :class="showOrganizationAccessTab ? 'grid-cols-2' : 'grid-cols-1'">
                           <TabsTrigger value="details" class="text-slate-600 data-[state=active]:bg-slate-900 data-[state=active]:text-white dark:text-slate-300 dark:data-[state=active]:bg-slate-100 dark:data-[state=active]:text-slate-900">
                             Member Details
+                            <span v-if="memberTabHasValidationError('details')" class="ml-2 h-2 w-2 rounded-full bg-red-500" aria-hidden="true" />
                           </TabsTrigger>
                           <TabsTrigger
                             v-if="showOrganizationAccessTab"
@@ -1050,8 +1128,22 @@ onBeforeMount(async () => {
                             class="text-slate-600 data-[state=active]:bg-slate-900 data-[state=active]:text-white dark:text-slate-300 dark:data-[state=active]:bg-slate-100 dark:data-[state=active]:text-slate-900"
                           >
                             Organizations
+                            <span v-if="memberTabHasValidationError('organizations')" class="ml-2 h-2 w-2 rounded-full bg-red-500" aria-hidden="true" />
                           </TabsTrigger>
                         </TabsList>
+
+                        <div
+                          v-if="validationErrorMessages.length"
+                          class="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
+                          role="alert"
+                        >
+                          <div class="font-semibold">
+                            Fix the highlighted fields before saving.
+                          </div>
+                          <div class="mt-1">
+                            {{ validationErrorMessages[0] }}
+                          </div>
+                        </div>
 
                         <TabsContent value="details" class="space-y-4">
                           <div class="flex flex-col gap-4 md:flex-row md:items-stretch">
