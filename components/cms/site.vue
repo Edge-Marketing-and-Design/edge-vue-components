@@ -22,12 +22,13 @@ const props = defineProps({
 })
 const edgeFirebase = inject('edgeFirebase')
 const {
-  effectiveAgentUserId,
-} = useActingAgentContext(edgeFirebase)
+  effectiveUserId,
+} = useDelegatedUserContext(edgeFirebase)
 const {
   assignableUsers,
   getAssignableUserId,
   getAssignableUserName,
+  normalizedUsers,
 } = useAssignableOrgUsers(edgeFirebase)
 const { saveJsonFiles } = useJsonFileSave()
 const { createDefaults: createSiteSettingsDefaults, createNewDocSchema: createSiteSettingsNewDocSchema } = useSiteSettingsTemplate()
@@ -336,7 +337,7 @@ const siteData = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site] || {}
 })
 const contactSpamClassifierEnabled = computed(() => siteData.value?.contactSpam?.enabled === true)
-const currentSiteAccessUserId = computed(() => String(effectiveAgentUserId.value || edgeFirebase.user?.uid || edgeFirebase.user?.firebaseUser?.uid || '').trim())
+const currentSiteAccessUserId = computed(() => String(effectiveUserId.value || edgeFirebase.user?.uid || edgeFirebase.user?.firebaseUser?.uid || '').trim())
 const currentSiteAssignedUserIds = computed(() =>
   Array.isArray(siteData.value?.users) ? siteData.value.users.map(userId => String(userId || '').trim()).filter(Boolean) : [],
 )
@@ -784,7 +785,6 @@ watch(themeOptions, (options) => {
     edgeGlobal.edgeState.blockEditorTheme = options?.[0]?.value || ''
 }, { immediate: true, deep: true })
 
-const orgUsers = computed(() => edgeFirebase.state?.users || {})
 const userOptions = computed(() => {
   return assignableUsers.value
     .map(user => ({
@@ -797,18 +797,11 @@ const authUid = computed(() => String(edgeFirebase?.user?.uid || '').trim())
 const currentOrgUser = computed(() => {
   if (!authUid.value)
     return null
-  const users = Object.values(orgUsers.value || {})
-  return users.find((user) => {
-    const userId = String(user?.userId || '').trim()
-    const docId = String(user?.docId || '').trim()
-    const uid = String(user?.uid || '').trim()
-    return userId === authUid.value || docId === authUid.value || uid === authUid.value
-  }) || null
+  return normalizedUsers.value.find(user => getAssignableUserId(user) === authUid.value) || null
 })
 const currentOrgUserId = computed(() => {
   return String(
     currentOrgUser.value?.userId
-    || currentOrgUser.value?.docId
     || authUid.value
     || '',
   ).trim()

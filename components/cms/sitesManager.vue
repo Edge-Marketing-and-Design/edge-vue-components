@@ -9,8 +9,8 @@ const props = defineProps({
 })
 const edgeFirebase = inject('edgeFirebase')
 const {
-  effectiveAgentUserId,
-} = useActingAgentContext(edgeFirebase)
+  effectiveUserId,
+} = useDelegatedUserContext(edgeFirebase)
 const route = useRoute()
 const router = useRouter()
 const isAiBusy = status => status === 'queued' || status === 'running'
@@ -52,8 +52,8 @@ const queryField = computed(() => {
 
 const queryValue = computed(() => {
   if (!isAdmin.value && !cmsMultiOrg.value) {
-    const agentUserId = String(effectiveAgentUserId.value || edgeFirebase?.user?.uid || '').trim()
-    return agentUserId ? [agentUserId] : ''
+    const userId = String(effectiveUserId.value || edgeFirebase?.user?.uid || '').trim()
+    return userId ? [userId] : ''
   }
   return ''
 })
@@ -91,7 +91,7 @@ const maybeAutoOpenSingleSite = (items = []) => {
   return true
 }
 
-watch(effectiveAgentUserId, () => {
+watch(effectiveUserId, () => {
   state.autoOpenedSingleSite = false
 })
 </script>
