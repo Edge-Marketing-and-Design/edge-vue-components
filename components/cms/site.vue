@@ -3925,7 +3925,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
             @update:model-value="value => (slotProps.workingDoc.theme = value || '')"
           />
           <edge-shad-select-tags
-            v-if="!cmsMultiOrg && Object.keys(orgUsers).length > 0"
+            v-if="!cmsMultiOrg && userOptions.length > 0"
             :model-value="getSiteUsersModel(slotProps.workingDoc)"
             :disabled="shouldForceCurrentUserForNewSite || !edgeGlobal.isAdminGlobal(edgeFirebase).value"
             :items="userOptions"
@@ -5123,7 +5123,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                 :settings="slotProps.workingDoc"
                 :theme-options="themeOptions"
                 :user-options="userOptions"
-                :has-users="Object.keys(orgUsers).length > 0"
+                :has-users="userOptions.length > 0"
                 :show-users="!cmsMultiOrg"
                 :show-theme-fields="true"
                 :is-admin="isOrgAdmin"
