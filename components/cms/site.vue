@@ -3643,57 +3643,59 @@ watch(() => state.menus, async (newVal) => {
     return
   }
   state.saving = true
-  // todo loop through menus and if any item is a blank string use the name {name:'blah', item: ''} and used edgeFirebase to add that page and wait for complete and put docId as value of item
-  const newPage = JSON.parse(JSON.stringify(pageInit))
-  for (const [menuName, items] of Object.entries(newVal)) {
-    for (const [index, item] of items.entries()) {
-      if (isExternalLinkEntry(item))
-        continue
-      if (typeof item.item === 'string') {
-        if (item.item === '') {
-          newPage.name = item.name
-          console.log('Creating new page for menu item:', item)
-          const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`, newPage)
-          const docId = result?.meta?.docId
-          item.item = docId
-        }
-        else {
-          if (item.name === 'Deleting...') {
-            await edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`, item.item)
-            state.menus[menuName].splice(index, 1)
+  try {
+    // todo loop through menus and if any item is a blank string use the name {name:'blah', item: ''} and used edgeFirebase to add that page and wait for complete and put docId as value of item
+    const newPage = JSON.parse(JSON.stringify(pageInit))
+    for (const [menuName, items] of Object.entries(newVal)) {
+      for (const [index, item] of items.entries()) {
+        if (isExternalLinkEntry(item))
+          continue
+        if (typeof item.item === 'string') {
+          if (item.item === '') {
+            newPage.name = item.name
+            const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`, newPage)
+            assertCmsActionSucceeded(result, 'Unable to create the page.')
+            const docId = result?.meta?.docId
+            if (!docId)
+              throw new Error('The new page did not return a document ID.')
+            item.item = docId
           }
         }
-      }
-      if (typeof item.item === 'object' && !isExternalLinkEntry(item)) {
-        for (const [subMenuName, subItems] of Object.entries(item.item)) {
-          for (const [subIndex, subItem] of subItems.entries()) {
-            if (isExternalLinkEntry(subItem))
-              continue
-            if (typeof subItem.item === 'string') {
-              if (subItem.item === '') {
-                newPage.name = subItem.name
-                const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`, newPage)
-                const docId = result?.meta?.docId
-                subItem.item = docId
-              }
-              else {
-                if (subItem.name === 'Deleting...') {
-                  await edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`, subItem.item)
-                  state.menus[menuName][index].item[subMenuName].splice(subIndex, 1)
+        if (item.item && typeof item.item === 'object' && !isExternalLinkEntry(item)) {
+          for (const [_subMenuName, subItems] of Object.entries(item.item)) {
+            for (const subItem of subItems) {
+              if (isExternalLinkEntry(subItem))
+                continue
+              if (typeof subItem.item === 'string') {
+                if (subItem.item === '') {
+                  newPage.name = subItem.name
+                  const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`, newPage)
+                  assertCmsActionSucceeded(result, 'Unable to create the page.')
+                  const docId = result?.meta?.docId
+                  if (!docId)
+                    throw new Error('The new page did not return a document ID.')
+                  subItem.item = docId
                 }
               }
             }
           }
-        }
-        if (Object.keys(item.item).length === 0) {
-          state.menus[menuName].splice(index, 1)
+          if (Object.keys(item.item).length === 0) {
+            state.menus[menuName].splice(index, 1)
+          }
         }
       }
     }
+    if (!isTemplateSite.value) {
+      const result = await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, { menus: state.menus })
+      assertCmsActionSucceeded(result, 'Unable to save menu changes.')
+    }
   }
-  if (!isTemplateSite.value)
-    await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, { menus: state.menus })
-  state.saving = false
+  catch {
+    edgeFirebase?.toast?.error?.('Unable to save menu changes right now.')
+  }
+  finally {
+    state.saving = false
+  }
 }, { deep: true })
 
 const formErrors = (error) => {

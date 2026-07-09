@@ -2263,12 +2263,12 @@ const openEditor = async (event, options = {}) => {
     }
   }
 
-  state.draft = JSON.parse(JSON.stringify({
-    ...schemaDefaults,
-    ...(templateIsV2 ? {} : legacyAuthoredModel.values),
-    ...(blockData?.values || {}),
-    ...(modelValue.value?.values || {}),
-  }))
+  state.draft = JSON.parse(JSON.stringify(buildCmsBlockEditorDraftValues({
+    schemaDefaults,
+    legacyValues: templateIsV2 ? {} : legacyAuthoredModel.values,
+    blockValues: blockData?.values,
+    instanceValues: modelValue.value?.values,
+  })))
   if (templateIsV2) {
     Object.entries(mergedMeta).forEach(([field, fieldMeta]) => {
       const control = fieldMeta?.dataSourceControl
@@ -2389,23 +2389,12 @@ const orderedMeta = computed(() => {
     ? extractTemplateV2FieldsInOrder(tpl, Object.keys(metaObj))
     : extractFieldsInOrder(tpl)
 
-  const out = []
-  const picked = new Set()
-
-  for (const f of orderedFields) {
-    if (f in metaObj && !shouldIgnoreMeta(metaObj[f])) {
-      out.push({ field: f, meta: metaObj[f] })
-      picked.add(f)
-    }
-  }
-
-  for (const f of Object.keys(metaObj)) {
-    if (!picked.has(f) && !shouldIgnoreMeta(metaObj[f])) {
-      out.push({ field: f, meta: metaObj[f] })
-    }
-  }
-
-  return out
+  return orderCmsBlockEditorMeta({
+    meta: metaObj,
+    orderedFields,
+    includeUnreferenced: templateIsV2,
+    shouldIgnore: shouldIgnoreMeta,
+  })
 })
 
 const hasEditableArrayControls = (entry) => {

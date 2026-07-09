@@ -62,7 +62,7 @@ const cmsMultiOrg = useState('cmsMultiOrg', () => true)
 const isExternalLinkEntry = entry => entry?.item && typeof entry.item === 'object' && entry.item.type === 'external'
 const isPageEntry = entry => typeof entry?.item === 'string'
 const isRenameDisabled = entry => isPageEntry(entry) && !!entry?.disableRename
-const isDeleteDisabled = entry => isPageEntry(entry) && !!entry?.disableDelete
+const isDeleteDisabled = entry => isPageEntry(entry) && (!!entry?.disableDelete || edgeGlobal.edgeState.cmsPageWithUnsavedChanges === entry.item)
 const isLinkUrlSpecial = url => /^tel:|^mailto:/i.test(String(url || '').trim())
 const linkTarget = url => (isLinkUrlSpecial(url) ? null : '_blank')
 const linkRel = url => (isLinkUrlSpecial(url) ? null : 'noopener noreferrer')
@@ -423,6 +423,7 @@ const state = reactive({
   addMenu: false,
   addLinkDialog: false,
   deletePage: {},
+  deletePageSubmitting: false,
   renameItem: {},
   renameFolderOrPageDialog: false,
   deletePageDialog: false,
@@ -1170,6 +1171,62 @@ const addPageAction = async () => {
   state.addPageDialog = false
 }
 
+const replaceMenus = (targetMenus, nextMenus) => {
+  if (!targetMenus || typeof targetMenus !== 'object')
+    return
+  for (const key of Object.keys(targetMenus)) {
+    if (!Object.prototype.hasOwnProperty.call(nextMenus, key))
+      delete targetMenus[key]
+  }
+  for (const [key, value] of Object.entries(nextMenus))
+    targetMenus[key] = value
+}
+
+const deleteSitePage = async (pageId) => {
+  const normalizedPageId = String(pageId || '').trim()
+  if (!normalizedPageId || state.deletePageSubmitting)
+    return false
+
+  state.deletePageSubmitting = true
+  try {
+    const rootMenus = props.rootModelValue || modelValue.value || {}
+    const nextMenus = removeCmsPageFromMenus(rootMenus, normalizedPageId)
+
+    if (!props.isTemplateSite) {
+      const nextAssignments = { ...normalizeRestrictedPageRuleAssignments(siteDoc.value?.restrictedContent?.pageRuleAssignments) }
+      delete nextAssignments[getPageRestrictionAssignmentKey(normalizedPageId, false)]
+      delete nextAssignments[getPageRestrictionAssignmentKey(normalizedPageId, true)]
+      const nextRestrictedContent = {
+        ...((siteDoc.value?.restrictedContent && typeof siteDoc.value.restrictedContent === 'object') ? siteDoc.value.restrictedContent : {}),
+        pageRuleAssignments: nextAssignments,
+      }
+      const siteResult = await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, {
+        menus: nextMenus,
+        restrictedContent: nextRestrictedContent,
+      })
+      assertCmsActionSucceeded(siteResult, 'Unable to update the site menus.')
+      const publishedResult = await edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`, normalizedPageId)
+      assertCmsActionSucceeded(publishedResult, 'Unable to delete the published page.')
+    }
+
+    const pageResult = await edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`, normalizedPageId)
+    assertCmsActionSucceeded(pageResult, 'Unable to delete the page.')
+    replaceMenus(rootMenus, nextMenus)
+    if (props.page === normalizedPageId) {
+      edgeGlobal.edgeState.cmsPageWithUnsavedChanges = null
+      await router.replace(pageRouteBase.value)
+    }
+    return true
+  }
+  catch {
+    edgeFirebase?.toast?.error?.('Unable to delete page right now.')
+    return false
+  }
+  finally {
+    state.deletePageSubmitting = false
+  }
+}
+
 const addLinkShow = (menuName) => {
   state.linkDialogMode = 'add'
   state.linkTargetMenu = menuName
@@ -1240,25 +1297,9 @@ const deletePageAction = async () => {
     state.deletePage = {}
     return
   }
-  if (props.page === state.deletePage.item) {
-    router.replace(pageRouteBase.value)
-  }
-  for (const [_menuName, items] of Object.entries(modelValue.value)) {
-    for (const item of items) {
-      if (typeof item.item === 'string' && item.item === state.deletePage.item) {
-        item.name = 'Deleting...'
-      }
-      if (typeof item.item === 'object') {
-        for (const [_subMenuName, subItems] of Object.entries(item.item)) {
-          for (const subItem of subItems) {
-            if (typeof subItem.item === 'string' && subItem.item === state.deletePage.item) {
-              subItem.name = 'Deleting...'
-            }
-          }
-        }
-      }
-    }
-  }
+  const deleted = await deleteSitePage(state.deletePage.item)
+  if (!deleted)
+    return
   state.deletePageDialog = false
   state.deletePage = {}
 }
@@ -1612,8 +1653,9 @@ const theme = computed(() => {
           Cancel
         </edge-shad-button>
         <edge-shad-button
-          variant="destructive" class="text-white w-full" @click="deletePageAction()"
+          variant="destructive" class="text-white w-full" :disabled="state.deletePageSubmitting" @click="deletePageAction()"
         >
+          <Loader2 v-if="state.deletePageSubmitting" class="h-4 w-4 animate-spin" />
           <span v-if="state.deletePage.item === ''">Delete Folder</span>
           <span v-else-if="isExternalLinkEntry(state.deletePage)">Delete Link</span>
           <span v-else>Delete Page</span>

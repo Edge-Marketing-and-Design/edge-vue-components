@@ -2651,38 +2651,6 @@ const openCurrentPageSettings = async () => {
   state.pageSettingsOpen = true
 }
 
-const removePageFromMenuItems = (items, pageId) => {
-  if (!Array.isArray(items))
-    return []
-
-  return items
-    .map((entry) => {
-      if (!entry || typeof entry !== 'object')
-        return entry
-
-      if (typeof entry.item === 'string')
-        return entry.item === pageId ? null : entry
-
-      if (entry.item && typeof entry.item === 'object') {
-        const nextEntry = edgeGlobal.dupObject(entry)
-        for (const [folderSlug, nestedItems] of Object.entries(nextEntry.item || {})) {
-          nextEntry.item[folderSlug] = removePageFromMenuItems(nestedItems, pageId)
-        }
-        return nextEntry
-      }
-
-      return entry
-    })
-    .filter(Boolean)
-}
-
-const removePageFromMenus = (menus, pageId) => {
-  const nextMenus = normalizeMenusForImport(menus)
-  for (const [menuName, items] of Object.entries(nextMenus))
-    nextMenus[menuName] = removePageFromMenuItems(items, pageId)
-  return nextMenus
-}
-
 const renameCurrentPageAction = async () => {
   const nextName = String(state.renamePageValue || '').trim()
   if (!nextName || state.renamePageSubmitting || !props.page || props.page === 'new')
@@ -2735,7 +2703,7 @@ const deleteCurrentPage = async () => {
   state.deletePageSubmitting = true
   try {
     if (!props.isTemplateSite) {
-      const nextMenus = removePageFromMenus(siteDoc.value?.menus, props.page)
+      const nextMenus = removeCmsPageFromMenus(siteDoc.value?.menus, props.page, { ensureRootMenus: true })
       const nextAssignments = { ...normalizeRestrictedPageRuleAssignments(siteDoc.value?.restrictedContent?.pageRuleAssignments) }
       delete nextAssignments[getPageRestrictionAssignmentKey(props.page, false)]
       delete nextAssignments[getPageRestrictionAssignmentKey(props.page, true)]
@@ -2743,15 +2711,19 @@ const deleteCurrentPage = async () => {
         ...((siteDoc.value?.restrictedContent && typeof siteDoc.value.restrictedContent === 'object') ? siteDoc.value.restrictedContent : {}),
         pageRuleAssignments: nextAssignments,
       }
-      await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, {
+      const siteResult = await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, {
         menus: nextMenus,
         restrictedContent: nextRestrictedContent,
       })
-      if (isPagePublished(props.page))
-        await edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`, props.page)
+      assertCmsActionSucceeded(siteResult, 'Unable to update the site menus.')
+      if (isPagePublished(props.page)) {
+        const publishedResult = await edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`, props.page)
+        assertCmsActionSucceeded(publishedResult, 'Unable to delete the published page.')
+      }
     }
 
-    await edgeFirebase.removeDoc(pagesCollectionPath.value, props.page)
+    const pageResult = await edgeFirebase.removeDoc(pagesCollectionPath.value, props.page)
+    assertCmsActionSucceeded(pageResult, 'Unable to delete the page.')
     state.deletePageDialogOpen = false
     notifySuccess(`Deleted ${props.isTemplateSite ? 'template' : 'page'} "${props.page}".`)
     await router.push(pageEditorBasePath.value)
