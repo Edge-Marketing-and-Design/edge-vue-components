@@ -1,7 +1,7 @@
 <script setup lang="js">
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { CircleAlert, Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePenLine, FileStack, FileUp, FileX, FolderCog, FolderDown, FolderUp, FolderX, ImagePlus, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload, Users, X } from 'lucide-vue-next'
+import { BarChart3, CircleAlert, Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePenLine, FileStack, FileUp, FileX, FolderCog, FolderDown, FolderUp, FolderX, ImagePlus, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload, Users, X } from 'lucide-vue-next'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
 
 const props = defineProps({
@@ -286,10 +286,12 @@ const canEditSiteSettings = computed(() => {
 const useMenuPublishLabels = computed(() => {
   return cmsMultiOrg.value && !canEditSiteSettings.value
 })
+const analyticsDevEnabled = computed(() => edgeGlobal.edgeState.devOverride === true)
 const cmsSiteTabs = useState('cmsSiteTabs', () => ({
   pages: true,
   posts: true,
   inbox: true,
+  analytics: !cmsMultiOrg.value,
   members: false,
   media: true,
   mediaEdit: true,
@@ -299,11 +301,14 @@ const cmsTabAccess = computed(() => {
     pages: cmsSiteTabs.value?.pages !== false,
     posts: cmsSiteTabs.value?.posts !== false,
     inbox: cmsSiteTabs.value?.inbox !== false,
+    analytics: cmsMultiOrg.value
+      ? cmsSiteTabs.value?.analytics === true
+      : true,
     members: cmsSiteTabs.value?.members === true,
     media: cmsSiteTabs.value?.media !== false,
     mediaEdit: cmsSiteTabs.value?.mediaEdit === true,
   }
-  if (!normalized.pages && !normalized.posts && !normalized.inbox && !normalized.members && !normalized.media) {
+  if (!normalized.pages && !normalized.posts && !normalized.inbox && !(normalized.analytics && analyticsDevEnabled.value) && !normalized.members && !normalized.media) {
     normalized.inbox = true
   }
   return normalized
@@ -326,9 +331,19 @@ const currentUserCanEditSiteMedia = computed(() =>
   || currentOrgRoleName.value === 'site admin'
   || currentUserHasRoleAt('sites-media', ['editor', 'admin'])),
 )
+const currentUserCanViewSiteAnalytics = computed(() =>
+  cmsMultiOrg.value && (isOrgAdmin.value
+  || currentOrgRoleName.value === 'site admin'
+  || currentUserHasRoleAt('sites-analytics')),
+)
 const canViewPagesTab = computed(() => cmsTabAccess.value.pages)
 const canViewPostsTab = computed(() => cmsTabAccess.value.posts)
 const canViewInboxTab = computed(() => cmsTabAccess.value.inbox)
+const canViewAnalyticsTab = computed(() => analyticsDevEnabled.value && !isTemplateSite.value && (
+  !cmsMultiOrg.value
+  || cmsTabAccess.value.analytics
+  || currentUserCanViewSiteAnalytics.value
+))
 const canViewMediaTab = computed(() => !isTemplateSite.value && (!cmsMultiOrg.value || cmsTabAccess.value.media || currentUserCanViewSiteMedia.value))
 const canEditMediaTab = computed(() => !isTemplateSite.value && (!cmsMultiOrg.value || cmsTabAccess.value.mediaEdit || currentUserCanEditSiteMedia.value))
 const hidePublishStatusAndActions = computed(() => cmsMultiOrg.value && !canViewPagesTab.value)
@@ -365,6 +380,8 @@ const defaultViewMode = computed(() => {
     return 'posts'
   if (canViewInboxTab.value)
     return 'submissions'
+  if (canViewAnalyticsTab.value)
+    return 'analytics'
   if (canViewRestrictedTab.value)
     return 'restricted'
   if (canViewMediaTab.value)
@@ -3452,6 +3469,8 @@ const ensureValidViewMode = () => {
     nextMode = defaultViewMode.value
   if (nextMode === 'submissions' && !canViewInboxTab.value)
     nextMode = defaultViewMode.value
+  if (nextMode === 'analytics' && !canViewAnalyticsTab.value)
+    nextMode = defaultViewMode.value
   if (nextMode === 'restricted' && !canViewRestrictedTab.value)
     nextMode = defaultViewMode.value
   if (nextMode === 'media' && !canViewMediaTab.value)
@@ -3477,6 +3496,8 @@ const setViewMode = (mode) => {
   if (mode === 'posts' && !canViewPostsTab.value)
     return
   if (mode === 'submissions' && !canViewInboxTab.value)
+    return
+  if (mode === 'analytics' && !canViewAnalyticsTab.value)
     return
   if (mode === 'restricted' && !canViewRestrictedTab.value)
     return
@@ -3599,6 +3620,10 @@ watch(() => props.page, (next) => {
 watch(cmsTabAccess, () => {
   ensureValidViewMode()
 }, { immediate: true, deep: true })
+
+watch(canViewAnalyticsTab, () => {
+  ensureValidViewMode()
+}, { immediate: true })
 
 watch(canEditSiteSettings, (allowed) => {
   if (!allowed && state.siteSettings) {
@@ -4268,7 +4293,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
           </div>
         </div>
         <div class="flex justify-center">
-          <div v-if="!isTemplateSite && (canViewPagesTab || canViewPostsTab || canViewInboxTab || canViewRestrictedTab || canViewMediaTab)" class="flex items-center rounded-full border border-slate-300 bg-white p-1 shadow-sm dark:border-slate-600 dark:bg-slate-950">
+          <div v-if="!isTemplateSite && (canViewPagesTab || canViewPostsTab || canViewInboxTab || canViewAnalyticsTab || canViewRestrictedTab || canViewMediaTab)" class="flex max-w-[62vw] items-center overflow-x-auto rounded-full border border-slate-300 bg-white p-1 shadow-sm dark:border-slate-600 dark:bg-slate-950">
             <edge-shad-button
               v-if="canViewPagesTab"
               variant="ghost"
@@ -4326,6 +4351,19 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
               >
                 {{ unreadSubmissionsCount }}
               </span>
+            </edge-shad-button>
+            <edge-shad-button
+              v-if="canViewAnalyticsTab"
+              variant="ghost"
+              size="sm"
+              class="h-8 whitespace-nowrap px-4 text-xs gap-2 rounded-full"
+              :class="state.viewMode === 'analytics'
+                ? 'bg-gradient-to-r from-slate-900 to-slate-700 text-white hover:text-white shadow-sm dark:bg-gradient-to-r dark:from-slate-200 dark:to-slate-400 dark:text-slate-900 dark:hover:text-slate-900'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100'"
+              @click="setViewMode('analytics')"
+            >
+              <BarChart3 class="h-4 w-4" aria-hidden="true" />
+              Analytics
             </edge-shad-button>
             <edge-shad-button
               v-if="canViewRestrictedTab"
@@ -4625,6 +4663,12 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                 </div>
               </template>
             </edge-dashboard>
+          </div>
+          <div v-else-if="state.viewMode === 'analytics' && canViewAnalyticsTab" class="h-full min-h-0 flex-1 overflow-hidden">
+            <edge-cms-site-analytics
+              :site="props.site"
+              :site-doc="siteData"
+            />
           </div>
           <div v-else-if="state.viewMode === 'restricted' && canViewRestrictedTab" class="flex-1 min-h-0 overflow-hidden p-6">
             <edge-cms-restricted-content
