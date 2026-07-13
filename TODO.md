@@ -12,9 +12,10 @@
   filtering/sorting time. New choices should be restricted to supported
   collections and fields; existing incompatible blocks require an explicit
   warning-versus-enforcement decision.
-- Dependencies: `edgeTemplateEngine` owns query/hydration semantics;
-  `clearwater-hub` is the initial integration environment; `emd-cms` and
-  `iafsc-hub` validate later rollouts.
+- Selected integration Hub: `clearwater-hub`.
+- Dependencies: `edgeTemplateEngine` owns query/hydration semantics. Other Hubs
+  are checked through the periodic Edge subtree audit and receive rollout TODOs
+  only if their rollout is selected.
 - Exclude: D1, moving complete previews to KV, Firestore fallback after KV
   failure, automatic subtree rollout, package publication, deployment, or
   production writes.
