@@ -332,6 +332,7 @@ const domainRegistry = ref({})
 const loadingDomainRegistry = ref(false)
 const hasLoadedDomainRegistry = ref(false)
 const retryingDomainSync = reactive({})
+const retryingWebAnalytics = ref(false)
 const pagesProject = computed(() => String(serverPagesProject.value || '').trim())
 const pagesDomain = computed(() => (pagesProject.value ? `${pagesProject.value}.pages.dev` : '(CLOUDFLARE_PAGES_PROJECT).pages.dev'))
 const forwardApexEnabled = computed({
@@ -432,6 +433,33 @@ const normalizedDomains = computed(() => {
 })
 
 const dnsEligibleDomains = computed(() => normalizedDomains.value.filter(shouldDisplayDomainDnsRecords))
+const NO_CANONICAL_DOMAIN_VALUE = '__no_forward__'
+const canonicalDomainOptions = computed(() => [
+  { value: NO_CANONICAL_DOMAIN_VALUE, label: 'No forward' },
+  ...dnsEligibleDomains.value.map(domain => ({
+    value: domain,
+    label: props.settings?.forwardApex !== false && !domain.startsWith('www.')
+      ? `${domain} (serves at www.${domain})`
+      : domain,
+  })),
+])
+const showCanonicalDomain = computed(() => dnsEligibleDomains.value.length > 1)
+const updateCanonicalDomain = (value) => {
+  const nextValue = value === NO_CANONICAL_DOMAIN_VALUE ? '' : normalizeDomain(value)
+  if (props.settings?.canonicalDomain !== nextValue)
+    Reflect.set(props.settings, 'canonicalDomain', nextValue)
+}
+
+const normalizeCanonicalDomain = () => {
+  if (!dnsEligibleDomains.value.length)
+    return
+  const hasSavedValue = Object.prototype.hasOwnProperty.call(props.settings || {}, 'canonicalDomain')
+  const current = normalizeDomain(props.settings?.canonicalDomain)
+  if (hasSavedValue && current === '')
+    return
+  if (!dnsEligibleDomains.value.includes(current))
+    Reflect.set(props.settings, 'canonicalDomain', dnsEligibleDomains.value[0] || '')
+}
 
 const organizationId = computed(() => String(edgeGlobal?.edgeState?.currentOrganization || '').trim())
 const shouldShowDomainRegistryLoading = computed(() => {
@@ -597,6 +625,26 @@ const retryDomainSync = async (domain) => {
   }
 }
 
+const retryWebAnalytics = async () => {
+  const orgId = organizationId.value
+  const siteId = String(props.siteId || '').trim()
+  const uid = String(edgeFirebase?.user?.uid || '').trim()
+  if (!orgId || !siteId || !uid)
+    return
+  retryingWebAnalytics.value = true
+  try {
+    await edgeFirebase.runFunction('siteWebAnalytics-retrySiteWebAnalytics', { uid, orgId, siteId }, { timeout: 300000 })
+    edgeFirebase?.toast?.success?.('Cloudflare Web Analytics synchronization completed.')
+    await fetchDomainRegistry()
+  }
+  catch (error) {
+    edgeFirebase?.toast?.error?.(parseFunctionError(error, 'Unable to synchronize Cloudflare Web Analytics.'))
+  }
+  finally {
+    retryingWebAnalytics.value = false
+  }
+}
+
 const stopDomainRegistryPolling = () => {
   if (domainRegistryPollTimer) {
     clearInterval(domainRegistryPollTimer)
@@ -639,6 +687,10 @@ onBeforeUnmount(() => {
 watch(() => props.settings?.forwardApex, (value) => {
   if (value === undefined)
     props.settings.forwardApex = true
+}, { immediate: true })
+
+watch(() => `${normalizedDomains.value.join('|')}:${String(props.settings?.canonicalDomain ?? '__missing__')}`, () => {
+  normalizeCanonicalDomain()
 }, { immediate: true })
 
 watch(() => [
@@ -836,6 +888,18 @@ watch(() => [
         placeholder="Add or remove domains"
         class="w-full"
       />
+      <edge-shad-select
+        v-if="showCanonicalDomain"
+        :model-value="normalizeDomain(props.settings.canonicalDomain) || NO_CANONICAL_DOMAIN_VALUE"
+        name="canonicalDomain"
+        label="Forward all sites to"
+        class="w-full"
+        :items="canonicalDomainOptions"
+        item-title="label"
+        item-value="value"
+        description="Redirect every other configured domain to this canonical domain. Choose No forward to let each domain serve the site."
+        @update:model-value="updateCanonicalDomain"
+      />
       <div class="rounded-lg border border-border/60 bg-muted/40 p-4 space-y-3">
         <edge-cms-boolean-card
           v-model="forwardApexEnabled"
@@ -882,6 +946,23 @@ watch(() => [
             Target: <span class="font-mono">{{ pagesDomain }}</span>
           </div>
         </div>
+        <div class="flex items-center justify-between gap-3">
+          <p class="text-sm text-muted-foreground">
+            Cloudflare Web Analytics is enabled automatically for eligible proxied domains.
+          </p>
+          <edge-shad-button
+            type="button"
+            size="sm"
+            variant="outline"
+            class="h-8 gap-2"
+            :disabled="retryingWebAnalytics"
+            @click="retryWebAnalytics"
+          >
+            <Loader2 v-if="retryingWebAnalytics" class="h-3.5 w-3.5 animate-spin" />
+            <RefreshCw v-else class="h-3.5 w-3.5" />
+            Sync Analytics
+          </edge-shad-button>
+        </div>
         <p class="text-sm text-muted-foreground">
           Records are listed for each domain.
         </p>
@@ -901,6 +982,15 @@ watch(() => [
               {{ entry.domain }}
             </div>
             <div class="flex items-center gap-2 text-xs">
+              <span
+                v-if="entry.webAnalytics?.status"
+                class="inline-flex items-center gap-1 rounded px-2 py-1"
+                :class="entry.webAnalytics.status === 'enabled'
+                  ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                  : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'"
+              >
+                Analytics: {{ entry.webAnalytics.status }}
+              </span>
               <span
                 v-if="entry.dnsSyncSucceeded"
                 class="inline-flex items-center gap-1 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-2 py-1"

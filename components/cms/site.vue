@@ -211,6 +211,7 @@ const schemas = {
         path: ['domains', 0],
       }),
     forwardApex: z.boolean().optional(),
+    canonicalDomain: z.string().max(255).optional(),
     contactEmail: z.string().optional(),
     contactPhone: z.string().optional(),
     theme: z.string({
@@ -1331,6 +1332,7 @@ const isSiteDiff = computed(() => {
       favicon: publishedSite.favicon,
       menuPosition: publishedSite.menuPosition,
       forwardApex: publishedSite.forwardApex,
+      canonicalDomain: publishedSite.canonicalDomain,
       contactEmail: publishedSite.contactEmail,
       contactPhone: publishedSite.contactPhone,
       metaTitle: publishedSite.metaTitle,
@@ -1364,6 +1366,7 @@ const isSiteDiff = computed(() => {
       favicon: siteData.value.favicon,
       menuPosition: siteData.value.menuPosition,
       forwardApex: siteData.value.forwardApex,
+      canonicalDomain: siteData.value.canonicalDomain,
       contactEmail: siteData.value.contactEmail,
       contactPhone: siteData.value.contactPhone,
       metaTitle: siteData.value.metaTitle,
@@ -1402,6 +1405,7 @@ const SITE_SETTINGS_DIFF_FIELDS = [
   { key: 'favicon', label: 'Favicon' },
   { key: 'menuPosition', label: 'Menu Position' },
   { key: 'forwardApex', label: 'Forward Apex', format: 'boolean' },
+  { key: 'canonicalDomain', label: 'Forward All Sites To' },
   { key: 'contactEmail', label: 'Contact Email' },
   { key: 'contactPhone', label: 'Contact Phone' },
   { key: 'metaTitle', label: 'Meta Title' },
@@ -1539,6 +1543,9 @@ const discardSiteSettings = async () => {
       favicon: publishedSite.favicon || '',
       menuPosition: publishedSite.menuPosition || '',
       forwardApex: publishedSite.forwardApex !== false,
+      canonicalDomain: Object.prototype.hasOwnProperty.call(publishedSite, 'canonicalDomain')
+        ? publishedSite.canonicalDomain
+        : undefined,
       contactEmail: publishedSite.contactEmail || '',
       contactPhone: publishedSite.contactPhone || '',
       metaTitle: publishedSite.metaTitle || '',
