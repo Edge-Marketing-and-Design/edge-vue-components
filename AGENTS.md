@@ -1,5 +1,17 @@
 # Edge Shared Code Agent Guide
 
+Read `RELATED-REPOSITORIES.md` when shared work may affect a direct consumer or
+dependency.
+
+## Hub-First Source Workflow
+
+This `edge/` subtree is the working source for `edge-vue-components`; a
+standalone checkout is not required. Before shared work, confirm the selected
+Hub's committed subtree matches current upstream. Keep shared TODOs in
+`edge/TODO.md`, implement and test shared changes in the Hub, and promote only
+the committed subtree with the Hub's root `edge-push.sh` after explicit commit
+and push authorization.
+
 This folder is shared Edge code. Changes here can affect every project that pulls Edge updates, so keep edits generic and avoid project-specific behavior unless the user explicitly approves it.
 
 ## Organization Mode
