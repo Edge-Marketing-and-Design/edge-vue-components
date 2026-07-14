@@ -745,6 +745,7 @@ const resolveTemplateV2CmsForItems = async (expression, scope, dataSources, rend
 const createTemplateV2ChildScope = (scope, alias, entry) => {
   const nextScope = {
     ...(scope || {}),
+    item: entry,
     [alias || 'item']: entry,
   }
   if (entry && typeof entry === 'object' && !Array.isArray(entry))
@@ -752,7 +753,24 @@ const createTemplateV2ChildScope = (scope, alias, entry) => {
   return nextScope
 }
 
-const renderTemplateV2CmsSection = async (template, scope, dataSources, schema, renderOptions) => {
+const normalizeTemplateV2ConditionalAlias = (template, alias) => {
+  const normalizedAlias = String(alias || '').trim()
+  if (!normalizedAlias || normalizedAlias === 'item')
+    return template
+
+  return String(template || '').replace(/\{\{\{\s*#if\s*({[\s\S]*?})\s*\}\}\}/g, (tag, rawConfig) => {
+    const config = safeParseTagConfig(rawConfig)
+    const condition = String(config?.cond || '').trim()
+    if (condition !== normalizedAlias && !condition.startsWith(`${normalizedAlias}.`))
+      return tag
+    const normalizedCondition = condition === normalizedAlias
+      ? 'item'
+      : `item.${condition.slice(normalizedAlias.length + 1)}`
+    return `{{{#if ${JSON.stringify({ ...config, cond: normalizedCondition })} }}}`
+  })
+}
+
+const renderTemplateV2CmsSection = async (template, scope, dataSources, schema, renderOptions, currentAlias = '') => {
   let output = replaceTemplateLoadingStateTokens(template, 'loaded')
   let forBlock = findNextTemplateV2ForBlock(output)
   while (forBlock) {
@@ -760,13 +778,13 @@ const renderTemplateV2CmsSection = async (template, scope, dataSources, schema, 
     const renderedItems = []
     for (const entry of items) {
       const childScope = createTemplateV2ChildScope(scope, forBlock.alias, entry)
-      renderedItems.push(await renderTemplateV2CmsSection(forBlock.innerTpl, childScope, dataSources, schema, renderOptions))
+      renderedItems.push(await renderTemplateV2CmsSection(forBlock.innerTpl, childScope, dataSources, schema, renderOptions, forBlock.alias))
     }
     output = `${output.slice(0, forBlock.start)}${renderedItems.join('')}${output.slice(forBlock.end)}`
     forBlock = findNextTemplateV2ForBlock(output)
   }
   return renderTemplateAsync(
-    output,
+    normalizeTemplateV2ConditionalAlias(output, currentAlias),
     scope || {},
     {},
     {
