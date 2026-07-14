@@ -207,7 +207,12 @@ const resolveBlockValuesForPreview = (blockRef, key) => {
   }
 }
 
-const hasPreviewSpans = row => (row?.columns || []).some(column => Number.isFinite(Number(column?.span)))
+const hasExplicitPreviewSpan = (column) => {
+  const span = column?.span
+  return span !== null && span !== undefined && span !== '' && Number.isFinite(Number(span))
+}
+
+const hasPreviewSpans = row => (row?.columns || []).some(hasExplicitPreviewSpan)
 
 const previewGridClass = (row) => {
   if (hasPreviewSpans(row))
@@ -225,9 +230,9 @@ const previewGridClass = (row) => {
 }
 
 const previewColumnStyle = (column) => {
-  const span = Number(column?.span)
-  if (!Number.isFinite(span))
+  if (!hasExplicitPreviewSpan(column))
     return {}
+  const span = Number(column?.span)
   const safeSpan = Math.min(Math.max(span, 1), 6)
   return { gridColumn: `span ${safeSpan} / span ${safeSpan}` }
 }
