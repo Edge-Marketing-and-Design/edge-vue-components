@@ -536,6 +536,48 @@ const finalValues = computed(() => {
     ...(collectionValues.value || {}),
   }
 })
+
+const scopedCollectionSourceCache = new Map()
+
+const getScopedCollectionArrayFields = (sourceConfig) => {
+  const records = Array.isArray(sourceConfig?.value) ? sourceConfig.value : []
+  return new Set(records.flatMap(record => Object.entries(record || {})
+    .filter(([, value]) => Array.isArray(value))
+    .map(([field]) => field)))
+}
+
+const resolveScopedCollectionSource = async (sourceName, sourceConfig, overrides = {}) => {
+  const overrideQueryItems = (overrides.queryItems && typeof overrides.queryItems === 'object' && !Array.isArray(overrides.queryItems))
+    ? overrides.queryItems
+    : {}
+  const arrayFields = getScopedCollectionArrayFields(sourceConfig)
+  const configuredQueryOptions = Array.isArray(sourceConfig?.queryOptions) ? sourceConfig.queryOptions : []
+  const configuredQueryOptionFields = new Set(configuredQueryOptions.map(option => option?.field).filter(Boolean))
+  const inferredQueryOptions = Object.keys(overrideQueryItems)
+    .filter(field => arrayFields.has(field) && !configuredQueryOptionFields.has(field))
+    .map(field => ({ field, operator: 'array-contains' }))
+  const scopedSource = {
+    ...(sourceConfig || {}),
+    ...(overrides || {}),
+    queryItems: overrideQueryItems,
+    queryOptions: [...configuredQueryOptions, ...inferredQueryOptions],
+    order: overrides.order || sourceConfig?.order,
+    limit: overrides.limit ?? sourceConfig?.limit,
+  }
+  const cfg = dataSourceToPreviewMetaConfig(scopedSource)
+  if (!cfg?.collection)
+    return null
+  delete cfg.value
+
+  const cacheKey = JSON.stringify({ sourceName, cfg, siteId: props.siteId })
+  if (!scopedCollectionSourceCache.has(cacheKey)) {
+    const request = edgeGlobal.cmsCollectionData(edgeFirebase, {}, { [sourceName]: cfg }, props.siteId)
+      .then(result => Array.isArray(result?.[sourceName]) ? result[sourceName] : [])
+      .catch(() => null)
+    scopedCollectionSourceCache.set(cacheKey, request)
+  }
+  return scopedCollectionSourceCache.get(cacheKey)
+}
 </script>
 
 <template>
@@ -546,6 +588,7 @@ const finalValues = computed(() => {
     :template="loadingRender(props.template)"
     :schema="props.schema"
     :data-sources="props.dataSources"
+    :collection-source-resolver="resolveScopedCollectionSource"
     :site-id="props.siteId"
     :route-last-segment="effectiveRouteLastSegment"
     :values="finalValues"

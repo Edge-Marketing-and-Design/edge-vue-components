@@ -30,6 +30,10 @@ const props = defineProps({
     type: Object,
     default: () => ({}),
   },
+  collectionSourceResolver: {
+    type: Function,
+    default: null,
+  },
   siteId: {
     type: String,
     default: '',
@@ -588,6 +592,15 @@ const resolveTemplateV2ScopedQueryItems = (queryItems, scope) => {
   }, {})
 }
 
+const hasTemplateV2ScopedCollectionOverrides = (overrides) => {
+  if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides))
+    return false
+  const queryItems = overrides.queryItems
+  if (queryItems && typeof queryItems === 'object' && !Array.isArray(queryItems) && Object.keys(queryItems).length)
+    return true
+  return !!overrides.canonicalLookup
+}
+
 const getTemplateV2CanonicalDocIds = (canonicalLookup, scope) => {
   const rawKey = resolveTemplateV2ParentToken(canonicalLookup?.key, scope)
   const keys = Array.isArray(rawKey) ? rawKey : [rawKey]
@@ -729,7 +742,17 @@ const resolveTemplateV2CmsForItems = async (expression, scope, dataSources, rend
       if (apiItems)
         return apiItems
     }
-    return applyTemplateV2SourceOverrides(sourceConfig.value, sourceConfig, sourceCall.overrides, scope)
+    const scopedOverrides = {
+      ...(sourceCall.overrides || {}),
+      queryItems: resolveTemplateV2ScopedQueryItems(sourceCall.overrides?.queryItems, scope),
+    }
+    const isCollectionSource = sourceConfig?.type === 'collection' || sourceConfig?.collection || sourceConfig?.path
+    if (isCollectionSource && props.collectionSourceResolver && hasTemplateV2ScopedCollectionOverrides(scopedOverrides)) {
+      const resolvedItems = await props.collectionSourceResolver(sourceCall.name, sourceConfig, scopedOverrides)
+      if (Array.isArray(resolvedItems))
+        return applyTemplateV2SourceOverrides(resolvedItems, sourceConfig, scopedOverrides, scope)
+    }
+    return applyTemplateV2SourceOverrides(sourceConfig.value, sourceConfig, scopedOverrides, scope)
   }
   const loopExpression = parseTemplateV2LoopExpression(expression, scope)
   const resolved = resolveTemplateV2ScopedPath(loopExpression.expression, scope)
