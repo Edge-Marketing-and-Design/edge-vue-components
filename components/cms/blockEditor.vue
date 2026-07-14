@@ -703,12 +703,21 @@ const removeTemplateV2WizardControlOptionRow = (control, index) => {
   control.options.splice(index, 1)
 }
 
+const parseIndexedLookupValue = (value) => {
+  const normalized = String(value ?? '').trim()
+  if (normalized === 'true')
+    return true
+  if (normalized === 'false')
+    return false
+  return normalized
+}
+
 const mapRowsToObject = (rows = []) => {
   return rows.reduce((acc, row) => {
     const key = String(row?.key || '').trim()
     if (!key)
       return acc
-    acc[key] = String(row?.value ?? '')
+    acc[key] = parseIndexedLookupValue(row?.value)
     return acc
   }, {})
 }
@@ -4500,9 +4509,9 @@ const exportCurrentBlock = async () => {
                           Use these when the field is indexed, like category = Featured or slug = route segment. This narrows the fetch before records are returned.
                         </p>
                         <div class="space-y-2">
-                          <div v-for="(row, index) in state.dataSourceWizardDraft.queryItems" :key="`wizard-query-${index}`" class="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
-                            <edge-shad-input v-model="row.key" :name="`wizardQueryKey-${index}`" label="Field" placeholder="category" />
-                            <edge-shad-input v-model="row.value" :name="`wizardQueryValue-${index}`" label="Value" placeholder="Featured" />
+                          <div v-for="(row, index) in state.dataSourceWizardDraft.queryItems" :key="`wizard-query-${state.dataSourceWizardKey}-${index}`" class="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+                            <edge-shad-input v-model="row.key" :name="`wizardQueryKey-${state.dataSourceWizardKey}-${index}`" label="Field" placeholder="category" />
+                            <edge-shad-input v-model="row.value" :name="`wizardQueryValue-${state.dataSourceWizardKey}-${index}`" label="Value" placeholder="Featured" />
                             <edge-shad-button type="button" size="icon" variant="ghost" class="mt-7 h-9 w-9 text-red-600" aria-label="Remove query item" @click="removeTemplateV2WizardMapRow('queryItems', index)">
                               <Trash2 class="h-4 w-4" />
                             </edge-shad-button>
@@ -4522,9 +4531,9 @@ const exportCurrentBlock = async () => {
                           Use these only to make editor previews work when a route token like <code>{routeLastSegment}</code> does not exist in the block editor.
                         </p>
                         <div class="space-y-2">
-                          <div v-for="(row, index) in state.dataSourceWizardDraft.previewQueryItems" :key="`wizard-preview-query-${index}`" class="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
-                            <edge-shad-input v-model="row.key" :name="`wizardPreviewQueryKey-${index}`" label="Field" placeholder="slug" />
-                            <edge-shad-input v-model="row.value" :name="`wizardPreviewQueryValue-${index}`" label="Preview Value" placeholder="sample-item" />
+                          <div v-for="(row, index) in state.dataSourceWizardDraft.previewQueryItems" :key="`wizard-preview-query-${state.dataSourceWizardKey}-${index}`" class="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+                            <edge-shad-input v-model="row.key" :name="`wizardPreviewQueryKey-${state.dataSourceWizardKey}-${index}`" label="Field" placeholder="slug" />
+                            <edge-shad-input v-model="row.value" :name="`wizardPreviewQueryValue-${state.dataSourceWizardKey}-${index}`" label="Preview Value" placeholder="sample-item" />
                             <edge-shad-button type="button" size="icon" variant="ghost" class="mt-7 h-9 w-9 text-red-600" aria-label="Remove preview query item" @click="removeTemplateV2WizardMapRow('previewQueryItems', index)">
                               <Trash2 class="h-4 w-4" />
                             </edge-shad-button>
