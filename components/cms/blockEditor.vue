@@ -608,15 +608,17 @@ const createTemplateV2DataSourceWizardDraftFromSource = (sourceName, source = {}
   }
 }
 
-const openTemplateV2DataSourceWizardForEdit = (sourceName, source) => {
+const openTemplateV2DataSourceWizardForEdit = async (sourceName, source) => {
+  state.dataSourceWizardOpen = false
+  state.dataSourceWizardDraft = null
+  state.dataSourceWizardKey += 1
+  await nextTick()
   state.dataSourceWizardStep = 1
   state.dataSourceWizardError = ''
-  state.dataSourceWizardDraft = null
   state.dataSourceWizardMode = 'edit'
   state.dataSourceWizardOriginalName = sourceName
   state.dataSourceWizardDraft = createTemplateV2DataSourceWizardDraftFromSource(sourceName, source)
   state.dataSourceWizardActiveControlIndex = -1
-  state.dataSourceWizardKey += 1
   state.dataSourceWizardOpen = true
 }
 
@@ -4424,25 +4426,25 @@ const exportCurrentBlock = async () => {
                     <div v-if="state.dataSourceWizardDraft.type === 'api'" class="grid gap-3 md:grid-cols-2">
                       <edge-shad-input
                         v-model="state.dataSourceWizardDraft.api"
-                        name="dataSourceWizardApi"
+                        :name="`dataSourceWizardApi-${state.dataSourceWizardKey}`"
                         label="API URL"
                         placeholder="https://api.example.com/items"
                       />
                       <edge-shad-input
                         v-model="state.dataSourceWizardDraft.apiField"
-                        name="dataSourceWizardApiField"
+                        :name="`dataSourceWizardApiField-${state.dataSourceWizardKey}`"
                         label="Response Field"
                         placeholder="data"
                       />
                       <edge-shad-input
                         v-model="state.dataSourceWizardDraft.apiQuery"
-                        name="dataSourceWizardApiQuery"
+                        :name="`dataSourceWizardApiQuery-${state.dataSourceWizardKey}`"
                         label="Static API Query"
                         placeholder="?limit=6"
                       />
                       <edge-shad-input
                         v-model="state.dataSourceWizardDraft.limit"
-                        name="dataSourceWizardApiLimit"
+                        :name="`dataSourceWizardApiLimit-${state.dataSourceWizardKey}`"
                         type="number"
                         label="Limit"
                         placeholder="6"
@@ -4453,25 +4455,25 @@ const exportCurrentBlock = async () => {
                       <div class="grid gap-3 md:grid-cols-2">
                         <edge-shad-input
                           v-model="state.dataSourceWizardDraft.path"
-                          name="dataSourceWizardPath"
+                          :name="`dataSourceWizardPath-${state.dataSourceWizardKey}`"
                           label="Collection Path"
                           placeholder="items"
                         />
                         <edge-shad-input
                           v-model="state.dataSourceWizardDraft.baseKey"
-                          name="dataSourceWizardBaseKey"
+                          :name="`dataSourceWizardBaseKey-${state.dataSourceWizardKey}`"
                           label="Base Key Override"
                           placeholder="Optional index key"
                         />
                         <edge-shad-select
                           v-model="state.dataSourceWizardDraft.uniqueKey"
-                          name="dataSourceWizardUniqueKey"
+                          :name="`dataSourceWizardUniqueKey-${state.dataSourceWizardKey}`"
                           label="Where is the collection located?"
                           :items="v2DataSourceScopeOptions"
                         />
                         <edge-shad-input
                           v-model="state.dataSourceWizardDraft.limit"
-                          name="dataSourceWizardCollectionLimit"
+                          :name="`dataSourceWizardCollectionLimit-${state.dataSourceWizardKey}`"
                           type="number"
                           label="Limit"
                           placeholder="80"
@@ -4482,7 +4484,7 @@ const exportCurrentBlock = async () => {
                       </div>
                       <edge-shad-input
                         v-model="state.dataSourceWizardDraft.canonicalLookupKey"
-                        name="dataSourceWizardCanonicalLookup"
+                        :name="`dataSourceWizardCanonicalLookup-${state.dataSourceWizardKey}`"
                         label="Fetch Exact Record Key"
                         placeholder="{orgId}:{siteId}"
                       />
@@ -4562,13 +4564,13 @@ const exportCurrentBlock = async () => {
                           >
                             <edge-shad-input
                               v-model="row.field"
-                              :name="`wizardFilterField-${index}`"
+                              :name="`wizardFilterField-${state.dataSourceWizardKey}-${index}`"
                               label="Field"
                               placeholder="status"
                             />
                             <edge-shad-select
                               v-model="row.operator"
-                              :name="`wizardFilterOperator-${index}`"
+                              :name="`wizardFilterOperator-${state.dataSourceWizardKey}-${index}`"
                               label="Operator"
                               :items="v2DataSourceFilterOperatorOptions"
                             />
@@ -4586,7 +4588,7 @@ const exportCurrentBlock = async () => {
                               <edge-shad-select-tags
                                 v-if="isV2DataSourceFilterArrayOperator(row.operator)"
                                 :model-value="getV2DataSourceFilterArrayValues(row.value)"
-                                :name="`wizardFilterValues-${index}`"
+                                :name="`wizardFilterValues-${state.dataSourceWizardKey}-${index}`"
                                 :label="getV2DataSourceFilterValueLabel(row.operator)"
                                 :placeholder="getV2DataSourceFilterValuePlaceholder(row.operator)"
                                 :items="[]"
@@ -4597,7 +4599,7 @@ const exportCurrentBlock = async () => {
                               <edge-shad-input
                                 v-else
                                 v-model="row.value"
-                                :name="`wizardFilterValue-${index}`"
+                                :name="`wizardFilterValue-${state.dataSourceWizardKey}-${index}`"
                                 :label="getV2DataSourceFilterValueLabel(row.operator)"
                                 :placeholder="getV2DataSourceFilterValuePlaceholder(row.operator)"
                               />
@@ -4631,13 +4633,13 @@ const exportCurrentBlock = async () => {
                           >
                             <edge-shad-input
                               v-model="row.field"
-                              :name="`wizardSortField-${index}`"
+                              :name="`wizardSortField-${state.dataSourceWizardKey}-${index}`"
                               label="Field"
                               placeholder="name"
                             />
                             <edge-shad-select
                               v-model="row.direction"
-                              :name="`wizardSortDirection-${index}`"
+                              :name="`wizardSortDirection-${state.dataSourceWizardKey}-${index}`"
                               label="Direction"
                               :items="v2DataSourceSortDirectionOptions"
                             />
@@ -4700,19 +4702,19 @@ const exportCurrentBlock = async () => {
                           <div class="grid gap-3 md:grid-cols-[1fr_1fr_150px_auto]">
                             <edge-shad-input
                               v-model="control.key"
-                              :name="`wizardControlKey-${controlIndex}`"
+                              :name="`wizardControlKey-${state.dataSourceWizardKey}-${controlIndex}`"
                               :label="getV2DataSourceControlKeyLabel(state.dataSourceWizardDraft.type)"
                               :placeholder="getV2DataSourceControlKeyPlaceholder(state.dataSourceWizardDraft.type)"
                             />
                             <edge-shad-input
                               v-model="control.title"
-                              :name="`wizardControlTitle-${controlIndex}`"
+                              :name="`wizardControlTitle-${state.dataSourceWizardKey}-${controlIndex}`"
                               label="Label"
                               placeholder="Category"
                             />
                             <edge-shad-select
                               v-model="control.input"
-                              :name="`wizardControlInput-${controlIndex}`"
+                              :name="`wizardControlInput-${state.dataSourceWizardKey}-${controlIndex}`"
                               label="Type"
                               :items="v2DataSourceControlTypeOptions"
                               @update:model-value="updateV2DataSourceControlInput(control, $event)"
@@ -4734,14 +4736,14 @@ const exportCurrentBlock = async () => {
                           <div class="mt-3 grid gap-3 md:grid-cols-2">
                             <edge-shad-input
                               v-model="control.placeholder"
-                              :name="`wizardControlPlaceholder-${controlIndex}`"
+                              :name="`wizardControlPlaceholder-${state.dataSourceWizardKey}-${controlIndex}`"
                               label="Placeholder"
                               placeholder="Optional placeholder"
                             />
                             <edge-shad-select
                               v-if="control.input === 'select'"
                               v-model="control.optionMode"
-                              :name="`wizardControlOptionMode-${controlIndex}`"
+                              :name="`wizardControlOptionMode-${state.dataSourceWizardKey}-${controlIndex}`"
                               label="Select Options"
                               :items="v2DataSourceControlOptionModeOptions"
                               @update:model-value="updateV2DataSourceControlOptionMode(control, $event)"
@@ -4750,14 +4752,14 @@ const exportCurrentBlock = async () => {
                           <div v-if="control.input === 'select' && control.optionMode === 'collection'" class="mt-3 grid gap-3 md:grid-cols-3">
                             <edge-shad-input
                               v-model="control.optionsCollection"
-                              :name="`wizardControlOptionsCollection-${controlIndex}`"
+                              :name="`wizardControlOptionsCollection-${state.dataSourceWizardKey}-${controlIndex}`"
                               label="Options Collection"
                               placeholder="categories"
                             />
                             <div class="space-y-1">
                               <edge-shad-input
                                 v-model="control.optionsKey"
-                                :name="`wizardControlOptionsKey-${controlIndex}`"
+                                :name="`wizardControlOptionsKey-${state.dataSourceWizardKey}-${controlIndex}`"
                                 label="Label Field"
                                 placeholder="label"
                               />
@@ -4768,7 +4770,7 @@ const exportCurrentBlock = async () => {
                             <div class="space-y-1">
                               <edge-shad-input
                                 v-model="control.optionsValue"
-                                :name="`wizardControlOptionsValue-${controlIndex}`"
+                                :name="`wizardControlOptionsValue-${state.dataSourceWizardKey}-${controlIndex}`"
                                 label="Value Field"
                                 placeholder="value"
                               />
@@ -4785,13 +4787,13 @@ const exportCurrentBlock = async () => {
                             >
                               <edge-shad-input
                                 v-model="option.label"
-                                :name="`wizardControlOptionLabel-${controlIndex}-${optionIndex}`"
+                                :name="`wizardControlOptionLabel-${state.dataSourceWizardKey}-${controlIndex}-${optionIndex}`"
                                 label="Option Label"
                                 placeholder="Featured"
                               />
                               <edge-shad-input
                                 v-model="option.value"
-                                :name="`wizardControlOptionValue-${controlIndex}-${optionIndex}`"
+                                :name="`wizardControlOptionValue-${state.dataSourceWizardKey}-${controlIndex}-${optionIndex}`"
                                 label="Option Value"
                                 placeholder="featured"
                               />
