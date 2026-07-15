@@ -6000,7 +6000,7 @@ const exportCurrentBlock = async () => {
                     <p class="text-sm text-foreground">
                       Use a Collection Data Source when records come from the site or organization data store. Add it from the Data Sources tab, then loop with <code>source("name")</code>.
                     </p>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{#for person in source("teamMembers")}}
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{#for person in source("teamMembers", { canonical: true })}}
   &lt;article&gt;
     &lt;h3&gt;{{ person.name }}&lt;/h3&gt;
     &lt;p&gt;{{ person.role }}&lt;/p&gt;
@@ -6028,6 +6028,8 @@ const exportCurrentBlock = async () => {
                       <div><code>path</code> is under <code>organizations/{orgId}</code>.</div>
                       <div><code>queryItems</code> should be the first choice for indexed lookups so the candidate list is narrowed before records are returned.</div>
                       <div><code>query</code> is an after-fetch filter. Use it for conditions that cannot be expressed as an exact lookup value, and mirror every filtered field into KV metadata for frontend rendering.</div>
+                      <div>Add <code>canonical: true</code> to <code>source(...)</code> when an indexed query can return multiple records and the Template needs complete record fields or relationship arrays that are not stored in index metadata.</div>
+                      <div><code>canonical: true</code> queries the index first and then resolves every surviving result. It is different from <code>canonicalLookup</code>, which is for an exact document key or array of keys you already have.</div>
                       <div><code>uniqueKey</code> supports runtime tokens such as <code>{orgId}</code> and <code>{siteId}</code>. It is resolved in memory for runtime fetches and does not need to be persisted as a concrete value in the saved block.</div>
                       <div><code>collection.canonicalLookup.key</code> is optional. It also supports runtime tokens and CMS preview resolves them in memory before fetching the matching document directly.</div>
                       <div><code>order</code> controls the final sort order.</div>
@@ -6115,12 +6117,13 @@ const exportCurrentBlock = async () => {
                     <ol class="list-decimal pl-5 text-sm text-foreground space-y-1">
                       <li>Before runtime fetches, tokens in <code>query</code>, <code>queryItems</code>, <code>uniqueKey</code>, and <code>canonicalLookup.key</code> are resolved in memory only. Supported tokens include <code>{orgId}</code>, <code>{siteId}</code>, and <code>{routeLastSegment}</code>. The saved block keeps the original tokens.</li>
                       <li>Each entry in <code>queryItems</code> makes an indexed lookup through the KV index.</li>
-                      <li>For a <code>queryItems</code> key to work, that field must be included in the KV mirror's <code>indexKeys</code>. Fields used by after-fetch <code>query</code> or <code>order</code> must be in <code>metadataKeys</code>. Final display fields come from the canonical KV record.</li>
+                      <li>For a <code>queryItems</code> key to work, that field must be included in the KV mirror's <code>indexKeys</code>. Fields used by after-fetch <code>query</code> or <code>order</code> must be in <code>metadataKeys</code>.</li>
                       <li>If you have more than one <code>queryItems</code> field, the runtime unions those matches into one candidate list (OR behavior at this stage).</li>
                       <li>Duplicate records are removed by <code>canonical</code>, so the same item only shows up once.</li>
                       <li>Only use <code>query</code> when the condition cannot be represented as an exact KV indexed lookup. It filters index metadata and is not a substitute for missing mirror metadata.</li>
                       <li>After that, <code>query</code> filters candidates in JavaScript; all query clauses must pass for a record to survive.</li>
                       <li>Finally, <code>order</code> sorts the remaining records.</li>
+                      <li>If the source uses <code>canonical: true</code>, every surviving indexed result is resolved to its complete canonical record before the Template loop runs. Without it, a multi-result indexed source can contain only index metadata.</li>
                       <li>The finished list is available in the Template through <code>source("dataSourceName")</code>.</li>
                       <li>If the source cannot be loaded, the block falls back to the source <code>value</code>, or to an empty array if there is no fallback value.</li>
                     </ol>
@@ -6142,9 +6145,10 @@ const exportCurrentBlock = async () => {
                     <div class="text-sm text-foreground space-y-1">
                       <div>1. Put every possible list-limiting indexed filter in <code>queryItems</code>. These should cut the candidate list down before KV returns records.</div>
                       <div>2. Use <code>collection.query</code> for comparisons <code>queryItems</code> cannot express. The filtered fields must be available in KV metadata before canonical records are loaded.</div>
-                      <div>3. Use <code>collection.canonicalLookup.key</code> when you already know the exact document to fetch.</div>
-                      <div>4. Put final sorting in <code>collection.order</code>.</div>
-                      <div>5. Treat <code>queryOptions</code> as the editor UI for choosing filters. At runtime, the actual filtering is driven by <code>collection.query</code> and <code>queryItems</code>.</div>
+                      <div>3. Add <code>canonical: true</code> to the indexed <code>source(...)</code> call when the Template needs every complete matched record.</div>
+                      <div>4. Use <code>collection.canonicalLookup.key</code> instead when you already know the exact document key or key array to fetch.</div>
+                      <div>5. Put final sorting in <code>collection.order</code>.</div>
+                      <div>6. Treat <code>queryOptions</code> as the editor UI for choosing filters. At runtime, the actual filtering is driven by <code>collection.query</code> and <code>queryItems</code>.</div>
                     </div>
                     <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{
   "eventsList": {
@@ -6166,6 +6170,7 @@ const exportCurrentBlock = async () => {
                       <div><code>queryItems.tags</code> does the indexed lookup first.</div>
                       <div><code>collection.query</code> then keeps only records that are actually events and already in the past.</div>
                       <div><code>collection.order</code> sorts those remaining records by start date.</div>
+                      <div>If the Template needs complete event fields that are not included in index metadata, loop with <code>source("eventsList", { canonical: true })</code>.</div>
                     </div>
                     <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{
   "siteDoc": {
