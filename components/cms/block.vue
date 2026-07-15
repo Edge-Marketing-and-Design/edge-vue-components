@@ -417,7 +417,6 @@ const state = reactive({
   arrayAddPopoverAllowCloseByField: {},
   reload: false,
   metaUpdate: {},
-  loading: true,
   afterLoad: false,
   imageOpen: false,
   imageOpenByField: {},
@@ -2665,18 +2664,6 @@ const addToArray = async (field) => {
   state.reload = false
 }
 
-const loadingRender = (content) => {
-  if (state.loading) {
-    content = content.replace(/\{\{\s*loading\s*\}\}/g, '')
-    content = content.replace(/\{\{\s*loaded\s*\}\}/g, 'hidden')
-  }
-  else {
-    content = content.replace(/\{\{\s*loading\s*\}\}/g, 'hidden')
-    content = content.replace(/\{\{\s*loaded\s*\}\}/g, '')
-  }
-  return content
-}
-
 const postsList = computed(() => {
   const postsCollectionPath = sitePostsCollectionPath.value
   return Object.values(edgeFirebase.data[postsCollectionPath] || {}).sort((a, b) => {
@@ -2712,21 +2699,7 @@ const getTagsFromPosts = computed(() => {
     >
       <!-- Content -->
       <div class="relative z-0" :class="props.editMode && props.overrideClicksInEditMode ? 'pointer-events-none' : ''">
-        <edge-cms-block-api :site-id="props.siteId" :route-last-segment="props.routeLastSegment" :theme="props.theme" :content="resolvedRenderBlock.content" :template-version="resolvedRenderBlock.templateVersion" :template="resolvedRenderBlock.template" :schema="resolvedRenderBlock.schema" :data-sources="resolvedRenderBlock.dataSources" :values="resolvedRenderBlock.values" :meta="resolvedRenderBlock.meta" :viewport-mode="props.viewportMode" :render-context="effectiveRenderContext" :standalone-preview="props.standalonePreview" @pending="state.loading = $event" />
-        <edge-cms-block-render
-          v-if="state.loading"
-          :content="loadingRender(resolvedRenderBlock.content)"
-          :template-version="resolvedRenderBlock.templateVersion"
-          :template="loadingRender(resolvedRenderBlock.template)"
-          :schema="resolvedRenderBlock.schema"
-          :data-sources="resolvedRenderBlock.dataSources"
-          :values="resolvedRenderBlock.values"
-          :meta="resolvedRenderBlock.meta"
-          :theme="props.theme"
-          :viewport-mode="props.viewportMode"
-          :render-context="effectiveRenderContext"
-          :standalone-preview="props.standalonePreview"
-        />
+        <edge-cms-block-api :site-id="props.siteId" :route-last-segment="props.routeLastSegment" :theme="props.theme" :content="resolvedRenderBlock.content" :template-version="resolvedRenderBlock.templateVersion" :template="resolvedRenderBlock.template" :schema="resolvedRenderBlock.schema" :data-sources="resolvedRenderBlock.dataSources" :values="resolvedRenderBlock.values" :meta="resolvedRenderBlock.meta" :viewport-mode="props.viewportMode" :render-context="effectiveRenderContext" :standalone-preview="props.standalonePreview" />
       </div>
       <div v-if="showProtectedEditOverlay" class="pointer-events-none absolute inset-0 z-[9998] bg-black/20">
         <div class="absolute left-2 top-2 inline-flex items-center gap-1 rounded bg-black/75 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-white">

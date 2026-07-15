@@ -39,6 +39,8 @@ const state = reactive({
   previewScale: '100',
   previewAuthLoggedIn: true,
   previewBlock: null,
+  previewRefreshRevision: 0,
+  previewTemplateDirty: false,
   previewSourceValues: {},
   previewRenderContext: null,
   editorWorkingDoc: null,
@@ -2459,9 +2461,34 @@ function syncWorkingTemplateContent(workingDoc, value) {
   if (isWorkingTemplateV2Doc(workingDoc))
     workingDoc.template = value
 
-  const parsed = blockModel(value || '')
+  state.previewTemplateDirty = true
+}
+
+function syncParsedWorkingDocState(workingDoc, parsed) {
+  let normalizedTypes = normalizeBlockTypes(workingDoc?.type)
+  if (!normalizedTypes.length)
+    normalizedTypes = ['Page']
+  state.workingDoc = {
+    ...parsed,
+    type: normalizedTypes,
+    templateVersion: workingDoc?.templateVersion,
+    template: workingDoc?.template,
+    schema: workingDoc?.schema,
+    dataSources: workingDoc?.dataSources,
+    values: isWorkingTemplateV2Doc(workingDoc) ? undefined : parsed.values,
+  }
+}
+
+function refreshWorkingTemplatePreview(workingDoc, { force = false } = {}) {
+  if (!workingDoc || (!force && !state.previewTemplateDirty))
+    return
+
+  const parsed = blockModel(workingDoc.content || '')
+  syncParsedWorkingDocState(workingDoc, parsed)
   state.previewBlock = buildPreviewBlock(workingDoc, parsed)
   state.previewSourceValues = edgeGlobal.dupObject(isWorkingTemplateV2Doc(workingDoc) ? {} : (parsed.values || {}))
+  state.previewTemplateDirty = false
+  state.previewRefreshRevision += 1
 }
 
 const theme = computed(() => {
@@ -2490,7 +2517,7 @@ const previewThemeRenderKey = computed(() => {
   const themeId = String(edgeGlobal.edgeState.blockEditorTheme || 'no-theme')
   const siteId = String(edgeGlobal.edgeState.blockEditorSite || 'no-site')
   const previewType = normalizePreviewType(state.previewBlock?.previewType)
-  return `${themeId}:${siteId}:${state.previewViewport}:${previewType}`
+  return `${themeId}:${siteId}:${state.previewViewport}:${previewType}:${state.previewRefreshRevision}`
 })
 
 const headObject = computed(() => {
@@ -2523,6 +2550,8 @@ const editorDocUpdates = (workingDoc) => {
   if (workingDoc && !areTypeArraysEqual(workingDoc.type, normalizedTypes))
     workingDoc.type = normalizedTypes
   state.editorWorkingDoc = workingDoc || null
+  if (state.previewTemplateDirty)
+    return
   const parsed = blockModel(workingDoc?.content || '')
   state.workingDoc = {
     ...parsed,
@@ -2535,6 +2564,7 @@ const editorDocUpdates = (workingDoc) => {
   }
   state.previewBlock = buildPreviewBlock(workingDoc, parsed)
   state.previewSourceValues = edgeGlobal.dupObject(isWorkingTemplateV2Doc(workingDoc) ? {} : (parsed.values || {}))
+  state.previewTemplateDirty = false
 }
 
 const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -2575,6 +2605,7 @@ const syncEditorStateFromBlockDoc = (doc) => {
   }
   state.previewBlock = buildPreviewBlock(restoredDoc, parsed)
   state.previewSourceValues = edgeGlobal.dupObject(isWorkingTemplateV2Doc(restoredDoc) ? {} : (parsed.values || {}))
+  state.previewTemplateDirty = false
   state.editorHasUnsavedChanges = false
 
   const collectionPath = `${edgeGlobal.edgeState.organizationDocPath}/blocks`
@@ -2637,6 +2668,7 @@ const applyThemeDefaultForBlock = () => {
 
 watch(() => props.blockId, () => {
   state.themeDefaultAppliedForBlockId = ''
+  state.previewTemplateDirty = false
 }, { immediate: true })
 
 watch([availableThemeIds, currentBlockAllowedThemeIds, () => props.blockId], async () => {
@@ -3244,6 +3276,11 @@ const clearTemplateConversionAfterSave = async (payload) => {
   }
 }
 
+const handleBlockSaved = async (payload) => {
+  refreshWorkingTemplatePreview(state.editorWorkingDoc, { force: true })
+  await clearTemplateConversionAfterSave(payload)
+}
+
 const exportCurrentBlock = async () => {
   const doc = blocks.value?.[props.blockId]
   if (!doc || !doc.docId) {
@@ -3275,7 +3312,7 @@ const exportCurrentBlock = async () => {
       :working-doc-overrides="editorWorkingDocOverrides"
       @working-doc="editorDocUpdates"
       @unsaved-changes="handleUnsavedChanges"
-      @saved="clearTemplateConversionAfterSave"
+      @saved="handleBlockSaved"
     >
       <template #header-start="slotProps">
         <FilePenLine class="mr-2" />
@@ -5128,6 +5165,18 @@ const exportCurrentBlock = async () => {
             <div class="w-1/2 space-y-2">
               <div class="flex items-center gap-2">
                 <span class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Viewport</span>
+                <edge-shad-button
+                  v-if="state.previewTemplateDirty"
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  class="h-7 shrink-0 gap-1.5 border-amber-500 px-2.5 text-xs text-amber-800 hover:bg-amber-50 hover:text-amber-900 dark:border-amber-400 dark:text-amber-200 dark:hover:bg-amber-950"
+                  aria-label="Changes pending: refresh developer block preview"
+                  @click="refreshWorkingTemplatePreview(slotProps.workingDoc, { force: true })"
+                >
+                  <RotateCcw class="h-3.5 w-3.5" aria-hidden="true" />
+                  Changes Pending: Refresh
+                </edge-shad-button>
                 <div class="ml-auto flex shrink-0 items-center gap-2">
                   <div class="flex shrink-0 items-center gap-1 flex-nowrap">
                     <edge-shad-select
@@ -5550,7 +5599,7 @@ const exportCurrentBlock = async () => {
                       <div>Use an API source for an outside URL that returns JSON.</div>
                       <div>Use a Collection source for records in the site or organization data store.</div>
                       <div>Use Indexed Lookup Values when a field is indexed and can narrow the fetch before records are returned.</div>
-                      <div>Use After-Fetch Filters only when the index is missing or when the filter cannot be done as an indexed lookup.</div>
+                      <div>Use After-Fetch Filters for comparisons that cannot be done as an exact indexed lookup. The filtered field must be present in KV index metadata on the public frontend.</div>
                       <div>Controls are optional fields shown when someone edits the block on a page. They can change API query string values or collection lookup values.</div>
                     </div>
                   </section>
@@ -5868,7 +5917,7 @@ const exportCurrentBlock = async () => {
   ]
 },</code></pre>
                     <p class="text-sm text-foreground">
-                      If you want fast search/filtering in the CMS, you also need a KV mirror in Firebase Functions.
+                      If you want the published frontend to search/filter the same records through Cloudflare KV, you also need a KV mirror in Firebase Functions.
                       Example (use your collection + fields):
                     </p>
                     <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>exports.onListingWritten = createKvMirrorHandlerFromFields({
@@ -5978,7 +6027,7 @@ const exportCurrentBlock = async () => {
                     <div class="text-sm text-foreground space-y-1">
                       <div><code>path</code> is under <code>organizations/{orgId}</code>.</div>
                       <div><code>queryItems</code> should be the first choice for indexed lookups so the candidate list is narrowed before records are returned.</div>
-                      <div><code>query</code> is an after-fetch filter. Use it only when the index is missing or the condition cannot be expressed as a lookup value.</div>
+                      <div><code>query</code> is an after-fetch filter. Use it for conditions that cannot be expressed as an exact lookup value, and mirror every filtered field into KV metadata for frontend rendering.</div>
                       <div><code>uniqueKey</code> supports runtime tokens such as <code>{orgId}</code> and <code>{siteId}</code>. It is resolved in memory for runtime fetches and does not need to be persisted as a concrete value in the saved block.</div>
                       <div><code>collection.canonicalLookup.key</code> is optional. It also supports runtime tokens and CMS preview resolves them in memory before fetching the matching document directly.</div>
                       <div><code>order</code> controls the final sort order.</div>
@@ -6011,7 +6060,7 @@ const exportCurrentBlock = async () => {
 }</code></pre>
                     <div class="text-sm text-foreground space-y-1">
                       <div><code>api</code> is the base URL without the query string.</div>
-                      <div><code>apiQuery</code> is appended to the URL.</div>
+                      <div><code>apiQuery</code> is appended in Hub preview. The current public Template v2 resolver does not consume it, so put required fixed parameters in <code>api</code> or use <code>queryItems</code> until the frontend package supports the same behavior.</div>
                       <div><code>apiField</code> tells the block which array to read from the response.</div>
                     </div>
                     <p class="text-sm text-foreground">
@@ -6066,10 +6115,10 @@ const exportCurrentBlock = async () => {
                     <ol class="list-decimal pl-5 text-sm text-foreground space-y-1">
                       <li>Before runtime fetches, tokens in <code>query</code>, <code>queryItems</code>, <code>uniqueKey</code>, and <code>canonicalLookup.key</code> are resolved in memory only. Supported tokens include <code>{orgId}</code>, <code>{siteId}</code>, and <code>{routeLastSegment}</code>. The saved block keeps the original tokens.</li>
                       <li>Each entry in <code>queryItems</code> makes an indexed lookup through the KV index.</li>
-                      <li>For a query key to work, that field must be included in your KV mirror config (in <code>indexKeys</code> and in <code>metadataKeys</code> for list rendering).</li>
+                      <li>For a <code>queryItems</code> key to work, that field must be included in the KV mirror's <code>indexKeys</code>. Fields used by after-fetch <code>query</code> or <code>order</code> must be in <code>metadataKeys</code>. Final display fields come from the canonical KV record.</li>
                       <li>If you have more than one <code>queryItems</code> field, the runtime unions those matches into one candidate list (OR behavior at this stage).</li>
                       <li>Duplicate records are removed by <code>canonical</code>, so the same item only shows up once.</li>
-                      <li>Only use <code>query</code> when a needed filter cannot use <code>queryItems</code>, usually because the field is not indexed yet or the condition cannot be represented as a KV indexed lookup.</li>
+                      <li>Only use <code>query</code> when the condition cannot be represented as an exact KV indexed lookup. It filters index metadata and is not a substitute for missing mirror metadata.</li>
                       <li>After that, <code>query</code> filters candidates in JavaScript; all query clauses must pass for a record to survive.</li>
                       <li>Finally, <code>order</code> sorts the remaining records.</li>
                       <li>The finished list is available in the Template through <code>source("dataSourceName")</code>.</li>
@@ -6092,7 +6141,7 @@ const exportCurrentBlock = async () => {
                     </p>
                     <div class="text-sm text-foreground space-y-1">
                       <div>1. Put every possible list-limiting indexed filter in <code>queryItems</code>. These should cut the candidate list down before KV returns records.</div>
-                      <div>2. Use <code>collection.query</code> only for fields missing from the KV index or for conditions <code>queryItems</code> cannot express. Think of this as an exception path, not the default.</div>
+                      <div>2. Use <code>collection.query</code> for comparisons <code>queryItems</code> cannot express. The filtered fields must be available in KV metadata before canonical records are loaded.</div>
                       <div>3. Use <code>collection.canonicalLookup.key</code> when you already know the exact document to fetch.</div>
                       <div>4. Put final sorting in <code>collection.order</code>.</div>
                       <div>5. Treat <code>queryOptions</code> as the editor UI for choosing filters. At runtime, the actual filtering is driven by <code>collection.query</code> and <code>queryItems</code>.</div>
@@ -6140,11 +6189,11 @@ const exportCurrentBlock = async () => {
                       Conditionals (Inside Arrays)
                     </h3>
                     <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{#for property in source("properties")}}
-  {{#if property.price}}
+  {{{#if {"cond":"property.price"} }}}
     &lt;div&gt;Price: {{ money(property.price) }}&lt;/div&gt;
-  {{#else}}
+  {{{#else}}}
     &lt;div&gt;Contact for pricing&lt;/div&gt;
-  {{/if}}
+  {{{/if}}}
 {{/for}}</code></pre>
                     <div class="text-sm text-foreground space-y-1">
                       <div>Prefer simple Template v2 conditionals around the field that controls the display.</div>
@@ -6687,7 +6736,7 @@ const exportCurrentBlock = async () => {
                 {{ field.fieldName }}
               &lt;/label&gt;
 
-              {{#if field.isTextarea}}
+              {{{#if {"cond":"field.isTextarea"} }}}
                 &lt;textarea
                   class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
                   data-cms-required="{{ field.fieldRequired }}"
@@ -6695,7 +6744,7 @@ const exportCurrentBlock = async () => {
                   placeholder="{{ field.fieldName }}"
                   rows="6"
                 &gt;&lt;/textarea&gt;
-              {{#else}}
+              {{{#else}}}
                 &lt;input
                   class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
                   data-cms-required="{{ field.fieldRequired }}"
@@ -6703,7 +6752,7 @@ const exportCurrentBlock = async () => {
                   name="{{ field.fieldName }}"
                   placeholder="{{ field.fieldName }}"
                 /&gt;
-              {{/if}}
+              {{{/if}}}
             &lt;/div&gt;
           {{/for}}
         &lt;/div&gt;
