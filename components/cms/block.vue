@@ -75,6 +75,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  allowRichtextArticleTools: {
+    type: Boolean,
+    default: false,
+  },
   previewAuthLoggedIn: {
     type: Boolean,
     default: true,
@@ -100,6 +104,7 @@ const PROTECTION_UNAUTH_BEHAVIORS = [
   { name: 'blurWithLoginPrompt', title: 'Blur + Login Prompt' },
 ]
 const showRichtextImageToggle = computed(() => props.allowRichtextImageTools === true)
+const showRichtextArticleTools = computed(() => props.allowRichtextArticleTools === true)
 const BLOCK_EDITOR_PANEL_STORAGE_KEYS = {
   page: 'edge-cms-block-editor-panel-width:page',
   post: 'edge-cms-block-editor-panel-width:post',
@@ -3225,6 +3230,7 @@ const getTagsFromPosts = computed(() => {
                                               :schema="schemaItem"
                                               :site="props.siteId"
                                               :show-richtext-image-toggle="showRichtextImageToggle"
+                                              :show-richtext-article-tools="showRichtextArticleTools"
                                               :label="genTitleFromField(schemaItem)"
                                             />
                                           </template>
@@ -3334,6 +3340,7 @@ const getTagsFromPosts = computed(() => {
                                                 :field="`${schemaItem.field}-${index}-entry`"
                                                 :site="props.siteId"
                                                 :show-richtext-image-toggle="showRichtextImageToggle"
+                                                :show-richtext-article-tools="showRichtextArticleTools"
                                                 :label="genTitleFromField(schemaItem)"
                                               />
                                             </Card>
@@ -3365,6 +3372,7 @@ const getTagsFromPosts = computed(() => {
                           :site="props.siteId"
                           :richtext-auto-height="editableMetaEntries.length === 1 && entry.meta?.type === 'richtext'"
                           :show-richtext-image-toggle="showRichtextImageToggle"
+                          :show-richtext-article-tools="showRichtextArticleTools"
                           :label="genTitleFromField(entry)"
                           :placeholder="entry.meta?.placeholder || ''"
                         />
@@ -3614,6 +3622,7 @@ const getTagsFromPosts = computed(() => {
                         :site="props.siteId"
                         :richtext-auto-height="editableMetaEntries.length === 1 && entry.meta?.type === 'richtext'"
                         :show-richtext-image-toggle="showRichtextImageToggle"
+                        :show-richtext-article-tools="showRichtextArticleTools"
                         :label="genTitleFromField(entry)"
                         :placeholder="entry.meta?.placeholder || ''"
                       />
