@@ -766,14 +766,15 @@ const resolveTemplateV2CmsForItems = async (expression, scope, dataSources, rend
 }
 
 const createTemplateV2ChildScope = (scope, alias, entry) => {
-  const nextScope = {
+  const entryValues = (entry && typeof entry === 'object' && !Array.isArray(entry))
+    ? entry
+    : {}
+  return {
     ...(scope || {}),
+    ...entryValues,
     item: entry,
     [alias || 'item']: entry,
   }
-  if (entry && typeof entry === 'object' && !Array.isArray(entry))
-    Object.assign(nextScope, entry)
-  return nextScope
 }
 
 const normalizeTemplateV2ConditionalAlias = (template, alias) => {
