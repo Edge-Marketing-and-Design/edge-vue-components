@@ -23,6 +23,7 @@ const {
 
 const { createKvMirrorHandler } = require('./kv/kvMirror')
 const kv = require('./kv/kvClient')
+const { resolveSubmittedUserRouting } = require('./helpers/submittedUserRouting')
 
 const SITE_AI_TOPIC = 'site-ai-bootstrap'
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || ''
@@ -1765,9 +1766,13 @@ exports.trackHistory = onRequest(async (req, res) => {
           const entries = collectFormEntries(data)
           const replyTo = getReplyToEmail(data, entries)
           const subject = getContactFormSubject(data, entries)
-          const blockEmails = await getPublishedEmailTo(orgId, siteId, pageId, blockId)
-          const fallbackEmail = await getSiteSettingsEmail(orgId, siteId)
-          const emailTo = blockEmails.length ? blockEmails : (fallbackEmail ? [fallbackEmail] : [])
+          const submittedUserRouting = await resolveSubmittedUserRouting({ db, orgId, data })
+          let emailTo = submittedUserRouting?.email ? [submittedUserRouting.email] : []
+          if (!emailTo.length) {
+            const blockEmails = await getPublishedEmailTo(orgId, siteId, pageId, blockId)
+            const fallbackEmail = await getSiteSettingsEmail(orgId, siteId)
+            emailTo = blockEmails.length ? blockEmails : (fallbackEmail ? [fallbackEmail] : [])
+          }
 
           if (!emailTo.length) {
             logger.warn('Contact form email not found', { orgId, siteId, pageId, blockId })

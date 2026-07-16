@@ -6698,6 +6698,33 @@ const exportCurrentBlock = async () => {
                     </p>
                   </section>
 
+                  <section class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Email Routing by User ID
+                    </h3>
+                    <div class="text-sm text-foreground space-y-2">
+                      <p>
+                        The destination email is trusted CMS data, not submitted form data. Set <code>emailTo</code> as a block Input value.
+                        Do not add an <code>emailTo</code> hidden input. A valid published block <code>emailTo</code> is used before the site's
+                        <code>contactEmail</code> fallback.
+                      </p>
+                      <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{
+  "emailTo": { "type": "text", "label": "Email To", "value": "" }
+}</code></pre>
+                      <p>
+                        To route a user-specific form, submit the user's registered <code>userId</code> in a hidden input. Use a real
+                        registered user ID from the form's data context; do not put an email address in this field.
+                      </p>
+                      <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;input type="hidden" name="userId" value="{{ userId }}" /&gt;</code></pre>
+                      <div class="space-y-1">
+                        <div>The server requires an exact organization-user match for the submitted <code>userId</code>.</div>
+                        <div>Email resolves from the matched user's <code>meta.contactEmail</code>, then <code>meta.email</code>.</div>
+                        <div>A valid match overrides block <code>emailTo</code> and site <code>contactEmail</code>.</div>
+                        <div>If the user is missing or has no valid email, normal block and site email fallbacks remain in effect.</div>
+                      </div>
+                    </div>
+                  </section>
+
                     <section class="space-y-3">
                       <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                         Contact Form Example (Block HTML)
