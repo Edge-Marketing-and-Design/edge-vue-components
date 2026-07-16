@@ -913,7 +913,7 @@ onBeforeMount(async () => {
 <template>
   <div v-if="state.loaded" class="w-full flex-1 min-h-0 h-[calc(100vh-58px)] overflow-hidden">
     <ResizablePanelGroup direction="horizontal" class="w-full h-full flex-1">
-      <ResizablePanel class="bg-white text-slate-950 dark:bg-slate-950 dark:text-slate-100 min-w-[400px]" :default-size="22" :min-size="30">
+      <ResizablePanel class="min-w-[320px] bg-white text-slate-950 dark:bg-slate-950 dark:text-slate-100" :default-size="24" :min-size="24">
         <div class="flex flex-col h-full">
           <div class="px-3 py-3 border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
             <div class="flex items-center justify-between gap-2">
