@@ -1,5 +1,6 @@
 <script setup>
 import { renderTemplate, renderTemplateAsync } from '@edgedev/template-engine'
+import { getCmsTemplateRuntimeMeta } from '../../composables/useCmsTemplateRuntimeMeta'
 
 const props = defineProps({
   content: {
@@ -205,8 +206,12 @@ const templateV2Values = computed(() => ({
   ...normalizeTemplateV2Values(renderValues.value, props.schema),
 }))
 
+const templateV2RuntimeMeta = computed(() => {
+  return getCmsTemplateRuntimeMeta(props.templateVersion, props.dataSources, props.meta)
+})
+
 const templateV2CmsDataSources = computed(() => {
-  return Object.entries(applyTemplateV2DataSourceMeta(props.dataSources, props.meta, templateV2RuntimeTokens.value))
+  return Object.entries(applyTemplateV2DataSourceMeta(props.dataSources, templateV2RuntimeMeta.value, templateV2RuntimeTokens.value))
     .reduce((acc, [sourceName, sourceConfig]) => {
       acc[sourceName] = {
         ...(sourceConfig || {}),

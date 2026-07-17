@@ -1230,6 +1230,15 @@ const hasLegacyInlineTags = content => /\{\{\{#[A-Za-z0-9_-]+\s*\{/.test(String(
 const hasTemplateV2EditorConfig = (doc) => {
   return hasObjectEntries(doc?.schema) || hasObjectEntries(doc?.dataSources)
 }
+const getBlockRenderMeta = (templateIsV2, sourceMeta = {}, instanceMeta = {}) => {
+  if (templateIsV2)
+    return { ...(instanceMeta || {}) }
+
+  return {
+    ...(sourceMeta || {}),
+    ...(instanceMeta || {}),
+  }
+}
 const isMalformedLegacyTemplateV2Doc = (doc) => {
   if (!isTemplateV2BlockDoc(doc))
     return false
@@ -1498,10 +1507,7 @@ const resolvedRenderBlock = computed(() => {
       ...(sourceDoc.values || {}),
       ...(instance.values || {}),
     },
-    meta: {
-      ...(sourceDoc.meta || {}),
-      ...(instance.meta || {}),
-    },
+    meta: getBlockRenderMeta(templateIsV2, sourceDoc.meta, instance.meta),
   }
 })
 
@@ -1600,10 +1606,7 @@ const blockContentPreviewBlock = computed(() => {
           ...(sourceDoc.values || {}),
           ...(modelValue.value?.values || {}),
         },
-        meta: {
-          ...(sourceDoc.meta || {}),
-          ...(modelValue.value?.meta || {}),
-        },
+        meta: getBlockRenderMeta(templateIsV2, sourceDoc.meta, modelValue.value?.meta),
       }
     : buildUpdatedBlockDocFromContent(content, sourceDoc)
   const previewType = modelValue.value?.previewType ?? blockContentSourceDoc.value?.previewType

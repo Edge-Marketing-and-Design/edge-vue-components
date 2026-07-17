@@ -7,6 +7,7 @@
  */
 
 import { computedAsync } from '@vueuse/core'
+import { getCmsTemplateRuntimeMeta } from '../../composables/useCmsTemplateRuntimeMeta'
 
 const props = defineProps({
   content: {
@@ -149,9 +150,15 @@ const dataSourcesToRuntimeMeta = (dataSources, meta) => {
   }, {})
 }
 
+const templateRuntimeMeta = computed(() => {
+  return getCmsTemplateRuntimeMeta(props.templateVersion, props.dataSources, props.meta)
+})
+
 const getRouteLastSegmentPreviewEntries = () => {
-  const metaEntries = Object.entries(props.meta || {})
-  const dataSourceEntries = Object.entries(dataSourcesToRuntimeMeta(props.dataSources, props.meta))
+  const metaEntries = Number(props.templateVersion) === 2
+    ? []
+    : Object.entries(templateRuntimeMeta.value)
+  const dataSourceEntries = Object.entries(dataSourcesToRuntimeMeta(props.dataSources, templateRuntimeMeta.value))
 
   return [...metaEntries, ...dataSourceEntries]
 }
@@ -412,8 +419,8 @@ const effectiveRouteLastSegment = computed(() => {
 
 const runtimeMeta = computed(() => {
   return edgeGlobal.prepareCmsMetaForRuntime({
-    ...(props.meta || {}),
-    ...dataSourcesToRuntimeMeta(props.dataSources, props.meta),
+    ...templateRuntimeMeta.value,
+    ...dataSourcesToRuntimeMeta(props.dataSources, templateRuntimeMeta.value),
   }, props.siteId, {
     routeLastSegment: effectiveRouteLastSegment.value,
   })
