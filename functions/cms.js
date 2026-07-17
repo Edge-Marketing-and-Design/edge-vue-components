@@ -2712,11 +2712,74 @@ exports.onUserWritten = createKvMirrorHandler({
   timeoutSeconds: 180,
 })
 
+const PUBLISHED_THEME_FIELDS = ['theme', 'headJSON', 'extraCSS']
+
+const themeOutputChanged = (beforeData, afterData) => {
+  if (!beforeData || !afterData)
+    return true
+
+  return PUBLISHED_THEME_FIELDS.some((field) => {
+    const beforeValue = typeof beforeData[field] === 'string'
+      ? beforeData[field]
+      : JSON.stringify(beforeData[field] ?? null)
+    const afterValue = typeof afterData[field] === 'string'
+      ? afterData[field]
+      : JSON.stringify(afterData[field] ?? null)
+    return beforeValue !== afterValue
+  })
+}
+
+const bumpPublishedSiteVersionsForTheme = async ({ orgId, themeId }) => {
+  const orgRef = db.collection('organizations').doc(orgId)
+  const publishedSites = await orgRef.collection('published-site-settings')
+    .where('theme', '==', themeId)
+    .get()
+
+  if (publishedSites.empty)
+    return 0
+
+  let batch = db.batch()
+  let operationCount = 0
+  let updatedSiteCount = 0
+
+  for (const publishedSite of publishedSites.docs) {
+    const versionUpdate = { version: Firestore.FieldValue.increment(1) }
+    batch.set(publishedSite.ref, versionUpdate, { merge: true })
+    batch.set(orgRef.collection('sites').doc(publishedSite.id), versionUpdate, { merge: true })
+    operationCount += 2
+    updatedSiteCount += 1
+
+    if (operationCount >= 400) {
+      await batch.commit()
+      batch = db.batch()
+      operationCount = 0
+    }
+  }
+
+  if (operationCount > 0)
+    await batch.commit()
+
+  return updatedSiteCount
+}
+
 exports.onThemeWritten = createKvMirrorHandler({
   document: 'organizations/{orgId}/themes/{themeId}',
   makeCanonicalKey: ({ orgId, themeId }) =>
     `themes:${orgId}:${themeId}`,
   serialize: data => JSON.stringify({ theme: JSON.parse(data.theme), headJSON: JSON.parse(data.headJSON), extraCSS: data.extraCSS }),
+  afterCanonicalWrite: async ({ event, params }) => {
+    const beforeData = event.data?.before?.exists ? (event.data.before.data() || {}) : null
+    const afterData = event.data?.after?.exists ? (event.data.after.data() || {}) : null
+    if (!themeOutputChanged(beforeData, afterData))
+      return
+
+    const updatedSiteCount = await bumpPublishedSiteVersionsForTheme(params)
+    logger.log('onThemeWritten site version bump complete', {
+      orgId: params.orgId,
+      themeId: params.themeId,
+      updatedSiteCount,
+    })
+  },
   timeoutSeconds: 180,
 })
 

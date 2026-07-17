@@ -138,6 +138,7 @@ function setDiff(oldArr = [], newArr = []) {
  *   makeIndexKeys: (params, data) => [...],                  // optional
  *   makeMetadata: (data, params) => ({ title: data.title }), // optional, merged with { canonical }
  *   serialize: (data) => JSON.stringify(data),               // optional
+ *   afterCanonicalWrite: ({ event, params, data, canonicalKey }) => {}, // optional
  *   timeoutSeconds: 180                                      // optional
  * })
  */
@@ -147,6 +148,7 @@ function createKvMirrorHandler({
   makeIndexKeys,
   makeMetadata,
   serialize = json,
+  afterCanonicalWrite,
   timeoutSeconds = 180,
 }) {
   return onDocumentWritten({ document, timeoutSeconds }, async (event) => {
@@ -161,8 +163,14 @@ function createKvMirrorHandler({
     }
     const indexingEnabled = typeof makeIndexKeys === 'function'
     const manifestKey = indexingEnabled ? `idx:manifest:${canonicalKey}` : null
+    const runAfterCanonicalWrite = async (succeeded) => {
+      if (!succeeded || typeof afterCanonicalWrite !== 'function')
+        return
+      await afterCanonicalWrite({ event, params, data, canonicalKey })
+    }
 
     if (!after?.exists) {
+      let canonicalWriteSucceeded = false
       if (indexingEnabled) {
         let prev = null
         try {
@@ -177,20 +185,23 @@ function createKvMirrorHandler({
           manifestKey,
         ])
         await runWithConcurrency(keys, INDEX_WRITE_CONCURRENCY, async (key) => {
-          await safeKvOperation({
+          const succeeded = await safeKvOperation({
             run: () => kv.del(key),
             payload: { op: 'del', key, source: 'kvMirror' },
             label: `del:${key}`,
           })
+          if (key === canonicalKey)
+            canonicalWriteSucceeded = succeeded
         })
       }
       else {
-        await safeKvOperation({
+        canonicalWriteSucceeded = await safeKvOperation({
           run: () => kv.del(canonicalKey),
           payload: { op: 'del', key: canonicalKey, source: 'kvMirror' },
           label: `del:${canonicalKey}`,
         })
       }
+      await runAfterCanonicalWrite(canonicalWriteSucceeded)
       return
     }
 
@@ -201,7 +212,7 @@ function createKvMirrorHandler({
       : baseMeta
 
     const serializedData = serialize(data)
-    await safeKvOperation({
+    const canonicalWriteSucceeded = await safeKvOperation({
       run: () => kv.put(canonicalKey, serializedData, { metadata: metaValue }),
       payload: {
         op: 'put',
@@ -212,6 +223,7 @@ function createKvMirrorHandler({
       },
       label: `put:${canonicalKey}`,
     })
+    await runAfterCanonicalWrite(canonicalWriteSucceeded)
 
     if (!indexingEnabled) {
       return

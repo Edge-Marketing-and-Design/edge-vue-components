@@ -291,6 +291,18 @@ const formatFromName = (name = '', contentType = '') => {
   return null
 }
 
+const contentTypeFromFormat = (format = '') => {
+  if (format === 'woff2')
+    return 'font/woff2'
+  if (format === 'woff')
+    return 'font/woff'
+  if (format === 'opentype')
+    return 'font/otf'
+  if (format === 'truetype')
+    return 'font/ttf'
+  return ''
+}
+
 const guessWeight = (name = '') => {
   const lower = name.toLowerCase()
   if (lower.includes('thin'))
@@ -368,11 +380,22 @@ const waitForR2 = async (docId) => {
 
   return await new Promise((resolve) => {
     const stop = () => edgeFirebase.stopSnapshot(docKey)
-    const unwatch = watch(() => edgeFirebase.data?.[docKey], (fileDoc) => {
+    let settled = false
+    let unwatch
+
+    const finish = (fileDoc) => {
+      if (settled)
+        return
+
+      settled = true
+      stop()
+      resolve(fileDoc)
+      queueMicrotask(() => unwatch?.())
+    }
+
+    unwatch = watch(() => edgeFirebase.data?.[docKey], (fileDoc) => {
       if (fileDoc?.uploadCompletedToR2 && fileDoc?.r2URL) {
-        stop()
-        unwatch()
-        resolve(fileDoc)
+        finish(fileDoc)
       }
     }, { immediate: true, deep: true })
   })
@@ -402,7 +425,14 @@ const applyFontFaceToHead = (uploadedDocs, groupId) => {
       continue
     const encodedUrl = encodeUrl(doc.r2URL)
     const css = `@font-face {\n  font-family: "${family}";\n  src: url("${encodedUrl}") format("${format}");\n  font-weight: ${meta.weight || '400'};\n  font-style: ${meta.style || 'normal'};\n  font-display: ${state.fontDisplay || 'swap'};\n}`
-    styles.push({ css, id: `font-${slugify(family)}-${groupId}-${meta.weight}-${meta.style}` })
+    styles.push({
+      css,
+      href: encodedUrl,
+      id: `font-${slugify(family)}-${groupId}-${meta.weight}-${meta.style}`,
+      style: meta.style || 'normal',
+      type: contentTypeFromFormat(format),
+      weight: meta.weight || '400',
+    })
   }
   if (!styles.length)
     return
@@ -417,6 +447,25 @@ const applyFontFaceToHead = (uploadedDocs, groupId) => {
     filtered.push({ id: s.id, children: s.css, innerHTML: s.css })
   })
   head.style = filtered
+
+  const preloadId = `font-preload-${slugify(family)}-${groupId}`
+  const preload = styles.find(style => style.weight === '400' && style.style === 'normal') || styles[0]
+  const headLinks = Array.isArray(head.link) ? [...head.link] : []
+  head.link = headLinks
+    .filter((entry) => {
+      if (entry?.id === preloadId)
+        return false
+      return !urlVariants(preload.href).includes(String(entry?.href || ''))
+    })
+    .concat({
+      id: preloadId,
+      rel: 'preload',
+      as: 'font',
+      href: preload.href,
+      type: preload.type,
+      crossorigin: 'anonymous',
+    })
+
   setHeadJson(head)
 }
 
