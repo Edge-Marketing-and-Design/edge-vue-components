@@ -40,6 +40,11 @@ const props = defineProps({
     required: false,
     default: false,
   },
+  showRichtextArticleTools: {
+    type: Boolean,
+    required: false,
+    default: false,
+  },
   richtextAutoHeight: {
     type: Boolean,
     required: false,
@@ -55,6 +60,8 @@ const edgeFirebase = inject('edgeFirebase')
 const isGlobalAdmin = computed(() => edgeGlobal.isAdminGlobal(edgeFirebase).value)
 const richtextEnabledToggles = computed(() => {
   const baseToggles = ['bold', 'italic', 'strike', 'bulletlist', 'orderedlist', 'underline', 'link', 'files']
+  if (props.showRichtextArticleTools)
+    baseToggles.push('paragraph', 'heading2', 'heading3', 'blockquote', 'horizontalrule')
   if (props.showRichtextImageToggle)
     baseToggles.push('image')
   if (isGlobalAdmin.value)

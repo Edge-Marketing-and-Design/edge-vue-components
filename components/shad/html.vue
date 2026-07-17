@@ -674,6 +674,8 @@ defineExpose({
                       :class="toolbarToggleClass"
                       :disabled="!editor.can().chain().focus().toggleHeading({ level: 2 }).run()"
                       :data-state="editor.isActive('heading', { level: 2 }) ? 'on' : 'off'"
+                      title="Heading 2"
+                      aria-label="Heading 2"
                       @click.prevent="editor.chain().focus().toggleHeading({ level: 2 }).run()"
                     >
                       <Heading2 :size="16" />
@@ -684,6 +686,8 @@ defineExpose({
                       :class="toolbarToggleClass"
                       :disabled="!editor.can().chain().focus().toggleHeading({ level: 3 }).run()"
                       :data-state="editor.isActive('heading', { level: 3 }) ? 'on' : 'off'"
+                      title="Heading 3"
+                      aria-label="Heading 3"
                       @click.prevent="editor.chain().focus().toggleHeading({ level: 3 }).run()"
                     >
                       <Heading3 :size="16" />
@@ -725,6 +729,8 @@ defineExpose({
                     variant="outline"
                     :class="toolbarToggleClass"
                     :data-state="editor.isActive('paragraph') ? 'on' : 'off'"
+                    title="Paragraph"
+                    aria-label="Paragraph"
                     @click.prevent="editor.chain().focus().setParagraph().run()"
                   >
                     <Pilcrow :size="16" />
@@ -796,6 +802,8 @@ defineExpose({
                     :class="toolbarToggleClass"
                     :disabled="!editor.can().chain().focus().toggleBlockquote().run()"
                     :data-state="editor.isActive('blockQuote') ? 'on' : 'off'"
+                    title="Blockquote"
+                    aria-label="Blockquote"
                     @click.prevent="editor.chain().focus().toggleBlockquote().run()"
                   >
                     <TextQuote :size="16" />
@@ -806,6 +814,7 @@ defineExpose({
                     variant="outline"
                     :class="toolbarControlClass"
                     title="Horizontal Rule"
+                    aria-label="Horizontal rule"
                     @click.prevent="editor.chain().focus().setHorizontalRule().run()"
                   >
                     <Minus :size="16" />
