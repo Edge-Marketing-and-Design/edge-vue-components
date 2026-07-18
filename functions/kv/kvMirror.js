@@ -4,9 +4,19 @@
 // - Optionally writes index keys that carry JSON in **metadata** (value = '1').
 // - Index-key metadata always includes { canonical: <canonicalKey> }.
 // - Keeps a small manifest per canonical key to clean up all index keys on delete.
+// - Publishes a sharded collection-generation vector after complete logical mirrors.
 
 const { onDocumentWritten, db, Firestore, logger } = require('../config.js')
 const kv = require('./kvClient')
+const { runKvMirrorFollowup } = require('./kvMirrorFollowups')
+const {
+  collectionScopeFromCanonicalKey,
+  collectionVersionShard,
+  createCollectionVersionOperation,
+  isSourceStateCurrent,
+  materializeCollectionVersionOperation,
+  sourceStateFromEvent,
+} = require('./kvMirrorProtocol')
 
 function json(x) {
   return JSON.stringify(x)
@@ -86,6 +96,7 @@ async function safeKvOperation({
   run,
   payload,
   label,
+  queueOnFailure = true,
 }) {
   try {
     await run()
@@ -93,22 +104,26 @@ async function safeKvOperation({
   }
   catch (err) {
     const message = String(err?.message || err || 'KV operation failed')
-    logger.warn('KV operation failed; queued for retry', {
+    logger.warn(queueOnFailure
+      ? 'KV operation failed; queued for retry'
+      : 'KV operation failed; deferred to mirror finalization retry', {
       label,
       error: message.slice(0, 500),
       key: payload?.key,
       op: payload?.op,
     })
-    try {
-      await enqueueKvRetry(payload)
-    }
-    catch (queueErr) {
-      logger.error('Failed to enqueue KV retry', {
-        label,
-        key: payload?.key,
-        op: payload?.op,
-        error: String(queueErr?.message || queueErr || 'enqueue failed').slice(0, 500),
-      })
+    if (queueOnFailure) {
+      try {
+        await enqueueKvRetry(payload)
+      }
+      catch (queueErr) {
+        logger.error('Failed to enqueue KV retry', {
+          label,
+          key: payload?.key,
+          op: payload?.op,
+          error: String(queueErr?.message || queueErr || 'enqueue failed').slice(0, 500),
+        })
+      }
     }
     return false
   }
@@ -131,6 +146,35 @@ function setDiff(oldArr = [], newArr = []) {
   return { toRemove, toAdd }
 }
 
+async function runKvPayload(operation) {
+  if (operation?.op === 'putCollectionVersion') {
+    const materialized = materializeCollectionVersionOperation(operation)
+    return kv.put(materialized.key, materialized.value, materialized.opts)
+  }
+  if (operation?.op === 'put')
+    return kv.put(operation.key, operation.value, operation.opts)
+  if (operation?.op === 'putIndexMeta')
+    return kv.putIndexMeta(operation.key, operation.metadata, operation.opts)
+  if (operation?.op === 'del')
+    return kv.del(operation.key)
+  throw new Error(`Unsupported KV mirror operation: ${operation?.op || ''}`)
+}
+
+async function runMirrorPhase(operations) {
+  let succeeded = true
+  await runWithConcurrency(operations, INDEX_WRITE_CONCURRENCY, async (operation) => {
+    const operationSucceeded = await safeKvOperation({
+      run: () => runKvPayload(operation),
+      payload: operation,
+      label: `${operation.op}:${operation.key}`,
+      queueOnFailure: false,
+    })
+    if (!operationSucceeded)
+      succeeded = false
+  })
+  return succeeded
+}
+
 /**
  * createKvMirrorHandler({
  *   document: 'organizations/{orgId}/sites/{siteId}/published_posts/{postId}',
@@ -138,7 +182,7 @@ function setDiff(oldArr = [], newArr = []) {
  *   makeIndexKeys: (params, data) => [...],                  // optional
  *   makeMetadata: (data, params) => ({ title: data.title }), // optional, merged with { canonical }
  *   serialize: (data) => JSON.stringify(data),               // optional
- *   afterCanonicalWrite: ({ event, params, data, canonicalKey }) => {}, // optional
+ *   makeAfterMirrorOperation: ({ event, params, data, canonicalKey }) => null, // optional
  *   timeoutSeconds: 180                                      // optional
  * })
  */
@@ -148,139 +192,145 @@ function createKvMirrorHandler({
   makeIndexKeys,
   makeMetadata,
   serialize = json,
-  afterCanonicalWrite,
+  makeAfterMirrorOperation,
   timeoutSeconds = 180,
 }) {
   return onDocumentWritten({ document, timeoutSeconds }, async (event) => {
     const after = event.data?.after
     const params = event.params || {}
     const data = after?.exists ? after.data() : null
-
     const canonicalKey = makeCanonicalKey(params, data)
     if (!canonicalKey) {
       logger.warn('KV mirror skipped due to missing canonical key', { document })
       return
     }
+
     const indexingEnabled = typeof makeIndexKeys === 'function'
     const manifestKey = indexingEnabled ? `idx:manifest:${canonicalKey}` : null
-    const runAfterCanonicalWrite = async (succeeded) => {
-      if (!succeeded || typeof afterCanonicalWrite !== 'function')
-        return
-      await afterCanonicalWrite({ event, params, data, canonicalKey })
-    }
+    const phases = []
 
     if (!after?.exists) {
-      let canonicalWriteSucceeded = false
+      let keys = [canonicalKey]
       if (indexingEnabled) {
-        let prev = null
+        let previousManifest = null
         try {
-          prev = await kv.get(manifestKey, 'json')
+          previousManifest = await kv.get(manifestKey, 'json')
         }
         catch (_) {
-          prev = null
+          previousManifest = null
         }
-        const keys = toSortedUniqueStrings([
-          ...(Array.isArray(prev?.indexKeys) ? prev.indexKeys : []),
+        keys = [
+          ...(Array.isArray(previousManifest?.indexKeys) ? previousManifest.indexKeys : []),
           canonicalKey,
           manifestKey,
-        ])
-        await runWithConcurrency(keys, INDEX_WRITE_CONCURRENCY, async (key) => {
-          const succeeded = await safeKvOperation({
-            run: () => kv.del(key),
-            payload: { op: 'del', key, source: 'kvMirror' },
-            label: `del:${key}`,
-          })
-          if (key === canonicalKey)
-            canonicalWriteSucceeded = succeeded
-        })
+        ]
       }
-      else {
-        canonicalWriteSucceeded = await safeKvOperation({
-          run: () => kv.del(canonicalKey),
-          payload: { op: 'del', key: canonicalKey, source: 'kvMirror' },
-          label: `del:${canonicalKey}`,
-        })
-      }
-      await runAfterCanonicalWrite(canonicalWriteSucceeded)
-      return
+      phases.push(toSortedUniqueStrings(keys).map(key => ({ op: 'del', key, source: 'kvMirror' })))
     }
-
-    const baseMeta = { canonical: canonicalKey }
-    const customMetaCandidate = typeof makeMetadata === 'function' ? (makeMetadata(data, params) || null) : null
-    const metaValue = (customMetaCandidate && typeof customMetaCandidate === 'object')
-      ? { ...customMetaCandidate, canonical: canonicalKey }
-      : baseMeta
-
-    const serializedData = serialize(data)
-    const canonicalWriteSucceeded = await safeKvOperation({
-      run: () => kv.put(canonicalKey, serializedData, { metadata: metaValue }),
-      payload: {
+    else {
+      const baseMeta = { canonical: canonicalKey }
+      const customMetaCandidate = typeof makeMetadata === 'function' ? (makeMetadata(data, params) || null) : null
+      const metaValue = (customMetaCandidate && typeof customMetaCandidate === 'object')
+        ? { ...customMetaCandidate, canonical: canonicalKey }
+        : baseMeta
+      const serializedData = serialize(data)
+      phases.push([{
         op: 'put',
         key: canonicalKey,
         value: serializedData,
         opts: { metadata: metaValue },
         source: 'kvMirror',
-      },
-      label: `put:${canonicalKey}`,
-    })
-    await runAfterCanonicalWrite(canonicalWriteSucceeded)
+      }])
 
-    if (!indexingEnabled) {
+      if (indexingEnabled) {
+        const resolvedIndexKeys = await Promise.resolve(makeIndexKeys(params, data))
+        const nextIndexKeys = toSortedUniqueStrings(resolvedIndexKeys || [])
+        let previousManifest = null
+        try {
+          previousManifest = await kv.get(manifestKey, 'json')
+        }
+        catch (_) {
+          previousManifest = null
+        }
+
+        const oldIndexKeys = toSortedUniqueStrings(Array.isArray(previousManifest?.indexKeys) ? previousManifest.indexKeys : [])
+        const previousMetaHash = typeof previousManifest?.metadataHash === 'string' ? previousManifest.metadataHash : ''
+        const currentMetaHash = stableStringify(metaValue)
+        const { toRemove, toAdd } = setDiff(oldIndexKeys, nextIndexKeys)
+        const keysToUpsert = previousMetaHash !== currentMetaHash ? nextIndexKeys : toAdd
+        phases.push([
+          ...keysToUpsert.map(key => ({
+            op: 'putIndexMeta',
+            key,
+            metadata: metaValue,
+            source: 'kvMirror',
+          })),
+          ...toRemove.map(key => ({ op: 'del', key, source: 'kvMirror' })),
+        ])
+
+        const manifestUnchanged = areSameStrings(oldIndexKeys, nextIndexKeys)
+          && previousMetaHash === currentMetaHash
+        if (!manifestUnchanged) {
+          phases.push([{
+            op: 'put',
+            key: manifestKey,
+            value: { indexKeys: nextIndexKeys, metadataHash: currentMetaHash },
+            source: 'kvMirror',
+          }])
+        }
+      }
+    }
+
+    const afterOperation = typeof makeAfterMirrorOperation === 'function'
+      ? await Promise.resolve(makeAfterMirrorOperation({ event, params, data, canonicalKey }))
+      : null
+    const versionOperation = createCollectionVersionOperation({
+      event,
+      canonicalKey,
+      deleted: !after?.exists,
+    })
+    const sourceState = sourceStateFromEvent(event)
+    const finalizationPayload = {
+      op: 'finalizeMirror',
+      key: versionOperation?.key || canonicalKey,
+      sourceState,
+      phases,
+      afterOperation,
+      versionOperation,
+      source: 'kvMirror',
+    }
+
+    if (!await isSourceStateCurrent(db, sourceState)) {
+      logger.log('KV mirror skipped for superseded Firestore event', { document, canonicalKey })
       return
     }
 
-    const resolvedIndexKeys = await Promise.resolve(makeIndexKeys(params, data))
-    const nextIndexKeys = toSortedUniqueStrings(resolvedIndexKeys || [])
-
-    let prev = null
-    try {
-      prev = await kv.get(manifestKey, 'json')
-    }
-    catch (_) {
-      prev = null
+    for (const phase of phases) {
+      if (!await runMirrorPhase(phase)) {
+        await enqueueKvRetry(finalizationPayload)
+        return
+      }
     }
 
-    const oldIndexKeys = toSortedUniqueStrings(Array.isArray(prev?.indexKeys) ? prev.indexKeys : [])
-    const previousMetaHash = typeof prev?.metadataHash === 'string' ? prev.metadataHash : ''
-    const currentMetaHash = stableStringify(metaValue)
-    const { toRemove, toAdd } = setDiff(oldIndexKeys, nextIndexKeys)
-    const shouldRewriteAllIndexKeys = previousMetaHash !== currentMetaHash
-    const keysToUpsert = shouldRewriteAllIndexKeys ? nextIndexKeys : toAdd
+    if (afterOperation) {
+      try {
+        await runKvMirrorFollowup(afterOperation)
+      }
+      catch (error) {
+        logger.warn('KV mirror follow-up failed; queued complete mirror for retry', {
+          canonicalKey,
+          error: String(error?.message || error || 'follow-up failed').slice(0, 500),
+        })
+        await enqueueKvRetry(finalizationPayload)
+        return
+      }
+    }
 
-    await runWithConcurrency(keysToUpsert, INDEX_WRITE_CONCURRENCY, async (key) => {
+    if (versionOperation) {
       await safeKvOperation({
-        run: () => kv.putIndexMeta(key, metaValue),
-        payload: {
-          op: 'putIndexMeta',
-          key,
-          metadata: metaValue,
-          source: 'kvMirror',
-        },
-        label: `putIndexMeta:${key}`,
-      })
-    })
-
-    await runWithConcurrency(toRemove, INDEX_WRITE_CONCURRENCY, async (key) => {
-      await safeKvOperation({
-        run: () => kv.del(key),
-        payload: { op: 'del', key, source: 'kvMirror' },
-        label: `del:${key}`,
-      })
-    })
-
-    const manifestUnchanged = areSameStrings(oldIndexKeys, nextIndexKeys)
-      && previousMetaHash === currentMetaHash
-    if (!manifestUnchanged) {
-      const manifestValue = { indexKeys: nextIndexKeys, metadataHash: currentMetaHash }
-      await safeKvOperation({
-        run: () => kv.put(manifestKey, manifestValue),
-        payload: {
-          op: 'put',
-          key: manifestKey,
-          value: manifestValue,
-          source: 'kvMirror',
-        },
-        label: `put:${manifestKey}`,
+        run: () => runKvPayload(versionOperation),
+        payload: versionOperation,
+        label: `put:${versionOperation.key}`,
       })
     }
   })
@@ -404,4 +454,10 @@ function createKvMirrorHandlerFromFields({
   })
 }
 
-module.exports = { createKvMirrorHandler, createKvMirrorHandlerFromFields }
+module.exports = {
+  createKvMirrorHandler,
+  createKvMirrorHandlerFromFields,
+  collectionScopeFromCanonicalKey,
+  collectionVersionShard,
+  createCollectionVersionOperation,
+}
