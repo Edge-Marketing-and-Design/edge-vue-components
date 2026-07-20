@@ -17,8 +17,10 @@ export const clearCmsTemplateV2LibraryState = (doc) => {
   if (!doc || typeof doc !== 'object' || Array.isArray(doc) || Number(doc.templateVersion) !== 2)
     return doc
 
-  doc.meta = {}
-  doc.values = {}
+  if (!doc.meta || typeof doc.meta !== 'object' || Array.isArray(doc.meta) || Object.keys(doc.meta).length)
+    doc.meta = {}
+  if (!doc.values || typeof doc.values !== 'object' || Array.isArray(doc.values) || Object.keys(doc.values).length)
+    doc.values = {}
   return doc
 }
 
