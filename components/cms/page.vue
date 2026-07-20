@@ -3546,7 +3546,7 @@ const hasUnsavedChanges = (changes) => {
     @saved="handlePageSaved"
   >
     <template #header="slotProps">
-      <div class="rounded-none relative flex flex-col gap-2 p-2 top-0 z-50 rounded border border-stone-300 bg-stone-100 text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100">
+      <div class="rounded-none relative flex flex-col gap-2 p-2 top-0 z-[10010] rounded border border-stone-300 bg-stone-100 text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div class="flex min-w-0 flex-1 items-center gap-2 pr-2">
             <edge-shad-button
