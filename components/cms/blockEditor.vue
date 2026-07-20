@@ -2,6 +2,7 @@
 import { Code2, Download, HelpCircle, History, Loader2, Maximize2, Monitor, Plus, RotateCcw, Smartphone, Tablet, Trash2, Wand2 } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
+import { clearCmsTemplateV2LibraryState } from '../../composables/useCmsTemplateRuntimeMeta'
 const props = defineProps({
   blockId: {
     type: String,
@@ -249,6 +250,7 @@ const ensureTemplateV2Fields = (doc) => {
     doc.schema = {}
   if (!doc.dataSources || typeof doc.dataSources !== 'object' || Array.isArray(doc.dataSources))
     doc.dataSources = {}
+  clearCmsTemplateV2LibraryState(doc)
 }
 
 const formatJson = (value) => {

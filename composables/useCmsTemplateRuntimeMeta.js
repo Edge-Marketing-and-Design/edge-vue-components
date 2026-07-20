@@ -12,3 +12,19 @@ export const getCmsTemplateRuntimeMeta = (templateVersion, dataSources = {}, met
     return runtimeMeta
   }, {})
 }
+
+export const clearCmsTemplateV2LibraryState = (doc) => {
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc) || Number(doc.templateVersion) !== 2)
+    return doc
+
+  doc.meta = {}
+  doc.values = {}
+  return doc
+}
+
+export const prepareCmsTemplateV2PickedBlock = (doc) => {
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc) || doc.synced)
+    return doc
+
+  return clearCmsTemplateV2LibraryState(doc)
+}
