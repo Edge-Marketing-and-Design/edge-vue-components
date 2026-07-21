@@ -23,6 +23,7 @@ const {
 
 const { createKvMirrorHandler } = require('./kv/kvMirror')
 const kv = require('./kv/kvClient')
+const { resolveSubmittedUserRouting } = require('./helpers/submittedUserRouting')
 
 const SITE_AI_TOPIC = 'site-ai-bootstrap'
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || ''
@@ -1765,9 +1766,13 @@ exports.trackHistory = onRequest(async (req, res) => {
           const entries = collectFormEntries(data)
           const replyTo = getReplyToEmail(data, entries)
           const subject = getContactFormSubject(data, entries)
-          const blockEmails = await getPublishedEmailTo(orgId, siteId, pageId, blockId)
-          const fallbackEmail = await getSiteSettingsEmail(orgId, siteId)
-          const emailTo = blockEmails.length ? blockEmails : (fallbackEmail ? [fallbackEmail] : [])
+          const submittedUserRouting = await resolveSubmittedUserRouting({ db, orgId, data })
+          let emailTo = submittedUserRouting?.email ? [submittedUserRouting.email] : []
+          if (!emailTo.length) {
+            const blockEmails = await getPublishedEmailTo(orgId, siteId, pageId, blockId)
+            const fallbackEmail = await getSiteSettingsEmail(orgId, siteId)
+            emailTo = blockEmails.length ? blockEmails : (fallbackEmail ? [fallbackEmail] : [])
+          }
 
           if (!emailTo.length) {
             logger.warn('Contact form email not found', { orgId, siteId, pageId, blockId })
@@ -2707,11 +2712,39 @@ exports.onUserWritten = createKvMirrorHandler({
   timeoutSeconds: 180,
 })
 
+const PUBLISHED_THEME_FIELDS = ['theme', 'headJSON', 'extraCSS']
+
+const themeOutputChanged = (beforeData, afterData) => {
+  if (!beforeData || !afterData)
+    return true
+
+  return PUBLISHED_THEME_FIELDS.some((field) => {
+    const beforeValue = typeof beforeData[field] === 'string'
+      ? beforeData[field]
+      : JSON.stringify(beforeData[field] ?? null)
+    const afterValue = typeof afterData[field] === 'string'
+      ? afterData[field]
+      : JSON.stringify(afterData[field] ?? null)
+    return beforeValue !== afterValue
+  })
+}
+
 exports.onThemeWritten = createKvMirrorHandler({
   document: 'organizations/{orgId}/themes/{themeId}',
   makeCanonicalKey: ({ orgId, themeId }) =>
     `themes:${orgId}:${themeId}`,
   serialize: data => JSON.stringify({ theme: JSON.parse(data.theme), headJSON: JSON.parse(data.headJSON), extraCSS: data.extraCSS }),
+  makeAfterMirrorOperation: ({ event, params }) => {
+    const beforeData = event.data?.before?.exists ? (event.data.before.data() || {}) : null
+    const afterData = event.data?.after?.exists ? (event.data.after.data() || {}) : null
+    if (!themeOutputChanged(beforeData, afterData))
+      return null
+    return {
+      op: 'bumpPublishedSiteVersionsForTheme',
+      orgId: params.orgId,
+      themeId: params.themeId,
+    }
+  },
   timeoutSeconds: 180,
 })
 

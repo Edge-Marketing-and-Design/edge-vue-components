@@ -1,5 +1,6 @@
 <script setup>
 import { renderTemplate, renderTemplateAsync } from '@edgedev/template-engine'
+import { getCmsTemplateRuntimeMeta } from '../../composables/useCmsTemplateRuntimeMeta'
 
 const props = defineProps({
   content: {
@@ -29,6 +30,10 @@ const props = defineProps({
   dataSources: {
     type: Object,
     default: () => ({}),
+  },
+  collectionSourceResolver: {
+    type: Function,
+    default: null,
   },
   siteId: {
     type: String,
@@ -201,8 +206,12 @@ const templateV2Values = computed(() => ({
   ...normalizeTemplateV2Values(renderValues.value, props.schema),
 }))
 
+const templateV2RuntimeMeta = computed(() => {
+  return getCmsTemplateRuntimeMeta(props.templateVersion, props.dataSources, props.meta)
+})
+
 const templateV2CmsDataSources = computed(() => {
-  return Object.entries(applyTemplateV2DataSourceMeta(props.dataSources, props.meta, templateV2RuntimeTokens.value))
+  return Object.entries(applyTemplateV2DataSourceMeta(props.dataSources, templateV2RuntimeMeta.value, templateV2RuntimeTokens.value))
     .reduce((acc, [sourceName, sourceConfig]) => {
       acc[sourceName] = {
         ...(sourceConfig || {}),
@@ -588,6 +597,15 @@ const resolveTemplateV2ScopedQueryItems = (queryItems, scope) => {
   }, {})
 }
 
+const hasTemplateV2ScopedCollectionOverrides = (overrides) => {
+  if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides))
+    return false
+  const queryItems = overrides.queryItems
+  if (queryItems && typeof queryItems === 'object' && !Array.isArray(queryItems) && Object.keys(queryItems).length)
+    return true
+  return !!overrides.canonicalLookup
+}
+
 const getTemplateV2CanonicalDocIds = (canonicalLookup, scope) => {
   const rawKey = resolveTemplateV2ParentToken(canonicalLookup?.key, scope)
   const keys = Array.isArray(rawKey) ? rawKey : [rawKey]
@@ -729,7 +747,17 @@ const resolveTemplateV2CmsForItems = async (expression, scope, dataSources, rend
       if (apiItems)
         return apiItems
     }
-    return applyTemplateV2SourceOverrides(sourceConfig.value, sourceConfig, sourceCall.overrides, scope)
+    const scopedOverrides = {
+      ...(sourceCall.overrides || {}),
+      queryItems: resolveTemplateV2ScopedQueryItems(sourceCall.overrides?.queryItems, scope),
+    }
+    const isCollectionSource = sourceConfig?.type === 'collection' || sourceConfig?.collection || sourceConfig?.path
+    if (isCollectionSource && props.collectionSourceResolver && hasTemplateV2ScopedCollectionOverrides(scopedOverrides)) {
+      const resolvedItems = await props.collectionSourceResolver(sourceCall.name, sourceConfig, scopedOverrides)
+      if (Array.isArray(resolvedItems))
+        return applyTemplateV2SourceOverrides(resolvedItems, sourceConfig, scopedOverrides, scope)
+    }
+    return applyTemplateV2SourceOverrides(sourceConfig.value, sourceConfig, scopedOverrides, scope)
   }
   const loopExpression = parseTemplateV2LoopExpression(expression, scope)
   const resolved = resolveTemplateV2ScopedPath(loopExpression.expression, scope)
@@ -743,16 +771,35 @@ const resolveTemplateV2CmsForItems = async (expression, scope, dataSources, rend
 }
 
 const createTemplateV2ChildScope = (scope, alias, entry) => {
-  const nextScope = {
+  const entryValues = (entry && typeof entry === 'object' && !Array.isArray(entry))
+    ? entry
+    : {}
+  return {
     ...(scope || {}),
+    ...entryValues,
+    item: entry,
     [alias || 'item']: entry,
   }
-  if (entry && typeof entry === 'object' && !Array.isArray(entry))
-    Object.assign(nextScope, entry)
-  return nextScope
 }
 
-const renderTemplateV2CmsSection = async (template, scope, dataSources, schema, renderOptions) => {
+const normalizeTemplateV2ConditionalAlias = (template, alias) => {
+  const normalizedAlias = String(alias || '').trim()
+  if (!normalizedAlias || normalizedAlias === 'item')
+    return template
+
+  return String(template || '').replace(/\{\{\{\s*#if\s*({[\s\S]*?})\s*\}\}\}/g, (tag, rawConfig) => {
+    const config = safeParseTagConfig(rawConfig)
+    const condition = String(config?.cond || '').trim()
+    if (condition !== normalizedAlias && !condition.startsWith(`${normalizedAlias}.`))
+      return tag
+    const normalizedCondition = condition === normalizedAlias
+      ? 'item'
+      : `item.${condition.slice(normalizedAlias.length + 1)}`
+    return `{{{#if ${JSON.stringify({ ...config, cond: normalizedCondition })} }}}`
+  })
+}
+
+const renderTemplateV2CmsSection = async (template, scope, dataSources, schema, renderOptions, currentAlias = '') => {
   let output = replaceTemplateLoadingStateTokens(template, 'loaded')
   let forBlock = findNextTemplateV2ForBlock(output)
   while (forBlock) {
@@ -760,13 +807,13 @@ const renderTemplateV2CmsSection = async (template, scope, dataSources, schema, 
     const renderedItems = []
     for (const entry of items) {
       const childScope = createTemplateV2ChildScope(scope, forBlock.alias, entry)
-      renderedItems.push(await renderTemplateV2CmsSection(forBlock.innerTpl, childScope, dataSources, schema, renderOptions))
+      renderedItems.push(await renderTemplateV2CmsSection(forBlock.innerTpl, childScope, dataSources, schema, renderOptions, forBlock.alias))
     }
     output = `${output.slice(0, forBlock.start)}${renderedItems.join('')}${output.slice(forBlock.end)}`
     forBlock = findNextTemplateV2ForBlock(output)
   }
   return renderTemplateAsync(
-    output,
+    normalizeTemplateV2ConditionalAlias(output, currentAlias),
     scope || {},
     {},
     {

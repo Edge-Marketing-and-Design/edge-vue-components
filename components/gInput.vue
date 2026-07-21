@@ -137,8 +137,11 @@ const jsonSchemaStringFormats = [
   'relative-json-pointer',
   'regex',
 ]
-// const edgeGlobal = inject('edgeGlobal')
 const edgeFirebase = inject('edgeFirebase')
+const {
+  assignableUserOptions,
+  normalizedUserNameById,
+} = useAssignableOrgUsers(edgeFirebase)
 const state = reactive({
   loaded: false,
   afterMount: false,
@@ -687,16 +690,8 @@ onMounted(() => {
 })
 
 const userItem = (id) => {
-  if (!edgeGlobal.objHas(edgeFirebase.state.users, id)) {
-    return ''
-  }
-  if (!edgeGlobal.objHas(edgeFirebase.state.users[id], 'meta')) {
-    return ''
-  }
-  if (!edgeGlobal.objHas(edgeFirebase.state.users[id].meta, 'name')) {
-    return ''
-  }
-  return edgeFirebase.state.users[id].meta.name
+  const userId = String(id || '').trim()
+  return normalizedUserNameById.value[userId] || userId
 }
 
 const collectionItem = (id) => {
@@ -900,8 +895,8 @@ watch(modelValue, () => {
     </Card>
     <edge-shad-select
       v-if="props.fieldType === 'users'" v-model="modelValue" :label="props.label"
-      v-bind="props.bindings" :items="Object.values(edgeFirebase.state.users).filter(user => user.uid !== '')"
-      item-title="meta.name" item-value="uid" :disabled="props.disabled" :name="props.name" :description="props.hint"
+      v-bind="props.bindings" :items="assignableUserOptions"
+      item-title="label" item-value="value" :disabled="props.disabled" :name="props.name" :description="props.hint"
     >
       <template v-if="props.helper" #icon>
         <edge-g-helper :title="props.label" :helper="props.helper" />

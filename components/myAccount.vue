@@ -4,7 +4,6 @@ import { toTypedSchema } from '@vee-validate/zod'
 import { Loader2, Save } from 'lucide-vue-next'
 import * as z from 'zod'
 const edgeFirebase = inject('edgeFirebase')
-// const edgeGlobal = inject('edgeGlobal')
 
 const router = useRouter()
 

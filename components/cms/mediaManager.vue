@@ -85,7 +85,6 @@ const props = defineProps({
   },
 })
 
-// const edgeGlobal = inject('edgeGlobal')
 
 const emits = defineEmits(['select'])
 

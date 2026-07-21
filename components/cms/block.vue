@@ -75,6 +75,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  allowRichtextArticleTools: {
+    type: Boolean,
+    default: false,
+  },
   previewAuthLoggedIn: {
     type: Boolean,
     default: true,
@@ -100,6 +104,7 @@ const PROTECTION_UNAUTH_BEHAVIORS = [
   { name: 'blurWithLoginPrompt', title: 'Blur + Login Prompt' },
 ]
 const showRichtextImageToggle = computed(() => props.allowRichtextImageTools === true)
+const showRichtextArticleTools = computed(() => props.allowRichtextArticleTools === true)
 const BLOCK_EDITOR_PANEL_STORAGE_KEYS = {
   page: 'edge-cms-block-editor-panel-width:page',
   post: 'edge-cms-block-editor-panel-width:post',
@@ -417,7 +422,6 @@ const state = reactive({
   arrayAddPopoverAllowCloseByField: {},
   reload: false,
   metaUpdate: {},
-  loading: true,
   afterLoad: false,
   imageOpen: false,
   imageOpenByField: {},
@@ -1231,6 +1235,15 @@ const hasLegacyInlineTags = content => /\{\{\{#[A-Za-z0-9_-]+\s*\{/.test(String(
 const hasTemplateV2EditorConfig = (doc) => {
   return hasObjectEntries(doc?.schema) || hasObjectEntries(doc?.dataSources)
 }
+const getBlockRenderMeta = (templateIsV2, sourceMeta = {}, instanceMeta = {}) => {
+  if (templateIsV2)
+    return { ...(instanceMeta || {}) }
+
+  return {
+    ...(sourceMeta || {}),
+    ...(instanceMeta || {}),
+  }
+}
 const isMalformedLegacyTemplateV2Doc = (doc) => {
   if (!isTemplateV2BlockDoc(doc))
     return false
@@ -1499,10 +1512,7 @@ const resolvedRenderBlock = computed(() => {
       ...(sourceDoc.values || {}),
       ...(instance.values || {}),
     },
-    meta: {
-      ...(sourceDoc.meta || {}),
-      ...(instance.meta || {}),
-    },
+    meta: getBlockRenderMeta(templateIsV2, sourceDoc.meta, instance.meta),
   }
 })
 
@@ -1601,10 +1611,7 @@ const blockContentPreviewBlock = computed(() => {
           ...(sourceDoc.values || {}),
           ...(modelValue.value?.values || {}),
         },
-        meta: {
-          ...(sourceDoc.meta || {}),
-          ...(modelValue.value?.meta || {}),
-        },
+        meta: getBlockRenderMeta(templateIsV2, sourceDoc.meta, modelValue.value?.meta),
       }
     : buildUpdatedBlockDocFromContent(content, sourceDoc)
   const previewType = modelValue.value?.previewType ?? blockContentSourceDoc.value?.previewType
@@ -2263,12 +2270,12 @@ const openEditor = async (event, options = {}) => {
     }
   }
 
-  state.draft = JSON.parse(JSON.stringify({
-    ...schemaDefaults,
-    ...(templateIsV2 ? {} : legacyAuthoredModel.values),
-    ...(blockData?.values || {}),
-    ...(modelValue.value?.values || {}),
-  }))
+  state.draft = JSON.parse(JSON.stringify(buildCmsBlockEditorDraftValues({
+    schemaDefaults,
+    legacyValues: templateIsV2 ? {} : legacyAuthoredModel.values,
+    blockValues: blockData?.values,
+    instanceValues: modelValue.value?.values,
+  })))
   if (templateIsV2) {
     Object.entries(mergedMeta).forEach(([field, fieldMeta]) => {
       const control = fieldMeta?.dataSourceControl
@@ -2389,23 +2396,12 @@ const orderedMeta = computed(() => {
     ? extractTemplateV2FieldsInOrder(tpl, Object.keys(metaObj))
     : extractFieldsInOrder(tpl)
 
-  const out = []
-  const picked = new Set()
-
-  for (const f of orderedFields) {
-    if (f in metaObj && !shouldIgnoreMeta(metaObj[f])) {
-      out.push({ field: f, meta: metaObj[f] })
-      picked.add(f)
-    }
-  }
-
-  for (const f of Object.keys(metaObj)) {
-    if (!picked.has(f) && !shouldIgnoreMeta(metaObj[f])) {
-      out.push({ field: f, meta: metaObj[f] })
-    }
-  }
-
-  return out
+  return orderCmsBlockEditorMeta({
+    meta: metaObj,
+    orderedFields,
+    includeUnreferenced: templateIsV2,
+    shouldIgnore: shouldIgnoreMeta,
+  })
 })
 
 const hasEditableArrayControls = (entry) => {
@@ -2676,18 +2672,6 @@ const addToArray = async (field) => {
   state.reload = false
 }
 
-const loadingRender = (content) => {
-  if (state.loading) {
-    content = content.replace(/\{\{\s*loading\s*\}\}/g, '')
-    content = content.replace(/\{\{\s*loaded\s*\}\}/g, 'hidden')
-  }
-  else {
-    content = content.replace(/\{\{\s*loading\s*\}\}/g, 'hidden')
-    content = content.replace(/\{\{\s*loaded\s*\}\}/g, '')
-  }
-  return content
-}
-
 const postsList = computed(() => {
   const postsCollectionPath = sitePostsCollectionPath.value
   return Object.values(edgeFirebase.data[postsCollectionPath] || {}).sort((a, b) => {
@@ -2723,21 +2707,7 @@ const getTagsFromPosts = computed(() => {
     >
       <!-- Content -->
       <div class="relative z-0" :class="props.editMode && props.overrideClicksInEditMode ? 'pointer-events-none' : ''">
-        <edge-cms-block-api :site-id="props.siteId" :route-last-segment="props.routeLastSegment" :theme="props.theme" :content="resolvedRenderBlock.content" :template-version="resolvedRenderBlock.templateVersion" :template="resolvedRenderBlock.template" :schema="resolvedRenderBlock.schema" :data-sources="resolvedRenderBlock.dataSources" :values="resolvedRenderBlock.values" :meta="resolvedRenderBlock.meta" :viewport-mode="props.viewportMode" :render-context="effectiveRenderContext" :standalone-preview="props.standalonePreview" @pending="state.loading = $event" />
-        <edge-cms-block-render
-          v-if="state.loading"
-          :content="loadingRender(resolvedRenderBlock.content)"
-          :template-version="resolvedRenderBlock.templateVersion"
-          :template="loadingRender(resolvedRenderBlock.template)"
-          :schema="resolvedRenderBlock.schema"
-          :data-sources="resolvedRenderBlock.dataSources"
-          :values="resolvedRenderBlock.values"
-          :meta="resolvedRenderBlock.meta"
-          :theme="props.theme"
-          :viewport-mode="props.viewportMode"
-          :render-context="effectiveRenderContext"
-          :standalone-preview="props.standalonePreview"
-        />
+        <edge-cms-block-api :site-id="props.siteId" :route-last-segment="props.routeLastSegment" :theme="props.theme" :content="resolvedRenderBlock.content" :template-version="resolvedRenderBlock.templateVersion" :template="resolvedRenderBlock.template" :schema="resolvedRenderBlock.schema" :data-sources="resolvedRenderBlock.dataSources" :values="resolvedRenderBlock.values" :meta="resolvedRenderBlock.meta" :viewport-mode="props.viewportMode" :render-context="effectiveRenderContext" :standalone-preview="props.standalonePreview" />
       </div>
       <div v-if="showProtectedEditOverlay" class="pointer-events-none absolute inset-0 z-[9998] bg-black/20">
         <div class="absolute left-2 top-2 inline-flex items-center gap-1 rounded bg-black/75 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-white">
@@ -3263,6 +3233,7 @@ const getTagsFromPosts = computed(() => {
                                               :schema="schemaItem"
                                               :site="props.siteId"
                                               :show-richtext-image-toggle="showRichtextImageToggle"
+                                              :show-richtext-article-tools="showRichtextArticleTools"
                                               :label="genTitleFromField(schemaItem)"
                                             />
                                           </template>
@@ -3372,6 +3343,7 @@ const getTagsFromPosts = computed(() => {
                                                 :field="`${schemaItem.field}-${index}-entry`"
                                                 :site="props.siteId"
                                                 :show-richtext-image-toggle="showRichtextImageToggle"
+                                                :show-richtext-article-tools="showRichtextArticleTools"
                                                 :label="genTitleFromField(schemaItem)"
                                               />
                                             </Card>
@@ -3403,6 +3375,7 @@ const getTagsFromPosts = computed(() => {
                           :site="props.siteId"
                           :richtext-auto-height="editableMetaEntries.length === 1 && entry.meta?.type === 'richtext'"
                           :show-richtext-image-toggle="showRichtextImageToggle"
+                          :show-richtext-article-tools="showRichtextArticleTools"
                           :label="genTitleFromField(entry)"
                           :placeholder="entry.meta?.placeholder || ''"
                         />
@@ -3652,6 +3625,7 @@ const getTagsFromPosts = computed(() => {
                         :site="props.siteId"
                         :richtext-auto-height="editableMetaEntries.length === 1 && entry.meta?.type === 'richtext'"
                         :show-richtext-image-toggle="showRichtextImageToggle"
+                        :show-richtext-article-tools="showRichtextArticleTools"
                         :label="genTitleFromField(entry)"
                         :placeholder="entry.meta?.placeholder || ''"
                       />

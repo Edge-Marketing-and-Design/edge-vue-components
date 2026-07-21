@@ -1,5 +1,10 @@
 const { onMessagePublished, db, Firestore, logger } = require('../config.js')
 const kv = require('./kvClient')
+const { runKvMirrorFollowup } = require('./kvMirrorFollowups')
+const {
+  isSourceStateCurrent,
+  materializeCollectionVersionOperation,
+} = require('./kvMirrorProtocol')
 
 const KV_RETRY_TOPIC = process.env.KV_RETRY_TOPIC || 'kv-mirror-retry'
 const KV_RETRY_MAX_ATTEMPTS = Number(process.env.KV_RETRY_MAX_ATTEMPTS || 8)
@@ -53,6 +58,34 @@ async function runKvOperation(payload) {
   if (!op || !key)
     throw new Error('Invalid KV retry payload: missing op/key')
 
+  if (op === 'finalizeMirror') {
+    if (!await isSourceStateCurrent(db, payload?.sourceState)) {
+      logger.log('Discarded superseded KV mirror finalization', {
+        key,
+        sourcePath: payload?.sourceState?.path || '',
+      })
+      return
+    }
+
+    const phases = Array.isArray(payload?.phases)
+      ? payload.phases
+      : [Array.isArray(payload?.operations) ? payload.operations : []]
+    const versionOperation = payload?.versionOperation
+    if (!versionOperation || typeof versionOperation !== 'object')
+      throw new Error('Invalid mirror finalization payload: missing version operation')
+    for (const phase of phases) {
+      for (const operation of Array.isArray(phase) ? phase : [])
+        await runKvOperation(operation)
+    }
+    if (payload?.afterOperation)
+      await runKvMirrorFollowup(payload.afterOperation)
+    return await runKvOperation(versionOperation)
+  }
+
+  if (op === 'putCollectionVersion') {
+    const materialized = materializeCollectionVersionOperation(payload)
+    return kv.put(materialized.key, materialized.value, materialized.opts)
+  }
   if (op === 'put')
     return kv.put(key, payload.value, payload.opts)
   if (op === 'putIndexMeta')

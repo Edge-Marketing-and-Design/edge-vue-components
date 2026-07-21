@@ -2,6 +2,7 @@
 import { Code2, Download, HelpCircle, History, Loader2, Maximize2, Monitor, Plus, RotateCcw, Smartphone, Tablet, Trash2, Wand2 } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
+import { clearCmsTemplateV2LibraryState } from '../../composables/useCmsTemplateRuntimeMeta'
 const props = defineProps({
   blockId: {
     type: String,
@@ -39,6 +40,8 @@ const state = reactive({
   previewScale: '100',
   previewAuthLoggedIn: true,
   previewBlock: null,
+  previewRefreshRevision: 0,
+  previewTemplateDirty: false,
   previewSourceValues: {},
   previewRenderContext: null,
   editorWorkingDoc: null,
@@ -247,6 +250,7 @@ const ensureTemplateV2Fields = (doc) => {
     doc.schema = {}
   if (!doc.dataSources || typeof doc.dataSources !== 'object' || Array.isArray(doc.dataSources))
     doc.dataSources = {}
+  clearCmsTemplateV2LibraryState(doc)
 }
 
 const formatJson = (value) => {
@@ -608,15 +612,17 @@ const createTemplateV2DataSourceWizardDraftFromSource = (sourceName, source = {}
   }
 }
 
-const openTemplateV2DataSourceWizardForEdit = (sourceName, source) => {
+const openTemplateV2DataSourceWizardForEdit = async (sourceName, source) => {
+  state.dataSourceWizardOpen = false
+  state.dataSourceWizardDraft = null
+  state.dataSourceWizardKey += 1
+  await nextTick()
   state.dataSourceWizardStep = 1
   state.dataSourceWizardError = ''
-  state.dataSourceWizardDraft = null
   state.dataSourceWizardMode = 'edit'
   state.dataSourceWizardOriginalName = sourceName
   state.dataSourceWizardDraft = createTemplateV2DataSourceWizardDraftFromSource(sourceName, source)
   state.dataSourceWizardActiveControlIndex = -1
-  state.dataSourceWizardKey += 1
   state.dataSourceWizardOpen = true
 }
 
@@ -703,12 +709,21 @@ const removeTemplateV2WizardControlOptionRow = (control, index) => {
   control.options.splice(index, 1)
 }
 
+const parseIndexedLookupValue = (value) => {
+  const normalized = String(value ?? '').trim()
+  if (normalized === 'true')
+    return true
+  if (normalized === 'false')
+    return false
+  return normalized
+}
+
 const mapRowsToObject = (rows = []) => {
   return rows.reduce((acc, row) => {
     const key = String(row?.key || '').trim()
     if (!key)
       return acc
-    acc[key] = String(row?.value ?? '')
+    acc[key] = parseIndexedLookupValue(row?.value)
     return acc
   }, {})
 }
@@ -2448,9 +2463,34 @@ function syncWorkingTemplateContent(workingDoc, value) {
   if (isWorkingTemplateV2Doc(workingDoc))
     workingDoc.template = value
 
-  const parsed = blockModel(value || '')
+  state.previewTemplateDirty = true
+}
+
+function syncParsedWorkingDocState(workingDoc, parsed) {
+  let normalizedTypes = normalizeBlockTypes(workingDoc?.type)
+  if (!normalizedTypes.length)
+    normalizedTypes = ['Page']
+  state.workingDoc = {
+    ...parsed,
+    type: normalizedTypes,
+    templateVersion: workingDoc?.templateVersion,
+    template: workingDoc?.template,
+    schema: workingDoc?.schema,
+    dataSources: workingDoc?.dataSources,
+    values: isWorkingTemplateV2Doc(workingDoc) ? undefined : parsed.values,
+  }
+}
+
+function refreshWorkingTemplatePreview(workingDoc, { force = false } = {}) {
+  if (!workingDoc || (!force && !state.previewTemplateDirty))
+    return
+
+  const parsed = blockModel(workingDoc.content || '')
+  syncParsedWorkingDocState(workingDoc, parsed)
   state.previewBlock = buildPreviewBlock(workingDoc, parsed)
   state.previewSourceValues = edgeGlobal.dupObject(isWorkingTemplateV2Doc(workingDoc) ? {} : (parsed.values || {}))
+  state.previewTemplateDirty = false
+  state.previewRefreshRevision += 1
 }
 
 const theme = computed(() => {
@@ -2479,7 +2519,7 @@ const previewThemeRenderKey = computed(() => {
   const themeId = String(edgeGlobal.edgeState.blockEditorTheme || 'no-theme')
   const siteId = String(edgeGlobal.edgeState.blockEditorSite || 'no-site')
   const previewType = normalizePreviewType(state.previewBlock?.previewType)
-  return `${themeId}:${siteId}:${state.previewViewport}:${previewType}`
+  return `${themeId}:${siteId}:${state.previewViewport}:${previewType}:${state.previewRefreshRevision}`
 })
 
 const headObject = computed(() => {
@@ -2512,6 +2552,8 @@ const editorDocUpdates = (workingDoc) => {
   if (workingDoc && !areTypeArraysEqual(workingDoc.type, normalizedTypes))
     workingDoc.type = normalizedTypes
   state.editorWorkingDoc = workingDoc || null
+  if (state.previewTemplateDirty)
+    return
   const parsed = blockModel(workingDoc?.content || '')
   state.workingDoc = {
     ...parsed,
@@ -2524,6 +2566,7 @@ const editorDocUpdates = (workingDoc) => {
   }
   state.previewBlock = buildPreviewBlock(workingDoc, parsed)
   state.previewSourceValues = edgeGlobal.dupObject(isWorkingTemplateV2Doc(workingDoc) ? {} : (parsed.values || {}))
+  state.previewTemplateDirty = false
 }
 
 const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -2564,6 +2607,7 @@ const syncEditorStateFromBlockDoc = (doc) => {
   }
   state.previewBlock = buildPreviewBlock(restoredDoc, parsed)
   state.previewSourceValues = edgeGlobal.dupObject(isWorkingTemplateV2Doc(restoredDoc) ? {} : (parsed.values || {}))
+  state.previewTemplateDirty = false
   state.editorHasUnsavedChanges = false
 
   const collectionPath = `${edgeGlobal.edgeState.organizationDocPath}/blocks`
@@ -2626,6 +2670,7 @@ const applyThemeDefaultForBlock = () => {
 
 watch(() => props.blockId, () => {
   state.themeDefaultAppliedForBlockId = ''
+  state.previewTemplateDirty = false
 }, { immediate: true })
 
 watch([availableThemeIds, currentBlockAllowedThemeIds, () => props.blockId], async () => {
@@ -3233,6 +3278,11 @@ const clearTemplateConversionAfterSave = async (payload) => {
   }
 }
 
+const handleBlockSaved = async (payload) => {
+  refreshWorkingTemplatePreview(state.editorWorkingDoc, { force: true })
+  await clearTemplateConversionAfterSave(payload)
+}
+
 const exportCurrentBlock = async () => {
   const doc = blocks.value?.[props.blockId]
   if (!doc || !doc.docId) {
@@ -3264,7 +3314,7 @@ const exportCurrentBlock = async () => {
       :working-doc-overrides="editorWorkingDocOverrides"
       @working-doc="editorDocUpdates"
       @unsaved-changes="handleUnsavedChanges"
-      @saved="clearTemplateConversionAfterSave"
+      @saved="handleBlockSaved"
     >
       <template #header-start="slotProps">
         <FilePenLine class="mr-2" />
@@ -4415,25 +4465,25 @@ const exportCurrentBlock = async () => {
                     <div v-if="state.dataSourceWizardDraft.type === 'api'" class="grid gap-3 md:grid-cols-2">
                       <edge-shad-input
                         v-model="state.dataSourceWizardDraft.api"
-                        name="dataSourceWizardApi"
+                        :name="`dataSourceWizardApi-${state.dataSourceWizardKey}`"
                         label="API URL"
                         placeholder="https://api.example.com/items"
                       />
                       <edge-shad-input
                         v-model="state.dataSourceWizardDraft.apiField"
-                        name="dataSourceWizardApiField"
+                        :name="`dataSourceWizardApiField-${state.dataSourceWizardKey}`"
                         label="Response Field"
                         placeholder="data"
                       />
                       <edge-shad-input
                         v-model="state.dataSourceWizardDraft.apiQuery"
-                        name="dataSourceWizardApiQuery"
+                        :name="`dataSourceWizardApiQuery-${state.dataSourceWizardKey}`"
                         label="Static API Query"
                         placeholder="?limit=6"
                       />
                       <edge-shad-input
                         v-model="state.dataSourceWizardDraft.limit"
-                        name="dataSourceWizardApiLimit"
+                        :name="`dataSourceWizardApiLimit-${state.dataSourceWizardKey}`"
                         type="number"
                         label="Limit"
                         placeholder="6"
@@ -4444,25 +4494,25 @@ const exportCurrentBlock = async () => {
                       <div class="grid gap-3 md:grid-cols-2">
                         <edge-shad-input
                           v-model="state.dataSourceWizardDraft.path"
-                          name="dataSourceWizardPath"
+                          :name="`dataSourceWizardPath-${state.dataSourceWizardKey}`"
                           label="Collection Path"
                           placeholder="items"
                         />
                         <edge-shad-input
                           v-model="state.dataSourceWizardDraft.baseKey"
-                          name="dataSourceWizardBaseKey"
+                          :name="`dataSourceWizardBaseKey-${state.dataSourceWizardKey}`"
                           label="Base Key Override"
                           placeholder="Optional index key"
                         />
                         <edge-shad-select
                           v-model="state.dataSourceWizardDraft.uniqueKey"
-                          name="dataSourceWizardUniqueKey"
+                          :name="`dataSourceWizardUniqueKey-${state.dataSourceWizardKey}`"
                           label="Where is the collection located?"
                           :items="v2DataSourceScopeOptions"
                         />
                         <edge-shad-input
                           v-model="state.dataSourceWizardDraft.limit"
-                          name="dataSourceWizardCollectionLimit"
+                          :name="`dataSourceWizardCollectionLimit-${state.dataSourceWizardKey}`"
                           type="number"
                           label="Limit"
                           placeholder="80"
@@ -4473,7 +4523,7 @@ const exportCurrentBlock = async () => {
                       </div>
                       <edge-shad-input
                         v-model="state.dataSourceWizardDraft.canonicalLookupKey"
-                        name="dataSourceWizardCanonicalLookup"
+                        :name="`dataSourceWizardCanonicalLookup-${state.dataSourceWizardKey}`"
                         label="Fetch Exact Record Key"
                         placeholder="{orgId}:{siteId}"
                       />
@@ -4500,9 +4550,9 @@ const exportCurrentBlock = async () => {
                           Use these when the field is indexed, like category = Featured or slug = route segment. This narrows the fetch before records are returned.
                         </p>
                         <div class="space-y-2">
-                          <div v-for="(row, index) in state.dataSourceWizardDraft.queryItems" :key="`wizard-query-${index}`" class="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
-                            <edge-shad-input v-model="row.key" :name="`wizardQueryKey-${index}`" label="Field" placeholder="category" />
-                            <edge-shad-input v-model="row.value" :name="`wizardQueryValue-${index}`" label="Value" placeholder="Featured" />
+                          <div v-for="(row, index) in state.dataSourceWizardDraft.queryItems" :key="`wizard-query-${state.dataSourceWizardKey}-${index}`" class="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+                            <edge-shad-input v-model="row.key" :name="`wizardQueryKey-${state.dataSourceWizardKey}-${index}`" label="Field" placeholder="category" />
+                            <edge-shad-input v-model="row.value" :name="`wizardQueryValue-${state.dataSourceWizardKey}-${index}`" label="Value" placeholder="Featured" />
                             <edge-shad-button type="button" size="icon" variant="ghost" class="mt-7 h-9 w-9 text-red-600" aria-label="Remove query item" @click="removeTemplateV2WizardMapRow('queryItems', index)">
                               <Trash2 class="h-4 w-4" />
                             </edge-shad-button>
@@ -4522,9 +4572,9 @@ const exportCurrentBlock = async () => {
                           Use these only to make editor previews work when a route token like <code>{routeLastSegment}</code> does not exist in the block editor.
                         </p>
                         <div class="space-y-2">
-                          <div v-for="(row, index) in state.dataSourceWizardDraft.previewQueryItems" :key="`wizard-preview-query-${index}`" class="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
-                            <edge-shad-input v-model="row.key" :name="`wizardPreviewQueryKey-${index}`" label="Field" placeholder="slug" />
-                            <edge-shad-input v-model="row.value" :name="`wizardPreviewQueryValue-${index}`" label="Preview Value" placeholder="sample-item" />
+                          <div v-for="(row, index) in state.dataSourceWizardDraft.previewQueryItems" :key="`wizard-preview-query-${state.dataSourceWizardKey}-${index}`" class="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+                            <edge-shad-input v-model="row.key" :name="`wizardPreviewQueryKey-${state.dataSourceWizardKey}-${index}`" label="Field" placeholder="slug" />
+                            <edge-shad-input v-model="row.value" :name="`wizardPreviewQueryValue-${state.dataSourceWizardKey}-${index}`" label="Preview Value" placeholder="sample-item" />
                             <edge-shad-button type="button" size="icon" variant="ghost" class="mt-7 h-9 w-9 text-red-600" aria-label="Remove preview query item" @click="removeTemplateV2WizardMapRow('previewQueryItems', index)">
                               <Trash2 class="h-4 w-4" />
                             </edge-shad-button>
@@ -4553,13 +4603,13 @@ const exportCurrentBlock = async () => {
                           >
                             <edge-shad-input
                               v-model="row.field"
-                              :name="`wizardFilterField-${index}`"
+                              :name="`wizardFilterField-${state.dataSourceWizardKey}-${index}`"
                               label="Field"
                               placeholder="status"
                             />
                             <edge-shad-select
                               v-model="row.operator"
-                              :name="`wizardFilterOperator-${index}`"
+                              :name="`wizardFilterOperator-${state.dataSourceWizardKey}-${index}`"
                               label="Operator"
                               :items="v2DataSourceFilterOperatorOptions"
                             />
@@ -4577,7 +4627,7 @@ const exportCurrentBlock = async () => {
                               <edge-shad-select-tags
                                 v-if="isV2DataSourceFilterArrayOperator(row.operator)"
                                 :model-value="getV2DataSourceFilterArrayValues(row.value)"
-                                :name="`wizardFilterValues-${index}`"
+                                :name="`wizardFilterValues-${state.dataSourceWizardKey}-${index}`"
                                 :label="getV2DataSourceFilterValueLabel(row.operator)"
                                 :placeholder="getV2DataSourceFilterValuePlaceholder(row.operator)"
                                 :items="[]"
@@ -4588,7 +4638,7 @@ const exportCurrentBlock = async () => {
                               <edge-shad-input
                                 v-else
                                 v-model="row.value"
-                                :name="`wizardFilterValue-${index}`"
+                                :name="`wizardFilterValue-${state.dataSourceWizardKey}-${index}`"
                                 :label="getV2DataSourceFilterValueLabel(row.operator)"
                                 :placeholder="getV2DataSourceFilterValuePlaceholder(row.operator)"
                               />
@@ -4622,13 +4672,13 @@ const exportCurrentBlock = async () => {
                           >
                             <edge-shad-input
                               v-model="row.field"
-                              :name="`wizardSortField-${index}`"
+                              :name="`wizardSortField-${state.dataSourceWizardKey}-${index}`"
                               label="Field"
                               placeholder="name"
                             />
                             <edge-shad-select
                               v-model="row.direction"
-                              :name="`wizardSortDirection-${index}`"
+                              :name="`wizardSortDirection-${state.dataSourceWizardKey}-${index}`"
                               label="Direction"
                               :items="v2DataSourceSortDirectionOptions"
                             />
@@ -4691,19 +4741,19 @@ const exportCurrentBlock = async () => {
                           <div class="grid gap-3 md:grid-cols-[1fr_1fr_150px_auto]">
                             <edge-shad-input
                               v-model="control.key"
-                              :name="`wizardControlKey-${controlIndex}`"
+                              :name="`wizardControlKey-${state.dataSourceWizardKey}-${controlIndex}`"
                               :label="getV2DataSourceControlKeyLabel(state.dataSourceWizardDraft.type)"
                               :placeholder="getV2DataSourceControlKeyPlaceholder(state.dataSourceWizardDraft.type)"
                             />
                             <edge-shad-input
                               v-model="control.title"
-                              :name="`wizardControlTitle-${controlIndex}`"
+                              :name="`wizardControlTitle-${state.dataSourceWizardKey}-${controlIndex}`"
                               label="Label"
                               placeholder="Category"
                             />
                             <edge-shad-select
                               v-model="control.input"
-                              :name="`wizardControlInput-${controlIndex}`"
+                              :name="`wizardControlInput-${state.dataSourceWizardKey}-${controlIndex}`"
                               label="Type"
                               :items="v2DataSourceControlTypeOptions"
                               @update:model-value="updateV2DataSourceControlInput(control, $event)"
@@ -4725,14 +4775,14 @@ const exportCurrentBlock = async () => {
                           <div class="mt-3 grid gap-3 md:grid-cols-2">
                             <edge-shad-input
                               v-model="control.placeholder"
-                              :name="`wizardControlPlaceholder-${controlIndex}`"
+                              :name="`wizardControlPlaceholder-${state.dataSourceWizardKey}-${controlIndex}`"
                               label="Placeholder"
                               placeholder="Optional placeholder"
                             />
                             <edge-shad-select
                               v-if="control.input === 'select'"
                               v-model="control.optionMode"
-                              :name="`wizardControlOptionMode-${controlIndex}`"
+                              :name="`wizardControlOptionMode-${state.dataSourceWizardKey}-${controlIndex}`"
                               label="Select Options"
                               :items="v2DataSourceControlOptionModeOptions"
                               @update:model-value="updateV2DataSourceControlOptionMode(control, $event)"
@@ -4741,14 +4791,14 @@ const exportCurrentBlock = async () => {
                           <div v-if="control.input === 'select' && control.optionMode === 'collection'" class="mt-3 grid gap-3 md:grid-cols-3">
                             <edge-shad-input
                               v-model="control.optionsCollection"
-                              :name="`wizardControlOptionsCollection-${controlIndex}`"
+                              :name="`wizardControlOptionsCollection-${state.dataSourceWizardKey}-${controlIndex}`"
                               label="Options Collection"
                               placeholder="categories"
                             />
                             <div class="space-y-1">
                               <edge-shad-input
                                 v-model="control.optionsKey"
-                                :name="`wizardControlOptionsKey-${controlIndex}`"
+                                :name="`wizardControlOptionsKey-${state.dataSourceWizardKey}-${controlIndex}`"
                                 label="Label Field"
                                 placeholder="label"
                               />
@@ -4759,7 +4809,7 @@ const exportCurrentBlock = async () => {
                             <div class="space-y-1">
                               <edge-shad-input
                                 v-model="control.optionsValue"
-                                :name="`wizardControlOptionsValue-${controlIndex}`"
+                                :name="`wizardControlOptionsValue-${state.dataSourceWizardKey}-${controlIndex}`"
                                 label="Value Field"
                                 placeholder="value"
                               />
@@ -4776,13 +4826,13 @@ const exportCurrentBlock = async () => {
                             >
                               <edge-shad-input
                                 v-model="option.label"
-                                :name="`wizardControlOptionLabel-${controlIndex}-${optionIndex}`"
+                                :name="`wizardControlOptionLabel-${state.dataSourceWizardKey}-${controlIndex}-${optionIndex}`"
                                 label="Option Label"
                                 placeholder="Featured"
                               />
                               <edge-shad-input
                                 v-model="option.value"
-                                :name="`wizardControlOptionValue-${controlIndex}-${optionIndex}`"
+                                :name="`wizardControlOptionValue-${state.dataSourceWizardKey}-${controlIndex}-${optionIndex}`"
                                 label="Option Value"
                                 placeholder="featured"
                               />
@@ -5117,6 +5167,18 @@ const exportCurrentBlock = async () => {
             <div class="w-1/2 space-y-2">
               <div class="flex items-center gap-2">
                 <span class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Viewport</span>
+                <edge-shad-button
+                  v-if="state.previewTemplateDirty"
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  class="h-7 shrink-0 gap-1.5 border-amber-500 px-2.5 text-xs text-amber-800 hover:bg-amber-50 hover:text-amber-900 dark:border-amber-400 dark:text-amber-200 dark:hover:bg-amber-950"
+                  aria-label="Changes pending: refresh developer block preview"
+                  @click="refreshWorkingTemplatePreview(slotProps.workingDoc, { force: true })"
+                >
+                  <RotateCcw class="h-3.5 w-3.5" aria-hidden="true" />
+                  Changes Pending: Refresh
+                </edge-shad-button>
                 <div class="ml-auto flex shrink-0 items-center gap-2">
                   <div class="flex shrink-0 items-center gap-1 flex-nowrap">
                     <edge-shad-select
@@ -5539,7 +5601,7 @@ const exportCurrentBlock = async () => {
                       <div>Use an API source for an outside URL that returns JSON.</div>
                       <div>Use a Collection source for records in the site or organization data store.</div>
                       <div>Use Indexed Lookup Values when a field is indexed and can narrow the fetch before records are returned.</div>
-                      <div>Use After-Fetch Filters only when the index is missing or when the filter cannot be done as an indexed lookup.</div>
+                      <div>Use After-Fetch Filters for comparisons that cannot be done as an exact indexed lookup. The filtered field must be present in KV index metadata on the public frontend.</div>
                       <div>Controls are optional fields shown when someone edits the block on a page. They can change API query string values or collection lookup values.</div>
                     </div>
                   </section>
@@ -5857,7 +5919,7 @@ const exportCurrentBlock = async () => {
   ]
 },</code></pre>
                     <p class="text-sm text-foreground">
-                      If you want fast search/filtering in the CMS, you also need a KV mirror in Firebase Functions.
+                      If you want the published frontend to search/filter the same records through Cloudflare KV, you also need a KV mirror in Firebase Functions.
                       Example (use your collection + fields):
                     </p>
                     <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>exports.onListingWritten = createKvMirrorHandlerFromFields({
@@ -5940,7 +6002,7 @@ const exportCurrentBlock = async () => {
                     <p class="text-sm text-foreground">
                       Use a Collection Data Source when records come from the site or organization data store. Add it from the Data Sources tab, then loop with <code>source("name")</code>.
                     </p>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{#for person in source("teamMembers")}}
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{#for person in source("teamMembers", { canonical: true })}}
   &lt;article&gt;
     &lt;h3&gt;{{ person.name }}&lt;/h3&gt;
     &lt;p&gt;{{ person.role }}&lt;/p&gt;
@@ -5967,7 +6029,9 @@ const exportCurrentBlock = async () => {
                     <div class="text-sm text-foreground space-y-1">
                       <div><code>path</code> is under <code>organizations/{orgId}</code>.</div>
                       <div><code>queryItems</code> should be the first choice for indexed lookups so the candidate list is narrowed before records are returned.</div>
-                      <div><code>query</code> is an after-fetch filter. Use it only when the index is missing or the condition cannot be expressed as a lookup value.</div>
+                      <div><code>query</code> is an after-fetch filter. Use it for conditions that cannot be expressed as an exact lookup value, and mirror every filtered field into KV metadata for frontend rendering.</div>
+                      <div>Add <code>canonical: true</code> to <code>source(...)</code> when an indexed query can return multiple records and the Template needs complete record fields or relationship arrays that are not stored in index metadata.</div>
+                      <div><code>canonical: true</code> queries the index first and then resolves every surviving result. It is different from <code>canonicalLookup</code>, which is for an exact document key or array of keys you already have.</div>
                       <div><code>uniqueKey</code> supports runtime tokens such as <code>{orgId}</code> and <code>{siteId}</code>. It is resolved in memory for runtime fetches and does not need to be persisted as a concrete value in the saved block.</div>
                       <div><code>collection.canonicalLookup.key</code> is optional. It also supports runtime tokens and CMS preview resolves them in memory before fetching the matching document directly.</div>
                       <div><code>order</code> controls the final sort order.</div>
@@ -6000,7 +6064,7 @@ const exportCurrentBlock = async () => {
 }</code></pre>
                     <div class="text-sm text-foreground space-y-1">
                       <div><code>api</code> is the base URL without the query string.</div>
-                      <div><code>apiQuery</code> is appended to the URL.</div>
+                      <div><code>apiQuery</code> is appended in Hub preview. The current public Template v2 resolver does not consume it, so put required fixed parameters in <code>api</code> or use <code>queryItems</code> until the frontend package supports the same behavior.</div>
                       <div><code>apiField</code> tells the block which array to read from the response.</div>
                     </div>
                     <p class="text-sm text-foreground">
@@ -6055,12 +6119,13 @@ const exportCurrentBlock = async () => {
                     <ol class="list-decimal pl-5 text-sm text-foreground space-y-1">
                       <li>Before runtime fetches, tokens in <code>query</code>, <code>queryItems</code>, <code>uniqueKey</code>, and <code>canonicalLookup.key</code> are resolved in memory only. Supported tokens include <code>{orgId}</code>, <code>{siteId}</code>, and <code>{routeLastSegment}</code>. The saved block keeps the original tokens.</li>
                       <li>Each entry in <code>queryItems</code> makes an indexed lookup through the KV index.</li>
-                      <li>For a query key to work, that field must be included in your KV mirror config (in <code>indexKeys</code> and in <code>metadataKeys</code> for list rendering).</li>
+                      <li>For a <code>queryItems</code> key to work, that field must be included in the KV mirror's <code>indexKeys</code>. Fields used by after-fetch <code>query</code> or <code>order</code> must be in <code>metadataKeys</code>.</li>
                       <li>If you have more than one <code>queryItems</code> field, the runtime unions those matches into one candidate list (OR behavior at this stage).</li>
                       <li>Duplicate records are removed by <code>canonical</code>, so the same item only shows up once.</li>
-                      <li>Only use <code>query</code> when a needed filter cannot use <code>queryItems</code>, usually because the field is not indexed yet or the condition cannot be represented as a KV indexed lookup.</li>
+                      <li>Only use <code>query</code> when the condition cannot be represented as an exact KV indexed lookup. It filters index metadata and is not a substitute for missing mirror metadata.</li>
                       <li>After that, <code>query</code> filters candidates in JavaScript; all query clauses must pass for a record to survive.</li>
                       <li>Finally, <code>order</code> sorts the remaining records.</li>
+                      <li>If the source uses <code>canonical: true</code>, every surviving indexed result is resolved to its complete canonical record before the Template loop runs. Without it, a multi-result indexed source can contain only index metadata.</li>
                       <li>The finished list is available in the Template through <code>source("dataSourceName")</code>.</li>
                       <li>If the source cannot be loaded, the block falls back to the source <code>value</code>, or to an empty array if there is no fallback value.</li>
                     </ol>
@@ -6081,10 +6146,11 @@ const exportCurrentBlock = async () => {
                     </p>
                     <div class="text-sm text-foreground space-y-1">
                       <div>1. Put every possible list-limiting indexed filter in <code>queryItems</code>. These should cut the candidate list down before KV returns records.</div>
-                      <div>2. Use <code>collection.query</code> only for fields missing from the KV index or for conditions <code>queryItems</code> cannot express. Think of this as an exception path, not the default.</div>
-                      <div>3. Use <code>collection.canonicalLookup.key</code> when you already know the exact document to fetch.</div>
-                      <div>4. Put final sorting in <code>collection.order</code>.</div>
-                      <div>5. Treat <code>queryOptions</code> as the editor UI for choosing filters. At runtime, the actual filtering is driven by <code>collection.query</code> and <code>queryItems</code>.</div>
+                      <div>2. Use <code>collection.query</code> for comparisons <code>queryItems</code> cannot express. The filtered fields must be available in KV metadata before canonical records are loaded.</div>
+                      <div>3. Add <code>canonical: true</code> to the indexed <code>source(...)</code> call when the Template needs every complete matched record.</div>
+                      <div>4. Use <code>collection.canonicalLookup.key</code> instead when you already know the exact document key or key array to fetch.</div>
+                      <div>5. Put final sorting in <code>collection.order</code>.</div>
+                      <div>6. Treat <code>queryOptions</code> as the editor UI for choosing filters. At runtime, the actual filtering is driven by <code>collection.query</code> and <code>queryItems</code>.</div>
                     </div>
                     <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{
   "eventsList": {
@@ -6106,6 +6172,7 @@ const exportCurrentBlock = async () => {
                       <div><code>queryItems.tags</code> does the indexed lookup first.</div>
                       <div><code>collection.query</code> then keeps only records that are actually events and already in the past.</div>
                       <div><code>collection.order</code> sorts those remaining records by start date.</div>
+                      <div>If the Template needs complete event fields that are not included in index metadata, loop with <code>source("eventsList", { canonical: true })</code>.</div>
                     </div>
                     <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{
   "siteDoc": {
@@ -6129,11 +6196,11 @@ const exportCurrentBlock = async () => {
                       Conditionals (Inside Arrays)
                     </h3>
                     <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{#for property in source("properties")}}
-  {{#if property.price}}
+  {{{#if {"cond":"property.price"} }}}
     &lt;div&gt;Price: {{ money(property.price) }}&lt;/div&gt;
-  {{#else}}
+  {{{#else}}}
     &lt;div&gt;Contact for pricing&lt;/div&gt;
-  {{/if}}
+  {{{/if}}}
 {{/for}}</code></pre>
                     <div class="text-sm text-foreground space-y-1">
                       <div>Prefer simple Template v2 conditionals around the field that controls the display.</div>
@@ -6633,6 +6700,33 @@ const exportCurrentBlock = async () => {
                     </p>
                   </section>
 
+                  <section class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Email Routing by User ID
+                    </h3>
+                    <div class="text-sm text-foreground space-y-2">
+                      <p>
+                        The destination email is trusted CMS data, not submitted form data. Set <code>emailTo</code> as a block Input value.
+                        Do not add an <code>emailTo</code> hidden input. A valid published block <code>emailTo</code> is used before the site's
+                        <code>contactEmail</code> fallback.
+                      </p>
+                      <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{
+  "emailTo": { "type": "text", "label": "Email To", "value": "" }
+}</code></pre>
+                      <p>
+                        To route a user-specific form, submit the user's registered <code>userId</code> in a hidden input. Use a real
+                        registered user ID from the form's data context; do not put an email address in this field.
+                      </p>
+                      <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;input type="hidden" name="userId" value="{{ userId }}" /&gt;</code></pre>
+                      <div class="space-y-1">
+                        <div>The server requires an exact organization-user match for the submitted <code>userId</code>.</div>
+                        <div>Email resolves from the matched user's <code>meta.contactEmail</code>, then <code>meta.email</code>.</div>
+                        <div>A valid match overrides block <code>emailTo</code> and site <code>contactEmail</code>.</div>
+                        <div>If the user is missing or has no valid email, normal block and site email fallbacks remain in effect.</div>
+                      </div>
+                    </div>
+                  </section>
+
                     <section class="space-y-3">
                       <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                         Contact Form Example (Block HTML)
@@ -6676,7 +6770,7 @@ const exportCurrentBlock = async () => {
                 {{ field.fieldName }}
               &lt;/label&gt;
 
-              {{#if field.isTextarea}}
+              {{{#if {"cond":"field.isTextarea"} }}}
                 &lt;textarea
                   class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
                   data-cms-required="{{ field.fieldRequired }}"
@@ -6684,7 +6778,7 @@ const exportCurrentBlock = async () => {
                   placeholder="{{ field.fieldName }}"
                   rows="6"
                 &gt;&lt;/textarea&gt;
-              {{#else}}
+              {{{#else}}}
                 &lt;input
                   class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
                   data-cms-required="{{ field.fieldRequired }}"
@@ -6692,7 +6786,7 @@ const exportCurrentBlock = async () => {
                   name="{{ field.fieldName }}"
                   placeholder="{{ field.fieldName }}"
                 /&gt;
-              {{/if}}
+              {{{/if}}}
             &lt;/div&gt;
           {{/for}}
         &lt;/div&gt;

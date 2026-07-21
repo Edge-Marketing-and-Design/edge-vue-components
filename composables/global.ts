@@ -585,12 +585,25 @@ const cmsCollectionData = async (edgeFirebase: any, value: any, meta: any, curre
       const currentQuery = Array.isArray(meta[key].collection.query)
         ? resolveCmsCollectionTokens(dupObject(meta[key].collection.query), currentSite)
         : []
+      const missingBooleanDefaults: string[] = []
       for (const queryKey in meta[key].queryItems || {}) {
-        if (meta[key].queryItems[queryKey]) {
+        const rawValue = meta[key].queryItems[queryKey]
+        const hasValue = rawValue !== undefined && rawValue !== null && rawValue !== ''
+        if (hasValue) {
           const findIndex = currentQuery.findIndex((q: any) => q.field === queryKey)
           const queryOption = meta[key]?.queryOptions?.find((o: any) => o.field === queryKey)
           const operator = queryOption?.operator || '=='
-          let queryValue = resolveCmsCollectionTokens(meta[key].queryItems[queryKey], currentSite)
+          let queryValue = resolveCmsCollectionTokens(rawValue, currentSite)
+          if (queryValue === 'true')
+            queryValue = true
+          else if (queryValue === 'false')
+            queryValue = false
+          if (operator === '==' && queryValue === false) {
+            missingBooleanDefaults.push(queryKey)
+            if (findIndex > -1)
+              currentQuery.splice(findIndex, 1)
+            continue
+          }
           if (operator === 'array-contains-any' && !Array.isArray(queryValue))
             queryValue = [queryValue]
           const newQuery = { field: queryKey, operator, value: queryValue }
@@ -624,10 +637,17 @@ const cmsCollectionData = async (edgeFirebase: any, value: any, meta: any, curre
         }
       }
 
-      await staticSearch.getData(collectionPath, currentQuery, meta[key].collection.order, meta[key].limit)
+      const fetchLimit = missingBooleanDefaults.length ? 0 : meta[key].limit
+      await staticSearch.getData(collectionPath, currentQuery, meta[key].collection.order, fetchLimit)
 
-      const records = Object.values(staticSearch.results.data || {})
-      value[key] = applyCmsCollectionOrder(records, meta[key].collection.order)
+      let records = Object.values(staticSearch.results.data || {})
+      if (missingBooleanDefaults.length)
+        records = records.filter(record => missingBooleanDefaults.every(field => record?.[field] !== true))
+      const orderedRecords = applyCmsCollectionOrder(records, meta[key].collection.order)
+      const limit = Number(meta[key].limit)
+      value[key] = (Number.isFinite(limit) && limit > 0)
+        ? orderedRecords.slice(0, Math.floor(limit))
+        : orderedRecords
     }
   }
   return value

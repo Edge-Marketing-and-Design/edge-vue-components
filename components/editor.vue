@@ -102,7 +102,6 @@ const state = reactive({
   dialog: false,
 })
 const edgeFirebase = inject('edgeFirebase')
-// const edgeGlobal = inject('edgeGlobal')
 
 const normalizeObject = (value) => {
   if (Array.isArray(value)) {
@@ -407,20 +406,19 @@ const startCollectionSnapshots = async () => {
 
 const setCollectionData = async () => {
   const collectionPath = `${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`
-  if (!edgeFirebase.data?.[collectionPath]) {
-    if (props.docId !== 'new') {
-      const docData = await edgeFirebase.getDocData(collectionPath, props.docId)
-      state.collectionData = {
-        ...(state.collectionData || {}),
-        [props.docId]: docData,
-      }
-    }
-    else if (!state.collectionData || typeof state.collectionData !== 'object') {
-      state.collectionData = {}
+  const cachedCollection = edgeFirebase.data?.[collectionPath]
+  if (props.docId !== 'new') {
+    const docData = await edgeFirebase.getDocData(collectionPath, props.docId)
+    if (!edgeFirebase.data[collectionPath])
+      edgeFirebase.data[collectionPath] = {}
+    edgeFirebase.data[collectionPath][props.docId] = edgeGlobal.dupObject(docData)
+    state.collectionData = {
+      ...(edgeFirebase.data[collectionPath] || cachedCollection || state.collectionData || {}),
+      [props.docId]: docData,
     }
     return
   }
-  state.collectionData = edgeFirebase.data[collectionPath]
+  state.collectionData = cachedCollection || {}
 }
 
 const resetEditorState = () => {

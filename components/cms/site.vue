@@ -1,7 +1,7 @@
 <script setup lang="js">
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { CircleAlert, Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePenLine, FileStack, FileUp, FileX, FolderCog, FolderDown, FolderUp, FolderX, ImagePlus, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload, Users, X } from 'lucide-vue-next'
+import { BarChart3, CircleAlert, Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePenLine, FileStack, FileUp, FileX, FolderCog, FolderDown, FolderUp, FolderX, ImagePlus, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload, Users, X } from 'lucide-vue-next'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
 
 const props = defineProps({
@@ -21,6 +21,14 @@ const props = defineProps({
   },
 })
 const edgeFirebase = inject('edgeFirebase')
+const {
+  effectiveUserId,
+} = useDelegatedUserContext(edgeFirebase)
+const {
+  assignableUsers,
+  getAssignableUserId,
+  getAssignableUserName,
+} = useAssignableOrgUsers(edgeFirebase)
 const { saveJsonFiles } = useJsonFileSave()
 const { createDefaults: createSiteSettingsDefaults, createNewDocSchema: createSiteSettingsNewDocSchema } = useSiteSettingsTemplate()
 const { buildPageStructuredData } = useStructuredDataTemplates()
@@ -203,6 +211,7 @@ const schemas = {
         path: ['domains', 0],
       }),
     forwardApex: z.boolean().optional(),
+    canonicalDomain: z.string().max(255).optional(),
     contactEmail: z.string().optional(),
     contactPhone: z.string().optional(),
     theme: z.string({
@@ -278,10 +287,12 @@ const canEditSiteSettings = computed(() => {
 const useMenuPublishLabels = computed(() => {
   return cmsMultiOrg.value && !canEditSiteSettings.value
 })
+const analyticsDevEnabled = computed(() => edgeGlobal.edgeState.devOverride === true)
 const cmsSiteTabs = useState('cmsSiteTabs', () => ({
   pages: true,
   posts: true,
   inbox: true,
+  analytics: !cmsMultiOrg.value,
   members: false,
   media: true,
   mediaEdit: true,
@@ -291,11 +302,14 @@ const cmsTabAccess = computed(() => {
     pages: cmsSiteTabs.value?.pages !== false,
     posts: cmsSiteTabs.value?.posts !== false,
     inbox: cmsSiteTabs.value?.inbox !== false,
+    analytics: cmsMultiOrg.value
+      ? cmsSiteTabs.value?.analytics === true
+      : true,
     members: cmsSiteTabs.value?.members === true,
     media: cmsSiteTabs.value?.media !== false,
     mediaEdit: cmsSiteTabs.value?.mediaEdit === true,
   }
-  if (!normalized.pages && !normalized.posts && !normalized.inbox && !normalized.members && !normalized.media) {
+  if (!normalized.pages && !normalized.posts && !normalized.inbox && !(normalized.analytics && analyticsDevEnabled.value) && !normalized.members && !normalized.media) {
     normalized.inbox = true
   }
   return normalized
@@ -318,9 +332,19 @@ const currentUserCanEditSiteMedia = computed(() =>
   || currentOrgRoleName.value === 'site admin'
   || currentUserHasRoleAt('sites-media', ['editor', 'admin'])),
 )
+const currentUserCanViewSiteAnalytics = computed(() =>
+  cmsMultiOrg.value && (isOrgAdmin.value
+  || currentOrgRoleName.value === 'site admin'
+  || currentUserHasRoleAt('sites-analytics')),
+)
 const canViewPagesTab = computed(() => cmsTabAccess.value.pages)
 const canViewPostsTab = computed(() => cmsTabAccess.value.posts)
 const canViewInboxTab = computed(() => cmsTabAccess.value.inbox)
+const canViewAnalyticsTab = computed(() => analyticsDevEnabled.value && !isTemplateSite.value && (
+  !cmsMultiOrg.value
+  || cmsTabAccess.value.analytics
+  || currentUserCanViewSiteAnalytics.value
+))
 const canViewMediaTab = computed(() => !isTemplateSite.value && (!cmsMultiOrg.value || cmsTabAccess.value.media || currentUserCanViewSiteMedia.value))
 const canEditMediaTab = computed(() => !isTemplateSite.value && (!cmsMultiOrg.value || cmsTabAccess.value.mediaEdit || currentUserCanEditSiteMedia.value))
 const hidePublishStatusAndActions = computed(() => cmsMultiOrg.value && !canViewPagesTab.value)
@@ -328,10 +352,12 @@ const siteData = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site] || {}
 })
 const contactSpamClassifierEnabled = computed(() => siteData.value?.contactSpam?.enabled === true)
-const currentUserId = computed(() => String(edgeFirebase.user?.uid || edgeFirebase.user?.firebaseUser?.uid || '').trim())
+const currentSiteAccessUserId = computed(() => String(effectiveUserId.value || '').trim())
+const currentSiteAssignedUserIds = computed(() =>
+  Array.isArray(siteData.value?.users) ? siteData.value.users.map(userId => String(userId || '').trim()).filter(Boolean) : [],
+)
 const currentUserIsAssignedToSite = computed(() => {
-  const users = Array.isArray(siteData.value?.users) ? siteData.value.users.map(userId => String(userId || '').trim()) : []
-  return Boolean(currentUserId.value && users.includes(currentUserId.value))
+  return Boolean(currentSiteAccessUserId.value && currentSiteAssignedUserIds.value.includes(currentSiteAccessUserId.value))
 })
 const canManageRestrictedContent = computed(() => {
   if (currentUserIsAssignedToSite.value)
@@ -355,12 +381,28 @@ const defaultViewMode = computed(() => {
     return 'posts'
   if (canViewInboxTab.value)
     return 'submissions'
+  if (canViewAnalyticsTab.value)
+    return 'analytics'
   if (canViewRestrictedTab.value)
     return 'restricted'
   if (canViewMediaTab.value)
     return 'media'
   return 'pages'
 })
+
+watch(
+  [currentSiteAccessUserId, currentSiteAssignedUserIds],
+  () => {
+    if (props.site === 'new' || isAdmin.value || cmsMultiOrg.value)
+      return
+    if (!currentSiteAccessUserId.value || !Array.isArray(siteData.value?.users))
+      return
+    if (!currentUserIsAssignedToSite.value)
+      router.replace('/app/dashboard/sites?forceList=1')
+  },
+  { immediate: true },
+)
+
 const restrictedContentEnabled = computed(() => Boolean(siteData.value?.restrictedContent?.enabled))
 const publishedSiteSettings = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`]?.[props.site] || {}
@@ -760,42 +802,32 @@ watch(themeOptions, (options) => {
     edgeGlobal.edgeState.blockEditorTheme = options?.[0]?.value || ''
 }, { immediate: true, deep: true })
 
-const orgUsers = computed(() => edgeFirebase.state?.users || {})
 const userOptions = computed(() => {
-  return Object.entries(orgUsers.value || {})
-    .filter(([, user]) => Boolean(user?.userId))
-    .map(([id, user]) => ({
-      value: user?.userId,
-      label: user?.meta?.name || user?.userId || id,
+  return assignableUsers.value
+    .map(user => ({
+      value: getAssignableUserId(user),
+      label: getAssignableUserName(user),
     }))
     .sort((a, b) => a.label.localeCompare(b.label))
 })
-const authUid = computed(() => String(edgeFirebase?.user?.uid || '').trim())
+const userOptionIds = computed(() =>
+  new Set(userOptions.value.map(option => String(option.value || '').trim()).filter(Boolean)),
+)
 const currentOrgUser = computed(() => {
-  if (!authUid.value)
+  const userId = String(effectiveUserId.value || '').trim()
+  if (!userId)
     return null
-  const users = Object.values(orgUsers.value || {})
-  return users.find((user) => {
-    const userId = String(user?.userId || '').trim()
-    const docId = String(user?.docId || '').trim()
-    const uid = String(user?.uid || '').trim()
-    return userId === authUid.value || docId === authUid.value || uid === authUid.value
-  }) || null
+  return assignableUsers.value.find(user => getAssignableUserId(user) === userId) || null
 })
 const currentOrgUserId = computed(() => {
-  return String(
-    currentOrgUser.value?.userId
-    || currentOrgUser.value?.docId
-    || authUid.value
-    || '',
-  ).trim()
+  return String(currentOrgUser.value?.userId || '').trim()
 })
 const currentUserOption = computed(() => {
   if (!currentOrgUserId.value)
     return null
   return {
     value: currentOrgUserId.value,
-    label: currentOrgUser.value?.meta?.name || currentOrgUser.value?.meta?.email || currentOrgUserId.value,
+    label: getAssignableUserName(currentOrgUser.value),
   }
 })
 const shouldForceCurrentUserForNewSite = computed(() => !isAdmin.value && props.site === 'new')
@@ -827,7 +859,7 @@ const updateSiteUsersModel = (workingDoc, value) => {
     workingDoc.users = currentOrgUserId.value ? [currentOrgUserId.value] : []
     return
   }
-  workingDoc.users = normalizeUserIds(value)
+  workingDoc.users = normalizeUserIds(value).filter(userId => userOptionIds.value.has(userId))
 }
 
 const themeItemsForAllowed = (allowed, current) => {
@@ -1219,8 +1251,15 @@ const handleNewSiteSaved = async ({ docId, data, collection }) => {
   }
 }
 
-const queueSnapshotTask = (tasks, loader) => {
-  tasks.push(Promise.resolve().then(loader))
+const queueSnapshotTask = (tasks, label, loader) => {
+  tasks.push(
+    Promise.resolve()
+      .then(loader)
+      .catch((error) => {
+        console.error(`Failed to load CMS site snapshot: ${label}`, error)
+        throw error
+      }),
+  )
 }
 
 onBeforeMount(async () => {
@@ -1228,37 +1267,38 @@ onBeforeMount(async () => {
   const startupTasks = []
 
   if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/users`]) {
-    queueSnapshotTask(startupTasks, () => edgeFirebase.startUsersSnapshot(edgeGlobal.edgeState.organizationDocPath))
+    queueSnapshotTask(startupTasks, 'users', () => edgeFirebase.startUsersSnapshot(edgeGlobal.edgeState.organizationDocPath))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/published-site-settings`]) {
-    queueSnapshotTask(startupTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/published-site-settings`))
+    queueSnapshotTask(startupTasks, 'published-site-settings', () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/published-site-settings`))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/pages`]) {
-    queueSnapshotTask(previewSnapshotTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/pages`))
+    queueSnapshotTask(previewSnapshotTasks, 'site pages', () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/pages`))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`]) {
-    queueSnapshotTask(previewSnapshotTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`))
+    queueSnapshotTask(previewSnapshotTasks, 'themes', () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/blocks`]) {
-    queueSnapshotTask(previewSnapshotTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/blocks`))
+    queueSnapshotTask(previewSnapshotTasks, 'blocks', () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/blocks`))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites`]) {
-    queueSnapshotTask(previewSnapshotTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites`))
+    queueSnapshotTask(previewSnapshotTasks, 'sites', () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites`))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published`]) {
-    queueSnapshotTask(startupTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published`))
+    queueSnapshotTask(startupTasks, 'published pages', () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published`))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/posts`]) {
-    queueSnapshotTask(startupTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/posts`))
+    queueSnapshotTask(startupTasks, 'posts', () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/posts`))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published_posts`]) {
-    queueSnapshotTask(startupTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published_posts`))
+    queueSnapshotTask(startupTasks, 'published posts', () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published_posts`))
   }
   if (props.site !== 'templates') {
     const submissionsPath = `organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/lead-actions`
     if (!edgeFirebase.data?.[submissionsPath]) {
       queueSnapshotTask(
         startupTasks,
+        'lead actions',
         () => edgeFirebase.startSnapshot(submissionsPath, [{ field: 'action', operator: '==', value: 'Contact Form' }]),
       )
     }
@@ -1300,6 +1340,7 @@ const isSiteDiff = computed(() => {
       favicon: publishedSite.favicon,
       menuPosition: publishedSite.menuPosition,
       forwardApex: publishedSite.forwardApex,
+      canonicalDomain: publishedSite.canonicalDomain,
       contactEmail: publishedSite.contactEmail,
       contactPhone: publishedSite.contactPhone,
       metaTitle: publishedSite.metaTitle,
@@ -1333,6 +1374,7 @@ const isSiteDiff = computed(() => {
       favicon: siteData.value.favicon,
       menuPosition: siteData.value.menuPosition,
       forwardApex: siteData.value.forwardApex,
+      canonicalDomain: siteData.value.canonicalDomain,
       contactEmail: siteData.value.contactEmail,
       contactPhone: siteData.value.contactPhone,
       metaTitle: siteData.value.metaTitle,
@@ -1371,6 +1413,7 @@ const SITE_SETTINGS_DIFF_FIELDS = [
   { key: 'favicon', label: 'Favicon' },
   { key: 'menuPosition', label: 'Menu Position' },
   { key: 'forwardApex', label: 'Forward Apex', format: 'boolean' },
+  { key: 'canonicalDomain', label: 'Forward All Sites To' },
   { key: 'contactEmail', label: 'Contact Email' },
   { key: 'contactPhone', label: 'Contact Phone' },
   { key: 'metaTitle', label: 'Meta Title' },
@@ -1508,6 +1551,9 @@ const discardSiteSettings = async () => {
       favicon: publishedSite.favicon || '',
       menuPosition: publishedSite.menuPosition || '',
       forwardApex: publishedSite.forwardApex !== false,
+      canonicalDomain: Object.prototype.hasOwnProperty.call(publishedSite, 'canonicalDomain')
+        ? publishedSite.canonicalDomain
+        : undefined,
       contactEmail: publishedSite.contactEmail || '',
       contactPhone: publishedSite.contactPhone || '',
       metaTitle: publishedSite.metaTitle || '',
@@ -1851,7 +1897,12 @@ const resolveTemplateBlockForPreview = (pageDoc, blockRef) => {
   return resolveBlockForPreview(source || blockRef)
 }
 
-const hasPreviewSpans = row => (row?.columns || []).some(column => Number.isFinite(Number(column?.span)))
+const hasExplicitPreviewSpan = (column) => {
+  const span = column?.span
+  return span !== null && span !== undefined && span !== '' && Number.isFinite(Number(span))
+}
+
+const hasPreviewSpans = row => (row?.columns || []).some(hasExplicitPreviewSpan)
 
 const previewGridClass = (row) => {
   if (hasPreviewSpans(row))
@@ -1869,9 +1920,9 @@ const previewGridClass = (row) => {
 }
 
 const previewColumnStyle = (column) => {
-  const span = Number(column?.span)
-  if (!Number.isFinite(span))
+  if (!hasExplicitPreviewSpan(column))
     return {}
+  const span = Number(column?.span)
   const safeSpan = Math.min(Math.max(span, 1), 6)
   return { gridColumn: `span ${safeSpan} / span ${safeSpan}` }
 }
@@ -2169,6 +2220,8 @@ const shouldShowSitePagePreviewImage = (pageDoc) => {
 }
 
 const isSitePagePreviewDecisionPending = (pageDoc) => {
+  if (state.pagePreviewsLoading || (!isTemplateSite.value && !Object.keys(siteData.value).length))
+    return true
   if (!SITE_PAGE_PREVIEW_JPEG_ENABLED && !SITE_PAGE_PREVIEW_BACKEND_JPEG_ENABLED)
     return false
   if (shouldShowSitePagePreviewImage(pageDoc))
@@ -3438,6 +3491,8 @@ const ensureValidViewMode = () => {
     nextMode = defaultViewMode.value
   if (nextMode === 'submissions' && !canViewInboxTab.value)
     nextMode = defaultViewMode.value
+  if (nextMode === 'analytics' && !canViewAnalyticsTab.value)
+    nextMode = defaultViewMode.value
   if (nextMode === 'restricted' && !canViewRestrictedTab.value)
     nextMode = defaultViewMode.value
   if (nextMode === 'media' && !canViewMediaTab.value)
@@ -3463,6 +3518,8 @@ const setViewMode = (mode) => {
   if (mode === 'posts' && !canViewPostsTab.value)
     return
   if (mode === 'submissions' && !canViewInboxTab.value)
+    return
+  if (mode === 'analytics' && !canViewAnalyticsTab.value)
     return
   if (mode === 'restricted' && !canViewRestrictedTab.value)
     return
@@ -3586,6 +3643,10 @@ watch(cmsTabAccess, () => {
   ensureValidViewMode()
 }, { immediate: true, deep: true })
 
+watch(canViewAnalyticsTab, () => {
+  ensureValidViewMode()
+}, { immediate: true })
+
 watch(canEditSiteSettings, (allowed) => {
   if (!allowed && state.siteSettings) {
     state.siteSettings = false
@@ -3629,57 +3690,59 @@ watch(() => state.menus, async (newVal) => {
     return
   }
   state.saving = true
-  // todo loop through menus and if any item is a blank string use the name {name:'blah', item: ''} and used edgeFirebase to add that page and wait for complete and put docId as value of item
-  const newPage = JSON.parse(JSON.stringify(pageInit))
-  for (const [menuName, items] of Object.entries(newVal)) {
-    for (const [index, item] of items.entries()) {
-      if (isExternalLinkEntry(item))
-        continue
-      if (typeof item.item === 'string') {
-        if (item.item === '') {
-          newPage.name = item.name
-          console.log('Creating new page for menu item:', item)
-          const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`, newPage)
-          const docId = result?.meta?.docId
-          item.item = docId
-        }
-        else {
-          if (item.name === 'Deleting...') {
-            await edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`, item.item)
-            state.menus[menuName].splice(index, 1)
+  try {
+    // todo loop through menus and if any item is a blank string use the name {name:'blah', item: ''} and used edgeFirebase to add that page and wait for complete and put docId as value of item
+    const newPage = JSON.parse(JSON.stringify(pageInit))
+    for (const [menuName, items] of Object.entries(newVal)) {
+      for (const [index, item] of items.entries()) {
+        if (isExternalLinkEntry(item))
+          continue
+        if (typeof item.item === 'string') {
+          if (item.item === '') {
+            newPage.name = item.name
+            const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`, newPage)
+            assertCmsActionSucceeded(result, 'Unable to create the page.')
+            const docId = result?.meta?.docId
+            if (!docId)
+              throw new Error('The new page did not return a document ID.')
+            item.item = docId
           }
         }
-      }
-      if (typeof item.item === 'object' && !isExternalLinkEntry(item)) {
-        for (const [subMenuName, subItems] of Object.entries(item.item)) {
-          for (const [subIndex, subItem] of subItems.entries()) {
-            if (isExternalLinkEntry(subItem))
-              continue
-            if (typeof subItem.item === 'string') {
-              if (subItem.item === '') {
-                newPage.name = subItem.name
-                const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`, newPage)
-                const docId = result?.meta?.docId
-                subItem.item = docId
-              }
-              else {
-                if (subItem.name === 'Deleting...') {
-                  await edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`, subItem.item)
-                  state.menus[menuName][index].item[subMenuName].splice(subIndex, 1)
+        if (item.item && typeof item.item === 'object' && !isExternalLinkEntry(item)) {
+          for (const [_subMenuName, subItems] of Object.entries(item.item)) {
+            for (const subItem of subItems) {
+              if (isExternalLinkEntry(subItem))
+                continue
+              if (typeof subItem.item === 'string') {
+                if (subItem.item === '') {
+                  newPage.name = subItem.name
+                  const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`, newPage)
+                  assertCmsActionSucceeded(result, 'Unable to create the page.')
+                  const docId = result?.meta?.docId
+                  if (!docId)
+                    throw new Error('The new page did not return a document ID.')
+                  subItem.item = docId
                 }
               }
             }
           }
-        }
-        if (Object.keys(item.item).length === 0) {
-          state.menus[menuName].splice(index, 1)
+          if (Object.keys(item.item).length === 0) {
+            state.menus[menuName].splice(index, 1)
+          }
         }
       }
     }
+    if (!isTemplateSite.value) {
+      const result = await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, { menus: state.menus })
+      assertCmsActionSucceeded(result, 'Unable to save menu changes.')
+    }
   }
-  if (!isTemplateSite.value)
-    await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, { menus: state.menus })
-  state.saving = false
+  catch {
+    edgeFirebase?.toast?.error?.('Unable to save menu changes right now.')
+  }
+  finally {
+    state.saving = false
+  }
 }, { deep: true })
 
 const formErrors = (error) => {
@@ -3911,7 +3974,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
             @update:model-value="value => (slotProps.workingDoc.theme = value || '')"
           />
           <edge-shad-select-tags
-            v-if="!cmsMultiOrg && Object.keys(orgUsers).length > 0"
+            v-if="!cmsMultiOrg && userOptions.length > 0"
             :model-value="getSiteUsersModel(slotProps.workingDoc)"
             :disabled="shouldForceCurrentUserForNewSite || !edgeGlobal.isAdminGlobal(edgeFirebase).value"
             :items="userOptions"
@@ -3922,6 +3985,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
             placeholder="Select users"
             class="w-full"
             :multiple="true"
+            :allow-additions="false"
             @update:model-value="value => updateSiteUsersModel(slotProps.workingDoc, value)"
           />
           <div class="rounded-lg border border-dashed border-slate-300 p-4 dark:border-slate-700">
@@ -4251,7 +4315,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
           </div>
         </div>
         <div class="flex justify-center">
-          <div v-if="!isTemplateSite && (canViewPagesTab || canViewPostsTab || canViewInboxTab || canViewRestrictedTab || canViewMediaTab)" class="flex items-center rounded-full border border-slate-300 bg-white p-1 shadow-sm dark:border-slate-600 dark:bg-slate-950">
+          <div v-if="!isTemplateSite && (canViewPagesTab || canViewPostsTab || canViewInboxTab || canViewAnalyticsTab || canViewRestrictedTab || canViewMediaTab)" class="flex max-w-[62vw] items-center overflow-x-auto rounded-full border border-slate-300 bg-white p-1 shadow-sm dark:border-slate-600 dark:bg-slate-950">
             <edge-shad-button
               v-if="canViewPagesTab"
               variant="ghost"
@@ -4309,6 +4373,19 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
               >
                 {{ unreadSubmissionsCount }}
               </span>
+            </edge-shad-button>
+            <edge-shad-button
+              v-if="canViewAnalyticsTab"
+              variant="ghost"
+              size="sm"
+              class="h-8 whitespace-nowrap px-4 text-xs gap-2 rounded-full"
+              :class="state.viewMode === 'analytics'
+                ? 'bg-gradient-to-r from-slate-900 to-slate-700 text-white hover:text-white shadow-sm dark:bg-gradient-to-r dark:from-slate-200 dark:to-slate-400 dark:text-slate-900 dark:hover:text-slate-900'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100'"
+              @click="setViewMode('analytics')"
+            >
+              <BarChart3 class="h-4 w-4" aria-hidden="true" />
+              Analytics
             </edge-shad-button>
             <edge-shad-button
               v-if="canViewRestrictedTab"
@@ -4608,6 +4685,12 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                 </div>
               </template>
             </edge-dashboard>
+          </div>
+          <div v-else-if="state.viewMode === 'analytics' && canViewAnalyticsTab" class="h-full min-h-0 flex-1 overflow-hidden">
+            <edge-cms-site-analytics
+              :site="props.site"
+              :site-doc="siteData"
+            />
           </div>
           <div v-else-if="state.viewMode === 'restricted' && canViewRestrictedTab" class="flex-1 min-h-0 overflow-hidden p-6">
             <edge-cms-restricted-content
@@ -5108,7 +5191,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                 :settings="slotProps.workingDoc"
                 :theme-options="themeOptions"
                 :user-options="userOptions"
-                :has-users="Object.keys(orgUsers).length > 0"
+                :has-users="userOptions.length > 0"
                 :show-users="!cmsMultiOrg"
                 :show-theme-fields="true"
                 :is-admin="isOrgAdmin"

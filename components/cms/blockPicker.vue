@@ -1,5 +1,6 @@
 <script setup>
 import { Plus } from 'lucide-vue-next'
+import { prepareCmsTemplateV2PickedBlock } from '../../composables/useCmsTemplateRuntimeMeta'
 
 const props = defineProps({
   blockOverride: {
@@ -329,6 +330,7 @@ const chooseBlock = (block) => {
   blockModelData.name = block.name
   blockModelData.blockId = block.docId
   delete blockModelData.previewType
+  prepareCmsTemplateV2PickedBlock(blockModelData)
   console.log('Chosen block:', blockModelData)
   if (isSharedMode.value) {
     const handler = HANDLERS.get(SHARED_PICKER_STATE.activeInstance)

@@ -1,5 +1,19 @@
 # Edge Shared Code Agent Guide
 
+Read `RELATED-REPOSITORIES.md` when shared work may affect a direct consumer or
+dependency.
+
+## Hub-First Source Workflow
+
+This `edge/` subtree is the working source for `edge-vue-components`; a
+standalone checkout is not required. Before shared work, confirm the selected
+Hub's last pulled subtree commit is current upstream and review later local
+Edge changes. Keep feature and coordination TODOs in the selected Hub's normal
+TODO/plan location outside this subtree; the Hub TODO should name the shared
+files to edit here. Implement and test shared changes in the Hub, and promote
+only the committed subtree with the Hub's root `edge-push.sh` after explicit
+commit and push authorization.
+
 This folder is shared Edge code. Changes here can affect every project that pulls Edge updates, so keep edits generic and avoid project-specific behavior unless the user explicitly approves it.
 
 ## Organization Mode
@@ -108,12 +122,12 @@ Root admin means a user role with:
 
 ## Functions Sync
 
-When approved changes are made to the project copy at `functions/cms.js`, mirror them by copying that file over `edge/functions/cms.js`. The Edge source copy should stay in sync with the project function copy after approved CMS function changes.
+When a Function addition or update is intended for `edge-vue-components`, make the corresponding change identically in both the Hub's deployable `functions/` path and `edge/functions/` during the same work cycle. Neither copy is generated from the other. Verify task-relevant pairs before testing, deployment, commit, or `edge-push`, and keep Hub-only Function files and exports outside the shared Edge export block.
 
 Use a direct check when verifying:
 
 ```sh
-diff -q functions/cms.js edge/functions/cms.js
+diff -q functions/<shared-file>.js edge/functions/<shared-file>.js
 ```
 
 ## Firestore Index Sync
