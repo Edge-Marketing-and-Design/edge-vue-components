@@ -19,7 +19,6 @@ const props = defineProps({
 const route = useRoute()
 
 const edgeFirebase = inject('edgeFirebase')
-// const edgeGlobal = inject('edgeGlobal')
 
 const state = reactive({
   form2: false,

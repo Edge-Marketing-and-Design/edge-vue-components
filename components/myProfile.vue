@@ -17,7 +17,6 @@ const props = defineProps({
 const { toast } = useToast()
 
 const edgeFirebase = inject('edgeFirebase')
-const edgeGlobal = inject('edgeGlobal')
 
 const formRef = ref(null)
 

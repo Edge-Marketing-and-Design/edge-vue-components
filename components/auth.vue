@@ -56,7 +56,6 @@ const effectiveSingleOrganization = computed(() => envSingleOrg.value || props.s
 const effectiveRegistrationCode = computed(() =>
   effectiveSingleOrganization.value ? '' : (props.registrationCode || config.public.registrationCode || ''),
 )
-// const edgeGlobal = inject('edgeGlobal')
 
 let activeLoginKey = ''
 let completedLoginKey = ''

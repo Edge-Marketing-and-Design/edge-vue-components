@@ -8,7 +8,6 @@ const props = defineProps({
   },
 })
 const edgeFirebase = inject('edgeFirebase')
-// const edgeGlobal = inject('edgeGlobal')
 </script>
 
 <template>

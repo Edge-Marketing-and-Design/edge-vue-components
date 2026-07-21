@@ -102,7 +102,6 @@ const state = reactive({
   dialog: false,
 })
 const edgeFirebase = inject('edgeFirebase')
-// const edgeGlobal = inject('edgeGlobal')
 
 const normalizeObject = (value) => {
   if (Array.isArray(value)) {

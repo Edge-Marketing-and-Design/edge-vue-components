@@ -56,7 +56,6 @@ const router = useRouter()
 
 const route = useRoute()
 const edgeFirebase = inject('edgeFirebase')
-// const edgeGlobal = inject('edgeGlobal')
 
 const state = reactive({
   registering: false,

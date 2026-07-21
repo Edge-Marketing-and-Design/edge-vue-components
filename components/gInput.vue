@@ -137,7 +137,6 @@ const jsonSchemaStringFormats = [
   'relative-json-pointer',
   'regex',
 ]
-// const edgeGlobal = inject('edgeGlobal')
 const edgeFirebase = inject('edgeFirebase')
 const {
   assignableUserOptions,

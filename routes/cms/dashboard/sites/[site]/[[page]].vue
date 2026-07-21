@@ -3,7 +3,6 @@ import { useEdgeCmsDialogPositionFix } from '~/edge/composables/useEdgeCmsDialog
 
 const route = useRoute()
 
-// const edgeGlobal = inject('edgeGlobal')
 
 const state = reactive({
   mounted: false,

@@ -58,7 +58,6 @@ const emit = defineEmits(['close'])
 const { toast } = useToast()
 
 const edgeFirebase = inject('edgeFirebase')
-// const edgeGlobal = inject('edgeGlobal')
 
 const GEO_FIND_NOTIFICATION_TEMPLATE_ID = 'geo-find-notification'
 const GEO_INVALID_PHONE_TEMPLATE_ID = 'geo-invalid-phone'
