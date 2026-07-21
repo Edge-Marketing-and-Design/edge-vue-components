@@ -1251,8 +1251,15 @@ const handleNewSiteSaved = async ({ docId, data, collection }) => {
   }
 }
 
-const queueSnapshotTask = (tasks, loader) => {
-  tasks.push(Promise.resolve().then(loader))
+const queueSnapshotTask = (tasks, label, loader) => {
+  tasks.push(
+    Promise.resolve()
+      .then(loader)
+      .catch((error) => {
+        console.error(`Failed to load CMS site snapshot: ${label}`, error)
+        throw error
+      }),
+  )
 }
 
 onBeforeMount(async () => {
@@ -1260,37 +1267,38 @@ onBeforeMount(async () => {
   const startupTasks = []
 
   if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/users`]) {
-    queueSnapshotTask(startupTasks, () => edgeFirebase.startUsersSnapshot(edgeGlobal.edgeState.organizationDocPath))
+    queueSnapshotTask(startupTasks, 'users', () => edgeFirebase.startUsersSnapshot(edgeGlobal.edgeState.organizationDocPath))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/published-site-settings`]) {
-    queueSnapshotTask(startupTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/published-site-settings`))
+    queueSnapshotTask(startupTasks, 'published-site-settings', () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/published-site-settings`))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/pages`]) {
-    queueSnapshotTask(previewSnapshotTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/pages`))
+    queueSnapshotTask(previewSnapshotTasks, 'site pages', () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/pages`))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`]) {
-    queueSnapshotTask(previewSnapshotTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`))
+    queueSnapshotTask(previewSnapshotTasks, 'themes', () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/blocks`]) {
-    queueSnapshotTask(previewSnapshotTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/blocks`))
+    queueSnapshotTask(previewSnapshotTasks, 'blocks', () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/blocks`))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites`]) {
-    queueSnapshotTask(previewSnapshotTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites`))
+    queueSnapshotTask(previewSnapshotTasks, 'sites', () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites`))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published`]) {
-    queueSnapshotTask(startupTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published`))
+    queueSnapshotTask(startupTasks, 'published pages', () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published`))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/posts`]) {
-    queueSnapshotTask(startupTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/posts`))
+    queueSnapshotTask(startupTasks, 'posts', () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/posts`))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published_posts`]) {
-    queueSnapshotTask(startupTasks, () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published_posts`))
+    queueSnapshotTask(startupTasks, 'published posts', () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published_posts`))
   }
   if (props.site !== 'templates') {
     const submissionsPath = `organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/lead-actions`
     if (!edgeFirebase.data?.[submissionsPath]) {
       queueSnapshotTask(
         startupTasks,
+        'lead actions',
         () => edgeFirebase.startSnapshot(submissionsPath, [{ field: 'action', operator: '==', value: 'Contact Form' }]),
       )
     }
@@ -2212,6 +2220,8 @@ const shouldShowSitePagePreviewImage = (pageDoc) => {
 }
 
 const isSitePagePreviewDecisionPending = (pageDoc) => {
+  if (state.pagePreviewsLoading || (!isTemplateSite.value && !Object.keys(siteData.value).length))
+    return true
   if (!SITE_PAGE_PREVIEW_JPEG_ENABLED && !SITE_PAGE_PREVIEW_BACKEND_JPEG_ENABLED)
     return false
   if (shouldShowSitePagePreviewImage(pageDoc))
