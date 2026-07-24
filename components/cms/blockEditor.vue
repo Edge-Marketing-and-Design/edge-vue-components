@@ -2453,6 +2453,7 @@ const buildPreviewBlock = (workingDoc, parsed) => {
     values: isWorkingTemplateV2Doc(workingDoc) ? templateV2PreviewValues : nextValues,
     meta: nextMeta,
     synced: !!workingDoc?.synced,
+    isOverrideBlock: workingDoc?.isOverrideBlock === true,
   }
 }
 
@@ -2874,6 +2875,7 @@ const buildComparableBlockDiffDoc = (doc) => {
     type: normalizeBlockTypes(doc.type, { fallbackToPage: false }),
     themes: Array.isArray(doc.themes) ? doc.themes : [],
     synced: !!doc.synced,
+    isOverrideBlock: doc.isOverrideBlock === true,
     previewType: normalizePreviewType(doc.previewType),
   }
 }
@@ -2902,6 +2904,7 @@ const buildHistoryPreviewBlock = (doc) => {
     values: isWorkingTemplateV2Doc(doc) ? edgeGlobal.dupObject(doc.values || {}) : edgeGlobal.dupObject(parsed.values || {}),
     meta: edgeGlobal.dupObject(parsed.meta || {}),
     synced: !!doc.synced,
+    isOverrideBlock: doc.isOverrideBlock === true,
   }
 }
 
@@ -3101,6 +3104,7 @@ const buildBlockChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel 
     { key: 'type', label: 'Block Type', transform: value => normalizeBlockTypes(value, { fallbackToPage: false }) },
     { key: 'themes', label: 'Allowed Themes' },
     { key: 'synced', label: 'Synced Block' },
+    { key: 'isOverrideBlock', label: 'Override Block' },
     { key: 'previewType', label: 'Preview Surface', transform: value => normalizePreviewType(value) },
     { key: 'templateVersion', label: 'Template Version', transform: value => normalizeTemplateVersion(value) },
     { key: 'content', label: 'Block Content' },
@@ -3435,6 +3439,16 @@ const exportCurrentBlock = async () => {
                 class="border-slate-400 bg-white text-slate-900 data-[state=checked]:bg-slate-700 data-[state=checked]:text-white dark:border-slate-500 dark:bg-slate-800 dark:text-slate-100 dark:data-[state=checked]:bg-slate-200 dark:data-[state=checked]:text-slate-900"
               >
                 <span class="text-slate-900">Synced Block</span>
+              </edge-shad-checkbox>
+            </div>
+            <div class="flex-auto pt-2 text-slate-900 dark:text-slate-100">
+              <edge-shad-checkbox
+                v-model="slotProps.workingDoc.isOverrideBlock"
+                name="isOverrideBlock"
+                label="Override Block"
+                class="border-violet-400 bg-white text-slate-900 data-[state=checked]:bg-violet-700 data-[state=checked]:text-white dark:border-violet-500 dark:bg-slate-800 dark:text-slate-100 dark:data-[state=checked]:bg-violet-300 dark:data-[state=checked]:text-violet-950"
+              >
+                <span class="text-slate-900 dark:text-slate-100">Override Block</span>
               </edge-shad-checkbox>
             </div>
           </div>

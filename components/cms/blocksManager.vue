@@ -211,7 +211,7 @@ const blockImportInputRef = ref(null)
 const blockImportDocIdResolver = ref(null)
 const blockImportConflictResolver = ref(null)
 const DEFAULT_BLOCK_IMPORT_ERROR_MESSAGE = 'Failed to import block JSON.'
-const OPTIONAL_BLOCK_IMPORT_KEYS = new Set(['previewType', 'type'])
+const OPTIONAL_BLOCK_IMPORT_KEYS = new Set(['previewType', 'type', 'isOverrideBlock'])
 const TEMPLATE_V2_BLOCK_IMPORT_KEYS = new Set(['templateVersion', 'template', 'schema', 'dataSources'])
 
 const openAddBlockDialog = () => {
@@ -1474,6 +1474,11 @@ const handleBlockImport = async (event) => {
                     >
                       v2
                     </edge-chip>
+                    <edge-cms-override-block-badge
+                      :is-override-block="item.isOverrideBlock === true"
+                      :overlay="false"
+                      class="shrink-0"
+                    />
                     <edge-shad-button
                       size="icon"
                       variant="ghost"
@@ -1488,6 +1493,7 @@ const handleBlockImport = async (event) => {
                     class="block-preview"
                     :class="previewSurfaceClass(item.previewType)"
                   >
+                    <edge-cms-override-block-badge :is-override-block="item.isOverrideBlock === true" />
                     <div class="scale-wrapper">
                       <div class="scale-inner scale p-4 block-list-preview-content">
                         <edge-cms-block-api
@@ -1674,6 +1680,7 @@ const handleBlockImport = async (event) => {
                         </span>
                       </div>
                       <div v-if="hasBlockPreviewContent(template)" class="block-preview" :class="previewSurfaceClass(template.previewType)">
+                        <edge-cms-override-block-badge :is-override-block="template.isOverrideBlock === true" />
                         <div class="scale-wrapper">
                           <div class="scale-inner scale p-4 block-list-preview-content">
                             <edge-cms-block-api
@@ -1737,6 +1744,7 @@ const handleBlockImport = async (event) => {
                         <span class="text-[10px] uppercase tracking-wide text-muted-foreground">Duplicate</span>
                       </div>
                       <div v-if="hasBlockPreviewContent(block)" class="block-preview" :class="previewSurfaceClass(block.previewType)">
+                        <edge-cms-override-block-badge :is-override-block="block.isOverrideBlock === true" />
                         <div class="scale-wrapper">
                           <div class="scale-inner scale p-4 block-list-preview-content">
                             <edge-cms-block-api

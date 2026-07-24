@@ -3531,7 +3531,12 @@ const reindexPublishedPostsToKv = async () => {
                           <div
                             v-for="(blockRef, blockIdx) in column.blocks || []"
                             :key="`${template.docId}-row-${row.id || rowIndex}-col-${column.id || colIndex}-block-${blockIdx}`"
+                            class="relative"
                           >
+                            <edge-cms-override-block-badge
+                              :is-override-block="resolveTemplateBlockForPreview(template, blockRef)?.isOverrideBlock === true"
+                              :scale-compensation="5"
+                            />
                             <edge-cms-block-api
                               v-if="resolveTemplateBlockForPreview(template, blockRef)"
                               :content="resolveTemplateBlockForPreview(template, blockRef).content"
@@ -3664,7 +3669,11 @@ const reindexPublishedPostsToKv = async () => {
                 <div
                   v-for="(blockId, blockPosition) in row?.columns?.[0]?.blocks || []"
                   :key="`history-post:${blockId}:${blockPosition}`"
+                  class="relative"
                 >
+                  <edge-cms-override-block-badge
+                    :is-override-block="renderedHistoryPreviewDoc.content[postBlockIndex(renderedHistoryPreviewDoc, blockId)]?.isOverrideBlock === true"
+                  />
                   <edge-cms-block-api
                     v-if="postBlockIndex(renderedHistoryPreviewDoc, blockId) !== -1"
                     :site-id="props.site"
@@ -3796,7 +3805,10 @@ const reindexPublishedPostsToKv = async () => {
                       data-cms-preview-mode="history"
                       class="relative isolate overflow-hidden rounded border border-gray-200 dark:border-white/15 bg-white dark:bg-gray-900"
                     >
-                      <div v-if="blockChange.baseBlock" class="p-3">
+                      <div v-if="blockChange.baseBlock" class="relative p-3">
+                        <edge-cms-override-block-badge
+                          :is-override-block="blockChange.baseBlock?.isOverrideBlock === true"
+                        />
                         <edge-cms-block-api
                           :key="`${blockChange.key}:base`"
                           :site-id="props.site"
@@ -3824,7 +3836,10 @@ const reindexPublishedPostsToKv = async () => {
                       data-cms-preview-mode="history"
                       class="relative isolate overflow-hidden rounded border border-gray-200 dark:border-white/15 bg-white dark:bg-gray-900"
                     >
-                      <div v-if="blockChange.compareBlock" class="p-3">
+                      <div v-if="blockChange.compareBlock" class="relative p-3">
+                        <edge-cms-override-block-badge
+                          :is-override-block="blockChange.compareBlock?.isOverrideBlock === true"
+                        />
                         <edge-cms-block-api
                           :key="`${blockChange.key}:compare`"
                           :site-id="props.site"
@@ -3963,7 +3978,10 @@ const reindexPublishedPostsToKv = async () => {
                       data-cms-preview-mode="history"
                       class="relative isolate overflow-hidden rounded border border-gray-200 dark:border-white/15 bg-white dark:bg-gray-900"
                     >
-                      <div v-if="blockChange.baseBlock" class="p-3">
+                      <div v-if="blockChange.baseBlock" class="relative p-3">
+                        <edge-cms-override-block-badge
+                          :is-override-block="blockChange.baseBlock?.isOverrideBlock === true"
+                        />
                         <edge-cms-block-api
                           :key="`${blockChange.key}:base`"
                           :content="blockChange.baseBlock?.content"
@@ -3991,7 +4009,10 @@ const reindexPublishedPostsToKv = async () => {
                       data-cms-preview-mode="history"
                       class="relative isolate overflow-hidden rounded border border-gray-200 dark:border-white/15 bg-white dark:bg-gray-900"
                     >
-                      <div v-if="blockChange.compareBlock" class="p-3">
+                      <div v-if="blockChange.compareBlock" class="relative p-3">
+                        <edge-cms-override-block-badge
+                          :is-override-block="blockChange.compareBlock?.isOverrideBlock === true"
+                        />
                         <edge-cms-block-api
                           :key="`${blockChange.key}:compare`"
                           :content="blockChange.compareBlock?.content"

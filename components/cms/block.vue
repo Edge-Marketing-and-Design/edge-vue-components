@@ -1516,6 +1516,22 @@ const resolvedRenderBlock = computed(() => {
   }
 })
 
+const isOverrideBlockPreview = computed(() => {
+  const instance = modelValue.value || {}
+  if (props.standalonePreview && Object.prototype.hasOwnProperty.call(instance, 'isOverrideBlock'))
+    return instance.isOverrideBlock === true
+
+  const sourceDoc = blockContentSourceDoc.value
+  if (sourceDoc && Object.prototype.hasOwnProperty.call(sourceDoc, 'isOverrideBlock'))
+    return sourceDoc.isOverrideBlock === true
+
+  return resolvedRenderBlock.value?.isOverrideBlock === true
+})
+
+const blockNameOverlayTopClass = computed(() => {
+  return showProtectedEditOverlay.value ? 'top-9' : 'top-2'
+})
+
 const editorInstructionsHtml = computed(() => {
   const fromInstance = String(modelValue.value?.[BLOCK_INSTRUCTIONS_FIELD_KEY] || '').trim()
   if (fromInstance)
@@ -2709,6 +2725,7 @@ const getTagsFromPosts = computed(() => {
       <div class="relative z-0" :class="props.editMode && props.overrideClicksInEditMode ? 'pointer-events-none' : ''">
         <edge-cms-block-api :site-id="props.siteId" :route-last-segment="props.routeLastSegment" :theme="props.theme" :content="resolvedRenderBlock.content" :template-version="resolvedRenderBlock.templateVersion" :template="resolvedRenderBlock.template" :schema="resolvedRenderBlock.schema" :data-sources="resolvedRenderBlock.dataSources" :values="resolvedRenderBlock.values" :meta="resolvedRenderBlock.meta" :viewport-mode="props.viewportMode" :render-context="effectiveRenderContext" :standalone-preview="props.standalonePreview" />
       </div>
+      <edge-cms-override-block-badge :is-override-block="isOverrideBlockPreview" />
       <div v-if="showProtectedEditOverlay" class="pointer-events-none absolute inset-0 z-[9998] bg-black/20">
         <div class="absolute left-2 top-2 inline-flex items-center gap-1 rounded bg-black/75 px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-white">
           <LockKeyhole class="h-3.5 w-3.5" />
@@ -2780,7 +2797,7 @@ const getTagsFromPosts = computed(() => {
         v-if="props.editMode"
         class="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-20"
       >
-        <div class="absolute top-2 left-2">
+        <div class="absolute left-2" :class="blockNameOverlayTopClass">
           <span class="inline-flex items-center rounded bg-black px-2 py-1 text-[11px] font-medium leading-none text-white">
             {{ previewBlockDisplayName }}
           </span>

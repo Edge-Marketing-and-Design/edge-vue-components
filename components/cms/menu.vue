@@ -727,6 +727,9 @@ const resolveBlockForPreview = (block) => {
       dataSources: (block.dataSources && Object.keys(block.dataSources).length) ? block.dataSources : (libraryBlock?.dataSources || {}),
       values: { ...(libraryBlock?.values || {}), ...(block.values || {}) },
       meta: { ...(libraryBlock?.meta || {}), ...(block.meta || {}) },
+      isOverrideBlock: libraryBlock
+        ? libraryBlock.isOverrideBlock === true
+        : block.isOverrideBlock === true,
     }
   if (libraryBlock) {
     return {
@@ -737,6 +740,7 @@ const resolveBlockForPreview = (block) => {
       dataSources: libraryBlock.dataSources || {},
       values: block.values || libraryBlock.values || EMPTY_PREVIEW_VALUES,
       meta: block.meta || libraryBlock.meta || EMPTY_PREVIEW_META,
+      isOverrideBlock: libraryBlock.isOverrideBlock === true,
     }
   }
   return null
@@ -1774,7 +1778,12 @@ const theme = computed(() => {
                                   <div
                                     v-for="(blockRef, blockIdx) in column.blocks || []"
                                     :key="`${template.docId}-row-${row.id || rowIndex}-col-${column.id || colIndex}-block-${blockIdx}`"
+                                    class="relative"
                                   >
+                                    <edge-cms-override-block-badge
+                                      :is-override-block="resolveTemplateBlockForPreview(template, blockRef)?.isOverrideBlock === true"
+                                      :scale-compensation="5"
+                                    />
                                     <edge-cms-block-api
                                       v-if="resolveTemplateBlockForPreview(template, blockRef)"
                                       :content="resolveTemplateBlockForPreview(template, blockRef).content"
@@ -1846,7 +1855,12 @@ const theme = computed(() => {
                                   <div
                                     v-for="(blockRef, blockIdx) in column.blocks || []"
                                     :key="`${existingPage.docId}-row-${row.id || rowIndex}-col-${column.id || colIndex}-block-${blockIdx}`"
+                                    class="relative"
                                   >
+                                    <edge-cms-override-block-badge
+                                      :is-override-block="resolveTemplateBlockForPreview(existingPage, blockRef)?.isOverrideBlock === true"
+                                      :scale-compensation="5"
+                                    />
                                     <edge-cms-block-render
                                       v-if="resolveTemplateBlockForPreview(existingPage, blockRef)"
                                       :content="resolveTemplateBlockForPreview(existingPage, blockRef).content"
