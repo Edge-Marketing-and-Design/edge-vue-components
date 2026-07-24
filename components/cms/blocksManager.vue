@@ -1474,11 +1474,6 @@ const handleBlockImport = async (event) => {
                     >
                       v2
                     </edge-chip>
-                    <edge-cms-override-block-badge
-                      :is-override-block="item.isOverrideBlock === true"
-                      :overlay="false"
-                      class="shrink-0"
-                    />
                     <edge-shad-button
                       size="icon"
                       variant="ghost"
@@ -1515,10 +1510,12 @@ const handleBlockImport = async (event) => {
                     </div>
                     <div class="preview-overlay" />
                   </div>
-                  <div v-else-if="hasBlockPreviewContent(item)" class="block-preview-empty" :class="previewSurfaceClass(item.previewType)">
+                  <div v-else-if="hasBlockPreviewContent(item)" class="block-preview-empty relative" :class="previewSurfaceClass(item.previewType)">
+                    <edge-cms-override-block-badge :is-override-block="item.isOverrideBlock === true" />
                     Filter to 10 or fewer blocks to see previews.
                   </div>
-                  <div v-else class="block-preview-empty" :class="previewSurfaceClass(item.previewType)">
+                  <div v-else class="block-preview-empty relative" :class="previewSurfaceClass(item.previewType)">
+                    <edge-cms-override-block-badge :is-override-block="item.isOverrideBlock === true" />
                     Preview unavailable for this block.
                   </div>
                   <div class="flex flex-wrap items-center gap-1 text-[11px] text-slate-300 uppercase tracking-wide overflow-hidden">
