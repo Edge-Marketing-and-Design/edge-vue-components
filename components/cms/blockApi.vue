@@ -426,6 +426,31 @@ const runtimeMeta = computed(() => {
   })
 })
 
+const serializePreviewRequestInput = (value) => {
+  const normalize = (input) => {
+    if (Array.isArray(input))
+      return input.map(normalize)
+    if (!input || typeof input !== 'object')
+      return input
+    if (typeof input.toJSON === 'function')
+      return normalize(input.toJSON())
+    return Object.keys(input).sort().reduce((acc, key) => {
+      acc[key] = normalize(input[key])
+      return acc
+    }, {})
+  }
+
+  try {
+    return JSON.stringify(normalize(value ?? {}))
+  }
+  catch {
+    return ''
+  }
+}
+
+const runtimeMetaRequestSignature = computed(() => serializePreviewRequestInput(runtimeMeta.value))
+const valuesRequestSignature = computed(() => serializePreviewRequestInput(props.values))
+
 /* ---------------- async data (SSR + client) ---------------- */
 
 // Stable, SSR-safe cache key so multiple block instances don't collide
@@ -441,8 +466,9 @@ const { data: apiResolved, pending } = await useAsyncData(
   {
     server: true,
     default: () => ({}),
-    // Re-run when inputs change on client side
-    watch: [runtimeMeta, () => props.values],
+    // Parent preview renders can recreate equivalent objects. Refetch only
+    // when their serializable request content actually changes.
+    watch: [runtimeMetaRequestSignature, valuesRequestSignature],
   },
 )
 const collectionPending = ref(false)
