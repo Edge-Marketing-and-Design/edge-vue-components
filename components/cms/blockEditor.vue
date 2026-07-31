@@ -6423,6 +6423,35 @@ const exportCurrentBlock = async () => {
                     </div>
                   </section>
 
+                  <section class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Dot Styling
+                    </h3>
+                    <div class="space-y-3 text-sm text-foreground">
+                      <p>
+                        The frontend generates each carousel dot with the stable <code>cms-carousel-dot</code> class. It automatically supplies the dot’s size, circular shape, keyboard-focus state, and theme-aware colors.
+                      </p>
+                      <div>
+                        <div>By default:</div>
+                        <ul class="mt-1 list-disc space-y-1 pl-5">
+                          <li>Inactive dots use the theme’s <code>border</code> color.</li>
+                          <li>The active dot uses the theme’s <code>brand</code> color.</li>
+                        </ul>
+                      </div>
+                      <p>
+                        To customize the colors for a particular CMS block, set these optional CSS variables on the <code>data-carousel-dots</code> element:
+                      </p>
+                    </div>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;div
+  data-carousel-dots
+  class="mt-3 flex justify-center gap-2"
+  style="
+    --carousel-dot-color: var(--colors-muted);
+    --carousel-dot-active-color: var(--colors-accent);
+  "
+&gt;&lt;/div&gt;</code></pre>
+                  </section>
+
                   <section class="space-y-2">
                     <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                       Behavior Notes
