@@ -24,6 +24,7 @@ function json(x) {
 
 const KV_RETRY_TOPIC = process.env.KV_RETRY_TOPIC || 'kv-mirror-retry'
 const INDEX_WRITE_CONCURRENCY = Number(process.env.KV_MIRROR_INDEX_CONCURRENCY || 20)
+const KV_MIRROR_DISABLED = ['1', 'true', 'yes'].includes(String(process.env.KV_MIRROR_DISABLED || '').trim().toLowerCase())
 
 function toSortedUniqueStrings(values = []) {
   return [...new Set((Array.isArray(values) ? values : [])
@@ -341,6 +342,10 @@ function createKvMirrorHandler({
   const redactionTree = buildRedactionTree(redactedFields)
 
   return onDocumentWritten({ document, timeoutSeconds }, async (event) => {
+    if (KV_MIRROR_DISABLED) {
+      logger.log('KV mirror disabled by environment', { document })
+      return
+    }
     const after = event.data?.after
     const params = event.params || {}
     const sourceData = after?.exists ? after.data() : null
