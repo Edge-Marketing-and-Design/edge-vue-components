@@ -55,6 +55,14 @@ const props = defineProps({
     type: Function,
     default: null,
   },
+  loadDocument: {
+    type: Function,
+    default: null,
+  },
+  saveHandler: {
+    type: Function,
+    default: null,
+  },
   workingDocOverrides: {
     type: Object,
     default: null,
@@ -145,7 +153,9 @@ const comparableDoc = (doc = {}) => {
 
 const unsavedChanges = computed(() => {
   if (props.docId === 'new') {
-    return false
+    if (!state.afterMount)
+      return false
+    return JSON.stringify(comparableDoc(state.workingDoc)) !== JSON.stringify(comparableDoc(newDoc.value))
   }
 
   // If the baseline doc is not yet loaded (e.g. on page refresh) avoid flagging unsaved changes
@@ -301,59 +311,55 @@ const onSubmit = async () => {
   }
   // console.log(state.workingDoc)
   state.submitting = true
-  state.bypassUnsavedChanges = true
-  Object.keys(finalWorkingDoc).forEach((key) => {
-    const schemaFieldType = props.newDocSchema[key]?.bindings?.['field-type']
-    if (typeof finalWorkingDoc[key] === 'string' && props.stringsToUpperCase) {
-      if (key !== 'docId') {
-        finalWorkingDoc[key] = finalWorkingDoc[key].toUpperCase()
+  state.bypassUnsavedChanges = false
+  try {
+    Object.keys(finalWorkingDoc).forEach((key) => {
+      const schemaFieldType = props.newDocSchema[key]?.bindings?.['field-type']
+      if (typeof finalWorkingDoc[key] === 'string' && props.stringsToUpperCase) {
+        if (key !== 'docId') {
+          finalWorkingDoc[key] = finalWorkingDoc[key].toUpperCase()
+        }
       }
+      if (schemaFieldType === 'money') {
+        finalWorkingDoc[key] = Number(parseFloat(finalWorkingDoc[key]).toFixed(2))
+      }
+    })
+    if (props.customDocId) {
+      finalWorkingDoc.docId = finalWorkingDoc[props.customDocId]
     }
-    if (schemaFieldType === 'money') {
-      finalWorkingDoc[key] = Number(parseFloat(finalWorkingDoc[key]).toFixed(2))
-    }
-  })
-  if (props.customDocId) {
-    finalWorkingDoc.docId = finalWorkingDoc[props.customDocId]
-  }
-  // console.log('saving', state.workingDoc)
-  const savePath = `${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`
-  const result = await edgeFirebase.storeDoc(savePath, finalWorkingDoc)
-  finalWorkingDoc.docId = result.meta.docId
-  state.workingDoc = edgeGlobal.dupObject(finalWorkingDoc)
-  const savedDoc = edgeGlobal.dupObject(finalWorkingDoc)
-  state.collectionData = {
-    ...(state.collectionData || {}),
-    [state.workingDoc.docId]: savedDoc,
-  }
-  emit('saved', {
-    collection: props.collection,
-    docId: state.workingDoc.docId,
-    data: edgeGlobal.dupObject(savedDoc),
-  })
-  edgeGlobal.edgeState.lastPaginatedDoc = JSON.parse(JSON.stringify(savedDoc))
-  if (state.overrideClose) {
-    state.submitting = false
-    // state.overrideClose = false
-    // state.workingDoc = edgeGlobal.dupObject(state.collectionData[props.docId])
+    const savePath = `${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`
+    const result = props.saveHandler
+      ? await props.saveHandler(edgeGlobal.dupObject(finalWorkingDoc))
+      : await edgeFirebase.storeDoc(savePath, finalWorkingDoc)
+    const savedDocId = String(result?.docId || result?.meta?.docId || finalWorkingDoc.docId || '').trim()
+    if (!savedDocId)
+      throw new Error('The save completed without a document ID.')
+    const savedDoc = edgeGlobal.dupObject(result?.data || { ...finalWorkingDoc, docId: savedDocId })
+    savedDoc.docId = savedDocId
+    state.workingDoc = edgeGlobal.dupObject(savedDoc)
     state.collectionData = {
-      ...(edgeFirebase.data?.[savePath] || {}),
-      [state.workingDoc.docId]: savedDoc,
+      ...(state.collectionData || {}),
+      [savedDocId]: savedDoc,
     }
-    emit('unsavedChanges', false)
-    // console.log('bypassUnsavedChanges', state.bypassUnsavedChanges)
+    emit('saved', {
+      collection: props.collection,
+      docId: savedDocId,
+      data: edgeGlobal.dupObject(savedDoc),
+    })
+    edgeGlobal.edgeState.lastPaginatedDoc = JSON.parse(JSON.stringify(savedDoc))
     edgeGlobal.edgeState.changeTracker = {}
-    state.bypassUnsavedChanges = false
-    state.successMessage = 'All changes saved. You can close or continue editing.'
-    return
-  }
-  edgeGlobal.edgeState.changeTracker = {}
-  state.workingDoc = {}
-  if (props.saveRedirectOverride) {
-    router.push(props.saveRedirectOverride)
-  }
-  else {
-    if (props.saveFunctionOverride) {
+    state.bypassUnsavedChanges = true
+    if (state.overrideClose) {
+      state.bypassUnsavedChanges = false
+      state.successMessage = 'All changes saved. You can close or continue editing.'
+      emit('unsavedChanges', false)
+      return
+    }
+    state.workingDoc = {}
+    if (props.saveRedirectOverride) {
+      router.push(props.saveRedirectOverride)
+    }
+    else if (props.saveFunctionOverride) {
       emit('unsavedChanges', false)
       props.saveFunctionOverride()
     }
@@ -361,7 +367,15 @@ const onSubmit = async () => {
       router.push(`/app/dashboard/${props.collection}`)
     }
   }
-  state.submitting = false
+  catch (error) {
+    state.bypassUnsavedChanges = false
+    const message = String(error?.message || '').trim() || 'Unable to save changes.'
+    state.errors = { _form: message }
+    emit('error', state.errors)
+  }
+  finally {
+    state.submitting = false
+  }
 }
 
 const onCancel = () => {
@@ -408,12 +422,17 @@ const setCollectionData = async () => {
   const collectionPath = `${edgeGlobal.edgeState.organizationDocPath}/${props.collection}`
   const cachedCollection = edgeFirebase.data?.[collectionPath]
   if (props.docId !== 'new') {
-    const docData = await edgeFirebase.getDocData(collectionPath, props.docId)
-    if (!edgeFirebase.data[collectionPath])
-      edgeFirebase.data[collectionPath] = {}
-    edgeFirebase.data[collectionPath][props.docId] = edgeGlobal.dupObject(docData)
+    const docData = props.loadDocument
+      ? await props.loadDocument({ collection: props.collection, docId: props.docId })
+      : await edgeFirebase.getDocData(collectionPath, props.docId)
+    if (!props.loadDocument) {
+      if (!edgeFirebase.data[collectionPath])
+        edgeFirebase.data[collectionPath] = {}
+      edgeFirebase.data[collectionPath][props.docId] = edgeGlobal.dupObject(docData)
+    }
     state.collectionData = {
-      ...(edgeFirebase.data[collectionPath] || cachedCollection || state.collectionData || {}),
+      ...(!props.loadDocument ? (edgeFirebase.data[collectionPath] || cachedCollection || {}) : {}),
+      ...(state.collectionData || {}),
       [props.docId]: docData,
     }
     return
@@ -440,7 +459,14 @@ const refreshEditorData = async () => {
 }
 
 onBeforeMount(async () => {
-  await refreshEditorData()
+  try {
+    await refreshEditorData()
+  }
+  catch (error) {
+    const message = String(error?.message || '').trim() || 'Unable to load this document.'
+    state.errors = { _form: message }
+    emit('error', state.errors)
+  }
   if (props.noCloseAfterSave) {
     state.overrideClose = true
   }
@@ -457,7 +483,14 @@ watch(() => [props.collection, props.docId], async (newVal, oldVal) => {
   if (newVal[0] === oldVal[0] && newVal[1] === oldVal[1]) {
     return
   }
-  await refreshEditorData()
+  try {
+    await refreshEditorData()
+  }
+  catch (error) {
+    const message = String(error?.message || '').trim() || 'Unable to load this document.'
+    state.errors = { _form: message }
+    emit('error', state.errors)
+  }
 })
 
 onActivated(() => {
@@ -542,11 +575,9 @@ const triggerSubmit = async (insertedValues = {}) => {
     await nextTick()
     await formRef.value.setValues(state.workingDoc, true)
     await formRef.value.validate()
-    console.log(formRef.value?.errors)
     await nextTick()
     await formRef.value.handleSubmit(onSubmit)()
     await nextTick()
-    console.log(formRef.value?.errors)
     state.errors = formRef.value?.errors
   }
 }
@@ -585,6 +616,8 @@ const onError = async () => {
   state.errors = formRef.value?.errors // reflect in UI
   emit('error', state.errors)
 }
+
+defineExpose({ refresh: refreshEditorData })
 </script>
 
 <template>
@@ -747,6 +780,9 @@ const onError = async () => {
       </CardFooter>
     </edge-shad-form>
   </Card>
+  <div v-else-if="state.errors?._form" class="m-6 rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+    {{ state.errors._form }}
+  </div>
 </template>
 
 <style lang="scss" scoped>
