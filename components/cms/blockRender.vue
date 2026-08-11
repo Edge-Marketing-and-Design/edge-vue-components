@@ -63,6 +63,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  previewAuthLoggedIn: {
+    type: Boolean,
+    default: null,
+  },
 })
 
 const emit = defineEmits(['loaded'])
@@ -1052,6 +1056,7 @@ const handleHtmlLoaded = async () => {
     :isolated="props.isolated"
     :viewport-mode="props.viewportMode"
     :standalone-preview="props.standalonePreview"
+    :preview-auth-logged-in="props.previewAuthLoggedIn"
     @loaded="handleHtmlLoaded"
   />
   <ClientOnly>

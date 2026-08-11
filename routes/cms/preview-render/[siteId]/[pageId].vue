@@ -431,6 +431,7 @@ watch(() => [organizationId.value, siteId.value, pageId.value, previewSignature.
                     :render-context="state.renderContext"
                     :route-last-segment="routeLastSegment"
                     :standalone-preview="true"
+                    :preview-auth-logged-in="true"
                     @pending="setPreviewBlockPending(previewBlockKey(row, rowIndex, column, colIndex, blockIdx), $event)"
                     @loaded="setPreviewBlockLoaded(previewBlockKey(row, rowIndex, column, colIndex, blockIdx))"
                   />

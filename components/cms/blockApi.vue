@@ -62,6 +62,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  previewAuthLoggedIn: {
+    type: Boolean,
+    default: true,
+  },
 })
 const emit = defineEmits(['pending', 'loaded'])
 const edgeFirebase = inject('edgeFirebase')
@@ -629,6 +633,7 @@ const resolveScopedCollectionSource = async (sourceName, sourceConfig, overrides
     :viewport-mode="props.viewportMode"
     :render-context="props.renderContext"
     :standalone-preview="props.standalonePreview"
+    :preview-auth-logged-in="props.previewAuthLoggedIn"
     @loaded="!anyPending && emit('loaded')"
   />
 </template>

@@ -10,6 +10,10 @@ const props = defineProps({
     type: Object,
     required: true,
   },
+  name: {
+    type: String,
+    default: '',
+  },
   label: {
     type: String,
     required: false,
@@ -26,6 +30,7 @@ const modelValue = useVModel(props, 'modelValue', emits, {
   emits,
   prop: 'modelValue',
 })
+const fieldName = computed(() => String(props.name || props.option?.field || '').trim())
 
 const NONE_VALUE = '__edge_none__'
 
@@ -116,7 +121,7 @@ onBeforeMount(async () => {
     v-if="!state.loading && staticOption.options.length > 0 && !props.multiple"
     v-model="selectValue"
     :label="props.label"
-    :name="props.option.field"
+    :name="fieldName"
     :items="staticOption.options"
     class="w-full"
   />
@@ -124,7 +129,7 @@ onBeforeMount(async () => {
     v-else-if="!state.loading && staticOption.options.length > 0 && props.multiple"
     :model-value="Array.isArray(modelValue) ? modelValue : []"
     :label="props.label"
-    :name="props.option.field"
+    :name="fieldName"
     :items="staticOption.options"
     item-title="title"
     item-value="name"

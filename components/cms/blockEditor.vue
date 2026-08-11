@@ -5245,6 +5245,7 @@ const exportCurrentBlock = async () => {
                     :allow-delete="false"
                     :standalone-preview="true"
                     :viewport-mode="previewViewportMode"
+                    :preview-auth-logged-in="state.previewAuthLoggedIn"
                     :block-id="state.previewBlock.id"
                     @delete="ignorePreviewDelete"
                   />
@@ -5345,6 +5346,7 @@ const exportCurrentBlock = async () => {
                   :allow-delete="false"
                   :standalone-preview="true"
                   :viewport-mode="previewViewportMode"
+                  :preview-auth-logged-in="state.previewAuthLoggedIn"
                   :block-id="state.historyPreviewBlock.id"
                   @delete="ignorePreviewDelete"
                 />
@@ -5418,6 +5420,7 @@ const exportCurrentBlock = async () => {
                         :suppress-interactive-clicks-except-allowed="true"
                         :allow-delete="false"
                         :viewport-mode="previewViewportMode"
+                        :preview-auth-logged-in="state.previewAuthLoggedIn"
                         :block-id="historyDiffBasePreviewBlock.id"
                         @delete="ignorePreviewDelete"
                       />
@@ -5454,6 +5457,7 @@ const exportCurrentBlock = async () => {
                         :suppress-interactive-clicks-except-allowed="true"
                         :allow-delete="false"
                         :viewport-mode="previewViewportMode"
+                        :preview-auth-logged-in="state.previewAuthLoggedIn"
                         :block-id="historyDiffComparePreviewBlock.id"
                         @delete="ignorePreviewDelete"
                       />
@@ -6958,7 +6962,7 @@ const exportCurrentBlock = async () => {
                       <div><code>.cms-login-button</code> or <code>[data-cms-login-button]</code>: marks a login CTA.</div>
                       <div><code>.cms-logout-button</code> or <code>[data-cms-logout-button]</code>: marks a logout CTA.</div>
                       <div><code>.cms-account-button</code> or <code>[data-cms-account-button]</code>: marks a My Account CTA so frontend can open a My Account dialog.</div>
-                      <div>Runtime adds <code>data-cms-auth-action="login|logout"</code> plus <code>data-cms-interactive="true"</code> so frontend can open login UI or trigger logout.</div>
+                      <div>Runtime adds <code>data-cms-auth-action="login|logout|account"</code> plus <code>data-cms-interactive="true"</code> so frontend can open login or account UI, or trigger logout.</div>
                     </div>
                   </section>
 
@@ -6972,6 +6976,7 @@ const exportCurrentBlock = async () => {
                       <div><code>.cms-hide-logged-in</code> or <code>[data-cms-hide-logged-in]</code>: hidden when logged in.</div>
                       <div><code>.cms-hide-logged-out</code> or <code>[data-cms-hide-logged-out]</code>: hidden when logged out.</div>
                       <div>Runtime writes <code>data-cms-auth-state="logged-in|logged-out"</code> on the block HTML root.</div>
+                      <div>Start state-specific elements with <code>hidden</code>. Both the Hub preview and public frontend remove it only from the element that matches the selected authentication state.</div>
                     </div>
                   </section>
 
@@ -7000,18 +7005,17 @@ const exportCurrentBlock = async () => {
                       Example
                     </h3>
                     <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;div class="flex items-center gap-3"&gt;
-  &lt;button type="button" class="cms-login-button cms-show-logged-out inline-flex items-center rounded-md bg-black px-4 py-2 text-white"&gt;
-    Log In
+  &lt;button type="button" class="cms-login-button cms-show-logged-out hidden inline-flex items-center rounded-md bg-black px-4 py-2 text-white"&gt;
+    Register / Sign In
   &lt;/button&gt;
 
-  &lt;button type="button" class="cms-account-button cms-show-logged-in inline-flex items-center rounded-md border px-4 py-2"&gt;
+  &lt;button type="button" class="cms-account-button cms-show-logged-in hidden inline-flex items-center rounded-md border px-4 py-2"&gt;
     My Account
   &lt;/button&gt;
-
-  &lt;button type="button" class="cms-logout-button cms-show-logged-in inline-flex items-center rounded-md border px-4 py-2"&gt;
-    Log Out
-  &lt;/button&gt;
 &lt;/div&gt;</code></pre>
+                    <p class="text-sm text-foreground">
+                      Do not add an account URL. The public frontend opens login for the logged-out button and the account interface for the logged-in button.
+                    </p>
                   </section>
                 </div>
               </div>

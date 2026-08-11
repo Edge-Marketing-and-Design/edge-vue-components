@@ -2723,7 +2723,7 @@ const getTagsFromPosts = computed(() => {
     >
       <!-- Content -->
       <div class="relative z-0" :class="props.editMode && props.overrideClicksInEditMode ? 'pointer-events-none' : ''">
-        <edge-cms-block-api :site-id="props.siteId" :route-last-segment="props.routeLastSegment" :theme="props.theme" :content="resolvedRenderBlock.content" :template-version="resolvedRenderBlock.templateVersion" :template="resolvedRenderBlock.template" :schema="resolvedRenderBlock.schema" :data-sources="resolvedRenderBlock.dataSources" :values="resolvedRenderBlock.values" :meta="resolvedRenderBlock.meta" :viewport-mode="props.viewportMode" :render-context="effectiveRenderContext" :standalone-preview="props.standalonePreview" />
+        <edge-cms-block-api :site-id="props.siteId" :route-last-segment="props.routeLastSegment" :theme="props.theme" :content="resolvedRenderBlock.content" :template-version="resolvedRenderBlock.templateVersion" :template="resolvedRenderBlock.template" :schema="resolvedRenderBlock.schema" :data-sources="resolvedRenderBlock.dataSources" :values="resolvedRenderBlock.values" :meta="resolvedRenderBlock.meta" :viewport-mode="props.viewportMode" :render-context="effectiveRenderContext" :standalone-preview="props.standalonePreview" :preview-auth-logged-in="props.previewAuthLoggedIn" />
       </div>
       <edge-cms-override-block-badge :is-override-block="isOverrideBlockPreview" />
       <div v-if="showProtectedEditOverlay" class="pointer-events-none absolute inset-0 z-[9998] bg-black/20">
@@ -2954,6 +2954,7 @@ const getTagsFromPosts = computed(() => {
                         :viewport-mode="previewViewportMode"
                         :render-context="effectiveRenderContext"
                         :standalone-preview="true"
+                        :preview-auth-logged-in="state.previewAuthLoggedIn"
                       />
                     </div>
                   </div>
@@ -3071,6 +3072,7 @@ const getTagsFromPosts = computed(() => {
                         :viewport-mode="previewViewportMode"
                         :render-context="effectiveRenderContext"
                         :standalone-preview="true"
+                        :preview-auth-logged-in="state.previewAuthLoggedIn"
                         @loaded="handleFieldEditorPreviewLoaded"
                       />
                     </div>
@@ -3452,6 +3454,7 @@ const getTagsFromPosts = computed(() => {
                               v-else-if="entry.meta?.collection?.path !== 'post'"
                               v-model="state.meta[entry.field].queryItems[option.field]"
                               :option="option"
+                              :name="`${entry.field}-${option.field}`"
                               :label="genTitleFromField(option)"
                               :multiple="option?.multiple || false"
                             />
@@ -3631,6 +3634,7 @@ const getTagsFromPosts = computed(() => {
                         v-else
                         v-model="state.draft[entry.field]"
                         :option="entry.meta.option"
+                        :name="entry.field"
                         :label="genTitleFromField(entry)"
                       />
                     </div>
