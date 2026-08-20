@@ -348,9 +348,24 @@ const canViewAnalyticsTab = computed(() => analyticsDevEnabled.value && !isTempl
 const canViewMediaTab = computed(() => !isTemplateSite.value && (!cmsMultiOrg.value || cmsTabAccess.value.media || currentUserCanViewSiteMedia.value))
 const canEditMediaTab = computed(() => !isTemplateSite.value && (!cmsMultiOrg.value || cmsTabAccess.value.mediaEdit || currentUserCanEditSiteMedia.value))
 const hidePublishStatusAndActions = computed(() => cmsMultiOrg.value && !canViewPagesTab.value)
+const sitesCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites`)
+const sitesCollection = computed(() => edgeFirebase.data?.[sitesCollectionPath.value])
 const siteData = computed(() => {
-  return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site] || {}
+  return sitesCollection.value?.[props.site] || {}
 })
+const isPersistedSiteRoute = computed(() => Boolean(props.site) && props.site !== 'new' && !isTemplateSite.value)
+const persistedSiteExists = computed(() => Object.prototype.hasOwnProperty.call(sitesCollection.value || {}, props.site))
+const canRenderSiteRoute = computed(() => !isPersistedSiteRoute.value || persistedSiteExists.value)
+const redirectMissingSite = () => {
+  if (!state.mounted || !isPersistedSiteRoute.value || sitesCollection.value === undefined || persistedSiteExists.value)
+    return
+  router.replace('/app/dashboard/sites?forceList=1')
+}
+
+watch(
+  [sitesCollection, () => props.site, () => state.mounted],
+  redirectMissingSite,
+)
 const contactSpamClassifierEnabled = computed(() => siteData.value?.contactSpam?.enabled === true)
 const currentSiteAccessUserId = computed(() => String(effectiveUserId.value || '').trim())
 const currentSiteAssignedUserIds = computed(() =>
@@ -1265,6 +1280,17 @@ const queueSnapshotTask = (tasks, label, loader) => {
 onBeforeMount(async () => {
   const previewSnapshotTasks = []
   const startupTasks = []
+  const siteCollectionTasks = []
+
+  if (sitesCollection.value === undefined) {
+    queueSnapshotTask(siteCollectionTasks, 'sites', () => edgeFirebase.startSnapshot(sitesCollectionPath.value))
+    await Promise.allSettled(siteCollectionTasks)
+  }
+
+  if (isPersistedSiteRoute.value && sitesCollection.value !== undefined && !persistedSiteExists.value) {
+    await router.replace('/app/dashboard/sites?forceList=1')
+    return
+  }
 
   if (!edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/users`]) {
     queueSnapshotTask(startupTasks, 'users', () => edgeFirebase.startUsersSnapshot(edgeGlobal.edgeState.organizationDocPath))
@@ -1280,9 +1306,6 @@ onBeforeMount(async () => {
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/blocks`]) {
     queueSnapshotTask(previewSnapshotTasks, 'blocks', () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/blocks`))
-  }
-  if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites`]) {
-    queueSnapshotTask(previewSnapshotTasks, 'sites', () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites`))
   }
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published`]) {
     queueSnapshotTask(startupTasks, 'published pages', () => edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/${props.site}/published`))
@@ -3895,7 +3918,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
 
 <template>
   <div
-    v-if="edgeGlobal.edgeState.organizationDocPath"
+    v-if="edgeGlobal.edgeState.organizationDocPath && canRenderSiteRoute"
   >
     <edge-editor
       v-if="!props.page && props.site === 'new' && canCreateSite"
