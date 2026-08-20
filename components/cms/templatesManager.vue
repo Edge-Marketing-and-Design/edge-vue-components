@@ -331,6 +331,9 @@ const resolveBlockForPreview = (block) => {
         : ((block.dataSources && Object.keys(block.dataSources).length) ? block.dataSources : (libraryBlock?.dataSources || {})),
       values: { ...(libraryBlock?.values || {}), ...(block.values || {}) },
       meta: { ...(libraryBlock?.meta || {}), ...(block.meta || {}) },
+      isOverrideBlock: libraryBlock
+        ? libraryBlock.isOverrideBlock === true
+        : block.isOverrideBlock === true,
     }
   }
   if (libraryBlock) {
@@ -342,6 +345,7 @@ const resolveBlockForPreview = (block) => {
       dataSources: libraryBlock.dataSources || {},
       values: block.values || libraryBlock.values || {},
       meta: block.meta || libraryBlock.meta || {},
+      isOverrideBlock: libraryBlock.isOverrideBlock === true,
     }
   }
   return null
@@ -1224,7 +1228,12 @@ watch(themeCollection, () => {
                                 <div
                                   v-for="(blockRef, blockIdx) in column.blocks || []"
                                   :key="`${item.docId}-row-${row.id || rowIndex}-col-${column.id || colIndex}-block-${blockIdx}`"
+                                  class="relative"
                                 >
+                                  <edge-cms-override-block-badge
+                                    :is-override-block="resolveTemplateBlockForPreview(item, blockRef)?.isOverrideBlock === true"
+                                    :scale-compensation="5"
+                                  />
                                   <edge-cms-block-api
                                     v-if="resolveTemplateBlockForPreview(item, blockRef)"
                                     :key="getTemplatePreviewBlockRenderKey(getTemplatePagePreviewKey(item.docId), item, blockRef, blockIdx)"
@@ -1387,7 +1396,12 @@ watch(themeCollection, () => {
                                 <div
                                   v-for="(blockRef, blockIdx) in column.blocks || []"
                                   :key="`${template.docId}-row-${row.id || rowIndex}-col-${column.id || colIndex}-block-${blockIdx}`"
+                                  class="relative"
                                 >
+                                  <edge-cms-override-block-badge
+                                    :is-override-block="resolveTemplateBlockForPreview(template, blockRef)?.isOverrideBlock === true"
+                                    :scale-compensation="5"
+                                  />
                                   <edge-cms-block-api
                                     v-if="resolveTemplateBlockForPreview(template, blockRef)"
                                     :key="getTemplatePreviewBlockRenderKey(getTemplatePagePreviewKey(template.docId), template, blockRef, blockIdx)"

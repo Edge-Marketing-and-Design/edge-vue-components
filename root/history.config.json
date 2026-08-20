@@ -39,6 +39,16 @@
       "match": "sites/*/posts/*",
       "label": "post",
       "retainDays": 180
+    },
+    {
+      "match": "neighborhoods/*",
+      "label": "area guide",
+      "retainDays": 180
+    },
+    {
+      "match": "named_searches/*",
+      "label": "named search",
+      "retainDays": 180
     }
   ]
 }

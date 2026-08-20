@@ -63,12 +63,18 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  previewAuthLoggedIn: {
+    type: Boolean,
+    default: null,
+  },
 })
 
 const emit = defineEmits(['loaded'])
 const renderInstanceId = `cms-block-render-${Math.random().toString(36).slice(2, 10)}`
 const htmlReady = ref(false)
 const templateV2Html = ref('')
+// A manual preview refresh remounts this component and starts with a fresh cache.
+const templateV2ApiRequestCache = new Map()
 let templateV2RenderToken = 0
 
 const defaultTheme = {
@@ -834,6 +840,18 @@ const templateV2Block = computed(() => ({
   dataSources: templateV2CmsDataSources.value,
 }))
 
+const templateV2RenderSignature = computed(() => {
+  try {
+    return JSON.stringify({
+      block: templateV2Block.value,
+      theme: theme.value || {},
+    })
+  }
+  catch {
+    return ''
+  }
+})
+
 function normalizeConfigLiteral(str) {
   return String(str || '')
     .replace(/(\{|,)\s*([A-Za-z_][\w-]*)\s*:/g, '$1"$2":')
@@ -988,13 +1006,14 @@ const renderedBlock = computed(() => {
 })
 
 watch(
-  templateV2Block,
-  async (block) => {
+  templateV2RenderSignature,
+  async () => {
     if (!isTemplateV2.value) {
       templateV2Html.value = ''
       return
     }
 
+    const block = templateV2Block.value
     const renderToken = ++templateV2RenderToken
     try {
       const result = await renderTemplateV2CmsSection(
@@ -1005,6 +1024,7 @@ watch(
         {
           theme: theme.value || {},
           extraHtml: '',
+          templateV2ApiRequestCache,
         },
       )
       if (renderToken === templateV2RenderToken)
@@ -1015,7 +1035,7 @@ watch(
         templateV2Html.value = ''
     }
   },
-  { immediate: true, deep: true },
+  { immediate: true },
 )
 
 watch(() => renderedBlock.value.html, () => {
@@ -1036,6 +1056,7 @@ const handleHtmlLoaded = async () => {
     :isolated="props.isolated"
     :viewport-mode="props.viewportMode"
     :standalone-preview="props.standalonePreview"
+    :preview-auth-logged-in="props.previewAuthLoggedIn"
     @loaded="handleHtmlLoaded"
   />
   <ClientOnly>

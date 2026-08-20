@@ -1855,6 +1855,7 @@ const resolveBlockForPreview = (block) => {
       dataSources: libraryBlock.dataSources || {},
       values: libraryBlock.values || EMPTY_PREVIEW_VALUES,
       meta: libraryBlock.meta || EMPTY_PREVIEW_META,
+      isOverrideBlock: libraryBlock.isOverrideBlock === true,
     }
   }
   if (block.content || block.template) {
@@ -1876,6 +1877,9 @@ const resolveBlockForPreview = (block) => {
         : (hasPreviewObjectEntries(block.dataSources) ? block.dataSources : (libraryBlock?.dataSources || {})),
       values: { ...(libraryBlock?.values || {}), ...(block.values || {}) },
       meta: { ...(libraryBlock?.meta || {}), ...(block.meta || {}) },
+      isOverrideBlock: libraryBlock
+        ? libraryBlock.isOverrideBlock === true
+        : block.isOverrideBlock === true,
     }
   }
   if (libraryBlock) {
@@ -1887,6 +1891,7 @@ const resolveBlockForPreview = (block) => {
       dataSources: libraryBlock.dataSources || {},
       values: block.values || libraryBlock.values || EMPTY_PREVIEW_VALUES,
       meta: block.meta || libraryBlock.meta || EMPTY_PREVIEW_META,
+      isOverrideBlock: libraryBlock.isOverrideBlock === true,
     }
   }
   return null
@@ -4217,7 +4222,12 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                                   <div
                                     v-for="(blockRef, blockIdx) in column.blocks || []"
                                     :key="`${item.docId}-row-${row.id || rowIndex}-col-${column.id || colIndex}-block-${blockIdx}`"
+                                    class="relative"
                                   >
+                                    <edge-cms-override-block-badge
+                                      :is-override-block="resolveTemplateBlockForPreview(item, blockRef)?.isOverrideBlock === true"
+                                      :scale-compensation="1 / 0.18"
+                                    />
                                     <edge-cms-block-api
                                       v-if="resolveTemplateBlockForPreview(item, blockRef)"
                                       :key="getPagePreviewBlockRenderKey(getTemplatePagePreviewKey(item.docId), item, blockRef, blockIdx)"
@@ -4896,7 +4906,12 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                                         <div
                                           v-for="(blockRef, blockIdx) in column.blocks || []"
                                           :key="`${item.docId}-row-${row.id || rowIndex}-col-${column.id || colIndex}-block-${blockIdx}`"
+                                          class="relative"
                                         >
+                                          <edge-cms-override-block-badge
+                                            :is-override-block="resolveTemplateBlockForPreview(item, blockRef)?.isOverrideBlock === true"
+                                            :scale-compensation="1 / getSitePagePreviewScale(item)"
+                                          />
                                           <edge-cms-block-api
                                             v-if="resolveTemplateBlockForPreview(item, blockRef)"
                                             :key="getPagePreviewBlockRenderKey(getSitePagePreviewKey(item.docId), item, blockRef, blockIdx)"

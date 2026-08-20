@@ -2453,6 +2453,7 @@ const buildPreviewBlock = (workingDoc, parsed) => {
     values: isWorkingTemplateV2Doc(workingDoc) ? templateV2PreviewValues : nextValues,
     meta: nextMeta,
     synced: !!workingDoc?.synced,
+    isOverrideBlock: workingDoc?.isOverrideBlock === true,
   }
 }
 
@@ -2874,6 +2875,7 @@ const buildComparableBlockDiffDoc = (doc) => {
     type: normalizeBlockTypes(doc.type, { fallbackToPage: false }),
     themes: Array.isArray(doc.themes) ? doc.themes : [],
     synced: !!doc.synced,
+    isOverrideBlock: doc.isOverrideBlock === true,
     previewType: normalizePreviewType(doc.previewType),
   }
 }
@@ -2902,6 +2904,7 @@ const buildHistoryPreviewBlock = (doc) => {
     values: isWorkingTemplateV2Doc(doc) ? edgeGlobal.dupObject(doc.values || {}) : edgeGlobal.dupObject(parsed.values || {}),
     meta: edgeGlobal.dupObject(parsed.meta || {}),
     synced: !!doc.synced,
+    isOverrideBlock: doc.isOverrideBlock === true,
   }
 }
 
@@ -3101,6 +3104,7 @@ const buildBlockChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel 
     { key: 'type', label: 'Block Type', transform: value => normalizeBlockTypes(value, { fallbackToPage: false }) },
     { key: 'themes', label: 'Allowed Themes' },
     { key: 'synced', label: 'Synced Block' },
+    { key: 'isOverrideBlock', label: 'Override Block' },
     { key: 'previewType', label: 'Preview Surface', transform: value => normalizePreviewType(value) },
     { key: 'templateVersion', label: 'Template Version', transform: value => normalizeTemplateVersion(value) },
     { key: 'content', label: 'Block Content' },
@@ -3435,6 +3439,16 @@ const exportCurrentBlock = async () => {
                 class="border-slate-400 bg-white text-slate-900 data-[state=checked]:bg-slate-700 data-[state=checked]:text-white dark:border-slate-500 dark:bg-slate-800 dark:text-slate-100 dark:data-[state=checked]:bg-slate-200 dark:data-[state=checked]:text-slate-900"
               >
                 <span class="text-slate-900">Synced Block</span>
+              </edge-shad-checkbox>
+            </div>
+            <div class="flex-auto pt-2 text-slate-900 dark:text-slate-100">
+              <edge-shad-checkbox
+                v-model="slotProps.workingDoc.isOverrideBlock"
+                name="isOverrideBlock"
+                label="Override Block"
+                class="border-violet-400 bg-white text-slate-900 data-[state=checked]:bg-violet-700 data-[state=checked]:text-white dark:border-violet-500 dark:bg-slate-800 dark:text-slate-100 dark:data-[state=checked]:bg-violet-300 dark:data-[state=checked]:text-violet-950"
+              >
+                <span class="text-slate-900 dark:text-slate-100">Override Block</span>
               </edge-shad-checkbox>
             </div>
           </div>
@@ -5231,6 +5245,7 @@ const exportCurrentBlock = async () => {
                     :allow-delete="false"
                     :standalone-preview="true"
                     :viewport-mode="previewViewportMode"
+                    :preview-auth-logged-in="state.previewAuthLoggedIn"
                     :block-id="state.previewBlock.id"
                     @delete="ignorePreviewDelete"
                   />
@@ -5331,6 +5346,7 @@ const exportCurrentBlock = async () => {
                   :allow-delete="false"
                   :standalone-preview="true"
                   :viewport-mode="previewViewportMode"
+                  :preview-auth-logged-in="state.previewAuthLoggedIn"
                   :block-id="state.historyPreviewBlock.id"
                   @delete="ignorePreviewDelete"
                 />
@@ -5404,6 +5420,7 @@ const exportCurrentBlock = async () => {
                         :suppress-interactive-clicks-except-allowed="true"
                         :allow-delete="false"
                         :viewport-mode="previewViewportMode"
+                        :preview-auth-logged-in="state.previewAuthLoggedIn"
                         :block-id="historyDiffBasePreviewBlock.id"
                         @delete="ignorePreviewDelete"
                       />
@@ -5440,6 +5457,7 @@ const exportCurrentBlock = async () => {
                         :suppress-interactive-clicks-except-allowed="true"
                         :allow-delete="false"
                         :viewport-mode="previewViewportMode"
+                        :preview-auth-logged-in="state.previewAuthLoggedIn"
                         :block-id="historyDiffComparePreviewBlock.id"
                         @delete="ignorePreviewDelete"
                       />
@@ -6409,6 +6427,35 @@ const exportCurrentBlock = async () => {
                     </div>
                   </section>
 
+                  <section class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Dot Styling
+                    </h3>
+                    <div class="space-y-3 text-sm text-foreground">
+                      <p>
+                        The frontend generates each carousel dot with the stable <code>cms-carousel-dot</code> class. It automatically supplies the dot’s size, circular shape, keyboard-focus state, and theme-aware colors.
+                      </p>
+                      <div>
+                        <div>By default:</div>
+                        <ul class="mt-1 list-disc space-y-1 pl-5">
+                          <li>Inactive dots use the theme’s <code>border</code> color.</li>
+                          <li>The active dot uses the theme’s <code>brand</code> color.</li>
+                        </ul>
+                      </div>
+                      <p>
+                        To customize the colors for a particular CMS block, set these optional CSS variables on the <code>data-carousel-dots</code> element:
+                      </p>
+                    </div>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;div
+  data-carousel-dots
+  class="mt-3 flex justify-center gap-2"
+  style="
+    --carousel-dot-color: var(--colors-muted);
+    --carousel-dot-active-color: var(--colors-accent);
+  "
+&gt;&lt;/div&gt;</code></pre>
+                  </section>
+
                   <section class="space-y-2">
                     <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
                       Behavior Notes
@@ -6915,7 +6962,7 @@ const exportCurrentBlock = async () => {
                       <div><code>.cms-login-button</code> or <code>[data-cms-login-button]</code>: marks a login CTA.</div>
                       <div><code>.cms-logout-button</code> or <code>[data-cms-logout-button]</code>: marks a logout CTA.</div>
                       <div><code>.cms-account-button</code> or <code>[data-cms-account-button]</code>: marks a My Account CTA so frontend can open a My Account dialog.</div>
-                      <div>Runtime adds <code>data-cms-auth-action="login|logout"</code> plus <code>data-cms-interactive="true"</code> so frontend can open login UI or trigger logout.</div>
+                      <div>Runtime adds <code>data-cms-auth-action="login|logout|account"</code> plus <code>data-cms-interactive="true"</code> so frontend can open login or account UI, or trigger logout.</div>
                     </div>
                   </section>
 
@@ -6929,6 +6976,7 @@ const exportCurrentBlock = async () => {
                       <div><code>.cms-hide-logged-in</code> or <code>[data-cms-hide-logged-in]</code>: hidden when logged in.</div>
                       <div><code>.cms-hide-logged-out</code> or <code>[data-cms-hide-logged-out]</code>: hidden when logged out.</div>
                       <div>Runtime writes <code>data-cms-auth-state="logged-in|logged-out"</code> on the block HTML root.</div>
+                      <div>Start state-specific elements with <code>hidden</code>. Both the Hub preview and public frontend remove it only from the element that matches the selected authentication state.</div>
                     </div>
                   </section>
 
@@ -6957,18 +7005,17 @@ const exportCurrentBlock = async () => {
                       Example
                     </h3>
                     <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;div class="flex items-center gap-3"&gt;
-  &lt;button type="button" class="cms-login-button cms-show-logged-out inline-flex items-center rounded-md bg-black px-4 py-2 text-white"&gt;
-    Log In
+  &lt;button type="button" class="cms-login-button cms-show-logged-out hidden inline-flex items-center rounded-md bg-black px-4 py-2 text-white"&gt;
+    Register / Sign In
   &lt;/button&gt;
 
-  &lt;button type="button" class="cms-account-button cms-show-logged-in inline-flex items-center rounded-md border px-4 py-2"&gt;
+  &lt;button type="button" class="cms-account-button cms-show-logged-in hidden inline-flex items-center rounded-md border px-4 py-2"&gt;
     My Account
   &lt;/button&gt;
-
-  &lt;button type="button" class="cms-logout-button cms-show-logged-in inline-flex items-center rounded-md border px-4 py-2"&gt;
-    Log Out
-  &lt;/button&gt;
 &lt;/div&gt;</code></pre>
+                    <p class="text-sm text-foreground">
+                      Do not add an account URL. The public frontend opens login for the logged-out button and the account interface for the logged-in button.
+                    </p>
                   </section>
                 </div>
               </div>

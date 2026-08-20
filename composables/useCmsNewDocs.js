@@ -13,6 +13,7 @@ export const useCmsNewDocs = () => {
     themes: { value: [] },
     type: { value: ['Page'] },
     previewType: { value: 'light' },
+    isOverrideBlock: { value: false },
     synced: { value: false },
     version: 1,
   }))

@@ -5,6 +5,7 @@ import initUnocssRuntime, { defineConfig } from '@unocss/runtime'
 import DOMPurify from 'dompurify'
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { syncCmsPreviewAuthState } from '../../lib/cmsPreviewAuthState'
 import { useHead } from '#imports'
 
 const props = defineProps({
@@ -32,6 +33,10 @@ const props = defineProps({
   standalonePreview: {
     type: Boolean,
     default: false,
+  },
+  previewAuthLoggedIn: {
+    type: Boolean,
+    default: null,
   },
 })
 
@@ -1825,6 +1830,7 @@ onMounted(async () => {
   // setScopedThemeVars(hostEl.value, normalizeTheme(props.theme))
   applyThemeClasses(hostEl.value, props.theme, (props.theme && props.theme.variant) || 'light')
   rewriteAllClasses(hostEl.value, props.theme, props.isolated, props.viewportMode)
+  syncCmsPreviewAuthState(hostEl.value, props.previewAuthLoggedIn)
   // Initialize behaviors after class rewriting so helpers use final class state.
   initEmblaCarousels(hostEl.value)
   initCmsNavHelpers(hostEl.value)
@@ -1844,6 +1850,7 @@ watch(
 
     applyThemeClasses(hostEl.value, props.theme, (props.theme && props.theme.variant) || 'light')
     rewriteAllClasses(hostEl.value, props.theme, props.isolated, props.viewportMode)
+    syncCmsPreviewAuthState(hostEl.value, props.previewAuthLoggedIn)
     initEmblaCarousels(hostEl.value)
     initCmsNavHelpers(hostEl.value)
     await nextTick()
@@ -1861,6 +1868,7 @@ watch(
     // 2) Apply classes based on `apply`, `slots`, and optional variants
     applyThemeClasses(hostEl.value, val, (val && val.variant) || 'light')
     rewriteAllClasses(hostEl.value, val, props.isolated, props.viewportMode)
+    syncCmsPreviewAuthState(hostEl.value, props.previewAuthLoggedIn)
     initCmsNavHelpers(hostEl.value)
     await nextTick()
     syncStandalonePreviewInset()
@@ -1874,6 +1882,7 @@ watch(
   async () => {
     await nextTick()
     rewriteAllClasses(hostEl.value, props.theme, props.isolated, props.viewportMode)
+    syncCmsPreviewAuthState(hostEl.value, props.previewAuthLoggedIn)
     // Viewport button changes can alter preview surface width without a window resize.
     // Reinitialize nav helpers so fixed nav left/width is recalculated immediately.
     initCmsNavHelpers(hostEl.value)
@@ -1886,6 +1895,14 @@ watch(
   async () => {
     await nextTick()
     syncStandalonePreviewInset()
+  },
+)
+
+watch(
+  () => props.previewAuthLoggedIn,
+  async (loggedIn) => {
+    await nextTick()
+    syncCmsPreviewAuthState(hostEl.value, loggedIn)
   },
 )
 

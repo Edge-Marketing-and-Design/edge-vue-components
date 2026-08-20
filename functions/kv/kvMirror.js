@@ -24,6 +24,7 @@ function json(x) {
 
 const KV_RETRY_TOPIC = process.env.KV_RETRY_TOPIC || 'kv-mirror-retry'
 const INDEX_WRITE_CONCURRENCY = Number(process.env.KV_MIRROR_INDEX_CONCURRENCY || 20)
+const KV_MIRROR_DISABLED = ['1', 'true', 'yes'].includes(String(process.env.KV_MIRROR_DISABLED || '').trim().toLowerCase())
 
 function toSortedUniqueStrings(values = []) {
   return [...new Set((Array.isArray(values) ? values : [])
@@ -79,7 +80,7 @@ async function runWithConcurrency(items, limit, worker) {
 }
 
 async function enqueueKvRetry(payload, minuteDelay = 1) {
-  const safePayload = payload && typeof payload === 'object' ? payload : {}
+  const safePayload = (payload && typeof payload === 'object') ? payload : {}
   await db.collection('topic-queue').add({
     topic: KV_RETRY_TOPIC,
     payload: {
@@ -146,6 +147,147 @@ function setDiff(oldArr = [], newArr = []) {
   return { toRemove, toAdd }
 }
 
+function createRedactionNode() {
+  return {
+    redact: false,
+    children: Object.create(null),
+  }
+}
+
+function buildRedactionTree(redactedFields) {
+  const root = createRedactionNode()
+  let pathCount = 0
+
+  for (const fieldPath of Array.isArray(redactedFields) ? redactedFields : []) {
+    if (typeof fieldPath !== 'string')
+      continue
+    const segments = fieldPath
+      .split('.')
+      .map(segment => segment.trim())
+      .filter(Boolean)
+    if (!segments.length)
+      continue
+
+    let node = root
+    for (const segment of segments) {
+      if (!node.children[segment])
+        node.children[segment] = createRedactionNode()
+      node = node.children[segment]
+    }
+    if (!node.redact) {
+      node.redact = true
+      pathCount += 1
+    }
+  }
+
+  return pathCount ? root : null
+}
+
+function isPlainObject(value) {
+  if (!value || Object.prototype.toString.call(value) !== '[object Object]')
+    return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === null || prototype?.constructor?.name === 'Object'
+}
+
+function redactValue(value, node, keepEmptyObject = false) {
+  if (node?.redact) {
+    return {
+      omitted: true,
+      redacted: true,
+    }
+  }
+
+  if (Array.isArray(value)) {
+    let redacted = false
+    const output = value.map((item) => {
+      const result = redactValue(item, node, true)
+      redacted = redacted || result.redacted
+      return result.omitted ? null : result.value
+    })
+    return {
+      omitted: false,
+      redacted,
+      value: output,
+    }
+  }
+
+  if (!isPlainObject(value)) {
+    return {
+      omitted: false,
+      redacted: false,
+      value,
+    }
+  }
+
+  let redacted = false
+  const output = {}
+  for (const [key, childValue] of Object.entries(value)) {
+    const result = redactValue(childValue, node?.children?.[key], false)
+    redacted = redacted || result.redacted
+    if (!result.omitted)
+      output[key] = result.value
+  }
+
+  if (redacted && !keepEmptyObject && Object.keys(value).length && !Object.keys(output).length) {
+    return {
+      omitted: true,
+      redacted: true,
+    }
+  }
+
+  return {
+    omitted: false,
+    redacted,
+    value: output,
+  }
+}
+
+function redactConfiguredFields(value, redactionTree) {
+  if (!redactionTree || value === null || value === undefined)
+    return value
+  const result = redactValue(value, redactionTree, true)
+  if (!result.omitted)
+    return result.value
+  return Array.isArray(value) ? [] : {}
+}
+
+function createObjectView(source, overrides) {
+  if (!source || typeof source !== 'object')
+    return source
+  return Object.assign(Object.create(Object.getPrototypeOf(source)), source, overrides)
+}
+
+function getRedactedField(data, fieldPath) {
+  if (typeof fieldPath !== 'string')
+    return undefined
+  return fieldPath
+    .split('.')
+    .filter(Boolean)
+    .reduce((value, segment) => value?.[segment], data)
+}
+
+function createRedactedEventView(event, redactionTree) {
+  if (!redactionTree || !event?.data)
+    return event
+
+  const createSnapshotView = (snapshot) => {
+    if (!snapshot?.exists || typeof snapshot.data !== 'function')
+      return snapshot
+    const redactedData = redactConfiguredFields(snapshot.data(), redactionTree)
+    return createObjectView(snapshot, {
+      data: () => redactedData,
+      get: fieldPath => getRedactedField(redactedData, fieldPath),
+    })
+  }
+
+  const eventData = createObjectView(event.data, {
+    before: createSnapshotView(event.data.before),
+    after: createSnapshotView(event.data.after),
+  })
+  return createObjectView(event, { data: eventData })
+}
+
 async function runKvPayload(operation) {
   if (operation?.op === 'putCollectionVersion') {
     const materialized = materializeCollectionVersionOperation(operation)
@@ -182,6 +324,7 @@ async function runMirrorPhase(operations) {
  *   makeIndexKeys: (params, data) => [...],                  // optional
  *   makeMetadata: (data, params) => ({ title: data.title }), // optional, merged with { canonical }
  *   serialize: (data) => JSON.stringify(data),               // optional
+ *   redactedFields: ['privateNotes', 'meta.internalEmail'],   // optional dot paths; traverses arrays
  *   makeAfterMirrorOperation: ({ event, params, data, canonicalKey }) => null, // optional
  *   timeoutSeconds: 180                                      // optional
  * })
@@ -192,14 +335,22 @@ function createKvMirrorHandler({
   makeIndexKeys,
   makeMetadata,
   serialize = json,
+  redactedFields = [],
   makeAfterMirrorOperation,
   timeoutSeconds = 180,
 }) {
+  const redactionTree = buildRedactionTree(redactedFields)
+
   return onDocumentWritten({ document, timeoutSeconds }, async (event) => {
+    if (KV_MIRROR_DISABLED) {
+      logger.log('KV mirror disabled by environment', { document })
+      return
+    }
     const after = event.data?.after
     const params = event.params || {}
-    const data = after?.exists ? after.data() : null
-    const canonicalKey = makeCanonicalKey(params, data)
+    const sourceData = after?.exists ? after.data() : null
+    const data = redactConfiguredFields(sourceData, redactionTree)
+    const canonicalKey = makeCanonicalKey(params, sourceData)
     if (!canonicalKey) {
       logger.warn('KV mirror skipped due to missing canonical key', { document })
       return
@@ -230,8 +381,9 @@ function createKvMirrorHandler({
     else {
       const baseMeta = { canonical: canonicalKey }
       const customMetaCandidate = typeof makeMetadata === 'function' ? (makeMetadata(data, params) || null) : null
-      const metaValue = (customMetaCandidate && typeof customMetaCandidate === 'object')
-        ? { ...customMetaCandidate, canonical: canonicalKey }
+      const redactedMetaCandidate = redactConfiguredFields(customMetaCandidate, redactionTree)
+      const metaValue = (redactedMetaCandidate && typeof redactedMetaCandidate === 'object')
+        ? { ...redactedMetaCandidate, canonical: canonicalKey }
         : baseMeta
       const serializedData = serialize(data)
       phases.push([{
@@ -281,8 +433,14 @@ function createKvMirrorHandler({
       }
     }
 
+    const followupEvent = createRedactedEventView(event, redactionTree)
     const afterOperation = typeof makeAfterMirrorOperation === 'function'
-      ? await Promise.resolve(makeAfterMirrorOperation({ event, params, data, canonicalKey }))
+      ? await Promise.resolve(makeAfterMirrorOperation({
+        event: followupEvent,
+        params,
+        data,
+        canonicalKey,
+      }))
       : null
     const versionOperation = createCollectionVersionOperation({
       event,
@@ -345,6 +503,7 @@ function createKvMirrorHandlerFromFields({
   metadataKeys = [],
   metaKeyTruncate = {},
   serialize = json,
+  redactedFields = [],
 }) {
   if (!uniqueKey || typeof uniqueKey !== 'string') {
     throw new Error('createKvMirrorHandlerFromFields requires uniqueKey (e.g. "{orgId}:{siteId}")')
@@ -409,7 +568,7 @@ function createKvMirrorHandlerFromFields({
       const values = Array.isArray(rawValue)
         ? rawValue
         : (
-            csvIndexFields.has(field) && typeof rawValue === 'string'
+            (csvIndexFields.has(field) && typeof rawValue === 'string')
               ? rawValue.split(',').map(value => value.trim())
               : [rawValue]
           )
@@ -428,7 +587,7 @@ function createKvMirrorHandlerFromFields({
   const makeMetadata = (data) => {
     const meta = {}
     const keys = Array.isArray(metadataKeys) ? metadataKeys : []
-    const truncateMap = metaKeyTruncate && typeof metaKeyTruncate === 'object'
+    const truncateMap = (metaKeyTruncate && typeof metaKeyTruncate === 'object')
       ? metaKeyTruncate
       : {}
     for (const key of keys) {
@@ -450,6 +609,7 @@ function createKvMirrorHandlerFromFields({
     makeIndexKeys: indexKeys.length ? makeIndexKeys : undefined,
     makeMetadata: metadataKeys.length ? makeMetadata : undefined,
     serialize,
+    redactedFields,
     timeoutSeconds: 180,
   })
 }

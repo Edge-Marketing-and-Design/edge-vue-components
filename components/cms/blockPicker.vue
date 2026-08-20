@@ -161,6 +161,17 @@ const blockOverridePreviewType = computed(() => {
   return normalizePreviewType(savedPreviewType)
 })
 
+const blockOverrideIsOverrideBlock = computed(() => {
+  if (Object.prototype.hasOwnProperty.call(props.blockOverride || {}, 'isOverrideBlock'))
+    return props.blockOverride?.isOverrideBlock === true
+
+  const blockId = String(props.blockOverride?.blockId || '').trim()
+  if (!blockId)
+    return false
+
+  return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[blockId]?.isOverrideBlock === true
+})
+
 const blocks = computed(() => {
   let blocks = []
   if (edgeFirebase?.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]) {
@@ -396,7 +407,8 @@ const clearTagFilters = () => {
 </script>
 
 <template>
-  <div v-if="props.blockOverride" class="pointer-events-none" :class="previewSurfaceClass(blockOverridePreviewType)">
+  <div v-if="props.blockOverride" class="pointer-events-none relative" :class="previewSurfaceClass(blockOverridePreviewType)">
+    <edge-cms-override-block-badge :is-override-block="blockOverrideIsOverrideBlock" />
     <edge-cms-block-api
       :content="props.blockOverride.content"
       :template-version="props.blockOverride.templateVersion"
@@ -459,6 +471,7 @@ const clearTagFilters = () => {
             type="button"
             class="p-0 text-left text-slate-500 border border-dashed border-border/70 hover:border-primary hover:ring-1 hover:ring-primary/40 cursor-pointer w-full overflow-hidden relative transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
           >
+            <edge-cms-override-block-badge :is-override-block="block.isOverrideBlock === true" />
             <div class="scale-wrapper">
               <div
                 :ref="el => setInnerRef(block.docId, el)"
@@ -544,6 +557,7 @@ const clearTagFilters = () => {
                     class="p-0 text-left text-slate-500 border border-dashed border-border/70 hover:border-primary hover:ring-1 hover:ring-primary/40 cursor-pointer w-full overflow-hidden relative transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
                     @click="chooseBlock(block)"
                   >
+                    <edge-cms-override-block-badge :is-override-block="block.isOverrideBlock === true" />
                     <div class="scale-wrapper">
                       <div
                 :ref="el => setInnerRef(block.docId, el)"
