@@ -23,6 +23,7 @@ const {
 
 const { createKvMirrorHandler } = require('./kv/kvMirror')
 const kv = require('./kv/kvClient')
+const { removeCmsPageFromMenus } = require('./helpers/cmsPageDeletion')
 const { resolveSubmittedUserRouting } = require('./helpers/submittedUserRouting')
 
 const SITE_AI_TOPIC = 'site-ai-bootstrap'
@@ -2885,7 +2886,16 @@ exports.onPageDeleted = onDocumentDeleted({ document: 'organizations/{orgId}/sit
   const siteId = event.params.siteId
   const pageId = event.params.pageId
   const publishedRef = db.collection('organizations').doc(orgId).collection('sites').doc(siteId).collection('published').doc(pageId)
-  await publishedRef.delete()
+  const publishedSiteSettingsRef = db.collection('organizations').doc(orgId).collection('published-site-settings').doc(siteId)
+  await db.runTransaction(async (transaction) => {
+    const publishedSiteSettingsSnap = await transaction.get(publishedSiteSettingsRef)
+    if (publishedSiteSettingsSnap.exists) {
+      transaction.update(publishedSiteSettingsRef, {
+        menus: removeCmsPageFromMenus(publishedSiteSettingsSnap.data()?.menus, pageId, { ensureRootMenus: true }),
+      })
+    }
+    transaction.delete(publishedRef)
+  })
   const siteRef = db.collection('organizations').doc(orgId).collection('sites').doc(siteId)
   try {
     await siteRef.update({

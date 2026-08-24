@@ -2704,6 +2704,13 @@ const deleteCurrentPage = async () => {
   try {
     if (!props.isTemplateSite) {
       const nextMenus = removeCmsPageFromMenus(siteDoc.value?.menus, props.page, { ensureRootMenus: true })
+      await removeCmsPageFromPublishedMenus({
+        edgeFirebase,
+        organizationDocPath: edgeGlobal.edgeState.organizationDocPath,
+        siteId: props.site,
+        pageId: props.page,
+        publishedSettings: publishedSiteSettingsDoc.value,
+      })
       const nextAssignments = { ...normalizeRestrictedPageRuleAssignments(siteDoc.value?.restrictedContent?.pageRuleAssignments) }
       delete nextAssignments[getPageRestrictionAssignmentKey(props.page, false)]
       delete nextAssignments[getPageRestrictionAssignmentKey(props.page, true)]
