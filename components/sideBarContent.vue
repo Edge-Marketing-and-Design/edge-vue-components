@@ -240,7 +240,14 @@ const resolveMenuIcon = icon => iconComponents[icon] || icon
                       </span>
                     </span>
                     <span v-if="!isSlack">{{ item.title }}</span>
-                    <span v-else :class="submenu ? 'text-[10px]' : 'text-xs'">{{ item.title }}</span>
+                    <span
+                      v-else
+                      :class="submenu
+                        ? 'line-clamp-2 !whitespace-normal !text-clip text-center text-[10px] leading-[1.1]'
+                        : 'text-xs'"
+                    >
+                      {{ item.title }}
+                    </span>
                   </SidebarMenuButton>
                 </div>
               </SidebarMenuItem>

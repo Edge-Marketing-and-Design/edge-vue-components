@@ -74,6 +74,18 @@ const state = reactive({
 
 const open = ref(false)
 
+const resolvedInputAttrs = computed(() => ({
+  'name': `${props.name}Search`,
+  'autocomplete': 'off',
+  'autocorrect': 'off',
+  'autocapitalize': 'none',
+  'spellcheck': 'false',
+  'data-1p-ignore': 'true',
+  'data-lpignore': 'true',
+  'data-form-type': 'other',
+  ...props.inputAttrs,
+}))
+
 const computedItems = computed(() => {
   return props.items.map((item) => {
     if (typeof item === 'string') {
@@ -210,7 +222,7 @@ const triggerTitle = computed(() => {
         </PopoverTrigger>
         <PopoverContent class="p-0" :style="`width: ${state.width}px !important;`">
           <Command>
-            <CommandInput class="h-9" placeholder="Search..." v-bind="props.inputAttrs" />
+            <CommandInput class="h-9" placeholder="Search..." v-bind="resolvedInputAttrs" />
             <CommandEmpty>Not found.</CommandEmpty>
             <CommandList>
               <CommandGroup>

@@ -1202,6 +1202,14 @@ const deleteSitePage = async (pageId) => {
     const nextMenus = removeCmsPageFromMenus(rootMenus, normalizedPageId)
 
     if (!props.isTemplateSite) {
+      const publishedSettingsPath = `${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`
+      await removeCmsPageFromPublishedMenus({
+        edgeFirebase,
+        organizationDocPath: edgeGlobal.edgeState.organizationDocPath,
+        siteId: props.site,
+        pageId: normalizedPageId,
+        publishedSettings: edgeFirebase.data?.[publishedSettingsPath]?.[props.site] || null,
+      })
       const nextAssignments = { ...normalizeRestrictedPageRuleAssignments(siteDoc.value?.restrictedContent?.pageRuleAssignments) }
       delete nextAssignments[getPageRestrictionAssignmentKey(normalizedPageId, false)]
       delete nextAssignments[getPageRestrictionAssignmentKey(normalizedPageId, true)]
