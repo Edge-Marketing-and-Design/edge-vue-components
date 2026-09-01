@@ -3,6 +3,7 @@ import { computed, inject, onBeforeMount, reactive, ref, watch } from 'vue'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { ArrowDown, ArrowLeft, ArrowUp, Clock3, Copy, Eye, File, FileCheck, FilePen, FileWarning, FileX, GripVertical, History, Image, ImagePlus, Loader2, MoreHorizontal, PanelTop, Plus, RotateCcw, Save, Trash2, X } from 'lucide-vue-next'
+import { buildCmsPostLiveUrl, findFirstCmsPostRouteSegments } from '../../lib/cmsPostRoutes'
 
 const props = defineProps({
   site: {
@@ -919,58 +920,6 @@ const firstValidDomain = (domains) => {
   return ''
 }
 
-const normalizePathSlug = value => String(value || '').trim().toLowerCase()
-
-const isExternalMenuLink = entry => entry?.item && typeof entry.item === 'object' && entry.item.type === 'external'
-
-const isPostRoutePage = (pageDoc) => {
-  if (!pageDoc || typeof pageDoc !== 'object')
-    return false
-  return Boolean(pageDoc.post)
-    || (Array.isArray(pageDoc.postContent) && pageDoc.postContent.length > 0)
-    || (Array.isArray(pageDoc.postStructure) && pageDoc.postStructure.length > 0)
-}
-
-const getFirstFolderEntry = (entry) => {
-  if (!entry?.item || typeof entry.item !== 'object' || isExternalMenuLink(entry))
-    return null
-  for (const [folderSlug, nestedItems] of Object.entries(entry.item || {})) {
-    if (Array.isArray(nestedItems))
-      return { folderSlug, nestedItems }
-  }
-  return null
-}
-
-const findFirstPostRouteSegments = (menus, pagesById, folderSlugs = []) => {
-  for (const menuItems of Object.values(menus || {})) {
-    if (!Array.isArray(menuItems))
-      continue
-    for (const entry of menuItems) {
-      if (isExternalMenuLink(entry))
-        continue
-      if (typeof entry?.item === 'string') {
-        const pageSlug = normalizePathSlug(entry?.name)
-        if (!pageSlug)
-          continue
-        const pageDoc = pagesById?.[entry.item]
-        if (isPostRoutePage(pageDoc))
-          return [...folderSlugs, pageSlug]
-        continue
-      }
-      const folderEntry = getFirstFolderEntry(entry)
-      if (!folderEntry)
-        continue
-      const folderSlug = normalizePathSlug(folderEntry.folderSlug)
-      if (!folderSlug)
-        continue
-      const nested = findFirstPostRouteSegments({ [folderEntry.folderSlug]: folderEntry.nestedItems }, pagesById, [...folderSlugs, folderSlug])
-      if (nested.length)
-        return nested
-    }
-  }
-  return []
-}
-
 const postListLiveOrigin = computed(() => {
   if (props.site === 'templates')
     return ''
@@ -979,7 +928,7 @@ const postListLiveOrigin = computed(() => {
 })
 
 const firstPostRouteSegments = computed(() => {
-  return findFirstPostRouteSegments(siteDoc.value?.menus || {}, sitePages.value, [])
+  return findFirstCmsPostRouteSegments(siteDoc.value?.menus || {}, sitePages.value, [])
 })
 
 const getPostLiveUrl = (post) => {
@@ -994,13 +943,7 @@ const getPostLiveUrl = (post) => {
   const postSlug = getPostSlug(post) || slugify(post?.title || post?.name || '')
   if (!postSlug)
     return ''
-
-  const encodedPostSlug = encodeURIComponent(postSlug)
-  if (routeSegments.length === 1 && routeSegments[0] === 'home')
-    return `${origin}/${encodedPostSlug}`
-
-  const encodedPath = routeSegments.map(segment => encodeURIComponent(segment)).join('/')
-  return `${origin}/${encodedPath}/${encodedPostSlug}`
+  return buildCmsPostLiveUrl({ origin, routeSegments, postSlug })
 }
 
 const postLiveUrlUnavailableReason = computed(() => {
@@ -2894,7 +2837,7 @@ const publishPost = async (postId) => {
   }
   emit('updating', true)
   try {
-    const publishedPost = edgeGlobal.dupObject(post || {})
+    const publishedPost = resolveSyncedPostDoc(edgeGlobal.dupObject(post || {}))
     delete publishedPost.publishAt
     publishedPost.doc_created_at = Number.isFinite(publishedAtMillis) ? publishedAtMillis : Date.now()
     publishedPost.publishedAt = publishedAtIso
@@ -2947,7 +2890,7 @@ const publishPostAt = async (postId, publishedAtIso) => {
 
   emit('updating', true)
   try {
-    const publishedPost = edgeGlobal.dupObject(post || {})
+    const publishedPost = resolveSyncedPostDoc(edgeGlobal.dupObject(post || {}))
     delete publishedPost.publishAt
     publishedPost.doc_created_at = publishedAtMillis
     publishedPost.publishedAt = publishedAtIso
