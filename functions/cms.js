@@ -9024,7 +9024,7 @@ exports.registrarRegisterDomain = onCall(async (request) => {
     registration = await cloudflareRegistrarRequest({
       method: 'post',
       endpoint: 'registrations',
-      data: { domain_name: domain },
+      data: { domain_name: domain, auto_renew: true },
     })
   }
   catch (error) {
