@@ -1,5 +1,6 @@
 <script setup>
 import { Globe, Link2, Loader2, Pencil, Plus, RefreshCw, Search, Unlink2 } from 'lucide-vue-next'
+import { getDomain } from 'tldts'
 
 const edgeFirebase = inject('edgeFirebase')
 
@@ -103,7 +104,7 @@ const shouldExcludeDomainFromList = (value) => {
     return true
   if (normalized.endsWith('.dev'))
     return true
-  return false
+  return getDomain(normalized, { allowPrivateDomains: false }) !== normalized
 }
 
 const setMessage = (message, type = 'info') => {
@@ -135,20 +136,21 @@ const snapshotCollectionItems = (path) => {
 
 const startRegistrarSnapshots = async () => {
   if (!canViewDomains.value || !snapshotPaths.value.length)
-    return
+    return false
 
   state.loading = true
   try {
     const tasks = snapshotPaths.value
-      .filter(path => !edgeFirebase.data?.[path])
       .map(path => edgeFirebase.startSnapshot(path))
     const results = tasks.length ? await Promise.allSettled(tasks) : []
     const rejected = results.find(result => result.status === 'rejected')
     if (rejected)
       throw rejected.reason
+    return true
   }
   catch (error) {
     setMessage(parseFunctionError(error, 'Unable to load domain registrar data.'), 'error')
+    return false
   }
   finally {
     state.loading = false
@@ -177,6 +179,8 @@ const syncFromRegistry = async () => {
       uid: currentUid.value,
       orgId: currentOrgId.value,
     })
+    if (!(await startRegistrarSnapshots()))
+      return
     setMessage('Domain registry status refreshed.', 'success')
   }
   catch (error) {
