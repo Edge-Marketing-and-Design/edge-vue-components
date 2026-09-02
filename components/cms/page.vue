@@ -1919,6 +1919,9 @@ const currentMenuPageEntry = computed(() => {
   return found
 })
 
+const isCurrentPageRenameDisabled = computed(() => !!currentMenuPageEntry.value?.disableRename)
+const isCurrentPageDeleteDisabled = computed(() => !!currentMenuPageEntry.value?.disableDelete)
+
 const currentPageRenameLabel = computed(() => {
   if (props.isTemplateSite)
     return String(currentPage.value?.name || props.page || '').trim() || 'Template'
@@ -2636,11 +2639,17 @@ const makeImportedPageNameForNew = (baseName, docsMap = {}) => {
 }
 
 const openRenamePageDialog = () => {
-  if (!props.page || props.page === 'new')
+  if (isCurrentPageRenameDisabled.value || !props.page || props.page === 'new')
     return
   state.renamePageValue = currentPageRenameLabel.value
   state.renamePageSubmitting = false
   state.renamePageDialogOpen = true
+}
+
+const openDeletePageDialog = () => {
+  if (isCurrentPageDeleteDisabled.value || !props.page || props.page === 'new')
+    return
+  state.deletePageDialogOpen = true
 }
 
 const openCurrentPageSettings = async () => {
@@ -2653,7 +2662,7 @@ const openCurrentPageSettings = async () => {
 
 const renameCurrentPageAction = async () => {
   const nextName = String(state.renamePageValue || '').trim()
-  if (!nextName || state.renamePageSubmitting || !props.page || props.page === 'new')
+  if (isCurrentPageRenameDisabled.value || !nextName || state.renamePageSubmitting || !props.page || props.page === 'new')
     return
 
   state.renamePageSubmitting = true
@@ -2697,7 +2706,7 @@ const renameCurrentPageAction = async () => {
 }
 
 const deleteCurrentPage = async () => {
-  if (state.deletePageSubmitting || !props.page || props.page === 'new')
+  if (isCurrentPageDeleteDisabled.value || state.deletePageSubmitting || !props.page || props.page === 'new')
     return
 
   state.deletePageSubmitting = true
@@ -3792,7 +3801,7 @@ const hasUnsavedChanges = (changes) => {
                     <span>Export {{ props.isTemplateSite ? 'Template' : 'Page' }}</span>
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    :disabled="slotProps.unsavedChanges || state.renamePageSubmitting || !currentPage || !props.page || props.page === 'new'"
+                    :disabled="isCurrentPageRenameDisabled || slotProps.unsavedChanges || state.renamePageSubmitting || !currentPage || !props.page || props.page === 'new'"
                     @click="openRenamePageDialog"
                   >
                     <FilePen class="w-4 h-4" />
@@ -3825,8 +3834,8 @@ const hasUnsavedChanges = (changes) => {
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     class="text-destructive"
-                    :disabled="slotProps.unsavedChanges || state.deletePageSubmitting || !currentPage || !props.page || props.page === 'new'"
-                    @click="state.deletePageDialogOpen = true"
+                    :disabled="isCurrentPageDeleteDisabled || slotProps.unsavedChanges || state.deletePageSubmitting || !currentPage || !props.page || props.page === 'new'"
+                    @click="openDeletePageDialog"
                   >
                     <FileMinus2 class="w-4 h-4" />
                     <span>Delete</span>
@@ -4778,7 +4787,7 @@ const hasUnsavedChanges = (changes) => {
           <edge-shad-button variant="outline" @click="state.renamePageDialogOpen = false">
             Cancel
           </edge-shad-button>
-          <edge-shad-button type="submit" :disabled="state.renamePageSubmitting">
+          <edge-shad-button type="submit" :disabled="isCurrentPageRenameDisabled || state.renamePageSubmitting">
             <Loader2 v-if="state.renamePageSubmitting" class="h-4 w-4 animate-spin" />
             <span v-else>Rename</span>
           </edge-shad-button>
@@ -4801,7 +4810,7 @@ const hasUnsavedChanges = (changes) => {
         <edge-shad-button variant="outline" @click="state.deletePageDialogOpen = false">
           Cancel
         </edge-shad-button>
-        <edge-shad-button variant="destructive" :disabled="state.deletePageSubmitting" @click="deleteCurrentPage">
+        <edge-shad-button variant="destructive" :disabled="isCurrentPageDeleteDisabled || state.deletePageSubmitting" @click="deleteCurrentPage">
           <Loader2 v-if="state.deletePageSubmitting" class="h-4 w-4 animate-spin" />
           <span v-else>Delete</span>
         </edge-shad-button>
