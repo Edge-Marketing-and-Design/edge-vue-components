@@ -1,6 +1,6 @@
 <script setup lang="js">
 import { useVModel } from '@vueuse/core'
-import { Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePlus2, FileUp, FileWarning, FileX, Folder, FolderMinus, FolderOpen, FolderPen, FolderPlus, History, Link } from 'lucide-vue-next'
+import { Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePlus2, FileUp, FileWarning, FileX, Folder, FolderMinus, FolderOpen, FolderPen, FolderPlus, History, Link, Loader2 } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
@@ -418,6 +418,8 @@ const schemas = {
 
 const state = reactive({
   addPageDialog: false,
+  addPageSubmitting: false,
+  pendingPageCreation: null,
   newPageName: '',
   indexPath: '',
   addMenu: false,
@@ -524,6 +526,7 @@ const exportPage = async (pageId) => {
 const BLANK_TEMPLATE_ID = 'blank'
 
 const resetAddPageDialogState = () => {
+  state.pendingPageCreation = null
   state.newPageName = ''
   state.addPageTab = 'templates'
   state.templateFilter = 'quick-picks'
@@ -533,7 +536,7 @@ const resetAddPageDialogState = () => {
 }
 
 watch(() => state.addPageDialog, (open) => {
-  if (!open)
+  if (!open && !state.addPageSubmitting)
     resetAddPageDialogState()
 })
 
@@ -844,6 +847,8 @@ const renameFolderOrPageShow = (item) => {
 }
 
 const addPageShow = (menuName, isMenu = false) => {
+  if (state.addPageSubmitting)
+    return
   state.addMenu = isMenu
   state.menuName = menuName
   resetAddPageDialogState()
@@ -1137,10 +1142,12 @@ const renameFolderOrPageAction = async () => {
 }
 
 const addPageAction = async () => {
+  if (state.addPageSubmitting || !state.addPageDialog)
+    return
   state.newPageName = state.newPageName?.trim() || ''
   if (!state.newPageName)
     return
-  const slug = slugGenerator(state.newPageName)
+  const slug = state.pendingPageCreation?.slug || slugGenerator(state.newPageName)
   if (!state.menuName) {
     modelValue.value[state.newPageName] = []
     state.newPageName = ''
@@ -1155,26 +1162,49 @@ const addPageAction = async () => {
     modelValue.value[state.menuName].push({ menuTitle: state.newPageName, item: { [slug]: [] } })
   }
   else {
-    const shouldDuplicateExistingPage = state.addPageTab === 'existing' && canDuplicateExistingPages.value
-    const sourcePageDoc = shouldDuplicateExistingPage
-      ? selectedExistingPage.value
-      : getTemplateDoc(state.selectedTemplateId)
-    const payload = buildPagePayloadFromTemplate(sourcePageDoc, slug)
-    const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`, payload)
-    const docId = result?.meta?.docId
-    if (docId) {
-      const targetMenu = modelValue.value[state.menuName]
-      const alreadyExists = Array.isArray(targetMenu) && targetMenu.some(entry => entry?.item === docId)
-      if (!alreadyExists) {
-        targetMenu.push({ name: slug, menuTitle: state.newPageName, item: docId })
-        if (!props.isTemplateSite) {
-          const menusToPersist = props.rootModelValue || modelValue.value
-          await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, {
-            menus: edgeGlobal.dupObject(menusToPersist),
-          })
+    state.addPageSubmitting = true
+    try {
+      if (!state.pendingPageCreation) {
+        const shouldDuplicateExistingPage = state.addPageTab === 'existing' && canDuplicateExistingPages.value
+        const sourcePageDoc = shouldDuplicateExistingPage
+          ? selectedExistingPage.value
+          : getTemplateDoc(state.selectedTemplateId)
+        state.pendingPageCreation = {
+          docId: crypto.randomUUID(),
+          payload: buildPagePayloadFromTemplate(sourcePageDoc, slug),
+          slug,
+          menuTitle: state.newPageName,
+          saved: false,
         }
       }
+      const pending = state.pendingPageCreation
+      if (!pending.saved) {
+        const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`, { ...pending.payload, docId: pending.docId })
+        assertCmsActionSucceeded(result, 'Unable to create the page.')
+        pending.saved = true
+      }
+      const targetMenu = modelValue.value[state.menuName]
+      const alreadyExists = targetMenu.some(entry => entry?.item === pending.docId)
+      if (!alreadyExists)
+        targetMenu.push({ name: pending.slug, menuTitle: pending.menuTitle, item: pending.docId })
+      if (!props.isTemplateSite) {
+        const menusToPersist = props.rootModelValue || modelValue.value
+        const result = await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, {
+          menus: edgeGlobal.dupObject(menusToPersist),
+        })
+        assertCmsActionSucceeded(result, 'Unable to update the site menus.')
+      }
+      state.addPageDialog = false
     }
+    catch {
+      edgeFirebase?.toast?.error?.('Unable to finish creating the page. Please try again.')
+    }
+    finally {
+      state.addPageSubmitting = false
+      if (!state.addPageDialog)
+        resetAddPageDialogState()
+    }
+    return
   }
 
   state.addPageDialog = false
@@ -1711,7 +1741,7 @@ const theme = computed(() => {
             Choose a template or start from an existing page. You can always customize it later.
           </DialogDescription>
         </DialogHeader>
-        <div class="flex min-h-0 flex-1 flex-col">
+        <fieldset :disabled="state.addPageSubmitting || !!state.pendingPageCreation" class="flex min-h-0 min-w-0 flex-1 flex-col">
           <div class="w-full space-y-4">
             <edge-shad-input v-model="state.newPageName" name="name" label="Page Name" placeholder="Enter page name" />
           </div>
@@ -1902,13 +1932,14 @@ const theme = computed(() => {
               </div>
             </TabsContent>
           </Tabs>
-        </div>
+        </fieldset>
         <DialogFooter class="pt-4">
-          <edge-shad-button type="button" variant="destructive" @click="state.addPageDialog = false">
+          <edge-shad-button type="button" variant="destructive" :disabled="state.addPageSubmitting" @click="state.addPageDialog = false">
             Cancel
           </edge-shad-button>
-          <edge-shad-button type="submit" class="bg-slate-800 hover:bg-slate-400 text-white" :disabled="!hasValidNewPageName">
-            Create Page
+          <edge-shad-button type="submit" class="bg-slate-800 hover:bg-slate-400 text-white" :disabled="state.addPageSubmitting || !hasValidNewPageName" :aria-busy="state.addPageSubmitting">
+            <Loader2 v-if="state.addPageSubmitting" class="h-4 w-4 animate-spin" aria-hidden="true" />
+            {{ state.addPageSubmitting ? 'Creating…' : state.pendingPageCreation ? 'Retry Create Page' : 'Create Page' }}
           </edge-shad-button>
         </DialogFooter>
       </edge-shad-form>
