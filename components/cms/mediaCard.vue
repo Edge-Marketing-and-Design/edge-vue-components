@@ -1,5 +1,5 @@
 <script setup>
-import { Code, Eye, File, FileArchive, FileSpreadsheet, FileText, ImagePlus, Loader2, Square, SquareCheckBig, Trash } from 'lucide-vue-next'
+import { Code, Eye, File, FileArchive, FileSpreadsheet, FileText, ImagePlus, Loader2, Square, SquareCheckBig, Trash, Video } from 'lucide-vue-next'
 const props = defineProps({
   item: {
     type: Object,
@@ -65,6 +65,7 @@ const previewBackgroundClass = computed(() => {
 })
 
 const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'avif']
+const videoExtensions = ['mp4', 'm4v', 'mkv', 'mov', 'avi', 'flv', 'ts', 'm2ts', 'mts', 'mpeg', 'mpg', 'mxf', 'lxf', 'gxf', '3gp', 'webm']
 const getMediaExtension = () => {
   const fileName = String(props.item?.fileName || props.item?.name || '').toLowerCase()
   const fileNameMatch = fileName.match(/\.([a-z0-9]+)$/i)
@@ -80,6 +81,12 @@ const isImageItem = computed(() => {
   if (contentType.startsWith('image/'))
     return true
   return imageExtensions.includes(getMediaExtension())
+})
+const isVideoItem = computed(() => {
+  const contentType = String(props.item?.contentType || '').toLowerCase()
+  if (contentType.startsWith('video/'))
+    return true
+  return videoExtensions.includes(getMediaExtension())
 })
 const getEdgeMediaImageVariant = (variant) => {
   const variants = props.item?.edgeMediaImageState?.outputs?.image?.variants
@@ -105,7 +112,7 @@ const isPdfItem = computed(() => {
     return true
   return getMediaExtension() === 'pdf'
 })
-const isFileItem = computed(() => !isImageItem.value)
+const isFileItem = computed(() => !isImageItem.value && !isVideoItem.value)
 const publicationPageCount = computed(() => {
   return getPublicationPageCount(props.item)
 })
@@ -125,6 +132,8 @@ const fileTypeLabel = computed(() => {
 })
 const fileIconComponent = computed(() => {
   const ext = getMediaExtension()
+  if (isVideoItem.value)
+    return Video
   if (ext === 'pdf')
     return FileText
   if (['doc', 'docx', 'txt', 'rtf', 'odt'].includes(ext))
@@ -140,14 +149,23 @@ const fileIconComponent = computed(() => {
 const thumbnailUrl = computed(() => {
   if (isImageItem.value)
     return edgeGlobal.getImage(props.item, 'thumbnail') || getEdgeMediaImageVariant('thumbnail') || ''
+  if (isVideoItem.value)
+    return String(props.item?.cloudflareVideoThumbnail || '')
   if (!isPdfItem.value)
     return ''
   return getPublicationThumbnailUrl(props.item)
 })
 const mediaCopyUrl = computed(() => {
-  if (isFileItem.value)
+  if (!isImageItem.value)
     return String(props.item?.r2URL || props.item?.r2Url || '')
   return String(edgeGlobal.getImage(props.item, 'public') || getEdgeMediaImageVariant('public') || '')
+})
+const uploadIconComponent = computed(() => {
+  if (isVideoItem.value)
+    return Video
+  if (isFileItem.value)
+    return File
+  return ImagePlus
 })
 </script>
 
@@ -161,6 +179,7 @@ const mediaCopyUrl = computed(() => {
         <edge-shad-button
           v-if="!props.selectMode && props.canDelete"
           size="icon"
+          :aria-label="props.selected ? 'Deselect media item' : 'Select media item'"
           class="bg-slate-900 text-white hover:bg-slate-800 shadow-sm dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
           @click.stop="emits('select', !props.selected, item.docId)"
         >
@@ -190,6 +209,7 @@ const mediaCopyUrl = computed(() => {
           <edge-shad-button
             v-if="props.canDelete"
             size="icon"
+            aria-label="Delete media item"
             class="bg-destructive/80 text-destructive-foreground hover:bg-destructive h-8 w-8 rounded-lg border border-destructive/40 shadow-sm"
             @click.stop="emits('delete', item.docId)"
           >
@@ -200,7 +220,7 @@ const mediaCopyUrl = computed(() => {
       <div v-if="props.isNew" class="absolute left-3 bottom-3 z-20 rounded-md bg-emerald-600 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-white shadow-sm">
         Just Uploaded
       </div>
-      <div v-if="isFileItem && !thumbnailUrl" class="absolute inset-0 m-auto flex h-full w-full items-center justify-center">
+      <div v-if="(isFileItem || isVideoItem) && !thumbnailUrl" class="absolute inset-0 m-auto flex h-full w-full items-center justify-center">
         <component :is="fileIconComponent" class="h-24 w-24 text-slate-600 dark:text-slate-300" />
       </div>
       <Loader2
@@ -210,7 +230,7 @@ const mediaCopyUrl = computed(() => {
       <img
         v-else
         :src="thumbnailUrl"
-        alt=""
+        :alt="`Preview of ${item.name || item.fileName || 'media item'}`"
         class="max-h-full max-w-full h-auto w-auto object-contain transition-transform duration-200 group-hover:scale-[1.02]"
       >
       <div
@@ -223,13 +243,16 @@ const mediaCopyUrl = computed(() => {
       <div v-if="isFileItem" class="absolute bottom-3 right-3 rounded-md bg-red-600 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-white shadow-sm">
         {{ fileTypeLabel }}
       </div>
+      <div v-else-if="isVideoItem" class="absolute bottom-3 right-3 rounded-md bg-sky-700 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-white shadow-sm">
+        {{ fileTypeLabel }}
+      </div>
     </div>
 
     <!-- Main Content -->
     <CardContent class="p-2.5 sm:p-3">
       <div class="min-w-0 text-left">
         <div class="flex items-center gap-1.5 text-xs sm:text-sm text-muted-foreground font-light italic">
-          <ImagePlus class="w-4 h-4 shrink-0" />
+          <component :is="uploadIconComponent" class="w-4 h-4 shrink-0" aria-hidden="true" />
           <span class="truncate">Uploaded {{ timeAgo(item.uploadTime) }}</span>
         </div>
 

@@ -4717,6 +4717,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
               <edge-cms-media-manager
                 :site="props.site"
                 :include-files="true"
+                :include-videos="true"
                 :read-only="!canEditMediaTab"
                 :show-cms-site-filter="true"
                 :mark-pdf-as-flipbook="true"

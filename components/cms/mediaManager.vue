@@ -1,5 +1,5 @@
 <script setup>
-import { ChevronLeft, ChevronRight, FileText, ImagePlus, Loader2, RotateCw, Square, SquareCheckBig } from 'lucide-vue-next'
+import { ChevronLeft, ChevronRight, FileText, Loader2, RotateCw, Square, SquareCheckBig, Upload, Video } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 const props = defineProps({
@@ -24,6 +24,11 @@ const props = defineProps({
     default: () => [],
   },
   includeFiles: {
+    type: Boolean,
+    required: false,
+    default: false,
+  },
+  includeVideos: {
     type: Boolean,
     required: false,
     default: false,
@@ -85,7 +90,6 @@ const props = defineProps({
   },
 })
 
-
 const emits = defineEmits(['select'])
 
 const edgeFirebase = inject('edgeFirebase')
@@ -97,6 +101,7 @@ const {
 } = usePublicationMedia()
 const allowedFileExtensions = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'ppt', 'pptx', 'txt', 'rtf', 'zip', 'odt', 'ods', 'odp']
 const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'avif']
+const videoExtensions = ['mp4', 'm4v', 'mkv', 'mov', 'avi', 'flv', 'ts', 'm2ts', 'mts', 'mpeg', 'mpg', 'mxf', 'lxf', 'gxf', '3gp', 'webm']
 const allowedFileMimeTypes = [
   'application/pdf',
   'application/msword',
@@ -116,6 +121,21 @@ const allowedFileMimeTypes = [
   'application/vnd.oasis.opendocument.presentation',
 ]
 const imageMimeTypes = ['image/jpg', 'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml', 'image/avif']
+const videoMimeTypes = [
+  'video/mp4',
+  'video/x-m4v',
+  'video/x-matroska',
+  'video/quicktime',
+  'video/x-msvideo',
+  'video/x-flv',
+  'video/mp2t',
+  'video/mpeg',
+  'application/mxf',
+  'video/mxf',
+  'video/3gpp',
+  'video/webm',
+]
+const videoAcceptTypes = [...videoMimeTypes, ...videoExtensions.map(extension => `.${extension}`)]
 const resolvedImageVariant = computed(() => {
   return String(props.imageVariant || 'public').trim() || 'public'
 })
@@ -162,6 +182,29 @@ const isImageMediaItem = (item) => {
   const ext = getMediaExtension(item)
   return imageExtensions.includes(ext)
 }
+const isVideoMediaItem = (item) => {
+  const contentType = String(item?.contentType || '').toLowerCase()
+  if (contentType.startsWith('video/'))
+    return true
+  const ext = getMediaExtension(item)
+  return videoExtensions.includes(ext)
+}
+const isVideoUpload = (file) => {
+  const contentType = String(file?.type || file?.file?.type || '').toLowerCase()
+  if (contentType.startsWith('video/'))
+    return true
+  const fileName = String(file?.name || file?.file?.name || '').toLowerCase()
+  const extension = fileName.match(/\.([a-z0-9]+)$/i)?.[1] || ''
+  return videoExtensions.includes(extension)
+}
+const isImageUpload = (file) => {
+  const contentType = String(file?.type || file?.file?.type || '').toLowerCase()
+  if (contentType.startsWith('image/'))
+    return true
+  const fileName = String(file?.name || file?.file?.name || '').toLowerCase()
+  const extension = fileName.match(/\.([a-z0-9]+)$/i)?.[1] || ''
+  return imageExtensions.includes(extension)
+}
 const getEdgeMediaImageVariant = (item, variant) => {
   const variants = item?.edgeMediaImageState?.outputs?.image?.variants
   if (!variants)
@@ -181,7 +224,7 @@ const getEdgeMediaImageVariant = (item, variant) => {
   return baseUrl.replace(/\/[^/]+$/, `/${requestedVariant}`)
 }
 const isAllowedFileItem = (item) => {
-  if (isImageMediaItem(item))
+  if (isImageMediaItem(item) || isVideoMediaItem(item))
     return false
   const contentType = String(item?.contentType || '').toLowerCase()
   const ext = getMediaExtension(item)
@@ -281,7 +324,11 @@ const mediaSnapshotReady = computed(() => {
 
 const normalizeMediaTypeFilter = (value) => {
   const normalized = String(value || '').trim().toLowerCase()
-  if (['both', 'images', 'files'].includes(normalized))
+  if (normalized === 'images' || normalized === 'both')
+    return normalized
+  if (normalized === 'videos' && props.includeVideos)
+    return normalized
+  if (normalized === 'files' && (props.includeFiles || props.filesOnly))
     return normalized
   return 'both'
 }
@@ -291,34 +338,58 @@ const normalizeFileTypeFilter = (value) => {
     return 'all'
   if (normalized === 'pub')
     return 'pub'
-  if ([...imageExtensions, ...allowedFileExtensions].includes(normalized))
+  if ([...imageExtensions, ...videoExtensions, ...allowedFileExtensions].includes(normalized))
     return normalized
   return 'all'
 }
-const showMediaTypeFilter = computed(() => props.includeFiles && !props.filesOnly)
-const mediaTypeFilterItems = [
-  { title: 'IMAGES & FILES', name: 'both' },
-  { title: 'Images Only', name: 'images' },
-  { title: 'Files Only', name: 'files' },
-]
+const enabledMediaScopes = computed(() => {
+  if (props.filesOnly)
+    return ['files']
+  return [
+    'images',
+    ...(props.includeVideos ? ['videos'] : []),
+    ...(props.includeFiles ? ['files'] : []),
+  ]
+})
+const showMediaTypeFilter = computed(() => enabledMediaScopes.value.length > 1)
+const mediaTypeFilterItems = computed(() => {
+  const scopeTitle = enabledMediaScopes.value.length > 2
+    ? 'ALL MEDIA'
+    : enabledMediaScopes.value
+      .map(scope => ({ images: 'IMAGES', videos: 'VIDEOS', files: 'FILES' })[scope])
+      .join(' & ')
+  const titles = {
+    images: 'Images Only',
+    videos: 'Videos Only',
+    files: 'Files Only',
+  }
+  return [
+    { title: scopeTitle || 'ALL MEDIA', name: 'both' },
+    ...enabledMediaScopes.value.map(scope => ({ title: titles[scope], name: scope })),
+  ]
+})
 const activeMediaScope = computed(() => {
   if (props.filesOnly)
     return 'files'
-  if (!props.includeFiles)
-    return 'images'
   const mediaTypeFilter = normalizeMediaTypeFilter(state.mediaTypeFilter)
-  if (mediaTypeFilter === 'images')
-    return 'images'
-  if (mediaTypeFilter === 'files')
-    return 'files'
+  if (mediaTypeFilter !== 'both' && enabledMediaScopes.value.includes(mediaTypeFilter))
+    return mediaTypeFilter
+  if (enabledMediaScopes.value.length === 1)
+    return enabledMediaScopes.value[0]
   return 'both'
 })
 const fileTypeExtensionsForScope = computed(() => {
-  const allowedByScope = activeMediaScope.value === 'images'
-    ? new Set(imageExtensions)
-    : (activeMediaScope.value === 'files'
-        ? new Set(allowedFileExtensions)
-        : new Set([...imageExtensions, ...allowedFileExtensions]))
+  let allowedByScope = new Set([
+    ...imageExtensions,
+    ...(props.includeVideos ? videoExtensions : []),
+    ...(props.includeFiles ? allowedFileExtensions : []),
+  ])
+  if (activeMediaScope.value === 'images')
+    allowedByScope = new Set(imageExtensions)
+  else if (activeMediaScope.value === 'videos')
+    allowedByScope = new Set(videoExtensions)
+  else if (activeMediaScope.value === 'files')
+    allowedByScope = new Set(allowedFileExtensions)
 
   const query = String(state.filter || '').toLowerCase().trim()
   const activeTags = Array.isArray(state.filterTags)
@@ -329,7 +400,11 @@ const fileTypeExtensionsForScope = computed(() => {
   Object.values(files.value || {}).forEach((item) => {
     const includeByScope = activeMediaScope.value === 'images'
       ? isImageMediaItem(item)
-      : (activeMediaScope.value === 'files' ? isAllowedFileItem(item) : (isImageMediaItem(item) || isAllowedFileItem(item)))
+      : (activeMediaScope.value === 'videos'
+          ? isVideoMediaItem(item)
+          : (activeMediaScope.value === 'files'
+              ? isAllowedFileItem(item)
+              : (isImageMediaItem(item) || (props.includeVideos && isVideoMediaItem(item)) || (props.includeFiles && isAllowedFileItem(item)))))
     if (!includeByScope)
       return
 
@@ -426,9 +501,18 @@ const shouldIncludeItemByMode = (item) => {
       return isImageMediaItem(item)
     if (mediaTypeFilter === 'files')
       return isAllowedFileItem(item)
-    return isImageMediaItem(item) || isAllowedFileItem(item)
+    if (mediaTypeFilter === 'videos')
+      return props.includeVideos && isVideoMediaItem(item)
+    return isImageMediaItem(item) || (props.includeVideos && isVideoMediaItem(item)) || isAllowedFileItem(item)
   }
-  return isImageMediaItem(item)
+  if (props.includeVideos) {
+    const mediaTypeFilter = normalizeMediaTypeFilter(state.mediaTypeFilter)
+    if (mediaTypeFilter === 'images')
+      return isImageMediaItem(item)
+    if (mediaTypeFilter === 'videos')
+      return isVideoMediaItem(item)
+  }
+  return isImageMediaItem(item) || (props.includeVideos && isVideoMediaItem(item))
 }
 const shouldIncludeItemByFileType = (item) => {
   const fileTypeFilter = normalizeFileTypeFilter(state.fileTypeFilter)
@@ -503,9 +587,11 @@ const selectedFilterTagsMissingFromOptions = computed(() => {
 const uploadAcceptTypes = computed(() => {
   if (props.filesOnly)
     return [...allowedFileMimeTypes]
-  if (props.includeFiles)
-    return [...imageMimeTypes, ...allowedFileMimeTypes]
-  return [...imageMimeTypes]
+  return Array.from(new Set([
+    ...imageMimeTypes,
+    ...(props.includeVideos ? videoAcceptTypes : []),
+    ...(props.includeFiles ? allowedFileMimeTypes : []),
+  ]))
 })
 
 const mediaLoading = computed(() => {
@@ -579,6 +665,15 @@ const handleUploadComplete = (uploadedFiles = [], sourceFiles = [], uploadMeta =
   }
   state.recentUploadStartedAt = Number(uploadMeta?.startedAt || 0)
   state.recentUploadCompletedAt = Number(uploadMeta?.completedAt || Date.now())
+  const sourceFileList = Array.isArray(sourceFiles) ? sourceFiles : [sourceFiles]
+  const uploadedMediaTypes = new Set(sourceFileList.filter(Boolean).map((file) => {
+    if (isVideoUpload(file))
+      return 'videos'
+    return isImageUpload(file) ? 'images' : 'files'
+  }))
+  const currentMediaType = normalizeMediaTypeFilter(state.mediaTypeFilter)
+  if (currentMediaType !== 'both' && (uploadedMediaTypes.size > 1 || !uploadedMediaTypes.has(currentMediaType)))
+    state.mediaTypeFilter = uploadedMediaTypes.size === 1 ? [...uploadedMediaTypes][0] : 'both'
   state.showUpload = false
 }
 
@@ -597,15 +692,19 @@ const mediaPlaceholderClass = computed(() => {
 const uploadActionLabel = computed(() => {
   if (props.filesOnly)
     return 'Upload Files'
-  if (props.includeFiles)
+  if (enabledMediaScopes.value.length > 1)
     return 'Upload Media'
+  if (props.includeVideos)
+    return 'Upload Videos'
   return 'Upload Images'
 })
 const emptyStateHint = computed(() => {
   if (props.filesOnly)
     return 'Upload files to get started.'
-  if (props.includeFiles)
+  if (enabledMediaScopes.value.length > 1)
     return 'Upload media to get started.'
+  if (props.includeVideos)
+    return 'Upload videos to get started.'
   return 'Upload images to get started.'
 })
 
@@ -716,7 +815,6 @@ watch(selectAll, (newValue) => {
 })
 
 const handleCheckboxChange = (checked, docId) => {
-  console.log('Checkbox changed:', checked, docId)
   const item = files.value?.[docId]
   if (!canDeleteMedia(item))
     return
@@ -767,7 +865,6 @@ onBeforeMount(() => {
   state.mediaTypeFilter = normalizeMediaTypeFilter(props.mediaTypeDefault)
   state.fileTypeFilter = normalizeFileTypeFilter(props.fileTypeDefault)
   state.cmsSiteFilter = showCmsSiteFilter.value ? resolveCmsSiteFilterDefault() : '__all__'
-  console.log('Default tags prop:', props.defaultTags)
   if (props.defaultTags && Array.isArray(props.defaultTags) && props.defaultTags.length > 0) {
     state.filterTags = [...props.defaultTags]
     state.tags = [...props.defaultTags]
@@ -883,6 +980,24 @@ const isLightName = (name) => {
 
 const previewBackgroundClass = computed(() => (isLightName(state.workingDoc?.name) ? 'bg-neutral-900/90' : 'bg-neutral-100'))
 const workingDocIsImage = computed(() => isImageMediaItem(state.workingDoc))
+const workingDocIsVideo = computed(() => isVideoMediaItem(state.workingDoc))
+const workingDocVideoSourceUrl = computed(() => String(state.workingDoc?.r2URL || state.workingDoc?.r2Url || ''))
+const workingDocVideoEmbedUrl = computed(() => {
+  const previewUrl = String(state.workingDoc?.cloudflareVideoPreview || '').trim()
+  if (previewUrl) {
+    if (/\/iframe(?:\?|$)/i.test(previewUrl))
+      return previewUrl
+    if (/\/watch(?:\?|$)/i.test(previewUrl))
+      return previewUrl.replace(/\/watch(?=\?|$)/i, '/iframe')
+  }
+
+  const videoId = String(state.workingDoc?.cloudflareVideoId || '').trim()
+  const cloudflareAssetUrl = previewUrl || String(state.workingDoc?.cloudflareVideoThumbnail || '').trim()
+  const origin = cloudflareAssetUrl.match(/^(https?:\/\/[^/]+)/i)?.[1] || ''
+  if (!videoId || !origin)
+    return ''
+  return `${origin}/${videoId}/iframe`
+})
 const workingDocR2Path = computed(() => String(state.workingDoc?.r2FilePath || '').trim())
 const canRetryWorkingImage = computed(() => {
   return showDevOnlyActions.value && workingDocIsImage.value && !!workingDocR2Path.value && !!filesPath.value && canEditWorkingDoc.value
@@ -1144,7 +1259,7 @@ const siteQueryValue = computed(() => resolveCmsSiteScopeValues())
             <template #title>
               <div class="flex items-center gap-2 justify-center gap-5 text-white dark:text-slate-100 drop-shadow">
                 <div>
-                  <ImagePlus class="h-10 w-10" />
+                  <Upload class="h-10 w-10" />
                 </div>
                 <div>
                   <h1 class="text-4xl font-[700] leading-none">
@@ -1215,7 +1330,7 @@ const siteQueryValue = computed(() => resolveCmsSiteScopeValues())
                         class="bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
                         @click="state.showUpload = true"
                       >
-                        <ImagePlus class="h-5 w-5 mr-2" />
+                        <Upload class="h-5 w-5 mr-2" />
                         {{ uploadActionLabel }}
                       </edge-shad-button>
                     </div>
@@ -1452,10 +1567,28 @@ const siteQueryValue = computed(() => resolveCmsSiteScopeValues())
                   </div>
                 </div>
               </template>
+              <iframe
+                v-else-if="workingDocIsVideo && workingDocVideoEmbedUrl"
+                :src="workingDocVideoEmbedUrl"
+                :title="`Video preview for ${state.workingDoc?.name || state.workingDoc?.fileName || 'media item'}`"
+                class="h-full w-full max-h-full max-w-full border-0"
+                allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture"
+                allowfullscreen
+              />
+              <video
+                v-else-if="workingDocIsVideo && workingDocVideoSourceUrl"
+                :src="workingDocVideoSourceUrl"
+                controls
+                preload="metadata"
+                class="max-h-full max-w-full"
+              >
+                Your browser does not support video playback.
+              </video>
+              <Video v-else-if="workingDocIsVideo" class="h-20 w-20 text-slate-500 dark:text-slate-300" />
               <img
                 v-else-if="workingDocPreviewUrl"
                 :src="workingDocPreviewUrl"
-                alt=""
+                :alt="`Preview of ${state.workingDoc?.name || state.workingDoc?.fileName || 'media item'}`"
                 class="max-h-full max-w-full h-auto w-auto object-contain"
               >
               <FileText v-else class="h-20 w-20 text-slate-500 dark:text-slate-300" />
