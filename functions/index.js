@@ -1,4 +1,6 @@
 // START EXTRA EDGE functions
+const { kvMirrorRetryWorker } = require('./kv/kvRetryWorker')
+exports.kvMirrorRetryWorker = kvMirrorRetryWorker
 exports.cms = require('./cms')
 exports.history = require('./history')
 exports.registration = require('./stagedUserNotifications')

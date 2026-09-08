@@ -4,6 +4,8 @@ const { runKvMirrorFollowup } = require('./kvMirrorFollowups')
 const {
   isSourceStateCurrent,
   materializeCollectionVersionOperation,
+  serializeKvRetryPayload,
+  getMirrorRetryPhases,
 } = require('./kvMirrorProtocol')
 
 const KV_RETRY_TOPIC = process.env.KV_RETRY_TOPIC || 'kv-mirror-retry'
@@ -45,7 +47,7 @@ function computeRetryDelayMinutes(attempt) {
 async function enqueueKvRetry(payload, minuteDelay = 0) {
   await db.collection('topic-queue').add({
     topic: KV_RETRY_TOPIC,
-    payload,
+    payload: serializeKvRetryPayload(payload),
     minuteDelay: Number(minuteDelay || 0),
     retry: 0,
     timestamp: Firestore.FieldValue.serverTimestamp(),
@@ -67,14 +69,12 @@ async function runKvOperation(payload) {
       return
     }
 
-    const phases = Array.isArray(payload?.phases)
-      ? payload.phases
-      : [Array.isArray(payload?.operations) ? payload.operations : []]
+    const phases = getMirrorRetryPhases(payload)
     const versionOperation = payload?.versionOperation
     if (!versionOperation || typeof versionOperation !== 'object')
       throw new Error('Invalid mirror finalization payload: missing version operation')
     for (const phase of phases) {
-      for (const operation of Array.isArray(phase) ? phase : [])
+      for (const operation of phase)
         await runKvOperation(operation)
     }
     if (payload?.afterOperation)
@@ -129,7 +129,7 @@ const kvMirrorRetryWorker = onMessagePublished(
           await db.collection('kv-retry-dead').add({
             topic: KV_RETRY_TOPIC,
             payload: {
-              ...payload,
+              ...serializeKvRetryPayload(payload),
               attempt: nextAttempt,
             },
             error: errorMessage.slice(0, 1000),

@@ -16,6 +16,7 @@ const {
   isSourceStateCurrent,
   materializeCollectionVersionOperation,
   sourceStateFromEvent,
+  serializeKvRetryPayload,
 } = require('./kvMirrorProtocol')
 
 function json(x) {
@@ -84,7 +85,7 @@ async function enqueueKvRetry(payload, minuteDelay = 1) {
   await db.collection('topic-queue').add({
     topic: KV_RETRY_TOPIC,
     payload: {
-      ...safePayload,
+      ...serializeKvRetryPayload(safePayload),
       attempt: Number(safePayload.attempt || 0),
     },
     minuteDelay: Number(minuteDelay || 0),
