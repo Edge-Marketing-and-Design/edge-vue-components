@@ -97,6 +97,33 @@ function materializeCollectionVersionOperation(operation) {
   }
 }
 
+function serializeKvRetryPayload(payload) {
+  if (payload?.op !== 'finalizeMirror' || !Array.isArray(payload.phases))
+    return payload
+  return {
+    ...payload,
+    phases: payload.phases.map(phase => Array.isArray(phase) ? { operations: phase } : phase),
+  }
+}
+
+function getMirrorRetryPhases(payload) {
+  const phases = payload.phases === undefined
+    ? [payload.operations]
+    : payload.phases
+  if (!Array.isArray(phases))
+    throw new Error('Invalid mirror finalization payload: phases must be an array')
+  return phases.map((phase) => {
+    const operations = Array.isArray(phase) ? phase : phase?.operations
+    if (!Array.isArray(operations) || operations.some(operation => (
+      !operation || typeof operation !== 'object' || Array.isArray(operation)
+      || !['put', 'putIndexMeta', 'del'].includes(operation.op)
+      || typeof operation.key !== 'string' || !operation.key.trim()
+    )))
+      throw new Error('Invalid mirror finalization payload: invalid phase operations')
+    return operations
+  })
+}
+
 module.exports = {
   collectionScopeFromCanonicalKey,
   collectionVersionShard,
@@ -104,4 +131,6 @@ module.exports = {
   isSourceStateCurrent,
   materializeCollectionVersionOperation,
   sourceStateFromEvent,
+  serializeKvRetryPayload,
+  getMirrorRetryPhases,
 }

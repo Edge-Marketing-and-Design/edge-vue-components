@@ -88,11 +88,27 @@ const normalizedAccept = computed(() => {
   return props.accept
 })
 
-const acceptRegex = computed(() => {
-  return normalizedAccept.value
-    ? new RegExp(normalizedAccept.value.replace(/,/g, '|').replace(/\./g, '\\.'), 'i')
-    : null
-})
+const normalizedAcceptItems = computed(() => normalizedAccept.value
+  .split(',')
+  .map(item => item.trim().toLowerCase())
+  .filter(Boolean))
+
+const isAcceptedFile = (file) => {
+  if (!normalizedAcceptItems.value.length)
+    return true
+
+  const mimeType = String(file?.type || file?.file?.type || '').trim().toLowerCase()
+  const fileName = String(file?.name || file?.file?.name || '').trim().toLowerCase()
+  const extension = fileName.match(/(\.[a-z0-9]+)$/i)?.[1] || ''
+
+  return normalizedAcceptItems.value.some((acceptItem) => {
+    if (acceptItem.startsWith('.'))
+      return extension === acceptItem
+    if (acceptItem.endsWith('/*'))
+      return mimeType.startsWith(acceptItem.slice(0, -1))
+    return mimeType === acceptItem
+  })
+}
 
 const resetUploadProgressAfterDelay = () => {
   setTimeout(() => {
@@ -111,7 +127,7 @@ const uploadFiles = async () => {
     try {
       let index = 0
       for (const file of state.files) {
-        if (acceptRegex.value && !file.type.match(acceptRegex.value)) {
+        if (!isAcceptedFile(file)) {
           state.currentUploadFile = `Skipped: ${file.name} (unsupported file type)`
           state.uploadErrors.push(`"${file.name}" is an unsupported file type. Please upload "${normalizedAccept.value}" files only.`)
         }

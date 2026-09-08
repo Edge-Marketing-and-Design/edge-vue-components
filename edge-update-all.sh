@@ -124,7 +124,13 @@ const replaceMarkedBlock = (text, replacement) => {
 const edgeText = readText(edgePath)
 const localText = readText(localPath)
 const edgeBlock = extractMarkedBlock(edgeText)
-const mergedText = replaceMarkedBlock(localText, edgeBlock)
+const withoutLegacyKvRegistration = localText.replace(
+  /\/\/ START @edge\/firebase functions[\s\S]*?\/\/ END @edge\/firebase functions/g,
+  block => block
+    .replace(/^[\t ]*const\s+\{\s*kvMirrorRetryWorker\s*\}\s*=\s*require\(['"]\.\/kv\/kvRetryWorker['"]\);?[\t ]*\r?\n/gm, '')
+    .replace(/^[\t ]*exports\.kvMirrorRetryWorker\s*=\s*(?:kvMirrorRetryWorker|require\(['"]\.\/kv\/kvRetryWorker['"]\)\.kvMirrorRetryWorker);?[\t ]*\r?\n/gm, ''),
+)
+const mergedText = replaceMarkedBlock(withoutLegacyKvRegistration, edgeBlock)
 
 fs.writeFileSync(localPath, mergedText.endsWith('\n') ? mergedText : `${mergedText}\n`)
 EOF
@@ -559,5 +565,6 @@ migrate_nuxt_single_org_runtime_config
 migrate_app_cms_access
 install_edge_packages
 install_edge_function_packages
+merge_edge_functions_index
 
 echo "==> Done"

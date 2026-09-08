@@ -13,7 +13,7 @@ const cloneValue = (value) => {
 
 const isExternalLinkEntry = entry => isRecord(entry?.item) && entry.item.type === 'external'
 
-export const removeCmsPageFromMenuItems = (items, pageId) => {
+const removeCmsPageFromMenuItems = (items, pageId) => {
   if (!Array.isArray(items))
     return []
 
@@ -36,7 +36,7 @@ export const removeCmsPageFromMenuItems = (items, pageId) => {
     .filter(Boolean)
 }
 
-export const removeCmsPageFromMenus = (menus, pageId, { ensureRootMenus = false } = {}) => {
+const removeCmsPageFromMenus = (menus, pageId, { ensureRootMenus = false } = {}) => {
   const nextMenus = isRecord(menus) ? cloneValue(menus) : {}
   for (const [menuName, items] of Object.entries(nextMenus))
     nextMenus[menuName] = removeCmsPageFromMenuItems(items, pageId)
@@ -51,25 +51,6 @@ export const removeCmsPageFromMenus = (menus, pageId, { ensureRootMenus = false 
   return nextMenus
 }
 
-export const assertCmsActionSucceeded = (result, fallbackMessage) => {
-  if (result?.success)
-    return result
-  throw new Error(result?.message || fallbackMessage || 'The CMS action failed.')
-}
-
-export const removeCmsPageFromPublishedMenus = async ({
-  edgeFirebase,
-  organizationDocPath,
-  siteId,
-  pageId,
-  publishedSettings = null,
-}) => {
-  if (!isRecord(publishedSettings))
-    return null
-
-  const publishedSettingsPath = `${organizationDocPath}/published-site-settings`
-  const menus = removeCmsPageFromMenus(publishedSettings.menus, pageId, { ensureRootMenus: true })
-  const result = await edgeFirebase.changeDoc(publishedSettingsPath, siteId, { menus })
-  assertCmsActionSucceeded(result, 'Unable to update the published site menu.')
-  return menus
+module.exports = {
+  removeCmsPageFromMenus,
 }

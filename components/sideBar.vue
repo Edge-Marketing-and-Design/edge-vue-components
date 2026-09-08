@@ -233,7 +233,7 @@ const hasSecondarySubmenuItems = computed(() => {
           :content-classes="props.contentClasses"
           :footer-classes="props.footerClasses"
           :group-label-classes="props.groupLabelClasses"
-          :button-classes="`gap-0 h-[52px] ${props.buttonClasses}`"
+          :button-classes="`gap-0 min-h-[52px] !h-auto py-1 ${props.buttonClasses}`"
           :icon-classes="props.iconClasses"
           :hide-logout="props.hideLogout"
           :single-org="effectiveSingleOrg"

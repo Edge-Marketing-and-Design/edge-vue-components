@@ -38,6 +38,7 @@ onMounted(() => {
   >
     <edge-cms-media-manager
       :include-files="true"
+      :include-videos="true"
       :read-only="!canEditMedia"
       :mark-pdf-as-flipbook="true"
       media-type-default="images"
