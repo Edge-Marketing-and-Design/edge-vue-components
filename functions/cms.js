@@ -23,6 +23,7 @@ const {
 
 const { createKvMirrorHandler } = require('./kv/kvMirror')
 const kv = require('./kv/kvClient')
+const { resolvePublicationFile, reconcilePublicationValues } = require('./helpers/cmsPublicationValues')
 const { removeCmsPageFromMenus } = require('./helpers/cmsPageDeletion')
 const { resolveSubmittedUserRouting } = require('./helpers/submittedUserRouting')
 
@@ -1912,13 +1913,15 @@ const collectSyncedBlocks = (content, postContent) => {
 const BLOCK_META_EXCLUDE_KEYS = new Set(['limit'])
 const BLOCK_DEFINITION_SYNC_FIELDS = ['content', 'template', 'templateVersion', 'schema', 'dataSources', 'blockUpdatedAt']
 
-const updateBlocksInArray = (blocks, blockId, beforeData, afterData) => {
+const updateBlocksInArray = async (blocks, blockId, beforeData, afterData, { resolveFile = async () => null } = {}) => {
   let touched = false
   const beforeMeta = beforeData?.meta || {}
   const afterMeta = afterData?.meta || {}
   for (const block of blocks) {
     if (block?.blockId !== blockId)
       continue
+
+    await reconcilePublicationValues(block, beforeData, afterData, resolveFile, message => logger.warn(message))
 
     for (const field of BLOCK_DEFINITION_SYNC_FIELDS) {
       if (Object.prototype.hasOwnProperty.call(afterData, field))
@@ -1965,12 +1968,12 @@ const updateBlocksInArray = (blocks, blockId, beforeData, afterData) => {
   return touched
 }
 
-const buildPageBlockUpdate = (pageData, blockId, beforeData, afterData) => {
+const buildPageBlockUpdate = async (pageData, blockId, beforeData, afterData, options) => {
   const pageContent = Array.isArray(pageData.content) ? [...pageData.content] : []
   const pagePostContent = Array.isArray(pageData.postContent) ? [...pageData.postContent] : []
 
-  const contentTouched = updateBlocksInArray(pageContent, blockId, beforeData, afterData)
-  const postContentTouched = updateBlocksInArray(pagePostContent, blockId, beforeData, afterData)
+  const contentTouched = await updateBlocksInArray(pageContent, blockId, beforeData, afterData, options)
+  const postContentTouched = await updateBlocksInArray(pagePostContent, blockId, beforeData, afterData, options)
 
   return {
     touched: contentTouched || postContentTouched,
@@ -1984,28 +1987,6 @@ const getNextVersion = (value) => {
   if (!Number.isFinite(numericVersion))
     return 1
   return Math.max(0, Math.trunc(numericVersion)) + 1
-}
-
-const syncPageVersionMaps = async ({ orgId, siteId, pageId, version }) => {
-  if (!orgId || !siteId || !pageId)
-    return
-
-  const orgRef = db.collection('organizations').doc(orgId)
-  const sitesRef = orgRef.collection('sites').doc(siteId)
-  const publishedSettingsRef = orgRef.collection('published-site-settings').doc(siteId)
-
-  await Promise.all([
-    sitesRef.set({
-      pageVersions: {
-        [pageId]: version,
-      },
-    }, { merge: true }),
-    publishedSettingsRef.set({
-      pageVersions: {
-        [pageId]: version,
-      },
-    }, { merge: true }),
-  ])
 }
 
 exports.blockUpdated = onDocumentUpdated({ document: 'organizations/{orgId}/blocks/{blockId}', timeoutSeconds: 180 }, async (event) => {
@@ -2028,58 +2009,54 @@ exports.blockUpdated = onDocumentUpdated({ document: 'organizations/{orgId}/bloc
     updatePublished = true,
     scopeLabel,
   }) => {
-    const pagesSnap = await db.collection('organizations').doc(orgId)
-      .collection('sites').doc(siteId)
-      .collection(collectionName)
-      .where('blockIds', 'array-contains', blockId)
-      .get()
+    const orgRef = db.collection('organizations').doc(orgId)
+    const siteRef = orgRef.collection('sites').doc(siteId)
+    const collections = [{ name: collectionName, published: false }]
+    if (updatePublished && publishedCollectionName)
+      collections.push({ name: publishedCollectionName, published: true })
 
-    if (pagesSnap.empty) {
-      logger.log(`No ${collectionName} found using block ${blockId} in ${scopeLabel}`)
-      return
-    }
+    // Query both snapshots independently: the draft may have removed a block
+    // that is still live, or added one that has never been published.
+    for (const { name, published } of collections) {
+      const pagesSnap = await siteRef.collection(name)
+        .where('blockIds', 'array-contains', blockId)
+        .get()
 
-    for (const pageDoc of pagesSnap.docs) {
-      const pageData = pageDoc.data() || {}
-      const { touched, content, postContent } = buildPageBlockUpdate(pageData, blockId, beforeData, afterData)
+      for (const pageDoc of pagesSnap.docs) {
+        await db.runTransaction(async (transaction) => {
+          // Re-read inside the transaction so an overlapping save, publish or
+          // unpublish cannot be overwritten by a stale query snapshot.
+          const currentDoc = await transaction.get(pageDoc.ref)
+          if (!currentDoc.exists)
+            return
+          const pageData = currentDoc.data() || {}
+          const publications = new Map()
+          const resolveFile = (reference) => {
+            if (!publications.has(reference))
+              publications.set(reference, resolvePublicationFile(transaction, orgRef, reference))
+            return publications.get(reference)
+          }
+          const { touched, content, postContent } = await buildPageBlockUpdate(pageData, blockId, beforeData, afterData, { resolveFile })
+          if (!touched)
+            return
 
-      if (!touched) {
-        logger.log(`${docLabel} ${pageDoc.id} has no matching block ${blockId} in ${scopeLabel}`)
-        continue
+          const update = {}
+          if (Array.isArray(pageData.content))
+            update.content = content
+          if (Array.isArray(pageData.postContent))
+            update.postContent = postContent
+          if (collectionName === 'pages')
+            update.version = getNextVersion(pageData.version)
+          transaction.update(pageDoc.ref, update)
+
+          if (published && collectionName === 'pages') {
+            const versionMap = { pageVersions: { [pageDoc.id]: update.version } }
+            transaction.set(siteRef, versionMap, { merge: true })
+            transaction.set(orgRef.collection('published-site-settings').doc(siteId), versionMap, { merge: true })
+          }
+        })
       }
-
-      const shouldTrackPageVersion = collectionName === 'pages'
-      const nextVersion = shouldTrackPageVersion ? getNextVersion(pageData?.version) : null
-      const draftUpdate = shouldTrackPageVersion
-        ? { content, postContent, version: nextVersion }
-        : { content, postContent }
-
-      await pageDoc.ref.update(draftUpdate)
-
-      if (updatePublished && publishedCollectionName) {
-        const publishedRef = db.collection('organizations').doc(orgId)
-          .collection('sites').doc(siteId)
-          .collection(publishedCollectionName).doc(pageDoc.id)
-
-        const publishedDoc = await publishedRef.get()
-        if (publishedDoc.exists) {
-          const publishedUpdate = shouldTrackPageVersion
-            ? { content, postContent, version: nextVersion }
-            : { content, postContent }
-          await publishedRef.update(publishedUpdate)
-        }
-
-        if (shouldTrackPageVersion) {
-          await syncPageVersionMaps({
-            orgId,
-            siteId,
-            pageId: pageDoc.id,
-            version: nextVersion,
-          })
-        }
-      }
-
-      logger.log(`Updated ${docLabel} ${pageDoc.id} in ${scopeLabel} with new block ${blockId} content`)
+      logger.log(`Processed ${name} ${docLabel} references in ${scopeLabel} for block ${blockId}`)
     }
   }
 
