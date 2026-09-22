@@ -358,7 +358,7 @@ const onSubmit = async () => {
       state.bypassUnsavedChanges = false
       state.successMessage = 'All changes saved. You can close or continue editing.'
       emit('unsavedChanges', false)
-      return
+      return normalizedSavedDoc
     }
     state.workingDoc = {}
     if (props.saveRedirectOverride) {
@@ -371,12 +371,14 @@ const onSubmit = async () => {
     else {
       router.push(`/app/dashboard/${props.collection}`)
     }
+    return normalizedSavedDoc
   }
   catch (error) {
     state.bypassUnsavedChanges = false
     const message = String(error?.message || '').trim() || 'Unable to save changes.'
     state.errors = { _form: message }
     emit('error', state.errors)
+    return null
   }
   finally {
     state.submitting = false
@@ -582,9 +584,10 @@ const triggerSubmit = async (insertedValues = {}) => {
     await formRef.value.setValues(state.workingDoc, true)
     await formRef.value.validate()
     await nextTick()
-    await formRef.value.handleSubmit(onSubmit)()
+    const savedDoc = await formRef.value.handleSubmit(onSubmit)()
     await nextTick()
     state.errors = formRef.value?.errors
+    return savedDoc
   }
 }
 
