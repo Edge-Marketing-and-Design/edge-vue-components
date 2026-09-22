@@ -966,8 +966,19 @@ const renderPublicationContent = (content, values, renderSegment) => {
     const cfg = safeParseTagConfig(tag.rawCfg)
     const field = String(cfg?.field || '').trim()
     const fieldMeta = getPublicationMeta(field)
-    const pages = values?.[field] || cfg?.value || {}
-    const effect = fieldMeta.effect || cfg?.effect || 'flip'
+    let context = null
+    if (Object.hasOwn(cfg || {}, 'context')) {
+      try {
+        const decoded = JSON.parse(decodeURIComponent(cfg.context))
+        context = (decoded && typeof decoded === 'object') ? decoded : {}
+      }
+      catch {
+        context = {}
+      }
+    }
+    const candidatePages = context ? context.pages : (values?.[field] || cfg?.value)
+    const pages = (candidatePages && typeof candidatePages === 'object') ? candidatePages : {}
+    const effect = (context ? context.effect : fieldMeta.effect) || cfg?.effect || 'flip'
     const targetId = `${renderInstanceId}-publication-${publicationIndex}`
 
     html += `<div id="${targetId}" class="edge-cms-publication-slot"></div>`

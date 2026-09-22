@@ -102,6 +102,7 @@ const state = reactive({
   afterMount: false,
   submitting: false,
   errors: {},
+  savedDocId: '',
   // When creating a new doc, suppress the very first validation pass that happens right after initial values load
   skipNextValidation: props.docId === 'new',
   overrideClose: false,
@@ -152,14 +153,15 @@ const comparableDoc = (doc = {}) => {
 }
 
 const unsavedChanges = computed(() => {
-  if (props.docId === 'new') {
+  const baselineDocId = props.docId === 'new' ? state.savedDocId : props.docId
+  if (!baselineDocId) {
     if (!state.afterMount)
       return false
     return JSON.stringify(comparableDoc(state.workingDoc)) !== JSON.stringify(comparableDoc(newDoc.value))
   }
 
   // If the baseline doc is not yet loaded (e.g. on page refresh) avoid flagging unsaved changes
-  const baselineDoc = state.collectionData?.[props.docId]
+  const baselineDoc = state.collectionData?.[baselineDocId]
   if (!state.afterMount || !baselineDoc) {
     return false
   }
@@ -337,16 +339,19 @@ const onSubmit = async () => {
     const savedDoc = edgeGlobal.dupObject(result?.data || { ...finalWorkingDoc, docId: savedDocId })
     savedDoc.docId = savedDocId
     state.workingDoc = edgeGlobal.dupObject(savedDoc)
+    await nextTick()
+    const normalizedSavedDoc = edgeGlobal.dupObject(state.workingDoc)
     state.collectionData = {
       ...(state.collectionData || {}),
-      [savedDocId]: savedDoc,
+      [savedDocId]: normalizedSavedDoc,
     }
+    state.savedDocId = savedDocId
     emit('saved', {
       collection: props.collection,
       docId: savedDocId,
-      data: edgeGlobal.dupObject(savedDoc),
+      data: edgeGlobal.dupObject(normalizedSavedDoc),
     })
-    edgeGlobal.edgeState.lastPaginatedDoc = JSON.parse(JSON.stringify(savedDoc))
+    edgeGlobal.edgeState.lastPaginatedDoc = JSON.parse(JSON.stringify(normalizedSavedDoc))
     edgeGlobal.edgeState.changeTracker = {}
     state.bypassUnsavedChanges = true
     if (state.overrideClose) {
@@ -447,6 +452,7 @@ const resetEditorState = () => {
   state.dialog = false
   state.successMessage = ''
   state.skipNextValidation = props.docId === 'new'
+  state.savedDocId = ''
   edgeGlobal.edgeState.changeTracker = {}
 }
 
