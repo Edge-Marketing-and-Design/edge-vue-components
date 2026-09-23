@@ -5743,7 +5743,14 @@ const exportCurrentBlock = async () => {
                     <p class="text-sm text-foreground">
                       Video inputs use the shared media manager, accept video uploads, and save a Cloudflare Stream iframe. Newly uploaded videos can take a few minutes to finish processing before they can be selected.
                     </p>
-                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;div class="aspect-video"&gt;{{ promoVideo }}&lt;/div&gt;</code></pre>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;div class="aspect-video"&gt;{{ richtext(promoVideo) }}&lt;/div&gt;
+
+{{#for video in videos}}
+  &lt;div class="aspect-video"&gt;{{ richtext(video.embed) }}&lt;/div&gt;
+{{/for}}</code></pre>
+                    <p class="text-sm text-foreground">
+                      Always render video values with <code v-pre>{{ richtext(...) }}</code>, including Video fields inside array items. A bare <code v-pre>{{ promoVideo }}</code> can show the iframe as escaped text on the live site.
+                    </p>
                     <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{
   "promoVideo": {
     "type": "richtext",
@@ -5754,7 +5761,7 @@ const exportCurrentBlock = async () => {
   }
 }</code></pre>
                     <p class="text-sm text-foreground">
-                      The friendly Inputs editor labels this configuration as Video. The stored <code>richtext</code> type is intentional so both renderers preserve the iframe HTML.
+                      The friendly Inputs editor labels this configuration as Video. The stored <code>richtext</code> type is intentional so the value stays on the existing rich-text contract.
                     </p>
                   </section>
 
