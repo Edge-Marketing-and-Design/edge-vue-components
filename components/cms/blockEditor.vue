@@ -131,6 +131,7 @@ const v2SchemaTypeOptions = [
   { name: 'textarea', title: 'Textarea' },
   { name: 'richtext', title: 'Rich Text' },
   { name: 'image', title: 'Image' },
+  { name: 'video', title: 'Video' },
   { name: 'number', title: 'Number' },
   { name: 'array', title: 'Array' },
   { name: 'option', title: 'Select' },
@@ -141,6 +142,7 @@ const v2ArrayItemSchemaTypeOptions = [
   { name: 'textarea', title: 'Textarea' },
   { name: 'richtext', title: 'Rich Text' },
   { name: 'image', title: 'Image' },
+  { name: 'video', title: 'Video' },
   { name: 'number', title: 'Number' },
   { name: 'option', title: 'Select' },
 ]
@@ -452,11 +454,11 @@ const dataSourceWizardStepItems = [
   { step: 5, title: 'Review' },
 ]
 const getTemplateV2SchemaWizardSteps = (entry) => {
-  const type = String(entry?.type || 'text').trim() || 'text'
+  const type = getTemplateV2SchemaEditorType(entry)
   const steps = [{ step: 1, title: 'Field' }]
-  if (!['array', 'publication'].includes(type))
+  if (!['array', 'video', 'publication'].includes(type))
     steps.push({ step: 2, title: 'Default' })
-  if (['array', 'image', 'richtext', 'publication', 'option'].includes(type))
+  if (['array', 'image', 'video', 'richtext', 'publication', 'option'].includes(type))
     steps.push({ step: 3, title: 'Settings' })
   steps.push({ step: 4, title: 'Review' })
   return steps
@@ -998,6 +1000,10 @@ const normalizeTemplateV2SchemaEntry = (schema, field) => {
   }
   if (schema[field].type === 'select')
     schema[field].type = 'option'
+  if (schema[field].type === 'video') {
+    schema[field].type = 'richtext'
+    schema[field].picker = 'video'
+  }
   if (schema[field].type === 'option')
     ensureTemplateV2SchemaOption(schema[field])
   if (schema[field].type === 'publication') {
@@ -1015,11 +1021,19 @@ const getTemplateV2SchemaEntries = (workingDoc) => {
   }))
 }
 
+function getTemplateV2SchemaEditorType(entry) {
+  if (entry?.type === 'richtext' && entry?.picker === 'video')
+    return 'video'
+  return String(entry?.type || 'text').trim() || 'text'
+}
+
 const normalizeTemplateV2SchemaConfig = (field, config) => {
   if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    const type = (typeof config === 'string' && config) ? config : 'text'
     return {
-      type: (typeof config === 'string' && config) ? config : 'text',
+      type: type === 'video' ? 'richtext' : type,
       label: titleFromKey(field),
+      ...(type === 'video' ? { picker: 'video' } : {}),
     }
   }
   const normalized = config
@@ -1027,6 +1041,10 @@ const normalizeTemplateV2SchemaConfig = (field, config) => {
     normalized.type = 'text'
   if (normalized.type === 'select')
     normalized.type = 'option'
+  if (normalized.type === 'video') {
+    normalized.type = 'richtext'
+    normalized.picker = 'video'
+  }
   if (!normalized.label && !normalized.title)
     normalized.label = titleFromKey(field)
   if (normalized.type === 'option')
@@ -1327,8 +1345,20 @@ const updateTemplateV2SchemaOptionRowField = (entry, index, field, value) => {
 const updateTemplateV2SchemaType = (entry, value) => {
   if (!entry || typeof entry !== 'object')
     return
+  const previousType = getTemplateV2SchemaEditorType(entry)
   const type = String(value || 'text').trim() || 'text'
-  entry.type = type === 'select' ? 'option' : type
+  const normalizedType = type === 'select' ? 'option' : type
+  if (normalizedType === 'video') {
+    entry.type = 'richtext'
+    entry.picker = 'video'
+    if (previousType !== 'video')
+      entry.value = ''
+  }
+  else {
+    entry.type = normalizedType
+    if (entry.picker === 'video')
+      delete entry.picker
+  }
   if (entry.type === 'option')
     ensureTemplateV2SchemaOption(entry)
   else
@@ -1341,6 +1371,8 @@ const updateTemplateV2SchemaType = (entry, value) => {
     delete entry.tags
     delete entry.variant
   }
+  if (entry.picker === 'video')
+    delete entry.variant
   if (entry.type === 'publication')
     entry.effect = normalizeTemplateV2PublicationEffect(entry.effect)
   if (state.schemaWizardDraft?.entry === entry) {
@@ -1353,8 +1385,20 @@ const updateTemplateV2SchemaType = (entry, value) => {
 const updateTemplateV2ArraySchemaType = (entry, value) => {
   if (!entry || typeof entry !== 'object')
     return
+  const previousType = getTemplateV2SchemaEditorType(entry)
   const type = String(value || 'text').trim() || 'text'
-  entry.type = type === 'select' ? 'option' : type
+  const normalizedType = type === 'select' ? 'option' : type
+  if (normalizedType === 'video') {
+    entry.type = 'richtext'
+    entry.picker = 'video'
+    if (previousType !== 'video')
+      entry.value = ''
+  }
+  else {
+    entry.type = normalizedType
+    if (entry.picker === 'video')
+      delete entry.picker
+  }
   if (entry.type === 'option')
     ensureTemplateV2SchemaOption(entry)
   else
@@ -1363,6 +1407,8 @@ const updateTemplateV2ArraySchemaType = (entry, value) => {
     delete entry.tags
     delete entry.variant
   }
+  if (entry.picker === 'video')
+    delete entry.variant
 }
 
 const updateTemplateV2SchemaArrayField = (entry, field, value) => {
@@ -1762,6 +1808,11 @@ const BLOCK_CONTENT_SNIPPETS = [
     label: 'Image',
     snippet: '{{{#image {"field": "imageField", "value": "",   "tags": ["Backgrounds"] }}}}',
     description: 'Image field placeholder',
+  },
+  {
+    label: 'Video',
+    snippet: '{{{#richtext {"field": "videoField", "value": "", "picker": "video" }}}}',
+    description: 'Cloudflare Stream video picker',
   },
   {
     label: 'Publication',
@@ -2249,7 +2300,7 @@ const blockModel = (html) => {
       val = !val ? PLACEHOLDERS.textarea : String(val)
     }
     else if (type === 'richtext') {
-      val = !val ? PLACEHOLDERS.richtext : String(val)
+      val = cfg.picker === 'video' ? String(val || '') : (!val ? PLACEHOLDERS.richtext : String(val))
     }
 
     values[field] = val
@@ -3635,7 +3686,7 @@ const exportCurrentBlock = async () => {
                       >
                         <span>{{ schemaItem.entry.label || schemaItem.field }}</span>
                         <span class="rounded border border-slate-200 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-500 dark:border-slate-700">
-                          {{ schemaItem.entry.type || 'text' }}
+                          {{ getTemplateV2SchemaEditorType(schemaItem.entry) }}
                         </span>
                       </summary>
                       <div class="space-y-3 p-3">
@@ -3654,7 +3705,7 @@ const exportCurrentBlock = async () => {
                           placeholder="Heading"
                         />
                         <edge-shad-select
-                          :model-value="schemaItem.entry.type"
+                          :model-value="getTemplateV2SchemaEditorType(schemaItem.entry)"
                           :name="`schemaType-${schemaItem.field}`"
                           label="Type"
                           :items="v2SchemaTypeOptions"
@@ -3731,7 +3782,7 @@ const exportCurrentBlock = async () => {
                                 placeholder="Heading"
                               />
                               <edge-shad-select
-                                :model-value="arraySchemaItem.entry.type"
+                                :model-value="getTemplateV2SchemaEditorType(arraySchemaItem.entry)"
                                 :name="`arraySchemaType-${schemaItem.field}-${arraySchemaItem.field}`"
                                 label="Type"
                                 :items="v2ArrayItemSchemaTypeOptions"
@@ -3758,6 +3809,7 @@ const exportCurrentBlock = async () => {
                                 @update:model-value="updateTemplateV2SchemaArrayField(arraySchemaItem.entry, 'tags', $event)"
                               />
                               <edge-shad-select
+                                v-if="getTemplateV2SchemaEditorType(arraySchemaItem.entry) === 'image'"
                                 :model-value="arraySchemaItem.entry.variant || 'public'"
                                 :name="`arraySchemaVariant-${schemaItem.field}-${arraySchemaItem.field}`"
                                 label="Image Variant"
@@ -3898,6 +3950,7 @@ const exportCurrentBlock = async () => {
                           @update:model-value="updateTemplateV2SchemaArrayField(schemaItem.entry, 'tags', $event)"
                         />
                         <edge-shad-select
+                          v-if="getTemplateV2SchemaEditorType(schemaItem.entry) === 'image'"
                           :model-value="schemaItem.entry.variant || 'public'"
                           :name="`schemaVariant-${schemaItem.field}`"
                           label="Image Variant"
@@ -4005,7 +4058,7 @@ const exportCurrentBlock = async () => {
                         placeholder="Heading"
                       />
                       <edge-shad-select
-                        :model-value="state.schemaWizardDraft.entry.type"
+                        :model-value="getTemplateV2SchemaEditorType(state.schemaWizardDraft.entry)"
                         name="schemaWizardType"
                         label="Type"
                         :items="v2SchemaTypeOptions"
@@ -4131,7 +4184,7 @@ const exportCurrentBlock = async () => {
                                 placeholder="Heading"
                               />
                               <edge-shad-select
-                                :model-value="arraySchemaItem.entry.type"
+                                :model-value="getTemplateV2SchemaEditorType(arraySchemaItem.entry)"
                                 :name="`schemaWizardArrayType-${arraySchemaItem.field}`"
                                 label="Type"
                                 :items="v2ArrayItemSchemaTypeOptions"
@@ -4148,6 +4201,7 @@ const exportCurrentBlock = async () => {
                                 @update:model-value="updateTemplateV2SchemaArrayField(arraySchemaItem.entry, 'tags', $event)"
                               />
                               <edge-shad-select
+                                v-if="getTemplateV2SchemaEditorType(arraySchemaItem.entry) === 'image'"
                                 :model-value="arraySchemaItem.entry.variant || 'public'"
                                 :name="`schemaWizardArrayVariant-${arraySchemaItem.field}`"
                                 label="Image Variant"
@@ -4307,6 +4361,7 @@ const exportCurrentBlock = async () => {
                         @update:model-value="updateTemplateV2SchemaArrayField(state.schemaWizardDraft.entry, 'tags', $event)"
                       />
                       <edge-shad-select
+                        v-if="getTemplateV2SchemaEditorType(state.schemaWizardDraft.entry) === 'image'"
                         :model-value="state.schemaWizardDraft.entry.variant || 'public'"
                         name="schemaWizardVariant"
                         label="Image Variant"
@@ -5646,6 +5701,7 @@ const exportCurrentBlock = async () => {
                     <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#text {"field":"headline","value":"Hello","title":"Headline"}}}}
 {{{#textarea {"field":"intro","value":""}}}}
 {{{#richtext {"field":"body","value":""}}}}
+{{{#richtext {"field":"video","value":"","picker":"video"}}}}
 {{{#image {"field":"heroImage","value":"https://example.com/hero.jpg"}}}}</code></pre>
                   </section>
 
@@ -5671,11 +5727,34 @@ const exportCurrentBlock = async () => {
                       <div><code>richtext</code> → WYSIWYG editor (HTML is rendered as‑is).</div>
                       <div><code>number</code> → number input.</div>
                       <div><code>image</code> → image picker + preview.</div>
+                      <div><code>video</code> → Cloudflare Stream video picker + iframe preview.</div>
                       <div><code>publication</code> → publication picker that stores selected page image data.</div>
                       <div><code>array</code> → list editor (manual items) or data loader (API/collection).</div>
                     </div>
                     <p class="text-sm text-foreground">
                       Rich text image controls include size buttons, float left/none/right, and a width slider (10–100%).
+                    </p>
+                  </section>
+
+                  <section id="video-fields" class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Video Fields (Media Picker)
+                    </h3>
+                    <p class="text-sm text-foreground">
+                      Video inputs use the shared media manager, accept video uploads, and save a Cloudflare Stream iframe. Newly uploaded videos can take a few minutes to finish processing before they can be selected.
+                    </p>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;div class="aspect-video"&gt;{{ promoVideo }}&lt;/div&gt;</code></pre>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{
+  "promoVideo": {
+    "type": "richtext",
+    "label": "Promo Video",
+    "picker": "video",
+    "value": "",
+    "tags": ["Videos"]
+  }
+}</code></pre>
+                    <p class="text-sm text-foreground">
+                      The friendly Inputs editor labels this configuration as Video. The stored <code>richtext</code> type is intentional so both renderers preserve the iframe HTML.
                     </p>
                   </section>
 

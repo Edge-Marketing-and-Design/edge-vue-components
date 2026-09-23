@@ -1205,7 +1205,7 @@ const parseBlockContentModel = (html) => {
     else if (type === 'textarea')
       val = !val ? PLACEHOLDERS.textarea : String(val)
     else if (type === 'richtext')
-      val = !val ? PLACEHOLDERS.richtext : String(val)
+      val = cfg.picker === 'video' ? String(val || '') : (!val ? PLACEHOLDERS.richtext : String(val))
 
     values[field] = val
   }
@@ -1295,6 +1295,11 @@ const normalizeTemplateV2SchemaItem = (field, config = {}) => {
     ...rest,
     type: rawConfig.type || rawConfig.value || 'text',
     title: title || label || '',
+  }
+
+  if (normalized.type === 'video') {
+    normalized.type = 'richtext'
+    normalized.picker = 'video'
   }
 
   if (schema !== undefined)
@@ -2536,8 +2541,9 @@ const aiFieldOptions = computed(() => {
       id: entry.field,
       label: genTitleFromField(entry),
       type: entry.meta?.type || 'text',
+      picker: entry.meta?.picker || '',
     }))
-    .filter(option => option.type !== 'image' && option.type !== 'color' && !/url/i.test(option.id) && !/color/i.test(option.id))
+    .filter(option => option.type !== 'image' && option.type !== 'color' && option.picker !== 'video' && !/url/i.test(option.id) && !/color/i.test(option.id))
 })
 
 const selectedAiFieldIds = computed(() => {
@@ -3391,6 +3397,7 @@ const getTagsFromPosts = computed(() => {
                           v-model="state.draft[entry.field]"
                           :type="entry.meta.type"
                           :field="entry.field"
+                          :schema="entry.meta"
                           :site="props.siteId"
                           :richtext-auto-height="editableMetaEntries.length === 1 && entry.meta?.type === 'richtext'"
                           :show-richtext-image-toggle="showRichtextImageToggle"
@@ -3643,6 +3650,7 @@ const getTagsFromPosts = computed(() => {
                         v-model="state.draft[entry.field]"
                         :type="entry.meta.type"
                         :field="entry.field"
+                        :schema="entry.meta"
                         :site="props.siteId"
                         :richtext-auto-height="editableMetaEntries.length === 1 && entry.meta?.type === 'richtext'"
                         :show-richtext-image-toggle="showRichtextImageToggle"

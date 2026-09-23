@@ -2,6 +2,7 @@
 import { ChevronLeft, ChevronRight, FileText, Loader2, RotateCw, Square, SquareCheckBig, Upload, Video } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
+import { getCloudflareVideoEmbedUrl } from '../../lib/cmsVideo'
 const props = defineProps({
   site: {
     type: String,
@@ -29,6 +30,11 @@ const props = defineProps({
     default: false,
   },
   includeVideos: {
+    type: Boolean,
+    required: false,
+    default: false,
+  },
+  videosOnly: {
     type: Boolean,
     required: false,
     default: false,
@@ -136,6 +142,7 @@ const videoMimeTypes = [
   'video/webm',
 ]
 const videoAcceptTypes = [...videoMimeTypes, ...videoExtensions.map(extension => `.${extension}`)]
+const videosEnabled = computed(() => props.includeVideos || props.videosOnly)
 const resolvedImageVariant = computed(() => {
   return String(props.imageVariant || 'public').trim() || 'public'
 })
@@ -326,7 +333,7 @@ const normalizeMediaTypeFilter = (value) => {
   const normalized = String(value || '').trim().toLowerCase()
   if (normalized === 'images' || normalized === 'both')
     return normalized
-  if (normalized === 'videos' && props.includeVideos)
+  if (normalized === 'videos' && videosEnabled.value)
     return normalized
   if (normalized === 'files' && (props.includeFiles || props.filesOnly))
     return normalized
@@ -345,9 +352,11 @@ const normalizeFileTypeFilter = (value) => {
 const enabledMediaScopes = computed(() => {
   if (props.filesOnly)
     return ['files']
+  if (props.videosOnly)
+    return ['videos']
   return [
     'images',
-    ...(props.includeVideos ? ['videos'] : []),
+    ...(videosEnabled.value ? ['videos'] : []),
     ...(props.includeFiles ? ['files'] : []),
   ]
 })
@@ -381,7 +390,7 @@ const activeMediaScope = computed(() => {
 const fileTypeExtensionsForScope = computed(() => {
   let allowedByScope = new Set([
     ...imageExtensions,
-    ...(props.includeVideos ? videoExtensions : []),
+    ...(videosEnabled.value ? videoExtensions : []),
     ...(props.includeFiles ? allowedFileExtensions : []),
   ])
   if (activeMediaScope.value === 'images')
@@ -404,7 +413,7 @@ const fileTypeExtensionsForScope = computed(() => {
           ? isVideoMediaItem(item)
           : (activeMediaScope.value === 'files'
               ? isAllowedFileItem(item)
-              : (isImageMediaItem(item) || (props.includeVideos && isVideoMediaItem(item)) || (props.includeFiles && isAllowedFileItem(item)))))
+              : (isImageMediaItem(item) || (videosEnabled.value && isVideoMediaItem(item)) || (props.includeFiles && isAllowedFileItem(item)))))
     if (!includeByScope)
       return
 
@@ -495,6 +504,8 @@ const shouldIncludeItemByCmsSiteFilter = (item) => {
 const shouldIncludeItemByMode = (item) => {
   if (props.filesOnly)
     return isAllowedFileItem(item)
+  if (props.videosOnly)
+    return isVideoMediaItem(item)
   if (props.includeFiles) {
     const mediaTypeFilter = normalizeMediaTypeFilter(state.mediaTypeFilter)
     if (mediaTypeFilter === 'images')
@@ -502,17 +513,17 @@ const shouldIncludeItemByMode = (item) => {
     if (mediaTypeFilter === 'files')
       return isAllowedFileItem(item)
     if (mediaTypeFilter === 'videos')
-      return props.includeVideos && isVideoMediaItem(item)
-    return isImageMediaItem(item) || (props.includeVideos && isVideoMediaItem(item)) || isAllowedFileItem(item)
+      return videosEnabled.value && isVideoMediaItem(item)
+    return isImageMediaItem(item) || (videosEnabled.value && isVideoMediaItem(item)) || isAllowedFileItem(item)
   }
-  if (props.includeVideos) {
+  if (videosEnabled.value) {
     const mediaTypeFilter = normalizeMediaTypeFilter(state.mediaTypeFilter)
     if (mediaTypeFilter === 'images')
       return isImageMediaItem(item)
     if (mediaTypeFilter === 'videos')
       return isVideoMediaItem(item)
   }
-  return isImageMediaItem(item) || (props.includeVideos && isVideoMediaItem(item))
+  return isImageMediaItem(item) || (videosEnabled.value && isVideoMediaItem(item))
 }
 const shouldIncludeItemByFileType = (item) => {
   const fileTypeFilter = normalizeFileTypeFilter(state.fileTypeFilter)
@@ -587,9 +598,11 @@ const selectedFilterTagsMissingFromOptions = computed(() => {
 const uploadAcceptTypes = computed(() => {
   if (props.filesOnly)
     return [...allowedFileMimeTypes]
+  if (props.videosOnly)
+    return [...videoAcceptTypes]
   return Array.from(new Set([
     ...imageMimeTypes,
-    ...(props.includeVideos ? videoAcceptTypes : []),
+    ...(videosEnabled.value ? videoAcceptTypes : []),
     ...(props.includeFiles ? allowedFileMimeTypes : []),
   ]))
 })
@@ -694,7 +707,7 @@ const uploadActionLabel = computed(() => {
     return 'Upload Files'
   if (enabledMediaScopes.value.length > 1)
     return 'Upload Media'
-  if (props.includeVideos)
+  if (videosEnabled.value)
     return 'Upload Videos'
   return 'Upload Images'
 })
@@ -703,7 +716,7 @@ const emptyStateHint = computed(() => {
     return 'Upload files to get started.'
   if (enabledMediaScopes.value.length > 1)
     return 'Upload media to get started.'
-  if (props.includeVideos)
+  if (videosEnabled.value)
     return 'Upload videos to get started.'
   return 'Upload images to get started.'
 })
@@ -983,20 +996,7 @@ const workingDocIsImage = computed(() => isImageMediaItem(state.workingDoc))
 const workingDocIsVideo = computed(() => isVideoMediaItem(state.workingDoc))
 const workingDocVideoSourceUrl = computed(() => String(state.workingDoc?.r2URL || state.workingDoc?.r2Url || ''))
 const workingDocVideoEmbedUrl = computed(() => {
-  const previewUrl = String(state.workingDoc?.cloudflareVideoPreview || '').trim()
-  if (previewUrl) {
-    if (/\/iframe(?:\?|$)/i.test(previewUrl))
-      return previewUrl
-    if (/\/watch(?:\?|$)/i.test(previewUrl))
-      return previewUrl.replace(/\/watch(?=\?|$)/i, '/iframe')
-  }
-
-  const videoId = String(state.workingDoc?.cloudflareVideoId || '').trim()
-  const cloudflareAssetUrl = previewUrl || String(state.workingDoc?.cloudflareVideoThumbnail || '').trim()
-  const origin = cloudflareAssetUrl.match(/^(https?:\/\/[^/]+)/i)?.[1] || ''
-  if (!videoId || !origin)
-    return ''
-  return `${origin}/${videoId}/iframe`
+  return getCloudflareVideoEmbedUrl(state.workingDoc)
 })
 const workingDocR2Path = computed(() => String(state.workingDoc?.r2FilePath || '').trim())
 const canRetryWorkingImage = computed(() => {
