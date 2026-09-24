@@ -2,6 +2,7 @@
 import { useVModel } from '@vueuse/core'
 import { renderTemplate } from '@edgedev/template-engine'
 import { ChevronDown, FilePen, GripVertical, ImagePlus, Loader2, LockKeyhole, LockOpen, Maximize2, Monitor, Pencil, Plus, Smartphone, Sparkles, Tablet, X } from 'lucide-vue-next'
+import { loadLibraryBlockForEditing, saveLibraryBlockEdit } from '../../lib/cmsBlockRevisionClient'
 const props = defineProps({
   modelValue: {
     type: Object,
@@ -439,6 +440,10 @@ const state = reactive({
   protectionPanelOpen: false,
   blockContentDraft: '',
   blockContentDocId: '',
+  // The library block this content editor opened: its unreleased draft
+  // definition when there is one, otherwise the released one.
+  blockContentSourceView: null,
+  blockContentDraftRevision: null,
   blockContentUpdating: false,
   blockContentError: '',
 })
@@ -1485,6 +1490,8 @@ const blockContentSourceDoc = computed(() => {
   const blockDocId = String(state.blockContentDocId || sourceBlockDocId.value || '').trim()
   if (!blockDocId)
     return null
+  if (state.blockContentSourceView && state.blockContentDocId === blockDocId)
+    return state.blockContentSourceView
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[blockDocId] || null
 })
 
@@ -2124,7 +2131,19 @@ const openPreviewContentEditor = async () => {
   if (!edgeFirebase.data?.[blocksPath])
     await edgeFirebase.startSnapshot(blocksPath)
 
-  const blockData = edgeFirebase.data?.[blocksPath]?.[blockDocId]
+  // Edit the unreleased draft when there is one, so saving never drops it.
+  let loaded = null
+  try {
+    loaded = await loadLibraryBlockForEditing({
+      edgeFirebase,
+      organizationDocPath: edgeGlobal.edgeState.organizationDocPath,
+      blockId: blockDocId,
+    })
+  }
+  catch {
+    loaded = null
+  }
+  const blockData = loaded?.view
   if (!blockData) {
     state.blockContentError = 'Unable to load block content.'
     edgeFirebase?.toast?.error?.('Unable to load block content.')
@@ -2133,6 +2152,8 @@ const openPreviewContentEditor = async () => {
 
   state.editorMode = 'content'
   state.blockContentDocId = blockDocId
+  state.blockContentSourceView = blockData
+  state.blockContentDraftRevision = loaded.draft ? loaded.stored.draftRevision : null
   const blockDataIsTemplateV2 = isTemplateV2BlockDoc(blockData) && !isMalformedLegacyTemplateV2Doc(blockData)
   state.blockContentDraft = String(blockDataIsTemplateV2
     ? (blockData.template || blockData.content || '')
@@ -2144,6 +2165,8 @@ const openPreviewContentEditor = async () => {
   state.afterLoad = true
 }
 
+// Saves the edited template as the library block's unreleased draft
+// revision. No page changes, including this one, until the draft is released.
 const updateBlockContent = async () => {
   if (state.blockContentUpdating)
     return
@@ -2151,68 +2174,44 @@ const updateBlockContent = async () => {
   if (!blockDocId)
     return
 
-  const blocksPath = `${edgeGlobal.edgeState.organizationDocPath}/blocks`
-  const blockData = edgeFirebase.data?.[blocksPath]?.[blockDocId] || {}
+  const blockData = state.blockContentSourceView
+    || edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[blockDocId]
+    || {}
   const nextContent = String(state.blockContentDraft || '')
   const templateIsV2 = isTemplateV2BlockDoc(blockData) && !isMalformedLegacyTemplateV2Doc(blockData)
-  const { values: blockValues, meta: blockMeta } = templateIsV2
-    ? {
-        values: blockData.values || {},
-        meta: blockData.meta || {},
-      }
-    : buildUpdatedBlockDocFromContent(nextContent, blockData)
-  const { values: instanceValues, meta: instanceMeta } = templateIsV2
-    ? {
-        values: modelValue.value?.values || {},
-        meta: modelValue.value?.meta || {},
-      }
-    : buildUpdatedBlockDocFromContent(nextContent, modelValue.value || {})
-  const blockUpdatedAt = new Date().toISOString()
-  const nextType = normalizeBlockTypes(blockData?.type)
-  const normalizedNextType = nextType.length ? nextType : ['Page']
-
-  const previousModelValue = edgeGlobal.dupObject(modelValue.value || {})
-  const nextModelValue = {
-    ...(modelValue.value || {}),
-    content: nextContent,
-    values: instanceValues,
-    meta: instanceMeta,
-    blockUpdatedAt,
-    blockId: blockData?.docId || blockDocId,
-  }
+  const nextDoc = { ...edgeGlobal.dupObject(blockData), content: nextContent }
   if (templateIsV2) {
-    nextModelValue.templateVersion = 2
-    nextModelValue.template = nextContent
-    nextModelValue.schema = blockData.schema || modelValue.value?.schema || {}
-    nextModelValue.dataSources = blockData.dataSources || modelValue.value?.dataSources || {}
+    nextDoc.templateVersion = 2
+    nextDoc.template = nextContent
   }
-  modelValue.value = nextModelValue
+  else {
+    const { values, meta } = buildUpdatedBlockDocFromContent(nextContent, blockData)
+    nextDoc.values = values
+    nextDoc.meta = meta
+  }
 
   state.blockContentError = ''
   state.blockContentUpdating = true
   try {
-    const updates = {
-      content: nextContent,
-      blockUpdatedAt,
-      type: normalizedNextType,
-    }
-    if (templateIsV2) {
-      updates.templateVersion = 2
-      updates.template = nextContent
-    }
-    else {
-      updates.values = blockValues
-      updates.meta = blockMeta
-    }
-    const results = await edgeFirebase.changeDoc(blocksPath, blockDocId, updates)
-    if (results?.success === false) {
-      throw new Error(results?.error || 'Failed to update block content.')
-    }
-    edgeFirebase?.toast?.success?.('Block content updated.')
+    const { view, revision } = await saveLibraryBlockEdit({
+      edgeFirebase,
+      organizationDocPath: edgeGlobal.edgeState.organizationDocPath,
+      orgId: edgeGlobal.edgeState.currentOrganization,
+      blockId: blockDocId,
+      nextDoc,
+      source: 'page-editor',
+    })
+    state.blockContentSourceView = view
+    state.blockContentDraftRevision = revision.draftRevision ?? null
+    if (revision.status === 'saved')
+      edgeFirebase?.toast?.success?.(`Saved as unreleased changes to this library block (revision ${revision.draftRevision}). Pages, including this one, are unchanged until it's released.`)
+    else if (revision.status === 'discarded')
+      edgeFirebase?.toast?.success?.('The template matches the released block again, so its unreleased changes were discarded.')
+    else
+      edgeFirebase?.toast?.success?.('No template changes to save.')
     state.open = false
   }
   catch (error) {
-    modelValue.value = previousModelValue
     state.blockContentError = error?.message || 'Unable to save block content.'
     edgeFirebase?.toast?.error?.(state.blockContentError)
   }
@@ -2863,7 +2862,8 @@ const getTagsFromPosts = computed(() => {
               <div class="min-w-0">
                 <SheetTitle>Edit Block Content: {{ previewBlockDisplayName }}</SheetTitle>
                 <SheetDescription class="text-sm text-muted-foreground">
-                  Update this block template and save it globally. Changes will sync to every page using this block.
+                  Edit this library block's template. Saving keeps it as unreleased changes: every
+                  page, including this one, keeps the released version until it's released.
                 </SheetDescription>
               </div>
             </div>
@@ -2988,7 +2988,7 @@ const getTagsFromPosts = computed(() => {
                 @click="updateBlockContent"
               >
                 <Loader2 v-if="state.blockContentUpdating" class="w-4 h-4 mr-2 animate-spin" />
-                Update
+                Save as unreleased changes
               </edge-shad-button>
             </SheetFooter>
           </div>

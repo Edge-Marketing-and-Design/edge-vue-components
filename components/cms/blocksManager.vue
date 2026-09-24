@@ -4,6 +4,7 @@ import { renderTemplateAsync } from '@edgedev/template-engine'
 import { guardOverrideRename } from '../../lib/cmsOverrideRename'
 import { validateBlock } from '../../lib/cmsBlockValidation'
 import { collectImportFindings, createBlockCheckError, resolveImportedBlockThemes } from '../../lib/cmsBlockImport'
+import { saveLibraryBlockEdit } from '../../lib/cmsBlockRevisionClient'
 const emit = defineEmits(['head'])
 const edgeFirebase = inject('edgeFirebase')
 const { saveJsonFiles } = useJsonFileSave()
@@ -1257,18 +1258,38 @@ const importSingleBlockFile = async (file, existingBlocks = {}) => {
   }
 
   const payload = { ...getBlockDocDefaults(), ...importedDoc, docId: targetDocId }
+  // A new block has no instances, so it is written directly. Overwriting an
+  // existing block saves its definition as an unreleased draft revision and
+  // leaves every page as it is.
+  const writeImportedBlock = importDecision === 'overwrite'
+    ? () => saveLibraryBlockEdit({
+        edgeFirebase,
+        organizationDocPath: edgeGlobal.edgeState.organizationDocPath,
+        orgId: edgeGlobal.edgeState.currentOrganization,
+        blockId: targetDocId,
+        nextDoc: payload,
+        source: 'import',
+      })
+    : () => edgeFirebase.storeDoc(blockCollectionPath.value, payload, targetDocId)
   const result = await guardOverrideRename({
     storedDoc: importDecision === 'overwrite' ? existingBlocks[targetDocId] : null,
     nextDoc: payload,
     confirm: confirmOverrideRename,
-    write: () => edgeFirebase.storeDoc(blockCollectionPath.value, payload, targetDocId),
+    write: writeImportedBlock,
   })
   if (result?.cancelled)
     return null
-  existingBlocks[targetDocId] = payload
+  existingBlocks[targetDocId] = importDecision === 'overwrite' ? result.view : payload
 
-  if (importDecision === 'overwrite')
-    edgeFirebase?.toast?.success?.(`Overwrote block "${targetDocId}".`)
+  if (importDecision === 'overwrite') {
+    const { status, draftRevision } = result.revision || {}
+    if (status === 'saved')
+      edgeFirebase?.toast?.success?.(`Saved the import of "${targetDocId}" as unreleased changes (revision ${draftRevision}). Pages are unchanged until it's released.`)
+    else if (status === 'discarded')
+      edgeFirebase?.toast?.success?.(`The import of "${targetDocId}" matches the released block, so its unreleased changes were discarded.`)
+    else
+      edgeFirebase?.toast?.success?.(`The import of "${targetDocId}" matches the released block. Only its details were updated.`)
+  }
   else if (importDecision === 'new')
     edgeFirebase?.toast?.success?.(`Imported block as new "${targetDocId}".`)
   else
@@ -1652,7 +1673,9 @@ const handleBlockImport = async (event) => {
             Block Already Exists
           </DialogTitle>
           <DialogDescription>
-            <code>{{ state.importConflictDocId }}</code> already exists. Choose to overwrite it or import as a new block.
+            <code>{{ state.importConflictDocId }}</code> already exists. Overwrite saves the imported
+            definition as unreleased changes to that block; pages keep the released version until
+            it's released. Or import it as a new block.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter class="pt-2 flex justify-between">

@@ -6,6 +6,8 @@ import * as z from 'zod'
 import { clearCmsTemplateV2LibraryState } from '../../composables/useCmsTemplateRuntimeMeta'
 import { guardOverrideRename } from '../../lib/cmsOverrideRename'
 import { validateBlock } from '../../lib/cmsBlockValidation'
+import { BLOCK_REVISION_DEFINITION_FIELDS, diffBlockMetadata } from '../../lib/cmsBlockRevisions'
+import { discardLibraryBlockDraft, loadLibraryBlockForEditing, releasedRevisionOf, saveLibraryBlockEdit } from '../../lib/cmsBlockRevisionClient'
 const props = defineProps({
   blockId: {
     type: String,
@@ -57,6 +59,11 @@ const state = reactive({
   historyLoading: false,
   historyRestoring: false,
   historyError: '',
+  // The library block as this editor loaded or last saved it: the draft
+  // revision's definition when one exists, otherwise the released one.
+  blockRevision: { view: null, releasedRevision: null, draftRevision: null, draftSource: '', draftUpdatedAt: '' },
+  discardDraftDialogOpen: false,
+  discardingDraft: false,
   historyItems: [],
   historySelectedId: '',
   historyPreviewBlock: null,
@@ -193,6 +200,10 @@ const blocks = computed(() => {
 
 const currentBlock = computed(() => blocks.value?.[props.blockId] || null)
 
+// What this editor treats as saved. With an unreleased draft that is the
+// draft definition, not the live library block pages use.
+const savedEditorBlock = computed(() => state.blockRevision.view || currentBlock.value || null)
+
 const hasExplicitTemplateVersion = (doc) => {
   return !!doc && Object.prototype.hasOwnProperty.call(doc, 'templateVersion')
 }
@@ -200,7 +211,7 @@ const hasExplicitTemplateVersion = (doc) => {
 const isSavedTemplateV2Block = computed(() => {
   if (props.blockId === 'new')
     return false
-  return hasExplicitTemplateVersion(currentBlock.value) && normalizeTemplateVersion(currentBlock.value?.templateVersion) === 2
+  return hasExplicitTemplateVersion(savedEditorBlock.value) && normalizeTemplateVersion(savedEditorBlock.value?.templateVersion) === 2
 })
 
 const isSavedLegacyTemplateBlock = () => {
@@ -215,7 +226,7 @@ const stripTemplateV2DefaultsFromLegacyBlock = (doc) => {
   if (doc.templateConversion)
     return doc
 
-  const savedDoc = currentBlock.value || {}
+  const savedDoc = savedEditorBlock.value || {}
   if (hasExplicitTemplateVersion(savedDoc))
     doc.templateVersion = normalizeTemplateVersion(savedDoc.templateVersion)
   else
@@ -2628,51 +2639,6 @@ const editorDocUpdates = (workingDoc) => {
 
 const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value)
 
-const syncEditorStateFromBlockDoc = (doc) => {
-  if (!isPlainObject(doc))
-    return
-
-  const restoredDoc = edgeGlobal.dupObject(doc)
-  if (shouldAutoConvertTemplateV2Doc(restoredDoc)) {
-    const converted = convertLegacyBlockToTemplateV2(restoredDoc)
-    restoredDoc.templateVersion = 2
-    restoredDoc.template = converted.template
-    restoredDoc.content = converted.template
-    restoredDoc.schema = converted.schema
-    restoredDoc.dataSources = converted.dataSources
-    restoredDoc.values = undefined
-    restoredDoc.templateConversion = converted.conversion
-  }
-  let normalizedTypes = normalizeBlockTypes(restoredDoc.type)
-  if (!normalizedTypes.length)
-    normalizedTypes = ['Page']
-  restoredDoc.type = normalizedTypes
-  ensureTemplateV2Fields(restoredDoc)
-  if (!restoredDoc.docId)
-    restoredDoc.docId = props.blockId
-
-  state.editorWorkingDoc = restoredDoc
-  const parsed = blockModel(restoredDoc.content || '')
-  state.workingDoc = {
-    ...parsed,
-    type: normalizedTypes,
-    templateVersion: restoredDoc.templateVersion,
-    template: restoredDoc.template,
-    schema: restoredDoc.schema,
-    dataSources: restoredDoc.dataSources,
-    values: isWorkingTemplateV2Doc(restoredDoc) ? undefined : parsed.values,
-  }
-  state.previewBlock = buildPreviewBlock(restoredDoc, parsed)
-  state.previewSourceValues = edgeGlobal.dupObject(isWorkingTemplateV2Doc(restoredDoc) ? {} : (parsed.values || {}))
-  state.previewTemplateDirty = false
-  state.editorHasUnsavedChanges = false
-
-  const collectionPath = `${edgeGlobal.edgeState.organizationDocPath}/blocks`
-  if (!edgeFirebase.data?.[collectionPath])
-    edgeFirebase.data[collectionPath] = {}
-  edgeFirebase.data[collectionPath][props.blockId] = edgeGlobal.dupObject(restoredDoc)
-}
-
 onBeforeMount(async () => {
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`]) {
     await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`)
@@ -3018,7 +2984,7 @@ const historyPreviewItems = computed(() => {
     const historyDoc = getHistorySnapshotDoc(item)
     if (!historyDoc)
       return false
-    return !blockDocsMatchForDiff(historyDoc, currentBlock.value)
+    return !blockDocsMatchForDiff(historyDoc, savedEditorBlock.value)
   })
 })
 
@@ -3190,7 +3156,7 @@ const buildBlockChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel 
 }
 
 const historyDiffDetails = computed(() => {
-  return buildBlockChangeDetails(getHistorySnapshotDoc(selectedHistoryEntry.value), currentBlock.value, {
+  return buildBlockChangeDetails(getHistorySnapshotDoc(selectedHistoryEntry.value), savedEditorBlock.value, {
     baseLabel: 'Selected History',
     compareLabel: 'Current',
   })
@@ -3201,7 +3167,7 @@ const historyDiffBasePreviewBlock = computed(() => {
 })
 
 const historyDiffComparePreviewBlock = computed(() => {
-  return buildHistoryPreviewBlock(currentBlock.value)
+  return buildHistoryPreviewBlock(savedEditorBlock.value)
 })
 
 const historyDiffCountLabel = computed(() => {
@@ -3268,33 +3234,30 @@ const closeHistoryDialog = () => {
   state.historyDialogOpen = false
 }
 
-const restoreHistoryVersion = async () => {
+// Loads the selected version into the editor as unsaved changes. Saving it
+// then goes through the normal save, so a definition change becomes an
+// unreleased draft instead of reaching every page at once.
+const loadHistoryVersionIntoEditor = () => {
   const historyEntry = selectedHistoryEntry.value
-  if (!historyEntry?.historyId || !edgeFirebase?.user?.uid)
+  const snapshotDoc = getHistorySnapshotDoc(historyEntry)
+  const target = state.editorWorkingDoc
+  if (!historyEntry?.historyId || !isPlainObject(snapshotDoc) || !target)
     return
 
-  state.historyRestoring = true
   state.historyError = ''
-  try {
-    const targetState = getHistorySnapshotState(historyEntry)
-    await edgeFirebase.runFunction('history-restoreHistory', {
-      uid: edgeFirebase.user.uid,
-      historyId: historyEntry.historyId,
-      targetState,
-    })
-    syncEditorStateFromBlockDoc(getHistorySnapshotDoc(historyEntry))
-    state.showHistoryDiffDialog = false
-    state.historyDialogOpen = false
-    state.editorKey += 1
-    notifySuccess(`Restored block from ${formatHistoryEntryLabel(historyEntry)}.`)
+  const restored = edgeGlobal.dupObject(snapshotDoc)
+  for (const field of BLOCK_REVISION_DEFINITION_FIELDS) {
+    if (restored[field] === undefined)
+      delete target[field]
+    else
+      target[field] = restored[field]
   }
-  catch {
-    state.historyError = 'Failed to restore this version.'
-    notifyError('Failed to restore block history.')
-  }
-  finally {
-    state.historyRestoring = false
-  }
+  Object.assign(target, diffBlockMetadata(target, restored))
+  editorDocUpdates(target)
+  refreshWorkingTemplatePreview(target, { force: true })
+  state.showHistoryDiffDialog = false
+  state.historyDialogOpen = false
+  notifySuccess(`Loaded ${formatHistoryEntryLabel(historyEntry)} into the editor. Save to keep it.`)
 }
 
 const handleUnsavedChanges = (changes) => {
@@ -3308,30 +3271,16 @@ const clearTemplateConversionAfterSave = async (payload) => {
     return
 
   const collectionPath = `${edgeGlobal.edgeState.organizationDocPath}/blocks`
-  const currentStoredDoc = edgeFirebase.data?.[collectionPath]?.[docId] || {}
-  const cleanedDoc = edgeGlobal.dupObject({
-    ...currentStoredDoc,
-    ...(savedDoc || {}),
-    ...(state.workingDoc || {}),
-    ...(state.editorWorkingDoc || {}),
-  })
-  delete cleanedDoc.templateConversion
-  cleanedDoc.docId = docId
-
   try {
-    await edgeFirebase.storeDoc(collectionPath, cleanedDoc)
-    if (state.editorWorkingDoc?.docId === docId) {
-      Object.assign(state.editorWorkingDoc, edgeGlobal.dupObject(cleanedDoc))
-      delete state.editorWorkingDoc.templateConversion
+    // Only the notes field: writing the working document here would make an
+    // unreleased definition live.
+    const result = await edgeFirebase.changeDoc(collectionPath, docId, { templateConversion: null })
+    if (result?.success === false)
+      throw new Error(result.message)
+    for (const doc of [state.editorWorkingDoc, state.workingDoc, state.previewBlock, state.blockRevision.view]) {
+      if (doc)
+        delete doc.templateConversion
     }
-    if (state.workingDoc?.docId === docId) {
-      Object.assign(state.workingDoc, edgeGlobal.dupObject(cleanedDoc))
-      delete state.workingDoc.templateConversion
-    }
-    if (state.previewBlock?.blockId === docId || state.previewBlock?.id === docId)
-      delete state.previewBlock.templateConversion
-    if (edgeFirebase.data?.[collectionPath]?.[docId])
-      edgeFirebase.data[collectionPath][docId] = edgeGlobal.dupObject(cleanedDoc)
   }
   catch {
     notifyError('Saved block, but could not clear conversion notes.')
@@ -3352,13 +3301,112 @@ const resolveOverrideRename = (confirmed) => {
   resolve?.(confirmed === true)
 }
 
-// Runs before edge-editor writes, so a declined override rename stores nothing.
-const saveBlockDoc = doc => guardOverrideRename({
-  storedDoc: props.blockId === 'new' ? null : currentBlock.value,
-  nextDoc: doc,
-  confirm: confirmOverrideRename,
-  write: () => edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/blocks`, doc),
+const setBlockRevisionState = ({ view, draft = null, releasedRevision = null, draftRevision = null }) => {
+  state.blockRevision = {
+    view: view ? edgeGlobal.dupObject(view) : null,
+    releasedRevision,
+    draftRevision,
+    draftSource: draft?.source || '',
+    draftUpdatedAt: draft?.updatedAt || '',
+  }
+}
+
+// Opens an existing block with its unreleased draft definition, if any.
+const loadBlockDocument = async ({ docId }) => {
+  const { stored, draft, view } = await loadLibraryBlockForEditing({
+    edgeFirebase,
+    organizationDocPath: edgeGlobal.edgeState.organizationDocPath,
+    blockId: docId,
+  })
+  if (!stored)
+    throw new Error('This block no longer exists.')
+  setBlockRevisionState({
+    view,
+    draft,
+    releasedRevision: releasedRevisionOf(stored),
+    draftRevision: draft ? stored.draftRevision : null,
+  })
+  return view
+}
+
+const DRAFT_SOURCE_LABELS = { 'editor': 'Block Editor', 'import': 'import', 'page-editor': 'page editor' }
+
+const unreleasedChangesLabel = computed(() => {
+  const { draftRevision, releasedRevision, draftSource } = state.blockRevision
+  if (draftRevision === null)
+    return ''
+  const from = DRAFT_SOURCE_LABELS[draftSource] ? ` from the ${DRAFT_SOURCE_LABELS[draftSource]}` : ''
+  return `Unreleased changes${from} (revision ${draftRevision}). Pages still use revision ${releasedRevision ?? 0} until these changes are released.`
 })
+
+// A new block has no instances, so it is written directly and its live
+// definition is revision 0. Edits to an existing block save metadata directly
+// and the definition as an unreleased draft revision.
+const writeBlockDoc = async (doc) => {
+  const organizationDocPath = edgeGlobal.edgeState.organizationDocPath
+  if (props.blockId === 'new')
+    return edgeFirebase.storeDoc(`${organizationDocPath}/blocks`, doc)
+
+  const { view, revision } = await saveLibraryBlockEdit({
+    edgeFirebase,
+    organizationDocPath,
+    orgId: edgeGlobal.edgeState.currentOrganization,
+    blockId: props.blockId,
+    nextDoc: doc,
+    source: 'editor',
+  })
+  setBlockRevisionState({
+    view,
+    draft: revision.status === 'saved' ? { source: 'editor', updatedAt: new Date().toISOString() } : null,
+    releasedRevision: revision.releasedRevision ?? null,
+    draftRevision: revision.draftRevision ?? null,
+  })
+  if (revision.status === 'saved')
+    notifySuccess(`Saved as unreleased changes (revision ${revision.draftRevision}). Pages are unchanged.`)
+  else if (revision.status === 'discarded')
+    notifySuccess('The definition matches the released block again, so the unreleased changes were discarded.')
+  return { docId: props.blockId, data: view }
+}
+
+// Runs before edge-editor writes, so a declined override rename stores nothing.
+const saveBlockDoc = async (doc) => {
+  try {
+    return await guardOverrideRename({
+      storedDoc: props.blockId === 'new' ? null : currentBlock.value,
+      nextDoc: doc,
+      confirm: confirmOverrideRename,
+      write: () => writeBlockDoc(doc),
+    })
+  }
+  catch (error) {
+    notifyError(String(error?.message || error || 'Failed to save the block.'))
+    throw error
+  }
+}
+
+const discardUnreleasedChanges = async () => {
+  const draftRevision = state.blockRevision.draftRevision
+  if (draftRevision === null || state.discardingDraft)
+    return
+  state.discardingDraft = true
+  try {
+    await discardLibraryBlockDraft({
+      edgeFirebase,
+      orgId: edgeGlobal.edgeState.currentOrganization,
+      blockId: props.blockId,
+      draftRevision,
+    })
+    state.discardDraftDialogOpen = false
+    state.editorKey += 1
+    notifySuccess(`Discarded unreleased revision ${draftRevision}.`)
+  }
+  catch (error) {
+    notifyError(String(error?.message || error || 'Failed to discard the unreleased changes.'))
+  }
+  finally {
+    state.discardingDraft = false
+  }
+}
 
 // Advisory checks on the saved block. They run after the save completes and
 // never block it; the newest run wins if saves overlap.
@@ -3407,7 +3455,7 @@ const handleBlockSaved = async (payload) => {
 }
 
 const exportCurrentBlock = async () => {
-  const doc = blocks.value?.[props.blockId]
+  const doc = savedEditorBlock.value
   if (!doc || !doc.docId) {
     notifyError('Save this block before exporting.')
     return
@@ -3435,6 +3483,7 @@ const exportCurrentBlock = async () => {
       :show-footer="false"
       :no-close-after-save="true"
       :working-doc-overrides="editorWorkingDocOverrides"
+      :load-document="props.blockId === 'new' ? null : loadBlockDocument"
       :save-handler="saveBlockDoc"
       @working-doc="editorDocUpdates"
       @unsaved-changes="handleUnsavedChanges"
@@ -3527,6 +3576,22 @@ const exportCurrentBlock = async () => {
       </template>
       <template #main="slotProps">
         <div class="pt-4">
+          <div
+            v-if="unreleasedChangesLabel"
+            role="status"
+            class="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+          >
+            <span>{{ unreleasedChangesLabel }}</span>
+            <edge-shad-button
+              type="button"
+              size="sm"
+              variant="outline"
+              :disabled="state.discardingDraft"
+              @click="state.discardDraftDialogOpen = true"
+            >
+              Discard unreleased changes
+            </edge-shad-button>
+          </div>
           <div class="flex w-full gap-2">
             <div class="flex-auto">
               <edge-shad-input
@@ -5438,6 +5503,29 @@ const exportCurrentBlock = async () => {
         </DialogFooter>
       </DialogContent>
     </edge-shad-dialog>
+    <edge-shad-dialog v-model="state.discardDraftDialogOpen">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle class="text-left">
+            Discard unreleased changes?
+          </DialogTitle>
+          <DialogDescription class="text-left">
+            Revision {{ state.blockRevision.draftRevision }} is discarded and the editor reloads the
+            released block (revision {{ state.blockRevision.releasedRevision ?? 0 }}). Pages are not
+            affected. Metadata such as the name and tags stays as saved.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter class="pt-2 flex justify-between">
+          <edge-shad-button variant="outline" :disabled="state.discardingDraft" @click="state.discardDraftDialogOpen = false">
+            Cancel
+          </edge-shad-button>
+          <edge-shad-button variant="destructive" :disabled="state.discardingDraft" @click="discardUnreleasedChanges">
+            <Loader2 v-if="state.discardingDraft" class="mr-2 h-4 w-4 animate-spin" />
+            Discard
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
     <edge-shad-dialog v-model="state.historyDialogOpen">
       <DialogContent class="max-w-[96vw] max-h-[92vh] overflow-hidden flex flex-col">
         <DialogHeader>
@@ -5445,7 +5533,8 @@ const exportCurrentBlock = async () => {
             Block History
           </DialogTitle>
           <DialogDescription class="text-left">
-            Select a saved version, preview it, and restore it if needed.
+            Select a saved version, preview it, and load it into the editor. Saving
+            it keeps it as unreleased changes; pages don't change until it's released.
           </DialogDescription>
         </DialogHeader>
         <div class="min-w-0 space-y-4">
@@ -5541,12 +5630,11 @@ const exportCurrentBlock = async () => {
             Cancel
           </edge-shad-button>
           <edge-shad-button
-            :disabled="state.historyLoading || state.historyRestoring || !selectedHistoryEntry"
-            @click="restoreHistoryVersion"
+            :disabled="state.historyLoading || state.historyRestoring || !selectedHistoryEntry || !state.editorWorkingDoc"
+            @click="loadHistoryVersionIntoEditor"
           >
-            <Loader2 v-if="state.historyRestoring" class="mr-2 h-4 w-4 animate-spin" />
-            <RotateCcw v-else class="mr-2 h-4 w-4" />
-            Restore
+            <RotateCcw class="mr-2 h-4 w-4" />
+            Load into editor
           </edge-shad-button>
         </DialogFooter>
       </DialogContent>

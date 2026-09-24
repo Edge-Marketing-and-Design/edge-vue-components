@@ -2154,6 +2154,12 @@ exports.blockUpdated = onDocumentUpdated({ document: 'organizations/{orgId}/bloc
   }
 })
 
+// Library block draft revisions (cms-saveBlockDraft, cms-discardBlockDraft).
+const blockRevisions = require('./cmsBlockRevisions')
+
+exports.saveBlockDraft = blockRevisions.saveBlockDraft
+exports.discardBlockDraft = blockRevisions.discardBlockDraft
+
 exports.fontFileUpdated = onDocumentUpdated({ document: 'organizations/{orgId}/files/{fileId}', timeoutSeconds: 180 }, async (event) => {
   const before = event.data.before.data() || {}
   const after = event.data.after.data() || {}
