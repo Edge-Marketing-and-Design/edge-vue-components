@@ -1,6 +1,9 @@
 <script setup>
 import { Download, MoreHorizontal } from 'lucide-vue-next'
+import { renderTemplateAsync } from '@edgedev/template-engine'
 import { guardOverrideRename } from '../../lib/cmsOverrideRename'
+import { validateBlock } from '../../lib/cmsBlockValidation'
+import { ENFORCE_SHARED_BLOCK_VALIDATION, collectImportFindings, resolveImportedBlockThemes } from '../../lib/cmsBlockImport'
 const emit = defineEmits(['head'])
 const edgeFirebase = inject('edgeFirebase')
 const { saveJsonFiles } = useJsonFileSave()
@@ -30,6 +33,9 @@ const state = reactive({
   importConflictDocId: '',
   importErrorDialogOpen: false,
   importErrorMessage: '',
+  importThemeDialog: null,
+  importReviewDialogOpen: false,
+  importReviewFiles: [],
   addBlockDialogOpen: false,
   addBlockTab: 'templates',
   selectedInitBlockDocId: BLANK_BLOCK_TEMPLATE_ID,
@@ -1061,44 +1067,53 @@ const validateImportedBlockTypes = (doc) => {
   return doc
 }
 
-const validateImportedBlockThemes = (doc) => {
+const getOrgThemeIds = () => Object.keys(edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`] || {})
+
+const importThemeResolver = ref(null)
+
+const confirmDroppedImportThemes = (details) => {
+  state.importThemeDialog = details
+  return new Promise((resolve) => {
+    importThemeResolver.value = resolve
+  })
+}
+
+const resolveDroppedImportThemes = (confirmed) => {
+  const resolve = importThemeResolver.value
+  importThemeResolver.value = null
+  state.importThemeDialog = null
+  resolve?.(confirmed === true)
+}
+
+const importThemeDialogOpen = computed({
+  get: () => !!state.importThemeDialog,
+  set: (open) => {
+    if (!open)
+      resolveDroppedImportThemes(false)
+  },
+})
+
+// Returns false when the user declines to drop unknown theme ids, which skips
+// the file. Valid theme ids are always kept.
+const applyImportedBlockThemes = async (doc, fileName) => {
   if (Object.prototype.hasOwnProperty.call(doc || {}, 'themes') && !Array.isArray(doc?.themes)) {
     throw new Error('Invalid "themes" value. Expected an array of theme docIds.')
   }
+  if (!Array.isArray(doc?.themes) || !doc.themes.length)
+    return true
 
-  const importedThemes = Array.isArray(doc?.themes) ? doc.themes : []
-  if (!importedThemes.length)
-    return doc
-
-  const orgThemes = edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`] || {}
-  const missingThemeIds = []
-  let hasEmptyThemeId = false
-  const normalizedThemes = []
-  for (const themeId of importedThemes) {
-    const normalizedThemeId = String(themeId || '').trim()
-    if (!normalizedThemeId) {
-      hasEmptyThemeId = true
-      continue
-    }
-    if (!orgThemes[normalizedThemeId]) {
-      missingThemeIds.push(normalizedThemeId)
-      continue
-    }
-    normalizedThemes.push(normalizedThemeId)
-  }
-
-  if (hasEmptyThemeId || missingThemeIds.length) {
-    const uniqueMissingThemeIds = [...new Set(missingThemeIds)]
-    console.warn('[BlocksManager] Imported block contains unavailable theme ids. Importing with no theme.', {
-      docId: String(doc?.docId || ''),
-      missingThemeIds: uniqueMissingThemeIds,
-      hasEmptyThemeId,
+  const { themes, dropped } = resolveImportedBlockThemes(doc.themes, getOrgThemeIds())
+  if (dropped.length) {
+    const confirmed = await confirmDroppedImportThemes({
+      fileName,
+      dropped: dropped.map(themeId => themeId || '(empty theme id)'),
+      remaining: themes.length,
     })
-    doc.themes = []
-    return doc
+    if (!confirmed)
+      return false
   }
-  doc.themes = [...new Set(normalizedThemes)]
-  return doc
+  doc.themes = themes
+  return true
 }
 
 const makeUniqueDocId = (baseDocId, docsMap = {}) => {
@@ -1216,7 +1231,18 @@ const triggerBlockImport = () => {
 const importSingleBlockFile = async (file, existingBlocks = {}) => {
   const fileText = await readTextFile(file)
   const parsed = JSON.parse(fileText)
-  const importedDoc = validateImportedBlockThemes(validateImportedBlockTypes(validateImportedBlockDoc(normalizeImportedDoc(parsed, ''))))
+  const rawDoc = normalizeImportedDoc(parsed, '')
+  // Validate the file as written, before the Hub fills in defaults.
+  const validation = await validateBlock(isPlainObject(rawDoc) ? edgeGlobal.dupObject(rawDoc) : rawDoc, {
+    knownThemeIds: getOrgThemeIds(),
+    renderTemplate: renderTemplateAsync,
+  })
+  const findings = collectImportFindings(validation)
+  const importedDoc = validateImportedBlockTypes(validateImportedBlockDoc(rawDoc))
+  if (findings.blocking.length)
+    throw new Error(findings.blocking.map(issue => issue.message).join(' '))
+  if (!await applyImportedBlockThemes(importedDoc, file?.name))
+    return null
   const incomingDocId = await getImportDocId(importedDoc, '')
   let targetDocId = incomingDocId
   let importDecision = 'create'
@@ -1224,7 +1250,7 @@ const importSingleBlockFile = async (file, existingBlocks = {}) => {
   if (existingBlocks[targetDocId]) {
     const decision = await requestBlockImportConflict(targetDocId)
     if (decision === 'cancel')
-      return
+      return null
     if (decision === 'new') {
       targetDocId = makeUniqueDocId(targetDocId, existingBlocks)
       if (typeof importedDoc.name === 'string' && importedDoc.name.trim() && !/\(Copy\)$/i.test(importedDoc.name.trim()))
@@ -1244,7 +1270,7 @@ const importSingleBlockFile = async (file, existingBlocks = {}) => {
     write: () => edgeFirebase.storeDoc(blockCollectionPath.value, payload, targetDocId),
   })
   if (result?.cancelled)
-    return
+    return null
   existingBlocks[targetDocId] = payload
 
   if (importDecision === 'overwrite')
@@ -1253,6 +1279,8 @@ const importSingleBlockFile = async (file, existingBlocks = {}) => {
     edgeFirebase?.toast?.success?.(`Imported block as new "${targetDocId}".`)
   else
     edgeFirebase?.toast?.success?.(`Imported block "${targetDocId}".`)
+
+  return { fileName: String(file?.name || targetDocId), docId: targetDocId, notices: findings.notices }
 }
 
 const handleBlockImport = async (event) => {
@@ -1268,9 +1296,12 @@ const handleBlockImport = async (event) => {
     if (!edgeFirebase.data?.[themesCollectionPath])
       await edgeFirebase.startSnapshot(themesCollectionPath)
 
+    const reviewFiles = []
     for (const file of files) {
       try {
-        await importSingleBlockFile(file, existingBlocks)
+        const imported = await importSingleBlockFile(file, existingBlocks)
+        if (imported?.notices?.length)
+          reviewFiles.push(imported)
       }
       catch (error) {
         const message = error?.message || DEFAULT_BLOCK_IMPORT_ERROR_MESSAGE
@@ -1279,6 +1310,10 @@ const handleBlockImport = async (event) => {
           continue
         openImportErrorDialog(getBlockImportFailureReason(error, message))
       }
+    }
+    if (reviewFiles.length) {
+      state.importReviewFiles = reviewFiles
+      state.importReviewDialogOpen = true
     }
   }
   finally {
@@ -1627,6 +1662,77 @@ const handleBlockImport = async (event) => {
           </edge-shad-button>
           <edge-shad-button @click="resolveBlockImportConflict('overwrite')">
             Overwrite
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
+    <edge-shad-dialog v-model="importThemeDialogOpen">
+      <DialogContent class="pt-8">
+        <DialogHeader>
+          <DialogTitle class="text-left">
+            Unknown Themes
+          </DialogTitle>
+          <DialogDescription class="space-y-2 text-left">
+            <p>
+              <code>{{ state.importThemeDialog?.fileName }}</code> lists themes that don't exist in this organization:
+            </p>
+            <ul class="list-disc pl-5">
+              <li v-for="themeId in state.importThemeDialog?.dropped || []" :key="themeId">
+                <code>{{ themeId }}</code>
+              </li>
+            </ul>
+            <p v-if="state.importThemeDialog?.remaining">
+              Importing keeps its other {{ state.importThemeDialog.remaining }} theme(s) and drops these.
+            </p>
+            <p v-else>
+              None of its themes exist here, so it will import with no theme.
+            </p>
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter class="pt-2 flex justify-between">
+          <edge-shad-button variant="outline" autofocus @click="resolveDroppedImportThemes(false)">
+            Skip This File
+          </edge-shad-button>
+          <edge-shad-button @click="resolveDroppedImportThemes(true)">
+            Import Without Them
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
+    <edge-shad-dialog v-model="state.importReviewDialogOpen">
+      <DialogContent class="pt-8 max-w-3xl max-h-[85vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle class="text-left">
+            Import Review
+          </DialogTitle>
+          <DialogDescription class="text-left">
+            These blocks were imported. The block checks below are advisory for now{{ ENFORCE_SHARED_BLOCK_VALIDATION ? '' : '; errors will start blocking imports after the production block audit' }}.
+          </DialogDescription>
+        </DialogHeader>
+        <div class="min-h-0 flex-1 overflow-y-auto space-y-4 pr-1">
+          <section v-for="item in state.importReviewFiles" :key="item.docId" :aria-label="item.fileName">
+            <h3 class="text-sm font-semibold">
+              {{ item.fileName }} <span class="font-normal text-muted-foreground">→ {{ item.docId }}</span>
+            </h3>
+            <ul class="mt-2 space-y-1.5">
+              <li v-for="(issue, index) in item.notices" :key="`${item.docId}-${index}`" class="flex gap-2 text-sm">
+                <span
+                  class="shrink-0 rounded px-1.5 py-0.5 text-xs font-medium uppercase"
+                  :class="issue.severity === 'error' ? 'bg-destructive/10 text-destructive' : 'bg-muted text-muted-foreground'"
+                >
+                  {{ issue.severity }}
+                </span>
+                <span class="min-w-0">
+                  {{ issue.message }}
+                  <code class="ml-1 text-xs text-muted-foreground">{{ issue.code }}</code>
+                </span>
+              </li>
+            </ul>
+          </section>
+        </div>
+        <DialogFooter class="pt-2">
+          <edge-shad-button @click="state.importReviewDialogOpen = false">
+            Close
           </edge-shad-button>
         </DialogFooter>
       </DialogContent>
