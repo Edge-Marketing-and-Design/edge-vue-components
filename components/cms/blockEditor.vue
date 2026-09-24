@@ -3,6 +3,7 @@ import { Code2, Download, HelpCircle, History, Loader2, Maximize2, Monitor, Plus
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { clearCmsTemplateV2LibraryState } from '../../composables/useCmsTemplateRuntimeMeta'
+import { guardOverrideRename } from '../../lib/cmsOverrideRename'
 const props = defineProps({
   blockId: {
     type: String,
@@ -3333,6 +3334,28 @@ const clearTemplateConversionAfterSave = async (payload) => {
   }
 }
 
+const overrideRename = reactive({ change: null, resolve: null })
+
+const confirmOverrideRename = change => new Promise((resolve) => {
+  overrideRename.change = change
+  overrideRename.resolve = resolve
+})
+
+const resolveOverrideRename = (confirmed) => {
+  const resolve = overrideRename.resolve
+  overrideRename.change = null
+  overrideRename.resolve = null
+  resolve?.(confirmed === true)
+}
+
+// Runs before edge-editor writes, so a declined override rename stores nothing.
+const saveBlockDoc = doc => guardOverrideRename({
+  storedDoc: props.blockId === 'new' ? null : currentBlock.value,
+  nextDoc: doc,
+  confirm: confirmOverrideRename,
+  write: () => edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/blocks`, doc),
+})
+
 const handleBlockSaved = async (payload) => {
   refreshWorkingTemplatePreview(state.editorWorkingDoc, { force: true })
   await clearTemplateConversionAfterSave(payload)
@@ -3367,6 +3390,7 @@ const exportCurrentBlock = async () => {
       :show-footer="false"
       :no-close-after-save="true"
       :working-doc-overrides="editorWorkingDocOverrides"
+      :save-handler="saveBlockDoc"
       @working-doc="editorDocUpdates"
       @unsaved-changes="handleUnsavedChanges"
       @saved="handleBlockSaved"
@@ -5311,6 +5335,7 @@ const exportCurrentBlock = async () => {
         </div>
       </template>
     </edge-editor>
+    <edge-cms-override-rename-dialog :change="overrideRename.change" @resolve="resolveOverrideRename" />
     <edge-shad-dialog v-model="state.historyDialogOpen">
       <DialogContent class="max-w-[96vw] max-h-[92vh] overflow-hidden flex flex-col">
         <DialogHeader>

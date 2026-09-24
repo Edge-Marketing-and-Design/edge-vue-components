@@ -1,5 +1,6 @@
 <script setup>
 import { Download, MoreHorizontal } from 'lucide-vue-next'
+import { guardOverrideRename } from '../../lib/cmsOverrideRename'
 const emit = defineEmits(['head'])
 const edgeFirebase = inject('edgeFirebase')
 const { saveJsonFiles } = useJsonFileSave()
@@ -1159,6 +1160,20 @@ watch(() => state.importConflictDialogOpen, (open) => {
   }
 })
 
+const overrideRename = reactive({ change: null, resolve: null })
+
+const confirmOverrideRename = change => new Promise((resolve) => {
+  overrideRename.change = change
+  overrideRename.resolve = resolve
+})
+
+const resolveOverrideRename = (confirmed) => {
+  const resolve = overrideRename.resolve
+  overrideRename.change = null
+  overrideRename.resolve = null
+  resolve?.(confirmed === true)
+}
+
 const getImportDocId = async (incomingDoc, fallbackDocId = '') => {
   let nextDocId = String(incomingDoc?.docId || '').trim()
   if (!nextDocId)
@@ -1222,7 +1237,14 @@ const importSingleBlockFile = async (file, existingBlocks = {}) => {
   }
 
   const payload = { ...getBlockDocDefaults(), ...importedDoc, docId: targetDocId }
-  await edgeFirebase.storeDoc(blockCollectionPath.value, payload, targetDocId)
+  const result = await guardOverrideRename({
+    storedDoc: importDecision === 'overwrite' ? existingBlocks[targetDocId] : null,
+    nextDoc: payload,
+    confirm: confirmOverrideRename,
+    write: () => edgeFirebase.storeDoc(blockCollectionPath.value, payload, targetDocId),
+  })
+  if (result?.cancelled)
+    return
   existingBlocks[targetDocId] = payload
 
   if (importDecision === 'overwrite')
@@ -1585,6 +1607,7 @@ const handleBlockImport = async (event) => {
         </DialogFooter>
       </DialogContent>
     </edge-shad-dialog>
+    <edge-cms-override-rename-dialog :change="overrideRename.change" @resolve="resolveOverrideRename" />
     <edge-shad-dialog v-model="state.importConflictDialogOpen">
       <DialogContent class="pt-8">
         <DialogHeader>

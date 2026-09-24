@@ -333,6 +333,10 @@ const onSubmit = async () => {
     const result = props.saveHandler
       ? await props.saveHandler(edgeGlobal.dupObject(finalWorkingDoc))
       : await edgeFirebase.storeDoc(savePath, finalWorkingDoc)
+    // A save handler may decline to write (for example, after a declined
+    // confirmation). Keep the working document and unsaved-changes state.
+    if (result?.cancelled === true)
+      return null
     const savedDocId = String(result?.docId || result?.meta?.docId || finalWorkingDoc.docId || '').trim()
     if (!savedDocId)
       throw new Error('The save completed without a document ID.')
