@@ -1714,20 +1714,7 @@ const handleBlockImport = async (event) => {
             <h3 class="text-sm font-semibold">
               {{ item.fileName }} <span class="font-normal text-muted-foreground">→ {{ item.docId }}</span>
             </h3>
-            <ul class="mt-2 space-y-1.5">
-              <li v-for="(issue, index) in item.notices" :key="`${item.docId}-${index}`" class="flex gap-2 text-sm">
-                <span
-                  class="shrink-0 rounded px-1.5 py-0.5 text-xs font-medium uppercase"
-                  :class="issue.severity === 'error' ? 'bg-destructive/10 text-destructive' : 'bg-muted text-muted-foreground'"
-                >
-                  {{ issue.severity }}
-                </span>
-                <span class="min-w-0">
-                  {{ issue.message }}
-                  <code class="ml-1 text-xs text-muted-foreground">{{ issue.code }}</code>
-                </span>
-              </li>
-            </ul>
+            <edge-cms-block-validation-issues class="mt-2" :issues="item.notices" />
           </section>
         </div>
         <DialogFooter class="pt-2">

@@ -1,9 +1,11 @@
 <script setup>
-import { Code2, Download, HelpCircle, History, Loader2, Maximize2, Monitor, Plus, RotateCcw, Smartphone, Tablet, Trash2, Wand2 } from 'lucide-vue-next'
+import { Code2, Download, HelpCircle, History, ListChecks, Loader2, Maximize2, Monitor, Plus, RotateCcw, Smartphone, Tablet, Trash2, Wand2 } from 'lucide-vue-next'
+import { renderTemplateAsync } from '@edgedev/template-engine'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { clearCmsTemplateV2LibraryState } from '../../composables/useCmsTemplateRuntimeMeta'
 import { guardOverrideRename } from '../../lib/cmsOverrideRename'
+import { validateBlock } from '../../lib/cmsBlockValidation'
 const props = defineProps({
   blockId: {
     type: String,
@@ -50,6 +52,8 @@ const state = reactive({
   editorKey: 0,
   editorHasUnsavedChanges: false,
   historyDialogOpen: false,
+  blockChecks: { status: 'idle', result: null, checkedAt: '', error: '' },
+  blockChecksOpen: false,
   historyLoading: false,
   historyRestoring: false,
   historyError: '',
@@ -3356,7 +3360,48 @@ const saveBlockDoc = doc => guardOverrideRename({
   write: () => edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/blocks`, doc),
 })
 
+// Advisory checks on the saved block. They run after the save completes and
+// never block it; the newest run wins if saves overlap.
+let blockChecksRun = 0
+const runBlockChecks = async (doc) => {
+  const run = ++blockChecksRun
+  state.blockChecks = { status: 'running', result: null, checkedAt: '', error: '' }
+  try {
+    const result = await validateBlock(edgeGlobal.dupObject(doc || {}), {
+      knownThemeIds: availableThemeIds.value,
+      renderTemplate: renderTemplateAsync,
+    })
+    if (run === blockChecksRun)
+      state.blockChecks = { status: 'done', result, checkedAt: new Date().toLocaleTimeString(), error: '' }
+  }
+  catch (error) {
+    if (run === blockChecksRun)
+      state.blockChecks = { status: 'failed', result: null, checkedAt: '', error: String(error?.message || error) }
+  }
+}
+
+const blockCheckIssues = computed(() => {
+  const result = state.blockChecks.result
+  return result ? [...result.errors, ...result.warnings] : []
+})
+
+const blockChecksLabel = computed(() => {
+  const { status, result } = state.blockChecks
+  if (status === 'running')
+    return 'Block checks: running'
+  if (status === 'failed')
+    return 'Block checks: could not run'
+  if (status !== 'done')
+    return 'Block checks: save to run'
+  const errors = result.errors.length
+  const warnings = result.warnings.length
+  if (!errors && !warnings)
+    return 'Block checks: no issues'
+  return `Block checks: ${errors} error(s), ${warnings} warning(s)`
+})
+
 const handleBlockSaved = async (payload) => {
+  runBlockChecks(payload?.data)
   refreshWorkingTemplatePreview(state.editorWorkingDoc, { force: true })
   await clearTemplateConversionAfterSave(payload)
 }
@@ -3444,6 +3489,26 @@ const exportCurrentBlock = async () => {
               @click="openHistoryDialog"
             >
               <History class="h-4 w-4" />
+            </edge-shad-button>
+            <edge-shad-button
+              type="button"
+              size="icon"
+              variant="outline"
+              class="relative h-9 w-9"
+              :title="blockChecksLabel"
+              :aria-label="blockChecksLabel"
+              @click="state.blockChecksOpen = true"
+            >
+              <Loader2 v-if="state.blockChecks.status === 'running'" class="h-4 w-4 animate-spin" />
+              <ListChecks v-else class="h-4 w-4" />
+              <span
+                v-if="state.blockChecks.status === 'done' && blockCheckIssues.length"
+                class="absolute -right-1 -top-1 min-w-4 rounded-full px-1 text-[10px] font-semibold leading-4"
+                :class="state.blockChecks.result.errors.length ? 'bg-destructive text-destructive-foreground' : 'bg-muted-foreground text-background'"
+                aria-hidden="true"
+              >
+                {{ blockCheckIssues.length }}
+              </span>
             </edge-shad-button>
             <edge-shad-button
               type="button"
@@ -5336,6 +5401,43 @@ const exportCurrentBlock = async () => {
       </template>
     </edge-editor>
     <edge-cms-override-rename-dialog :change="overrideRename.change" @resolve="resolveOverrideRename" />
+    <edge-shad-dialog v-model="state.blockChecksOpen">
+      <DialogContent class="pt-8 max-w-3xl max-h-[85vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle class="text-left">
+            Block Checks
+          </DialogTitle>
+          <DialogDescription class="text-left">
+            Checks run on the saved block after each save. They never block saving.
+          </DialogDescription>
+        </DialogHeader>
+        <div class="min-h-0 flex-1 overflow-y-auto pr-1" aria-live="polite">
+          <p v-if="state.blockChecks.status === 'idle'" class="text-sm text-muted-foreground">
+            Save the block to run its checks.
+          </p>
+          <p v-else-if="state.blockChecks.status === 'running'" class="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 class="h-4 w-4 animate-spin" /> Running checks...
+          </p>
+          <p v-else-if="state.blockChecks.status === 'failed'" class="text-sm text-destructive">
+            The checks could not run: {{ state.blockChecks.error }}
+          </p>
+          <p v-else-if="!blockCheckIssues.length" class="text-sm">
+            No issues found at {{ state.blockChecks.checkedAt }}.
+          </p>
+          <template v-else>
+            <p class="mb-3 text-sm text-muted-foreground">
+              {{ state.blockChecks.result.errors.length }} error(s) and {{ state.blockChecks.result.warnings.length }} warning(s) at {{ state.blockChecks.checkedAt }}.
+            </p>
+            <edge-cms-block-validation-issues :issues="blockCheckIssues" />
+          </template>
+        </div>
+        <DialogFooter class="pt-2">
+          <edge-shad-button @click="state.blockChecksOpen = false">
+            Close
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
     <edge-shad-dialog v-model="state.historyDialogOpen">
       <DialogContent class="max-w-[96vw] max-h-[92vh] overflow-hidden flex flex-col">
         <DialogHeader>
