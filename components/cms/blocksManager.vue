@@ -3,7 +3,7 @@ import { Download, MoreHorizontal } from 'lucide-vue-next'
 import { renderTemplateAsync } from '@edgedev/template-engine'
 import { guardOverrideRename } from '../../lib/cmsOverrideRename'
 import { validateBlock } from '../../lib/cmsBlockValidation'
-import { ENFORCE_SHARED_BLOCK_VALIDATION, collectImportFindings, resolveImportedBlockThemes } from '../../lib/cmsBlockImport'
+import { collectImportFindings, createBlockCheckError, resolveImportedBlockThemes } from '../../lib/cmsBlockImport'
 const emit = defineEmits(['head'])
 const edgeFirebase = inject('edgeFirebase')
 const { saveJsonFiles } = useJsonFileSave()
@@ -31,10 +31,9 @@ const state = reactive({
   importDocIdValue: '',
   importConflictDialogOpen: false,
   importConflictDocId: '',
-  importErrorDialogOpen: false,
-  importErrorMessage: '',
+  importFailures: [],
   importThemeDialog: null,
-  importReviewDialogOpen: false,
+  importResultsDialogOpen: false,
   importReviewFiles: [],
   addBlockDialogOpen: false,
   addBlockTab: 'templates',
@@ -1200,11 +1199,6 @@ const getImportDocId = async (incomingDoc, fallbackDocId = '') => {
   return nextDocId
 }
 
-const openImportErrorDialog = (message) => {
-  state.importErrorMessage = String(message || DEFAULT_BLOCK_IMPORT_ERROR_MESSAGE)
-  state.importErrorDialogOpen = true
-}
-
 const getBlockImportFailureReason = (error, message) => {
   if (error instanceof SyntaxError)
     return `Invalid JSON syntax: ${String(error?.message || 'Unable to parse JSON.')}`
@@ -1240,7 +1234,7 @@ const importSingleBlockFile = async (file, existingBlocks = {}) => {
   const findings = collectImportFindings(validation)
   const importedDoc = validateImportedBlockTypes(validateImportedBlockDoc(rawDoc))
   if (findings.blocking.length)
-    throw new Error(findings.blocking.map(issue => issue.message).join(' '))
+    throw createBlockCheckError(findings.blocking)
   if (!await applyImportedBlockThemes(importedDoc, file?.name))
     return null
   const incomingDocId = await getImportDocId(importedDoc, '')
@@ -1296,7 +1290,10 @@ const handleBlockImport = async (event) => {
     if (!edgeFirebase.data?.[themesCollectionPath])
       await edgeFirebase.startSnapshot(themesCollectionPath)
 
+    // Every file's outcome is collected so one dialog can report the whole
+    // batch; a later failure no longer replaces an earlier one.
     const reviewFiles = []
+    const failures = []
     for (const file of files) {
       try {
         const imported = await importSingleBlockFile(file, existingBlocks)
@@ -1308,12 +1305,17 @@ const handleBlockImport = async (event) => {
         logBlockImportFailure(file, error, message)
         if (/^Import canceled\./i.test(message))
           continue
-        openImportErrorDialog(getBlockImportFailureReason(error, message))
+        failures.push({
+          fileName: String(file?.name || 'unknown-file'),
+          reason: getBlockImportFailureReason(error, message),
+          issues: Array.isArray(error?.issues) ? error.issues : [],
+        })
       }
     }
-    if (reviewFiles.length) {
+    if (failures.length || reviewFiles.length) {
+      state.importFailures = failures
       state.importReviewFiles = reviewFiles
-      state.importReviewDialogOpen = true
+      state.importResultsDialogOpen = true
     }
   }
   finally {
@@ -1699,43 +1701,50 @@ const handleBlockImport = async (event) => {
         </DialogFooter>
       </DialogContent>
     </edge-shad-dialog>
-    <edge-shad-dialog v-model="state.importReviewDialogOpen">
+    <edge-shad-dialog v-model="state.importResultsDialogOpen">
       <DialogContent class="pt-8 max-w-3xl max-h-[85vh] flex flex-col">
         <DialogHeader>
           <DialogTitle class="text-left">
-            Import Review
+            {{ state.importFailures.length ? 'Import Problems' : 'Import Review' }}
           </DialogTitle>
           <DialogDescription class="text-left">
-            These blocks were imported. The block checks below are advisory for now{{ ENFORCE_SHARED_BLOCK_VALIDATION ? '' : '; errors will start blocking imports after the production block audit' }}.
+            <template v-if="state.importFailures.length">
+              {{ state.importFailures.length }} file(s) were not imported. Nothing was written for them.
+            </template>
+            <template v-if="state.importReviewFiles.length">
+              {{ state.importFailures.length ? ' ' : '' }}Imported blocks with warnings are listed below; warnings don't block imports.
+            </template>
           </DialogDescription>
         </DialogHeader>
-        <div class="min-h-0 flex-1 overflow-y-auto space-y-4 pr-1">
-          <section v-for="item in state.importReviewFiles" :key="item.docId" :aria-label="item.fileName">
-            <h3 class="text-sm font-semibold">
-              {{ item.fileName }} <span class="font-normal text-muted-foreground">→ {{ item.docId }}</span>
+        <div class="min-h-0 flex-1 overflow-y-auto space-y-5 pr-1">
+          <div v-if="state.importFailures.length" class="space-y-4">
+            <h3 class="text-sm font-semibold text-destructive">
+              Not imported
             </h3>
-            <edge-cms-block-validation-issues class="mt-2" :issues="item.notices" />
-          </section>
+            <section v-for="(failure, index) in state.importFailures" :key="`failed-${index}`" :aria-label="`${failure.fileName} not imported`">
+              <h4 class="text-sm font-semibold">
+                {{ failure.fileName }}
+              </h4>
+              <edge-cms-block-validation-issues v-if="failure.issues.length" class="mt-2" :issues="failure.issues" />
+              <p v-else class="mt-1 text-sm">
+                {{ failure.reason }}
+              </p>
+            </section>
+          </div>
+          <div v-if="state.importReviewFiles.length" class="space-y-4">
+            <h3 class="text-sm font-semibold">
+              Imported with warnings
+            </h3>
+            <section v-for="item in state.importReviewFiles" :key="item.docId" :aria-label="item.fileName">
+              <h4 class="text-sm font-semibold">
+                {{ item.fileName }} <span class="font-normal text-muted-foreground">→ {{ item.docId }}</span>
+              </h4>
+              <edge-cms-block-validation-issues class="mt-2" :issues="item.notices" />
+            </section>
+          </div>
         </div>
         <DialogFooter class="pt-2">
-          <edge-shad-button @click="state.importReviewDialogOpen = false">
-            Close
-          </edge-shad-button>
-        </DialogFooter>
-      </DialogContent>
-    </edge-shad-dialog>
-    <edge-shad-dialog v-model="state.importErrorDialogOpen">
-      <DialogContent class="pt-8">
-        <DialogHeader>
-          <DialogTitle class="text-left">
-            Import Failed
-          </DialogTitle>
-          <DialogDescription class="text-left">
-            {{ state.importErrorMessage }}
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter class="pt-2">
-          <edge-shad-button @click="state.importErrorDialogOpen = false">
+          <edge-shad-button @click="state.importResultsDialogOpen = false">
             Close
           </edge-shad-button>
         </DialogFooter>
