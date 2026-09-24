@@ -1989,12 +1989,62 @@ const getNextVersion = (value) => {
   return Math.max(0, Math.trunc(numericVersion)) + 1
 }
 
+// Key-order independent serialization, so re-saving the same definition with
+// reordered keys compares equal.
+const canonicalJson = (value) => {
+  if (Array.isArray(value))
+    return `[${value.map(item => canonicalJson(item === undefined ? null : item)).join(',')}]`
+  if (value && typeof value === 'object') {
+    const plain = typeof value.toJSON === 'function' ? value.toJSON() : value
+    if (plain !== value)
+      return canonicalJson(plain)
+    const keys = Object.keys(value).filter(key => value[key] !== undefined).sort()
+    return `{${keys.map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`
+  }
+  return JSON.stringify(value === undefined ? null : value)
+}
+
+// The parts of a library block that updateBlocksInArray and publication value
+// reconciliation read. blockUpdatedAt is excluded: the page editor stamps it on
+// every inline save, and it carries no definition of its own. Per-entry meta
+// keys that instances keep for themselves (BLOCK_META_EXCLUDE_KEYS) are
+// excluded too.
+const propagatedBlockDefinition = (data) => {
+  const definition = {}
+  for (const field of BLOCK_DEFINITION_SYNC_FIELDS) {
+    if (field !== 'blockUpdatedAt')
+      definition[field] = data?.[field]
+  }
+  const meta = {}
+  for (const [key, entry] of Object.entries(data?.meta || {})) {
+    if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+      meta[key] = Object.fromEntries(Object.entries(entry).filter(([metaKey]) => !BLOCK_META_EXCLUDE_KEYS.has(metaKey)))
+    }
+    else {
+      meta[key] = entry
+    }
+  }
+  definition.meta = meta
+  return definition
+}
+
+const blockDefinitionChanged = (beforeData, afterData) =>
+  canonicalJson(propagatedBlockDefinition(beforeData)) !== canonicalJson(propagatedBlockDefinition(afterData))
+
 exports.blockUpdated = onDocumentUpdated({ document: 'organizations/{orgId}/blocks/{blockId}', timeoutSeconds: 180 }, async (event) => {
   const change = event.data
   const blockId = event.params.blockId
   const orgId = event.params.orgId
   const beforeData = change.before.data() || {}
   const afterData = change.after.data() || {}
+
+  // Metadata-only edits (name, tags, themes, type, previewType) and no-op
+  // re-saves must not rewrite every instance or bump page versions, which
+  // invalidates the renderer's caches.
+  if (!blockDefinitionChanged(beforeData, afterData)) {
+    logger.log(`Block ${blockId} in org ${orgId} saved without definition changes; nothing to propagate`)
+    return
+  }
 
   const sites = await db.collection('organizations').doc(orgId).collection('sites').get()
   if (sites.empty)
