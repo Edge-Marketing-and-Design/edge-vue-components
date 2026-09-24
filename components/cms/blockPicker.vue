@@ -1,6 +1,7 @@
 <script setup>
 import { Plus } from 'lucide-vue-next'
 import { prepareCmsTemplateV2PickedBlock } from '../../composables/useCmsTemplateRuntimeMeta'
+import { applyLibraryBlockIdentity } from '../../lib/cmsPickedBlock'
 
 const props = defineProps({
   blockOverride: {
@@ -338,8 +339,7 @@ const chooseBlock = (block) => {
       }
     }
   }
-  blockModelData.name = block.name
-  blockModelData.blockId = block.docId
+  applyLibraryBlockIdentity(blockModelData, block)
   delete blockModelData.previewType
   prepareCmsTemplateV2PickedBlock(blockModelData)
   console.log('Chosen block:', blockModelData)

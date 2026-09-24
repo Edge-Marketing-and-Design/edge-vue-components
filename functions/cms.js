@@ -1911,7 +1911,7 @@ const collectSyncedBlocks = (content, postContent) => {
 }
 
 const BLOCK_META_EXCLUDE_KEYS = new Set(['limit'])
-const BLOCK_DEFINITION_SYNC_FIELDS = ['content', 'template', 'templateVersion', 'schema', 'dataSources', 'blockUpdatedAt']
+const BLOCK_DEFINITION_SYNC_FIELDS = ['content', 'template', 'templateVersion', 'schema', 'dataSources', 'isOverrideBlock', 'blockUpdatedAt']
 
 const updateBlocksInArray = async (blocks, blockId, beforeData, afterData, { resolveFile = async () => null } = {}) => {
   let touched = false
