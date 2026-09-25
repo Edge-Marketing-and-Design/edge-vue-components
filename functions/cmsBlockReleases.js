@@ -613,6 +613,10 @@ const addCounts = async (orgId, releaseId, tally) => {
   const releaseRef = releaseRefOf(orgId, releaseId)
   await db.runTransaction(async (transaction) => {
     const release = (await transaction.get(releaseRef)).data() || {}
+    // A duplicate worker can finish after another one finalized the release;
+    // the final counts come from the targets, so leave them alone.
+    if (release.status !== 'running')
+      return
     const counts = { planned: 0, done: 0, skipped: 0, failed: 0, ...release.counts }
     for (const [key, value] of Object.entries(tally))
       counts[key] = (counts[key] || 0) + value

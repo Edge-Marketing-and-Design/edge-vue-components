@@ -13,6 +13,32 @@ const {
 const corePromise = import('./helpers/cmsBlockRevisions.mjs')
 
 const DOC_ID_PATTERN = /^[^/]{1,1500}$/
+const BASE_HASH_PATTERN = /^[0-9a-f]{16}$/
+
+const SOURCE_LABELS = { 'editor': 'the Block Editor', 'import': 'an import', 'page-editor': 'the page editor' }
+
+// Refuses a save whose starting point is out of date. The details let the
+// caller show what changed and save again on top of it.
+const baseChangedError = (core, { blockId, block, draft, draftNumber, current, currentHash, definition }) => {
+  const where = draft
+    ? `its unreleased draft (revision ${draftNumber}, saved from ${SOURCE_LABELS[draft.source] || draft.source || 'an unknown source'}${draft.updatedAt ? ` at ${draft.updatedAt}` : ''})`
+    : 'its released definition'
+  const wouldReplace = core.changedDefinitionFields(current, definition)
+  return new HttpsError(
+    'failed-precondition',
+    `Block "${blockId}" changed since you loaded it: ${where} is different. Saving now would replace ${wouldReplace.join(', ') || 'it'}. Reload the block to see the changes, or confirm to replace them.`,
+    {
+      reason: 'base-changed',
+      currentHash,
+      releasedRevision: core.isRevisionNumber(block.releasedRevision) ? block.releasedRevision : 0,
+      draftRevision: draft ? draftNumber : null,
+      draftSource: draft?.source || null,
+      draftUpdatedBy: draft ? (draft.updatedBy || draft.createdBy || null) : null,
+      draftUpdatedAt: draft ? (draft.updatedAt || draft.createdAt || null) : null,
+      wouldReplace,
+    },
+  )
+}
 
 const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value)
 
@@ -74,6 +100,11 @@ exports.saveBlockDraft = onCall({ timeoutSeconds: 60 }, async (request) => {
   const baseRevision = data.baseRevision ?? null
   if (baseRevision !== null && !core.isRevisionNumber(baseRevision))
     throw new HttpsError('invalid-argument', 'baseRevision must be a revision number.')
+  // The fingerprint of the definition the caller started from: the open
+  // draft if there was one, otherwise the released block.
+  const baseHash = data.baseHash
+  if (typeof baseHash !== 'string' || !BASE_HASH_PATTERN.test(baseHash))
+    throw new HttpsError('invalid-argument', 'baseHash is required. Reload the block and save again.')
 
   const result = await db.runTransaction(async (transaction) => {
     const blockSnap = await transaction.get(blockRef)
@@ -92,6 +123,16 @@ exports.saveBlockDraft = onCall({ timeoutSeconds: 60 }, async (request) => {
     const draftNumber = core.isRevisionNumber(block.draftRevision) ? block.draftRevision : null
     const draftSnap = draftNumber === null ? null : await transaction.get(revisionRef(blockRef, draftNumber))
     const openDraft = draftSnap?.exists && draftSnap.data()?.status === 'draft'
+    const draft = openDraft ? draftSnap.data() : null
+
+    // Never overwrite changes the caller didn't see. Saving exactly what is
+    // already there is harmless (a repeated save), so it isn't refused.
+    const current = draft ? draft.definition : block
+    if (core.blockDefinitionsEqual(definition, current) && draft)
+      return { status: 'unchanged', releasedRevision: released ?? 0, draftRevision: draftNumber }
+    const currentHash = core.blockDefinitionHash(current)
+    if (baseHash !== currentHash)
+      throw baseChangedError(core, { blockId, block, draft, draftNumber, current, currentHash, definition })
 
     const blockUpdate = {}
     if (released === null) {
@@ -113,6 +154,16 @@ exports.saveBlockDraft = onCall({ timeoutSeconds: 60 }, async (request) => {
 
     let number = draftNumber
     if (openDraft) {
+      // Keep the definition this save replaces, so a hand edit is never lost.
+      transaction.set(draftSnap.ref.collection('replaced').doc(), {
+        definition: draft.definition,
+        source: draft.source || null,
+        savedBy: draft.updatedBy || draft.createdBy || null,
+        savedAt: draft.updatedAt || draft.createdAt || null,
+        replacedBy: uid,
+        replacedBySource: source,
+        replacedAt: now,
+      })
       transaction.update(draftSnap.ref, { definition, baseNumber: released, source, updatedBy: uid, updatedAt: now })
     }
     else {
@@ -140,14 +191,18 @@ exports.saveBlockDraft = onCall({ timeoutSeconds: 60 }, async (request) => {
   return result
 })
 
-// Discards the block's draft revision. `draftRevision` must name the draft
-// the caller saw, so a newer draft saved by someone else is never discarded.
+// Discards the block's draft revision. `draftRevision` and `baseHash` must
+// name the draft the caller saw, so a newer draft, or a later save of the same
+// draft by someone else, is never discarded.
 exports.discardBlockDraft = onCall({ timeoutSeconds: 60 }, async (request) => {
   const core = await corePromise
   const { uid, blockId, blockRef } = await assertRevisionCaller(request)
   const expected = request.data?.draftRevision
   if (!core.isRevisionNumber(expected))
     throw new HttpsError('invalid-argument', 'draftRevision must be a revision number.')
+  const baseHash = request.data?.baseHash
+  if (typeof baseHash !== 'string' || !BASE_HASH_PATTERN.test(baseHash))
+    throw new HttpsError('invalid-argument', 'baseHash is required. Reload the block and discard again.')
 
   const result = await db.runTransaction(async (transaction) => {
     const blockSnap = await transaction.get(blockRef)
@@ -158,8 +213,20 @@ exports.discardBlockDraft = onCall({ timeoutSeconds: 60 }, async (request) => {
       throw new HttpsError('failed-precondition', `Block "${blockId}" no longer has draft revision ${expected}. Reload the block.`)
 
     const draftSnap = await transaction.get(revisionRef(blockRef, expected))
+    const draft = (draftSnap.exists && draftSnap.data()?.status === 'draft') ? draftSnap.data() : null
+    // The draft may have been saved again since the caller loaded it.
+    if (draft && core.blockDefinitionHash(draft.definition) !== baseHash) {
+      throw new HttpsError('failed-precondition', `Draft revision ${expected} of block "${blockId}" was saved again since you loaded it${draft.updatedAt ? ` (at ${draft.updatedAt})` : ''}. Reload the block before discarding it.`, {
+        reason: 'base-changed',
+        currentHash: core.blockDefinitionHash(draft.definition),
+        draftRevision: expected,
+        draftSource: draft.source || null,
+        draftUpdatedBy: draft.updatedBy || draft.createdBy || null,
+        draftUpdatedAt: draft.updatedAt || draft.createdAt || null,
+      })
+    }
     const now = new Date().toISOString()
-    if (draftSnap.exists && draftSnap.data()?.status === 'draft')
+    if (draft)
       transaction.update(draftSnap.ref, { status: 'discarded', discardedBy: uid, discardedAt: now, updatedAt: now })
     transaction.update(blockRef, { draftRevision: null })
     return { status: 'discarded', releasedRevision: releasedRevisionNumber(core, block), draftRevision: null }

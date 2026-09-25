@@ -305,6 +305,11 @@ const title = computed(() => {
 })
 
 const onSubmit = async () => {
+  // One save at a time: a second submit while the first is still running
+  // (Enter in a field, Cmd+S, or a confirmation dialog still open) would
+  // save the same document twice.
+  if (state.submitting)
+    return null
   state.successMessage = ''
   const workingDocOverrides = props.workingDocOverrides
   const finalWorkingDoc = {
@@ -335,8 +340,10 @@ const onSubmit = async () => {
       : await edgeFirebase.storeDoc(savePath, finalWorkingDoc)
     // A save handler may decline to write (for example, after a declined
     // confirmation). Keep the working document and unsaved-changes state.
-    if (result?.cancelled === true)
+    if (result?.cancelled === true) {
+      emit('unsavedChanges', unsavedChanges.value)
       return null
+    }
     const savedDocId = String(result?.docId || result?.meta?.docId || finalWorkingDoc.docId || '').trim()
     if (!savedDocId)
       throw new Error('The save completed without a document ID.')

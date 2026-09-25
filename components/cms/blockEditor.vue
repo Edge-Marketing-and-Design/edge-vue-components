@@ -7,7 +7,7 @@ import { clearCmsTemplateV2LibraryState } from '../../composables/useCmsTemplate
 import { guardOverrideRename } from '../../lib/cmsOverrideRename'
 import { validateBlock } from '../../lib/cmsBlockValidation'
 import { BLOCK_REVISION_DEFINITION_FIELDS, diffBlockMetadata } from '../../lib/cmsBlockRevisions'
-import { discardLibraryBlockDraft, loadLibraryBlockForEditing, releasedRevisionOf, saveLibraryBlockEdit } from '../../lib/cmsBlockRevisionClient'
+import { BLOCK_EXPORT_BASE_KEY, blockExportBase, discardLibraryBlockDraft, isBlockBaseChangedError, loadLibraryBlockForEditing, releasedRevisionOf, saveLibraryBlockEdit, saveWithBaseCheck } from '../../lib/cmsBlockRevisionClient'
 const props = defineProps({
   blockId: {
     type: String,
@@ -61,7 +61,7 @@ const state = reactive({
   historyError: '',
   // The library block as this editor loaded or last saved it: the draft
   // revision's definition when one exists, otherwise the released one.
-  blockRevision: { view: null, releasedRevision: null, draftRevision: null, draftSource: '', draftUpdatedAt: '' },
+  blockRevision: { view: null, releasedRevision: null, draftRevision: null, draftSource: '', draftUpdatedAt: '', baseHash: null },
   discardDraftDialogOpen: false,
   discardingDraft: false,
   releaseDialogOpen: false,
@@ -2867,14 +2867,6 @@ const formatHistoryDate = (value) => {
   return new Date(millis).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })
 }
 
-function formatHistoryEntryLabel(item, index = 0) {
-  const dateLabel = formatHistoryDate(item?.createdAt)
-  const fallbackLabel = `Entry ${index + 1}`
-  if (dateLabel)
-    return dateLabel
-  return fallbackLabel
-}
-
 const getHistorySnapshotState = (item) => {
   if (isPlainObject(item?.afterData))
     return 'afterData'
@@ -2884,6 +2876,17 @@ const getHistorySnapshotState = (item) => {
 }
 
 const getHistorySnapshotDoc = item => item?.[getHistorySnapshotState(item)] || null
+
+// "Sep 25, 2026, 12:34 PM · revision 5": the date, and the released
+// revision the saved version holds (revision 0 before any release).
+function formatHistoryEntryLabel(item, index = 0) {
+  const dateLabel = formatHistoryDate(item?.createdAt) || `Entry ${index + 1}`
+  const snapshot = getHistorySnapshotDoc(item)
+  if (!snapshot)
+    return dateLabel
+  const revision = Number.isInteger(snapshot.releasedRevision) ? snapshot.releasedRevision : 0
+  return `${dateLabel} · revision ${revision}`
+}
 
 const buildComparableBlockDiffDoc = (doc) => {
   if (!doc || typeof doc !== 'object')
@@ -3118,6 +3121,23 @@ const buildHighlightedDiffHtml = (sourceValue, compareValue) => {
   return html || '—'
 }
 
+// Text to compare for a field: objects as key-sorted JSON (so reordered keys
+// don't show as changes), lists of plain values joined, everything else as is.
+const sortKeysDeep = (value) => {
+  if (Array.isArray(value))
+    return value.map(sortKeysDeep)
+  if (isPlainObject(value))
+    return Object.fromEntries(Object.keys(value).sort().map(key => [key, sortKeysDeep(value[key])]))
+  return value
+}
+const diffTextOf = (value) => {
+  if (Array.isArray(value) && value.every(item => item === null || typeof item !== 'object'))
+    return value.map(item => String(item ?? '')).join(', ')
+  if (value !== null && typeof value === 'object')
+    return JSON.stringify(sortKeysDeep(value), null, 2)
+  return value
+}
+
 const buildBlockChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel } = {}) => {
   const changes = []
   const base = baseDoc || {}
@@ -3149,8 +3169,8 @@ const buildBlockChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel 
       compareLabel,
       base: summarizeBlockChangeValue(baseValue),
       compare: summarizeBlockChangeValue(compareValue),
-      baseHtml: buildHighlightedDiffHtml(baseValue, compareValue),
-      compareHtml: buildHighlightedDiffHtml(compareValue, baseValue),
+      baseHtml: buildHighlightedDiffHtml(diffTextOf(baseValue), diffTextOf(compareValue)),
+      compareHtml: buildHighlightedDiffHtml(diffTextOf(compareValue), diffTextOf(baseValue)),
     })
   })
 
@@ -3303,19 +3323,38 @@ const resolveOverrideRename = (confirmed) => {
   resolve?.(confirmed === true)
 }
 
-const setBlockRevisionState = ({ view, draft = null, releasedRevision = null, draftRevision = null }) => {
+// A save refused because the block changed after it was loaded; the dialog
+// resolves true to replace the newer version.
+const blockChanged = reactive({ conflict: null, resolve: null })
+
+const confirmBlockChanged = details => new Promise((resolve) => {
+  blockChanged.conflict = { details, blockId: props.blockId, blockName: currentBlock.value?.name || '' }
+  blockChanged.resolve = resolve
+})
+
+const resolveBlockChanged = (confirmed) => {
+  const resolve = blockChanged.resolve
+  blockChanged.conflict = null
+  blockChanged.resolve = null
+  resolve?.(confirmed === true)
+}
+
+// `baseHash` fingerprints the definition the editor started from: saves send
+// it so they never overwrite changes made elsewhere in the meantime.
+const setBlockRevisionState = ({ view, draft = null, releasedRevision = null, draftRevision = null, baseHash = null }) => {
   state.blockRevision = {
     view: view ? edgeGlobal.dupObject(view) : null,
     releasedRevision,
     draftRevision,
     draftSource: draft?.source || '',
     draftUpdatedAt: draft?.updatedAt || '',
+    baseHash,
   }
 }
 
 // Opens an existing block with its unreleased draft definition, if any.
 const loadBlockDocument = async ({ docId }) => {
-  const { stored, draft, view } = await loadLibraryBlockForEditing({
+  const { stored, draft, view, baseHash } = await loadLibraryBlockForEditing({
     edgeFirebase,
     organizationDocPath: edgeGlobal.edgeState.organizationDocPath,
     blockId: docId,
@@ -3327,6 +3366,7 @@ const loadBlockDocument = async ({ docId }) => {
     draft,
     releasedRevision: releasedRevisionOf(stored),
     draftRevision: draft ? stored.draftRevision : null,
+    baseHash,
   })
   return view
 }
@@ -3349,19 +3389,29 @@ const writeBlockDoc = async (doc) => {
   if (props.blockId === 'new')
     return edgeFirebase.storeDoc(`${organizationDocPath}/blocks`, doc)
 
-  const { view, revision } = await saveLibraryBlockEdit({
-    edgeFirebase,
-    organizationDocPath,
-    orgId: edgeGlobal.edgeState.currentOrganization,
+  const { view, revision, baseHash } = await saveWithBaseCheck({
     blockId: props.blockId,
-    nextDoc: doc,
-    source: 'editor',
+    baseHash: state.blockRevision.baseHash,
+    confirm: confirmBlockChanged,
+    save: base => saveLibraryBlockEdit({
+      edgeFirebase,
+      organizationDocPath,
+      orgId: edgeGlobal.edgeState.currentOrganization,
+      blockId: props.blockId,
+      nextDoc: doc,
+      source: 'editor',
+      baseHash: base,
+    }),
   })
+  const keptDraft = (revision.draftRevision !== null && revision.draftRevision !== undefined)
+    ? { source: state.blockRevision.draftSource, updatedAt: state.blockRevision.draftUpdatedAt }
+    : null
   setBlockRevisionState({
     view,
-    draft: revision.status === 'saved' ? { source: 'editor', updatedAt: new Date().toISOString() } : null,
+    draft: revision.status === 'saved' ? { source: 'editor', updatedAt: new Date().toISOString() } : keptDraft,
     releasedRevision: revision.releasedRevision ?? null,
     draftRevision: revision.draftRevision ?? null,
+    baseHash,
   })
   if (revision.status === 'saved')
     notifySuccess(`Saved as unreleased changes (revision ${revision.draftRevision}). Pages are unchanged.`)
@@ -3373,12 +3423,15 @@ const writeBlockDoc = async (doc) => {
 // Runs before edge-editor writes, so a declined override rename stores nothing.
 const saveBlockDoc = async (doc) => {
   try {
-    return await guardOverrideRename({
+    const result = await guardOverrideRename({
       storedDoc: props.blockId === 'new' ? null : currentBlock.value,
       nextDoc: doc,
       confirm: confirmOverrideRename,
       write: () => writeBlockDoc(doc),
     })
+    if (result?.cancelled)
+      notifyError(`Not saved. The override block keeps its name "${currentBlock.value?.name || ''}"; your changes are still in the editor.`)
+    return result
   }
   catch (error) {
     notifyError(String(error?.message || error || 'Failed to save the block.'))
@@ -3410,12 +3463,15 @@ const discardUnreleasedChanges = async () => {
       orgId: edgeGlobal.edgeState.currentOrganization,
       blockId: props.blockId,
       draftRevision,
+      baseHash: state.blockRevision.baseHash,
     })
     state.discardDraftDialogOpen = false
     state.editorKey += 1
     notifySuccess(`Discarded unreleased revision ${draftRevision}.`)
   }
   catch (error) {
+    if (isBlockBaseChangedError(error))
+      state.discardDraftDialogOpen = false
     notifyError(String(error?.message || error || 'Failed to discard the unreleased changes.'))
   }
   finally {
@@ -3475,7 +3531,17 @@ const exportCurrentBlock = async () => {
     notifyError('Save this block before exporting.')
     return
   }
-  const exportPayload = { ...getBlockDocDefaults(), ...doc }
+  const exportPayload = {
+    ...getBlockDocDefaults(),
+    ...doc,
+    // The version exported (the draft if there is one), so importing this
+    // file after the block changed again is caught.
+    [BLOCK_EXPORT_BASE_KEY]: blockExportBase({
+      definitionDoc: doc,
+      releasedRevision: state.blockRevision.releasedRevision,
+      draftRevision: state.blockRevision.draftRevision,
+    }),
+  }
   const saved = await saveJsonFile(exportPayload, `block-${doc.docId}.json`)
   if (saved)
     notifySuccess(`Exported block "${doc.docId}".`)
@@ -5504,6 +5570,7 @@ const exportCurrentBlock = async () => {
       </template>
     </edge-editor>
     <edge-cms-override-rename-dialog :change="overrideRename.change" @resolve="resolveOverrideRename" />
+    <edge-cms-block-changed-dialog :conflict="blockChanged.conflict" @resolve="resolveBlockChanged" />
     <edge-shad-dialog v-model="state.blockChecksOpen">
       <DialogContent class="pt-8 max-w-3xl max-h-[85vh] flex flex-col">
         <DialogHeader>
@@ -5582,7 +5649,7 @@ const exportCurrentBlock = async () => {
             it keeps it as unreleased changes; pages don't change until it's released.
           </DialogDescription>
         </DialogHeader>
-        <div class="min-w-0 space-y-4">
+        <div class="min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto pr-1">
           <div class="grid gap-4 md:grid-cols-[minmax(0,320px)_1fr] md:items-end">
             <div class="flex min-w-0 flex-col justify-end">
               <edge-shad-combobox
@@ -5632,14 +5699,14 @@ const exportCurrentBlock = async () => {
           <div class="min-w-0 rounded-md border border-slate-300 bg-card dark:border-slate-700">
             <div
               v-if="state.historyLoading"
-              class="flex h-[70vh] items-center justify-center gap-2 text-sm text-slate-500 dark:text-slate-400"
+              class="flex h-[55vh] items-center justify-center gap-2 text-sm text-slate-500 dark:text-slate-400"
             >
               <Loader2 class="h-4 w-4 animate-spin" />
               Loading history preview...
             </div>
             <div
               v-else-if="!state.historyPreviewBlock"
-              class="flex h-[70vh] items-center justify-center px-6 text-center text-sm text-slate-500 dark:text-slate-400"
+              class="flex h-[55vh] items-center justify-center px-6 text-center text-sm text-slate-500 dark:text-slate-400"
             >
               No older saved versions are available to preview.
             </div>
@@ -5650,8 +5717,9 @@ const exportCurrentBlock = async () => {
             >
               <div class="w-full mx-auto bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30" :class="[previewSurfaceClass, previewAuthClass]" style="transform: translateZ(0);">
                 <edge-cms-block
+                  :key="state.historySelectedId || 'history-preview'"
                   v-model="state.historyPreviewBlock"
-                  class="!h-[70vh] overflow-y-auto"
+                  class="!h-[55vh] overflow-y-auto"
                   :site-id="edgeGlobal.edgeState.blockEditorSite"
                   :render-context="state.previewRenderContext"
                   :theme="theme"
@@ -5670,7 +5738,7 @@ const exportCurrentBlock = async () => {
             </div>
           </div>
         </div>
-        <DialogFooter class="pt-2 flex justify-between">
+        <DialogFooter class="shrink-0 pt-2 flex justify-between">
           <edge-shad-button variant="outline" :disabled="state.historyRestoring" @click="closeHistoryDialog">
             Cancel
           </edge-shad-button>

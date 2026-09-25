@@ -2,7 +2,7 @@
 import { useVModel } from '@vueuse/core'
 import { renderTemplate } from '@edgedev/template-engine'
 import { ChevronDown, FilePen, GripVertical, ImagePlus, Loader2, LockKeyhole, LockOpen, Maximize2, Monitor, Pencil, Plus, Smartphone, Sparkles, Tablet, X } from 'lucide-vue-next'
-import { loadLibraryBlockForEditing, saveLibraryBlockEdit } from '../../lib/cmsBlockRevisionClient'
+import { loadLibraryBlockForEditing, saveLibraryBlockEdit, saveWithBaseCheck } from '../../lib/cmsBlockRevisionClient'
 const props = defineProps({
   modelValue: {
     type: Object,
@@ -444,6 +444,8 @@ const state = reactive({
   // definition when there is one, otherwise the released one.
   blockContentSourceView: null,
   blockContentDraftRevision: null,
+  blockContentBaseHash: null,
+  blockChangedConflict: null,
   blockContentUpdating: false,
   blockContentError: '',
 })
@@ -1495,14 +1497,19 @@ const blockContentSourceDoc = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[blockDocId] || null
 })
 
+const OWN_DEFINITION_PREVIEW_IDS = new Set(['preview', 'history-preview'])
+
 const resolvedRenderBlock = computed(() => {
   const instance = modelValue.value || {}
   const sourceDoc = blockContentSourceDoc.value || {}
   const sourceIsV2 = isTemplateV2BlockDoc(sourceDoc) && !isMalformedLegacyTemplateV2Doc(sourceDoc)
   const templateIsV2 = (isTemplateV2BlockDoc(instance) && !isMalformedLegacyTemplateV2Doc(instance)) || sourceIsV2
   const templateVersion = templateIsV2 ? 2 : (Number(instance.templateVersion || sourceDoc.templateVersion) || 1)
-  const isUnsavedEditorPreview = props.standalonePreview && String(instance.id || '') === 'preview'
-  const useSourceDefinition = sourceIsV2 && hasObjectEntries(sourceDoc) && !isUnsavedEditorPreview
+  // Standalone previews of a specific version (the Block Editor's unsaved
+  // work, a Block History snapshot) render their own definition, not the
+  // library block's current one.
+  const isOwnDefinitionPreview = props.standalonePreview && OWN_DEFINITION_PREVIEW_IDS.has(String(instance.id || ''))
+  const useSourceDefinition = sourceIsV2 && hasObjectEntries(sourceDoc) && !isOwnDefinitionPreview
 
   return {
     ...sourceDoc,
@@ -2154,6 +2161,7 @@ const openPreviewContentEditor = async () => {
   state.blockContentDocId = blockDocId
   state.blockContentSourceView = blockData
   state.blockContentDraftRevision = loaded.draft ? loaded.stored.draftRevision : null
+  state.blockContentBaseHash = loaded.baseHash
   const blockDataIsTemplateV2 = isTemplateV2BlockDoc(blockData) && !isMalformedLegacyTemplateV2Doc(blockData)
   state.blockContentDraft = String(blockDataIsTemplateV2
     ? (blockData.template || blockData.content || '')
@@ -2163,6 +2171,20 @@ const openPreviewContentEditor = async () => {
   state.validationErrors = []
   state.open = true
   state.afterLoad = true
+}
+
+// A save refused because the library block changed after the dialog loaded
+// it; resolves true to replace the newer version.
+let resolveBlockChangedPrompt = null
+const confirmBlockChanged = details => new Promise((resolve) => {
+  state.blockChangedConflict = { details, blockId: state.blockContentDocId, blockName: state.blockContentSourceView?.name || '' }
+  resolveBlockChangedPrompt = resolve
+})
+const resolveBlockChanged = (confirmed) => {
+  const resolve = resolveBlockChangedPrompt
+  state.blockChangedConflict = null
+  resolveBlockChangedPrompt = null
+  resolve?.(confirmed === true)
 }
 
 // Saves the edited template as the library block's unreleased draft
@@ -2193,16 +2215,23 @@ const updateBlockContent = async () => {
   state.blockContentError = ''
   state.blockContentUpdating = true
   try {
-    const { view, revision } = await saveLibraryBlockEdit({
-      edgeFirebase,
-      organizationDocPath: edgeGlobal.edgeState.organizationDocPath,
-      orgId: edgeGlobal.edgeState.currentOrganization,
+    const { view, revision, baseHash } = await saveWithBaseCheck({
       blockId: blockDocId,
-      nextDoc,
-      source: 'page-editor',
+      baseHash: state.blockContentBaseHash,
+      confirm: confirmBlockChanged,
+      save: base => saveLibraryBlockEdit({
+        edgeFirebase,
+        organizationDocPath: edgeGlobal.edgeState.organizationDocPath,
+        orgId: edgeGlobal.edgeState.currentOrganization,
+        blockId: blockDocId,
+        nextDoc,
+        source: 'page-editor',
+        baseHash: base,
+      }),
     })
     state.blockContentSourceView = view
     state.blockContentDraftRevision = revision.draftRevision ?? null
+    state.blockContentBaseHash = baseHash
     if (revision.status === 'saved')
       edgeFirebase?.toast?.success?.(`Saved as unreleased changes to this library block (revision ${revision.draftRevision}). Pages, including this one, are unchanged until it's released.`)
     else if (revision.status === 'discarded')
@@ -2828,6 +2857,7 @@ const getTagsFromPosts = computed(() => {
         </div>
       </div>
     </div>
+    <edge-cms-block-changed-dialog v-if="state.blockChangedConflict" :conflict="state.blockChangedConflict" @resolve="resolveBlockChanged" />
     <edge-shad-dialog v-model="state.delete">
       <DialogContent class="max-w-md">
         <DialogHeader>

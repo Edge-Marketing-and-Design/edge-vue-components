@@ -3,7 +3,7 @@ import { Download, MoreHorizontal } from 'lucide-vue-next'
 import { renderTemplateAsync } from '@edgedev/template-engine'
 import { guardOverrideRename } from '../../lib/cmsOverrideRename'
 import { checkImportedBlock, createBlockCheckError, normalizeBlockTypes, normalizeImportedDoc, resolveImportedBlockThemes } from '../../lib/cmsBlockImport'
-import { saveLibraryBlockEdit } from '../../lib/cmsBlockRevisionClient'
+import { BLOCK_EXPORT_BASE_KEY, BlockSaveCancelledError, blockExportBase, loadLibraryBlockForEditing, planImportOverwrite, saveLibraryBlockEdit, saveWithBaseCheck, takeImportBase } from '../../lib/cmsBlockRevisionClient'
 const emit = defineEmits(['head'])
 const edgeFirebase = inject('edgeFirebase')
 const { saveJsonFiles } = useJsonFileSave()
@@ -450,6 +450,12 @@ const exportAllBlocks = async () => {
       payload: {
         ...edgeGlobal.dupObject(blocksCollection.value?.[docId] || {}),
         docId,
+        // The released definition is exported; importing this file later is
+        // checked against the block's version at that time.
+        [BLOCK_EXPORT_BASE_KEY]: blockExportBase({
+          definitionDoc: blocksCollection.value?.[docId] || {},
+          releasedRevision: blocksCollection.value?.[docId]?.releasedRevision ?? null,
+        }),
       },
     }))
 
@@ -1076,6 +1082,20 @@ watch(() => state.importConflictDialogOpen, (open) => {
 
 const overrideRename = reactive({ change: null, resolve: null })
 
+// An import that would replace changes made in the Hub after the file was
+// made; resolves true to replace them.
+const blockChanged = reactive({ conflict: null, resolve: null })
+const confirmBlockChanged = (details, blockId, blockName = '') => new Promise((resolve) => {
+  blockChanged.conflict = { details, blockId, blockName }
+  blockChanged.resolve = resolve
+})
+const resolveBlockChanged = (confirmed) => {
+  const resolve = blockChanged.resolve
+  blockChanged.conflict = null
+  blockChanged.resolve = null
+  resolve?.(confirmed === true)
+}
+
 const confirmOverrideRename = change => new Promise((resolve) => {
   overrideRename.change = change
   overrideRename.resolve = resolve
@@ -1126,7 +1146,10 @@ const importSingleBlockFile = async (file, existingBlocks = {}) => {
   const fileText = await readTextFile(file)
   const parsed = JSON.parse(fileText)
   const rawDoc = normalizeImportedDoc(parsed, '')
-  // The same check as scripts/cms/validate-block.mjs.
+  // The version of the block the file was exported from, if it says. It is
+  // removed before the check, so it never becomes a block field.
+  const fileBase = takeImportBase(rawDoc)
+  // The same check as scripts/cms/validate-import.mjs.
   const findings = await checkImportedBlock(rawDoc, {
     knownThemeIds: getOrgThemeIds(),
     renderTemplate: renderTemplateAsync,
@@ -1159,25 +1182,61 @@ const importSingleBlockFile = async (file, existingBlocks = {}) => {
   }
 
   const payload = { ...getBlockDocDefaults(), ...importedDoc, docId: targetDocId }
+
+  // Overwriting must not silently replace changes made in the Hub after the
+  // file was made, such as a hand edit in an unreleased draft.
+  let overwriteBase = null
+  if (importDecision === 'overwrite') {
+    const loaded = await loadLibraryBlockForEditing({
+      edgeFirebase,
+      organizationDocPath: edgeGlobal.edgeState.organizationDocPath,
+      blockId: targetDocId,
+    })
+    const { baseHash, conflict } = planImportOverwrite({ loaded, fileBase, nextDoc: payload })
+    overwriteBase = baseHash
+    if (conflict) {
+      if (!await confirmBlockChanged(conflict, targetDocId, payload.name)) {
+        edgeFirebase?.toast?.success?.(`Kept the newer version of "${targetDocId}" in the Hub; this file was not imported.`)
+        return null
+      }
+      overwriteBase = conflict.currentHash
+    }
+  }
+
   // A new block has no instances, so it is written directly. Overwriting an
   // existing block saves its definition as an unreleased draft revision and
   // leaves every page as it is.
   const writeImportedBlock = importDecision === 'overwrite'
-    ? () => saveLibraryBlockEdit({
-        edgeFirebase,
-        organizationDocPath: edgeGlobal.edgeState.organizationDocPath,
-        orgId: edgeGlobal.edgeState.currentOrganization,
+    ? () => saveWithBaseCheck({
         blockId: targetDocId,
-        nextDoc: payload,
-        source: 'import',
+        baseHash: overwriteBase,
+        confirm: details => confirmBlockChanged(details, targetDocId, payload.name),
+        save: base => saveLibraryBlockEdit({
+          edgeFirebase,
+          organizationDocPath: edgeGlobal.edgeState.organizationDocPath,
+          orgId: edgeGlobal.edgeState.currentOrganization,
+          blockId: targetDocId,
+          nextDoc: payload,
+          source: 'import',
+          baseHash: base,
+        }),
       })
     : () => edgeFirebase.storeDoc(blockCollectionPath.value, payload, targetDocId)
-  const result = await guardOverrideRename({
-    storedDoc: importDecision === 'overwrite' ? existingBlocks[targetDocId] : null,
-    nextDoc: payload,
-    confirm: confirmOverrideRename,
-    write: writeImportedBlock,
-  })
+  let result
+  try {
+    result = await guardOverrideRename({
+      storedDoc: importDecision === 'overwrite' ? existingBlocks[targetDocId] : null,
+      nextDoc: payload,
+      confirm: confirmOverrideRename,
+      write: writeImportedBlock,
+    })
+  }
+  catch (error) {
+    if (!(error instanceof BlockSaveCancelledError))
+      throw error
+    edgeFirebase?.toast?.success?.(`Kept the newer version of "${targetDocId}" in the Hub; this file was not imported.`)
+    return null
+  }
   if (result?.cancelled)
     return null
   existingBlocks[targetDocId] = importDecision === 'overwrite' ? result.view : payload
@@ -1567,6 +1626,7 @@ const handleBlockImport = async (event) => {
       </DialogContent>
     </edge-shad-dialog>
     <edge-cms-override-rename-dialog :change="overrideRename.change" @resolve="resolveOverrideRename" />
+    <edge-cms-block-changed-dialog :conflict="blockChanged.conflict" @resolve="resolveBlockChanged" />
     <edge-shad-dialog v-model="state.importConflictDialogOpen">
       <DialogContent class="pt-8">
         <DialogHeader>
