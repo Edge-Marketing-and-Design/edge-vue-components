@@ -1497,14 +1497,19 @@ const blockContentSourceDoc = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[blockDocId] || null
 })
 
+const OWN_DEFINITION_PREVIEW_IDS = new Set(['preview', 'history-preview'])
+
 const resolvedRenderBlock = computed(() => {
   const instance = modelValue.value || {}
   const sourceDoc = blockContentSourceDoc.value || {}
   const sourceIsV2 = isTemplateV2BlockDoc(sourceDoc) && !isMalformedLegacyTemplateV2Doc(sourceDoc)
   const templateIsV2 = (isTemplateV2BlockDoc(instance) && !isMalformedLegacyTemplateV2Doc(instance)) || sourceIsV2
   const templateVersion = templateIsV2 ? 2 : (Number(instance.templateVersion || sourceDoc.templateVersion) || 1)
-  const isUnsavedEditorPreview = props.standalonePreview && String(instance.id || '') === 'preview'
-  const useSourceDefinition = sourceIsV2 && hasObjectEntries(sourceDoc) && !isUnsavedEditorPreview
+  // Standalone previews of a specific version (the Block Editor's unsaved
+  // work, a Block History snapshot) render their own definition, not the
+  // library block's current one.
+  const isOwnDefinitionPreview = props.standalonePreview && OWN_DEFINITION_PREVIEW_IDS.has(String(instance.id || ''))
+  const useSourceDefinition = sourceIsV2 && hasObjectEntries(sourceDoc) && !isOwnDefinitionPreview
 
   return {
     ...sourceDoc,
