@@ -52,6 +52,11 @@ export const cmsRoutes = [
     file: './edge/routes/cms/dashboard/themes/[theme].vue',
   },
   {
+    name: 'cms-dashboard-agent-keys-index',
+    path: '/app/dashboard/agent-keys',
+    file: './edge/routes/cms/dashboard/agent-keys/index.vue',
+  },
+  {
     name: 'cms-dashboard-registrar-index',
     path: '/app/dashboard/registrar',
     file: './edge/routes/cms/dashboard/registrar/index.vue',
