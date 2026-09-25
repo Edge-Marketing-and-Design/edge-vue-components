@@ -67,5 +67,6 @@ export function createAgentOperationClient({ endpoint, getKey, fetchImpl = globa
     endpoint,
     check: (orgId, operation) => post({ orgId, action: 'check', operation }),
     run: (orgId, operation, checksum) => post({ orgId, action: 'run', operation, checksum }),
+    preview: (orgId, siteId, pageId, source = 'draft') => post({ orgId, action: 'preview', siteId, pageId, source }),
   }
 }

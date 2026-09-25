@@ -28,6 +28,7 @@ const blockRevisions = require('./cmsBlockRevisions')
 const blockReleases = require('./cmsBlockReleases')
 const cmsOperations = require('./cmsOperations')
 const cmsAgentKeys = require('./cmsAgentKeys')
+const { buildPreviewUrl, issuePreviewToken, verifyPreviewToken } = require('./cmsPreviewTokens')
 const { removeCmsPageFromMenus } = require('./helpers/cmsPageDeletion')
 const { resolveSubmittedUserRouting } = require('./helpers/submittedUserRouting')
 
@@ -42,7 +43,6 @@ const CLOUDFLARE_PAGES_API_TOKEN = process.env.CLOUDFLARE_PAGES_API_TOKEN || ''
 const CLOUDFLARE_PAGES_PROJECT = process.env.CLOUDFLARE_PAGES_PROJECT || ''
 const DOMAIN_REGISTRY_COLLECTION = 'domain-registry'
 const DOMAINS_REGISTERED_COLLECTION = 'domains-registered'
-const EDGE_CMS_PREVIEW_RENDER_SIGNATURE_SALT = 'edge-cms-preview-render-v1'
 const SITE_PAGE_PREVIEW_THUMBNAIL_VERSION = 'backend-puppeteer-v1'
 const SITE_PAGE_PREVIEW_CAPTURE_WIDTH = 1600
 const SITE_PAGE_PREVIEW_VIEWPORT_HEIGHT = 900
@@ -3559,15 +3559,6 @@ const createPreviewSignatureHash = (value) => {
   return String(hash >>> 0)
 }
 
-const getCmsPreviewRenderSignature = ({ orgId, siteId, pageId }) => {
-  return createPreviewSignatureHash({
-    salt: EDGE_CMS_PREVIEW_RENDER_SIGNATURE_SALT,
-    orgId,
-    siteId,
-    pageId,
-  })
-}
-
 const normalizePreviewColumnsForSignature = (row) => {
   if (!Array.isArray(row?.columns) || !row.columns.length)
     return []
@@ -4029,16 +4020,11 @@ const firebaseStoragePublicUrl = ({ bucketName, filePath, token }) => {
   return `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodedPath}?alt=media&token=${token}`
 }
 
+// A preview link that works without signing in, for the thumbnail renderer:
+// a short-lived preview token (cmsPreviewTokens.js).
 const buildCmsPreviewRenderUrl = ({ baseUrl, orgId, siteId, pageId, mode = '', source = '' }) => {
-  const signature = getCmsPreviewRenderSignature({ orgId, siteId, pageId })
-  const url = new URL(`/cms-preview-render/${encodeURIComponent(siteId)}/${encodeURIComponent(pageId)}`, baseUrl)
-  url.searchParams.set('orgId', orgId)
-  url.searchParams.set('signature', signature)
-  if (mode)
-    url.searchParams.set('mode', mode)
-  if (source)
-    url.searchParams.set('source', source)
-  return url.toString()
+  const { token } = issuePreviewToken({ orgId, siteId, pageId, source: source === 'published' ? 'published' : 'draft' })
+  return buildPreviewUrl({ baseUrl, orgId, siteId, pageId, source, token, mode })
 }
 
 const readPreviewRenderContext = async ({ orgId, siteId, pageId, source = 'draft' }) => {
@@ -4085,13 +4071,17 @@ exports.getPreviewRenderPayload = onCall({ timeoutSeconds: 60, memory: '512MiB' 
   const orgId = String(data.orgId || '').trim()
   const siteId = String(data.siteId || '').trim()
   const pageId = String(data.pageId || '').trim()
-  const signature = String(data.signature || '').trim()
   const source = String(data.source || '').trim() === 'published' ? 'published' : 'draft'
   const routeLastSegment = String(data.routeLastSegment || '').trim()
-  if (!orgId || !siteId || !pageId || !signature)
+  if (!orgId || !siteId || !pageId)
     throw new HttpsError('invalid-argument', 'Missing preview render payload fields.')
-  if (signature !== getCmsPreviewRenderSignature({ orgId, siteId, pageId }))
-    throw new HttpsError('permission-denied', 'Invalid preview signature.')
+  // Draft content is private: a signed-in Hub user who can read the sites,
+  // or a preview token issued for exactly this page. (The old signature was a
+  // hash anyone could compute from the ids.)
+  const uid = request.auth?.uid
+  const signedInReader = !!uid && await permissionCheck(uid, 'read', `organizations/${orgId}/sites`)
+  if (!signedInReader && !verifyPreviewToken(data.token, { orgId, siteId, pageId, source }))
+    throw new HttpsError('permission-denied', 'Sign in to the Hub, or use a valid preview link. Preview links expire.')
 
   const context = await readPreviewRenderContext({ orgId, siteId, pageId, source })
   const collectionValues = await resolveCmsPreviewCollectionValuesWithTimeout({

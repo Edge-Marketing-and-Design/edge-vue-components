@@ -550,6 +550,26 @@ server.registerTool(
 )
 
 server.registerTool(
+  'cms_preview_url',
+  {
+    title: 'Get a CMS Page Preview Link',
+    description: 'Get a short-lived link (15 minutes) to the Hub\'s preview of one draft page (or its published copy), rendered with the Hub\'s own block renderer and the site\'s theme. Open it in a browser and screenshot it to compare what you built with the design. Vue override components are not shown (they render only on the public site). Needs an agent key.',
+    inputSchema: {
+      orgId: OptionalOrgIdSchema.describe('Organization id. Uses configured defaultOrgId when omitted.'),
+      siteId: z.string().trim().min(1).describe('Site document id.'),
+      pageId: z.string().trim().min(1).describe('Page document id.'),
+      source: z.enum(['draft', 'published']).optional().default('draft'),
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: false,
+    },
+  },
+  async ({ orgId, siteId, pageId, source }) => jsonResult(await agentOperations.preview(resolveOrgId(orgId), siteId, pageId, source)),
+)
+
+server.registerTool(
   'cms_block_base',
   {
     title: 'Get a CMS Block\'s Base',

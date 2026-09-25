@@ -122,6 +122,11 @@ name cannot silently select the wrong theme. Its response includes:
   `cmsOperations` audit with the key.
 - `cms_block_base`: a block's current definition (open draft, else released)
   and its fingerprint, which `block.draft` must send as `baseHash`.
+- `cms_preview_url`: a 15-minute link to the Hub's preview of one draft page
+  (or its published copy), rendered with the Hub's block renderer and the
+  site's theme. Open it in a browser and screenshot it to compare with the
+  design. Vue override components don't render there. Needs
+  `CMS_PREVIEW_TOKEN_SECRET` in the Hub's Functions environment.
 
 Every operation type and field is in
 `docs/data-contracts/cms-operations/README.md`. Results are the Hub's JSON

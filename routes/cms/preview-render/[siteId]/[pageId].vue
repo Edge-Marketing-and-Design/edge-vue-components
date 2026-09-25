@@ -16,11 +16,10 @@ const state = reactive({
   blockLoaded: {},
 })
 
-const EDGE_CMS_PREVIEW_RENDER_SIGNATURE_SALT = 'edge-cms-preview-render-v1'
-
 const siteId = computed(() => String(route.params.siteId || '').trim())
 const pageId = computed(() => String(route.params.pageId || '').trim())
-const previewSignature = computed(() => String(route.query.signature || '').trim())
+// A preview token from a preview link; signed-in Hub users don't need one.
+const previewToken = computed(() => String(route.query.token || '').trim())
 const organizationId = computed(() => String(route.query.orgId || edgeGlobal.edgeState.currentOrganization || localStorage.getItem('organizationID') || '').trim())
 const routeLastSegment = computed(() => String(route.query.routeLastSegment || '').trim())
 const isThumbnailMode = computed(() => String(route.query.mode || '').trim() === 'thumbnail')
@@ -32,39 +31,6 @@ const pageDoc = computed(() => state.payload?.page || null)
 const blocksCollection = computed(() => state.payload?.blocks || {})
 const themeDoc = computed(() => state.payload?.theme || null)
 const previewCollectionValues = computed(() => state.payload?.collectionValues || {})
-
-const normalizeForCompare = (value) => {
-  if (Array.isArray(value))
-    return value.map(normalizeForCompare)
-  if (value && typeof value === 'object') {
-    return Object.keys(value).sort().reduce((acc, key) => {
-      acc[key] = normalizeForCompare(value[key])
-      return acc
-    }, {})
-  }
-  return value
-}
-
-const stableSerialize = value => JSON.stringify(normalizeForCompare(value))
-
-const createPreviewSignatureHash = (value) => {
-  const input = stableSerialize(value)
-  let hash = 5381
-  for (let index = 0; index < input.length; index++)
-    hash = ((hash << 5) + hash) ^ input.charCodeAt(index)
-  return String(hash >>> 0)
-}
-
-const expectedPreviewSignature = computed(() => {
-  if (!organizationId.value || !siteId.value || !pageId.value)
-    return ''
-  return createPreviewSignatureHash({
-    salt: EDGE_CMS_PREVIEW_RENDER_SIGNATURE_SALT,
-    orgId: organizationId.value,
-    siteId: siteId.value,
-    pageId: pageId.value,
-  })
-})
 
 const parseThemeDoc = (themeDoc) => {
   const rawTheme = themeDoc?.theme
@@ -241,6 +207,23 @@ const previewBlockKey = (row, rowIndex, column, colIndex, blockIdx) => {
   return `${row?.id || rowIndex}:${column?.id || colIndex}:${blockIdx}`
 }
 
+// Each block's values, built once per page and data change. The template
+// used to build a new object on every render; blocks with collection data
+// reload when their values object changes and then emit pending/loaded,
+// which re-rendered the page and looped forever.
+const previewValuesByKey = computed(() => {
+  const map = {}
+  previewRows.value.forEach((row, rowIndex) => {
+    (row.columns || []).forEach((column, colIndex) => {
+      (column.blocks || []).forEach((blockRef, blockIdx) => {
+        const key = previewBlockKey(row, rowIndex, column, colIndex, blockIdx)
+        map[key] = resolveBlockValuesForPreview(blockRef, key)
+      })
+    })
+  })
+  return map
+})
+
 const previewBlockKeys = computed(() => {
   const keys = []
   previewRows.value.forEach((row, rowIndex) => {
@@ -326,14 +309,6 @@ const loadPreviewData = async () => {
   try {
     state.bootstrapped = true
 
-    if (!previewSignature.value) {
-      state.error = 'Missing preview signature.'
-      return
-    }
-    if (previewSignature.value !== expectedPreviewSignature.value) {
-      state.error = 'Invalid preview signature.'
-      return
-    }
     if (!organizationId.value) {
       state.error = 'Missing organization for preview.'
       return
@@ -349,7 +324,7 @@ const loadPreviewData = async () => {
       orgId: organizationId.value,
       siteId: siteId.value,
       pageId: pageId.value,
-      signature: previewSignature.value,
+      token: previewToken.value,
       source: previewSource.value,
       routeLastSegment: routeLastSegment.value,
     })
@@ -369,7 +344,7 @@ onMounted(() => {
   loadPreviewData()
 })
 
-watch(() => [organizationId.value, siteId.value, pageId.value, previewSignature.value, previewSource.value], () => {
+watch(() => [organizationId.value, siteId.value, pageId.value, previewToken.value, previewSource.value], () => {
   if (state.bootstrapped)
     loadPreviewData()
 })
@@ -425,7 +400,7 @@ watch(() => [organizationId.value, siteId.value, pageId.value, previewSignature.
                     :template="resolveBlockForPreview(blockRef).template"
                     :schema="resolveBlockForPreview(blockRef).schema"
                     :data-sources="resolveBlockForPreview(blockRef).dataSources"
-                    :values="resolveBlockValuesForPreview(blockRef, previewBlockKey(row, rowIndex, column, colIndex, blockIdx))"
+                    :values="previewValuesByKey[previewBlockKey(row, rowIndex, column, colIndex, blockIdx)] || EMPTY_PREVIEW_VALUES"
                     :meta="resolveBlockForPreview(blockRef).meta"
                     :theme="previewTheme"
                     :render-context="state.renderContext"

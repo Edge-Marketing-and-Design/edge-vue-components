@@ -20,6 +20,7 @@ const {
   permissionCheck,
 } = require('./config.js')
 const { authorizeOperation, performCheck, performRun } = require('./cmsOperations.js')
+const { buildPreviewUrl, issuePreviewToken, previewBaseUrl, previewTokensEnabled } = require('./cmsPreviewTokens.js')
 
 const DOC_ID_PATTERN = /^[^/]{1,1500}$/
 const KEY_PREFIX = 'cmsak'
@@ -163,9 +164,28 @@ const HTTP_STATUS = {
 }
 
 // POST { orgId, action: 'check' | 'run', operation, checksum?, client? }
-// with Authorization: Bearer <agent key>. Runs the draft-only CMS operations
-// as the key's creator. Responses are JSON: { ok: true, ... } or
+// or { orgId, action: 'preview', siteId, pageId, source? } with
+// Authorization: Bearer <agent key>. Runs the draft-only CMS operations as
+// the key's creator, or returns a short-lived preview link for one page the
+// creator can read. Responses are JSON: { ok: true, ... } or
 // { ok: false, code, message, details }.
+
+// A preview link for one draft (or published) page, for checking what the
+// agent built.
+const previewLink = async ({ uid, orgId, body }) => {
+  const siteId = requireDocId(body.siteId, 'site id')
+  const pageId = requireDocId(body.pageId, 'page id')
+  const source = body.source === 'published' ? 'published' : 'draft'
+  if (!await permissionCheck(uid, 'read', `organizations/${orgId}/sites`))
+    throw new HttpsError('permission-denied', 'Not allowed to read sites in this organization.')
+  if (!previewTokensEnabled())
+    throw new HttpsError('failed-precondition', 'Preview links are not configured: set CMS_PREVIEW_TOKEN_SECRET in the Functions environment.')
+  const page = await db.collection('organizations').doc(orgId).collection('sites').doc(siteId).collection(source === 'published' ? 'published' : 'pages').doc(pageId).get()
+  if (!page.exists)
+    throw new HttpsError('not-found', `${source === 'published' ? 'Published' : 'Draft'} page "${pageId}" does not exist on site "${siteId}".`)
+  const { token, expiresAt } = issuePreviewToken({ orgId, siteId, pageId, source })
+  return { url: buildPreviewUrl({ baseUrl: previewBaseUrl(), orgId, siteId, pageId, source, token }), expiresAt }
+}
 exports.agentOperation = onRequest({ timeoutSeconds: 120 }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ ok: false, code: 'method-not-allowed', message: 'Use POST.' })
@@ -175,14 +195,19 @@ exports.agentOperation = onRequest({ timeoutSeconds: 120 }, async (req, res) => 
     const body = (req.body && typeof req.body === 'object') ? req.body : {}
     const orgId = requireDocId(body.orgId, 'organization id')
     const { uid, keyId, ref } = await verifyAgentKey(orgId, req.get ? req.get('authorization') : req.headers?.authorization)
-    const caller = await authorizeOperation({ uid, orgId, operation: body.operation })
     let result
-    if (body.action === 'check')
-      result = await performCheck(caller)
-    else if (body.action === 'run')
-      result = await performRun({ ...caller, checksum: body.checksum, client: body.client, via: 'agent', agentKeyId: keyId })
-    else
-      throw new HttpsError('invalid-argument', 'action must be "check" or "run".')
+    if (body.action === 'preview') {
+      result = await previewLink({ uid, orgId, body })
+    }
+    else if (body.action === 'check' || body.action === 'run') {
+      const caller = await authorizeOperation({ uid, orgId, operation: body.operation })
+      result = body.action === 'check'
+        ? await performCheck(caller)
+        : await performRun({ ...caller, checksum: body.checksum, client: body.client, via: 'agent', agentKeyId: keyId })
+    }
+    else {
+      throw new HttpsError('invalid-argument', 'action must be "check", "run" or "preview".')
+    }
     const used = await ref.get()
     await ref.update({ lastUsedAt: new Date().toISOString(), useCount: (used.data()?.useCount || 0) + 1 })
     res.status(200).json({ ok: true, ...result })

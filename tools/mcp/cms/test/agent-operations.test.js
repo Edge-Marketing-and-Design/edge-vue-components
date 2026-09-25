@@ -41,6 +41,8 @@ test('check and run post the operation with the key and return the Hub\'s answer
   assert.equal(requests[0].init.headers.authorization, 'Bearer cmsak.k.s')
   assert.deepEqual(JSON.parse(requests[0].init.body), { orgId: 'org1', action: 'check', operation, client: 'edge-cms-mcp' })
   assert.deepEqual(JSON.parse(requests[1].init.body), { orgId: 'org1', action: 'run', operation, checksum: 'abc', client: 'edge-cms-mcp' })
+  await client.preview('org1', 'site1', 'home')
+  assert.deepEqual(JSON.parse(requests[2].init.body), { orgId: 'org1', action: 'preview', siteId: 'site1', pageId: 'home', source: 'draft', client: 'edge-cms-mcp' })
 })
 
 test('a missing key, an unreachable endpoint and a non-JSON reply are explained, not thrown', async () => {
