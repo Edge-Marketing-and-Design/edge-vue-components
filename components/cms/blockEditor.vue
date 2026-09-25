@@ -7,7 +7,7 @@ import { clearCmsTemplateV2LibraryState } from '../../composables/useCmsTemplate
 import { guardOverrideRename } from '../../lib/cmsOverrideRename'
 import { validateBlock } from '../../lib/cmsBlockValidation'
 import { BLOCK_REVISION_DEFINITION_FIELDS, diffBlockMetadata } from '../../lib/cmsBlockRevisions'
-import { discardLibraryBlockDraft, loadLibraryBlockForEditing, releasedRevisionOf, saveLibraryBlockEdit } from '../../lib/cmsBlockRevisionClient'
+import { BLOCK_EXPORT_BASE_KEY, blockExportBase, discardLibraryBlockDraft, isBlockBaseChangedError, loadLibraryBlockForEditing, releasedRevisionOf, saveLibraryBlockEdit, saveWithBaseCheck } from '../../lib/cmsBlockRevisionClient'
 const props = defineProps({
   blockId: {
     type: String,
@@ -61,7 +61,7 @@ const state = reactive({
   historyError: '',
   // The library block as this editor loaded or last saved it: the draft
   // revision's definition when one exists, otherwise the released one.
-  blockRevision: { view: null, releasedRevision: null, draftRevision: null, draftSource: '', draftUpdatedAt: '' },
+  blockRevision: { view: null, releasedRevision: null, draftRevision: null, draftSource: '', draftUpdatedAt: '', baseHash: null },
   discardDraftDialogOpen: false,
   discardingDraft: false,
   releaseDialogOpen: false,
@@ -3303,19 +3303,38 @@ const resolveOverrideRename = (confirmed) => {
   resolve?.(confirmed === true)
 }
 
-const setBlockRevisionState = ({ view, draft = null, releasedRevision = null, draftRevision = null }) => {
+// A save refused because the block changed after it was loaded; the dialog
+// resolves true to replace the newer version.
+const blockChanged = reactive({ conflict: null, resolve: null })
+
+const confirmBlockChanged = details => new Promise((resolve) => {
+  blockChanged.conflict = { details, blockId: props.blockId, blockName: currentBlock.value?.name || '' }
+  blockChanged.resolve = resolve
+})
+
+const resolveBlockChanged = (confirmed) => {
+  const resolve = blockChanged.resolve
+  blockChanged.conflict = null
+  blockChanged.resolve = null
+  resolve?.(confirmed === true)
+}
+
+// `baseHash` fingerprints the definition the editor started from: saves send
+// it so they never overwrite changes made elsewhere in the meantime.
+const setBlockRevisionState = ({ view, draft = null, releasedRevision = null, draftRevision = null, baseHash = null }) => {
   state.blockRevision = {
     view: view ? edgeGlobal.dupObject(view) : null,
     releasedRevision,
     draftRevision,
     draftSource: draft?.source || '',
     draftUpdatedAt: draft?.updatedAt || '',
+    baseHash,
   }
 }
 
 // Opens an existing block with its unreleased draft definition, if any.
 const loadBlockDocument = async ({ docId }) => {
-  const { stored, draft, view } = await loadLibraryBlockForEditing({
+  const { stored, draft, view, baseHash } = await loadLibraryBlockForEditing({
     edgeFirebase,
     organizationDocPath: edgeGlobal.edgeState.organizationDocPath,
     blockId: docId,
@@ -3327,6 +3346,7 @@ const loadBlockDocument = async ({ docId }) => {
     draft,
     releasedRevision: releasedRevisionOf(stored),
     draftRevision: draft ? stored.draftRevision : null,
+    baseHash,
   })
   return view
 }
@@ -3349,19 +3369,29 @@ const writeBlockDoc = async (doc) => {
   if (props.blockId === 'new')
     return edgeFirebase.storeDoc(`${organizationDocPath}/blocks`, doc)
 
-  const { view, revision } = await saveLibraryBlockEdit({
-    edgeFirebase,
-    organizationDocPath,
-    orgId: edgeGlobal.edgeState.currentOrganization,
+  const { view, revision, baseHash } = await saveWithBaseCheck({
     blockId: props.blockId,
-    nextDoc: doc,
-    source: 'editor',
+    baseHash: state.blockRevision.baseHash,
+    confirm: confirmBlockChanged,
+    save: base => saveLibraryBlockEdit({
+      edgeFirebase,
+      organizationDocPath,
+      orgId: edgeGlobal.edgeState.currentOrganization,
+      blockId: props.blockId,
+      nextDoc: doc,
+      source: 'editor',
+      baseHash: base,
+    }),
   })
+  const keptDraft = (revision.draftRevision !== null && revision.draftRevision !== undefined)
+    ? { source: state.blockRevision.draftSource, updatedAt: state.blockRevision.draftUpdatedAt }
+    : null
   setBlockRevisionState({
     view,
-    draft: revision.status === 'saved' ? { source: 'editor', updatedAt: new Date().toISOString() } : null,
+    draft: revision.status === 'saved' ? { source: 'editor', updatedAt: new Date().toISOString() } : keptDraft,
     releasedRevision: revision.releasedRevision ?? null,
     draftRevision: revision.draftRevision ?? null,
+    baseHash,
   })
   if (revision.status === 'saved')
     notifySuccess(`Saved as unreleased changes (revision ${revision.draftRevision}). Pages are unchanged.`)
@@ -3410,12 +3440,15 @@ const discardUnreleasedChanges = async () => {
       orgId: edgeGlobal.edgeState.currentOrganization,
       blockId: props.blockId,
       draftRevision,
+      baseHash: state.blockRevision.baseHash,
     })
     state.discardDraftDialogOpen = false
     state.editorKey += 1
     notifySuccess(`Discarded unreleased revision ${draftRevision}.`)
   }
   catch (error) {
+    if (isBlockBaseChangedError(error))
+      state.discardDraftDialogOpen = false
     notifyError(String(error?.message || error || 'Failed to discard the unreleased changes.'))
   }
   finally {
@@ -3475,7 +3508,17 @@ const exportCurrentBlock = async () => {
     notifyError('Save this block before exporting.')
     return
   }
-  const exportPayload = { ...getBlockDocDefaults(), ...doc }
+  const exportPayload = {
+    ...getBlockDocDefaults(),
+    ...doc,
+    // The version exported (the draft if there is one), so importing this
+    // file after the block changed again is caught.
+    [BLOCK_EXPORT_BASE_KEY]: blockExportBase({
+      definitionDoc: doc,
+      releasedRevision: state.blockRevision.releasedRevision,
+      draftRevision: state.blockRevision.draftRevision,
+    }),
+  }
   const saved = await saveJsonFile(exportPayload, `block-${doc.docId}.json`)
   if (saved)
     notifySuccess(`Exported block "${doc.docId}".`)
@@ -5504,6 +5547,7 @@ const exportCurrentBlock = async () => {
       </template>
     </edge-editor>
     <edge-cms-override-rename-dialog :change="overrideRename.change" @resolve="resolveOverrideRename" />
+    <edge-cms-block-changed-dialog :conflict="blockChanged.conflict" @resolve="resolveBlockChanged" />
     <edge-shad-dialog v-model="state.blockChecksOpen">
       <DialogContent class="pt-8 max-w-3xl max-h-[85vh] flex flex-col">
         <DialogHeader>
