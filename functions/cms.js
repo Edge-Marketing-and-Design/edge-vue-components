@@ -1954,6 +1954,7 @@ exports.blockReleaseHistory = blockReleases.blockReleaseHistory
 // (cms-checkOperation, cms-runOperation).
 exports.checkOperation = cmsOperations.checkOperation
 exports.runOperation = cmsOperations.runOperation
+exports.siteReadiness = cmsOperations.siteReadiness
 
 // Agent keys for the CMS operations (cms-createAgentKey, cms-listAgentKeys,
 // cms-revokeAgentKey) and the endpoint agents call with one

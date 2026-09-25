@@ -19,7 +19,7 @@ const {
   HttpsError,
   permissionCheck,
 } = require('./config.js')
-const { authorizeOperation, performCheck, performRun } = require('./cmsOperations.js')
+const { authorizeOperation, gatherSiteReadiness, performCheck, performRun } = require('./cmsOperations.js')
 const { buildPreviewUrl, issuePreviewToken, previewBaseUrl, previewTokensEnabled } = require('./cmsPreviewTokens.js')
 
 const DOC_ID_PATTERN = /^[^/]{1,1500}$/
@@ -164,7 +164,8 @@ const HTTP_STATUS = {
 }
 
 // POST { orgId, action: 'check' | 'run', operation, checksum?, client? }
-// or { orgId, action: 'preview', siteId, pageId, source? } with
+// or { orgId, action: 'preview', siteId, pageId, source? }, or
+// { orgId, action: 'readiness', siteId } with
 // Authorization: Bearer <agent key>. Runs the draft-only CMS operations as
 // the key's creator, or returns a short-lived preview link for one page the
 // creator can read. Responses are JSON: { ok: true, ... } or
@@ -199,6 +200,11 @@ exports.agentOperation = onRequest({ timeoutSeconds: 120 }, async (req, res) => 
     if (body.action === 'preview') {
       result = await previewLink({ uid, orgId, body })
     }
+    else if (body.action === 'readiness') {
+      if (!await permissionCheck(uid, 'read', `organizations/${orgId}/sites`))
+        throw new HttpsError('permission-denied', 'Not allowed to read sites in this organization.')
+      result = await gatherSiteReadiness({ orgId, siteId: requireDocId(body.siteId, 'site id') })
+    }
     else if (body.action === 'check' || body.action === 'run') {
       const caller = await authorizeOperation({ uid, orgId, operation: body.operation })
       result = body.action === 'check'
@@ -206,7 +212,7 @@ exports.agentOperation = onRequest({ timeoutSeconds: 120 }, async (req, res) => 
         : await performRun({ ...caller, checksum: body.checksum, client: body.client, via: 'agent', agentKeyId: keyId })
     }
     else {
-      throw new HttpsError('invalid-argument', 'action must be "check", "run" or "preview".')
+      throw new HttpsError('invalid-argument', 'action must be "check", "run", "preview" or "readiness".')
     }
     const used = await ref.get()
     await ref.update({ lastUsedAt: new Date().toISOString(), useCount: (used.data()?.useCount || 0) + 1 })

@@ -527,7 +527,81 @@ exports.runOperation = onCall({ timeoutSeconds: 120 }, async (request) => {
   return performRun({ ...caller, checksum: request.data.checksum, client: request.data.client, via: 'hub' })
 })
 
+// ---- Site readiness (phase 6) ----
+
+const READINESS_MAX_PAGES = 500
+const READINESS_MAX_BLOCK_CHECKS = 100
+const loadValidation = () => Promise.all([import('./helpers/cmsBlockValidation.mjs'), import('@edgedev/template-engine')])
+
+// What stops a site from being finished: see buildSiteReadiness in
+// helpers/cmsOperations.mjs. Reads only.
+const gatherSiteReadiness = async ({ orgId, siteId }) => {
+  const core = await corePromise
+  const org = orgRefOf(orgId)
+  const siteRef = org.collection('sites').doc(siteId)
+  const siteSnap = await siteRef.get()
+  if (!siteSnap.exists)
+    throw new HttpsError('not-found', `Site "${siteId}" does not exist.`)
+  const site = siteSnap.data() || {}
+  const themeSnap = site.theme ? await org.collection('themes').doc(String(site.theme)).get() : null
+  const pagesSnap = await siteRef.collection('pages').limit(READINESS_MAX_PAGES + 1).get()
+  const publishedSnap = await siteRef.collection('published').limit(READINESS_MAX_PAGES + 1).get()
+  const pages = Object.fromEntries(pagesSnap.docs.slice(0, READINESS_MAX_PAGES).map(doc => [doc.id, doc.data() || {}]))
+  const published = Object.fromEntries(publishedSnap.docs.map(doc => [doc.id, doc.data() || {}]))
+
+  const blockIds = new Set()
+  for (const page of Object.values(pages)) {
+    for (const instance of [...(page.content || []), ...(page.postContent || [])]) {
+      if (instance?.blockId)
+        blockIds.add(String(instance.blockId))
+    }
+  }
+  const blocks = {}
+  const drafts = {}
+  await Promise.all([...blockIds].map(async (blockId) => {
+    const snap = await org.collection('blocks').doc(blockId).get()
+    if (!snap.exists)
+      return
+    const block = snap.data() || {}
+    blocks[blockId] = block
+    if (Number.isInteger(block.draftRevision))
+      drafts[blockId] = block.draftRevision
+  }))
+
+  const [validation, engine] = await loadValidation()
+  const themes = await org.collection('themes').get()
+  const knownThemeIds = themes.docs.map(doc => doc.id)
+  const blockChecks = {}
+  const checked = Object.keys(blocks).sort().slice(0, READINESS_MAX_BLOCK_CHECKS)
+  for (const blockId of checked)
+    blockChecks[blockId] = await validation.validateBlock({ ...blocks[blockId] }, { knownThemeIds, renderTemplate: engine.renderTemplateAsync })
+
+  const report = core.buildSiteReadiness({ site, theme: themeSnap?.exists ? themeSnap.data() : null, pages, published, blocks, drafts, blockChecks })
+  return {
+    siteId,
+    ...report,
+    pagesChecked: Object.keys(pages).length,
+    blocksChecked: checked.length,
+    truncated: pagesSnap.size > READINESS_MAX_PAGES || Object.keys(blocks).length > READINESS_MAX_BLOCK_CHECKS,
+  }
+}
+
+// cms-siteReadiness { orgId, siteId }: for anyone who can read the sites.
+exports.siteReadiness = onCall({ timeoutSeconds: 120, memory: '512MiB' }, async (request) => {
+  const uid = request?.auth?.uid
+  if (!uid)
+    throw new HttpsError('unauthenticated', 'Authentication required.')
+  if (request?.data?.uid !== uid)
+    throw new HttpsError('permission-denied', 'UID mismatch.')
+  const orgId = requireDocId(request.data.orgId, 'organization id')
+  const siteId = requireDocId(request.data.siteId, 'site id')
+  if (!await permissionCheck(uid, 'read', `organizations/${orgId}/sites`))
+    throw new HttpsError('permission-denied', 'Not allowed to read sites in this organization.')
+  return gatherSiteReadiness({ orgId, siteId })
+})
+
 // For the agent endpoint (cmsAgentKeys.js); cms.js doesn't re-export these.
 exports.authorizeOperation = authorizeOperation
 exports.performCheck = performCheck
 exports.performRun = performRun
+exports.gatherSiteReadiness = gatherSiteReadiness

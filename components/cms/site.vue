@@ -1,7 +1,7 @@
 <script setup lang="js">
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { BarChart3, CircleAlert, Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePenLine, FileStack, FileUp, FileX, FolderCog, FolderDown, FolderUp, FolderX, ImagePlus, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload, Users, X } from 'lucide-vue-next'
+import { BarChart3, CircleAlert, ClipboardCheck, Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePenLine, FileStack, FileUp, FileX, FolderCog, FolderDown, FolderUp, FolderX, ImagePlus, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload, Users, X } from 'lucide-vue-next'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
 
 const props = defineProps({
@@ -131,6 +131,7 @@ const state = reactive({
   menus: { 'Site Root': [], 'Not In Menu': [] },
   saving: false,
   siteSettings: false,
+  siteReadiness: false,
   hasError: false,
   updating: false,
   aiSectionOpen: false,
@@ -4499,6 +4500,10 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                   <FolderCog />
                   <span>Settings</span>
                 </DropdownMenuItem>
+                <DropdownMenuItem v-if="!isTemplateSite" @click="state.siteReadiness = true">
+                  <ClipboardCheck />
+                  <span>Check Readiness</span>
+                </DropdownMenuItem>
                 <DropdownMenuItem :disabled="state.importingPages" @click="triggerPageImport">
                   <Loader2 v-if="state.importingPages" class="animate-spin" />
                   <Upload v-else />
@@ -5034,6 +5039,12 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
         </Transition>
       </div>
     </div>
+    <edge-cms-site-readiness-dialog
+      v-if="!isTemplateSite"
+      v-model="state.siteReadiness"
+      :site-id="props.site"
+      :site-name="siteData.name || ''"
+    />
     <edge-cms-json-export-progress-dialog
       v-model="state.exportDialogOpen"
       title="Exporting Pages"

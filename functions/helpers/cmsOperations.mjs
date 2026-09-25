@@ -427,3 +427,77 @@ export const themeFieldProblems = (fields) => {
   }
   return problems
 }
+
+// ---- Site readiness (first-release plan, phase 6) ----
+
+const pageLabel = (page, id) => page?.name || id
+
+// Everything that would stop a site from being finished, from facts the
+// caller gathers:
+// - pages: { [pageId]: draft page }, published: { [pageId]: published page }
+// - blocks: { [blockId]: library block } for every block the drafts use
+// - drafts: { [blockId]: open draft revision number }
+// - blockChecks: { [blockId]: { errors: [...], warnings: [...] } }
+// - site, theme (null when missing)
+// Returns { ready, counts: { error, warning, info }, items } with items
+// { severity, code, message, pageId?, instanceId?, blockId? }.
+export const buildSiteReadiness = ({ site = {}, theme = null, pages = {}, published = {}, blocks = {}, drafts = {}, blockChecks = {} }) => {
+  const items = []
+  const add = (severity, code, message, where = {}) => items.push({ severity, code, message, ...where })
+
+  if (!site?.theme)
+    add('error', 'site.no-theme', 'The site has no theme.')
+  else if (!theme)
+    add('error', 'site.theme-missing', `The site's theme "${site.theme}" does not exist.`)
+
+  const usedBlocks = new Map()
+  for (const [pageId, page] of Object.entries(pages)) {
+    const label = pageLabel(page, pageId)
+    const instances = [...(Array.isArray(page?.content) ? page.content : []), ...(Array.isArray(page?.postContent) ? page.postContent : [])]
+    if (!instances.length)
+      add('warning', 'page.empty', `Page "${label}" has no blocks.`, { pageId })
+    const live = published[pageId]
+    if (!live)
+      add('warning', 'page.unpublished', `Page "${label}" has never been published.`, { pageId })
+    else if (Number(page?.version) > Number(live?.version))
+      add('info', 'page.unpublished-changes', `Page "${label}" has changes that aren't published.`, { pageId })
+
+    for (const instance of instances) {
+      const where = { pageId, instanceId: instance?.id, blockId: instance?.blockId }
+      const library = blocks[instance?.blockId]
+      if (!library) {
+        add('error', 'block.missing', `Page "${label}" uses block "${instance?.name || instance?.blockId}", which is not in the library.`, where)
+        continue
+      }
+      if (!usedBlocks.has(instance.blockId))
+        usedBlocks.set(instance.blockId, new Set())
+      usedBlocks.get(instance.blockId).add(label)
+      if (Number(instance.templateVersion) === 2 && !instance.synced) {
+        for (const message of validateInstanceValues(instance.schema, instance.values))
+          add('error', 'instance.values', `Page "${label}", "${instance.name || library.name}": ${message}`, where)
+      }
+      const released = Number.isInteger(library.releasedRevision) ? library.releasedRevision : null
+      if (released !== null && Number.isInteger(instance.blockRevision) && instance.blockRevision < released)
+        add('warning', 'instance.behind', `Page "${label}", "${instance.name || library.name}" holds revision ${instance.blockRevision}; revision ${released} is released.`, where)
+    }
+  }
+
+  for (const [blockId, pageNames] of usedBlocks) {
+    const library = blocks[blockId] || {}
+    const name = library.name || blockId
+    const onPages = [...pageNames].join(', ')
+    if (library.isOverrideBlock === true)
+      add('warning', 'block.override', `"${name}" is an override block: the public site needs its Vue component (used on ${onPages}).`, { blockId })
+    if (Number.isInteger(drafts[blockId]))
+      add('info', 'block.unreleased', `"${name}" has unreleased changes (revision ${drafts[blockId]}).`, { blockId })
+    for (const issue of blockChecks[blockId]?.errors || [])
+      add('error', 'block.checks', `"${name}": ${issue.code}: ${issue.message}`, { blockId })
+  }
+
+  const counts = { error: 0, warning: 0, info: 0 }
+  for (const item of items)
+    counts[item.severity] += 1
+  const order = { error: 0, warning: 1, info: 2 }
+  items.sort((a, b) => order[a.severity] - order[b.severity])
+  return { ready: counts.error === 0, counts, items }
+}

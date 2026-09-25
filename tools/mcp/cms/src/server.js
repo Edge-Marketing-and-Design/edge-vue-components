@@ -569,6 +569,57 @@ server.registerTool(
   async ({ orgId, siteId, pageId, source }) => jsonResult(await agentOperations.preview(resolveOrgId(orgId), siteId, pageId, source)),
 )
 
+// Adds the local renderer's answer to each override item: whether the
+// emd-cms-front checkout has the block's Vue component.
+async function withLocalOverrideChecks(orgId, report) {
+  if (!report?.ok || !Array.isArray(report.items))
+    return report
+  const items = []
+  for (const item of report.items) {
+    if (item.code !== 'block.override' || !item.blockId) {
+      items.push(item)
+      continue
+    }
+    try {
+      const resolution = await cmsTools.resolveOverride({ orgId, docId: item.blockId })
+      const found = resolution.status === 'vue-override'
+      items.push({
+        ...item,
+        localRenderer: {
+          status: resolution.status,
+          file: resolution.selectedMatch?.relativePath || resolution.selectedMatch?.file || null,
+          note: found ? 'The local emd-cms-front checkout has this component; confirm it is deployed.' : 'The local emd-cms-front checkout has no single matching component: the public site would show the block\'s CMS HTML.',
+        },
+      })
+    }
+    catch (error) {
+      items.push({ ...item, localRenderer: { status: 'unchecked', note: error.message } })
+    }
+  }
+  return { ...report, items }
+}
+
+server.registerTool(
+  'cms_site_readiness',
+  {
+    title: 'Check a Site Is Ready',
+    description: 'List what stops a site from being finished: failed block checks, invalid or empty required block content, blocks missing from the library, override blocks that need a Vue component (with whether the local emd-cms-front checkout has it), unreleased block drafts, pages behind the released block, empty pages, and pages never published or with unpublished changes. Reads only. Needs an agent key.',
+    inputSchema: {
+      orgId: OptionalOrgIdSchema.describe('Organization id. Uses configured defaultOrgId when omitted.'),
+      siteId: z.string().trim().min(1).describe('Site document id.'),
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+    },
+  },
+  async ({ orgId, siteId }) => {
+    const org = resolveOrgId(orgId)
+    return jsonResult(await withLocalOverrideChecks(org, await agentOperations.readiness(org, siteId)))
+  },
+)
+
 server.registerTool(
   'cms_block_base',
   {
