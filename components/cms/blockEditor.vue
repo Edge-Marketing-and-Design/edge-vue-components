@@ -3423,12 +3423,15 @@ const writeBlockDoc = async (doc) => {
 // Runs before edge-editor writes, so a declined override rename stores nothing.
 const saveBlockDoc = async (doc) => {
   try {
-    return await guardOverrideRename({
+    const result = await guardOverrideRename({
       storedDoc: props.blockId === 'new' ? null : currentBlock.value,
       nextDoc: doc,
       confirm: confirmOverrideRename,
       write: () => writeBlockDoc(doc),
     })
+    if (result?.cancelled)
+      notifyError(`Not saved. The override block keeps its name "${currentBlock.value?.name || ''}"; your changes are still in the editor.`)
+    return result
   }
   catch (error) {
     notifyError(String(error?.message || error || 'Failed to save the block.'))
