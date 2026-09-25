@@ -23,7 +23,9 @@ const {
 
 const { createKvMirrorHandler } = require('./kv/kvMirror')
 const kv = require('./kv/kvClient')
-const { resolvePublicationFile, reconcilePublicationValues } = require('./helpers/cmsPublicationValues')
+const { blockDefinitionChanged } = require('./helpers/cmsBlockPropagation')
+const blockRevisions = require('./cmsBlockRevisions')
+const blockReleases = require('./cmsBlockReleases')
 const { removeCmsPageFromMenus } = require('./helpers/cmsPageDeletion')
 const { resolveSubmittedUserRouting } = require('./helpers/submittedUserRouting')
 
@@ -1910,255 +1912,41 @@ const collectSyncedBlocks = (content, postContent) => {
   return syncedBlocks
 }
 
-const BLOCK_META_EXCLUDE_KEYS = new Set(['limit'])
-const BLOCK_DEFINITION_SYNC_FIELDS = ['content', 'template', 'templateVersion', 'schema', 'dataSources', 'isOverrideBlock', 'blockUpdatedAt']
-
-const updateBlocksInArray = async (blocks, blockId, beforeData, afterData, { resolveFile = async () => null } = {}) => {
-  let touched = false
-  const beforeMeta = beforeData?.meta || {}
-  const afterMeta = afterData?.meta || {}
-  for (const block of blocks) {
-    if (block?.blockId !== blockId)
-      continue
-
-    await reconcilePublicationValues(block, beforeData, afterData, resolveFile, message => logger.warn(message))
-
-    for (const field of BLOCK_DEFINITION_SYNC_FIELDS) {
-      if (Object.prototype.hasOwnProperty.call(afterData, field))
-        block[field] = cloneValue(afterData[field])
-      else if (field !== 'content')
-        delete block[field]
-    }
-
-    block.meta = block.meta || {}
-    const srcMeta = afterMeta
-    for (const key of Object.keys(srcMeta)) {
-      block.meta[key] = block.meta[key] || {}
-      const src = srcMeta[key] || {}
-      const previousTemplateQueryItems = (beforeMeta[key]?.queryItems && typeof beforeMeta[key].queryItems === 'object')
-        ? beforeMeta[key].queryItems
-        : {}
-      const nextTemplateQueryItems = (src.queryItems && typeof src.queryItems === 'object')
-        ? src.queryItems
-        : {}
-      for (const metaKey of Object.keys(src)) {
-        if (metaKey === 'queryItems') {
-          const existingQueryItems = (block.meta[key].queryItems && typeof block.meta[key].queryItems === 'object')
-            ? block.meta[key].queryItems
-            : {}
-          const deletedTemplateKeys = Object.keys(previousTemplateQueryItems)
-            .filter(queryKey => !Object.prototype.hasOwnProperty.call(nextTemplateQueryItems, queryKey))
-          const nextQueryItems = { ...existingQueryItems }
-          for (const queryKey of deletedTemplateKeys)
-            delete nextQueryItems[queryKey]
-          block.meta[key].queryItems = {
-            ...nextQueryItems,
-            ...nextTemplateQueryItems,
-          }
-          continue
-        }
-        if (BLOCK_META_EXCLUDE_KEYS.has(metaKey))
-          continue
-        block.meta[key][metaKey] = src[metaKey]
-      }
-    }
-
-    touched = true
-  }
-  return touched
-}
-
-const buildPageBlockUpdate = async (pageData, blockId, beforeData, afterData, options) => {
-  const pageContent = Array.isArray(pageData.content) ? [...pageData.content] : []
-  const pagePostContent = Array.isArray(pageData.postContent) ? [...pageData.postContent] : []
-
-  const contentTouched = await updateBlocksInArray(pageContent, blockId, beforeData, afterData, options)
-  const postContentTouched = await updateBlocksInArray(pagePostContent, blockId, beforeData, afterData, options)
-
-  return {
-    touched: contentTouched || postContentTouched,
-    content: pageContent,
-    postContent: pagePostContent,
-  }
-}
-
-const getNextVersion = (value) => {
-  const numericVersion = Number(value)
-  if (!Number.isFinite(numericVersion))
-    return 1
-  return Math.max(0, Math.trunc(numericVersion)) + 1
-}
-
-// Key-order independent serialization, so re-saving the same definition with
-// reordered keys compares equal.
-const canonicalJson = (value) => {
-  if (Array.isArray(value))
-    return `[${value.map(item => canonicalJson(item === undefined ? null : item)).join(',')}]`
-  if (value && typeof value === 'object') {
-    const plain = typeof value.toJSON === 'function' ? value.toJSON() : value
-    if (plain !== value)
-      return canonicalJson(plain)
-    const keys = Object.keys(value).filter(key => value[key] !== undefined).sort()
-    return `{${keys.map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`
-  }
-  return JSON.stringify(value === undefined ? null : value)
-}
-
-// The parts of a library block that updateBlocksInArray and publication value
-// reconciliation read. blockUpdatedAt is excluded: the page editor stamps it on
-// every inline save, and it carries no definition of its own. Per-entry meta
-// keys that instances keep for themselves (BLOCK_META_EXCLUDE_KEYS) are
-// excluded too.
-const propagatedBlockDefinition = (data) => {
-  const definition = {}
-  for (const field of BLOCK_DEFINITION_SYNC_FIELDS) {
-    if (field !== 'blockUpdatedAt')
-      definition[field] = data?.[field]
-  }
-  const meta = {}
-  for (const [key, entry] of Object.entries(data?.meta || {})) {
-    if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
-      meta[key] = Object.fromEntries(Object.entries(entry).filter(([metaKey]) => !BLOCK_META_EXCLUDE_KEYS.has(metaKey)))
-    }
-    else {
-      meta[key] = entry
-    }
-  }
-  definition.meta = meta
-  return definition
-}
-
-const blockDefinitionChanged = (beforeData, afterData) =>
-  canonicalJson(propagatedBlockDefinition(beforeData)) !== canonicalJson(propagatedBlockDefinition(afterData))
-
 exports.blockUpdated = onDocumentUpdated({ document: 'organizations/{orgId}/blocks/{blockId}', timeoutSeconds: 180 }, async (event) => {
-  const change = event.data
   const blockId = event.params.blockId
   const orgId = event.params.orgId
-  const beforeData = change.before.data() || {}
-  const afterData = change.after.data() || {}
+  const beforeData = event.data.before.data() || {}
+  const afterData = event.data.after.data() || {}
 
-  // Metadata-only edits (name, tags, themes, type, previewType) and no-op
-  // re-saves must not rewrite every instance or bump page versions, which
-  // invalidates the renderer's caches.
+  // Metadata-only edits (name, tags, themes, type, previewType), revision
+  // pointer writes and no-op re-saves must not rewrite every instance or bump
+  // page versions, which invalidates the renderer's caches.
   if (!blockDefinitionChanged(beforeData, afterData)) {
     logger.log(`Block ${blockId} in org ${orgId} saved without definition changes; nothing to propagate`)
     return
   }
+  // The release worker's own library write: its pages are already updated.
+  if (afterData.lastReleaseId && afterData.lastReleaseId !== beforeData.lastReleaseId)
+    return
 
-  const sites = await db.collection('organizations').doc(orgId).collection('sites').get()
-  if (sites.empty)
-    logger.log(`No sites found in org ${orgId}`)
-
-  const processedSiteIds = new Set()
-
-  const updateDocsForSiteCollection = async (siteId, {
-    collectionName,
-    publishedCollectionName = '',
-    docLabel = 'doc',
-    updatePublished = true,
-    scopeLabel,
-  }) => {
-    const orgRef = db.collection('organizations').doc(orgId)
-    const siteRef = orgRef.collection('sites').doc(siteId)
-    const collections = [{ name: collectionName, published: false }]
-    if (updatePublished && publishedCollectionName)
-      collections.push({ name: publishedCollectionName, published: true })
-
-    // Query both snapshots independently: the draft may have removed a block
-    // that is still live, or added one that has never been published.
-    for (const { name, published } of collections) {
-      const pagesSnap = await siteRef.collection(name)
-        .where('blockIds', 'array-contains', blockId)
-        .get()
-
-      for (const pageDoc of pagesSnap.docs) {
-        await db.runTransaction(async (transaction) => {
-          // Re-read inside the transaction so an overlapping save, publish or
-          // unpublish cannot be overwritten by a stale query snapshot.
-          const currentDoc = await transaction.get(pageDoc.ref)
-          if (!currentDoc.exists)
-            return
-          const pageData = currentDoc.data() || {}
-          const publications = new Map()
-          const resolveFile = (reference) => {
-            if (!publications.has(reference))
-              publications.set(reference, resolvePublicationFile(transaction, orgRef, reference))
-            return publications.get(reference)
-          }
-          const { touched, content, postContent } = await buildPageBlockUpdate(pageData, blockId, beforeData, afterData, { resolveFile })
-          if (!touched)
-            return
-
-          const update = {}
-          if (Array.isArray(pageData.content))
-            update.content = content
-          if (Array.isArray(pageData.postContent))
-            update.postContent = postContent
-          if (collectionName === 'pages')
-            update.version = getNextVersion(pageData.version)
-          transaction.update(pageDoc.ref, update)
-
-          if (published && collectionName === 'pages') {
-            const versionMap = { pageVersions: { [pageDoc.id]: update.version } }
-            transaction.set(siteRef, versionMap, { merge: true })
-            transaction.set(orgRef.collection('published-site-settings').doc(siteId), versionMap, { merge: true })
-          }
-        })
-      }
-      logger.log(`Processed ${name} ${docLabel} references in ${scopeLabel} for block ${blockId}`)
-    }
-  }
-
-  for (const siteDoc of sites.docs) {
-    const siteId = siteDoc.id
-    processedSiteIds.add(siteId)
-    const updatePublished = siteId !== 'templates'
-    const scopeLabel = siteId === 'templates'
-      ? `templates site (org ${orgId})`
-      : `site ${siteId} (org ${orgId})`
-
-    await updateDocsForSiteCollection(siteId, {
-      collectionName: 'pages',
-      publishedCollectionName: 'published',
-      docLabel: 'page',
-      updatePublished,
-      scopeLabel,
-    })
-
-    await updateDocsForSiteCollection(siteId, {
-      collectionName: 'posts',
-      publishedCollectionName: 'published_posts',
-      docLabel: 'post',
-      updatePublished,
-      scopeLabel,
-    })
-  }
-
-  if (!processedSiteIds.has('templates')) {
-    await updateDocsForSiteCollection('templates', {
-      collectionName: 'pages',
-      publishedCollectionName: 'published',
-      docLabel: 'page',
-      updatePublished: false,
-      scopeLabel: `templates site (org ${orgId})`,
-    })
-
-    await updateDocsForSiteCollection('templates', {
-      collectionName: 'posts',
-      publishedCollectionName: 'published_posts',
-      docLabel: 'post',
-      updatePublished: false,
-      scopeLabel: `templates site (org ${orgId})`,
-    })
-  }
+  // Any other definition write reaches pages through a tracked release.
+  await blockReleases.startImplicitRelease({ orgId, blockId, beforeData, afterData, eventId: event.id })
 })
 
 // Library block draft revisions (cms-saveBlockDraft, cms-discardBlockDraft).
-const blockRevisions = require('./cmsBlockRevisions')
-
 exports.saveBlockDraft = blockRevisions.saveBlockDraft
 exports.discardBlockDraft = blockRevisions.discardBlockDraft
+
+// Library block releases (cms-dryRunBlockRelease, cms-executeBlockRelease,
+// cms-retryBlockRelease), their worker (cms-blockReleaseWorker), the
+// per-site revision report (cms-blockRevisionUsage) and the history
+// (cms-blockReleaseHistory).
+exports.dryRunBlockRelease = blockReleases.dryRunBlockRelease
+exports.executeBlockRelease = blockReleases.executeBlockRelease
+exports.retryBlockRelease = blockReleases.retryBlockRelease
+exports.blockReleaseWorker = blockReleases.blockReleaseWorker
+exports.blockRevisionUsage = blockReleases.blockRevisionUsage
+exports.blockReleaseHistory = blockReleases.blockReleaseHistory
 
 exports.fontFileUpdated = onDocumentUpdated({ document: 'organizations/{orgId}/files/{fileId}', timeoutSeconds: 180 }, async (event) => {
   const before = event.data.before.data() || {}

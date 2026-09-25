@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "@edgedev/template-engine": "26.9.3",
     "@sparticuz/chromium": "149.0.0",
     "puppeteer-core": "25.1.0"
   },

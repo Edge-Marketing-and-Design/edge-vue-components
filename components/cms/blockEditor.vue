@@ -1,5 +1,5 @@
 <script setup>
-import { Code2, Download, HelpCircle, History, ListChecks, Loader2, Maximize2, Monitor, Plus, RotateCcw, Smartphone, Tablet, Trash2, Wand2 } from 'lucide-vue-next'
+import { Code2, Download, HelpCircle, History, ListChecks, Loader2, Maximize2, Monitor, Plus, Rocket, RotateCcw, Smartphone, Tablet, Trash2, Wand2 } from 'lucide-vue-next'
 import { renderTemplateAsync } from '@edgedev/template-engine'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
@@ -64,6 +64,8 @@ const state = reactive({
   blockRevision: { view: null, releasedRevision: null, draftRevision: null, draftSource: '', draftUpdatedAt: '' },
   discardDraftDialogOpen: false,
   discardingDraft: false,
+  releaseDialogOpen: false,
+  releaseDialogRevision: null,
   historyItems: [],
   historySelectedId: '',
   historyPreviewBlock: null,
@@ -3336,7 +3338,7 @@ const unreleasedChangesLabel = computed(() => {
   if (draftRevision === null)
     return ''
   const from = DRAFT_SOURCE_LABELS[draftSource] ? ` from the ${DRAFT_SOURCE_LABELS[draftSource]}` : ''
-  return `Unreleased changes${from} (revision ${draftRevision}). Pages still use revision ${releasedRevision ?? 0} until these changes are released.`
+  return `Unreleased changes${from} (revision ${draftRevision}). Pages use revision ${releasedRevision ?? 0} until an organization admin releases these changes.`
 })
 
 // A new block has no instances, so it is written directly and its live
@@ -3382,6 +3384,19 @@ const saveBlockDoc = async (doc) => {
     notifyError(String(error?.message || error || 'Failed to save the block.'))
     throw error
   }
+}
+
+// Opens the release dialog: on a revision to release, or on the history.
+const openReleaseDialog = (revisionNumber = null) => {
+  state.releaseDialogRevision = revisionNumber
+  state.releaseDialogOpen = true
+}
+
+// A finished release changes what the editor loads (the draft is released,
+// or the released definition moved), so reload it.
+const handleBlockReleased = () => {
+  if (!state.editorHasUnsavedChanges)
+    state.editorKey += 1
 }
 
 const discardUnreleasedChanges = async () => {
@@ -3543,6 +3558,18 @@ const exportCurrentBlock = async () => {
               type="button"
               size="icon"
               variant="outline"
+              class="h-9 w-9"
+              :disabled="props.blockId === 'new' || !currentBlock"
+              title="Releases"
+              aria-label="Releases"
+              @click="openReleaseDialog()"
+            >
+              <Rocket class="h-4 w-4" />
+            </edge-shad-button>
+            <edge-shad-button
+              type="button"
+              size="icon"
+              variant="outline"
               class="relative h-9 w-9"
               :title="blockChecksLabel"
               :aria-label="blockChecksLabel"
@@ -3582,15 +3609,26 @@ const exportCurrentBlock = async () => {
             class="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
           >
             <span>{{ unreleasedChangesLabel }}</span>
-            <edge-shad-button
-              type="button"
-              size="sm"
-              variant="outline"
-              :disabled="state.discardingDraft"
-              @click="state.discardDraftDialogOpen = true"
-            >
-              Discard unreleased changes
-            </edge-shad-button>
+            <div class="flex gap-2">
+              <edge-shad-button
+                type="button"
+                size="sm"
+                :disabled="state.discardingDraft || state.editorHasUnsavedChanges"
+                :title="state.editorHasUnsavedChanges ? 'Save your changes before releasing.' : ''"
+                @click="openReleaseDialog(state.blockRevision.draftRevision)"
+              >
+                <Rocket class="mr-2 h-4 w-4" /> Release...
+              </edge-shad-button>
+              <edge-shad-button
+                type="button"
+                size="sm"
+                variant="outline"
+                :disabled="state.discardingDraft"
+                @click="state.discardDraftDialogOpen = true"
+              >
+                Discard unreleased changes
+              </edge-shad-button>
+            </div>
           </div>
           <div class="flex w-full gap-2">
             <div class="flex-auto">
@@ -5503,6 +5541,13 @@ const exportCurrentBlock = async () => {
         </DialogFooter>
       </DialogContent>
     </edge-shad-dialog>
+    <edge-cms-block-release-dialog
+      v-if="props.blockId !== 'new'"
+      v-model="state.releaseDialogOpen"
+      :block-id="props.blockId"
+      :initial-revision="state.releaseDialogRevision"
+      @released="handleBlockReleased"
+    />
     <edge-shad-dialog v-model="state.discardDraftDialogOpen">
       <DialogContent>
         <DialogHeader>
