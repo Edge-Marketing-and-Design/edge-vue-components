@@ -1,64 +1,12 @@
-import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
+import { DEFAULT_TRACKING_CONSENT_MESSAGE, contactSpamDefaults, restrictedContentDefaults, siteSettingsDefaults } from '../lib/cmsOperations'
 
+// The defaults live in edge/lib/cmsOperations.js, shared with the CMS
+// operations (site.create), so agent-created sites match Hub-created ones.
 export const useSiteSettingsTemplate = () => {
-  const { buildSiteStructuredData } = useStructuredDataTemplates()
-  const defaultTrackingConsentMessage = 'We use analytics, advertising, and feedback tools to understand how visitors use this site, improve our marketing, and collect website feedback. These tools may collect information such as pages visited, browser and device details, and interactions with the site. You can choose whether to allow this tracking.'
-  const createRestrictedContentDefaults = () => ({
-    enabled: false,
-    allowSelfRegistration: true,
-    registrationPricing: 'free',
-    provider: 'stripe',
-    defaultCurrency: 'USD',
-    registrationTermsUrl: '',
-    loginHelpText: '',
-    registrationSuccessMessage: '',
-    rules: [],
-  })
-  const createContactSpamDefaults = () => ({
-    enabled: true,
-    mode: 'block',
-    blockThreshold: 0.75,
-    allowedInquiryContext: 'Legitimate messages usually come from people trying to contact the organization, ask a question, request services, request information, schedule an appointment, ask about availability, ask about pricing, follow up on an existing relationship, apply for an opportunity, submit a support request, or respond to content on the website. Allow messages that appear to be from a real visitor with a specific need, even if the message is short, informal, misspelled, or incomplete.',
-    blockedInquiryContext: 'Spam messages usually advertise third-party services to the website owner, offer SEO, marketing, web design, app development, lead generation, directory listings, backlinks, loans, crypto, suspicious investments, or unrelated business promotions. Block messages that are primarily trying to sell something to the organization, contain generic outreach with no connection to the website services, include suspicious links, use mass-sales language, or appear automated. This includes unsolicited offers for free audits, mockups, redesign concepts, SEO reviews, performance checks, marketing ideas, or other no-cost evaluations when the purpose appears to be selling or promoting a service to the organization.',
-  })
-  const createDefaults = () => ({
-    name: '',
-    theme: '',
-    allowedThemes: [],
-    showMembersTab: false,
-    logo: '',
-    logoLight: '',
-    logoText: '',
-    logoType: 'image',
-    brandLogoDark: '',
-    brandLogoLight: '',
-    favicon: '',
-    menuPosition: 'right',
-    domains: [],
-    forwardApex: true,
-    contactEmail: '',
-    contactPhone: '',
-    metaTitle: '',
-    metaDescription: '',
-    structuredData: buildSiteStructuredData(),
-    trackingFacebookPixel: '',
-    trackingGoogleAnalytics: '',
-    trackingAdroll: '',
-    trackingConsentEnabled: true,
-    trackingConsentMessage: defaultTrackingConsentMessage,
-    sureFeedURL: '',
-    socialFacebook: '',
-    socialInstagram: '',
-    socialTwitter: '',
-    socialLinkedIn: '',
-    socialYouTube: '',
-    socialTikTok: '',
-    users: [],
-    restrictedContent: createRestrictedContentDefaults(),
-    contactSpam: createContactSpamDefaults(),
-    aiAgentUserId: '',
-    aiInstructions: '',
-  })
+  const defaultTrackingConsentMessage = DEFAULT_TRACKING_CONSENT_MESSAGE
+  const createRestrictedContentDefaults = restrictedContentDefaults
+  const createContactSpamDefaults = contactSpamDefaults
+  const createDefaults = siteSettingsDefaults
 
   const createNewDocSchema = () => {
     const defaults = createDefaults()

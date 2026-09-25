@@ -28,7 +28,7 @@ const loadImportCheck = () => Promise.all([
 ])
 
 const DOC_ID_PATTERN = /^[^/]{1,1500}$/
-const PERMISSION_TARGETS = { theme: 'themes', page: 'sites', block: 'blocks' }
+const PERMISSION_TARGETS = { theme: 'themes', page: 'sites', block: 'blocks', site: 'sites' }
 const MAX_VALUE_BYTES = 200000
 
 const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -407,6 +407,92 @@ const planBlock = async (core, reader, { orgId, uid, now, operation }) => {
   return plan
 }
 
+// ---- Sites ----
+
+// site.create { name, theme, domains, settings? }: a new site as the Hub's
+// new-site form makes it (site settings defaults, the creator as its only user unless
+// they are an organization admin), seeded from the theme's default menus and
+// site settings (site.vue seedNewSiteFromTheme). Nothing is published.
+const planSite = async (core, reader, { orgId, uid, now, operation }) => {
+  const plan = createPlan()
+  const org = orgRefOf(orgId)
+  const name = typeof operation.name === 'string' ? operation.name.trim() : ''
+  if (!name)
+    plan.problems.push('A site needs a name.')
+  const themeId = optionalDocId(operation.theme, 'theme id')
+  let themeDoc = null
+  if (!themeId) {
+    plan.problems.push('A site needs a theme.')
+  }
+  else {
+    const themeSnap = await reader.doc(org.collection('themes').doc(themeId))
+    if (themeSnap.exists)
+      themeDoc = themeSnap.data() || {}
+    else
+      plan.problems.push(`Theme "${themeId}" does not exist.`)
+  }
+  // Like the Hub form: at least one domain, each 45 characters or fewer.
+  // Domains reach the public renderer only when the site settings are
+  // published.
+  const domains = Array.isArray(operation.domains) ? operation.domains.map(domain => (typeof domain === 'string' ? domain.trim() : domain)) : []
+  if (!domains.length || domains.some(domain => typeof domain !== 'string' || !domain))
+    plan.problems.push('A site needs at least one domain (domains: ["example.com"]).')
+  else if (domains.some(domain => domain.length > 45))
+    plan.problems.push('Each domain must be 45 characters or fewer.')
+  const settings = isPlainObject(operation.settings) ? operation.settings : {}
+  const defaults = core.siteSettingsDefaults()
+  const chosen = {}
+  const kindOf = value => (Array.isArray(value) ? 'a list of strings' : typeof value === 'boolean' ? 'true or false' : 'a string')
+  for (const [key, value] of Object.entries(settings)) {
+    const kind = kindOf(defaults[key])
+    const valid = kind === 'a list of strings'
+      ? (Array.isArray(value) && value.every(item => typeof item === 'string'))
+      : (kind === 'true or false' ? typeof value === 'boolean' : typeof value === 'string')
+    if (!core.SITE_CREATE_FIELDS.includes(key))
+      plan.problems.push(`"${key}" can't be set by site.create (allowed: ${core.SITE_CREATE_FIELDS.join(', ')}). Set it in the Hub's site settings.`)
+    else if (!valid)
+      plan.problems.push(`${key} must be ${kind}.`)
+    else
+      chosen[key] = value
+  }
+  if (chosen.allowedThemes?.length && themeId && !chosen.allowedThemes.includes(themeId))
+    plan.problems.push('allowedThemes must include the site\'s theme.')
+
+  const isAdmin = await permissionCheck(uid, 'assign', `organizations/${orgId}`)
+  const siteRef = org.collection('sites').doc()
+  // The Hub's new-site form has every default except members-only content.
+  const { restrictedContent: _restrictedContent, ...formDefaults } = defaults
+  const siteDoc = {
+    ...formDefaults,
+    ...chosen,
+    name,
+    theme: themeId || '',
+    domains,
+    users: isAdmin ? [] : [uid],
+    docId: siteRef.id,
+    doc_created_at: now,
+    ...stamp(uid, now),
+  }
+  const pageWrites = []
+  if (themeDoc) {
+    const themeMenus = core.deriveThemeMenus(themeDoc)
+    if (themeMenus) {
+      const templates = await reader.query(org.collection('sites').doc('templates').collection('pages'), `organizations/${orgId}/sites/templates/pages`)
+      const templatePages = Object.fromEntries(templates.docs.map(doc => [doc.id, doc.data() || {}]))
+      const { menus, pages } = core.seedMenusFromTheme(themeMenus, templatePages, () => siteRef.collection('pages').doc().id, now)
+      siteDoc.menus = menus
+      pageWrites.push(...pages)
+    }
+    Object.assign(siteDoc, core.buildThemeSettingsPayload(themeDoc, siteDoc))
+  }
+  addWrite(plan, siteRef, siteDoc, 'set', `Create site "${name}" with theme ${themeId}. Nothing is published.`)
+  for (const { pageId, payload } of pageWrites)
+    addWrite(plan, siteRef.collection('pages').doc(pageId), { ...payload, docId: pageId, uid }, 'set', `Create draft page "${payload.name}" at /${payload.slug} from the theme's templates.`)
+  const pageIds = pageWrites.map(page => page.pageId)
+  plan.result = { siteId: siteRef.id, pageIds }
+  return plan
+}
+
 // ---- Check and run ----
 
 const OPERATION_AREA = type => String(type || '').split('.')[0]
@@ -418,6 +504,8 @@ const planOperation = async (reader, context) => {
     return planTheme(core, reader, context)
   if (area === 'page')
     return planPage(core, reader, context)
+  if (area === 'site')
+    return planSite(core, reader, context)
   return planBlock(core, reader, context)
 }
 
