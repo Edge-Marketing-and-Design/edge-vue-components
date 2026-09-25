@@ -1,9 +1,10 @@
 <script setup>
 import { Loader2, Rocket, RotateCcw } from 'lucide-vue-next'
 import {
-  RELEASE_KIND_LABELS,
   RELEASE_STATUS_LABELS,
   canRetryRelease,
+  canaryRollbackPlan,
+  describeRelease,
   describeScope,
   dryRunBlockRelease,
   executeBlockRelease,
@@ -61,6 +62,7 @@ const scopeItems = [{ title: 'All sites', name: 'all' }, { title: 'Selected site
 const planIssues = computed(() => releaseCheckIssues(state.plan?.checks))
 const progress = computed(() => releaseProgress(state.release))
 const rollbackTo = computed(() => rollbackRevision(state.history))
+const canaryRollback = computed(() => canaryRollbackPlan(state.history))
 const selectedSiteIds = computed(() => (state.scopeMode === 'sites' ? state.siteIds : null))
 const canExecute = computed(() => isAdmin.value
   && state.plan
@@ -187,6 +189,19 @@ const startRollback = () => {
   state.release = null
   state.revision = String(rollbackTo.value)
   state.scopeMode = 'all'
+  state.tab = 'release'
+}
+
+// Sets up the release that undoes the live canary; it still runs through
+// Check release.
+const startCanaryRollback = () => {
+  const plan = canaryRollback.value
+  if (!plan)
+    return
+  state.release = null
+  state.revision = String(plan.revisionNumber)
+  state.scopeMode = 'sites'
+  state.siteIds = plan.siteIds
   state.tab = 'release'
 }
 
@@ -321,7 +336,7 @@ const close = () => emit('update:modelValue', false)
 
           <div v-if="state.plan" class="space-y-3 rounded-md border p-3" aria-live="polite">
             <div class="flex flex-wrap items-center justify-between gap-2 text-sm">
-              <span class="font-medium">{{ RELEASE_KIND_LABELS[state.plan.kind] || state.plan.kind }}: revision {{ state.plan.revisionNumber }} to {{ describeScope(state.plan.scope) }}</span>
+              <span class="font-medium">{{ describeRelease(state.plan) }}: {{ describeScope(state.plan.scope, state.plan.kind) }}</span>
               <span class="text-muted-foreground">Released now: revision {{ state.plan.releasedRevision }}</span>
             </div>
             <p class="text-sm">
@@ -364,9 +379,14 @@ const close = () => emit('update:modelValue', false)
               <template v-if="state.history?.draftRevision !== null && state.history?.draftRevision !== undefined"> · Unreleased draft: revision {{ state.history.draftRevision }}</template>
               <template v-if="state.history?.canary"> · Canary: revision {{ state.history.canary.revisionNumber }} on {{ state.history.canary.siteIds.map(siteName).join(', ') }}</template>
             </span>
-            <edge-shad-button v-if="isAdmin && rollbackTo !== null" type="button" size="sm" variant="outline" @click="startRollback">
-              <RotateCcw class="mr-2 h-4 w-4" /> Roll back to revision {{ rollbackTo }}
-            </edge-shad-button>
+            <div class="flex flex-wrap gap-2">
+              <edge-shad-button v-if="isAdmin && canaryRollback" type="button" size="sm" variant="outline" @click="startCanaryRollback">
+                <RotateCcw class="mr-2 h-4 w-4" /> Roll back canary
+              </edge-shad-button>
+              <edge-shad-button v-if="isAdmin && rollbackTo !== null" type="button" size="sm" variant="outline" @click="startRollback">
+                <RotateCcw class="mr-2 h-4 w-4" /> Roll back to revision {{ rollbackTo }}
+              </edge-shad-button>
+            </div>
           </div>
 
           <div>
@@ -406,8 +426,8 @@ const close = () => emit('update:modelValue', false)
             <ul v-else class="space-y-2">
               <li v-for="item in state.history.releases" :key="item.releaseId" class="flex flex-wrap items-center justify-between gap-2 rounded border p-2">
                 <span>
-                  <span class="font-medium">{{ RELEASE_KIND_LABELS[item.kind] || item.kind }} revision {{ item.revisionNumber }}</span>
-                  · {{ describeScope(item.scope) }}
+                  <span class="font-medium">{{ describeRelease(item) }}</span>
+                  · {{ describeScope(item.scope, item.kind) }}
                   · {{ RELEASE_STATUS_LABELS[item.status] || item.status }}<template v-if="item.implicit"> (direct edit, unchecked)</template>
                   <span class="block text-xs text-muted-foreground">{{ item.createdAt }} · {{ releaseProgress(item).done }} updated, {{ releaseProgress(item).failed }} failed</span>
                 </span>
