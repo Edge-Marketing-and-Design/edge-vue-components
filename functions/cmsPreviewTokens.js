@@ -69,7 +69,7 @@ const previewBaseUrl = (projectId = process.env.GCLOUD_PROJECT || process.env.GC
   return projectId ? `https://${projectId}.web.app` : ''
 }
 
-const buildPreviewUrl = ({ baseUrl, orgId, siteId, pageId, source = 'draft', token, mode = '' }) => {
+const buildPreviewUrl = ({ baseUrl, orgId, siteId, pageId, source = 'draft', token, mode = '', blockDrafts = false }) => {
   const url = new URL(`/cms-preview-render/${encodeURIComponent(siteId)}/${encodeURIComponent(pageId)}`, baseUrl)
   url.searchParams.set('orgId', orgId)
   url.searchParams.set('token', token)
@@ -77,6 +77,8 @@ const buildPreviewUrl = ({ baseUrl, orgId, siteId, pageId, source = 'draft', tok
     url.searchParams.set('source', 'published')
   if (mode)
     url.searchParams.set('mode', mode)
+  if (blockDrafts && source !== 'published')
+    url.searchParams.set('drafts', '1')
   return url.toString()
 }
 

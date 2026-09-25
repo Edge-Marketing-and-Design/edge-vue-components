@@ -42,7 +42,7 @@ test('check and run post the operation with the key and return the Hub\'s answer
   assert.deepEqual(JSON.parse(requests[0].init.body), { orgId: 'org1', action: 'check', operation, client: 'edge-cms-mcp' })
   assert.deepEqual(JSON.parse(requests[1].init.body), { orgId: 'org1', action: 'run', operation, checksum: 'abc', client: 'edge-cms-mcp' })
   await client.preview('org1', 'site1', 'home')
-  assert.deepEqual(JSON.parse(requests[2].init.body), { orgId: 'org1', action: 'preview', siteId: 'site1', pageId: 'home', source: 'draft', client: 'edge-cms-mcp' })
+  assert.deepEqual(JSON.parse(requests[2].init.body), { orgId: 'org1', action: 'preview', siteId: 'site1', pageId: 'home', source: 'draft', blockDrafts: true, client: 'edge-cms-mcp' })
   await client.readiness('org1', 'site1')
   assert.deepEqual(JSON.parse(requests[3].init.body), { orgId: 'org1', action: 'readiness', siteId: 'site1', client: 'edge-cms-mcp' })
 })

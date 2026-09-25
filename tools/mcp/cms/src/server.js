@@ -559,6 +559,7 @@ server.registerTool(
       siteId: z.string().trim().min(1).describe('Site document id.'),
       pageId: z.string().trim().min(1).describe('Page document id.'),
       source: z.enum(['draft', 'published']).optional().default('draft'),
+      blockDrafts: z.boolean().optional().default(true).describe('Render blocks with their unreleased drafts (block.draft), so you can check a fix before a developer releases it. Draft pages only. False shows what the released blocks look like.'),
     },
     annotations: {
       readOnlyHint: true,
@@ -566,7 +567,7 @@ server.registerTool(
       idempotentHint: false,
     },
   },
-  async ({ orgId, siteId, pageId, source }) => jsonResult(await agentOperations.preview(resolveOrgId(orgId), siteId, pageId, source)),
+  async ({ orgId, siteId, pageId, source, blockDrafts }) => jsonResult(await agentOperations.preview(resolveOrgId(orgId), siteId, pageId, source, blockDrafts)),
 )
 
 // Adds the local renderer's answer to each override item: whether the

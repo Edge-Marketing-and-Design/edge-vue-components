@@ -23,7 +23,7 @@ const {
 
 const { createKvMirrorHandler } = require('./kv/kvMirror')
 const kv = require('./kv/kvClient')
-const { blockDefinitionChanged } = require('./helpers/cmsBlockPropagation')
+const { blockDefinitionChanged, buildPageBlockUpdate } = require('./helpers/cmsBlockPropagation')
 const blockRevisions = require('./cmsBlockRevisions')
 const blockReleases = require('./cmsBlockReleases')
 const cmsOperations = require('./cmsOperations')
@@ -4028,7 +4028,10 @@ const buildCmsPreviewRenderUrl = ({ baseUrl, orgId, siteId, pageId, mode = '', s
   return buildPreviewUrl({ baseUrl, orgId, siteId, pageId, source, token, mode })
 }
 
-const readPreviewRenderContext = async ({ orgId, siteId, pageId, source = 'draft' }) => {
+// blockDrafts: show each block's unreleased draft instead of its released
+// definition (draft pages only), so an agent can check a fix before a developer
+// releases it.
+const readPreviewRenderContext = async ({ orgId, siteId, pageId, source = 'draft', blockDrafts = false }) => {
   const orgRef = db.collection('organizations').doc(orgId)
   const siteRef = orgRef.collection('sites').doc(siteId)
   const draftPageRef = siteRef.collection('pages').doc(pageId)
@@ -4052,7 +4055,27 @@ const readPreviewRenderContext = async ({ orgId, siteId, pageId, source = 'draft
     if (snap.exists)
       blocksById[String(blockId)] = snap.data() || {}
   }))
-  return { siteRef, pageRef: draftPageRef, renderPageRef, siteData, pageData, themeData, blocksById, source: usePublished ? 'published' : 'draft' }
+  if (blockDrafts && !usePublished) {
+    const revisions = await import('./helpers/cmsBlockRevisions.mjs')
+    const draftRevisionDocs = {}
+    await Promise.all(Object.entries(blocksById).map(async ([blockId, block]) => {
+      if (!revisions.isRevisionNumber(block?.draftRevision))
+        return
+      const snap = await orgRef.collection('blocks').doc(blockId).collection('revisions').doc(String(block.draftRevision)).get()
+      if (snap.exists)
+        draftRevisionDocs[blockId] = snap.data() || {}
+    }))
+    const withDrafts = revisions.blocksWithDraftDefinitions(blocksById, draftRevisionDocs)
+    // The page's instances hold their own copy of each block; copy the draft
+    // into them the way a release would, keeping their values.
+    let draftPage = JSON.parse(JSON.stringify(pageData))
+    for (const blockId of withDrafts.draftBlockIds) {
+      const update = await buildPageBlockUpdate(draftPage, blockId, blocksById[blockId], withDrafts.blocks[blockId])
+      draftPage = { ...draftPage, content: update.content, postContent: update.postContent }
+    }
+    return { siteRef, pageRef: draftPageRef, renderPageRef, siteData, pageData: draftPage, themeData, blocksById: withDrafts.blocks, draftBlockIds: withDrafts.draftBlockIds, source: 'draft' }
+  }
+  return { siteRef, pageRef: draftPageRef, renderPageRef, siteData, pageData, themeData, blocksById, draftBlockIds: [], source: usePublished ? 'published' : 'draft' }
 }
 
 const serializePreviewPayload = value => JSON.parse(JSON.stringify(value || null))
@@ -4084,7 +4107,7 @@ exports.getPreviewRenderPayload = onCall({ timeoutSeconds: 60, memory: '512MiB' 
   if (!signedInReader && !verifyPreviewToken(data.token, { orgId, siteId, pageId, source }))
     throw new HttpsError('permission-denied', 'Sign in to the Hub, or use a valid preview link. Preview links expire.')
 
-  const context = await readPreviewRenderContext({ orgId, siteId, pageId, source })
+  const context = await readPreviewRenderContext({ orgId, siteId, pageId, source, blockDrafts: data.blockDrafts === true })
   const collectionValues = await resolveCmsPreviewCollectionValuesWithTimeout({
     orgId,
     siteId,
@@ -4098,6 +4121,7 @@ exports.getPreviewRenderPayload = onCall({ timeoutSeconds: 60, memory: '512MiB' 
     page: serializePreviewPayload({ ...context.pageData, docId: pageId }),
     theme: serializePreviewPayload(context.themeData),
     blocks: serializePreviewPayload(context.blocksById),
+    draftBlockIds: context.draftBlockIds,
     collectionValues: serializePreviewPayload(collectionValues),
     renderContext: await fetchPreviewRenderContext({ orgId, siteId }),
   }

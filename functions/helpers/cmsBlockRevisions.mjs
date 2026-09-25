@@ -184,3 +184,20 @@ export const blockWithDraftDefinition = (storedDoc, draftRevisionDoc) => {
     return clone(storedDoc)
   return applyBlockDefinition(storedDoc, draftRevisionDoc.definition)
 }
+
+// A page preview that shows unreleased work: each library block with an open
+// draft is replaced by the block with its draft definition, as the Block
+// Editor shows it. `draftRevisionDocs` maps block ids to their draft revision
+// documents. Returns { blocks, draftBlockIds }.
+export const blocksWithDraftDefinitions = (blocksById = {}, draftRevisionDocs = {}) => {
+  const blocks = {}
+  const draftBlockIds = []
+  for (const [blockId, block] of Object.entries(isPlainObject(blocksById) ? blocksById : {})) {
+    const draft = draftRevisionDocs?.[blockId]
+    const usable = isRevisionNumber(block?.draftRevision) && isPlainObject(draft) && draft.status === 'draft' && draft.number === block.draftRevision
+    blocks[blockId] = usable ? blockWithDraftDefinition(block, draft) : clone(block)
+    if (usable)
+      draftBlockIds.push(blockId)
+  }
+  return { blocks, draftBlockIds }
+}

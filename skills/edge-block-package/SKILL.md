@@ -7,6 +7,8 @@ description: Build Edge CMS Template v2 block import packages from a Claude Desi
 
 Repeatable process for producing Template v2 library blocks that a human uploads into a live Edge CMS Hub. Proven on The Mule (emd-cms, September 2026). The vue-to-block-migrator skill owns the block grammar; this skill owns the packaging workflow around it.
 
+**With the Hub's agent tools** (the CMS MCP with an agent key), building a whole site follows the edge-design-to-site skill: author and validate blocks here (steps 1–6), then create them in the Hub with `block.create` instead of handing files over, and keep going to the next page. Its two checkpoints replace the per-package review in step 8 and the one-page limit below.
+
 ## Boundary
 
 - Output is an import package under the project's `importfiles/` folder: block JSON files, a manifest, a README with upload steps, and support scripts. Never Hub application code, never renderer code.
@@ -64,7 +66,7 @@ Numbering packages (`00-site-setup`, `01-global-chrome`, `02-home` ...) keeps up
 
 ## Do not
 
-- Build more than one page or four blocks before the operator has reviewed the previous package.
+- Without the agent tools: build more than one page or four blocks before the operator has reviewed the previous package.
 - Rebuild chrome, theme, or head for one page.
 - Put a page JSON in a package unless the precedent package for that Hub does; pages are assembled in the Hub.
 - Edit `emd-cms-front`, commit, publish, or deploy.

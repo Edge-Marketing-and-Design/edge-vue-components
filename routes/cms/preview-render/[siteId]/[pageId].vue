@@ -24,6 +24,8 @@ const organizationId = computed(() => String(route.query.orgId || edgeGlobal.edg
 const routeLastSegment = computed(() => String(route.query.routeLastSegment || '').trim())
 const isThumbnailMode = computed(() => String(route.query.mode || '').trim() === 'thumbnail')
 const previewSource = computed(() => String(route.query.source || '').trim() === 'published' ? 'published' : 'draft')
+// drafts=1: blocks render their unreleased drafts (links from cms_preview_url).
+const previewBlockDrafts = computed(() => String(route.query.drafts || '') === '1' && previewSource.value === 'draft')
 const orgPath = computed(() => organizationId.value ? `organizations/${organizationId.value}` : '')
 
 const siteDoc = computed(() => state.payload?.site || null)
@@ -326,6 +328,7 @@ const loadPreviewData = async () => {
       pageId: pageId.value,
       token: previewToken.value,
       source: previewSource.value,
+      blockDrafts: previewBlockDrafts.value,
       routeLastSegment: routeLastSegment.value,
     })
     state.payload = response?.data || response || null
@@ -372,6 +375,7 @@ watch(() => [organizationId.value, siteId.value, pageId.value, previewToken.valu
       v-else
       :class="isThumbnailMode ? 'cms-preview-thumbnail-capture cms-auth-preview-logged-in' : 'cms-preview-render-page cms-auth-preview-logged-in'"
       :data-preview-ready="previewReady ? 'true' : 'false'"
+      :data-preview-block-drafts="(state.payload?.draftBlockIds || []).join(',')"
     >
       <div :class="isThumbnailMode ? 'cms-preview-render-page cms-preview-thumbnail-content' : ''">
         <template v-if="previewRows.length">

@@ -113,8 +113,8 @@ name cannot silently select the wrong theme. Its response includes:
 
 ## Draft-only CMS operations (agent key)
 
-- `cms_check_operation`: plan an operation (theme, draft page, block
-  placement and content, new block, block draft) and get what would change,
+- `cms_check_operation`: plan an operation (theme, new site, draft page,
+  block placement and content, new block, block draft) and get what would change,
   any problems, and a checksum. Writes nothing.
 - `cms_run_operation`: run a checked operation with its checksum. The Hub
   refuses it if anything the check read changed since, or if it has
@@ -125,8 +125,17 @@ name cannot silently select the wrong theme. Its response includes:
 - `cms_preview_url`: a 15-minute link to the Hub's preview of one draft page
   (or its published copy), rendered with the Hub's block renderer and the
   site's theme. Open it in a browser and screenshot it to compare with the
-  design. Vue override components don't render there. Needs
-  `CMS_PREVIEW_TOKEN_SECRET` in the Hub's Functions environment.
+  design. By default blocks show their unreleased drafts (`blockDrafts`,
+  applied to the page's instances as a release would), so a fix can be
+  checked before a developer releases it. Vue override components don't
+  render there. Needs `CMS_PREVIEW_TOKEN_SECRET` in the Hub's Functions
+  environment.
+- `cms_site_readiness`: what stops a site from being finished (see the
+  Hub's `docs/data-contracts/cms-operations/README.md`), with whether the
+  local `emd-cms-front` checkout has each override component.
+
+The end-to-end workflow that uses these tools is the `edge-design-to-site`
+skill (`edge/skills/edge-design-to-site`).
 
 Every operation type and field is in
 `docs/data-contracts/cms-operations/README.md`. Results are the Hub's JSON

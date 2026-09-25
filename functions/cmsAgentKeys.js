@@ -164,7 +164,7 @@ const HTTP_STATUS = {
 }
 
 // POST { orgId, action: 'check' | 'run', operation, checksum?, client? }
-// or { orgId, action: 'preview', siteId, pageId, source? }, or
+// or { orgId, action: 'preview', siteId, pageId, source?, blockDrafts? }, or
 // { orgId, action: 'readiness', siteId } with
 // Authorization: Bearer <agent key>. Runs the draft-only CMS operations as
 // the key's creator, or returns a short-lived preview link for one page the
@@ -185,7 +185,9 @@ const previewLink = async ({ uid, orgId, body }) => {
   if (!page.exists)
     throw new HttpsError('not-found', `${source === 'published' ? 'Published' : 'Draft'} page "${pageId}" does not exist on site "${siteId}".`)
   const { token, expiresAt } = issuePreviewToken({ orgId, siteId, pageId, source })
-  return { url: buildPreviewUrl({ baseUrl: previewBaseUrl(), orgId, siteId, pageId, source, token }), expiresAt }
+  // blockDrafts: render unreleased block drafts (draft pages only).
+  const blockDrafts = body.blockDrafts === true && source === 'draft'
+  return { url: buildPreviewUrl({ baseUrl: previewBaseUrl(), orgId, siteId, pageId, source, token, blockDrafts }), expiresAt, blockDrafts }
 }
 exports.agentOperation = onRequest({ timeoutSeconds: 120 }, async (req, res) => {
   if (req.method !== 'POST') {
