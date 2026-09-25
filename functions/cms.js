@@ -26,6 +26,7 @@ const kv = require('./kv/kvClient')
 const { blockDefinitionChanged } = require('./helpers/cmsBlockPropagation')
 const blockRevisions = require('./cmsBlockRevisions')
 const blockReleases = require('./cmsBlockReleases')
+const cmsOperations = require('./cmsOperations')
 const { removeCmsPageFromMenus } = require('./helpers/cmsPageDeletion')
 const { resolveSubmittedUserRouting } = require('./helpers/submittedUserRouting')
 
@@ -1947,6 +1948,11 @@ exports.retryBlockRelease = blockReleases.retryBlockRelease
 exports.blockReleaseWorker = blockReleases.blockReleaseWorker
 exports.blockRevisionUsage = blockReleases.blockRevisionUsage
 exports.blockReleaseHistory = blockReleases.blockReleaseHistory
+
+// CMS operations: validated, draft-only writes for building sites
+// (cms-checkOperation, cms-runOperation).
+exports.checkOperation = cmsOperations.checkOperation
+exports.runOperation = cmsOperations.runOperation
 
 exports.fontFileUpdated = onDocumentUpdated({ document: 'organizations/{orgId}/files/{fileId}', timeoutSeconds: 180 }, async (event) => {
   const before = event.data.before.data() || {}

@@ -20,7 +20,7 @@ const open = computed({
   },
 })
 
-const SOURCE_LABELS = { 'editor': 'the Block Editor', 'import': 'an import', 'page-editor': 'the page editor' }
+const SOURCE_LABELS = { 'editor': 'the Block Editor', 'import': 'an import', 'page-editor': 'the page editor', 'agent': 'an agent' }
 
 const details = computed(() => props.conflict?.details || {})
 const changedWhere = computed(() => {

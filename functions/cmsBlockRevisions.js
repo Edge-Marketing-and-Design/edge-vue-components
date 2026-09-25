@@ -15,7 +15,7 @@ const corePromise = import('./helpers/cmsBlockRevisions.mjs')
 const DOC_ID_PATTERN = /^[^/]{1,1500}$/
 const BASE_HASH_PATTERN = /^[0-9a-f]{16}$/
 
-const SOURCE_LABELS = { 'editor': 'the Block Editor', 'import': 'an import', 'page-editor': 'the page editor' }
+const SOURCE_LABELS = { 'editor': 'the Block Editor', 'import': 'an import', 'page-editor': 'the page editor', 'agent': 'an agent' }
 
 // Refuses a save whose starting point is out of date. The details let the
 // caller show what changed and save again on top of it.
@@ -84,11 +84,10 @@ const baselineRevision = (core, block, now) => ({
 
 // Creates or updates the block's single draft revision. Saving the released
 // definition back discards the draft instead.
-exports.saveBlockDraft = onCall({ timeoutSeconds: 60 }, async (request) => {
-  const core = await corePromise
-  const { uid, blockId, blockRef } = await assertRevisionCaller(request)
-  const data = request.data || {}
-
+// Saves a draft definition for an existing block in one transaction. Used by
+// cms-saveBlockDraft and by the CMS operations layer (block.draft), so both
+// apply the same base check and keep replaced drafts.
+const saveDraft = async (core, { uid, blockId, blockRef, data }) => {
   if (!isPlainObject(data.definition))
     throw new HttpsError('invalid-argument', 'A block definition is required.')
   const definition = core.pickBlockDefinition(data.definition)
@@ -189,7 +188,16 @@ exports.saveBlockDraft = onCall({ timeoutSeconds: 60 }, async (request) => {
 
   logger.log(`Block ${blockId} draft ${result.status} by ${uid} (source ${source})`, result)
   return result
+}
+
+exports.saveBlockDraft = onCall({ timeoutSeconds: 60 }, async (request) => {
+  const core = await corePromise
+  const { uid, blockId, blockRef } = await assertRevisionCaller(request)
+  return saveDraft(core, { uid, blockId, blockRef, data: request.data || {} })
 })
+
+// For the CMS operations layer; cms.js doesn't re-export it.
+exports.saveDraft = saveDraft
 
 // Discards the block's draft revision. `draftRevision` and `baseHash` must
 // name the draft the caller saw, so a newer draft, or a later save of the same

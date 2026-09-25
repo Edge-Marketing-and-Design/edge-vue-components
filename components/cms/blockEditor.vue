@@ -3371,7 +3371,7 @@ const loadBlockDocument = async ({ docId }) => {
   return view
 }
 
-const DRAFT_SOURCE_LABELS = { 'editor': 'Block Editor', 'import': 'import', 'page-editor': 'page editor' }
+const DRAFT_SOURCE_LABELS = { 'editor': 'Block Editor', 'import': 'import', 'page-editor': 'page editor', 'agent': 'agent' }
 
 const unreleasedChangesLabel = computed(() => {
   const { draftRevision, releasedRevision, draftSource } = state.blockRevision
