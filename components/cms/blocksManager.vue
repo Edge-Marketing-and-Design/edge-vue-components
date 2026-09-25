@@ -1696,7 +1696,7 @@ const handleBlockImport = async (event) => {
             Skip This File
           </edge-shad-button>
           <edge-shad-button @click="resolveDroppedImportThemes(true)">
-            Import Without Them
+            Import Without Unknown Themes
           </edge-shad-button>
         </DialogFooter>
       </DialogContent>
