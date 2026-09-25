@@ -2,8 +2,7 @@
 import { Download, MoreHorizontal } from 'lucide-vue-next'
 import { renderTemplateAsync } from '@edgedev/template-engine'
 import { guardOverrideRename } from '../../lib/cmsOverrideRename'
-import { validateBlock } from '../../lib/cmsBlockValidation'
-import { collectImportFindings, createBlockCheckError, resolveImportedBlockThemes } from '../../lib/cmsBlockImport'
+import { checkImportedBlock, createBlockCheckError, normalizeBlockTypes, normalizeImportedDoc, resolveImportedBlockThemes } from '../../lib/cmsBlockImport'
 import { saveLibraryBlockEdit } from '../../lib/cmsBlockRevisionClient'
 const emit = defineEmits(['head'])
 const edgeFirebase = inject('edgeFirebase')
@@ -220,6 +219,10 @@ const blockImportConflictResolver = ref(null)
 const DEFAULT_BLOCK_IMPORT_ERROR_MESSAGE = 'Failed to import block JSON.'
 const OPTIONAL_BLOCK_IMPORT_KEYS = new Set(['previewType', 'type', 'isOverrideBlock'])
 const TEMPLATE_V2_BLOCK_IMPORT_KEYS = new Set(['templateVersion', 'template', 'schema', 'dataSources'])
+// The keys a file must have: the new-block schema's, less the optional ones.
+// Import fills the Template v2 fields first, so they are never missing.
+const importRequiredBlockKeys = () => Object.keys(blockNewDocSchema.value || {})
+  .filter(key => !OPTIONAL_BLOCK_IMPORT_KEYS.has(key) && !TEMPLATE_V2_BLOCK_IMPORT_KEYS.has(key))
 
 const openAddBlockDialog = () => {
   resetAddBlockDialogState()
@@ -233,38 +236,6 @@ const getThemeFromId = (themeId) => {
 
 const normalizePreviewType = (value) => {
   return value === 'dark' ? 'dark' : 'light'
-}
-
-const normalizeBlockTypes = (value, { fallbackToPage = true } = {}) => {
-  const hasExplicitTypeValue = !(
-    value === undefined
-    || value === null
-    || value === ''
-    || (Array.isArray(value) && value.length === 0)
-  )
-  const rawTypes = Array.isArray(value) ? value : [value]
-  const normalized = rawTypes
-    .map((typeValue) => {
-      if (typeValue && typeof typeValue === 'object') {
-        const objectValue = typeValue.name ?? typeValue.value ?? typeValue.title ?? typeValue.label ?? ''
-        return String(objectValue || '')
-      }
-      return String(typeValue || '')
-    })
-    .map(typeValue => typeValue.trim().toLowerCase())
-    .map((typeValue) => {
-      if (typeValue === 'page')
-        return 'Page'
-      if (typeValue === 'post')
-        return 'Post'
-      return ''
-    })
-    .filter(Boolean)
-
-  const uniqueNormalized = [...new Set(normalized)]
-  if (!uniqueNormalized.length && fallbackToPage && !hasExplicitTypeValue)
-    return ['Page']
-  return uniqueNormalized
 }
 
 const previewSurfaceClass = (value) => {
@@ -889,25 +860,6 @@ const readTextFile = file => new Promise((resolve, reject) => {
   reader.readAsText(file)
 })
 
-const normalizeImportedDoc = (payload, fallbackDocId = '') => {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload))
-    throw new Error('Invalid JSON payload. Expected an object.')
-
-  if (payload.document && typeof payload.document === 'object' && !Array.isArray(payload.document)) {
-    const normalized = { ...payload.document }
-    if (!normalized.docId && payload.docId)
-      normalized.docId = payload.docId
-    if (!normalized.docId && fallbackDocId)
-      normalized.docId = fallbackDocId
-    return normalized
-  }
-
-  const normalized = { ...payload }
-  if (!normalized.docId && fallbackDocId)
-    normalized.docId = fallbackDocId
-  return normalized
-}
-
 const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value)
 
 const cloneSchemaValue = (value) => {
@@ -927,29 +879,6 @@ const getDocDefaultsFromSchema = (schema = {}) => {
 }
 
 const getBlockDocDefaults = () => getDocDefaultsFromSchema(blockNewDocSchema.value || {})
-
-const normalizeImportedBlockVersion = (doc) => {
-  const normalizedVersion = Number(doc?.templateVersion) === 2 ? 2 : 1
-  doc.templateVersion = normalizedVersion
-
-  if (normalizedVersion === 2) {
-    if (typeof doc.template !== 'string')
-      doc.template = typeof doc.content === 'string' ? doc.content : ''
-    if (!isPlainObject(doc.schema))
-      doc.schema = {}
-    if (!isPlainObject(doc.dataSources))
-      doc.dataSources = {}
-    return doc
-  }
-
-  if (typeof doc.template !== 'string')
-    doc.template = ''
-  if (!isPlainObject(doc.schema))
-    doc.schema = {}
-  if (!isPlainObject(doc.dataSources))
-    doc.dataSources = {}
-  return doc
-}
 
 const slugifyBlockDocId = (value) => {
   return String(value || '')
@@ -1035,36 +964,6 @@ const createBlockFromTemplate = async () => {
   finally {
     state.creatingBlock = false
   }
-}
-
-const validateImportedBlockDoc = (doc) => {
-  if (!isPlainObject(doc))
-    throw new Error('Invalid block document. Expected an object.')
-
-  normalizeImportedBlockVersion(doc)
-
-  const requiredKeys = Object.keys(blockNewDocSchema.value || {})
-    .filter(key => !OPTIONAL_BLOCK_IMPORT_KEYS.has(key))
-    .filter(key => doc.templateVersion === 2 || !TEMPLATE_V2_BLOCK_IMPORT_KEYS.has(key))
-  const missing = requiredKeys.filter(key => !Object.prototype.hasOwnProperty.call(doc, key))
-  if (missing.length)
-    throw new Error(`Missing required block key(s): ${missing.join(', ')}`)
-
-  return doc
-}
-
-const validateImportedBlockTypes = (doc) => {
-  if (!Object.prototype.hasOwnProperty.call(doc || {}, 'type')) {
-    doc.type = ['Page']
-    return doc
-  }
-
-  const normalizedTypes = normalizeBlockTypes(doc.type, { fallbackToPage: false })
-  if (!normalizedTypes.length)
-    throw new Error('Invalid "type" value. Use "Page", "Post", or both.')
-
-  doc.type = normalizedTypes
-  return doc
 }
 
 const getOrgThemeIds = () => Object.keys(edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`] || {})
@@ -1227,15 +1126,17 @@ const importSingleBlockFile = async (file, existingBlocks = {}) => {
   const fileText = await readTextFile(file)
   const parsed = JSON.parse(fileText)
   const rawDoc = normalizeImportedDoc(parsed, '')
-  // Validate the file as written, before the Hub fills in defaults.
-  const validation = await validateBlock(isPlainObject(rawDoc) ? edgeGlobal.dupObject(rawDoc) : rawDoc, {
+  // The same check as scripts/cms/validate-block.mjs.
+  const findings = await checkImportedBlock(rawDoc, {
     knownThemeIds: getOrgThemeIds(),
     renderTemplate: renderTemplateAsync,
+    requiredKeys: importRequiredBlockKeys(),
   })
-  const findings = collectImportFindings(validation)
-  const importedDoc = validateImportedBlockTypes(validateImportedBlockDoc(rawDoc))
+  if (findings.hardError)
+    throw new Error(findings.hardError)
   if (findings.blocking.length)
     throw createBlockCheckError(findings.blocking)
+  const importedDoc = findings.doc
   if (!await applyImportedBlockThemes(importedDoc, file?.name))
     return null
   const incomingDocId = await getImportDocId(importedDoc, '')
