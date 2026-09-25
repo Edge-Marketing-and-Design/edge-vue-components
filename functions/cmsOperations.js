@@ -421,14 +421,11 @@ const planOperation = async (reader, context) => {
   return planBlock(core, reader, context)
 }
 
-const assertOperationCaller = async (request) => {
-  const uid = request?.auth?.uid
-  if (!uid)
-    throw new HttpsError('unauthenticated', 'Authentication required.')
-  if (request?.data?.uid !== uid)
-    throw new HttpsError('permission-denied', 'UID mismatch.')
-  const orgId = requireDocId(request.data.orgId, 'organization id')
-  const operation = request.data.operation
+// Checks the organization, the operation type and the caller's write
+// permission. `uid` is the signed-in user, or for an agent key the developer
+// who created it.
+const authorizeOperation = async ({ uid, orgId: rawOrgId, operation }) => {
+  const orgId = requireDocId(rawOrgId, 'organization id')
   const core = await corePromise
   if (!isPlainObject(operation) || !core.CMS_OPERATION_TYPES.includes(operation.type))
     throw new HttpsError('invalid-argument', `operation.type must be one of: ${core.CMS_OPERATION_TYPES.join(', ')}.`)
@@ -436,6 +433,15 @@ const assertOperationCaller = async (request) => {
   if (!await permissionCheck(uid, 'write', `organizations/${orgId}/${target}`))
     throw new HttpsError('permission-denied', `Not allowed to change ${target} in this organization.`)
   return { uid, orgId, operation }
+}
+
+const assertOperationCaller = async (request) => {
+  const uid = request?.auth?.uid
+  if (!uid)
+    throw new HttpsError('unauthenticated', 'Authentication required.')
+  if (request?.data?.uid !== uid)
+    throw new HttpsError('permission-denied', 'UID mismatch.')
+  return authorizeOperation({ uid, orgId: request.data.orgId, operation: request.data.operation })
 }
 
 const describePlan = (plan, checksum) => ({
@@ -449,20 +455,30 @@ const describePlan = (plan, checksum) => ({
   checksum,
 })
 
-exports.checkOperation = onCall({ timeoutSeconds: 120 }, async (request) => {
-  const { uid, orgId, operation } = await assertOperationCaller(request)
+// Plans an authorized operation and writes nothing.
+const performCheck = async ({ uid, orgId, operation }) => {
   const reader = createReader(null)
   const plan = await planOperation(reader, { orgId, uid, now: Date.now(), operation })
   return describePlan(plan, checksumOf(operation, reader.reads))
-})
+}
 
-exports.runOperation = onCall({ timeoutSeconds: 120 }, async (request) => {
-  const { uid, orgId, operation } = await assertOperationCaller(request)
-  const checksum = request.data.checksum
+// Runs an authorized operation if its checksum still matches. `via` is
+// "hub" or "agent"; agent runs also record the key.
+const performRun = async ({ uid, orgId, operation, checksum, client = '', via = 'hub', agentKeyId = null }) => {
   if (typeof checksum !== 'string' || !checksum)
     throw new HttpsError('invalid-argument', 'checksum is required: run cms-checkOperation first.')
   const now = Date.now()
   const auditRef = orgRefOf(orgId).collection('cmsOperations').doc()
+  const auditBase = {
+    type: operation.type,
+    checksum,
+    runBy: uid,
+    runAt: new Date(now).toISOString(),
+    via,
+    agentKeyId,
+    client: String(client || '').slice(0, 100),
+    status: 'applied',
+  }
 
   const outcome = await db.runTransaction(async (transaction) => {
     const reader = createReader(transaction)
@@ -479,17 +495,7 @@ exports.runOperation = onCall({ timeoutSeconds: 120 }, async (request) => {
       else
         transaction.update(write.ref, write.data)
     }
-    transaction.set(auditRef, {
-      type: operation.type,
-      operation,
-      changes: plan.changes,
-      result: plan.result,
-      checksum,
-      runBy: uid,
-      runAt: new Date(now).toISOString(),
-      client: String(request.data.client || '').slice(0, 100),
-      status: 'applied',
-    })
+    transaction.set(auditRef, { ...auditBase, operation, changes: plan.changes, result: plan.result })
     return { plan }
   })
 
@@ -501,22 +507,27 @@ exports.runOperation = onCall({ timeoutSeconds: 120 }, async (request) => {
       uid,
       blockId: outcome.plan.draft.blockId,
       blockRef: outcome.plan.draft.ref,
-      data: { definition: operation.definition, source: 'agent', baseHash: operation.baseHash, baseRevision: operation.baseRevision ?? null },
+      data: { definition: operation.definition, source: via === 'agent' ? 'agent' : 'editor', baseHash: operation.baseHash, baseRevision: operation.baseRevision ?? null },
     })
     result = { ...result, ...draft }
     const { definition: _definition, ...recorded } = operation
-    await auditRef.set({
-      type: operation.type,
-      operation: recorded,
-      changes: outcome.plan.changes,
-      result,
-      checksum,
-      runBy: uid,
-      runAt: new Date(now).toISOString(),
-      client: String(request.data.client || '').slice(0, 100),
-      status: 'applied',
-    })
+    await auditRef.set({ ...auditBase, operation: recorded, changes: outcome.plan.changes, result })
   }
-  logger.log(`CMS operation ${operation.type} run by ${uid}`, { orgId, result })
+  logger.log(`CMS operation ${operation.type} run by ${uid} via ${via}`, { orgId, result, agentKeyId })
   return { operationId: auditRef.id, status: 'applied', result, summary: outcome.plan.summary }
+}
+
+exports.checkOperation = onCall({ timeoutSeconds: 120 }, async (request) => {
+  const caller = await assertOperationCaller(request)
+  return performCheck(caller)
 })
+
+exports.runOperation = onCall({ timeoutSeconds: 120 }, async (request) => {
+  const caller = await assertOperationCaller(request)
+  return performRun({ ...caller, checksum: request.data.checksum, client: request.data.client, via: 'hub' })
+})
+
+// For the agent endpoint (cmsAgentKeys.js); cms.js doesn't re-export these.
+exports.authorizeOperation = authorizeOperation
+exports.performCheck = performCheck
+exports.performRun = performRun

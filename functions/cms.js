@@ -27,6 +27,7 @@ const { blockDefinitionChanged } = require('./helpers/cmsBlockPropagation')
 const blockRevisions = require('./cmsBlockRevisions')
 const blockReleases = require('./cmsBlockReleases')
 const cmsOperations = require('./cmsOperations')
+const cmsAgentKeys = require('./cmsAgentKeys')
 const { removeCmsPageFromMenus } = require('./helpers/cmsPageDeletion')
 const { resolveSubmittedUserRouting } = require('./helpers/submittedUserRouting')
 
@@ -1953,6 +1954,14 @@ exports.blockReleaseHistory = blockReleases.blockReleaseHistory
 // (cms-checkOperation, cms-runOperation).
 exports.checkOperation = cmsOperations.checkOperation
 exports.runOperation = cmsOperations.runOperation
+
+// Agent keys for the CMS operations (cms-createAgentKey, cms-listAgentKeys,
+// cms-revokeAgentKey) and the endpoint agents call with one
+// (cms-agentOperation, HTTP POST).
+exports.createAgentKey = cmsAgentKeys.createAgentKey
+exports.listAgentKeys = cmsAgentKeys.listAgentKeys
+exports.revokeAgentKey = cmsAgentKeys.revokeAgentKey
+exports.agentOperation = cmsAgentKeys.agentOperation
 
 exports.fontFileUpdated = onDocumentUpdated({ document: 'organizations/{orgId}/files/{fileId}', timeoutSeconds: 180 }, async (event) => {
   const before = event.data.before.data() || {}
