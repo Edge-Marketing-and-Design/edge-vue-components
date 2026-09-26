@@ -233,16 +233,21 @@ EDGE_CMS_MCP_CONFIG=tools/mcp/config/clearwater.production.json node edge/tools/
 
 ### Git worktrees
 
-The project `.mcp.json` always starts the server from the main checkout
-(`git rev-parse --git-common-dir`), not from the session's own directory. A
-git worktree, such as the ones Claude Code creates under
-`.claude/worktrees/`, has no `node_modules` for the server (they are
-gitignored), so starting it from the worktree fails with "Cannot find
-package 'firebase-admin'" and the client reports the server as
-disconnected. Starting from the main checkout also makes the default
-workspace (`.tmp/cms-block-workspace`) and renderer path (`../emd-cms-front`)
-resolve to the real locations. Install the dependencies once, in the main
-checkout.
+The project `.mcp.json` starts the server from the session's own checkout
+(`git rev-parse --show-toplevel`), so the server code always matches that
+checkout's `.mcp.json`, whatever branch the main checkout has checked out.
+A git worktree, such as the ones Claude Code creates under
+`.claude/worktrees/`, has no `node_modules` (they are gitignored), so the
+launcher links the server's `node_modules` from the main checkout
+(`git rev-parse --git-common-dir`) when it is missing, and points the
+renderer path (`../emd-cms-front`) and the block workspace
+(`.tmp/cms-block-workspace`) at the main checkout's real locations unless
+`EDGE_CMS_RENDERER_REPO` or `EDGE_CMS_WORKSPACE_ROOT` is set. Install the
+dependencies once, in the main checkout.
+
+An earlier launcher started the server from the main checkout itself; it
+broke every session whose branch didn't match the main checkout's (the
+server moved from `tools/mcp/firebase-readonly` to `edge/tools/mcp/cms`).
 
 ## Codex MCP Config
 
