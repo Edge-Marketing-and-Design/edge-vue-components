@@ -179,6 +179,32 @@ const sitePagePreviewSnapshotQueued = new Set()
 const sitePagePreviewBackendQueued = new Set()
 const sitePagePreviewForcedRendered = ref(new Set())
 const sitePagePreviewScales = ref({})
+const visibleSitePagePreviewIds = ref(new Set())
+const sitePagePreviewVisibilityObservers = new Map()
+const vPreviewVisible = {
+  mounted(element, binding) {
+    const docId = String(binding.value || '').trim()
+    if (!docId || visibleSitePagePreviewIds.value.has(docId))
+      return
+    if (typeof IntersectionObserver === 'undefined') {
+      visibleSitePagePreviewIds.value = new Set([...visibleSitePagePreviewIds.value, docId])
+      return
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some(entry => entry.isIntersecting))
+        return
+      visibleSitePagePreviewIds.value = new Set([...visibleSitePagePreviewIds.value, docId])
+      observer.disconnect()
+      sitePagePreviewVisibilityObservers.delete(element)
+    }, { rootMargin: '400px 0px' })
+    sitePagePreviewVisibilityObservers.set(element, observer)
+    observer.observe(element)
+  },
+  unmounted(element) {
+    sitePagePreviewVisibilityObservers.get(element)?.disconnect()
+    sitePagePreviewVisibilityObservers.delete(element)
+  },
+}
 let html2canvasModulePromise = null
 let sitePagePreviewSnapshotQueueRunning = false
 let sitePagePreviewSnapshotQueueStopped = false
@@ -3779,6 +3805,8 @@ const isSiteSettingPublished = computed(() => {
 })
 
 onBeforeUnmount(() => {
+  sitePagePreviewVisibilityObservers.forEach(observer => observer.disconnect())
+  sitePagePreviewVisibilityObservers.clear()
   sitePagePreviewSnapshotQueueStopped = true
   sitePagePreviewSnapshotTimers.forEach(timer => clearTimeout(timer))
   sitePagePreviewSnapshotTimers.clear()
@@ -4782,6 +4810,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                     <div
                       v-for="item in sitePageGridItems"
                       :key="item.docId"
+                      v-preview-visible="item.docId"
                       role="button"
                       tabindex="0"
                       class="w-full h-full"
@@ -4884,7 +4913,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                             </div>
                           </div>
                           <div
-                            v-else
+                            v-else-if="visibleSitePagePreviewIds.has(item.docId)"
                             :ref="element => setSitePagePreviewSnapshotRef(item, element)"
                             class="template-scale-wrapper"
                             data-cms-standalone-preview="true"
@@ -4946,6 +4975,15 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                                   </div>
                                 </template>
                               </div>
+                            </div>
+                          </div>
+                          <div
+                            v-else
+                            class="template-scale-wrapper"
+                            aria-label="Page preview loads when this card comes into view"
+                          >
+                            <div class="flex h-full min-h-40 w-full items-center justify-center bg-slate-100 text-xs font-medium text-slate-500 dark:bg-slate-900/60 dark:text-slate-400">
+                              Preview available on scroll
                             </div>
                           </div>
                           <div
