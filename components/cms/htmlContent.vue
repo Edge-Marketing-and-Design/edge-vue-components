@@ -100,6 +100,18 @@ const pushVarDecl = (decls, prefix, key, value) => {
 const cssVarRef = (prefix, key) => `var(--${prefix}-${toCssVarToken(key)})`
 const escapeClassToken = value => String(value || '').replace(/([^a-zA-Z0-9_-])/g, '\\$1')
 
+// Adds `.block-content <selector>` to each utility selector (see the runtime
+// config below).
+const scopeUtilityToBlockContent = (util) => {
+  if (util.layer && util.layer !== 'default')
+    return
+  const selector = String(util.selector || '')
+  if (!selector || selector.includes('.block-content'))
+    return
+  const scoped = selector.split(',').map(part => `.block-content ${part.trim()}`).join(', ')
+  util.selector = `${selector}, ${scoped}`
+}
+
 // --- UnoCSS Runtime singleton (global, one init for the whole app) ---
 async function ensureUnoRuntime() {
   if (typeof window === 'undefined')
@@ -129,6 +141,13 @@ async function ensureUnoRuntime() {
       defaults: defineConfig({
         presets: [presetWind4()],
         shortcuts: [],
+        // The runtime injects its styles before every Hub stylesheet, so the
+        // Hub's own Tailwind (which also has .m-0, .p-0, ...) won any tie
+        // inside a block: `m-0 mt-8` rendered with no top margin (X29). Each
+        // utility also gets a `.block-content` selector, so inside block
+        // canvases block classes beat the Hub's by specificity and keep
+        // UnoCSS's own order among themselves; elsewhere nothing changes.
+        postprocess: [scopeUtilityToBlockContent],
       }),
       observe: true,
     })
@@ -1473,6 +1492,17 @@ function setScopedThemeVars(scopeEl, theme) {
   styleEl.textContent = buildScopedThemeCSS(theme, scopeId)
 }
 
+// An opacity modifier as a whole percent: `50` stays, `[0.03]` and `[3%]`
+// become `3`. Anything else keeps its brackets.
+const bracketOpacityToPercent = (value) => {
+  const raw = String(value || '')
+  if (!raw.startsWith('['))
+    return raw
+  const inner = raw.slice(1, -1).trim()
+  const percent = inner.endsWith('%') ? Number(inner.slice(0, -1)) : Number(inner) * 100
+  return (Number.isFinite(percent) && percent >= 0 && percent <= 100) ? String(Math.round(percent * 100) / 100) : raw
+}
+
 // Convert utility tokens like text-brand/bg-surface/rounded-xl/shadow-card
 // into variable-backed arbitrary values so we don't need to mutate Uno's theme.
 
@@ -1493,13 +1523,15 @@ function toVarBackedUtilities(classList, theme) {
       if (colorMatch) {
         const [, kind, rawKey] = colorMatch
 
-        // support opacity suffix: bg-secondary/50, text-primary/80, etc.
+        // support opacity suffix: bg-secondary/50, text-primary/80, and the
+        // bracketed form (text-primary/[0.03], /[3%]) as a whole percent;
+        // unmatched, the class fell through and rendered black (X30).
         let key = rawKey
         let opacity = null
-        const alphaMatch = /^(.+)\/(\d{1,3})$/.exec(rawKey)
+        const alphaMatch = /^(.+)\/(\d{1,3}|\[[^\]]+\])$/.exec(rawKey)
         if (alphaMatch) {
           key = alphaMatch[1]
-          opacity = alphaMatch[2]
+          opacity = bracketOpacityToPercent(alphaMatch[2])
         }
 
         if (colorKeys.has(key)) {

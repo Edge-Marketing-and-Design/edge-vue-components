@@ -335,10 +335,14 @@ export const templateClassStrings = (template) => {
 // { colors, fonts, radii, raw } (sorted, unique). `raw` holds hard-coded
 // colors: hex or rgb arbitrary values and the Tailwind palette.
 export const findThemeNameIssues = (classStrings) => {
-  const found = { colors: new Set(), fonts: new Set(), radii: new Set(), raw: new Set() }
+  const found = { colors: new Set(), fonts: new Set(), radii: new Set(), raw: new Set(), opacity: new Set() }
   for (const classString of classStrings) {
     for (const token of String(classString || '').split(/\s+/).filter(Boolean)) {
       const utility = token.split(':').pop().replace(/^!/, '').replace(/^-/, '')
+      // Opacity modifiers are whole percents (/5): a bracketed value
+      // (/[0.03]) is dropped by the public renderer.
+      if (/\/\[[^\]]+\]$/.test(utility) && /^(bg|text|border|divide|outline|ring|decoration|fill|stroke|from|via|to|accent|caret|placeholder)-/.test(utility))
+        found.opacity.add(token)
       const arbitrary = utility.match(/^([a-z-]+)-\[(.+)\](?:\/.*)?$/)
       if (arbitrary) {
         const [, prefix, value] = arbitrary
@@ -382,7 +386,7 @@ export const findThemeNameIssues = (classStrings) => {
     }
   }
   const sorted = set => [...set].sort()
-  return { colors: sorted(found.colors), fonts: sorted(found.fonts), radii: sorted(found.radii), raw: sorted(found.raw) }
+  return { colors: sorted(found.colors), fonts: sorted(found.fonts), radii: sorted(found.radii), raw: sorted(found.raw), opacity: sorted(found.opacity) }
 }
 
 // The same issues as block findings: { code, message } per kind found.
@@ -395,6 +399,8 @@ export const themeNameFindings = (classStrings) => {
     findings.push({ code: 'theme.font-name', message: `Fonts outside the standard theme names: ${issues.fonts.join(', ')}. Use ${THEME_FONT_TOKENS.join(', ')}.` })
   if (issues.radii.length)
     findings.push({ code: 'theme.radius-name', message: `Radii outside the standard theme names: ${issues.radii.join(', ')}. Use ${THEME_RADIUS_TOKENS.join(', ')} or a Tailwind size.` })
+  if (issues.opacity.length)
+    findings.push({ code: 'theme.opacity-format', message: `Opacity modifiers must be whole percents (/5, /90): ${issues.opacity.slice(0, 8).join(' ')}. The public renderer drops bracketed values like /[0.03].` })
   if (issues.raw.length)
     findings.push({ code: 'theme.raw-color', message: `Hard-coded colors bypass the theme: ${issues.raw.slice(0, 8).join(' ')}${issues.raw.length > 8 ? ` (+${issues.raw.length - 8} more)` : ''}. Use a standard theme color, with an opacity modifier if needed.` })
   return findings
