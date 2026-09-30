@@ -1,6 +1,7 @@
 <script setup>
 import { renderTemplate, renderTemplateAsync } from '@edgedev/template-engine'
 import { getCmsTemplateRuntimeMeta } from '../../composables/useCmsTemplateRuntimeMeta'
+import { safeParseTagConfig } from '../../lib/cmsTagConfig'
 
 const props = defineProps({
   content: {
@@ -851,21 +852,6 @@ const templateV2RenderSignature = computed(() => {
     return ''
   }
 })
-
-function normalizeConfigLiteral(str) {
-  return String(str || '')
-    .replace(/(\{|,)\s*([A-Za-z_][\w-]*)\s*:/g, '$1"$2":')
-    .replace(/'/g, '"')
-}
-
-function safeParseTagConfig(raw) {
-  try {
-    return JSON.parse(normalizeConfigLiteral(raw))
-  }
-  catch {
-    return null
-  }
-}
 
 function findMatchingBrace(str, startIdx) {
   let depth = 0

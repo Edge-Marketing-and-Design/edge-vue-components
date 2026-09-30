@@ -6,6 +6,7 @@ import * as z from 'zod'
 import { clearCmsTemplateV2LibraryState } from '../../composables/useCmsTemplateRuntimeMeta'
 import { guardOverrideRename } from '../../lib/cmsOverrideRename'
 import { validateBlock } from '../../lib/cmsBlockValidation'
+import { safeParseTagConfig } from '../../lib/cmsTagConfig'
 import { BLOCK_REVISION_DEFINITION_FIELDS, diffBlockMetadata } from '../../lib/cmsBlockRevisions'
 import { BLOCK_EXPORT_BASE_KEY, blockExportBase, discardLibraryBlockDraft, isBlockBaseChangedError, loadLibraryBlockForEditing, releasedRevisionOf, saveLibraryBlockEdit, saveWithBaseCheck } from '../../lib/cmsBlockRevisionClient'
 const props = defineProps({
@@ -2179,30 +2180,6 @@ const updateWorkingPreviewType = (nextValue) => {
     state.previewBlock.previewType = normalized
 }
 
-function normalizeConfigLiteral(str) {
-  // ensure keys are quoted: { title: "x", field: "y" } -> { "title": "x", "field": "y" }
-  return str
-    .replace(/(\{|,)\s*([A-Za-z_][\w-]*)\s*:/g, '$1"$2":')
-    // allow single quotes too
-    .replace(/'/g, '"')
-}
-
-function safeParseConfig(raw) {
-  try {
-    return JSON.parse(raw)
-  }
-  catch {
-    // Fall back to legacy loose config support below.
-  }
-
-  try {
-    return JSON.parse(normalizeConfigLiteral(raw))
-  }
-  catch {
-    return null
-  }
-}
-
 // --- Robust tag parsing: supports nested objects/arrays in the config ---
 // Matches `{{{#<type> { ... }}}}` and extracts a *balanced* `{ ... }` blob.
 const TAG_START_RE = /\{\{\{\#([A-Za-z0-9_-]+)\s*\{/g
@@ -2289,7 +2266,7 @@ const blockModel = (html) => {
     return { values, meta }
 
   for (const { type, rawCfg } of iterateTags(html)) {
-    const cfg = safeParseConfig(rawCfg)
+    const cfg = safeParseTagConfig(rawCfg)
     if (!cfg || !cfg.field)
       continue
 
@@ -2351,7 +2328,7 @@ function handleEditorLineClick(payload, workingDoc) {
   if (tag.type === 'if')
     return
 
-  const parsedCfg = safeParseConfig(tag.rawCfg)
+  const parsedCfg = safeParseTagConfig(tag.rawCfg)
   state.jsonEditorError = ''
   state.jsonEditorContent = parsedCfg ? JSON.stringify(parsedCfg, null, 2) : tag.rawCfg
   state.jsonEditorOpen = true
@@ -2430,7 +2407,7 @@ function handleJsonEditorSave() {
       target = tag
       break
     }
-    const cfg = safeParseConfig(tag.rawCfg)
+    const cfg = safeParseTagConfig(tag.rawCfg)
     if (cfg && String(cfg.field) === field) {
       target = tag
       break

@@ -1,6 +1,7 @@
 <script setup>
 import { Download, MoreHorizontal } from 'lucide-vue-next'
 import { renderTemplateAsync } from '@edgedev/template-engine'
+import { safeParseTagConfig } from '../../lib/cmsTagConfig'
 import { guardOverrideRename } from '../../lib/cmsOverrideRename'
 import { checkImportedBlock, createBlockCheckError, normalizeBlockTypes, normalizeImportedDoc, resolveImportedBlockThemes } from '../../lib/cmsBlockImport'
 import { BLOCK_EXPORT_BASE_KEY, BlockSaveCancelledError, blockExportBase, loadLibraryBlockForEditing, planImportOverwrite, saveLibraryBlockEdit, saveWithBaseCheck, takeImportBase } from '../../lib/cmsBlockRevisionClient'
@@ -55,21 +56,6 @@ const TEMPLATE_PREVIEW_PLACEHOLDERS = {
   textarea: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.',
   richtext: '<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>',
   image: 'https://imagedelivery.net/h7EjKG0X9kOxmLp41mxOng/f1f7f610-dfa9-4011-08a3-7a98d95e7500/thumbnail',
-}
-
-function normalizeConfigLiteral(str) {
-  return str
-    .replace(/(\{|,)\s*([A-Za-z_][\w-]*)\s*:/g, '$1"$2":')
-    .replace(/'/g, '"')
-}
-
-function safeParseConfig(raw) {
-  try {
-    return JSON.parse(normalizeConfigLiteral(raw))
-  }
-  catch {
-    return null
-  }
 }
 
 const TAG_START_RE = /\{\{\{\#([A-Za-z0-9_-]+)\s*\{/g
@@ -144,7 +130,7 @@ const parseBlockTemplateModel = (html) => {
     return { values, meta }
 
   for (const { type, rawCfg } of iterateTags(html)) {
-    const cfg = safeParseConfig(rawCfg)
+    const cfg = safeParseTagConfig(rawCfg)
     if (!cfg || !cfg.field)
       continue
 

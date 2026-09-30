@@ -3,6 +3,7 @@ import { useVModel } from '@vueuse/core'
 import { renderTemplate } from '@edgedev/template-engine'
 import { ChevronDown, FilePen, GripVertical, ImagePlus, Loader2, LockKeyhole, LockOpen, Maximize2, Monitor, Pencil, Plus, Smartphone, Sparkles, Tablet, X } from 'lucide-vue-next'
 import { loadLibraryBlockForEditing, saveLibraryBlockEdit, saveWithBaseCheck } from '../../lib/cmsBlockRevisionClient'
+import { safeParseTagConfig } from '../../lib/cmsTagConfig'
 const props = defineProps({
   modelValue: {
     type: Object,
@@ -166,28 +167,6 @@ const resolveSiteRestrictedSettings = () => {
 
 const resolveSiteAllowsSelfRegistration = () => {
   return resolveSiteRestrictedSettings()?.allowSelfRegistration !== false
-}
-
-function normalizeConfigLiteral(str) {
-  return str
-    .replace(/(\{|,)\s*([A-Za-z_][\w-]*)\s*:/g, '$1"$2":')
-    .replace(/'/g, '"')
-}
-
-function safeParseTagConfig(raw) {
-  try {
-    return JSON.parse(raw)
-  }
-  catch {
-    // Fall back to legacy loose config support below.
-  }
-
-  try {
-    return JSON.parse(normalizeConfigLiteral(raw))
-  }
-  catch {
-    return null
-  }
 }
 
 function findMatchingBrace(str, startIdx) {

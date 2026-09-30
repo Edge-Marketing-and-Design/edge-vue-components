@@ -6,6 +6,7 @@ import DOMPurify from 'dompurify'
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { syncCmsPreviewAuthState } from '../../lib/cmsPreviewAuthState'
+import { BREAKPOINT_MIN_WIDTHS, rewriteViewportClassTokens } from '../../lib/cmsViewportClasses'
 import { useHead } from '#imports'
 
 const props = defineProps({
@@ -1667,15 +1668,7 @@ function applyThemeClasses(scopeEl, theme, variant = 'light', isolated = true) {
   })
 }
 
-// Add new helper to rewrite arbitrary class tokens with responsive and state prefixes
-const BREAKPOINT_MIN_WIDTHS = {
-  'sm': 640,
-  'md': 768,
-  'lg': 1024,
-  'xl': 1280,
-  '2xl': 1536,
-}
-
+// Responsive classes in sized canvases: edge/lib/cmsViewportClasses.js.
 const VIEWPORT_WIDTHS = {
   auto: null,
   full: null,
@@ -1695,96 +1688,8 @@ const viewportModeToWidth = (mode) => {
 function rewriteAllClasses(scopeEl, theme, isolated = true, viewportMode = 'auto') {
   if (!scopeEl)
     return
-  // Utility regex for Uno/Tailwind classes
-  const utilRe = /^-?([pmwhz]|px|py|pt|pr|pb|pl|mx|my|mt|mr|mb|ml|text|font|leading|tracking|bg|border|rounded|shadow|min-w|max-w|min-h|max-h|object|overflow|opacity|order|top|right|bottom|left|inset|translate|rotate|scale|skew|origin|grid|flex|items|justify|content|place|gap|space|columns|col|row|aspect|ring|outline|decoration|underline|line-through|no-underline|whitespace|break|truncate|sr-only|not-sr-only|cursor|select|duration|ease|delay|transition|animate)(-|$|\[)/
-  // Mark utility classes as important so block-level styles win over parents.
-  const importantify = (core) => {
-    if (!core || core.startsWith('!'))
-      return core
-    // Avoid importantifying custom structural classes/hooks
-    if (core === 'block-content' || core.startsWith('embla'))
-      return core
-    // If it's a typical utility or an arbitrary utility, make it important.
-    if (utilRe.test(core) || core.includes('[')) {
-      return `!${core}`
-    }
-    return core
-  }
   const forcedWidth = viewportModeToWidth(viewportMode)
-
-  const TEXT_SIZE_RE = /^text-(xs|sm|base|lg|xl|\d+xl)$/
-  const FONT_UTILITY_RE = /^font-([\w-]+|\[[^\]]+\])$/
-
-  const mapToken = (token) => {
-    const parts = token.split(':')
-    const core = parts.pop()
-    const nakedCore = core.startsWith('!') ? core.slice(1) : core
-
-    //
-    // AUTO MODE: no breakpoint *simulation*, but we still:
-    // - map theme utilities
-    // - !important text sizes
-    // - !important breakpoint-based utilities (sm:, md:, lg:, etc.)
-    //
-    if (forcedWidth == null) {
-      let hadBreakpoint = false
-      const nextParts = []
-
-      for (const part of parts) {
-        const normalized = part.replace(/^!/, '')
-        if (Object.prototype.hasOwnProperty.call(BREAKPOINT_MIN_WIDTHS, normalized)) {
-          hadBreakpoint = true
-        }
-        nextParts.push(part)
-      }
-
-      const mappedCore = toVarBackedUtilities(core, theme)
-      const isTextSize = TEXT_SIZE_RE.test(nakedCore)
-      const isFontUtility = FONT_UTILITY_RE.test(nakedCore)
-      const shouldImportant = hadBreakpoint || isTextSize || isFontUtility
-      const finalCore = shouldImportant ? importantify(mappedCore) : mappedCore
-
-      return [...nextParts, finalCore].filter(Boolean).join(':')
-    }
-
-    //
-    // SIZED MODES (mobile/medium/large/full): your existing branch stays as-is
-    //
-    let drop = false
-    let hadBreakpoint = false
-    const nextParts = []
-
-    for (const part of parts) {
-      const normalized = part.replace(/^!/, '')
-
-      if (Object.prototype.hasOwnProperty.call(BREAKPOINT_MIN_WIDTHS, normalized)) {
-        hadBreakpoint = true
-        const minWidth = BREAKPOINT_MIN_WIDTHS[normalized]
-
-        if (forcedWidth >= minWidth) {
-        // We are "inside" this breakpoint → strip the prefix
-          continue
-        }
-
-        // Too small for this breakpoint → drop the whole token
-        drop = true
-        break
-      }
-
-      nextParts.push(part)
-    }
-
-    if (drop)
-      return ''
-
-    const mappedCore = toVarBackedUtilities(core, theme)
-    const isTextSize = TEXT_SIZE_RE.test(nakedCore)
-    const isFontUtility = FONT_UTILITY_RE.test(nakedCore)
-    const shouldImportant = hadBreakpoint || isTextSize || isFontUtility
-    const finalCore = shouldImportant ? importantify(mappedCore) : mappedCore
-
-    return [...nextParts, finalCore].filter(Boolean).join(':')
-  }
+  const mapCore = core => toVarBackedUtilities(core, theme)
 
   scopeEl.querySelectorAll('[class]').forEach((el) => {
     let base = el.dataset.viewportBaseClass
@@ -1796,9 +1701,7 @@ function rewriteAllClasses(scopeEl, theme, isolated = true, viewportMode = 'auto
     if (!orig.trim())
       return
     const origTokens = orig.split(/\s+/).filter(Boolean)
-    const mappedTokens = origTokens
-      .map(mapToken)
-      .filter(Boolean)
+    const mappedTokens = rewriteViewportClassTokens(origTokens, { forcedWidth, mapCore }).filter(Boolean)
     if (isolated) {
       const mapped = mappedTokens.join(' ')
       writeElementClass(el, mapped)
