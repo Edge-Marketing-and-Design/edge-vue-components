@@ -90,8 +90,8 @@ const baselineRevision = (core, block, now) => ({
 const saveDraft = async (core, { uid, blockId, blockRef, data }) => {
   if (!isPlainObject(data.definition))
     throw new HttpsError('invalid-argument', 'A block definition is required.')
-  const definition = core.pickBlockDefinition(data.definition)
-  if (typeof definition.content !== 'string')
+  const requested = core.pickBlockDefinition(data.definition)
+  if (typeof requested.content !== 'string')
     throw new HttpsError('invalid-argument', 'A block definition needs string content.')
   const source = data.source
   if (!core.BLOCK_REVISION_SOURCES.includes(source))
@@ -127,6 +127,9 @@ const saveDraft = async (core, { uid, blockId, blockRef, data }) => {
     // Never overwrite changes the caller didn't see. Saving exactly what is
     // already there is harmless (a repeated save), so it isn't refused.
     const current = draft ? draft.definition : block
+    // Fields the save leaves out keep the base's value (a release would
+    // otherwise delete them); null removes one on purpose.
+    const definition = core.completeBlockDefinition(requested, current)
     if (core.blockDefinitionsEqual(definition, current) && draft)
       return { status: 'unchanged', releasedRevision: released ?? 0, draftRevision: draftNumber }
     const currentHash = core.blockDefinitionHash(current)

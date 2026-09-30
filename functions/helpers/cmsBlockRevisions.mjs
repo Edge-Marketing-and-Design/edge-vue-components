@@ -79,6 +79,31 @@ export const pickBlockDefinition = (doc) => {
   return definition
 }
 
+// A draft replaces the block's whole definition: a release copies it field by
+// field and deletes the fields it lacks. So a save that leaves a field out
+// keeps the base definition's (the open draft, else the released block), and
+// sending `null` is how a field is removed on purpose. Template v2 keeps
+// `template` equal to `content`: a save without `template` takes its
+// content, never the base's older template.
+export const completeBlockDefinition = (requested, base) => {
+  const definition = pickBlockDefinition(requested)
+  const baseDefinition = pickBlockDefinition(base)
+  const templateVersion = Number(definition.templateVersion ?? baseDefinition.templateVersion)
+  for (const field of BLOCK_REVISION_DEFINITION_FIELDS) {
+    if (definition[field] === null) {
+      delete definition[field]
+      continue
+    }
+    if (definition[field] !== undefined)
+      continue
+    if (field === 'template' && templateVersion === 2 && typeof definition.content === 'string')
+      definition.template = definition.content
+    else if (baseDefinition[field] !== undefined)
+      definition[field] = baseDefinition[field]
+  }
+  return definition
+}
+
 // Editors fill in empty defaults (`schema: {}`, `values: {}`, a blank v1
 // `template`) that stored blocks may lack. Those differences are not edits.
 const normalizeDefinitionForCompare = (doc) => {

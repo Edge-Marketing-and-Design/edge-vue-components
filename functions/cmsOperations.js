@@ -452,7 +452,9 @@ const planBlock = async (core, reader, { orgId, uid, now, operation }) => {
     addThemeNameFindings(plan, findings, blockTargetsStandardThemes(validation, blockThemes, themeDocs))
   }
   if (isPlainObject(operation.definition)) {
-    const changed = revisionsCore.changedDefinitionFields(current, operation.definition)
+    // Describe what the save will store: fields the request leaves out keep
+    // the current definition's (saveDraft completes them the same way).
+    const changed = revisionsCore.changedDefinitionFields(current, revisionsCore.completeBlockDefinition(operation.definition, current))
     plan.summary.push(changed.length ? `Save a draft of "${block.name || blockId}" changing ${changed.join(', ')}. No page changes until a developer releases it.` : `No definition changes for "${block.name || blockId}".`)
   }
   plan.changes.push({ path: ref.path, action: 'draft' })
