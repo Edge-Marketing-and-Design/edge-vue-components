@@ -118,8 +118,8 @@ name cannot silently select the wrong theme. Its response includes:
   any problems, and a checksum. Writes nothing.
 - `cms_run_operation`: run a checked operation with its checksum. The Hub
   refuses it if anything the check read changed since, or if it has
-  problems. Results are drafts, recorded in the organization's
-  `cmsOperations` audit with the key.
+  problems. Results are drafts, recorded in the Hub's `cms-operations`
+  audit log with the organization and the key.
 - `cms_block_base`: a block's current definition (open draft, else released)
   and its fingerprint, which `block.draft` must send as `baseHash`.
 - `cms_preview_url`: a 15-minute link to the Hub's preview of one draft page

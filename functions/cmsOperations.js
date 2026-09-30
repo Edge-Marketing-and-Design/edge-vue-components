@@ -612,8 +612,12 @@ const performRun = async ({ uid, orgId, operation, checksum, client = '', via = 
   if (typeof checksum !== 'string' || !checksum)
     throw new HttpsError('invalid-argument', 'checksum is required: run cms-checkOperation first.')
   const now = Date.now()
-  const auditRef = orgRefOf(orgId).collection('cmsOperations').doc()
+  // Top level, like agent keys: the generic Firestore rules give clients no
+  // access to top-level collections they hold no role on, so organization
+  // editors can't edit the record of what they and agents ran.
+  const auditRef = db.collection('cms-operations').doc()
   const auditBase = {
+    orgId,
     type: operation.type,
     checksum,
     runBy: uid,
