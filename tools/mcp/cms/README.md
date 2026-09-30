@@ -233,6 +233,18 @@ Start the MCP server from the Hub root:
 EDGE_CMS_MCP_CONFIG=tools/mcp/config/clearwater.production.json node edge/tools/mcp/cms/src/server.js
 ```
 
+### Node version
+
+The server needs Node 22 or newer (`package.json` `engines`): the draft,
+preview and readiness tools use the built-in `fetch`. MCP clients start it
+without an interactive shell, so nvm's directory hooks don't run and the
+client's own `PATH` decides, which can be an old nvm default (Node 16 has no
+`fetch`: calls fail with "fetchImpl is not a function"). The `.mcp.json`
+launcher therefore runs the Node named in the Hub's `.nvmrc` when nvm has it
+installed (`~/.nvm/versions/node/v<version>/bin/node`), and plain `node`
+otherwise. `src/node-version.js` stops the server at startup, with the path of
+the Node it got, when that is older than 22.
+
 ### Git worktrees
 
 The project `.mcp.json` starts the server from the session's own checkout

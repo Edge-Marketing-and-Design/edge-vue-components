@@ -27,7 +27,10 @@ otherwise.
     each readable on its color (4.5:1 for body text);
   - page: `canvas`, `surface`, `surfaceAlt`;
   - text: `text`, `textMuted`, `heading`, `link`, `linkHover`, `border`;
-  - optional: `success`, `warning`, `danger`.
+  - optional: `success`, `warning`, `danger`, **for status only** (form
+    errors, confirmations, alerts). Never park a spare brand color in one
+    (an olive "meadow" is not `success`): a client theme will give it a
+    status green, red or amber and change every block that used it.
 - **Fonts** (`extend.fontFamily`): `display` (headings), `sans` (body),
   `accent` (eyebrows, quotes, a serif or script voice). All three; repeat a
   stack when the design has fewer faces.
@@ -39,14 +42,17 @@ Map the design's palette onto the roles by how each color is used, not by its
 name, and record the mapping (palette name → role) in the package README for
 the checkpoint. When a design has more brand colors than the four roles,
 fold the rarely used one into the closest role or use a tint of one
-(`bg-tertiary/60`), and say so at checkpoint 1.
+(`bg-tertiary/60`), and say so at checkpoint 1. Status colors are not spare
+slots.
 
 In blocks:
 
 - only the standard names, plus `white`, `black`, `transparent`,
   `current`, `inherit`;
-- tints and hover shades are opacity modifiers (`hover:bg-accent/90`,
-  `text-heading/5`), never a new color or a hex (`hover:bg-[#d96a20]`);
+- tints and hover shades are opacity modifiers in whole percent
+  (`hover:bg-accent/90`, `text-heading/5`), never a new color or a hex
+  (`hover:bg-[#d96a20]`). Never a bracketed decimal (`/[0.03]`): the Hub
+  renders it black and the public renderer drops it;
 - no Tailwind palette colors (`text-red-500`) and no raw variables for other
   names (`text-[var(--color-pine)]`);
 - decorative textures and patterns (topography lines, grain) are part of the
@@ -68,8 +74,12 @@ from Figma:
    system fallbacks.
 3. Add the three standard radii, and only the font sizes and shadows that
    appear repeatedly.
-4. Add conservative global `apply` rules for the root, headings, links, and
-   buttons, using only standard names.
+4. Leave `apply` empty (`{}`), in the theme and its variants. The public
+   renderer ignores `apply` rules; only the Hub's editors add them, as
+   classes that can override a block's own (a heading rule recolored every
+   heading in run 2 of the Montana test). Each block sets its own base font
+   and text color on its outer element instead (`font-sans text-text`), as
+   Clearwater's blocks do.
 5. Keep `slots` empty unless the active CMS/runtime defines a real slot
    contract.
 6. Keep light/dark variants structurally present, but do not invent a dark
@@ -96,10 +106,7 @@ from Figma:
     },
     "borderRadius": { "card": "16px", "panel": "24px", "button": "12px" }
   },
-  "apply": {
-    "root": "font-sans bg-canvas text-text antialiased",
-    "heading": "font-display text-heading"
-  },
+  "apply": {},
   "slots": {},
   "variants": {
     "light": { "apply": {} },
