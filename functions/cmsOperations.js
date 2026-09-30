@@ -81,6 +81,19 @@ const addWrite = (plan, ref, data, mode, description) => {
 
 const stamp = (uid, now) => ({ last_updated: now, uid })
 
+// Structured data must be valid JSON-LD (errors refuse the operation);
+// token and hard-coded URL findings are notices.
+const addStructuredDataFindings = (core, plan, fields) => {
+  for (const key of ['structuredData', 'postStructuredData']) {
+    if (typeof fields?.[key] !== 'string')
+      continue
+    const findings = core.structuredDataFindings(fields[key], { label: key, post: key === 'postStructuredData' })
+    plan.problems.push(...findings.errors)
+    if (findings.warnings.length)
+      plan.notices = [...(plan.notices || []), ...findings.warnings]
+  }
+}
+
 // ---- Themes ----
 
 // A theme is live when a published site uses it: every theme write is copied
@@ -296,6 +309,7 @@ const planPage = async (core, reader, { orgId, uid, now, operation }) => {
       else
         update[key] = value
     }
+    addStructuredDataFindings(core, plan, update)
     if (!Object.keys(fields).length)
       plan.problems.push('No page fields to change.')
     addWrite(plan, pageRef, { ...update, version: core.getNextVersion(page.version), ...stamp(uid, now) }, 'update', `Update draft page ${pageId}: ${Object.keys(update).join(', ')}.`)
@@ -469,7 +483,40 @@ const planBlock = async (core, reader, { orgId, uid, now, operation }) => {
 // new-site form makes it (site settings defaults, the creator as its only user unless
 // they are an organization admin), seeded from the theme's default menus and
 // site settings (site.vue seedNewSiteFromTheme). Nothing is published.
-const planSite = async (core, reader, { orgId, uid, now, operation }) => {
+// site.update { siteId, fields }: the site's SEO (meta title, description,
+// structured data) on the draft site document. Published site settings are
+// untouched until a developer publishes the site from the Hub.
+const planSiteUpdate = async (core, reader, { orgId, uid, now, operation }) => {
+  const plan = createPlan()
+  const siteId = requireDocId(operation.siteId, 'site id')
+  const siteRef = orgRefOf(orgId).collection('sites').doc(siteId)
+  const siteSnap = await reader.doc(siteRef)
+  if (!siteSnap.exists) {
+    plan.problems.push(`Site "${siteId}" does not exist.`)
+    return plan
+  }
+  const fields = isPlainObject(operation.fields) ? operation.fields : {}
+  const update = {}
+  for (const [key, value] of Object.entries(fields)) {
+    if (!core.SITE_UPDATE_FIELDS.includes(key))
+      plan.problems.push(`"${key}" can't be set by site.update (allowed: ${core.SITE_UPDATE_FIELDS.join(', ')}). Set it in the Hub's site settings.`)
+    else if (typeof value !== 'string')
+      plan.problems.push(`${key} must be a string.`)
+    else
+      update[key] = value
+  }
+  if (!Object.keys(fields).length)
+    plan.problems.push('No site fields to change.')
+  addStructuredDataFindings(core, plan, update)
+  addWrite(plan, siteRef, { ...update, ...stamp(uid, now) }, 'update', `Update site ${siteId}: ${Object.keys(update).join(', ')}. Published site settings are unchanged.`)
+  plan.result = { siteId }
+  return plan
+}
+
+const planSite = async (core, reader, context) => {
+  if (context.operation.type === 'site.update')
+    return planSiteUpdate(core, reader, context)
+  const { orgId, uid, now, operation } = context
   const plan = createPlan()
   const org = orgRefOf(orgId)
   const name = typeof operation.name === 'string' ? operation.name.trim() : ''
@@ -513,6 +560,7 @@ const planSite = async (core, reader, { orgId, uid, now, operation }) => {
   }
   if (chosen.allowedThemes?.length && themeId && !chosen.allowedThemes.includes(themeId))
     plan.problems.push('allowedThemes must include the site\'s theme.')
+  addStructuredDataFindings(core, plan, chosen)
 
   const isAdmin = await permissionCheck(uid, 'assign', `organizations/${orgId}`)
   const siteRef = org.collection('sites').doc()

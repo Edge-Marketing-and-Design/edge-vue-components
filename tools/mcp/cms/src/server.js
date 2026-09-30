@@ -517,7 +517,7 @@ server.registerTool(
   'cms_check_operation',
   {
     title: 'Check a CMS Operation',
-    description: 'Plan a draft-only CMS operation through the Hub (themes, new sites, draft pages, block placement and content, new blocks, block drafts) and return what would change, any problems, and a checksum for cms_run_operation. Writes nothing. Nothing can publish a page or release a block. Needs an agent key (Dev Mode > Agent Keys).',
+    description: 'Plan a draft-only CMS operation through the Hub (themes, new sites and their SEO, draft pages and their SEO, block placement and content, new blocks, block drafts) and return what would change, any problems, and a checksum for cms_run_operation. Writes nothing. Nothing can publish a page or release a block. Needs an agent key (Dev Mode > Agent Keys).',
     inputSchema: {
       orgId: OptionalOrgIdSchema.describe('Organization id. Uses configured defaultOrgId when omitted.'),
       operation: OperationSchema,

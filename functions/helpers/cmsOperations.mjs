@@ -20,6 +20,7 @@ export const CMS_OPERATION_TYPES = Object.freeze([
   'block.create',
   'block.draft',
   'site.create',
+  'site.update',
 ])
 
 export const ROOT_MENUS = Object.freeze(['Site Root', 'Not In Menu'])
@@ -429,6 +430,71 @@ export const themeFieldProblems = (fields) => {
   return problems
 }
 
+// ---- Page and site SEO ----
+// The public renderer replaces these tokens in meta fields and structured
+// data (emd-cms-front replaceMetaTokens). Post pages also fill tokens from
+// each post, so their post* fields may use others.
+export const SEO_TOKENS = Object.freeze(['cms-url', 'cms-site', 'cms-logo'])
+// Site fields site.update may set: the site's SEO only.
+export const SITE_UPDATE_FIELDS = Object.freeze(['metaTitle', 'metaDescription', 'structuredData'])
+
+// A structured data (JSON-LD) string: { errors, warnings, items }. Empty is
+// allowed here (readiness reports it). `post: true` for postStructuredData.
+export const structuredDataFindings = (value, { label = 'structuredData', post = false } = {}) => {
+  const errors = []
+  const warnings = []
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (!text)
+    return { errors, warnings, items: [] }
+  let data
+  try {
+    data = JSON.parse(text)
+  }
+  catch (error) {
+    errors.push(`${label} is not valid JSON: ${error.message}`)
+    return { errors, warnings, items: [] }
+  }
+  const items = Array.isArray(data) ? data : [data]
+  if (!items.length || !items.every(isPlainObject)) {
+    errors.push(`${label} must be a JSON-LD object (or a list of objects).`)
+    return { errors, warnings, items: [] }
+  }
+  if (!post) {
+    const unknown = [...new Set([...text.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)].map(match => match[1]).filter(token => !SEO_TOKENS.includes(token)))]
+    if (unknown.length)
+      warnings.push(`${label} uses ${unknown.map(token => `{{${token}}}`).join(', ')}, which the public site leaves empty on a regular page; only {{cms-url}}, {{cms-site}} and {{cms-logo}} are replaced.`)
+  }
+  const hardcoded = items.flatMap(item => ['@id', 'url'].filter(key => typeof item[key] === 'string' && /^https?:\/\//i.test(item[key])).map(key => `"${key}": "${item[key]}"`))
+  if (hardcoded.length)
+    warnings.push(`${label} hard-codes ${hardcoded.join(', ')}; use {{cms-site}} or {{cms-url}} so it follows the site's domain.`)
+  return { errors, warnings, items }
+}
+
+// The SEO fields of a draft page or the site, as readiness items.
+const seoReadinessItems = (fields, { subject, where = {} }) => {
+  const items = []
+  const add = (severity, code, message) => items.push({ severity, code, message, ...where })
+  if (!String(fields?.metaTitle || '').trim())
+    add('warning', 'seo.meta-title', `${subject} has no meta title.`)
+  if (!String(fields?.metaDescription || '').trim())
+    add('warning', 'seo.meta-description', `${subject} has no meta description.`)
+  const structured = structuredDataFindings(fields?.structuredData)
+  for (const message of structured.errors)
+    add('error', 'seo.structured-data', `${subject}: ${message}`)
+  if (!structured.errors.length && !String(fields?.structuredData || '').trim())
+    add('warning', 'seo.structured-data', `${subject} has no structured data.`)
+  const empty = structured.items.length ? ['name', 'description'].filter(key => !String(structured.items[0][key] ?? '').trim()) : []
+  if (empty.length)
+    add('warning', 'seo.structured-data-empty', `${subject}'s structured data has an empty ${empty.join(' and ')}.`)
+  for (const message of structured.warnings)
+    add('warning', 'seo.structured-data-tokens', `${subject}: ${message}`)
+  if (String(fields?.postStructuredData || '').trim()) {
+    for (const message of structuredDataFindings(fields.postStructuredData, { label: 'postStructuredData', post: true }).errors)
+      add('error', 'seo.structured-data', `${subject}: ${message}`)
+  }
+  return items
+}
+
 // ---- Site readiness (first-release plan, phase 6) ----
 
 const pageLabel = (page, id) => page?.name || id
@@ -450,6 +516,7 @@ export const buildSiteReadiness = ({ site = {}, theme = null, pages = {}, publis
     add('error', 'site.no-theme', 'The site has no theme.')
   else if (!theme)
     add('error', 'site.theme-missing', `The site's theme "${site.theme}" does not exist.`)
+  items.push(...seoReadinessItems(site, { subject: 'The site' }))
 
   const usedBlocks = new Map()
   for (const [pageId, page] of Object.entries(pages)) {
@@ -457,6 +524,7 @@ export const buildSiteReadiness = ({ site = {}, theme = null, pages = {}, publis
     const instances = [...(Array.isArray(page?.content) ? page.content : []), ...(Array.isArray(page?.postContent) ? page.postContent : [])]
     if (!instances.length)
       add('warning', 'page.empty', `Page "${label}" has no blocks.`, { pageId })
+    items.push(...seoReadinessItems(page, { subject: `Page "${label}"`, where: { pageId } }))
     const live = published[pageId]
     if (!live)
       add('warning', 'page.unpublished', `Page "${label}" has never been published.`, { pageId })
