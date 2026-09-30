@@ -3613,25 +3613,31 @@ const resolveTemplateBlockForSignature = (pageDoc, blockRef, blocksById = {}) =>
       content: libraryBlock.content,
       values: libraryBlock.values || {},
       meta: libraryBlock.meta || {},
+      dataSources: libraryBlock.dataSources || {},
+      templateVersion: libraryBlock.templateVersion,
     }
   }
 
   const block = resolveTemplateBlockSourceForSignature(pageDoc, blockRef)
   if (!block)
     return null
+  const libraryBlock = block.blockId ? blocksById?.[block.blockId] : null
   if (block.content) {
     return {
       content: block.content,
       values: block.values || {},
       meta: block.meta || {},
+      dataSources: block.dataSources || libraryBlock?.dataSources || {},
+      templateVersion: block.templateVersion ?? libraryBlock?.templateVersion,
     }
   }
-  if (block.blockId && blocksById?.[block.blockId]) {
-    const libraryBlock = blocksById[block.blockId]
+  if (libraryBlock) {
     return {
       content: libraryBlock.content,
       values: block.values || libraryBlock.values || {},
       meta: block.meta || libraryBlock.meta || {},
+      dataSources: libraryBlock.dataSources || {},
+      templateVersion: libraryBlock.templateVersion,
     }
   }
   return null
@@ -3829,9 +3835,38 @@ const fetchCmsPreviewCollectionField = async ({ cfg, orgId, siteId, pageId, rout
   )
 }
 
+// Template v2 blocks declare collections in `dataSources`; turn each into the
+// collection config the legacy `meta` path uses, as the Hub editor does
+// (blockApi.vue dataSourcesToRuntimeMeta), with the instance's query items and
+// limit. Token previews have no signed-in user to load them in the browser.
+const cmsPreviewDataSourceConfigs = (dataSources, meta) => {
+  const configs = {}
+  for (const [field, source] of Object.entries(dataSources || {})) {
+    if (!source || typeof source !== 'object' || Array.isArray(source))
+      continue
+    if (!(source.type === 'collection' || source.collection || source.path || source.query || source.canonicalLookup))
+      continue
+    const collection = (source.collection && typeof source.collection === 'object' && !Array.isArray(source.collection)) ? { ...source.collection } : {}
+    for (const key of ['path', 'baseKey', 'uniqueKey', 'canonicalLookup', 'query', 'order', 'orgLevel']) {
+      if (source[key] !== undefined)
+        collection[key] = source[key]
+    }
+    const sourceMeta = meta?.[field]
+    const queryItems = (sourceMeta?.queryItems && typeof sourceMeta.queryItems === 'object' && !Array.isArray(sourceMeta.queryItems)) ? sourceMeta.queryItems : {}
+    const cfg = { ...source, type: 'array', collection, queryItems: { ...(source.queryItems || {}), ...queryItems } }
+    if (sourceMeta?.limit !== undefined && sourceMeta.limit !== null && sourceMeta.limit !== '')
+      cfg.limit = sourceMeta.limit
+    configs[field] = cfg
+  }
+  return configs
+}
+
 const resolveCmsPreviewBlockCollectionValues = async ({ block, orgId, siteId, pageId, routeLastSegment }) => {
   const values = {}
-  const entries = Object.entries(block?.meta || {})
+  const entries = [
+    ...Object.entries(block?.meta || {}),
+    ...Object.entries(cmsPreviewDataSourceConfigs(block?.dataSources, block?.meta)),
+  ]
   await Promise.all(entries.map(async ([field, cfg]) => {
     if (!cfg || typeof cfg !== 'object' || !cfg.collection)
       return
@@ -3853,7 +3888,7 @@ const resolveCmsPreviewCollectionValues = async ({ orgId, siteId, pageId, pageDa
     ;(row.columns || []).forEach((column, colIndex) => {
       ;(column.blocks || []).forEach((blockRef, blockIdx) => {
         const block = resolveTemplateBlockForSignature(pageData, blockRef, blocksById)
-        if (!block?.meta)
+        if (!block?.meta && !Object.keys(block?.dataSources || {}).length)
           return
         const blockKey = getCmsPreviewBlockKey(row, rowIndex, column, colIndex, blockIdx)
         tasks.push((async () => {

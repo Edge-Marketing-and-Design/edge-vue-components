@@ -187,7 +187,12 @@ const previewLink = async ({ uid, orgId, body }) => {
   const { token, expiresAt } = issuePreviewToken({ orgId, siteId, pageId, source })
   // blockDrafts: render unreleased block drafts (draft pages only).
   const blockDrafts = body.blockDrafts === true && source === 'draft'
-  return { url: buildPreviewUrl({ baseUrl: previewBaseUrl(), orgId, siteId, pageId, source, token, blockDrafts }), expiresAt, blockDrafts }
+  // viewport / width: render at a phone, tablet or custom width.
+  const viewport = typeof body.viewport === 'string' ? body.viewport : ''
+  const width = body.width === undefined ? null : Number(body.width)
+  const url = buildPreviewUrl({ baseUrl: previewBaseUrl(), orgId, siteId, pageId, source, token, blockDrafts, viewport, width })
+  const applied = new URL(url).searchParams
+  return { url, expiresAt, blockDrafts, viewport: applied.get('viewport') || null, width: applied.get('width') ? Number(applied.get('width')) : null }
 }
 exports.agentOperation = onRequest({ timeoutSeconds: 120 }, async (req, res) => {
   if (req.method !== 'POST') {

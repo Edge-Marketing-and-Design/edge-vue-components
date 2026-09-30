@@ -127,7 +127,9 @@ name cannot silently select the wrong theme. Its response includes:
   site's theme. Open it in a browser and screenshot it to compare with the
   design. By default blocks show their unreleased drafts (`blockDrafts`,
   applied to the page's instances as a release would), so a fix can be
-  checked before a developer releases it. Vue override components don't
+  checked before a developer releases it. `viewport: "mobile"` (or
+  `medium`, `large`) renders the phone or tablet layout in any window;
+  `width` sets a plain page width. Vue override components don't
   render there. Needs `CMS_PREVIEW_TOKEN_SECRET` in the Hub's Functions
   environment.
 - `cms_site_readiness`: what stops a site from being finished (see the

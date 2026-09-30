@@ -47,7 +47,7 @@ Work through the pages in the handoff's order. For each page:
 3. **Create them**: `block.create` per block. The check runs the Hub's import check; fix every problem it reports and check again.
 4. **Change existing blocks** only from the Hub's copy: `cms_block_base`, edit that definition, `block.draft` with its `baseHash`. Never from a local file: the Hub may hold hand fixes you don't have. A "changed since you loaded it" refusal means someone edited it; load it again and reapply your change.
 5. **Build the page**: `page.create` (or use the page the theme seeded), `page.placeBlock` for each block in order with its content as `values`, `page.update` for the meta title and description. Content is the handoff's approved copy; anything invented stays empty or uses the block's intentional fallback, and goes in the report.
-6. **Look at it.** `cms_preview_url`, open the link in a browser, screenshot at about 1440 and 390 pixels wide, and compare with the design. Fix what doesn't match: content with `page.setValues`, a block's markup with `block.draft` (the preview shows your drafts). Up to three passes per page; record what still differs.
+6. **Look at it.** `cms_preview_url`, open the link in a browser and screenshot it at about 1440 pixels wide, then get a second link with `viewport: "mobile"` for the phone layout (it renders a 420px page and simulates its breakpoints in any window), and compare both with the design. Fix what doesn't match: content with `page.setValues`, a block's markup with `block.draft` (the preview shows your drafts). Up to three passes per page; record what still differs.
 7. Log the page as done and go straight to the next one.
 
 Override blocks render as their CMS HTML in the preview; that is expected. Check their CMS HTML is a sensible fallback.
@@ -57,7 +57,7 @@ Override blocks render as their CMS HTML in the preview; that is expected. Check
 1. `cms_site_readiness` for the site. Fix what you can (errors first), then run it again.
 2. **Checkpoint 2.** Stop and report:
    - pages built, each with a fresh preview link;
-   - blocks created, and block drafts waiting for the developer to release (Block Editor, then release);
+   - blocks created, and block drafts waiting for the developer to release (Block Editor, then release). Say plainly that the Hub page editor shows **released** blocks: until these drafts are released, the editor shows the older versions, while your preview links showed the drafts;
    - override blocks that need a Vue component, with a handoff note each (block name, fields the component reads, behaviour), and whether the local `emd-cms-front` checkout already has it (the readiness report says);
    - content you couldn't fill or left at a fallback, and anything you invented and removed;
    - remaining readiness items and differences from the design you couldn't fix;

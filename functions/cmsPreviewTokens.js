@@ -69,7 +69,11 @@ const previewBaseUrl = (projectId = process.env.GCLOUD_PROJECT || process.env.GC
   return projectId ? `https://${projectId}.web.app` : ''
 }
 
-const buildPreviewUrl = ({ baseUrl, orgId, siteId, pageId, source = 'draft', token, mode = '', blockDrafts = false }) => {
+const PREVIEW_VIEWPORTS = ['mobile', 'medium', 'large']
+
+// viewport (mobile, medium, large) and width (320-2560) set the page width in
+// the Hub preview route; anything else is left out.
+const buildPreviewUrl = ({ baseUrl, orgId, siteId, pageId, source = 'draft', token, mode = '', blockDrafts = false, viewport = '', width = null }) => {
   const url = new URL(`/cms-preview-render/${encodeURIComponent(siteId)}/${encodeURIComponent(pageId)}`, baseUrl)
   url.searchParams.set('orgId', orgId)
   url.searchParams.set('token', token)
@@ -79,7 +83,12 @@ const buildPreviewUrl = ({ baseUrl, orgId, siteId, pageId, source = 'draft', tok
     url.searchParams.set('mode', mode)
   if (blockDrafts && source !== 'published')
     url.searchParams.set('drafts', '1')
+  if (PREVIEW_VIEWPORTS.includes(viewport))
+    url.searchParams.set('viewport', viewport)
+  const pageWidth = Number(width)
+  if (!PREVIEW_VIEWPORTS.includes(viewport) && Number.isInteger(pageWidth) && pageWidth >= 320 && pageWidth <= 2560)
+    url.searchParams.set('width', String(pageWidth))
   return url.toString()
 }
 
-module.exports = { DEFAULT_TTL_SECONDS, buildPreviewUrl, issuePreviewToken, previewBaseUrl, previewTokensEnabled, verifyPreviewToken }
+module.exports = { DEFAULT_TTL_SECONDS, PREVIEW_VIEWPORTS, buildPreviewUrl, issuePreviewToken, previewBaseUrl, previewTokensEnabled, verifyPreviewToken }

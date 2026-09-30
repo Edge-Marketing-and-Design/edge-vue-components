@@ -45,6 +45,10 @@ test('check and run post the operation with the key and return the Hub\'s answer
   assert.deepEqual(JSON.parse(requests[2].init.body), { orgId: 'org1', action: 'preview', siteId: 'site1', pageId: 'home', source: 'draft', blockDrafts: true, client: 'edge-cms-mcp' })
   await client.readiness('org1', 'site1')
   assert.deepEqual(JSON.parse(requests[3].init.body), { orgId: 'org1', action: 'readiness', siteId: 'site1', client: 'edge-cms-mcp' })
+  await client.preview('org1', 'site1', 'home', 'draft', true, { viewport: 'mobile' })
+  assert.equal(JSON.parse(requests[4].init.body).viewport, 'mobile')
+  await client.preview('org1', 'site1', 'home', 'draft', true, { width: 768 })
+  assert.equal(JSON.parse(requests[5].init.body).width, 768)
 })
 
 test('a missing key, an unreachable endpoint and a non-JSON reply are explained, not thrown', async () => {

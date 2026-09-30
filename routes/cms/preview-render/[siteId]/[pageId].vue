@@ -1,4 +1,6 @@
 <script setup>
+import { rewriteViewportClassTokens } from '../../../../lib/cmsViewportClasses'
+
 const route = useRoute()
 const edgeFirebase = inject('edgeFirebase')
 
@@ -26,6 +28,30 @@ const isThumbnailMode = computed(() => String(route.query.mode || '').trim() ===
 const previewSource = computed(() => String(route.query.source || '').trim() === 'published' ? 'published' : 'draft')
 // drafts=1: blocks render their unreleased drafts (links from cms_preview_url).
 const previewBlockDrafts = computed(() => String(route.query.drafts || '') === '1' && previewSource.value === 'draft')
+// viewport=mobile|medium|large: render at that canvas width and simulate its
+// breakpoints, as the page editor's canvases do, so an agent can check the
+// phone layout in any window. width=N (320-2560) only sets the page width.
+// Thumbnails keep their fixed layout.
+const PREVIEW_VIEWPORT_WIDTHS = { mobile: 420, medium: 992, large: 1280 }
+const previewViewport = computed(() => {
+  const viewport = String(route.query.viewport || '').trim()
+  return !isThumbnailMode.value && PREVIEW_VIEWPORT_WIDTHS[viewport] ? viewport : ''
+})
+const previewWidth = computed(() => {
+  if (isThumbnailMode.value)
+    return null
+  if (previewViewport.value)
+    return PREVIEW_VIEWPORT_WIDTHS[previewViewport.value]
+  const width = Number.parseInt(String(route.query.width || ''), 10)
+  return Number.isFinite(width) ? Math.min(Math.max(width, 320), 2560) : null
+})
+// The transform makes the page the containing block for fixed elements (a
+// fixed nav bar), so they stay inside the simulated width, not the window.
+const previewPageStyle = computed(() => (previewWidth.value ? { width: `${previewWidth.value}px`, padding: '0', transform: 'translateZ(0)' } : {}))
+// Row layouts follow the simulated canvas too.
+const previewViewportClass = className => (previewViewport.value
+  ? rewriteViewportClassTokens(className.split(' '), { forcedWidth: previewWidth.value }).join(' ')
+  : className)
 const orgPath = computed(() => organizationId.value ? `organizations/${organizationId.value}` : '')
 
 const siteDoc = computed(() => state.payload?.site || null)
@@ -184,7 +210,7 @@ const hasPreviewSpans = row => (row?.columns || []).some(hasExplicitPreviewSpan)
 
 const previewGridClass = (row) => {
   if (hasPreviewSpans(row))
-    return 'grid grid-cols-1 sm:grid-cols-6 gap-4'
+    return previewViewportClass('grid grid-cols-1 sm:grid-cols-6 gap-4')
   const count = row?.columns?.length || 1
   const map = {
     1: 'grid grid-cols-1 gap-4',
@@ -194,11 +220,14 @@ const previewGridClass = (row) => {
     5: 'grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-4',
     6: 'grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-4',
   }
-  return map[count] || 'grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-4'
+  return previewViewportClass(map[count] || 'grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-4')
 }
 
 const previewColumnStyle = (column) => {
   if (!hasExplicitPreviewSpan(column))
+    return {}
+  // Below sm a simulated row is one column, so spans don't apply.
+  if (previewViewport.value && previewWidth.value < 640)
     return {}
   const span = Number(column?.span)
   const safeSpan = Math.min(Math.max(span, 1), 6)
@@ -376,6 +405,8 @@ watch(() => [organizationId.value, siteId.value, pageId.value, previewToken.valu
       :class="isThumbnailMode ? 'cms-preview-thumbnail-capture cms-auth-preview-logged-in' : 'cms-preview-render-page cms-auth-preview-logged-in'"
       :data-preview-ready="previewReady ? 'true' : 'false'"
       :data-preview-block-drafts="(state.payload?.draftBlockIds || []).join(',')"
+      :data-preview-viewport="previewViewport || null"
+      :style="isThumbnailMode ? null : previewPageStyle"
     >
       <div :class="isThumbnailMode ? 'cms-preview-render-page cms-preview-thumbnail-content' : ''">
         <template v-if="previewRows.length">
@@ -411,6 +442,7 @@ watch(() => [organizationId.value, siteId.value, pageId.value, previewToken.valu
                     :route-last-segment="routeLastSegment"
                     :standalone-preview="true"
                     :preview-auth-logged-in="true"
+                    :viewport-mode="previewViewport || 'auto'"
                     @pending="setPreviewBlockPending(previewBlockKey(row, rowIndex, column, colIndex, blockIdx), $event)"
                     @loaded="setPreviewBlockLoaded(previewBlockKey(row, rowIndex, column, colIndex, blockIdx))"
                   />

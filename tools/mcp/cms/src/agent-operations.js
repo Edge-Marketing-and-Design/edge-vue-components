@@ -67,7 +67,7 @@ export function createAgentOperationClient({ endpoint, getKey, fetchImpl = globa
     endpoint,
     check: (orgId, operation) => post({ orgId, action: 'check', operation }),
     run: (orgId, operation, checksum) => post({ orgId, action: 'run', operation, checksum }),
-    preview: (orgId, siteId, pageId, source = 'draft', blockDrafts = true) => post({ orgId, action: 'preview', siteId, pageId, source, blockDrafts }),
+    preview: (orgId, siteId, pageId, source = 'draft', blockDrafts = true, { viewport, width } = {}) => post({ orgId, action: 'preview', siteId, pageId, source, blockDrafts, ...(viewport ? { viewport } : {}), ...(width ? { width } : {}) }),
     readiness: (orgId, siteId) => post({ orgId, action: 'readiness', siteId }),
   }
 }

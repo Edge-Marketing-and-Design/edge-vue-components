@@ -559,7 +559,9 @@ server.registerTool(
       siteId: z.string().trim().min(1).describe('Site document id.'),
       pageId: z.string().trim().min(1).describe('Page document id.'),
       source: z.enum(['draft', 'published']).optional().default('draft'),
-      blockDrafts: z.boolean().optional().default(true).describe('Render blocks with their unreleased drafts (block.draft), so you can check a fix before a developer releases it. Draft pages only. False shows what the released blocks look like.'),
+      blockDrafts: z.boolean().optional().default(true).describe('Render blocks with their unreleased drafts (block.draft), so you can check a fix before a developer releases it. Draft pages only. False shows what the released blocks look like. The Hub page editor shows released blocks until a developer releases the drafts.'),
+      viewport: z.enum(['mobile', 'medium', 'large']).optional().describe('Render at a phone (420px), tablet (992px) or large (1280px) canvas and simulate its breakpoints, as the page editor does, in any browser window. Use mobile to check the phone layout.'),
+      width: z.number().int().min(320).max(2560).optional().describe('Page width in pixels without breakpoint simulation (breakpoints follow the browser window). Ignored when viewport is set.'),
     },
     annotations: {
       readOnlyHint: true,
@@ -567,7 +569,7 @@ server.registerTool(
       idempotentHint: false,
     },
   },
-  async ({ orgId, siteId, pageId, source, blockDrafts }) => jsonResult(await agentOperations.preview(resolveOrgId(orgId), siteId, pageId, source, blockDrafts)),
+  async ({ orgId, siteId, pageId, source, blockDrafts, viewport, width }) => jsonResult(await agentOperations.preview(resolveOrgId(orgId), siteId, pageId, source, blockDrafts, { viewport, width })),
 )
 
 // Adds the local renderer's answer to each override item: whether the
