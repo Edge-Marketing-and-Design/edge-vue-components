@@ -33,17 +33,17 @@ You never publish a page, release a block, change a live theme, or edit `emd-cms
 
 ## 1. Theme, then checkpoint 1
 
-1. Draft Theme JSON, Head JSON and extra CSS from the design (edge-block-package `reference/theme-guidelines.md`, `reference/head-guidelines.md`).
+1. Draft Theme JSON, Head JSON and extra CSS from the design (edge-block-package `reference/theme-guidelines.md`, `reference/head-guidelines.md`). A new theme uses **only the standard names** ("Standard names" in the theme guidelines): map the design's palette onto `primary`, `secondary`, `tertiary`, `accent`, their `on…` text colors and the page and text roles by how each color is used; fonts are `display`, `sans`, `accent`; radii `card`, `panel`, `button`. No palette names, even as aliases. Decorative textures and patterns in the design (topography lines, grain) go into Extra CSS as classes now; they are theme, not images. Check the theme file with `scripts/cms/validate-import.mjs --standard-theme` before `theme.create`, which refuses anything else.
 2. `theme.create` with them. If the design needs changes to a theme a published site uses, `theme.propose` instead and say so.
 3. `site.create` with the name, the theme, the domains and any settings the handoff gives (contact details, logos, social links). The theme's default menus and pages are copied in. Nothing is published.
-4. **Checkpoint 1.** Stop. Report the theme (fonts, colours, spacing decisions and where they came from), the site id, and what you'll build next. Wait for the developer's review; apply their changes with `theme.update` before going on.
+4. **Checkpoint 1.** Stop. Report the theme (fonts, colours, spacing decisions and where they came from), the palette mapping (design color → standard name, and any color folded into another role), the texture classes, the site id, and what you'll build next. Wait for the developer's review; apply their changes with `theme.update` before going on.
 
 ## 2. Every page, without stopping
 
 Work through the pages in the handoff's order. For each page:
 
 1. **Plan the blocks.** Existing blocks it reuses, new blocks it needs (four or fewer per page is a good size), and which need a Vue override component (interactive or renderer-owned behaviour; see edge-block-package `reference/override-blocks.md`). Flag overrides now, not at the end.
-2. **Author new blocks** with the edge-block-package workflow: generate, validate three ways, local preview at desktop and phone widths, fix. Get them right locally first: once a block is on a page, later fixes are drafts the developer must release.
+2. **Author new blocks** with the edge-block-package workflow: generate, validate three ways (the checker with `--standard-theme` for a standard theme), local preview at desktop and phone widths, fix. Classes use only the standard theme names; tints and hovers are opacity modifiers. Get them right locally first: once a block is on a page, later fixes are drafts the developer must release.
 3. **Create them**: `block.create` per block. The check runs the Hub's import check; fix every problem it reports and check again.
 4. **Change existing blocks** only from the Hub's copy: `cms_block_base`, edit that definition, `block.draft` with its `baseHash`. Never from a local file: the Hub may hold hand fixes you don't have. A "changed since you loaded it" refusal means someone edited it; load it again and reapply your change.
 5. **Build the page**: `page.create` (or use the page the theme seeded), `page.placeBlock` for each block in order with its content as `values`, `page.update` for the meta title and description. Content is the handoff's approved copy; anything invented stays empty or uses the block's intentional fallback, and goes in the report.

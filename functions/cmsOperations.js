@@ -22,6 +22,7 @@ const { stableStringify } = require('./helpers/historyFilter')
 
 const corePromise = import('./helpers/cmsOperations.mjs')
 const revisionsCorePromise = import('./helpers/cmsBlockRevisions.mjs')
+const validationPromise = import('./helpers/cmsBlockValidation.mjs')
 const loadImportCheck = () => Promise.all([
   import('./helpers/cmsBlockImport.mjs'),
   import('@edgedev/template-engine'),
@@ -105,8 +106,41 @@ const liveSitesForTheme = async (reader, orgId, themeId) => {
   return [...live].sort()
 }
 
+// ---- Standard theme names (docs/data-contracts/cms-themes/README.md) ----
+
+const parseThemeJson = (value) => {
+  try {
+    const parsed = JSON.parse(value)
+    return isPlainObject(parsed) ? parsed : null
+  }
+  catch {
+    return null
+  }
+}
+
+const isStandardTheme = (validation, themeDoc) => {
+  const theme = parseThemeJson(themeDoc?.theme)
+  return !!theme && !validation.themeTokenProblems(theme).length
+}
+
+// A block whose themes all use the standard names must use them too. Blocks
+// for older themes only get notices, so those sites keep working.
+const blockTargetsStandardThemes = (validation, blockThemes, themeDocs) => {
+  const ids = Array.isArray(blockThemes) ? blockThemes : []
+  return ids.length > 0 && ids.every(id => themeDocs[id] && isStandardTheme(validation, themeDocs[id]))
+}
+
+const addThemeNameFindings = (plan, findings, strict) => {
+  const messages = findings.map(issue => `${issue.code}: ${issue.message}`)
+  if (strict)
+    plan.problems.push(...messages)
+  else if (messages.length)
+    plan.notices = [...(plan.notices || []), ...messages]
+}
+
 const planTheme = async (core, reader, { orgId, uid, now, operation }) => {
   const plan = createPlan()
+  const validation = await validationPromise
   const fields = isPlainObject(operation.fields) ? operation.fields : {}
   const themes = orgRefOf(orgId).collection('themes')
 
@@ -116,6 +150,10 @@ const planTheme = async (core, reader, { orgId, uid, now, operation }) => {
     if (themeId && (await reader.doc(ref)).exists)
       plan.problems.push(`Theme "${themeId}" already exists.`)
     plan.problems.push(...core.themeFieldProblems(fields))
+    // New themes must use the standard names.
+    const parsedTheme = typeof fields.theme === 'string' ? parseThemeJson(fields.theme) : null
+    if (parsedTheme)
+      addThemeNameFindings(plan, validation.themeTokenProblems(parsedTheme), true)
     if (typeof fields.name !== 'string' || !fields.name.trim())
       plan.problems.push('A theme needs a name.')
     if (fields.theme === undefined)
@@ -147,6 +185,10 @@ const planTheme = async (core, reader, { orgId, uid, now, operation }) => {
   plan.problems.push(...core.themeFieldProblems(fields))
   if (!Object.keys(fields).length)
     plan.problems.push('No theme fields to change.')
+  // A standard theme must stay standard; an older theme gets notices.
+  const parsedTheme = typeof fields.theme === 'string' ? parseThemeJson(fields.theme) : null
+  if (parsedTheme)
+    addThemeNameFindings(plan, validation.themeTokenProblems(parsedTheme), isStandardTheme(validation, snap.data()))
 
   if (operation.type === 'theme.update') {
     const live = await liveSitesForTheme(reader, orgId, themeId)
@@ -365,7 +407,11 @@ const planBlock = async (core, reader, { orgId, uid, now, operation }) => {
     if (findings.hardError)
       plan.problems.push(findings.hardError)
     plan.problems.push(...findings.blocking.map(issue => `${issue.code}: ${issue.message}`))
-    plan.notices = findings.notices.map(issue => `${issue.code}: ${issue.message}`)
+    const isThemeName = issue => String(issue.code || '').startsWith('theme.')
+    plan.notices = findings.notices.filter(issue => !isThemeName(issue)).map(issue => `${issue.code}: ${issue.message}`)
+    const validation = await validationPromise
+    const themeDocs = Object.fromEntries(themes.docs.map(doc => [doc.id, doc.data()]))
+    addThemeNameFindings(plan, findings.notices.filter(isThemeName), blockTargetsStandardThemes(validation, (findings.doc || block).themes, themeDocs))
     const doc = { ...JSON.parse(JSON.stringify(core.NEW_BLOCK_DEFAULTS)), ...(findings.doc || block), docId: blockId, doc_created_at: now, ...stamp(uid, now) }
     addWrite(plan, ref, doc, 'set', `Create library block "${doc.name || blockId}" (${blockId}). Nothing uses it yet.`)
     plan.result = { blockId }
@@ -396,6 +442,14 @@ const planBlock = async (core, reader, { orgId, uid, now, operation }) => {
   if (typeof operation.baseHash === 'string' && operation.baseHash !== revisionsCore.blockDefinitionHash(current)) {
     plan.problems.push(`Block "${blockId}" changed since you loaded it (its ${current === block ? 'released definition' : `unreleased draft, revision ${block.draftRevision}`} is different). Load it again before drafting.`)
     plan.currentHash = revisionsCore.blockDefinitionHash(current)
+  }
+  if (isPlainObject(operation.definition) && typeof operation.definition.content === 'string') {
+    const validation = await validationPromise
+    const themes = await reader.query(orgRefOf(orgId).collection('themes'), `organizations/${orgId}/themes`)
+    const themeDocs = Object.fromEntries(themes.docs.map(doc => [doc.id, doc.data()]))
+    const blockThemes = Array.isArray(operation.definition.themes) ? operation.definition.themes : block.themes
+    const findings = validation.themeNameFindings(validation.templateClassStrings(operation.definition.content))
+    addThemeNameFindings(plan, findings, blockTargetsStandardThemes(validation, blockThemes, themeDocs))
   }
   if (isPlainObject(operation.definition)) {
     const changed = revisionsCore.changedDefinitionFields(current, operation.definition)

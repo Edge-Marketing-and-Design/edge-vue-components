@@ -288,6 +288,161 @@ const validateSchemaInput = (report, input, path, { allowMissingValue = false } 
 
 const hasAltPair = (schema, name) => owns(schema, `${name}Alt`) || owns(schema, 'alt')
 
+// ---- Standard theme names ----
+// Every theme defines the same color, font and radius names, and blocks use
+// only those, so a block works with any theme in the organization: swapping
+// themes never leaves a block pointing at a color (river, timber) the new
+// theme doesn't have. Contract: docs/data-contracts/cms-themes/README.md.
+export const THEME_COLOR_TOKENS = [
+  'primary', 'onPrimary', 'secondary', 'onSecondary', 'tertiary', 'onTertiary', 'accent', 'onAccent',
+  'canvas', 'surface', 'surfaceAlt',
+  'text', 'textMuted', 'heading', 'link', 'linkHover', 'border',
+]
+export const THEME_OPTIONAL_COLOR_TOKENS = ['success', 'warning', 'danger']
+export const THEME_FONT_TOKENS = ['display', 'sans', 'accent']
+export const THEME_RADIUS_TOKENS = ['card', 'panel', 'button']
+
+const STANDARD_COLORS = new Set([...THEME_COLOR_TOKENS, ...THEME_OPTIONAL_COLOR_TOKENS, 'white', 'black', 'transparent', 'current', 'inherit'])
+const STANDARD_FONTS = new Set([...THEME_FONT_TOKENS, 'mono'])
+const STANDARD_RADII = new Set([...THEME_RADIUS_TOKENS, 'none', 'sm', 'md', 'lg', 'xl', 'full'])
+const FONT_WEIGHTS = new Set(['thin', 'extralight', 'light', 'normal', 'medium', 'semibold', 'bold', 'extrabold', 'black'])
+const TAILWIND_PALETTE = 'slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose'
+// Letter-only suffixes of color utilities that aren't colors.
+const NON_COLOR_WORDS = {
+  text: ['left', 'center', 'right', 'justify', 'start', 'end', 'wrap', 'nowrap', 'balance', 'pretty', 'ellipsis', 'clip', 'xs', 'sm', 'base', 'lg', 'xl'],
+  bg: ['fixed', 'local', 'scroll', 'cover', 'contain', 'auto', 'center', 'top', 'bottom', 'left', 'right', 'none', 'repeat'],
+  border: ['x', 'y', 't', 'r', 'b', 'l', 's', 'e', 'solid', 'dashed', 'dotted', 'double', 'hidden', 'none', 'collapse', 'separate'],
+  divide: ['x', 'y', 'solid', 'dashed', 'dotted', 'double', 'none'],
+  outline: ['none', 'solid', 'dashed', 'dotted', 'double'],
+  ring: ['inset'],
+  decoration: ['solid', 'double', 'dotted', 'dashed', 'wavy', 'auto', 'slice', 'clone'],
+  accent: ['auto'],
+  fill: ['none'],
+  stroke: ['none'],
+}
+const COLOR_UTILITY = /^(bg|text|border(?:-[xytrblse])?|divide|outline|ring(?:-offset)?|decoration|fill|stroke|from|via|to|accent|caret|placeholder)-([a-z][a-zA-Z]*)(?:\/(?:\d+|\[[^\]]+\]))?$/
+const PALETTE_UTILITY = new RegExp(`^(?:bg|text|border(?:-[xytrblse])?|divide|outline|ring(?:-offset)?|decoration|fill|stroke|from|via|to|accent|caret|placeholder)-(?:${TAILWIND_PALETTE})-\\d{2,3}(?:\\/.*)?$`)
+const RAW_COLOR = /^(?:#|rgba?\(|hsla?\(|oklch\(|oklab\(|color-mix\()/i
+
+// The class strings in a template or an `apply` value, with template tokens
+// removed.
+export const templateClassStrings = (template) => {
+  const source = String(template || '').replace(/\{\{\{?[\s\S]*?\}?\}\}/g, ' ')
+  return [...source.matchAll(/\bclass\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)].map(match => match[1] ?? match[2] ?? '')
+}
+
+// Names in class strings that aren't standard theme names:
+// { colors, fonts, radii, raw } (sorted, unique). `raw` holds hard-coded
+// colors: hex or rgb arbitrary values and the Tailwind palette.
+export const findThemeNameIssues = (classStrings) => {
+  const found = { colors: new Set(), fonts: new Set(), radii: new Set(), raw: new Set() }
+  for (const classString of classStrings) {
+    for (const token of String(classString || '').split(/\s+/).filter(Boolean)) {
+      const utility = token.split(':').pop().replace(/^!/, '').replace(/^-/, '')
+      const arbitrary = utility.match(/^([a-z-]+)-\[(.+)\](?:\/.*)?$/)
+      if (arbitrary) {
+        const [, prefix, value] = arbitrary
+        const cssVar = value.match(/^var\(--(color|font|radius)-([\w-]+)\)/)
+        if (cssVar) {
+          const [, kind, name] = cssVar
+          if (kind === 'color' && !STANDARD_COLORS.has(name))
+            found.colors.add(name)
+          else if (kind === 'font' && !STANDARD_FONTS.has(name))
+            found.fonts.add(name)
+          else if (kind === 'radius' && !STANDARD_RADII.has(name))
+            found.radii.add(name)
+        }
+        else if (prefix !== 'font' && prefix !== 'rounded' && RAW_COLOR.test(value)) {
+          found.raw.add(token)
+        }
+        continue
+      }
+      if (PALETTE_UTILITY.test(utility)) {
+        found.raw.add(token)
+        continue
+      }
+      const font = utility.match(/^font-([a-z][a-zA-Z]*)$/)
+      if (font) {
+        if (!STANDARD_FONTS.has(font[1]) && !FONT_WEIGHTS.has(font[1]))
+          found.fonts.add(font[1])
+        continue
+      }
+      const radius = utility.match(/^rounded(?:-(?:[trblse]|tl|tr|bl|br|ss|se|es|ee))?-([a-z][a-zA-Z]*)$/)
+      if (radius) {
+        if (!STANDARD_RADII.has(radius[1]))
+          found.radii.add(radius[1])
+        continue
+      }
+      const color = utility.match(COLOR_UTILITY)
+      if (color) {
+        const group = color[1].replace(/-.*/, '')
+        if (!STANDARD_COLORS.has(color[2]) && !(NON_COLOR_WORDS[group] || []).includes(color[2]))
+          found.colors.add(color[2])
+      }
+    }
+  }
+  const sorted = set => [...set].sort()
+  return { colors: sorted(found.colors), fonts: sorted(found.fonts), radii: sorted(found.radii), raw: sorted(found.raw) }
+}
+
+// The same issues as block findings: { code, message } per kind found.
+export const themeNameFindings = (classStrings) => {
+  const issues = findThemeNameIssues(classStrings)
+  const findings = []
+  if (issues.colors.length)
+    findings.push({ code: 'theme.color-name', message: `Colors outside the standard theme names: ${issues.colors.join(', ')}. Use ${THEME_COLOR_TOKENS.join(', ')} (or ${THEME_OPTIONAL_COLOR_TOKENS.join(', ')}).` })
+  if (issues.fonts.length)
+    findings.push({ code: 'theme.font-name', message: `Fonts outside the standard theme names: ${issues.fonts.join(', ')}. Use ${THEME_FONT_TOKENS.join(', ')}.` })
+  if (issues.radii.length)
+    findings.push({ code: 'theme.radius-name', message: `Radii outside the standard theme names: ${issues.radii.join(', ')}. Use ${THEME_RADIUS_TOKENS.join(', ')} or a Tailwind size.` })
+  if (issues.raw.length)
+    findings.push({ code: 'theme.raw-color', message: `Hard-coded colors bypass the theme: ${issues.raw.slice(0, 8).join(' ')}${issues.raw.length > 8 ? ` (+${issues.raw.length - 8} more)` : ''}. Use a standard theme color, with an opacity modifier if needed.` })
+  return findings
+}
+
+const themeGroup = (theme, name) => {
+  const extend = isObject(theme?.extend) ? theme.extend[name] : undefined
+  const top = isObject(theme) ? theme[name] : undefined
+  if (!isObject(extend) && !isObject(top))
+    return null
+  return { ...(isObject(top) ? top : {}), ...(isObject(extend) ? extend : {}) }
+}
+
+// Problems with a parsed Theme JSON object against the standard names: every
+// required color, font and radius defined, nothing else defined, and `apply`
+// rules using only standard names. [] means the theme is standard.
+export const themeTokenProblems = (theme) => {
+  if (!isObject(theme))
+    return [{ code: 'theme.not-object', message: 'Theme JSON must be an object.' }]
+  const problems = []
+  const checkGroup = (groupName, label, required, allowed, code) => {
+    const group = themeGroup(theme, groupName) || {}
+    const keys = Object.keys(group)
+    const missing = required.filter(key => !keys.includes(key))
+    const extra = keys.filter(key => !allowed.includes(key))
+    if (missing.length)
+      problems.push({ code: `${code}-missing`, message: `Theme is missing standard ${label}: ${missing.join(', ')}.` })
+    if (extra.length)
+      problems.push({ code: `${code}-name`, message: `Theme defines ${label} outside the standard names: ${extra.join(', ')}. Map each to a standard name (${allowed.join(', ')}).` })
+  }
+  checkGroup('colors', 'colors', THEME_COLOR_TOKENS, [...THEME_COLOR_TOKENS, ...THEME_OPTIONAL_COLOR_TOKENS], 'theme.color')
+  checkGroup('fontFamily', 'fonts', THEME_FONT_TOKENS, THEME_FONT_TOKENS, 'theme.font')
+  checkGroup('borderRadius', 'radii', THEME_RADIUS_TOKENS, THEME_RADIUS_TOKENS, 'theme.radius')
+  const applyStrings = []
+  const collectApply = (apply) => {
+    for (const value of Object.values(isObject(apply) ? apply : {})) {
+      if (typeof value === 'string')
+        applyStrings.push(value)
+    }
+  }
+  collectApply(theme.apply)
+  for (const variant of Object.values(isObject(theme.variants) ? theme.variants : {}))
+    collectApply(variant?.apply)
+  for (const finding of themeNameFindings(applyStrings))
+    problems.push({ code: finding.code, message: `Theme apply rules: ${finding.message}` })
+  return problems
+}
+
 // Structural, schema, and template-grammar checks. Pass the raw document as
 // imported, before any Hub normalization.
 export const validateBlockDocument = (doc, options = {}) => {
@@ -410,6 +565,10 @@ export const validateBlockDocument = (doc, options = {}) => {
     report.add('error', 'grammar.condition-negation', 'template', 'Template v2 conditions do not support ! negation; test the field and put the content in the {{{#else}}} branch.')
   if (/ld\+json/i.test(template))
     report.add('warning', 'grammar.json-ld', 'template', 'Blocks should not contain JSON-LD; use page structured data.')
+  // Warnings here: blocks for themes that predate the standard names still
+  // import. Operations refuse them for blocks whose themes are standard.
+  for (const finding of themeNameFindings(templateClassStrings(template)))
+    report.add('warning', finding.code, 'template', finding.message)
 
   const declared = isObject(doc.dataSources) ? Object.keys(doc.dataSources) : []
   const called = [...new Set(extractSourceCalls(template))]
