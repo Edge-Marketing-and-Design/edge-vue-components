@@ -1547,7 +1547,7 @@ function toVarBackedUtilities(classList, theme) {
         return cls
       }
 
-      // font families via root apply, including custom keys like "brand"
+      // font family classes, including custom keys like "brand"
       if (cls === 'font-sans')
         return `font-[${cssVarRef('font', 'sans')}]`
       if (cls === 'font-serif')
@@ -1596,59 +1596,21 @@ function appendElementClasses(el, classList) {
   writeElementClass(el, `${base} ${additions}`.trim())
 }
 
-function applyThemeClasses(scopeEl, theme, variant = 'light', isolated = true) {
+function applyThemeClasses(scopeEl, theme, variant = 'light') {
   if (!scopeEl)
     return
   const t = normalizeTheme(theme)
-  // merge base + variant overrides for apply & slots
+  // Theme `apply` rules (root, link, heading, button, badge) are not applied:
+  // the public renderer ignores them, so adding them here only made the
+  // editor differ from the published site (a heading rule overrode blocks'
+  // own heading classes). Blocks set their own base font and colors
+  // (docs/data-contracts/cms-themes/README.md).
   const v = (t.variants && t.variants[variant]) || {}
-  const apply = { ...(t.apply || {}), ...(v.apply || {}) }
   const slots = JSON.parse(JSON.stringify(t.slots || {}))
   if (v.slots) {
     // shallow merge per slot key
     Object.entries(v.slots).forEach(([slotKey, obj]) => {
       slots[slotKey] = { ...(slots[slotKey] || {}), ...obj }
-    })
-  }
-
-  // Root classes
-  if (apply.root) {
-    const mapped = toVarBackedUtilities(apply.root, t)
-    if (isolated) {
-      writeElementClass(scopeEl, `block-content ${mapped}`.trim())
-    }
-    else {
-      const applied = (scopeEl.dataset.themeRootClasses || '').split(/\s+/).filter(Boolean)
-      applied.forEach(cls => scopeEl.classList.remove(cls))
-      const next = mapped.split(/\s+/).filter(Boolean)
-      next.forEach(cls => scopeEl.classList.add(cls))
-      scopeEl.classList.add('block-content')
-      if (next.length)
-        scopeEl.dataset.themeRootClasses = next.join(' ')
-      else
-        delete scopeEl.dataset.themeRootClasses
-    }
-  }
-
-  // Optional convenience: map a few generic applies
-  if (apply.link) {
-    scopeEl.querySelectorAll('a').forEach((el) => {
-      appendElementClasses(el, toVarBackedUtilities(apply.link, t))
-    })
-  }
-  if (apply.heading) {
-    scopeEl.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach((el) => {
-      appendElementClasses(el, toVarBackedUtilities(apply.heading, t))
-    })
-  }
-  if (apply.button) {
-    scopeEl.querySelectorAll('button,[data-theme="button"]').forEach((el) => {
-      appendElementClasses(el, toVarBackedUtilities(apply.button, t))
-    })
-  }
-  if (apply.badge) {
-    scopeEl.querySelectorAll('[data-theme="badge"]').forEach((el) => {
-      appendElementClasses(el, toVarBackedUtilities(apply.badge, t))
     })
   }
 

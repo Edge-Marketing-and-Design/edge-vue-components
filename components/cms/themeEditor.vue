@@ -83,6 +83,28 @@ const parseJsonSafe = (value, fallback) => {
   }
 }
 
+// Theme `apply` rules have no effect: published sites ignore them and the Hub
+// no longer applies them (docs/data-contracts/cms-themes/README.md). Lists the
+// non-empty ones so the editor can say so.
+const themeApplyRuleNames = (themeValue) => {
+  const theme = typeof themeValue === 'string' ? parseJsonSafe(themeValue, null) : themeValue
+  if (!theme || typeof theme !== 'object' || Array.isArray(theme))
+    return []
+  const names = []
+  const collect = (apply, prefix) => {
+    if (!apply || typeof apply !== 'object' || Array.isArray(apply))
+      return
+    for (const [key, value] of Object.entries(apply)) {
+      if (typeof value === 'string' && value.trim())
+        names.push(`${prefix}${key}`)
+    }
+  }
+  collect(theme.apply, '')
+  for (const [variantName, variant] of Object.entries(theme.variants || {}))
+    collect(variant?.apply, `${variantName}.`)
+  return names
+}
+
 const normalizeForCompare = (value) => {
   if (Array.isArray(value))
     return value.map(normalizeForCompare)
@@ -1303,6 +1325,13 @@ onBeforeMount(async () => {
                 </TabsList>
 
                 <TabsContent value="theme-json" class="mt-4">
+                  <p
+                    v-if="themeApplyRuleNames(slotProps.workingDoc.theme).length"
+                    class="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+                    role="note"
+                  >
+                    This theme has <code>apply</code> rules ({{ themeApplyRuleNames(slotProps.workingDoc.theme).join(', ') }}). They have no effect: published sites ignore them, and the Hub no longer applies them. Set base fonts and colors in each block's classes instead.
+                  </p>
                   <edge-cms-code-editor
                     v-model="slotProps.workingDoc.theme"
                     title="Theme JSON"
