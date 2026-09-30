@@ -310,6 +310,7 @@ const onSubmit = async () => {
   // save the same document twice.
   if (state.submitting)
     return null
+  state.errors = {}
   state.successMessage = ''
   const workingDocOverrides = props.workingDocOverrides
   const finalWorkingDoc = {
@@ -597,7 +598,10 @@ const triggerSubmit = async (insertedValues = {}) => {
     await nextTick()
     const savedDoc = await formRef.value.handleSubmit(onSubmit)()
     await nextTick()
-    state.errors = formRef.value?.errors
+    state.errors = {
+      ...(formRef.value?.errors || {}),
+      ...(state.errors?._form ? { _form: state.errors._form } : {}),
+    }
     return savedDoc
   }
 }
@@ -692,6 +696,9 @@ defineExpose({ refresh: refreshEditorData })
         </edge-menu>
       </slot>
       <CardContent :class="cn('flex-1 flex flex-col px-4', props.cardContentClass)">
+        <div v-if="state.errors?._form" role="alert" class="mb-4 rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-foreground">
+          {{ state.errors._form }}
+        </div>
         <div v-if="state.successMessage" class="px-6">
           <Alert
             class="mt-2 mb-4 border border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-500/60 dark:bg-emerald-900/50 dark:text-emerald-100"
