@@ -1518,8 +1518,13 @@ function toVarBackedUtilities(classList, theme) {
     .split(/\s+/)
     .filter(Boolean)
     .map((cls) => {
-      // colors: text-*, bg-*, border-* mapped when key exists
-      const colorMatch = /^(text|bg|border)-(.*)$/.exec(cls)
+      // colors: every color utility (text, bg, border and its sides, gradient
+      // stops, ring, outline, decoration, divide, fill, stroke, accent, caret,
+      // placeholder) mapped to the theme variable when the key exists. Only
+      // text/bg/border were, so a gradient's from-surface generated nothing
+      // in the Hub (the Hub's UnoCSS has no theme colors) while the public
+      // site drew it.
+      const colorMatch = /^(border-[xytrblse]|ring-offset|text|bg|border|from|via|to|ring|outline|decoration|divide|fill|stroke|accent|caret|placeholder)-(.*)$/.exec(cls)
       if (colorMatch) {
         const [, kind, rawKey] = colorMatch
 
@@ -1536,26 +1541,7 @@ function toVarBackedUtilities(classList, theme) {
 
         if (colorKeys.has(key)) {
           const varRef = cssVarRef('color', key)
-
-          // no /opacity → plain var()
-          if (!opacity) {
-            if (kind === 'text')
-              return `text-[${varRef}]`
-            if (kind === 'bg')
-              return `bg-[${varRef}]`
-            if (kind === 'border')
-              return `border-[${varRef}]`
-          }
-
-          // with /opacity → use slash opacity on arbitrary value
-          if (kind === 'text')
-            return `text-[${varRef}]/${opacity}`
-          if (kind === 'bg')
-            return `bg-[${varRef}]/${opacity}`
-          if (kind === 'border')
-            return `border-[${varRef}]/${opacity}`
-
-          return cls
+          return opacity ? `${kind}-[${varRef}]/${opacity}` : `${kind}-[${varRef}]`
         }
 
         return cls
