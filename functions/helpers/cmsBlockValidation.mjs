@@ -444,8 +444,10 @@ export const themeTokenProblems = (theme) => {
   collectApply(theme.apply)
   for (const variant of Object.values(isObject(theme.variants) ? theme.variants : {}))
     collectApply(variant?.apply)
-  for (const finding of themeNameFindings(applyStrings))
-    problems.push({ code: finding.code, message: `Theme apply rules: ${finding.message}` })
+  // `apply` stays empty: the public renderer ignores it (and the Hub no
+  // longer applies it), so blocks set their own base font and color.
+  if (applyStrings.some(value => value.trim()))
+    problems.push({ code: 'theme.apply-rules', message: 'Theme apply rules have no effect on published sites; leave "apply" empty and set base fonts and colors in each block\'s classes.' })
   return problems
 }
 
