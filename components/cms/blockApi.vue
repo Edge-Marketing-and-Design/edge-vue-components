@@ -6,7 +6,6 @@
  * - Preserves original behavior: API fields override same-named props.values fields
  */
 
-import { computedAsync } from '@vueuse/core'
 import { getCmsTemplateRuntimeMeta } from '../../composables/useCmsTemplateRuntimeMeta'
 
 const props = defineProps({
@@ -538,34 +537,39 @@ if (import.meta.client) {
   }, { immediate: true })
 }
 
-const collectionValues = computedAsync(
-  async () => {
-    if (!hasCollectionMetaToFetch.value) {
-      collectionPending.value = false
-      return {}
-    }
+const collectionValues = ref({})
+const collectionRequestSignature = computed(() => serializePreviewRequestInput({
+  siteId: props.siteId,
+  meta: collectionMetaToFetch.value,
+  values: mergedValues.value,
+}))
 
-    const requestId = ++collectionRequestId
-    collectionPending.value = true
-    try {
-      const collectionData = await edgeGlobal.cmsCollectionData(
-        edgeFirebase,
-        { ...(mergedValues.value || {}) },
-        collectionMetaToFetch.value,
-        props.siteId,
-      )
-      return collectionData
-    }
-    catch {
-      return {}
-    }
-    finally {
-      if (requestId === collectionRequestId)
-        collectionPending.value = false
-    }
-  },
-  {},
-)
+watch(collectionRequestSignature, async () => {
+  const requestId = ++collectionRequestId
+  if (!hasCollectionMetaToFetch.value) {
+    collectionValues.value = {}
+    collectionPending.value = false
+    return
+  }
+
+  const values = { ...(mergedValues.value || {}) }
+  const meta = collectionMetaToFetch.value
+  const siteId = props.siteId
+  collectionPending.value = true
+  try {
+    const result = await edgeGlobal.cmsCollectionData(edgeFirebase, values, meta, siteId)
+    if (requestId === collectionRequestId)
+      collectionValues.value = result || {}
+  }
+  catch {
+    if (requestId === collectionRequestId)
+      collectionValues.value = {}
+  }
+  finally {
+    if (requestId === collectionRequestId)
+      collectionPending.value = false
+  }
+}, { immediate: true })
 
 const finalValues = computed(() => {
   return {
