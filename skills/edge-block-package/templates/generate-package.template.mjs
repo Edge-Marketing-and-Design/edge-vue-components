@@ -26,7 +26,7 @@ const exampleMarkup = String.raw`<section class="bg-canvas px-6 py-20 font-sans 
     <p class="mt-6 max-w-2xl text-lg leading-8 text-textMuted">{{ body }}</p>
     <div class="mt-12 grid gap-6 md:grid-cols-3">
       {{#for card in cards}}
-        <article class="rounded-2xl border border-border bg-cardBg p-7">
+        <article class="rounded-card border border-border bg-surface p-7">
           <h3 class="text-2xl font-bold text-text">{{ card.title }}</h3>
           <p class="mt-3 leading-7 text-textMuted">{{ card.body }}</p>
         </article>

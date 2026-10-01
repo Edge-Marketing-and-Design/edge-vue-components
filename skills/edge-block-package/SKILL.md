@@ -62,7 +62,7 @@ Numbering packages (`00-site-setup`, `01-global-chrome`, `02-home` ...) keeps up
 
 ## Site chrome, posts, overrides
 
-- Navigation and footer are synced blocks that read the Site record through `siteDoc` (see `reference/chrome-and-helpers.md`). Never replace Site menu links or the Site logo with static content. New pages reuse the existing chrome blocks.
+- Navigation and footer are synced blocks that read the Site record through `siteDoc` (see `reference/chrome-and-helpers.md`). Never replace Site menu links or the Site logo with static content. New pages reuse the existing chrome blocks. Through the agent operations, `page.placeBlock` copies the site's existing synced instance onto a new page; the first instance on a site is placed in the Hub.
 - Post-enabled pages: listing blocks read `source("posts")` index metadata; detail blocks look up `queryItems.name = {routeLastSegment}` and render the body with `renderBlocks` (see `reference/posts-contract.md`).
 - Override blocks and the emd-cms-front handoff: `reference/override-blocks.md`.
 

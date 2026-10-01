@@ -86,9 +86,12 @@ const summarizeTargets = (targets) => {
   return { total: targets.length, sites: Object.values(bySite) }
 }
 
-const releaseChecksum = ({ blockId, revisionNumber, releasedRevision, scope, targets }) =>
+// Binds an execute to what the dry run reviewed: the revision's definition
+// and the library definition it replaces (a draft save keeps its revision
+// number, so numbers alone would miss an edit), the scope and the targets.
+const releaseChecksum = ({ blockId, revisionNumber, releasedRevision, scope, targets, definitionHash, beforeHash }) =>
   createHash('sha256')
-    .update(JSON.stringify({ blockId, revisionNumber, releasedRevision, scope, targets: targets.map(target => target.path) }))
+    .update(JSON.stringify({ blockId, revisionNumber, releasedRevision, scope, definitionHash, beforeHash, targets: targets.map(target => target.path) }))
     .digest('hex')
 
 // - release: a new revision (a draft), to all sites or as a canary;
@@ -148,6 +151,8 @@ const planRelease = async (core, { orgId, blockId, revisionNumber, scope }) => {
   })
   const targets = targetsWithData.map(({ path, siteId, collection, docId }) => ({ path, siteId, collection, docId }))
   const checks = await checkRelease({ orgId, blockId, block, revision, targets: targetsWithData })
+  const definitionHash = core.blockDefinitionHash(revision.definition || {})
+  const beforeHash = core.blockDefinitionHash(core.pickBlockDefinition(block))
   return {
     blockRef,
     block,
@@ -155,8 +160,9 @@ const planRelease = async (core, { orgId, blockId, revisionNumber, scope }) => {
     releasedRevision,
     targets,
     checks,
+    definitionHash,
     kind: releaseKind(revision, revisionNumber, releasedRevision, scope),
-    checksum: releaseChecksum({ blockId, revisionNumber, releasedRevision, scope, targets }),
+    checksum: releaseChecksum({ blockId, revisionNumber, releasedRevision, scope, targets, definitionHash, beforeHash }),
   }
 }
 
@@ -301,6 +307,10 @@ exports.executeBlockRelease = onCall({ timeoutSeconds: 300 }, async (request) =>
       const revision = revisionSnap.data() || {}
       if (!RELEASABLE_STATUSES.includes(revision.status))
         throw new HttpsError('failed-precondition', `Revision ${revisionNumber} changed since the dry run.`)
+      // A draft saved between the plan and this claim would otherwise be
+      // marked releasing while the release carried the older snapshot.
+      if (core.blockDefinitionHash(revision.definition || {}) !== plan.definitionHash)
+        throw new HttpsError('failed-precondition', `Revision ${revisionNumber} was edited since the dry run. Run it again before releasing.`)
 
       const startedAt = nowIso()
       // The definition is frozen in the release. Later edits start a new draft.
@@ -512,7 +522,9 @@ const countTargets = async (releaseRef) => {
 const finalizeScopedRelease = ({ transaction, release, releaseId, block, blockRef, revisionSnap, canarySnap, now }) => {
   const siteIds = release.scope.siteIds
   const canary = block.canary || null
-  const blockUpdate = { activeReleaseId: null }
+  // lastReleaseId keeps a partial canary or scoped rollback retryable
+  // (retryBlockRelease checks it) until a newer release takes the block.
+  const blockUpdate = { activeReleaseId: null, lastReleaseId: releaseId }
   if (release.kind === 'reapply') {
     if (revisionSnap.exists)
       transaction.update(revisionSnap.ref, { status: release.revisionStatusBefore || 'released', updatedAt: now })

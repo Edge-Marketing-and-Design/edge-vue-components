@@ -46,7 +46,7 @@ Work through the pages in the handoff's order. For each page:
 2. **Author new blocks** with the edge-block-package workflow: generate, validate three ways (the checker with `--standard-theme` for a standard theme), local preview at desktop and phone widths, fix. Classes use only the standard theme names; tints and hovers are opacity modifiers. Get them right locally first: once a block is on a page, later fixes are drafts the developer must release.
 3. **Create them**: `block.create` per block. The check runs the Hub's import check; fix every problem it reports and check again.
 4. **Change existing blocks** only from the Hub's copy: `cms_block_base`, edit that definition, `block.draft` with its `baseHash`. Never from a local file: the Hub may hold hand fixes you don't have. A "changed since you loaded it" refusal means someone edited it; load it again and reapply your change.
-5. **Build the page**: `page.create` (or use the page the theme seeded), `page.placeBlock` for each block in order with its content as `values`, `page.update` for the page's SEO (see "SEO" below). Content is the handoff's approved copy; anything invented stays empty or uses the block's intentional fallback, and goes in the report.
+5. **Build the page**: `page.create` (or use the page the theme seeded), `page.placeBlock` for each block in order with its content as `values`, `page.update` for the page's SEO (see "SEO" below). Content is the handoff's approved copy; anything invented stays empty or uses the block's intentional fallback, and goes in the report. Site chrome (navigation, footer) is synced: place it without `values`, and the operation copies the instance the site already has (the theme's seeded pages carry it). If the check says the site has no instance of it yet, the developer places the first one in the Hub: note the page in the report and go on.
 6. **Look at it.** `cms_preview_url`, open the link in a browser and screenshot it at about 1440 pixels wide, then get a second link with `viewport: "mobile"` for the phone layout (it renders a 420px page and simulates its breakpoints in any window), and compare both with the design. Fix what doesn't match: content with `page.setValues`, a block's markup with `block.draft` (the preview shows your drafts). Up to three passes per page; record what still differs.
 7. Log the page as done and go straight to the next one.
 
@@ -64,7 +64,7 @@ Set with the operations, from the handoff's approved copy only:
 
 ## 3. Readiness report, then checkpoint 2
 
-1. `cms_site_readiness` for the site. Fix what you can (errors first), then run it again.
+1. `cms_site_readiness` for the site. Fix what you can (errors first), then run it again. `truncated: true` (error `site.check-incomplete`) means the report is incomplete and the site can't be called ready; say so at checkpoint 2.
 2. **Checkpoint 2.** Stop and report:
    - pages built, each with a fresh preview link;
    - blocks created, and block drafts waiting for the developer to release (Block Editor, then release). Say plainly that the Hub page editor shows **released** blocks: until these drafts are released, the editor shows the older versions, while your preview links showed the drafts;

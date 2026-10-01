@@ -101,6 +101,9 @@ watch(open, (value) => {
             <CircleAlert v-else class="h-4 w-4" />
             {{ summary }}
           </p>
+          <p v-if="state.report.truncated" class="text-xs text-muted-foreground">
+            Checked {{ state.report.pagesChecked }} pages and {{ state.report.blocksChecked }} blocks; the site has more, so this report is incomplete.
+          </p>
           <section v-for="group in groups" :key="group.severity" class="space-y-1">
             <h3 class="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide" :class="group.tone">
               <component :is="group.icon" class="h-3.5 w-3.5" />

@@ -265,7 +265,10 @@ server moved from `tools/mcp/firebase-readonly` to `edge/tools/mcp/cms`).
 
 ## Codex MCP Config
 
-Point Codex or another MCP client at the Hub's main checkout, with the
+Clearwater's checkout ships `.codex/config.toml` with the same two servers
+and launcher as `.mcp.json` (production read-only and the emulator). Codex
+reads it from the project root; reconnect Codex after changing it. Another
+client can run the server directly from the Hub's main checkout, with the
 Hub's config:
 
 ```bash

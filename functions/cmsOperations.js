@@ -33,6 +33,7 @@ const PERMISSION_TARGETS = { theme: 'themes', page: 'sites', block: 'blocks', si
 const MAX_VALUE_BYTES = 200000
 
 const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value)
+const clone = value => JSON.parse(JSON.stringify(value))
 
 const requireDocId = (value, label) => {
   const id = typeof value === 'string' ? value.trim() : ''
@@ -57,9 +58,12 @@ const createReader = (transaction) => {
       record(ref.path, snap.exists, snap.exists ? snap.data() : null)
       return snap
     },
+    // Contents as well as membership: site.create copies template pages read
+    // this way, so a template edited under the same id must stale the check.
     async query(query, label) {
       const snap = transaction ? await transaction.get(query) : await query.get()
-      record(label, !snap.empty, snap.docs.map(doc => doc.id).sort())
+      const docs = snap.docs.map(doc => ({ id: doc.id, data: doc.data() || {} }))
+      record(label, !snap.empty, docs.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)))
       return snap
     },
   }
@@ -251,6 +255,22 @@ const loadSiteAndPage = async (reader, plan, { orgId, siteId, pageId }) => {
 
 const areaKeys = area => (area === 'post' ? ['postContent', 'postStructure'] : ['content', 'structure'])
 
+// The site's existing synced instance of a block, from the draft pages that
+// list it (as the Hub's blockPicker and menu editor find it).
+const findSyncedInstance = async (reader, siteRef, blockId) => {
+  const pagesSnap = await reader.query(siteRef.collection('pages').where('blockIds', 'array-contains', blockId), `${siteRef.path}/pages?blockIds=${blockId}`)
+  for (const doc of pagesSnap.docs) {
+    const page = doc.data() || {}
+    for (const key of ['content', 'postContent']) {
+      for (const candidate of Array.isArray(page[key]) ? page[key] : []) {
+        if (candidate?.blockId === blockId && candidate?.synced)
+          return candidate
+      }
+    }
+  }
+  return null
+}
+
 const findInstance = (page, instanceId) => {
   for (const key of ['content', 'postContent']) {
     const list = Array.isArray(page?.[key]) ? page[key] : []
@@ -292,7 +312,7 @@ const planPage = async (core, reader, { orgId, uid, now, operation }) => {
   }
 
   const pageId = requireDocId(operation.pageId, 'page id')
-  const { pageRef, page } = await loadSiteAndPage(reader, plan, { orgId, siteId, pageId })
+  const { siteRef, pageRef, page } = await loadSiteAndPage(reader, plan, { orgId, siteId, pageId })
   if (!pageRef)
     return plan
   const next = JSON.parse(JSON.stringify(page))
@@ -324,20 +344,36 @@ const planPage = async (core, reader, { orgId, uid, now, operation }) => {
       return plan
     }
     const block = blockSnap.data() || {}
-    if (block.synced)
-      plan.problems.push(`"${block.name || blockId}" is a synced block; place synced blocks in the Hub.`)
+    // A synced block (site chrome) shares one instance's values across the
+    // site's pages. As the Hub's picker does, copy the instance the site
+    // already has; the first one comes with the theme's seeded pages or is
+    // placed in the Hub, and its values are edited in the Hub.
+    const syncedSource = block.synced ? await findSyncedInstance(reader, siteRef, blockId) : null
+    if (block.synced && !syncedSource)
+      plan.problems.push(`"${block.name || blockId}" is a synced block and this site has no instance of it yet; place the first one in the Hub.`)
+    if (block.synced && operation.values !== undefined)
+      plan.problems.push(`"${block.name || blockId}" is a synced block; its values are shared across the site and edited in the Hub.`)
     const [contentKey, structureKey] = areaKeys(operation.area)
     const taken = core.pageIds(next)
     const instance = core.buildInstanceFromLibraryBlock(block, { id: core.generateShortId(taken), blockId })
-    if (operation.values !== undefined) {
+    if (syncedSource) {
+      instance.synced = true
+      instance.values = clone(syncedSource.values || {})
+      instance.meta = clone(syncedSource.meta || {})
+      if (isPlainObject(syncedSource.protection))
+        instance.protection = clone(syncedSource.protection)
+      if (syncedSource.blockUpdatedAt !== undefined)
+        instance.blockUpdatedAt = syncedSource.blockUpdatedAt
+    }
+    else if (operation.values !== undefined) {
       if (Number(instance.templateVersion) !== 2)
         plan.problems.push('Values can only be set on Template v2 blocks.')
       else if (!isPlainObject(operation.values) || valuesTooLarge(operation.values))
         plan.problems.push('values must be an object under 200 KB.')
       else
-        instance.values = JSON.parse(JSON.stringify(operation.values))
+        instance.values = clone(operation.values)
     }
-    if (Number(instance.templateVersion) === 2)
+    if (Number(instance.templateVersion) === 2 && !instance.synced)
       plan.problems.push(...core.validateInstanceValues(instance.schema, instance.values))
     const rows = Array.isArray(next[structureKey]) ? next[structureKey] : []
     const index = Number.isInteger(operation.index) ? Math.min(Math.max(operation.index, 0), rows.length) : rows.length
@@ -350,7 +386,7 @@ const planPage = async (core, reader, { orgId, uid, now, operation }) => {
       blockIds: core.derivePageBlockIds(next),
       version: core.getNextVersion(page.version),
       ...stamp(uid, now),
-    }, 'update', `Place "${block.name || blockId}" on draft page ${pageId} as row ${index + 1}.`)
+    }, 'update', `Place "${block.name || blockId}" on draft page ${pageId} as row ${index + 1}${syncedSource ? ' (synced; values shared with the site)' : ''}.`)
     plan.result = { siteId, pageId, instanceId: instance.id, rowId: row.id }
     return plan
   }
@@ -743,7 +779,7 @@ const gatherSiteReadiness = async ({ orgId, siteId }) => {
   const pagesSnap = await siteRef.collection('pages').limit(READINESS_MAX_PAGES + 1).get()
   const publishedSnap = await siteRef.collection('published').limit(READINESS_MAX_PAGES + 1).get()
   const pages = Object.fromEntries(pagesSnap.docs.slice(0, READINESS_MAX_PAGES).map(doc => [doc.id, doc.data() || {}]))
-  const published = Object.fromEntries(publishedSnap.docs.map(doc => [doc.id, doc.data() || {}]))
+  const published = Object.fromEntries(publishedSnap.docs.slice(0, READINESS_MAX_PAGES).map(doc => [doc.id, doc.data() || {}]))
 
   const blockIds = new Set()
   for (const page of Object.values(pages)) {
@@ -773,12 +809,28 @@ const gatherSiteReadiness = async ({ orgId, siteId }) => {
     blockChecks[blockId] = await validation.validateBlock({ ...blocks[blockId] }, { knownThemeIds, renderTemplate: engine.renderTemplateAsync })
 
   const report = core.buildSiteReadiness({ site, theme: themeSnap?.exists ? themeSnap.data() : null, pages, published, blocks, drafts, blockChecks })
+  const blockCount = Object.keys(blocks).length
+  const morePages = pagesSnap.size > READINESS_MAX_PAGES || publishedSnap.size > READINESS_MAX_PAGES
+  const truncated = morePages || blockCount > READINESS_MAX_BLOCK_CHECKS
+  if (truncated) {
+    // What the check skipped may hold errors, so an incomplete check never
+    // says the site is ready. Reported as an error item, so the Hub dialog,
+    // the agent endpoint and the MCP all show it.
+    const covered = []
+    if (morePages)
+      covered.push(`the first ${READINESS_MAX_PAGES} pages`)
+    if (blockCount > READINESS_MAX_BLOCK_CHECKS)
+      covered.push(`${READINESS_MAX_BLOCK_CHECKS} of ${blockCount} blocks`)
+    report.items.unshift({ severity: 'error', code: 'site.check-incomplete', message: `The check is incomplete: it covered ${covered.join(' and ')}, so it can't confirm the site is ready.` })
+    report.counts.error += 1
+    report.ready = false
+  }
   return {
     siteId,
     ...report,
     pagesChecked: Object.keys(pages).length,
     blocksChecked: checked.length,
-    truncated: pagesSnap.size > READINESS_MAX_PAGES || Object.keys(blocks).length > READINESS_MAX_BLOCK_CHECKS,
+    truncated,
   }
 }
 
