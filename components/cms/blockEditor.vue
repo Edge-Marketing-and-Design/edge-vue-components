@@ -5239,6 +5239,7 @@ const exportCurrentBlock = async () => {
                 language="handlebars"
                 name="content"
                 :enable-formatting="!isWorkingTemplateV2Doc(slotProps.workingDoc)"
+                format-single-line-on-open
                 height="calc(100vh - 316px)"
                 class="mb-0 flex-1"
                 @update:model-value="syncWorkingTemplateContent(slotProps.workingDoc, $event)"

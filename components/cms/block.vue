@@ -2887,6 +2887,7 @@ const getTagsFromPosts = computed(() => {
                   language="handlebars"
                   name="preview-block-content"
                   :enable-formatting="Number(blockContentPreviewBlock?.templateVersion) !== 2"
+                  format-single-line-on-open
                   height="calc(100vh - 295px)"
                   class="h-full min-h-0"
                 >

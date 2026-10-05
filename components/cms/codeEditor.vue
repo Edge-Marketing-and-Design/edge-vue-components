@@ -1,5 +1,7 @@
 <script setup>
 import { cn } from '@/lib/utils'
+import * as templateMonaco from 'monaco-editor'
+import { formatSingleLineTemplate, templateSourceOffset } from '../../lib/cmsTemplateReadability'
 
 const props = defineProps({
   modelValue: {
@@ -74,10 +76,20 @@ const props = defineProps({
     type: Boolean,
     default: true,
   },
+  formatSingleLineOnOpen: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const emit = defineEmits(['update:modelValue', 'lineClick'])
 const localModelValue = ref(null)
+let readabilitySource = null
+let readabilityDisplay = null
+let monacoApi = null
+let readabilityRequest = 0
+const isReadabilityDisplay = value => props.formatSingleLineOnOpen
+  && readabilitySource !== null && value === readabilityDisplay
 const edgeFirebase = inject('edgeFirebase')
 const expectsJsonObject = ref(false)
 const jsonValidationError = computed(() => {
@@ -153,6 +165,8 @@ const toEditorValue = (value) => {
 }
 
 const toEmittedValue = (value) => {
+  if (isReadabilityDisplay(value))
+    return readabilitySource
   if (props.language === 'json' && expectsJsonObject.value) {
     try {
       return value ? JSON.parse(value) : {}
@@ -167,13 +181,24 @@ const toEmittedValue = (value) => {
 
 watch(() => props.modelValue, (newValue) => {
   if (state.afterMount) {
+    // A parent echo of a real edit is not another block being opened.
+    if (props.formatSingleLineOnOpen && newValue === localModelValue.value)
+      return
+    readabilitySource = null
+    readabilityDisplay = null
     expectsJsonObject.value = props.language === 'json' && newValue !== null && typeof newValue === 'object'
     localModelValue.value = toEditorValue(newValue)
+    if (props.formatSingleLineOnOpen)
+      void formatSingleLineOnOpen()
   }
 })
 
 watch(localModelValue, () => {
   if (state.afterMount) {
+    if (props.formatSingleLineOnOpen
+      && (localModelValue.value === props.modelValue
+        || (isReadabilityDisplay(localModelValue.value) && props.modelValue === readabilitySource)))
+      return
     emit('update:modelValue', toEmittedValue(localModelValue.value))
     if (!state.undoredo) {
       state.editHistory.push(localModelValue.value)
@@ -265,9 +290,70 @@ const runChatGpt = async () => {
   state.gptLoading = false
 }
 
+const formatSingleLineOnOpen = async () => {
+  const editor = editorInstanceRef.value
+  const source = props.modelValue
+  const request = ++readabilityRequest
+  // Let the child Monaco model receive a newly opened document first.
+  await nextTick()
+  if (request !== readabilityRequest)
+    return
+  const model = editor?.getModel?.()
+  if (!model || !monacoApi || typeof source !== 'string' || /[\r\n]/.test(source))
+    return
+  const version = model.getVersionId()
+  let temporaryModel
+  let formattingWorker
+  try {
+    const formatted = await formatSingleLineTemplate(source, async (masked) => {
+      temporaryModel = monacoApi.editor.createModel(masked, 'html')
+      formattingWorker = monacoApi.editor.createWebWorker({
+        moduleId: 'vs/language/html/htmlWorker', label: 'html',
+        createData: { languageId: 'html', languageSettings: { format: {} } },
+      })
+      const worker = await formattingWorker.withSyncedResources([temporaryModel.uri])
+      const edits = await worker.format(temporaryModel.uri.toString(), null, {
+        tabSize: 2, insertSpaces: true, wrapLineLength: 0,
+        unformatted: 'pre,code,textarea,script,style',
+        contentUnformatted: 'pre,code,textarea,script,style',
+      })
+      // Use Monaco's edit ranges rather than assuming one whole-file edit.
+      temporaryModel.applyEdits(edits.map(edit => ({
+        range: new monacoApi.Range(edit.range.start.line + 1, edit.range.start.character + 1,
+          edit.range.end.line + 1, edit.range.end.character + 1), text: edit.newText,
+      })))
+      return temporaryModel.getValue()
+    })
+    if (request !== readabilityRequest || props.modelValue !== source
+      || editor.getModel() !== model || model.isDisposed()
+      || model.getVersionId() !== version || formatted === source)
+      return
+    readabilitySource = source
+    readabilityDisplay = formatted
+    localModelValue.value = formatted
+    state.editHistory = [formatted]
+    state.currentHistory = 0
+  }
+  catch (error) {
+    console.warn('Could not format the single-line template; keeping its original source.', error)
+  }
+  finally {
+    temporaryModel?.dispose()
+    formattingWorker?.dispose()
+  }
+}
+
+const sourceOffset = offset => isReadabilityDisplay(editorInstanceRef.value?.getValue?.())
+  ? templateSourceOffset(readabilitySource, readabilityDisplay, offset) : offset
+
 const handleMount = (editor) => {
   editorInstanceRef.value = editor
-  if (props.enableFormatting)
+  // Use the bundled version that matches plugins/monaco's worker modules.
+  // The editor loader may supply an older AMD namespace from its CDN.
+  monacoApi = templateMonaco
+  if (props.formatSingleLineOnOpen)
+    void formatSingleLineOnOpen()
+  else if (props.enableFormatting)
     editorInstanceRef.value?.getAction('editor.action.formatDocument').run()
   editorDomNode = editor.getDomNode?.()
   if (editorDomNode)
@@ -283,7 +369,7 @@ const handleMount = (editor) => {
       lineNumber: position.lineNumber,
       column: position.column,
       lineContent,
-      offset,
+      offset: sourceOffset(offset),
     })
   })
 }
@@ -427,7 +513,8 @@ const applyInlineFormatter = (formatter) => {
 }
 
 const getEditorValue = () => {
-  return editorInstanceRef.value?.getValue?.() || localModelValue.value || ''
+  const value = editorInstanceRef.value?.getValue?.() ?? localModelValue.value ?? ''
+  return isReadabilityDisplay(value) ? readabilitySource : value
 }
 
 const getCursorOffset = () => {
@@ -436,7 +523,7 @@ const getCursorOffset = () => {
   const position = editor?.getPosition?.()
   if (!model || !position || typeof model.getOffsetAt !== 'function')
     return null
-  return model.getOffsetAt(position)
+  return sourceOffset(model.getOffsetAt(position))
 }
 
 defineExpose({
@@ -462,6 +549,7 @@ const getChanges = () => {
 }
 
 onBeforeUnmount(() => {
+  readabilityRequest++
   if (editorDomNode)
     editorDomNode.removeEventListener('keydown', stopEnterPropagation)
   editorDomNode = null
