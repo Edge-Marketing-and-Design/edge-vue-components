@@ -15,12 +15,13 @@ Do not replace an existing theme merely to support one block.
 
 ## Standard names (required for new themes)
 
-Every new theme uses the same names, and blocks use only those names, so any
-block works with any theme in the organization. Contract: the Hub's
-`docs/data-contracts/cms-themes/README.md`. The Hub refuses `theme.create`
-otherwise.
+Start new themes from the Hub's `edge/lib/cmsThemeDefaults.mjs`, the source
+of truth for both the New Theme UI and agent defaults. Keep the baseline
+present; custom additions are allowed. Baseline-only blocks are portable;
+extensions require every selected theme to declare them. Existing themes and
+duplicates retain their JSON. Contract: `docs/data-contracts/cms-themes/README.md`.
 
-- **Colors** (`extend.colors`), all required, nothing else:
+- **Colors** (`extend.colors`), baseline required, extensions allowed:
   - brand: `primary`, `secondary`, `tertiary`, `accent` (the call-to-action
     color), most used first;
   - text on brand: `onPrimary`, `onSecondary`, `onTertiary`, `onAccent`,
@@ -35,8 +36,8 @@ otherwise.
   `accent` (eyebrows, quotes, a serif or script voice). All three; repeat a
   stack when the design has fewer faces.
 - **Radii** (`extend.borderRadius`): `card`, `panel`, `button`.
-- **Never** a palette name (`river`, `pine`, `timber`), a Figma layer name, a
-  hex-based name or a project prefix, even as an extra alias.
+- Prefer semantic role names over palette, Figma layer, hex-based or project
+  aliases. Extra names are a design choice, not a forbidden JSON schema.
 
 Map the design's palette onto the roles by how each color is used, not by its
 name, and record the mapping (palette name → role) in the package README for
@@ -47,26 +48,28 @@ slots.
 
 In blocks:
 
-- only the standard names, plus `white`, `black`, `transparent`,
+- preferably baseline names, plus `white`, `black`, `transparent`,
   `current`, `inherit`;
 - tints and hover shades are opacity modifiers in whole percent
   (`hover:bg-accent/90`, `text-heading/5`), never a new color or a hex
   (`hover:bg-[#d96a20]`). Never a bracketed decimal (`/[0.03]`): the Hub
   renders it black and the public renderer drops it;
-- no Tailwind palette colors (`text-red-500`) and no raw variables for other
-  names (`text-[var(--color-pine)]`);
+- no Tailwind palette colors (`text-red-500`); extension names or CSS variables
+  must be declared by every selected theme;
 - decorative textures and patterns (topography lines, grain) are part of the
   theme: export the SVG from the design into Extra CSS as a class, colored
   with standard names, and use that class in the blocks. Don't skip them as
   "images".
 
 Check with `node <hub>/scripts/cms/validate-import.mjs --standard-theme
-<theme.json> <blocks/>`: the theme file and every block must pass with no
-`theme.*` findings.
+<theme.json> <blocks/>` for baseline-only portability. Deliberate custom tokens
+may warn without selected-theme context: use normal import validation and
+`cms_check_operation` to verify those extensions against the selected themes.
 
 ## When a site has no theme
 
-Start from the recommended shape below, then translate the design system
+Start from the shared new-theme defaults, using the shape below as an example,
+then translate the design system
 from Figma:
 
 1. Map the design's colors onto the standard names above.
@@ -121,8 +124,8 @@ standardized; name them by role.
 ## Naming beyond the standard
 
 - Existing themes that predate the standard names (Clearwater Main, emd-cms
-  themes) keep their names until migrated; blocks for them only warn. Don't
-  add new non-standard names to them either.
+  themes) keep their names until an explicitly requested migration; blocks for
+  them only warn. Do not rename or migrate them as part of creating a new theme.
 - Avoid Figma layer names, page names, hex-based names, and project-prefixed
   aliases in every group.
 

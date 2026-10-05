@@ -3358,6 +3358,8 @@ const unreleasedChangesLabel = computed(() => {
   return `Unreleased changes${from} (revision ${draftRevision}). Pages use revision ${releasedRevision ?? 0} until an organization admin releases these changes.`
 })
 
+const activeCanary = computed(() => currentBlock.value?.canary || state.blockRevision.view?.canary || null)
+
 // A new block has no instances, so it is written directly and its live
 // definition is revision 0. Edits to an existing block save metadata directly
 // and the definition as an unreleased draft revision.
@@ -3646,6 +3648,10 @@ const exportCurrentBlock = async () => {
       </template>
       <template #main="slotProps">
         <div class="pt-4">
+          <div v-if="activeCanary" role="status" class="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
+            <div><p class="font-medium">Canary—not released everywhere</p><p class="mt-1">Revision {{ activeCanary.revisionNumber }} is assigned to {{ activeCanary.siteIds.length }} canary site(s). Other sites still use global revision {{ state.blockRevision.releasedRevision ?? 0 }}.</p></div>
+            <edge-shad-button v-if="isGlobalAdmin" type="button" size="sm" :disabled="state.editorHasUnsavedChanges || state.discardingDraft" :title="state.editorHasUnsavedChanges ? 'Save your changes before releasing.' : ''" @click="openReleaseDialog(activeCanary.revisionNumber)"><Rocket class="mr-2 h-4 w-4" />Release to all sites…</edge-shad-button>
+          </div>
           <div
             v-if="unreleasedChangesLabel"
             role="status"

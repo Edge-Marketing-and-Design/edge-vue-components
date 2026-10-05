@@ -23,6 +23,7 @@ const { stableStringify } = require('./helpers/historyFilter')
 const corePromise = import('./helpers/cmsOperations.mjs')
 const revisionsCorePromise = import('./helpers/cmsBlockRevisions.mjs')
 const validationPromise = import('./helpers/cmsBlockValidation.mjs')
+const themeDefaultsPromise = import('./helpers/cmsThemeDefaults.mjs')
 const loadImportCheck = () => Promise.all([
   import('./helpers/cmsBlockImport.mjs'),
   import('@edgedev/template-engine'),
@@ -147,6 +148,16 @@ const blockTargetsStandardThemes = (validation, blockThemes, themeDocs) => {
   return ids.length > 0 && ids.every(id => themeDocs[id] && isStandardTheme(validation, themeDocs[id]))
 }
 
+// Extensions are valid when every selected theme defines them. They are not
+// portable to unrelated themes; baseline names remain the default vocabulary.
+const commonThemeTokens = (blockThemes, themeDocs) => {
+  const themes = (Array.isArray(blockThemes) ? blockThemes : []).map(id => parseThemeJson(themeDocs[id]?.theme)).filter(Boolean)
+  return Object.fromEntries(['colors', 'fontFamily', 'borderRadius'].map(group => {
+    const names = themes.map(theme => Object.keys({ ...theme[group], ...theme.extend?.[group] }))
+    return [group, names.length ? names[0].filter(name => names.every(keys => keys.includes(name))) : []]
+  }))
+}
+
 const addThemeNameFindings = (plan, findings, strict) => {
   const messages = findings.map(issue => `${issue.code}: ${issue.message}`)
   if (strict)
@@ -158,10 +169,15 @@ const addThemeNameFindings = (plan, findings, strict) => {
 const planTheme = async (core, reader, { orgId, uid, now, operation }) => {
   const plan = createPlan()
   const validation = await validationPromise
-  const fields = isPlainObject(operation.fields) ? operation.fields : {}
+  const fields = isPlainObject(operation.fields) ? { ...operation.fields } : {}
   const themes = orgRefOf(orgId).collection('themes')
 
   if (operation.type === 'theme.create') {
+    const defaults = await themeDefaultsPromise
+    if (fields.theme === undefined)
+      fields.theme = JSON.stringify(defaults.createCmsThemeDefaults(), null, 2)
+    if (fields.headJSON === undefined)
+      fields.headJSON = JSON.stringify(defaults.createCmsThemeHeadDefaults(), null, 2)
     const themeId = optionalDocId(operation.themeId, 'theme id')
     const ref = themeId ? themes.doc(themeId) : themes.doc()
     if (themeId && (await reader.doc(ref)).exists)
@@ -461,7 +477,9 @@ const planBlock = async (core, reader, { orgId, uid, now, operation }) => {
     plan.notices = findings.notices.filter(issue => !isThemeName(issue)).map(issue => `${issue.code}: ${issue.message}`)
     const validation = await validationPromise
     const themeDocs = Object.fromEntries(themes.docs.map(doc => [doc.id, doc.data()]))
-    addThemeNameFindings(plan, findings.notices.filter(isThemeName), blockTargetsStandardThemes(validation, (findings.doc || block).themes, themeDocs))
+    const selectedThemes = (findings.doc || block).themes
+    const namedFindings = validation.themeNameFindings(validation.templateClassStrings((findings.doc || block).content), commonThemeTokens(selectedThemes, themeDocs))
+    addThemeNameFindings(plan, namedFindings, blockTargetsStandardThemes(validation, selectedThemes, themeDocs))
     const doc = { ...JSON.parse(JSON.stringify(core.NEW_BLOCK_DEFAULTS)), ...(findings.doc || block), docId: blockId, doc_created_at: now, ...stamp(uid, now) }
     addWrite(plan, ref, doc, 'set', `Create library block "${doc.name || blockId}" (${blockId}). Nothing uses it yet.`)
     plan.result = { blockId }
@@ -498,7 +516,7 @@ const planBlock = async (core, reader, { orgId, uid, now, operation }) => {
     const themes = await reader.query(orgRefOf(orgId).collection('themes'), `organizations/${orgId}/themes`)
     const themeDocs = Object.fromEntries(themes.docs.map(doc => [doc.id, doc.data()]))
     const blockThemes = Array.isArray(operation.definition.themes) ? operation.definition.themes : block.themes
-    const findings = validation.themeNameFindings(validation.templateClassStrings(operation.definition.content))
+    const findings = validation.themeNameFindings(validation.templateClassStrings(operation.definition.content), commonThemeTokens(blockThemes, themeDocs))
     addThemeNameFindings(plan, findings, blockTargetsStandardThemes(validation, blockThemes, themeDocs))
   }
   if (isPlainObject(operation.definition)) {

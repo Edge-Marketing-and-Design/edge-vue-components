@@ -1,5 +1,6 @@
 <script setup>
-import { Loader2, Rocket, RotateCcw } from 'lucide-vue-next'
+import { CheckCircle2, Loader2, RefreshCw, Rocket, RotateCcw, TriangleAlert } from 'lucide-vue-next'
+import { groupedReleaseIssues, releaseCanExecute, releaseComparisonRevision, revisionMatch, RELEASE_BADGE_CLASSES } from '../../lib/cmsBlockReleasePresentation'
 import {
   RELEASE_STATUS_LABELS,
   canRetryRelease,
@@ -13,7 +14,6 @@ import {
   loadBlockRevisionUsage,
   readBlockRelease,
   releasableRevisionItems,
-  releaseCheckIssues,
   releaseProgress,
   retryBlockRelease,
   rollbackRevision,
@@ -59,17 +59,39 @@ const siteItems = computed(() => Object.values(edgeFirebase.data?.[`${edgeGlobal
 const siteName = siteId => siteItems.value.find(site => site.name === siteId)?.title || siteId
 const revisionItems = computed(() => releasableRevisionItems(state.history))
 const scopeItems = [{ title: 'All sites', name: 'all' }, { title: 'Selected sites (canary)', name: 'sites' }]
-const planIssues = computed(() => releaseCheckIssues(state.plan?.checks))
+const issueGroups = computed(() => groupedReleaseIssues(state.plan?.checks))
+const comparisonRevision = computed(() => state.revision === '' ? releaseComparisonRevision(state.history) : Number(state.revision))
+const usageSites = computed(() => {
+  const used = new Map((state.usage?.sites || []).map(site => [site.siteId, site]))
+  for (const site of siteItems.value)
+    if (!used.has(site.name)) used.set(site.name, { siteId: site.name, drafts: {}, published: {}, documents: [] })
+  return [...used.values()].sort((a, b) => siteName(a.siteId).localeCompare(siteName(b.siteId)))
+})
+const sitesAtRevision = computed(() => usageSites.value.filter(site => {
+  const total = {}
+  for (const bucket of [site.drafts, site.published])
+    for (const [key, count] of Object.entries(bucket || {})) total[key] = (total[key] || 0) + count
+  return revisionMatch(total, comparisonRevision.value).status === 'current'
+}).length)
+const usageCount = bucket => Object.values(bucket || {}).reduce((total, count) => total + count, 0)
+const plannedDocuments = siteId => (state.plan?.targets?.documents || []).filter(doc => doc.siteId === siteId)
+const documentLabel = collection => ({ pages: 'Draft page', published: 'Published page', posts: 'Draft post', published_posts: 'Published post' }[collection] || collection)
+const checksTruncated = computed(() => {
+  const checks = state.plan?.checks
+  return checks && (checks.detailsTruncated || ['errors', 'warnings', 'instanceFailures', 'breaking'].some(key => (checks.counts?.[key] || 0) > (checks[key]?.length || 0)))
+})
 const progress = computed(() => releaseProgress(state.release))
 const rollbackTo = computed(() => rollbackRevision(state.history))
 const canaryRollback = computed(() => canaryRollbackPlan(state.history))
 const selectedSiteIds = computed(() => (state.scopeMode === 'sites' ? state.siteIds : null))
-const canExecute = computed(() => isAdmin.value
-  && state.plan
-  && !state.plan.blocked
-  && !state.plan.activeReleaseRunning
-  && (state.plan.checks?.status !== 'breaking' || state.confirmBreaking)
-  && !state.executing)
+const canExecute = computed(() => releaseCanExecute(state.plan, { isAdmin: isAdmin.value, confirmBreaking: state.confirmBreaking, executing: state.executing }))
+const checkStatusLabel = computed(() => {
+  const plan = state.plan
+  if (plan?.checks.status === 'passed') return 'Checks passed'
+  if (plan?.checks.status === 'blocked') return plan.blocked ? 'Release blocked' : 'Validation issues reported'
+  if (plan?.checks.status === 'breaking') return plan.breakingConfirmationRequired ? 'Breaking changes need confirmation' : 'Breaking changes reported'
+  return 'Checks passed with warnings'
+})
 
 const errorMessage = error => String(error?.message || error || 'Something went wrong.')
 
@@ -205,6 +227,16 @@ const startCanaryRollback = () => {
   state.tab = 'release'
 }
 
+const startCanaryPromotion = () => {
+  if (!state.history?.canary) return
+  state.release = null
+  state.revision = String(state.history.canary.revisionNumber)
+  state.scopeMode = 'all'
+  state.siteIds = []
+  resetPlan()
+  state.tab = 'release'
+}
+
 const usageLabel = (bucket) => {
   const entries = Object.entries(bucket || {})
   if (!entries.length)
@@ -227,7 +259,8 @@ watch(() => props.modelValue, async (open) => {
   state.siteIds = []
   state.tab = props.initialRevision === null ? 'history' : 'release'
   await loadHistory()
-  const fallback = revisionItems.value[0]?.name || ''
+  const preferred = releaseComparisonRevision(state.history)
+  const fallback = revisionItems.value.find(item => item.name === String(preferred))?.name || revisionItems.value[0]?.name || ''
   state.revision = props.initialRevision === null ? fallback : String(props.initialRevision)
 }, { immediate: true })
 
@@ -238,7 +271,7 @@ const close = () => emit('update:modelValue', false)
 
 <template>
   <edge-shad-dialog :model-value="props.modelValue" @update:model-value="emit('update:modelValue', $event)">
-    <DialogContent class="max-w-3xl max-h-[90vh] overflow-y-auto">
+    <DialogContent class="flex max-h-[90vh] max-w-4xl flex-col overflow-hidden">
       <DialogHeader>
         <DialogTitle class="text-left">
           Block releases
@@ -248,14 +281,13 @@ const close = () => emit('update:modelValue', false)
         </DialogDescription>
       </DialogHeader>
 
-      <div class="flex gap-2 border-b pb-2" role="tablist">
+      <div class="flex shrink-0 gap-2 border-b pb-2" aria-label="Release views">
         <edge-shad-button
           v-for="tab in [{ id: 'release', label: 'Release' }, { id: 'history', label: 'History and sites' }]"
           :key="tab.id"
           type="button"
           size="sm"
-          role="tab"
-          :aria-selected="state.tab === tab.id"
+          :aria-pressed="state.tab === tab.id"
           :variant="state.tab === tab.id ? 'default' : 'ghost'"
           @click="state.tab = tab.id"
         >
@@ -263,6 +295,7 @@ const close = () => emit('update:modelValue', false)
         </edge-shad-button>
       </div>
 
+      <div class="min-h-0 space-y-4 overflow-y-auto px-1" tabindex="0" aria-label="Release report">
       <Alert v-if="state.error" variant="destructive" role="alert">
         <AlertTitle>That didn't work</AlertTitle>
         <AlertDescription class="text-sm">
@@ -288,6 +321,12 @@ const close = () => emit('update:modelValue', false)
           <p v-if="state.release.status === 'superseded'" class="text-sm text-muted-foreground">
             A newer release of this block took over, so this one stopped. Pages hold the newer revision.
           </p>
+          <div v-if="progress.finished && state.history?.canary" class="rounded-lg border p-4" :class="RELEASE_BADGE_CLASSES.mixed">
+            <p class="font-medium">Canary—not released everywhere</p>
+            <p class="mt-1 text-sm">Revision {{ state.history.canary.revisionNumber }} is assigned to {{ state.history.canary.siteIds.length }} canary site(s). Other sites keep their previous revision. Check site outcomes below for any failed documents.</p>
+            <edge-shad-button v-if="isAdmin" type="button" size="sm" class="mt-3" @click="startCanaryPromotion">Release to all sites…</edge-shad-button>
+          </div>
+          <edge-cms-block-release-targets :key="state.release.releaseId" :release-id="state.release.releaseId" :sites="siteItems" :refresh-key="String(state.release.updatedAt || state.release.status)" />
           <div v-if="isAdmin && canRetryRelease(state.release)" class="flex justify-end">
             <edge-shad-button type="button" :disabled="state.retrying" @click="retry(state.release.releaseId)">
               <Loader2 v-if="state.retrying" class="mr-2 h-4 w-4 animate-spin" />
@@ -307,13 +346,12 @@ const close = () => emit('update:modelValue', false)
           </p>
           <template v-else>
             <div class="grid gap-3 md:grid-cols-2">
-              <edge-shad-select v-model="state.revision" name="releaseRevision" label="Revision" :items="revisionItems" placeholder="Choose a revision" />
-              <edge-shad-select v-model="state.scopeMode" name="releaseScope" label="Where" :items="scopeItems" />
+              <edge-shad-select v-model="state.revision" label="Revision" :items="revisionItems" placeholder="Choose a revision" />
+              <edge-shad-select v-model="state.scopeMode" label="Where" :items="scopeItems" />
             </div>
             <edge-shad-select-tags
               v-if="state.scopeMode === 'sites'"
               v-model="state.siteIds"
-              name="releaseSites"
               label="Canary sites"
               :items="siteItems"
               item-title="title"
@@ -339,31 +377,59 @@ const close = () => emit('update:modelValue', false)
               <span class="font-medium">{{ describeRelease(state.plan) }}: {{ describeScope(state.plan.scope, state.plan.kind) }}</span>
               <span class="text-muted-foreground">Released now: revision {{ state.plan.releasedRevision }}</span>
             </div>
-            <p class="text-sm">
-              {{ state.plan.targets.total }} document(s) will be updated:
-              <span v-for="(site, index) in state.plan.targets.sites" :key="site.siteId">{{ index ? ', ' : '' }}{{ siteName(site.siteId) }} ({{ site.total }})</span>
-            </p>
+            <dl class="grid grid-cols-2 gap-3 rounded-lg bg-muted/50 p-4 sm:grid-cols-4">
+              <div><dt class="text-xs text-muted-foreground">Affected sites</dt><dd class="mt-1 text-2xl font-semibold tabular-nums">{{ state.plan.targets.sites.length }}</dd></div>
+              <div><dt class="text-xs text-muted-foreground">Unique pages</dt><dd class="mt-1 text-2xl font-semibold tabular-nums">{{ state.plan.targets.pages ?? '—' }}</dd></div>
+              <div><dt class="text-xs text-muted-foreground">Unique posts</dt><dd class="mt-1 text-2xl font-semibold tabular-nums">{{ state.plan.targets.posts ?? '—' }}</dd></div>
+              <div><dt class="text-xs text-muted-foreground">Documents</dt><dd class="mt-1 text-2xl font-semibold tabular-nums">{{ state.plan.targets.total }}</dd></div>
+            </dl>
+            <p class="text-xs text-muted-foreground">A page or post can have both a draft and a published document. Documents are the propagation targets.</p>
+            <details class="rounded-lg border">
+              <summary class="cursor-pointer px-4 py-3 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">View affected sites and pages</summary>
+              <div class="space-y-2 border-t p-3">
+                <div class="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-3 px-3 text-xs text-muted-foreground"><span>Site · unique pages/posts</span><span>Draft docs</span><span>Published docs</span></div>
+                <details v-for="site in state.plan.targets.sites" :key="site.siteId" class="rounded-md border">
+                  <summary class="grid cursor-pointer grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
+                    <span class="min-w-0"><span class="block truncate font-medium">{{ siteName(site.siteId) }}</span><span class="text-xs text-muted-foreground">{{ site.pages ?? '—' }} pages · {{ site.posts ?? '—' }} posts</span></span>
+                    <span class="tabular-nums">{{ (site.collections.pages || 0) + (site.collections.posts || 0) }}</span><span class="tabular-nums">{{ (site.collections.published || 0) + (site.collections.published_posts || 0) }}</span>
+                  </summary>
+                  <ul class="max-h-56 divide-y overflow-y-auto border-t text-xs">
+                    <li v-for="doc in plannedDocuments(site.siteId)" :key="doc.path" class="flex flex-wrap justify-between gap-2 px-3 py-2"><span>{{ doc.docId }}</span><span class="text-muted-foreground">{{ documentLabel(doc.collection) }}</span></li>
+                    <li v-if="!plannedDocuments(site.siteId).length" class="px-3 py-2 text-muted-foreground">Document details are unavailable in this report.</li>
+                  </ul>
+                </details>
+                <p v-if="state.plan.targets.detailsTruncated" class="text-xs text-muted-foreground">Document details show the first 2,000 targets. Summary counts include all targets.</p>
+              </div>
+            </details>
             <p v-if="state.plan.canary && state.plan.kind !== 'promote'" class="text-sm text-muted-foreground">
-              Revision {{ state.plan.canary.revisionNumber }} is in a canary on {{ state.plan.canary.siteIds.map(siteName).join(', ') }}.
+              Revision {{ state.plan.canary.revisionNumber }} is assigned to {{ state.plan.canary.siteIds.length }} canary site(s). See History / sites for their revisions.
             </p>
-            <p class="text-sm">
-              Checks: <span class="font-medium">{{ state.plan.checks.status }}</span>
-              · {{ state.plan.checks.counts.instances }} instance(s), {{ state.plan.checks.counts.rendered }} distinct render(s)
-            </p>
-            <edge-cms-block-validation-issues v-if="planIssues.length" :issues="planIssues" />
+            <div class="flex items-start gap-3 rounded-lg border p-3" :class="RELEASE_BADGE_CLASSES[state.plan.checks.status === 'passed' ? 'current' : state.plan.checks.status === 'blocked' ? 'failed' : 'mixed']">
+              <CheckCircle2 v-if="state.plan.checks.status === 'passed'" class="mt-0.5 h-5 w-5 shrink-0" />
+              <TriangleAlert v-else class="mt-0.5 h-5 w-5 shrink-0" />
+              <div><p class="text-sm font-medium">{{ checkStatusLabel }}</p><p class="mt-1 text-xs">{{ state.plan.checks.counts.instances }} instances · {{ state.plan.checks.counts.rendered }} distinct renders<template v-if="issueGroups.length"> · {{ issueGroups.length }} reported issue types</template></p></div>
+            </div>
+            <div v-if="issueGroups.length" class="space-y-2">
+              <details v-for="group in issueGroups" :key="group.key" class="rounded-lg border">
+                <summary class="flex cursor-pointer items-start gap-3 px-3 py-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
+                  <span class="shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium" :class="RELEASE_BADGE_CLASSES[group.severity === 'error' ? 'failed' : 'mixed']">{{ group.severity === 'error' ? 'Blocking' : group.severity === 'breaking' ? 'Breaking' : 'Warning' }}</span>
+                  <span class="min-w-0 text-sm"><span class="block font-medium">{{ group.message }}</span><span class="mt-1 block text-xs text-muted-foreground">{{ group.instanceCount ? `${group.instanceCount} reported instances across ${group.siteCount} sites` : 'Block definition' }} · Show details</span></span>
+                </summary>
+                <div class="border-t p-3 text-xs"><code class="text-muted-foreground">{{ group.code }}</code><ul class="mt-2 max-h-52 space-y-2 overflow-y-auto"><li v-for="(location, index) in group.locations" :key="index" class="break-words"><span v-if="location.siteId" class="font-medium">{{ siteName(location.siteId) }} · </span>{{ location.path.split('/sites/')[1]?.split('/').slice(1).join('/') || location.path }}<template v-if="location.instanceId"> · instance {{ location.instanceId }}</template><template v-if="location.field"> · {{ location.field }}</template></li></ul></div>
+              </details>
+              <p v-if="checksTruncated" class="text-xs text-muted-foreground">The server caps detailed findings. Issue groups show the reported sample; the check totals above cover the full check.</p>
+            </div>
             <Alert v-if="state.plan.activeReleaseRunning" variant="destructive">
               <AlertDescription class="text-sm">
                 Another release of this block is still running. Wait for it to finish.
               </AlertDescription>
             </Alert>
-            <Alert v-if="state.plan.blocked && state.plan.checks.status !== 'breaking'" variant="destructive">
+            <Alert v-if="state.plan.blocked && !state.plan.breakingConfirmationRequired" variant="destructive">
               <AlertDescription class="text-sm">
                 {{ state.plan.blocked }}
               </AlertDescription>
             </Alert>
-            <edge-shad-checkbox v-if="state.plan.checks.status === 'breaking'" v-model="state.confirmBreaking" name="confirmBreaking">
-              I understand these breaking schema changes and want to release anyway.
-            </edge-shad-checkbox>
+            <label v-if="state.plan.breakingConfirmationRequired" class="flex cursor-pointer items-start gap-3 rounded-md border p-3 text-sm"><input v-model="state.confirmBreaking" type="checkbox" class="mt-1 accent-current">I understand these breaking schema changes and want to release anyway.</label>
             <p v-if="!isAdmin" class="text-sm text-muted-foreground">
               Only organization admins can release blocks.
             </p>
@@ -373,11 +439,15 @@ const close = () => emit('update:modelValue', false)
 
       <template v-else>
         <div class="space-y-4 text-sm">
+          <div v-if="state.history?.canary" class="rounded-lg border p-4" :class="RELEASE_BADGE_CLASSES.mixed">
+            <p class="flex items-center gap-2 font-medium"><TriangleAlert class="h-4 w-4" />Canary—not released everywhere</p>
+            <p class="mt-1">Revision {{ state.history.canary.revisionNumber }} is assigned to {{ state.history.canary.siteIds.length }} canary site(s). The global release remains revision {{ state.history.releasedRevision }}.</p>
+            <edge-shad-button v-if="isAdmin" type="button" size="sm" class="mt-3" @click="startCanaryPromotion">Release to all sites…</edge-shad-button>
+          </div>
           <div class="flex flex-wrap items-center justify-between gap-2">
             <span>
               Released: <span class="font-medium">revision {{ state.history?.releasedRevision ?? 0 }}</span>
               <template v-if="state.history?.draftRevision !== null && state.history?.draftRevision !== undefined"> · Unreleased draft: revision {{ state.history.draftRevision }}</template>
-              <template v-if="state.history?.canary"> · Canary: revision {{ state.history.canary.revisionNumber }} on {{ state.history.canary.siteIds.map(siteName).join(', ') }}</template>
             </span>
             <div class="flex flex-wrap gap-2">
               <edge-shad-button v-if="isAdmin && canaryRollback" type="button" size="sm" variant="outline" @click="startCanaryRollback">
@@ -393,27 +463,28 @@ const close = () => emit('update:modelValue', false)
             <h3 class="mb-1 font-medium">
               Revisions on each site
             </h3>
-            <p v-if="!state.usage?.sites?.length" class="text-muted-foreground">
+            <div class="my-3 flex flex-wrap items-end justify-between gap-3">
+              <div class="min-w-52"><edge-shad-select v-model="state.revision" label="Compare against" :items="revisionItems" placeholder="Choose a revision" /></div>
+              <div class="flex items-center gap-3"><span class="text-xs text-muted-foreground">{{ sitesAtRevision }} sites fully match revision {{ comparisonRevision }}</span><edge-shad-button type="button" size="sm" variant="outline" :disabled="state.loading" @click="loadHistory"><RefreshCw class="mr-2 h-3.5 w-3.5" />Refresh</edge-shad-button></div>
+            </div>
+            <p class="mb-3 text-xs text-muted-foreground">Counts are block instances, split between draft and published documents. Green matches the selected revision; amber means different, mixed or unversioned.</p>
+            <p v-if="!usageSites.length" class="text-muted-foreground">
               No page uses this block yet.
             </p>
-            <table v-else class="w-full text-left">
-              <thead class="text-xs text-muted-foreground">
-                <tr>
-                  <th class="py-1">
-                    Site
-                  </th><th>Drafts</th><th>Published</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="site in state.usage.sites" :key="site.siteId" class="border-t">
-                  <td class="py-1">
-                    {{ siteName(site.siteId) }}
-                  </td>
-                  <td>{{ usageLabel(site.drafts) }}</td>
-                  <td>{{ usageLabel(site.published) }}</td>
-                </tr>
-              </tbody>
-            </table>
+            <div v-else class="space-y-2">
+              <div class="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 px-3 text-xs text-muted-foreground"><span>Site</span><span>Draft instances</span><span>Published instances</span></div>
+              <details v-for="site in usageSites" :key="site.siteId" class="rounded-lg border">
+                <summary class="grid cursor-pointer grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] items-start gap-3 px-3 py-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
+                  <span class="min-w-0 font-medium">{{ siteName(site.siteId) }}</span>
+                  <span v-for="bucket in [site.drafts, site.published]" :key="bucket === site.drafts ? 'draft' : 'published'" class="min-w-0"><span class="inline-flex rounded-full border px-2 py-0.5 text-xs font-medium" :class="RELEASE_BADGE_CLASSES[revisionMatch(bucket, comparisonRevision).status]">{{ revisionMatch(bucket, comparisonRevision).label }}</span><span class="mt-1 block text-xs text-muted-foreground">{{ revisionMatch(bucket, comparisonRevision).matched }}/{{ usageCount(bucket) }} match · {{ usageLabel(bucket) }}</span></span>
+                </summary>
+                <div class="max-h-64 space-y-2 overflow-y-auto border-t p-3">
+                  <p v-if="!site.documents?.length" class="text-xs text-muted-foreground">{{ usageCount(site.drafts) + usageCount(site.published) ? 'Page details are unavailable in this report.' : 'This block is not used on this site.' }}</p>
+                  <div v-for="doc in site.documents || []" :key="doc.path" class="flex flex-wrap items-center justify-between gap-2 text-xs"><span>{{ doc.name || doc.docId }} · {{ documentLabel(doc.collection) }}</span><span class="rounded-full border px-2 py-0.5" :class="RELEASE_BADGE_CLASSES[revisionMatch(doc.revisions, comparisonRevision).status]">{{ usageLabel(doc.revisions) }}</span></div>
+                  <p v-if="site.detailsTruncated" class="text-xs text-muted-foreground">Showing the first 200 documents for this site. Revision totals above include every instance.</p>
+                </div>
+              </details>
+            </div>
           </div>
 
           <div>
@@ -424,7 +495,8 @@ const close = () => emit('update:modelValue', false)
               This block hasn't been released through the Hub yet.
             </p>
             <ul v-else class="space-y-2">
-              <li v-for="item in state.history.releases" :key="item.releaseId" class="flex flex-wrap items-center justify-between gap-2 rounded border p-2">
+              <li v-for="item in state.history.releases" :key="item.releaseId" class="space-y-3 rounded-lg border p-3">
+                <div class="flex flex-wrap items-center justify-between gap-2">
                 <span>
                   <span class="font-medium">{{ describeRelease(item) }}</span>
                   · {{ describeScope(item.scope, item.kind) }}
@@ -434,20 +506,23 @@ const close = () => emit('update:modelValue', false)
                 <edge-shad-button v-if="isAdmin && canRetryRelease(item)" type="button" size="sm" variant="outline" :disabled="state.retrying" @click="retry(item.releaseId)">
                   Retry
                 </edge-shad-button>
+                </div>
+                <edge-cms-block-release-targets :release-id="item.releaseId" :sites="siteItems" />
               </li>
             </ul>
           </div>
         </div>
       </template>
+      </div>
 
-      <DialogFooter class="pt-2 flex justify-between">
+      <DialogFooter class="flex shrink-0 justify-between border-t pt-4">
         <edge-shad-button type="button" variant="outline" @click="close">
           Close
         </edge-shad-button>
         <edge-shad-button v-if="state.tab === 'release' && !state.release && isAdmin" type="button" :disabled="!canExecute" @click="runRelease">
           <Loader2 v-if="state.executing" class="mr-2 h-4 w-4 animate-spin" />
           <Rocket v-else class="mr-2 h-4 w-4" />
-          Release
+          {{ state.plan?.kind === 'promote' ? 'Release to all sites' : 'Release' }}
         </edge-shad-button>
       </DialogFooter>
     </DialogContent>

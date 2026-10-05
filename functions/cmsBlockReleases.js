@@ -78,12 +78,22 @@ const releasedNumberOf = (core, block) => (core.isRevisionNumber(block.releasedR
 
 const summarizeTargets = (targets) => {
   const bySite = {}
+  const pages = new Set()
+  const posts = new Set()
   for (const target of targets) {
-    const site = bySite[target.siteId] || (bySite[target.siteId] = { siteId: target.siteId, total: 0, collections: {} })
+    const site = bySite[target.siteId] || (bySite[target.siteId] = { siteId: target.siteId, total: 0, collections: {}, pages: new Set(), posts: new Set() })
     site.total += 1
     site.collections[target.collection] = (site.collections[target.collection] || 0) + 1
+    const isPost = target.collection === 'posts' || target.collection === 'published_posts'
+    ;(isPost ? posts : pages).add(`${target.siteId}/${target.docId}`)
+    ;(isPost ? site.posts : site.pages).add(target.docId)
   }
-  return { total: targets.length, sites: Object.values(bySite) }
+  return {
+    total: targets.length, pages: pages.size, posts: posts.size,
+    sites: Object.values(bySite).map(({ pages, posts, ...site }) => ({ ...site, pages: pages.size, posts: posts.size })),
+    documents: targets.slice(0, 2000).map(({ path, siteId, collection, docId }) => ({ path, siteId, collection, docId })),
+    detailsTruncated: targets.length > 2000,
+  }
 }
 
 // Binds an execute to what the dry run reviewed: the revision's definition
@@ -237,6 +247,7 @@ exports.dryRunBlockRelease = onCall({ timeoutSeconds: 120 }, async (request) => 
   const { orgId } = await assertReleaseCaller(request, 'write')
   const { blockId, revisionNumber, scope } = parseReleaseRequest(core, request.data)
   const plan = await planRelease(core, { orgId, blockId, revisionNumber, scope })
+  const conflict = canaryConflict(plan.block, { revisionNumber, scope, releasedRevision: plan.releasedRevision })
   return {
     blockId,
     revisionNumber,
@@ -247,8 +258,8 @@ exports.dryRunBlockRelease = onCall({ timeoutSeconds: 120 }, async (request) => 
     activeReleaseRunning: await activeReleaseIsRunning(orgId, plan.block),
     targets: summarizeTargets(plan.targets),
     checks: (await loadCheckModules())[0].summarizeReleaseChecks(plan.checks),
-    blocked: canaryConflict(plan.block, { revisionNumber, scope, releasedRevision: plan.releasedRevision })
-      || releaseBlockedReason(plan, { confirmBreaking: false }),
+    blocked: conflict || releaseBlockedReason(plan, { confirmBreaking: false }),
+    breakingConfirmationRequired: !conflict && ['release', 'promote'].includes(plan.kind) && plan.checks.status === 'breaking',
     checksum: plan.checksum,
   }
 })
@@ -399,16 +410,22 @@ exports.blockRevisionUsage = onCall({ timeoutSeconds: 120 }, async (request) => 
   const targets = await planBlockTargets(db, orgId, blockId, { includeData: true })
   const sites = {}
   for (const target of targets) {
-    const site = sites[target.siteId] || (sites[target.siteId] = { siteId: target.siteId, drafts: {}, published: {} })
+    const site = sites[target.siteId] || (sites[target.siteId] = { siteId: target.siteId, drafts: {}, published: {}, documents: [], detailsTruncated: false })
     const bucket = target.collection.startsWith('published') ? site.published : site.drafts
+    const documentRevisions = {}
     for (const listName of ['content', 'postContent']) {
       for (const block of Array.isArray(target.data[listName]) ? target.data[listName] : []) {
         if (block?.blockId !== blockId)
           continue
         const key = Number.isInteger(block.blockRevision) ? String(block.blockRevision) : 'unversioned'
         bucket[key] = (bucket[key] || 0) + 1
+        documentRevisions[key] = (documentRevisions[key] || 0) + 1
       }
     }
+    if (site.documents.length < 200)
+      site.documents.push({ path: target.path, docId: target.docId, collection: target.collection, name: target.data?.name || target.docId, revisions: documentRevisions })
+    else
+      site.detailsTruncated = true
   }
   const block = blockSnap.data() || {}
   return {

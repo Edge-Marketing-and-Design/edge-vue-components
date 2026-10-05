@@ -5,6 +5,9 @@
 // Every finding is { code, severity, path, message }. Codes are stable; callers
 // decide which severities block their flow.
 
+import { THEME_COLOR_TOKENS, THEME_OPTIONAL_COLOR_TOKENS, THEME_FONT_TOKENS, THEME_RADIUS_TOKENS } from './cmsThemeDefaults.mjs'
+export { THEME_COLOR_TOKENS, THEME_OPTIONAL_COLOR_TOKENS, THEME_FONT_TOKENS, THEME_RADIUS_TOKENS }
+
 const VOID_TAGS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr'])
 const BLOCK_TYPES = new Set(['Page', 'Post'])
 const PREVIEW_TYPES = new Set(['light', 'dark'])
@@ -293,15 +296,6 @@ const hasAltPair = (schema, name) => owns(schema, `${name}Alt`) || owns(schema, 
 // only those, so a block works with any theme in the organization: swapping
 // themes never leaves a block pointing at a color (river, timber) the new
 // theme doesn't have. Contract: docs/data-contracts/cms-themes/README.md.
-export const THEME_COLOR_TOKENS = [
-  'primary', 'onPrimary', 'secondary', 'onSecondary', 'tertiary', 'onTertiary', 'accent', 'onAccent',
-  'canvas', 'surface', 'surfaceAlt',
-  'text', 'textMuted', 'heading', 'link', 'linkHover', 'border',
-]
-export const THEME_OPTIONAL_COLOR_TOKENS = ['success', 'warning', 'danger']
-export const THEME_FONT_TOKENS = ['display', 'sans', 'accent']
-export const THEME_RADIUS_TOKENS = ['card', 'panel', 'button']
-
 const STANDARD_COLORS = new Set([...THEME_COLOR_TOKENS, ...THEME_OPTIONAL_COLOR_TOKENS, 'white', 'black', 'transparent', 'current', 'inherit'])
 const STANDARD_FONTS = new Set([...THEME_FONT_TOKENS, 'mono'])
 const STANDARD_RADII = new Set([...THEME_RADIUS_TOKENS, 'none', 'sm', 'md', 'lg', 'xl', 'full'])
@@ -334,7 +328,10 @@ export const templateClassStrings = (template) => {
 // Names in class strings that aren't standard theme names:
 // { colors, fonts, radii, raw } (sorted, unique). `raw` holds hard-coded
 // colors: hex or rgb arbitrary values and the Tailwind palette.
-export const findThemeNameIssues = (classStrings) => {
+export const findThemeNameIssues = (classStrings, themeTokens = {}) => {
+  const colors = new Set([...STANDARD_COLORS, ...(themeTokens.colors || [])])
+  const fonts = new Set([...STANDARD_FONTS, ...(themeTokens.fontFamily || [])])
+  const radii = new Set([...STANDARD_RADII, ...(themeTokens.borderRadius || [])])
   const found = { colors: new Set(), fonts: new Set(), radii: new Set(), raw: new Set(), opacity: new Set() }
   for (const classString of classStrings) {
     for (const token of String(classString || '').split(/\s+/).filter(Boolean)) {
@@ -349,11 +346,11 @@ export const findThemeNameIssues = (classStrings) => {
         const cssVar = value.match(/^var\(--(color|font|radius)-([\w-]+)\)/)
         if (cssVar) {
           const [, kind, name] = cssVar
-          if (kind === 'color' && !STANDARD_COLORS.has(name))
+          if (kind === 'color' && !colors.has(name))
             found.colors.add(name)
-          else if (kind === 'font' && !STANDARD_FONTS.has(name))
+          else if (kind === 'font' && !fonts.has(name))
             found.fonts.add(name)
-          else if (kind === 'radius' && !STANDARD_RADII.has(name))
+          else if (kind === 'radius' && !radii.has(name))
             found.radii.add(name)
         }
         else if (prefix !== 'font' && prefix !== 'rounded' && RAW_COLOR.test(value)) {
@@ -367,20 +364,20 @@ export const findThemeNameIssues = (classStrings) => {
       }
       const font = utility.match(/^font-([a-z][a-zA-Z]*)$/)
       if (font) {
-        if (!STANDARD_FONTS.has(font[1]) && !FONT_WEIGHTS.has(font[1]))
+        if (!fonts.has(font[1]) && !FONT_WEIGHTS.has(font[1]))
           found.fonts.add(font[1])
         continue
       }
       const radius = utility.match(/^rounded(?:-(?:[trblse]|tl|tr|bl|br|ss|se|es|ee))?-([a-z][a-zA-Z]*)$/)
       if (radius) {
-        if (!STANDARD_RADII.has(radius[1]))
+        if (!radii.has(radius[1]))
           found.radii.add(radius[1])
         continue
       }
       const color = utility.match(COLOR_UTILITY)
       if (color) {
         const group = color[1].replace(/-.*/, '')
-        if (!STANDARD_COLORS.has(color[2]) && !(NON_COLOR_WORDS[group] || []).includes(color[2]))
+        if (!colors.has(color[2]) && !(NON_COLOR_WORDS[group] || []).includes(color[2]))
           found.colors.add(color[2])
       }
     }
@@ -390,8 +387,8 @@ export const findThemeNameIssues = (classStrings) => {
 }
 
 // The same issues as block findings: { code, message } per kind found.
-export const themeNameFindings = (classStrings) => {
-  const issues = findThemeNameIssues(classStrings)
+export const themeNameFindings = (classStrings, themeTokens = {}) => {
+  const issues = findThemeNameIssues(classStrings, themeTokens)
   const findings = []
   if (issues.colors.length)
     findings.push({ code: 'theme.color-name', message: `Colors outside the standard theme names: ${issues.colors.join(', ')}. Use ${THEME_COLOR_TOKENS.join(', ')} (or ${THEME_OPTIONAL_COLOR_TOKENS.join(', ')}).` })
@@ -415,25 +412,22 @@ const themeGroup = (theme, name) => {
 }
 
 // Problems with a parsed Theme JSON object against the standard names: every
-// required color, font and radius defined, nothing else defined, and `apply`
+// required color, font and radius defined, custom additions allowed, and `apply`
 // rules using only standard names. [] means the theme is standard.
 export const themeTokenProblems = (theme) => {
   if (!isObject(theme))
     return [{ code: 'theme.not-object', message: 'Theme JSON must be an object.' }]
   const problems = []
-  const checkGroup = (groupName, label, required, allowed, code) => {
+  const checkGroup = (groupName, label, required, code) => {
     const group = themeGroup(theme, groupName) || {}
     const keys = Object.keys(group)
     const missing = required.filter(key => !keys.includes(key))
-    const extra = keys.filter(key => !allowed.includes(key))
     if (missing.length)
       problems.push({ code: `${code}-missing`, message: `Theme is missing standard ${label}: ${missing.join(', ')}.` })
-    if (extra.length)
-      problems.push({ code: `${code}-name`, message: `Theme defines ${label} outside the standard names: ${extra.join(', ')}. Map each to a standard name (${allowed.join(', ')}).` })
   }
-  checkGroup('colors', 'colors', THEME_COLOR_TOKENS, [...THEME_COLOR_TOKENS, ...THEME_OPTIONAL_COLOR_TOKENS], 'theme.color')
-  checkGroup('fontFamily', 'fonts', THEME_FONT_TOKENS, THEME_FONT_TOKENS, 'theme.font')
-  checkGroup('borderRadius', 'radii', THEME_RADIUS_TOKENS, THEME_RADIUS_TOKENS, 'theme.radius')
+  checkGroup('colors', 'colors', THEME_COLOR_TOKENS, 'theme.color')
+  checkGroup('fontFamily', 'fonts', THEME_FONT_TOKENS, 'theme.font')
+  checkGroup('borderRadius', 'radii', THEME_RADIUS_TOKENS, 'theme.radius')
   const applyStrings = []
   const collectApply = (apply) => {
     for (const value of Object.values(isObject(apply) ? apply : {})) {

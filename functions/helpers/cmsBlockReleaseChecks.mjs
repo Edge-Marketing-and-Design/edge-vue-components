@@ -208,6 +208,8 @@ export const summarizeReleaseChecks = (checks) => {
   return {
     status: checks.status,
     counts: checks.counts,
+    detailsTruncated: ['errors', 'warnings', 'instanceFailures', 'breaking', 'schemaChanges'].some(key => (checks[key]?.length || 0) > MAX_LISTED_FINDINGS)
+      || (checks.breaking || []).some(change => (change.instances?.length || 0) > MAX_LISTED_FINDINGS),
     errors: cap(checks.errors),
     warnings: cap(checks.warnings),
     instanceFailures: cap(checks.instanceFailures),
