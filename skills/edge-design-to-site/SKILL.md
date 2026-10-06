@@ -1,11 +1,17 @@
 ---
 name: edge-design-to-site
-description: Build a whole Edge CMS site in a Hub from a designer's handoff, end to end, through the Hub's draft-only agent tools (the shared CMS MCP with an agent key) - theme, blocks for every page, the site and its pages, content, and a readiness report - stopping only at two checkpoints (theme review, site review) and for problems it can't solve. Use when asked to build a site from a design, turn a handoff into a site, or build every page of a handoff in a Hub (emd-cms, clearwater-hub, iafsc-hub). Uses the edge-block-package skill to author blocks. Never publishes pages, releases blocks, or edits emd-cms-front.
+description: Build a whole Edge CMS site in a Hub from a designer's handoff, end to end, through the Hub's draft-only agent tools (the shared CMS MCP with an agent key) - theme, blocks for every page, the site and its pages, content, and a readiness report - stopping only at two checkpoints (theme review, site review) and for problems it can't solve. Also updates the blocks of an existing site when its design changes: finds the blocks through the design map, classifies each change, stops at one checkpoint, applies drafts and value changes, and hands over a release recommendation. Use when asked to build a site from a design, turn a handoff into a site, build every page of a handoff in a Hub (emd-cms, clearwater-hub, iafsc-hub), or update a site's blocks from a changed design. Uses the edge-block-package skill to author blocks. Never publishes pages, releases blocks, or edits emd-cms-front.
 ---
 
 # Edge design to site
 
 The first-release workflow (Clearwater Hub `docs/features/cms/first-release-plan.md`): the developer hands over the design once, reviews the theme, then reviews the finished draft site. Everything in between is yours: no relaying files, no waiting to be told to start the next page.
+
+Three entry points, all through the same tools:
+
+1. **Build a site from a design** (sections 1–3 below): theme, checkpoint 1, every page, readiness, checkpoint 2.
+2. **Change a site during its build**: the developer's requests after checkpoint 2 (section 3, step 3).
+3. **Update blocks from a design change** (section 4): the design changed after the site was built; the blocks follow it, through drafts, with one checkpoint.
 
 ## Block vocabulary
 
@@ -88,10 +94,23 @@ Set with the operations, from the handoff's approved copy only:
    - the time log.
 3. The developer reviews the site in the Hub, asks for changes, releases the drafts and publishes. For each requested change, re-read the Hub's current state first (`cms_block_base`, the page) because they may have fixed things by hand, then change it through the operations as above.
 
+## 4. Update blocks from a design change
+
+The job that follows every launch: the design changed and the blocks already in the Hub have to follow it. The reference is edge-block-package `reference/block-updates.md` (the change classes, the path and the verification for each); this section is the order of work. Steps 0, 1 and 5 of "Before starting" apply (contracts, tools, the time log); the handoff is the one input, so ask for anything missing in one message.
+
+1. **Inputs.** The organization and site; the design reference (the Figma file and the changed node ids, or "compare the whole frame" when the designer did not record them; or a handoff export); and the map (the package manifest's `design` entries, or each block's `meta.design` from `cms_block_base`). Call `cms_contract` for `blocks` and `operations` first, and `sites-and-pages` when values change. Without the Figma MCP, a handoff export or screenshots work with your own comparison; say so in the report.
+2. **Identify the affected blocks** from the map (`block-updates.md`, "Finding the block a node became"). "Compare the whole frame" means `get_metadata` on the frame, then each mapped section against its block. Nodes with no map entry, by id or by name, are listed for the developer, never guessed; blocks with no `meta.design` are listed with the draft that would add it.
+3. **For each affected block:** `cms_block_base` (the current definition and its `baseHash`), the design node (`get_design_context`, `get_screenshot`), and the current preview (`cms_preview_url` for a page that holds it). Classify every change by the table in `block-updates.md`; a section can carry several classes. Count the instances with `cms_find_usage`.
+4. **Checkpoint.** Stop and report, in one table, one row per block: the node, the change classes, whether anything is breaking (a removed or renamed field), what needs the developer (media, synced values, a renderer task), and the instance count. Add the nodes with no map entry and the estimated work. Wait for the developer. Two-step is the default for a removed or renamed field (add now, remove in a later draft); a one-step removal happens only when the developer asks for it here.
+5. **Apply.** Per block, one `block.draft` carrying every definition change (markup, new fields, the first step of a rename, and `meta.design` when it was missing), validated with the checker before it is saved; `page.setValues` per instance for value changes; nothing for media and synced values beyond the list. Then preview each touched page beside the design at about 1440 pixels and with `viewport: "mobile"`, and fix what differs: up to three passes per block, as in section 2.
+6. **Hand off.** Drafts awaiting release, each with its classes and a release recommendation (all sites for a handful of documents; canary to one site first when `cms_find_usage` counts more; confirmation when breaking; two-step changes in order); value changes applied and the synced ones left for the developer; renderer tasks for override blocks; media for the developer; fresh preview links; what still differs; the design revision written to `PROJECT.md` (`design.revision`); the time log. Say plainly that the Hub page editor shows released blocks until the drafts are released.
+
+The developer releases from the Block Editor. Asked afterwards, confirm with `cms_site_readiness` that no instance is behind (`instance.behind`).
+
 ## When to stop early
 
 Only when you can't go on without the developer:
-- a fact only they have (domain, which copy is approved, a missing asset);
+- a fact only they have (domain, which copy is approved, a missing asset, which design node a block with no map entry belongs to);
 - a refusal you can't fix (permission, an expired or revoked key, a live theme that needs their decision on a proposal);
 - the same check failing after three honest attempts.
 
@@ -101,5 +120,6 @@ Say exactly what you need, and keep going on anything that doesn't depend on it.
 
 - Publish, release, or ask the MCP to do either; it can't.
 - Regenerate an existing Hub block from a local file, or re-import a package over Hub edits.
+- Remove or rename a schema field in one step unless the developer asked for exactly that at the checkpoint.
 - Rebuild the chrome, theme or head for one page.
 - Edit `emd-cms-front`, commit, push, or deploy.
