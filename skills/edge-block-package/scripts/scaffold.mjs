@@ -61,6 +61,8 @@ const replacements = {
   __BANNED__: JSON.stringify(project.bannedPhrases || []),
   __VALIDATOR__: validatorPath,
   __THEME_SETUP__: themeSetup ? relativeFrom(target, themeSetup) : '',
+  __DESIGN_SOURCE__: project.design?.source || 'figma',
+  __DESIGN_FILE__: project.design?.file || '',
 }
 function relativeFrom(from, to) {
   const fromParts = from.split('/').filter(Boolean)

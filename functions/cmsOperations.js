@@ -467,6 +467,7 @@ const planBlock = async (core, reader, { orgId, uid, now, operation }) => {
     const ref = blocks.doc(blockId)
     if ((await reader.doc(ref)).exists)
       plan.problems.push(`Block "${blockId}" already exists. Use block.draft to change it.`)
+    plan.problems.push(...core.designReferenceProblems(block.meta?.design, 'block.meta.design'))
     const themes = await reader.query(orgRefOf(orgId).collection('themes'), `organizations/${orgId}/themes`)
     const [{ checkImportedBlock }, engine] = await loadImportCheck()
     const findings = await checkImportedBlock(block, { knownThemeIds: themes.docs.map(doc => doc.id), renderTemplate: engine.renderTemplateAsync })
@@ -499,6 +500,8 @@ const planBlock = async (core, reader, { orgId, uid, now, operation }) => {
     plan.problems.push('definition must be a block definition with string content.')
   if (typeof operation.baseHash !== 'string')
     plan.problems.push('baseHash is required: the fingerprint of the definition you started from.')
+  if (isPlainObject(operation.definition) && isPlainObject(operation.definition.meta))
+    plan.problems.push(...core.designReferenceProblems(operation.definition.meta.design, 'definition.meta.design'))
   const revisionsCore = await revisionsCorePromise
   const block = snap.data() || {}
   let current = block

@@ -19,6 +19,17 @@ Route that work through the active repository's `AGENTS.md`,
 `docs/engineering/application-ui.md` guidance. Do not convert application UI
 into CMS blocks unless the user explicitly requests CMS import artifacts.
 
+## Block vocabulary
+
+The words below mean exactly this, here and in the contracts:
+
+- **Library block**: the document at `organizations/{orgId}/blocks/{blockId}`. It holds the released definition (template, schema with defaults, data sources) that pages copy from.
+- **Instance**: a copy of a library block placed in a page's or post's `content`, with its own `values`. Published pages carry the definition inline; the public renderer reads instances from KV and never reads the library.
+- **Synced**: a synced block shares one instance's values across a site's pages. It is placed without values; the first instance on a site is placed in the Hub, and later placements copy it.
+- **Override**: an override block is one the public renderer replaces with a Vue component resolved from the block name. The CMS HTML is the editor preview and the fallback, and the block is the design source of truth for the component.
+- **Draft and release**: an edit to an existing library block is a draft revision; library changes reach pages only through a release, which a developer runs in the Hub. Nothing here releases.
+- **Site chrome**: the synced navigation and footer blocks every page of a site shares.
+
 ## Purpose
 
 Produce supported Template v2 artifacts, not raw Vue parity:
@@ -94,6 +105,10 @@ When live source and this skill disagree, live source wins. Report the mismatch.
 If scope is ambiguous, generate local import artifacts and stop before external or production writes.
 
 ## End-to-End Workflow
+
+### 0. Receive the contracts
+
+Call `cms_contract` (the Hub's CMS MCP) for every kind the task will write: `blocks` always, `themes` for Theme or Head JSON, `posts` for post blocks or page documents that render posts, `operations` when artifacts are created through the agent operations. Read the returned text before authoring. The completion summary and the package README list each field written and the contract line it follows (section and field name). Without the MCP (a package-only session in a repository with no Hub), read the file by path from the resolved Hub checkout (`${HUB_ROOT}/docs/data-contracts/cms-<kind>/README.md`) and say in the handoff that the contract was read by path, with the Hub commit.
 
 ### 1. Scout and classify
 
@@ -415,6 +430,7 @@ Completion summary must include:
   block artifact;
 - a `Files to upload/deploy` section listing every exact filename, destination/action, and overwrite behavior;
 - source-to-field/data-source mapping decisions;
+- each field written and the contract line it follows (step 0);
 - page and package composition;
 - theme/style dependencies;
 - query/index/mirror impact;

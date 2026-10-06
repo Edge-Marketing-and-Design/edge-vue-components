@@ -271,7 +271,9 @@ const ensureTemplateV2Fields = (doc) => {
     doc.schema = {}
   if (!doc.dataSources || typeof doc.dataSources !== 'object' || Array.isArray(doc.dataSources))
     doc.dataSources = {}
-  clearCmsTemplateV2LibraryState(doc)
+  // Legacy per-field meta and preview values go; the library-only
+  // meta.design (the design-to-block map) stays, or a save would drop it.
+  clearCmsTemplateV2LibraryState(doc, { keepLibraryMeta: true })
 }
 
 const formatJson = (value) => {

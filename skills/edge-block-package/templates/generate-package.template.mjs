@@ -18,6 +18,17 @@ export const themeName = '__THEME_NAME__'
 export const organizationId = '__ORG_ID__'
 export const siteId = '__SITE_ID__'
 
+// --- Design map ----------------------------------------------------------------
+// The design node each block was built from, written to the manifest entry
+// (`design`) and to the block (`meta.design`, library only; a release never
+// copies it to instances). The update workflow (edge-block-package
+// reference/block-updates.md) starts from this map, so every block gets one.
+export const designSource = '__DESIGN_SOURCE__' // figma | handoff (PROJECT.md "design")
+export const designFile = '__DESIGN_FILE__' // Figma file key, or the handoff path
+const design = (node, name) => (designSource === 'handoff'
+  ? { source: 'handoff', path: designFile, section: node, name }
+  : { source: 'figma', file: designFile, node, name })
+
 // --- Markup (String.raw, Template v2 grammar) -------------------------------
 const exampleMarkup = String.raw`<section class="bg-canvas px-6 py-20 font-sans text-text md:py-24">
   <div class="mx-auto w-full max-w-6xl">
@@ -56,7 +67,7 @@ const schema = {
 }
 const pickSchema = mapping => Object.fromEntries(Object.entries(mapping).map(([field, source]) => [field, structuredClone(schema[source])]))
 
-const makeBlock = ({ docId, name, content, blockSchema, dataSources = {}, instructions, aiInstructions, tags, type = ['Page'], previewType = 'dark', synced = false, isOverrideBlock }) => ({
+const makeBlock = ({ docId, name, content, blockSchema, dataSources = {}, instructions, aiInstructions, tags, type = ['Page'], previewType = 'dark', synced = false, isOverrideBlock, design: designRef }) => ({
   docId,
   name,
   content,
@@ -65,6 +76,7 @@ const makeBlock = ({ docId, name, content, blockSchema, dataSources = {}, instru
   schema: blockSchema,
   dataSources,
   values: {},
+  ...(designRef ? { meta: { design: designRef } } : {}),
   Instructions: instructions,
   aiInstructions,
   tags,
@@ -85,6 +97,7 @@ const blocks = [
     instructions: 'What the editor should know: which inputs to fill, which media to upload, what must be confirmed before publication.',
     aiInstructions: 'What an agent must preserve and must not invent.',
     tags: ['Content'],
+    design: design('1:2', 'Example Section'), // the section's node id and layer name in the design
   }),
 ]
 
@@ -104,6 +117,7 @@ const manifest = {
     importMode: 'import-as-new', // overwrite only for a stable id that already exists in the Hub
     synced: block.synced,
     ...(block.isOverrideBlock === undefined ? {} : { isOverrideBlock: block.isOverrideBlock }),
+    ...(block.meta?.design ? { design: block.meta.design } : {}),
   })),
   pages: [],
   templates: [],
