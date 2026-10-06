@@ -115,7 +115,8 @@ name cannot silently select the wrong theme. Its response includes:
 
 - `cms_contract`: one of the Hub's data contracts as Markdown, read from the
   checkout the server runs in (`kind`: `blocks`, `operations`, `themes`,
-  `sites-and-pages`, `posts`; the list grows with `src/contracts.js`). It returns the text, the
+  `sites-and-pages`, `posts`, `webcams`; the list grows with
+  `src/contracts.js`). It returns the text, the
   contract's title, its `Last verified` line and the path. Call it for every
   kind a task will write before building, and name in the handoff the
   contract line each written field follows. It reads a file only: no key, no

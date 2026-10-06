@@ -11,6 +11,7 @@ export const CONTRACT_KINDS = Object.freeze({
   'themes': 'docs/data-contracts/cms-themes/README.md',
   'sites-and-pages': 'docs/data-contracts/cms-sites-and-pages/README.md',
   'posts': 'docs/data-contracts/cms-posts/README.md',
+  'webcams': 'docs/data-contracts/webcams/README.md',
 })
 
 export const contractKinds = () => Object.keys(CONTRACT_KINDS)
