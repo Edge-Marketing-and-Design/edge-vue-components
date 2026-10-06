@@ -64,5 +64,5 @@ test('an unknown kind lists the known ones instead of throwing', async () => {
   assert.equal(result.ok, false)
   assert.equal(result.code, 'unknown-kind')
   assert.deepEqual(result.kinds, contractKinds())
-  assert.match(result.message, /blocks, operations, themes, posts/)
+  assert.match(result.message, /blocks, operations, themes, sites-and-pages, posts/)
 })

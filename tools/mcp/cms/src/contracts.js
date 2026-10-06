@@ -9,6 +9,7 @@ export const CONTRACT_KINDS = Object.freeze({
   'blocks': 'docs/data-contracts/cms-blocks/README.md',
   'operations': 'docs/data-contracts/cms-operations/README.md',
   'themes': 'docs/data-contracts/cms-themes/README.md',
+  'sites-and-pages': 'docs/data-contracts/cms-sites-and-pages/README.md',
   'posts': 'docs/data-contracts/cms-posts/README.md',
 })
 
