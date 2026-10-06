@@ -19,6 +19,7 @@ Read this before building any package here. The JSON block is read by the scaffo
   "validatorPath": "scripts/cms/validate-import.mjs",
   "precedentPackage": "<path to the package to copy the file shape from>",
   "themeSetupPackage": "<path to theme.json/head.json for previews, or empty>",
+  "design": { "source": "figma", "file": "<Figma file key, or the handoff path with source handoff>", "revision": "<YYYY-MM-DD the design was last read>" },
   "bannedPhrases": ["requires an Apple Watch", "only app"]
 }
 ```
@@ -27,7 +28,7 @@ Read this before building any package here. The JSON block is read by the scaffo
 
 - Live Hub: <URL>. Existing blocks are pulled through the Firebase MCP before editing; never regenerated from files here.
 - Approved copy: <documents or live pages that count as approved>.
-- Design source: <Claude Design project / handoff zip location>.
+- Design source: <Claude Design project / handoff zip location>. The `design` entry above names the file; each block's manifest entry and `meta.design` name its node. Update `revision` each time the design is re-read.
 
 ## Brand and content rules
 

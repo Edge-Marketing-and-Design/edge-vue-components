@@ -38,7 +38,7 @@ The words below mean exactly this, here and in the contracts:
 1. **Review before build.** Compare the design with the live site and any existing packages. List what to keep, what to correct, and what is invented. Invented people, quotes, headshots, job openings, statistics, promises, and stock image URLs never persist in a block; they become editable inputs that default to approved copy or stay empty with an intentional fallback.
 2. **Establish what exists.** Through the Firebase MCP, list the Hub's current blocks and pages for the site. Decide per stable id: overwrite, new, or retire. Record it in the package README.
 3. **Scaffold** one package per page with `node <skill>/scripts/scaffold.mjs <package-name> --dir <importfiles/project>`. Four blocks or fewer per package; quality drops beyond that.
-4. **Write the blocks** in `generate-package.mjs`: template markup in `String.raw`, a `schema` object with every editable value, `makeBlock` for the document shape, and the manifest. Follow `reference/template-v2-contract.md` and the migrator skill for grammar.
+4. **Write the blocks** in `generate-package.mjs`: template markup in `String.raw`, a `schema` object with every editable value, `makeBlock` for the document shape (with each block's `design` node: the section's node id and layer name in the design), and the manifest. Follow `reference/template-v2-contract.md` and the migrator skill for grammar.
 5. **Validate three ways**: `node generate-package.mjs && node validate-package.mjs && node <validatorPath from PROJECT.md> .` The package validator renders every block through `@edgedev/template-engine` with its defaults and asserts the project's content rules. `validatorPath` should be the Hub's shared import check, `scripts/cms/validate-import.mjs` (relative to `hubPath`): it runs the exact check the Hub import runs, so a package that passes imports without rejections.
 6. **Preview** with `node preview.mjs`, serve the folder, and look at desktop and phone widths. Fix what you see. Common catches: figures wrapping on phones, three-column grids at 375px, design-board labels baked into renders, duplicate headlines between a section heading and an image.
 7. **Write the README**: block table with responsibilities and synced flags, facts baked into defaults, the fields written against their contract lines (step 0), validation commands, files to upload in order with import modes, page assembly order, manual verification. Support files are not upload inputs; say so.
@@ -54,6 +54,7 @@ The words below mean exactly this, here and in the contracts:
 - Every image input has a paired alt input; renders and compositions are called illustrations, never screenshots.
 - Numbers come from a source the validator can recompute (a shared model, a fixture); hand-typed figures fail.
 - Override blocks: name normalizes (camelCase) to an existing Vue file; schema carries every value the Vue component reads; `isOverrideBlock: true`; manifest `rendererChanges: true`. The block is the design source of truth and the override matches it (`reference/override-blocks.md`).
+- Design map: every manifest block entry carries `design` (`{ "source": "figma", "file": "<fileKey>", "node": "<nodeId>", "name": "<layer name>" }`, or `{ "source": "handoff", "path": "...", "section": "..." }`), and the block carries the same object as `meta.design`: a library-only field that `block.create` and `block.draft` accept and a release never copies to instances (cms-blocks contract). `PROJECT.md` keeps the file-level reference and the design revision date. The validator warns when an entry has no `design`; a later design change is traced through this map (`reference/block-updates.md`).
 
 ## Package layout
 
@@ -64,7 +65,7 @@ importfiles/<project>/<NN-package-name>/
   validate-common.mjs      shared assertions (copied in by scaffold so the package is self-contained)
   preview.mjs              renders blocks into preview/index.html with the project's theme tokens
   README.md                block table, upload order, import modes, page assembly, manual checks
-  manifest.json            generated
+  manifest.json            generated; each block entry's design maps it to the design node it was built from
   blocks/<id>.json         generated, one file per block, descriptive kebab-case ids with the project prefix
   media/                   files the operator uploads to CMS Media, listed in the manifest
   values/                  instance values for existing blocks placed on a page (not uploads)
@@ -77,6 +78,7 @@ Numbering packages (`00-site-setup`, `01-global-chrome`, `02-home` ...) keeps up
 - Navigation and footer are synced blocks that read the Site record through `siteDoc` (see `reference/chrome-and-helpers.md`). Never replace Site menu links or the Site logo with static content. New pages reuse the existing chrome blocks. Through the agent operations, `page.placeBlock` copies the site's existing synced instance onto a new page; the first instance on a site is placed in the Hub.
 - Post-enabled pages: listing blocks read `source("posts")` index metadata; detail blocks look up `queryItems.name = {routeLastSegment}` and render the body with `renderBlocks` (see `reference/posts-contract.md`).
 - Override blocks and the emd-cms-front handoff: `reference/override-blocks.md`.
+- Changing blocks that already exist in the Hub after the design changes: `reference/block-updates.md` (the change classes, their paths through `block.draft` and `page.setValues`, and what each needs verified). The edge-design-to-site skill's "Update blocks from a design change" entry point drives it.
 
 ## Do not
 

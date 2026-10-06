@@ -6,9 +6,11 @@ Organization: `__ORG_ID__` · Site: `__SITE_ID__` · Theme: __THEME_NAME__ (`__T
 
 ## Blocks
 
-| Block | File | Responsibility | Synced |
-| --- | --- | --- | --- |
-| __NAME_PREFIX__ Example Section | `blocks/__BLOCK_PREFIX__-example-section.json` | | No |
+| Block | File | Design node | Responsibility | Synced |
+| --- | --- | --- | --- | --- |
+| __NAME_PREFIX__ Example Section | `blocks/__BLOCK_PREFIX__-example-section.json` | `1:2` Example Section | | No |
+
+The design node column is the manifest entry's `design` (and the block's `meta.design`): the node the block was built from, which the update workflow starts from.
 
 Tags used: `Content`.
 
