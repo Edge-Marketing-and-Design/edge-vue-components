@@ -14,6 +14,7 @@ Updates:
 2) sync edge/functions + index and root config files
 3) migrate Nuxt/app CMS access, org-mode, and dev-mode helpers when present
    and ask for this Hub's CMS frontend URL if not configured
+   and configure production signed previews (generate a missing secret)
 4) install packages listed in edge/root/edge.packages.json
 5) install function packages listed in edge/functions/edge.packages.json
 EOF
@@ -564,6 +565,7 @@ merge_history_config
 merge_firebase_json
 migrate_nuxt_single_org_runtime_config
 node "$PROJECT_ROOT/edge/scripts/configure-cms-frontend.cjs" "$PROJECT_ROOT"
+node "$PROJECT_ROOT/edge/scripts/configure-cms-preview.cjs" "$PROJECT_ROOT"
 migrate_app_cms_access
 install_edge_packages
 install_edge_function_packages

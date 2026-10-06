@@ -6,12 +6,26 @@ const readline = require('node:readline/promises')
 const ENV_KEY = 'NUXT_PUBLIC_CMS_FRONTEND_URL'
 const assignment = /^[\t ]*(?:export[\t ]+)?NUXT_PUBLIC_CMS_FRONTEND_URL[\t ]*=[\t ]*(.*)$/gm
 
-function readValue(text) {
-  const matches = [...text.matchAll(assignment)]
+function envAssignment(key) {
+  if (!/^[A-Z][A-Z0-9_]*$/.test(key))
+    throw new Error('Invalid environment setting name.')
+  return new RegExp(`^[\\t ]*(?:export[\\t ]+)?${key}[\\t ]*=[\\t ]*(.*)$`, 'gm')
+}
+
+function readValue(text, key = ENV_KEY) {
+  const matches = [...text.matchAll(envAssignment(key))]
   const raw = matches.at(-1)?.[1]?.trim() || ''
   if (/^["']/.test(raw))
     return raw.match(/^["'](.*?)["'](?:\s*#.*)?$/)?.[1]?.trim() || ''
   return raw.split(/\s+#/)[0].trim()
+}
+
+function setValue(text, key, value) {
+  const pattern = envAssignment(key)
+  const line = `${key}=${value}`
+  return [...text.matchAll(pattern)].length
+    ? text.replace(pattern, () => line)
+    : `${text}${text && !text.endsWith('\n') ? '\n' : ''}${line}\n`
 }
 
 function validateUrl(value) {
@@ -87,7 +101,7 @@ async function configureCmsFrontend(projectRoot, { prompt = promptUrl, env = pro
   return { changedFiles }
 }
 
-module.exports = { configureCmsFrontend, readValue, addRuntimeConfig, validateUrl }
+module.exports = { configureCmsFrontend, readValue, setValue, addRuntimeConfig, validateUrl }
 
 if (require.main === module) {
   configureCmsFrontend(path.resolve(process.argv[2] || '.'))
