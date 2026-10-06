@@ -5,6 +5,10 @@
 const { reconcilePublicationValues, resolvePublicationFile } = require('./cmsPublicationValues')
 
 const BLOCK_META_EXCLUDE_KEYS = new Set(['limit'])
+// Library-only meta entries. `design` is the design-to-block map (which
+// design node the block was built from); it stays on the library block and
+// is never copied to instances.
+const BLOCK_META_LIBRARY_KEYS = new Set(['design'])
 const BLOCK_DEFINITION_SYNC_FIELDS = ['content', 'template', 'templateVersion', 'schema', 'dataSources', 'isOverrideBlock', 'blockUpdatedAt']
 
 // Deep copy that keeps Firestore Timestamps and Dates intact.
@@ -54,6 +58,8 @@ const updateBlocksInArray = async (blocks, blockId, beforeData, afterData, {
     block.meta = block.meta || {}
     const srcMeta = afterMeta
     for (const key of Object.keys(srcMeta)) {
+      if (BLOCK_META_LIBRARY_KEYS.has(key))
+        continue
       block.meta[key] = block.meta[key] || {}
       const src = srcMeta[key] || {}
       const previousTemplateQueryItems = (beforeMeta[key]?.queryItems && typeof beforeMeta[key].queryItems === 'object')
@@ -128,8 +134,8 @@ const canonicalJson = (value) => {
 // The parts of a library block that updateBlocksInArray and publication value
 // reconciliation read. blockUpdatedAt is excluded: the page editor stamps it on
 // every inline save, and it carries no definition of its own. Per-entry meta
-// keys that instances keep for themselves (BLOCK_META_EXCLUDE_KEYS) are
-// excluded too.
+// keys that instances keep for themselves (BLOCK_META_EXCLUDE_KEYS) and the
+// library-only entries (BLOCK_META_LIBRARY_KEYS) are excluded too.
 const propagatedBlockDefinition = (data) => {
   const definition = {}
   for (const field of BLOCK_DEFINITION_SYNC_FIELDS) {
@@ -138,6 +144,8 @@ const propagatedBlockDefinition = (data) => {
   }
   const meta = {}
   for (const [key, entry] of Object.entries(data?.meta || {})) {
+    if (BLOCK_META_LIBRARY_KEYS.has(key))
+      continue
     if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
       meta[key] = Object.fromEntries(Object.entries(entry).filter(([metaKey]) => !BLOCK_META_EXCLUDE_KEYS.has(metaKey)))
     }

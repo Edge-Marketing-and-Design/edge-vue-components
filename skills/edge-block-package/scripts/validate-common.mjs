@@ -18,6 +18,31 @@ export const assertBalancedHtml = (html, label) => {
 
 export const defaults = block => Object.fromEntries(Object.entries(block.schema).map(([key, input]) => [key, input.value]))
 
+/**
+ * The design node a block was built from: the manifest entry's `design` and
+ * the block's `meta.design` (cms-blocks contract, Library block). Same rules
+ * as the Hub's block.create and block.draft checks. Empty means absent or valid.
+ */
+const designReferenceFields = { figma: { required: ['file', 'node'], optional: ['name'] }, handoff: { required: ['path'], optional: ['section', 'name'] } }
+export const designReferenceProblems = (design, label = 'design') => {
+  if (design === undefined || design === null) return []
+  if (!design || typeof design !== 'object' || Array.isArray(design)) return [`${label} must be an object: { source: "figma", file, node, name? } or { source: "handoff", path, section?, name? }`]
+  const shape = designReferenceFields[design.source]
+  if (!shape) return [`${label}.source must be "figma" or "handoff"`]
+  const problems = []
+  for (const key of shape.required) if (typeof design[key] !== 'string' || !design[key].trim()) problems.push(`${label}.${key} is required for source "${design.source}"`)
+  for (const key of Object.keys(design)) {
+    if (key === 'source') continue
+    if (!shape.required.includes(key) && !shape.optional.includes(key)) problems.push(`${label}.${key} is not a design reference field`)
+    else if (typeof design[key] !== 'string') problems.push(`${label}.${key} must be a string`)
+  }
+  return problems
+}
+export const assertDesignReference = (design, label) => {
+  const problems = designReferenceProblems(design, label)
+  assert.deepEqual(problems, [], problems.join('\n'))
+}
+
 /** Render a block with its default values; `sources` maps a data-source name to sample records. */
 export const renderBlock = (block, { values = defaults(block), sources = {} } = {}) => {
   let template = block.template
@@ -41,9 +66,11 @@ const validateInput = (input, location) => {
   }
 }
 
-/** Structural checks every block must pass. */
-export const assertBlockBasics = (block, file, { themeId, allowedTags = null } = {}) => {
+/** Structural checks every block must pass. `design` is the manifest entry's design node; the block's `meta.design` must match it. */
+export const assertBlockBasics = (block, file, { themeId, allowedTags = null, design } = {}) => {
   for (const key of requiredBlockKeys) assert.ok(Object.hasOwn(block, key), `${file} is missing ${key}`)
+  if (block.meta?.design !== undefined) assertDesignReference(block.meta.design, `${file}.meta.design`)
+  if (design !== undefined) assert.deepEqual(block.meta?.design, design, `${file}: meta.design must equal the manifest entry's design`)
   assert.match(block.docId, /^[a-z0-9]+(?:-[a-z0-9]+)*$/, `${file}: docId must be kebab case`)
   assert.equal(block.templateVersion, 2, `${file}: templateVersion must be 2`)
   assert.equal(block.content, block.template, `${file}: content and template must match`)
@@ -82,9 +109,13 @@ export const assertRenderedCopy = (rendered, file, { bannedPhrases = [] } = {}) 
     assert.doesNotMatch(rendered, new RegExp(phrase, 'i'), `${file}: banned phrase "${phrase}"`)
 }
 
-/** Manifest sanity against the generated blocks directory. */
-export const assertManifest = (manifest, expectedIds, { organizationId, siteId, themeId, themeName } = {}) => {
+/** Manifest sanity against the generated blocks directory. Warns (never fails) when a block has no `design` entry: without one the update workflow cannot tell which block a design node became. */
+export const assertManifest = (manifest, expectedIds, { organizationId, siteId, themeId, themeName, warn = message => console.warn(message) } = {}) => {
   assert.deepEqual(manifest.blocks.map(entry => entry.docId), expectedIds, 'manifest block ids must match expectedIds in order')
+  for (const entry of manifest.blocks) {
+    if (entry.design === undefined) warn(`warning: manifest entry ${entry.docId} has no design entry; add { source, file, node, name } (or a handoff path) so the update workflow can map its design node (edge-block-package reference/block-updates.md)`)
+    else assertDesignReference(entry.design, `manifest ${entry.docId}.design`)
+  }
   if (organizationId) assert.deepEqual(manifest.targetOrganization, { id: organizationId })
   if (siteId) assert.deepEqual(manifest.targetSite, { id: siteId })
   if (themeId) assert.deepEqual(manifest.targetTheme, { id: themeId, name: themeName })

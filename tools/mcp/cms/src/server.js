@@ -12,6 +12,7 @@ import { blockDefinitionHash } from '../../../../lib/cmsBlockRevisions.js'
 import { CMS_OPERATION_TYPES } from '../../../../lib/cmsOperations.js'
 import { agentEndpoint, createAgentOperationClient, resolveAgentKey } from './agent-operations.js'
 import { createCmsToolService } from './cms-tools.js'
+import { contractKinds, readContract } from './contracts.js'
 import { describeCredentials, resolveCredentials } from './credentials.js'
 
 // Shared Edge code: this server lives in <hub>/edge/tools/mcp/cms/src and
@@ -508,8 +509,25 @@ server.registerTool(
   async input => jsonResult(await cmsTools.getTheme(input)),
 )
 
+server.registerTool(
+  'cms_contract',
+  {
+    title: 'Read a CMS Data Contract',
+    description: `Read one of the Hub's data contracts as Markdown, from the checkout this server runs in: the fields, storage paths, public projection, consumers and invariants an agent writes against. Call it for every kind the task will write before building (${contractKinds().join(', ')}), and name the contract lines each field follows in the handoff. Reads a file only: no network, no Firestore. An unknown kind lists the known ones.`,
+    inputSchema: {
+      kind: z.string().trim().min(1).describe(`Which contract: ${contractKinds().join(', ')}.`),
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+    },
+  },
+  async ({ kind }) => jsonResult(await readContract({ kind, repoRoot })),
+)
+
 const OperationSchema = z.object({ type: z.enum(CMS_OPERATION_TYPES) }).passthrough()
-  .describe('A CMS operation, e.g. { "type": "page.placeBlock", "siteId": "...", "pageId": "...", "blockId": "...", "values": { ... } }. See docs/data-contracts/cms-operations/README.md for every type and its fields.')
+  .describe('A CMS operation, e.g. { "type": "page.placeBlock", "siteId": "...", "pageId": "...", "blockId": "...", "values": { ... } }. Call cms_contract (kind "operations") first: it returns every type and its fields.')
 
 const resolveOrgId = orgId => orgId || config.defaultOrgId
 
@@ -517,7 +535,7 @@ server.registerTool(
   'cms_check_operation',
   {
     title: 'Check a CMS Operation',
-    description: 'Plan a draft-only CMS operation through the Hub (themes, new sites and their SEO, draft pages and their SEO, block placement and content, new blocks, block drafts) and return what would change, any problems, and a checksum for cms_run_operation. Writes nothing. Nothing can publish a page or release a block. Needs an agent key (Dev Mode > Agent Keys).',
+    description: 'Plan a draft-only CMS operation through the Hub (themes, new sites and their SEO, draft pages and their SEO, block placement and content, new blocks, block drafts) and return what would change, any problems, and a checksum for cms_run_operation. Call cms_contract first for the operations contract and for every kind the operation writes (blocks, themes, posts), and build the operation from those fields. Writes nothing. Nothing can publish a page or release a block. Needs an agent key (Dev Mode > Agent Keys).',
     inputSchema: {
       orgId: OptionalOrgIdSchema.describe('Organization id. Uses configured defaultOrgId when omitted.'),
       operation: OperationSchema,

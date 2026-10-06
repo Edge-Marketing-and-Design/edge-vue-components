@@ -23,7 +23,7 @@ for (const media of manifest.media || []) assert.ok(existsSync(resolve(packageRo
 
 for (const entry of manifest.blocks) {
   const block = readJson(entry.file)
-  assertBlockBasics(block, entry.file, { themeId, allowedTags })
+  assertBlockBasics(block, entry.file, { themeId, allowedTags, design: entry.design })
   const rendered = await renderBlock(block, { sources: sampleSources })
   assertRenderedCopy(rendered, entry.file, { bannedPhrases })
 }
