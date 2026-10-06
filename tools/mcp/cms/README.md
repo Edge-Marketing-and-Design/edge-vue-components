@@ -111,6 +111,18 @@ name cannot silently select the wrong theme. Its response includes:
 5. Continue manually importing blocks/pages and pasting any proposed theme
    changes into the Hub UI. These MCP tools cannot save or publish them.
 
+## Data contracts
+
+- `cms_contract`: one of the Hub's data contracts as Markdown, read from the
+  checkout the server runs in (`kind`: `blocks`, `operations`, `themes`,
+  `posts`; the list grows with `src/contracts.js`). It returns the text, the
+  contract's title, its `Last verified` line and the path. Call it for every
+  kind a task will write before building, and name in the handoff the
+  contract line each written field follows. It reads a file only: no key, no
+  network, no Firestore. An unknown kind answers with the known ones, and a
+  kind whose file is not in the checkout says which branch to pull. The
+  contracts are the files under `docs/data-contracts/`; nothing is copied.
+
 ## Draft-only CMS operations (agent key)
 
 - `cms_check_operation`: plan an operation (theme, new site, draft page,
@@ -132,17 +144,19 @@ name cannot silently select the wrong theme. Its response includes:
   `width` sets a plain page width. Vue override components don't
   render there. Needs `CMS_PREVIEW_TOKEN_SECRET` in the Hub's Functions
   environment.
-- `cms_site_readiness`: what stops a site from being finished (see the
-  Hub's `docs/data-contracts/cms-operations/README.md`), with whether the
-  local `emd-cms-front` checkout has each override component.
+- `cms_site_readiness`: what stops a site from being finished (the
+  readiness codes are in the operations contract, `cms_contract` kind
+  `operations`), with whether the local `emd-cms-front` checkout has each
+  override component.
 
 The end-to-end workflow that uses these tools is the `edge-design-to-site`
 skill (`edge/skills/edge-design-to-site`).
 
-Every operation type and field is in
-`docs/data-contracts/cms-operations/README.md`. Results are the Hub's JSON
-answer plus `httpStatus`; refusals are returned (`ok: false`, `code`,
-`message`), not thrown.
+Every operation type and field is in the operations contract: call
+`cms_contract` with kind `operations` before the first check, and the
+`blocks`, `themes` or `posts` contract for what the operation writes. Results
+are the Hub's JSON answer plus `httpStatus`; refusals are returned
+(`ok: false`, `code`, `message`), not thrown.
 
 The key comes from a developer: in the Hub, Dev Mode > Agent Keys. It acts as
 that developer, in one organization, expires and can be revoked. Give it to
@@ -300,6 +314,7 @@ cms_status docId=clearwater-agent-bio-contact
 cms_diff docId=clearwater-agent-bio-contact comparison=base-local
 cms_find_theme query=Clearwater Main
 cms_get_theme themeId=ZfAQ5pwetm9j2iXYFnE8-copy
+cms_contract kind=blocks
 ```
 
 ## Safety Notes
@@ -308,6 +323,7 @@ cms_get_theme themeId=ZfAQ5pwetm9j2iXYFnE8-copy
 - No tool calls `set`, `create`, `update`, `delete` or `storeDoc`. The only writes go through `cms-agentOperation` with an agent key, which authorizes as the key's creator and can only create drafts; the Hub records every run.
 - An emulator config (`requireEmulator: true`) never talks to a real project.
 - `cms_checkout_block` is the only tool that changes local state, and it refuses to overwrite a locally changed checkout.
+- `cms_contract` reads only files under the Hub's `docs/data-contracts/`.
 - Keep service account JSON files out of git.
 - Keep `allowedPathPrefixes` narrow when production data access is enabled.
 - CMS block/page/site scans are bounded. Treat `scanTruncated`, `siteScanTruncated`, or `resultTruncated` as an incomplete result, not proof of absence.
