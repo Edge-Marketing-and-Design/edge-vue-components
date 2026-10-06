@@ -7,7 +7,18 @@ description: Build Edge CMS Template v2 block import packages from a Claude Desi
 
 Repeatable process for producing Template v2 library blocks that a human uploads into a live Edge CMS Hub. Proven on The Mule (emd-cms, September 2026). The vue-to-block-migrator skill owns the block grammar; this skill owns the packaging workflow around it.
 
-**With the Hub's agent tools** (the CMS MCP with an agent key), building a whole site follows the edge-design-to-site skill: author and validate blocks here (steps 1–6), then create them in the Hub with `block.create` instead of handing files over, and keep going to the next page. Its two checkpoints replace the per-package review in step 8 and the one-page limit below.
+**With the Hub's agent tools** (the CMS MCP with an agent key), building a whole site follows the edge-design-to-site skill: author and validate blocks here (steps 0–6), then create them in the Hub with `block.create` instead of handing files over, and keep going to the next page. Its two checkpoints replace the per-package review in step 8 and the one-page limit below.
+
+## Block vocabulary
+
+The words below mean exactly this, here and in the contracts:
+
+- **Library block**: the document at `organizations/{orgId}/blocks/{blockId}`. It holds the released definition (template, schema with defaults, data sources) that pages copy from.
+- **Instance**: a copy of a library block placed in a page's or post's `content`, with its own `values`. Published pages carry the definition inline; the public renderer reads instances from KV and never reads the library.
+- **Synced**: a synced block shares one instance's values across a site's pages. It is placed without values; the first instance on a site is placed in the Hub, and later placements copy it.
+- **Override**: an override block is one the public renderer replaces with a Vue component resolved from the block name. The CMS HTML is the editor preview and the fallback, and the block is the design source of truth for the component.
+- **Draft and release**: an edit to an existing library block is a draft revision; library changes reach pages only through a release, which a developer runs in the Hub. Nothing here releases.
+- **Site chrome**: the synced navigation and footer blocks every page of a site shares.
 
 ## Boundary
 
@@ -23,13 +34,14 @@ Repeatable process for producing Template v2 library blocks that a human uploads
 
 ## Workflow
 
+0. **Receive the contracts.** Call `cms_contract` (the CMS MCP) for every kind the package will write: `blocks` always, `themes` when it carries Theme or Head JSON, `posts` for post blocks, `operations` when blocks are created through the agent operations. Read the returned text before writing a block. In the handoff (the package README and the completion summary), list each field the package writes and the contract line it follows (section and field name). Without the MCP (a package-only session in a repository with no Hub), read the file by path from the Hub checkout `PROJECT.md` names (`docs/data-contracts/cms-<kind>/README.md`) and say in the handoff that the contract was read by path, with the Hub commit.
 1. **Review before build.** Compare the design with the live site and any existing packages. List what to keep, what to correct, and what is invented. Invented people, quotes, headshots, job openings, statistics, promises, and stock image URLs never persist in a block; they become editable inputs that default to approved copy or stay empty with an intentional fallback.
 2. **Establish what exists.** Through the Firebase MCP, list the Hub's current blocks and pages for the site. Decide per stable id: overwrite, new, or retire. Record it in the package README.
 3. **Scaffold** one package per page with `node <skill>/scripts/scaffold.mjs <package-name> --dir <importfiles/project>`. Four blocks or fewer per package; quality drops beyond that.
 4. **Write the blocks** in `generate-package.mjs`: template markup in `String.raw`, a `schema` object with every editable value, `makeBlock` for the document shape, and the manifest. Follow `reference/template-v2-contract.md` and the migrator skill for grammar.
 5. **Validate three ways**: `node generate-package.mjs && node validate-package.mjs && node <validatorPath from PROJECT.md> .` The package validator renders every block through `@edgedev/template-engine` with its defaults and asserts the project's content rules. `validatorPath` should be the Hub's shared import check, `scripts/cms/validate-import.mjs` (relative to `hubPath`): it runs the exact check the Hub import runs, so a package that passes imports without rejections.
 6. **Preview** with `node preview.mjs`, serve the folder, and look at desktop and phone widths. Fix what you see. Common catches: figures wrapping on phones, three-column grids at 375px, design-board labels baked into renders, duplicate headlines between a section heading and an image.
-7. **Write the README**: block table with responsibilities and synced flags, facts baked into defaults, validation commands, files to upload in order with import modes, page assembly order, manual verification. Support files are not upload inputs; say so.
+7. **Write the README**: block table with responsibilities and synced flags, facts baked into defaults, the fields written against their contract lines (step 0), validation commands, files to upload in order with import modes, page assembly order, manual verification. Support files are not upload inputs; say so.
 8. **Stop.** Hand the package over and wait for the operator to upload and review before starting the next one. Corrections carry forward.
 
 ## Rules the validator should enforce
@@ -41,7 +53,7 @@ Repeatable process for producing Template v2 library blocks that a human uploads
 - Rendered defaults contain no unresolved `{{ }}`, no exclamation points, none of the project's banned phrases, and no claim the project has ruled out.
 - Every image input has a paired alt input; renders and compositions are called illustrations, never screenshots.
 - Numbers come from a source the validator can recompute (a shared model, a fixture); hand-typed figures fail.
-- Override blocks: name normalizes (camelCase) to an existing Vue file; schema carries every value the Vue component reads; `isOverrideBlock: true`; manifest `rendererChanges: true`.
+- Override blocks: name normalizes (camelCase) to an existing Vue file; schema carries every value the Vue component reads; `isOverrideBlock: true`; manifest `rendererChanges: true`. The block is the design source of truth and the override matches it (`reference/override-blocks.md`).
 
 ## Package layout
 

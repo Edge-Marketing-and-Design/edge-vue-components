@@ -2,6 +2,8 @@
 
 An override block is a normal Template v2 block whose **name** the public renderer resolves to a Vue component: the name is normalized to camelCase (`"Mule Walking vs Rucking Calculator"` → `muleWalkingVsRuckingCalculator`) and looked up in the component registry with Pascal, camel, and kebab variants. The block JSON carries an accessible static fallback (what Hub preview shows, and what the public site shows if the override is not deployed) and every input the Vue component reads from `block.values`.
 
+Fidelity rule: the CMS block is the design source of truth. Its template, schema defaults and fallback HTML define what the override shows; the Vue component matches the block (the same `block.values` keys, the same content and layout at the same breakpoints, no field the schema lacks). A design change lands in the block first, as a draft revision the developer releases, and the override follows it. An override that shows something the block does not is a defect in the override, not a design decision.
+
 Rules:
 
 - `isOverrideBlock: true` on the block and in the manifest entry (a hint for humans and agents; omit on ordinary blocks). Manifest `rendererChanges: true` with a `rendererHandoff` note.

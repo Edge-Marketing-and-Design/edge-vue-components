@@ -7,24 +7,37 @@ description: Build a whole Edge CMS site in a Hub from a designer's handoff, end
 
 The first-release workflow (Clearwater Hub `docs/features/cms/first-release-plan.md`): the developer hands over the design once, reviews the theme, then reviews the finished draft site. Everything in between is yours: no relaying files, no waiting to be told to start the next page.
 
+## Block vocabulary
+
+The words below mean exactly this, here and in the contracts:
+
+- **Library block**: the document at `organizations/{orgId}/blocks/{blockId}`. It holds the released definition (template, schema with defaults, data sources) that pages copy from.
+- **Instance**: a copy of a library block placed in a page's or post's `content`, with its own `values`. Published pages carry the definition inline; the public renderer reads instances from KV and never reads the library.
+- **Synced**: a synced block shares one instance's values across a site's pages. It is placed without values; the first instance on a site is placed in the Hub, and later placements copy it.
+- **Override**: an override block is one the public renderer replaces with a Vue component resolved from the block name. The CMS HTML is the editor preview and the fallback, and the block is the design source of truth for the component.
+- **Draft and release**: an edit to an existing library block is a draft revision; library changes reach pages only through a release, which a developer runs in the Hub. Nothing here releases.
+- **Site chrome**: the synced navigation and footer blocks every page of a site shares.
+
 ## What you can and can't do
 
 You work through the Hub's CMS MCP. Everything you write is a draft:
 
 | Tool | Use |
 | --- | --- |
+| `cms_contract` | The data contract for a kind (`operations`, `blocks`, `themes`, `posts`): the fields you write against |
 | `cms_find_theme`, `cms_get_theme`, `cms_find_block`, `cms_find_usage` | Read what the Hub has (production reads) |
 | `cms_check_operation` then `cms_run_operation` | Every write. The check returns problems and a checksum; the run is refused if anything changed since the check |
 | `cms_block_base` | The current definition of an existing block (its open draft, else released) and the fingerprint a `block.draft` must send |
 | `cms_preview_url` | A 15-minute link to the Hub's render of one draft page, with your unreleased block drafts by default |
 | `cms_site_readiness` | What stops the site from being finished |
 
-Operations (fields in the Hub's `docs/data-contracts/cms-operations/README.md`): `theme.create`, `theme.update` (only themes no published site uses), `theme.propose` (for a live theme), `site.create`, `site.update` (the site's SEO only), `page.create`, `page.update`, `page.placeBlock`, `page.setValues`, `page.removeBlock`, `block.create`, `block.draft`.
+Operations (fields from `cms_contract`, kind `operations`): `theme.create`, `theme.update` (only themes no published site uses), `theme.propose` (for a live theme), `site.create`, `site.update` (the site's SEO only), `page.create`, `page.update`, `page.placeBlock`, `page.setValues`, `page.removeBlock`, `block.create`, `block.draft`.
 
 You never publish a page, release a block, change a live theme, or edit `emd-cms-front`. The developer does those, in the Hub, after checkpoint 2.
 
 ## Before starting
 
+0. **Contracts.** Call `cms_contract` for every kind you will write: `operations` (every operation's fields), `blocks`, `themes`, and `posts` when the handoff covers posts. Read them before the first check. Keep a list of each field you write and the contract line it follows; it goes in the checkpoint 2 report. Without the MCP there is no site to build; stop.
 1. **Tools.** The CMS MCP is connected with the right Hub config, and an agent key is set (a check without one says "No agent key is configured"). If not, stop and tell the developer: Dev Mode > Agent Keys in the Hub, then the MCP README's setup.
 2. **Project facts.** Read `<importfiles>/PROJECT.md` (the edge-block-package skill's template). Besides its usual facts you need the site's name and at least one domain for `site.create`. Ask for anything missing now, in one message: this is the only handover.
 3. **The design.** Read the whole handoff before writing anything. Design files are annotations, not authority; the edge-block-package rules on invented content apply.
@@ -69,6 +82,7 @@ Set with the operations, from the handoff's approved copy only:
    - pages built, each with a fresh preview link;
    - blocks created, and block drafts waiting for the developer to release (Block Editor, then release). Say plainly that the Hub page editor shows **released** blocks: until these drafts are released, the editor shows the older versions, while your preview links showed the drafts;
    - override blocks that need a Vue component, with a handoff note each (block name, fields the component reads, behaviour), and whether the local `emd-cms-front` checkout already has it (the readiness report says);
+   - the fields you wrote and the contract line each follows (from step 0);
    - content you couldn't fill or left at a fallback, and anything you invented and removed;
    - remaining readiness items and differences from the design you couldn't fix;
    - the time log.
