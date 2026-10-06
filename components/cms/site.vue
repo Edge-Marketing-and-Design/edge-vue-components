@@ -1,9 +1,10 @@
 <script setup lang="js">
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { BarChart3, CircleAlert, ClipboardCheck, Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePenLine, FileStack, FileUp, FileX, FolderCog, FolderDown, FolderUp, FolderX, ImagePlus, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload, Users, X } from 'lucide-vue-next'
+import { BarChart3, Check, CircleAlert, ClipboardCheck, Copy, Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePenLine, FileStack, FileUp, FileX, FolderCog, FolderDown, FolderUp, FolderX, ImagePlus, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload, Users, X } from 'lucide-vue-next'
 import { buildPagePayloadFromTemplateDoc, buildThemeSettingsPayload, deriveThemeMenus, ensureMenuBuckets, ensureUniqueSlug, titleFromSlug } from '../../lib/cmsOperations'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
+import { buildPublishedSitePreviewUrl } from '../../lib/cmsPublishedSitePreview'
 
 const props = defineProps({
   site: {
@@ -66,6 +67,43 @@ const isJsonInvalid = (value) => {
 }
 
 const isTemplateSite = computed(() => props.site === 'templates')
+const runtimeConfig = useRuntimeConfig()
+const publishedSitePreviewUrl = computed(() => buildPublishedSitePreviewUrl(runtimeConfig.public.cmsFrontendUrl, props.site))
+const copyingPublishedSitePreview = ref(false)
+const publishedSitePreviewCopied = ref(false)
+let publishedSitePreviewCopyTimer = null
+const publishedSitePreviewUnavailableReason = computed(() => {
+  if (!publishedSitePreviewUrl.value)
+    return 'Configure the CMS frontend URL to copy a published site preview.'
+  if (!isSiteSettingPublished.value)
+    return 'Publish this site before copying its published preview URL.'
+  return ''
+})
+watch(publishedSitePreviewUrl, () => {
+  publishedSitePreviewCopied.value = false
+})
+const copyPublishedSitePreview = async () => {
+  if (copyingPublishedSitePreview.value || publishedSitePreviewUnavailableReason.value)
+    return
+  copyingPublishedSitePreview.value = true
+  try {
+    await navigator.clipboard.writeText(publishedSitePreviewUrl.value)
+    publishedSitePreviewCopied.value = true
+    if (publishedSitePreviewCopyTimer)
+      clearTimeout(publishedSitePreviewCopyTimer)
+    publishedSitePreviewCopyTimer = setTimeout(() => {
+      publishedSitePreviewCopied.value = false
+      publishedSitePreviewCopyTimer = null
+    }, 1800)
+    edgeFirebase?.toast?.success?.('Copied published site preview URL.')
+  }
+  catch {
+    edgeFirebase?.toast?.error?.('Unable to copy the published site preview URL. Check clipboard permission and try again.')
+  }
+  finally {
+    copyingPublishedSitePreview.value = false
+  }
+}
 const router = useRouter()
 const route = useRoute()
 
@@ -3607,6 +3645,8 @@ const isSiteSettingPublished = computed(() => {
 })
 
 onBeforeUnmount(() => {
+  if (publishedSitePreviewCopyTimer)
+    clearTimeout(publishedSitePreviewCopyTimer)
   sitePagePreviewVisibilityObservers.forEach(observer => observer.disconnect())
   sitePagePreviewVisibilityObservers.clear()
   sitePagePreviewSnapshotQueueStopped = true
@@ -4142,11 +4182,29 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
         class="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-2 border border-slate-300 bg-slate-100 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
         :class="isTemplateSite ? 'min-h-[68px]' : ''"
       >
-        <div class="flex items-center gap-3">
-          <FileStack class="w-5 h-5" />
-          <span class="text-lg font-normal">
-            {{ siteData.name || 'Templates' }}
-          </span>
+        <div class="flex min-w-0 items-center gap-3">
+          <FileStack class="w-5 h-5 shrink-0" />
+          <div class="min-w-0">
+            <div class="truncate text-lg font-normal" :title="siteData.name || 'Templates'">
+              {{ siteData.name || 'Templates' }}
+            </div>
+            <span v-if="!isTemplateSite" class="inline-flex" :title="publishedSitePreviewUnavailableReason || 'Copy the published site preview URL'">
+              <edge-shad-button
+                type="button"
+                variant="ghost"
+                size="sm"
+                class="h-6 gap-1.5 px-0 text-[11px] text-slate-600 hover:bg-transparent hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
+                :disabled="Boolean(publishedSitePreviewUnavailableReason) || copyingPublishedSitePreview"
+                aria-label="Copy published site preview URL"
+                @click="copyPublishedSitePreview"
+              >
+                <Loader2 v-if="copyingPublishedSitePreview" class="h-3 w-3 animate-spin" aria-hidden="true" />
+                <Check v-else-if="publishedSitePreviewCopied" class="h-3 w-3" aria-hidden="true" />
+                <Copy v-else class="h-3 w-3" aria-hidden="true" />
+                <span aria-live="polite">{{ publishedSitePreviewCopied ? 'Copied!' : 'Published Site Preview' }}</span>
+              </edge-shad-button>
+            </span>
+          </div>
           <div
             v-if="!isTemplateSite && activeDomainError"
             class="rounded bg-red-100 px-3 py-1 text-[10px] font-medium text-red-700 whitespace-nowrap shadow-sm"
