@@ -2,6 +2,8 @@
 import { useVModel } from '@vueuse/core'
 import { renderTemplate } from '@edgedev/template-engine'
 import { ChevronDown, FilePen, GripVertical, ImagePlus, Loader2, LockKeyhole, LockOpen, Maximize2, Monitor, Pencil, Plus, Smartphone, Sparkles, Tablet, X } from 'lucide-vue-next'
+import { loadLibraryBlockForEditing, saveLibraryBlockEdit, saveWithBaseCheck } from '../../lib/cmsBlockRevisionClient'
+import { safeParseTagConfig } from '../../lib/cmsTagConfig'
 const props = defineProps({
   modelValue: {
     type: Object,
@@ -165,28 +167,6 @@ const resolveSiteRestrictedSettings = () => {
 
 const resolveSiteAllowsSelfRegistration = () => {
   return resolveSiteRestrictedSettings()?.allowSelfRegistration !== false
-}
-
-function normalizeConfigLiteral(str) {
-  return str
-    .replace(/(\{|,)\s*([A-Za-z_][\w-]*)\s*:/g, '$1"$2":')
-    .replace(/'/g, '"')
-}
-
-function safeParseTagConfig(raw) {
-  try {
-    return JSON.parse(raw)
-  }
-  catch {
-    // Fall back to legacy loose config support below.
-  }
-
-  try {
-    return JSON.parse(normalizeConfigLiteral(raw))
-  }
-  catch {
-    return null
-  }
 }
 
 function findMatchingBrace(str, startIdx) {
@@ -439,6 +419,12 @@ const state = reactive({
   protectionPanelOpen: false,
   blockContentDraft: '',
   blockContentDocId: '',
+  // The library block this content editor opened: its unreleased draft
+  // definition when there is one, otherwise the released one.
+  blockContentSourceView: null,
+  blockContentDraftRevision: null,
+  blockContentBaseHash: null,
+  blockChangedConflict: null,
   blockContentUpdating: false,
   blockContentError: '',
 })
@@ -1205,7 +1191,7 @@ const parseBlockContentModel = (html) => {
     else if (type === 'textarea')
       val = !val ? PLACEHOLDERS.textarea : String(val)
     else if (type === 'richtext')
-      val = !val ? PLACEHOLDERS.richtext : String(val)
+      val = cfg.picker === 'video' ? String(val || '') : (!val ? PLACEHOLDERS.richtext : String(val))
 
     values[field] = val
   }
@@ -1295,6 +1281,11 @@ const normalizeTemplateV2SchemaItem = (field, config = {}) => {
     ...rest,
     type: rawConfig.type || rawConfig.value || 'text',
     title: title || label || '',
+  }
+
+  if (normalized.type === 'video') {
+    normalized.type = 'richtext'
+    normalized.picker = 'video'
   }
 
   if (schema !== undefined)
@@ -1480,8 +1471,12 @@ const blockContentSourceDoc = computed(() => {
   const blockDocId = String(state.blockContentDocId || sourceBlockDocId.value || '').trim()
   if (!blockDocId)
     return null
+  if (state.blockContentSourceView && state.blockContentDocId === blockDocId)
+    return state.blockContentSourceView
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[blockDocId] || null
 })
+
+const OWN_DEFINITION_PREVIEW_IDS = new Set(['preview', 'history-preview'])
 
 const resolvedRenderBlock = computed(() => {
   const instance = modelValue.value || {}
@@ -1489,8 +1484,11 @@ const resolvedRenderBlock = computed(() => {
   const sourceIsV2 = isTemplateV2BlockDoc(sourceDoc) && !isMalformedLegacyTemplateV2Doc(sourceDoc)
   const templateIsV2 = (isTemplateV2BlockDoc(instance) && !isMalformedLegacyTemplateV2Doc(instance)) || sourceIsV2
   const templateVersion = templateIsV2 ? 2 : (Number(instance.templateVersion || sourceDoc.templateVersion) || 1)
-  const isUnsavedEditorPreview = props.standalonePreview && String(instance.id || '') === 'preview'
-  const useSourceDefinition = sourceIsV2 && hasObjectEntries(sourceDoc) && !isUnsavedEditorPreview
+  // Standalone previews of a specific version (the Block Editor's unsaved
+  // work, a Block History snapshot) render their own definition, not the
+  // library block's current one.
+  const isOwnDefinitionPreview = props.standalonePreview && OWN_DEFINITION_PREVIEW_IDS.has(String(instance.id || ''))
+  const useSourceDefinition = sourceIsV2 && hasObjectEntries(sourceDoc) && !isOwnDefinitionPreview
 
   return {
     ...sourceDoc,
@@ -2119,7 +2117,19 @@ const openPreviewContentEditor = async () => {
   if (!edgeFirebase.data?.[blocksPath])
     await edgeFirebase.startSnapshot(blocksPath)
 
-  const blockData = edgeFirebase.data?.[blocksPath]?.[blockDocId]
+  // Edit the unreleased draft when there is one, so saving never drops it.
+  let loaded = null
+  try {
+    loaded = await loadLibraryBlockForEditing({
+      edgeFirebase,
+      organizationDocPath: edgeGlobal.edgeState.organizationDocPath,
+      blockId: blockDocId,
+    })
+  }
+  catch {
+    loaded = null
+  }
+  const blockData = loaded?.view
   if (!blockData) {
     state.blockContentError = 'Unable to load block content.'
     edgeFirebase?.toast?.error?.('Unable to load block content.')
@@ -2128,6 +2138,9 @@ const openPreviewContentEditor = async () => {
 
   state.editorMode = 'content'
   state.blockContentDocId = blockDocId
+  state.blockContentSourceView = blockData
+  state.blockContentDraftRevision = loaded.draft ? loaded.stored.draftRevision : null
+  state.blockContentBaseHash = loaded.baseHash
   const blockDataIsTemplateV2 = isTemplateV2BlockDoc(blockData) && !isMalformedLegacyTemplateV2Doc(blockData)
   state.blockContentDraft = String(blockDataIsTemplateV2
     ? (blockData.template || blockData.content || '')
@@ -2139,6 +2152,22 @@ const openPreviewContentEditor = async () => {
   state.afterLoad = true
 }
 
+// A save refused because the library block changed after the dialog loaded
+// it; resolves true to replace the newer version.
+let resolveBlockChangedPrompt = null
+const confirmBlockChanged = details => new Promise((resolve) => {
+  state.blockChangedConflict = { details, blockId: state.blockContentDocId, blockName: state.blockContentSourceView?.name || '' }
+  resolveBlockChangedPrompt = resolve
+})
+const resolveBlockChanged = (confirmed) => {
+  const resolve = resolveBlockChangedPrompt
+  state.blockChangedConflict = null
+  resolveBlockChangedPrompt = null
+  resolve?.(confirmed === true)
+}
+
+// Saves the edited template as the library block's unreleased draft
+// revision. No page changes, including this one, until the draft is released.
 const updateBlockContent = async () => {
   if (state.blockContentUpdating)
     return
@@ -2146,68 +2175,51 @@ const updateBlockContent = async () => {
   if (!blockDocId)
     return
 
-  const blocksPath = `${edgeGlobal.edgeState.organizationDocPath}/blocks`
-  const blockData = edgeFirebase.data?.[blocksPath]?.[blockDocId] || {}
+  const blockData = state.blockContentSourceView
+    || edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[blockDocId]
+    || {}
   const nextContent = String(state.blockContentDraft || '')
   const templateIsV2 = isTemplateV2BlockDoc(blockData) && !isMalformedLegacyTemplateV2Doc(blockData)
-  const { values: blockValues, meta: blockMeta } = templateIsV2
-    ? {
-        values: blockData.values || {},
-        meta: blockData.meta || {},
-      }
-    : buildUpdatedBlockDocFromContent(nextContent, blockData)
-  const { values: instanceValues, meta: instanceMeta } = templateIsV2
-    ? {
-        values: modelValue.value?.values || {},
-        meta: modelValue.value?.meta || {},
-      }
-    : buildUpdatedBlockDocFromContent(nextContent, modelValue.value || {})
-  const blockUpdatedAt = new Date().toISOString()
-  const nextType = normalizeBlockTypes(blockData?.type)
-  const normalizedNextType = nextType.length ? nextType : ['Page']
-
-  const previousModelValue = edgeGlobal.dupObject(modelValue.value || {})
-  const nextModelValue = {
-    ...(modelValue.value || {}),
-    content: nextContent,
-    values: instanceValues,
-    meta: instanceMeta,
-    blockUpdatedAt,
-    blockId: blockData?.docId || blockDocId,
-  }
+  const nextDoc = { ...edgeGlobal.dupObject(blockData), content: nextContent }
   if (templateIsV2) {
-    nextModelValue.templateVersion = 2
-    nextModelValue.template = nextContent
-    nextModelValue.schema = blockData.schema || modelValue.value?.schema || {}
-    nextModelValue.dataSources = blockData.dataSources || modelValue.value?.dataSources || {}
+    nextDoc.templateVersion = 2
+    nextDoc.template = nextContent
   }
-  modelValue.value = nextModelValue
+  else {
+    const { values, meta } = buildUpdatedBlockDocFromContent(nextContent, blockData)
+    nextDoc.values = values
+    nextDoc.meta = meta
+  }
 
   state.blockContentError = ''
   state.blockContentUpdating = true
   try {
-    const updates = {
-      content: nextContent,
-      blockUpdatedAt,
-      type: normalizedNextType,
-    }
-    if (templateIsV2) {
-      updates.templateVersion = 2
-      updates.template = nextContent
-    }
-    else {
-      updates.values = blockValues
-      updates.meta = blockMeta
-    }
-    const results = await edgeFirebase.changeDoc(blocksPath, blockDocId, updates)
-    if (results?.success === false) {
-      throw new Error(results?.error || 'Failed to update block content.')
-    }
-    edgeFirebase?.toast?.success?.('Block content updated.')
+    const { view, revision, baseHash } = await saveWithBaseCheck({
+      blockId: blockDocId,
+      baseHash: state.blockContentBaseHash,
+      confirm: confirmBlockChanged,
+      save: base => saveLibraryBlockEdit({
+        edgeFirebase,
+        organizationDocPath: edgeGlobal.edgeState.organizationDocPath,
+        orgId: edgeGlobal.edgeState.currentOrganization,
+        blockId: blockDocId,
+        nextDoc,
+        source: 'page-editor',
+        baseHash: base,
+      }),
+    })
+    state.blockContentSourceView = view
+    state.blockContentDraftRevision = revision.draftRevision ?? null
+    state.blockContentBaseHash = baseHash
+    if (revision.status === 'saved')
+      edgeFirebase?.toast?.success?.(`Saved as unreleased changes to this library block (revision ${revision.draftRevision}). Pages, including this one, are unchanged until it's released.`)
+    else if (revision.status === 'discarded')
+      edgeFirebase?.toast?.success?.('The template matches the released block again, so its unreleased changes were discarded.')
+    else
+      edgeFirebase?.toast?.success?.('No template changes to save.')
     state.open = false
   }
   catch (error) {
-    modelValue.value = previousModelValue
     state.blockContentError = error?.message || 'Unable to save block content.'
     edgeFirebase?.toast?.error?.(state.blockContentError)
   }
@@ -2536,8 +2548,9 @@ const aiFieldOptions = computed(() => {
       id: entry.field,
       label: genTitleFromField(entry),
       type: entry.meta?.type || 'text',
+      picker: entry.meta?.picker || '',
     }))
-    .filter(option => option.type !== 'image' && option.type !== 'color' && !/url/i.test(option.id) && !/color/i.test(option.id))
+    .filter(option => option.type !== 'image' && option.type !== 'color' && option.picker !== 'video' && !/url/i.test(option.id) && !/color/i.test(option.id))
 })
 
 const selectedAiFieldIds = computed(() => {
@@ -2823,6 +2836,7 @@ const getTagsFromPosts = computed(() => {
         </div>
       </div>
     </div>
+    <edge-cms-block-changed-dialog v-if="state.blockChangedConflict" :conflict="state.blockChangedConflict" @resolve="resolveBlockChanged" />
     <edge-shad-dialog v-model="state.delete">
       <DialogContent class="max-w-md">
         <DialogHeader>
@@ -2857,7 +2871,8 @@ const getTagsFromPosts = computed(() => {
               <div class="min-w-0">
                 <SheetTitle>Edit Block Content: {{ previewBlockDisplayName }}</SheetTitle>
                 <SheetDescription class="text-sm text-muted-foreground">
-                  Update this block template and save it globally. Changes will sync to every page using this block.
+                  Edit this library block's template. Saving keeps it as unreleased changes: every
+                  page, including this one, keeps the released version until it's released.
                 </SheetDescription>
               </div>
             </div>
@@ -2872,6 +2887,7 @@ const getTagsFromPosts = computed(() => {
                   language="handlebars"
                   name="preview-block-content"
                   :enable-formatting="Number(blockContentPreviewBlock?.templateVersion) !== 2"
+                  format-single-line-on-open
                   height="calc(100vh - 295px)"
                   class="h-full min-h-0"
                 >
@@ -2982,7 +2998,7 @@ const getTagsFromPosts = computed(() => {
                 @click="updateBlockContent"
               >
                 <Loader2 v-if="state.blockContentUpdating" class="w-4 h-4 mr-2 animate-spin" />
-                Update
+                Save as unreleased changes
               </edge-shad-button>
             </SheetFooter>
           </div>
@@ -3391,6 +3407,7 @@ const getTagsFromPosts = computed(() => {
                           v-model="state.draft[entry.field]"
                           :type="entry.meta.type"
                           :field="entry.field"
+                          :schema="entry.meta"
                           :site="props.siteId"
                           :richtext-auto-height="editableMetaEntries.length === 1 && entry.meta?.type === 'richtext'"
                           :show-richtext-image-toggle="showRichtextImageToggle"
@@ -3643,6 +3660,7 @@ const getTagsFromPosts = computed(() => {
                         v-model="state.draft[entry.field]"
                         :type="entry.meta.type"
                         :field="entry.field"
+                        :schema="entry.meta"
                         :site="props.siteId"
                         :richtext-auto-height="editableMetaEntries.length === 1 && entry.meta?.type === 'richtext'"
                         :show-richtext-image-toggle="showRichtextImageToggle"

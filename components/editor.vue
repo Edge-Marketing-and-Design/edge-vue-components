@@ -305,6 +305,12 @@ const title = computed(() => {
 })
 
 const onSubmit = async () => {
+  // One save at a time: a second submit while the first is still running
+  // (Enter in a field, Cmd+S, or a confirmation dialog still open) would
+  // save the same document twice.
+  if (state.submitting)
+    return null
+  state.errors = {}
   state.successMessage = ''
   const workingDocOverrides = props.workingDocOverrides
   const finalWorkingDoc = {
@@ -333,6 +339,12 @@ const onSubmit = async () => {
     const result = props.saveHandler
       ? await props.saveHandler(edgeGlobal.dupObject(finalWorkingDoc))
       : await edgeFirebase.storeDoc(savePath, finalWorkingDoc)
+    // A save handler may decline to write (for example, after a declined
+    // confirmation). Keep the working document and unsaved-changes state.
+    if (result?.cancelled === true) {
+      emit('unsavedChanges', unsavedChanges.value)
+      return null
+    }
     const savedDocId = String(result?.docId || result?.meta?.docId || finalWorkingDoc.docId || '').trim()
     if (!savedDocId)
       throw new Error('The save completed without a document ID.')
@@ -358,7 +370,7 @@ const onSubmit = async () => {
       state.bypassUnsavedChanges = false
       state.successMessage = 'All changes saved. You can close or continue editing.'
       emit('unsavedChanges', false)
-      return
+      return normalizedSavedDoc
     }
     state.workingDoc = {}
     if (props.saveRedirectOverride) {
@@ -371,12 +383,14 @@ const onSubmit = async () => {
     else {
       router.push(`/app/dashboard/${props.collection}`)
     }
+    return normalizedSavedDoc
   }
   catch (error) {
     state.bypassUnsavedChanges = false
     const message = String(error?.message || '').trim() || 'Unable to save changes.'
     state.errors = { _form: message }
     emit('error', state.errors)
+    return null
   }
   finally {
     state.submitting = false
@@ -582,9 +596,13 @@ const triggerSubmit = async (insertedValues = {}) => {
     await formRef.value.setValues(state.workingDoc, true)
     await formRef.value.validate()
     await nextTick()
-    await formRef.value.handleSubmit(onSubmit)()
+    const savedDoc = await formRef.value.handleSubmit(onSubmit)()
     await nextTick()
-    state.errors = formRef.value?.errors
+    state.errors = {
+      ...(formRef.value?.errors || {}),
+      ...(state.errors?._form ? { _form: state.errors._form } : {}),
+    }
+    return savedDoc
   }
 }
 
@@ -678,6 +696,9 @@ defineExpose({ refresh: refreshEditorData })
         </edge-menu>
       </slot>
       <CardContent :class="cn('flex-1 flex flex-col px-4', props.cardContentClass)">
+        <div v-if="state.errors?._form" role="alert" class="mb-4 rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-foreground">
+          {{ state.errors._form }}
+        </div>
         <div v-if="state.successMessage" class="px-6">
           <Alert
             class="mt-2 mb-4 border border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-500/60 dark:bg-emerald-900/50 dark:text-emerald-100"

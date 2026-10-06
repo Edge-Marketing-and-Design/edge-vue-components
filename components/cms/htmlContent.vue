@@ -6,6 +6,7 @@ import DOMPurify from 'dompurify'
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { syncCmsPreviewAuthState } from '../../lib/cmsPreviewAuthState'
+import { BREAKPOINT_MIN_WIDTHS, rewriteViewportClassTokens } from '../../lib/cmsViewportClasses'
 import { useHead } from '#imports'
 
 const props = defineProps({
@@ -99,6 +100,18 @@ const pushVarDecl = (decls, prefix, key, value) => {
 const cssVarRef = (prefix, key) => `var(--${prefix}-${toCssVarToken(key)})`
 const escapeClassToken = value => String(value || '').replace(/([^a-zA-Z0-9_-])/g, '\\$1')
 
+// Adds `.block-content <selector>` to each utility selector (see the runtime
+// config below).
+const scopeUtilityToBlockContent = (util) => {
+  if (util.layer && util.layer !== 'default')
+    return
+  const selector = String(util.selector || '')
+  if (!selector || selector.includes('.block-content'))
+    return
+  const scoped = selector.split(',').map(part => `.block-content ${part.trim()}`).join(', ')
+  util.selector = `${selector}, ${scoped}`
+}
+
 // --- UnoCSS Runtime singleton (global, one init for the whole app) ---
 async function ensureUnoRuntime() {
   if (typeof window === 'undefined')
@@ -128,6 +141,13 @@ async function ensureUnoRuntime() {
       defaults: defineConfig({
         presets: [presetWind4()],
         shortcuts: [],
+        // The runtime injects its styles before every Hub stylesheet, so the
+        // Hub's own Tailwind (which also has .m-0, .p-0, ...) won any tie
+        // inside a block: `m-0 mt-8` rendered with no top margin (X29). Each
+        // utility also gets a `.block-content` selector, so inside block
+        // canvases block classes beat the Hub's by specificity and keep
+        // UnoCSS's own order among themselves; elsewhere nothing changes.
+        postprocess: [scopeUtilityToBlockContent],
       }),
       observe: true,
     })
@@ -1472,6 +1492,17 @@ function setScopedThemeVars(scopeEl, theme) {
   styleEl.textContent = buildScopedThemeCSS(theme, scopeId)
 }
 
+// An opacity modifier as a whole percent: `50` stays, `[0.03]` and `[3%]`
+// become `3`. Anything else keeps its brackets.
+const bracketOpacityToPercent = (value) => {
+  const raw = String(value || '')
+  if (!raw.startsWith('['))
+    return raw
+  const inner = raw.slice(1, -1).trim()
+  const percent = inner.endsWith('%') ? Number(inner.slice(0, -1)) : Number(inner) * 100
+  return (Number.isFinite(percent) && percent >= 0 && percent <= 100) ? String(Math.round(percent * 100) / 100) : raw
+}
+
 // Convert utility tokens like text-brand/bg-surface/rounded-xl/shadow-card
 // into variable-backed arbitrary values so we don't need to mutate Uno's theme.
 
@@ -1487,42 +1518,30 @@ function toVarBackedUtilities(classList, theme) {
     .split(/\s+/)
     .filter(Boolean)
     .map((cls) => {
-      // colors: text-*, bg-*, border-* mapped when key exists
-      const colorMatch = /^(text|bg|border)-(.*)$/.exec(cls)
+      // colors: every color utility (text, bg, border and its sides, gradient
+      // stops, ring, outline, decoration, divide, fill, stroke, accent, caret,
+      // placeholder) mapped to the theme variable when the key exists. Only
+      // text/bg/border were, so a gradient's from-surface generated nothing
+      // in the Hub (the Hub's UnoCSS has no theme colors) while the public
+      // site drew it.
+      const colorMatch = /^(border-[xytrblse]|ring-offset|text|bg|border|from|via|to|ring|outline|decoration|divide|fill|stroke|accent|caret|placeholder)-(.*)$/.exec(cls)
       if (colorMatch) {
         const [, kind, rawKey] = colorMatch
 
-        // support opacity suffix: bg-secondary/50, text-primary/80, etc.
+        // support opacity suffix: bg-secondary/50, text-primary/80, and the
+        // bracketed form (text-primary/[0.03], /[3%]) as a whole percent;
+        // unmatched, the class fell through and rendered black (X30).
         let key = rawKey
         let opacity = null
-        const alphaMatch = /^(.+)\/(\d{1,3})$/.exec(rawKey)
+        const alphaMatch = /^(.+)\/(\d{1,3}|\[[^\]]+\])$/.exec(rawKey)
         if (alphaMatch) {
           key = alphaMatch[1]
-          opacity = alphaMatch[2]
+          opacity = bracketOpacityToPercent(alphaMatch[2])
         }
 
         if (colorKeys.has(key)) {
           const varRef = cssVarRef('color', key)
-
-          // no /opacity → plain var()
-          if (!opacity) {
-            if (kind === 'text')
-              return `text-[${varRef}]`
-            if (kind === 'bg')
-              return `bg-[${varRef}]`
-            if (kind === 'border')
-              return `border-[${varRef}]`
-          }
-
-          // with /opacity → use slash opacity on arbitrary value
-          if (kind === 'text')
-            return `text-[${varRef}]/${opacity}`
-          if (kind === 'bg')
-            return `bg-[${varRef}]/${opacity}`
-          if (kind === 'border')
-            return `border-[${varRef}]/${opacity}`
-
-          return cls
+          return opacity ? `${kind}-[${varRef}]/${opacity}` : `${kind}-[${varRef}]`
         }
 
         return cls
@@ -1546,7 +1565,7 @@ function toVarBackedUtilities(classList, theme) {
         return cls
       }
 
-      // font families via root apply, including custom keys like "brand"
+      // font family classes, including custom keys like "brand"
       if (cls === 'font-sans')
         return `font-[${cssVarRef('font', 'sans')}]`
       if (cls === 'font-serif')
@@ -1595,59 +1614,21 @@ function appendElementClasses(el, classList) {
   writeElementClass(el, `${base} ${additions}`.trim())
 }
 
-function applyThemeClasses(scopeEl, theme, variant = 'light', isolated = true) {
+function applyThemeClasses(scopeEl, theme, variant = 'light') {
   if (!scopeEl)
     return
   const t = normalizeTheme(theme)
-  // merge base + variant overrides for apply & slots
+  // Theme `apply` rules (root, link, heading, button, badge) are not applied:
+  // the public renderer ignores them, so adding them here only made the
+  // editor differ from the published site (a heading rule overrode blocks'
+  // own heading classes). Blocks set their own base font and colors
+  // (docs/data-contracts/cms-themes/README.md).
   const v = (t.variants && t.variants[variant]) || {}
-  const apply = { ...(t.apply || {}), ...(v.apply || {}) }
   const slots = JSON.parse(JSON.stringify(t.slots || {}))
   if (v.slots) {
     // shallow merge per slot key
     Object.entries(v.slots).forEach(([slotKey, obj]) => {
       slots[slotKey] = { ...(slots[slotKey] || {}), ...obj }
-    })
-  }
-
-  // Root classes
-  if (apply.root) {
-    const mapped = toVarBackedUtilities(apply.root, t)
-    if (isolated) {
-      writeElementClass(scopeEl, `block-content ${mapped}`.trim())
-    }
-    else {
-      const applied = (scopeEl.dataset.themeRootClasses || '').split(/\s+/).filter(Boolean)
-      applied.forEach(cls => scopeEl.classList.remove(cls))
-      const next = mapped.split(/\s+/).filter(Boolean)
-      next.forEach(cls => scopeEl.classList.add(cls))
-      scopeEl.classList.add('block-content')
-      if (next.length)
-        scopeEl.dataset.themeRootClasses = next.join(' ')
-      else
-        delete scopeEl.dataset.themeRootClasses
-    }
-  }
-
-  // Optional convenience: map a few generic applies
-  if (apply.link) {
-    scopeEl.querySelectorAll('a').forEach((el) => {
-      appendElementClasses(el, toVarBackedUtilities(apply.link, t))
-    })
-  }
-  if (apply.heading) {
-    scopeEl.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach((el) => {
-      appendElementClasses(el, toVarBackedUtilities(apply.heading, t))
-    })
-  }
-  if (apply.button) {
-    scopeEl.querySelectorAll('button,[data-theme="button"]').forEach((el) => {
-      appendElementClasses(el, toVarBackedUtilities(apply.button, t))
-    })
-  }
-  if (apply.badge) {
-    scopeEl.querySelectorAll('[data-theme="badge"]').forEach((el) => {
-      appendElementClasses(el, toVarBackedUtilities(apply.badge, t))
     })
   }
 
@@ -1667,15 +1648,7 @@ function applyThemeClasses(scopeEl, theme, variant = 'light', isolated = true) {
   })
 }
 
-// Add new helper to rewrite arbitrary class tokens with responsive and state prefixes
-const BREAKPOINT_MIN_WIDTHS = {
-  'sm': 640,
-  'md': 768,
-  'lg': 1024,
-  'xl': 1280,
-  '2xl': 1536,
-}
-
+// Responsive classes in sized canvases: edge/lib/cmsViewportClasses.js.
 const VIEWPORT_WIDTHS = {
   auto: null,
   full: null,
@@ -1695,96 +1668,8 @@ const viewportModeToWidth = (mode) => {
 function rewriteAllClasses(scopeEl, theme, isolated = true, viewportMode = 'auto') {
   if (!scopeEl)
     return
-  // Utility regex for Uno/Tailwind classes
-  const utilRe = /^-?([pmwhz]|px|py|pt|pr|pb|pl|mx|my|mt|mr|mb|ml|text|font|leading|tracking|bg|border|rounded|shadow|min-w|max-w|min-h|max-h|object|overflow|opacity|order|top|right|bottom|left|inset|translate|rotate|scale|skew|origin|grid|flex|items|justify|content|place|gap|space|columns|col|row|aspect|ring|outline|decoration|underline|line-through|no-underline|whitespace|break|truncate|sr-only|not-sr-only|cursor|select|duration|ease|delay|transition|animate)(-|$|\[)/
-  // Mark utility classes as important so block-level styles win over parents.
-  const importantify = (core) => {
-    if (!core || core.startsWith('!'))
-      return core
-    // Avoid importantifying custom structural classes/hooks
-    if (core === 'block-content' || core.startsWith('embla'))
-      return core
-    // If it's a typical utility or an arbitrary utility, make it important.
-    if (utilRe.test(core) || core.includes('[')) {
-      return `!${core}`
-    }
-    return core
-  }
   const forcedWidth = viewportModeToWidth(viewportMode)
-
-  const TEXT_SIZE_RE = /^text-(xs|sm|base|lg|xl|\d+xl)$/
-  const FONT_UTILITY_RE = /^font-([\w-]+|\[[^\]]+\])$/
-
-  const mapToken = (token) => {
-    const parts = token.split(':')
-    const core = parts.pop()
-    const nakedCore = core.startsWith('!') ? core.slice(1) : core
-
-    //
-    // AUTO MODE: no breakpoint *simulation*, but we still:
-    // - map theme utilities
-    // - !important text sizes
-    // - !important breakpoint-based utilities (sm:, md:, lg:, etc.)
-    //
-    if (forcedWidth == null) {
-      let hadBreakpoint = false
-      const nextParts = []
-
-      for (const part of parts) {
-        const normalized = part.replace(/^!/, '')
-        if (Object.prototype.hasOwnProperty.call(BREAKPOINT_MIN_WIDTHS, normalized)) {
-          hadBreakpoint = true
-        }
-        nextParts.push(part)
-      }
-
-      const mappedCore = toVarBackedUtilities(core, theme)
-      const isTextSize = TEXT_SIZE_RE.test(nakedCore)
-      const isFontUtility = FONT_UTILITY_RE.test(nakedCore)
-      const shouldImportant = hadBreakpoint || isTextSize || isFontUtility
-      const finalCore = shouldImportant ? importantify(mappedCore) : mappedCore
-
-      return [...nextParts, finalCore].filter(Boolean).join(':')
-    }
-
-    //
-    // SIZED MODES (mobile/medium/large/full): your existing branch stays as-is
-    //
-    let drop = false
-    let hadBreakpoint = false
-    const nextParts = []
-
-    for (const part of parts) {
-      const normalized = part.replace(/^!/, '')
-
-      if (Object.prototype.hasOwnProperty.call(BREAKPOINT_MIN_WIDTHS, normalized)) {
-        hadBreakpoint = true
-        const minWidth = BREAKPOINT_MIN_WIDTHS[normalized]
-
-        if (forcedWidth >= minWidth) {
-        // We are "inside" this breakpoint → strip the prefix
-          continue
-        }
-
-        // Too small for this breakpoint → drop the whole token
-        drop = true
-        break
-      }
-
-      nextParts.push(part)
-    }
-
-    if (drop)
-      return ''
-
-    const mappedCore = toVarBackedUtilities(core, theme)
-    const isTextSize = TEXT_SIZE_RE.test(nakedCore)
-    const isFontUtility = FONT_UTILITY_RE.test(nakedCore)
-    const shouldImportant = hadBreakpoint || isTextSize || isFontUtility
-    const finalCore = shouldImportant ? importantify(mappedCore) : mappedCore
-
-    return [...nextParts, finalCore].filter(Boolean).join(':')
-  }
+  const mapCore = core => toVarBackedUtilities(core, theme)
 
   scopeEl.querySelectorAll('[class]').forEach((el) => {
     let base = el.dataset.viewportBaseClass
@@ -1796,9 +1681,7 @@ function rewriteAllClasses(scopeEl, theme, isolated = true, viewportMode = 'auto
     if (!orig.trim())
       return
     const origTokens = orig.split(/\s+/).filter(Boolean)
-    const mappedTokens = origTokens
-      .map(mapToken)
-      .filter(Boolean)
+    const mappedTokens = rewriteViewportClassTokens(origTokens, { forcedWidth, mapCore }).filter(Boolean)
     if (isolated) {
       const mapped = mappedTokens.join(' ')
       writeElementClass(el, mapped)

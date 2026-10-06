@@ -1,4 +1,6 @@
 <script setup>
+import { rewriteViewportClassTokens } from '../../../../lib/cmsViewportClasses'
+
 const route = useRoute()
 const edgeFirebase = inject('edgeFirebase')
 
@@ -16,15 +18,40 @@ const state = reactive({
   blockLoaded: {},
 })
 
-const EDGE_CMS_PREVIEW_RENDER_SIGNATURE_SALT = 'edge-cms-preview-render-v1'
-
 const siteId = computed(() => String(route.params.siteId || '').trim())
 const pageId = computed(() => String(route.params.pageId || '').trim())
-const previewSignature = computed(() => String(route.query.signature || '').trim())
+// A preview token from a preview link; signed-in Hub users don't need one.
+const previewToken = computed(() => String(route.query.token || '').trim())
 const organizationId = computed(() => String(route.query.orgId || edgeGlobal.edgeState.currentOrganization || localStorage.getItem('organizationID') || '').trim())
 const routeLastSegment = computed(() => String(route.query.routeLastSegment || '').trim())
 const isThumbnailMode = computed(() => String(route.query.mode || '').trim() === 'thumbnail')
 const previewSource = computed(() => String(route.query.source || '').trim() === 'published' ? 'published' : 'draft')
+// drafts=1: blocks render their unreleased drafts (links from cms_preview_url).
+const previewBlockDrafts = computed(() => String(route.query.drafts || '') === '1' && previewSource.value === 'draft')
+// viewport=mobile|medium|large: render at that canvas width and simulate its
+// breakpoints, as the page editor's canvases do, so an agent can check the
+// phone layout in any window. width=N (320-2560) only sets the page width.
+// Thumbnails keep their fixed layout.
+const PREVIEW_VIEWPORT_WIDTHS = { mobile: 420, medium: 992, large: 1280 }
+const previewViewport = computed(() => {
+  const viewport = String(route.query.viewport || '').trim()
+  return !isThumbnailMode.value && PREVIEW_VIEWPORT_WIDTHS[viewport] ? viewport : ''
+})
+const previewWidth = computed(() => {
+  if (isThumbnailMode.value)
+    return null
+  if (previewViewport.value)
+    return PREVIEW_VIEWPORT_WIDTHS[previewViewport.value]
+  const width = Number.parseInt(String(route.query.width || ''), 10)
+  return Number.isFinite(width) ? Math.min(Math.max(width, 320), 2560) : null
+})
+// The transform makes the page the containing block for fixed elements (a
+// fixed nav bar), so they stay inside the simulated width, not the window.
+const previewPageStyle = computed(() => (previewWidth.value ? { width: `${previewWidth.value}px`, padding: '0', transform: 'translateZ(0)' } : {}))
+// Row layouts follow the simulated canvas too.
+const previewViewportClass = className => (previewViewport.value
+  ? rewriteViewportClassTokens(className.split(' '), { forcedWidth: previewWidth.value }).join(' ')
+  : className)
 const orgPath = computed(() => organizationId.value ? `organizations/${organizationId.value}` : '')
 
 const siteDoc = computed(() => state.payload?.site || null)
@@ -32,39 +59,6 @@ const pageDoc = computed(() => state.payload?.page || null)
 const blocksCollection = computed(() => state.payload?.blocks || {})
 const themeDoc = computed(() => state.payload?.theme || null)
 const previewCollectionValues = computed(() => state.payload?.collectionValues || {})
-
-const normalizeForCompare = (value) => {
-  if (Array.isArray(value))
-    return value.map(normalizeForCompare)
-  if (value && typeof value === 'object') {
-    return Object.keys(value).sort().reduce((acc, key) => {
-      acc[key] = normalizeForCompare(value[key])
-      return acc
-    }, {})
-  }
-  return value
-}
-
-const stableSerialize = value => JSON.stringify(normalizeForCompare(value))
-
-const createPreviewSignatureHash = (value) => {
-  const input = stableSerialize(value)
-  let hash = 5381
-  for (let index = 0; index < input.length; index++)
-    hash = ((hash << 5) + hash) ^ input.charCodeAt(index)
-  return String(hash >>> 0)
-}
-
-const expectedPreviewSignature = computed(() => {
-  if (!organizationId.value || !siteId.value || !pageId.value)
-    return ''
-  return createPreviewSignatureHash({
-    salt: EDGE_CMS_PREVIEW_RENDER_SIGNATURE_SALT,
-    orgId: organizationId.value,
-    siteId: siteId.value,
-    pageId: pageId.value,
-  })
-})
 
 const parseThemeDoc = (themeDoc) => {
   const rawTheme = themeDoc?.theme
@@ -216,7 +210,7 @@ const hasPreviewSpans = row => (row?.columns || []).some(hasExplicitPreviewSpan)
 
 const previewGridClass = (row) => {
   if (hasPreviewSpans(row))
-    return 'grid grid-cols-1 sm:grid-cols-6 gap-4'
+    return previewViewportClass('grid grid-cols-1 sm:grid-cols-6 gap-4')
   const count = row?.columns?.length || 1
   const map = {
     1: 'grid grid-cols-1 gap-4',
@@ -226,11 +220,14 @@ const previewGridClass = (row) => {
     5: 'grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-4',
     6: 'grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-4',
   }
-  return map[count] || 'grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-4'
+  return previewViewportClass(map[count] || 'grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-4')
 }
 
 const previewColumnStyle = (column) => {
   if (!hasExplicitPreviewSpan(column))
+    return {}
+  // Below sm a simulated row is one column, so spans don't apply.
+  if (previewViewport.value && previewWidth.value < 640)
     return {}
   const span = Number(column?.span)
   const safeSpan = Math.min(Math.max(span, 1), 6)
@@ -240,6 +237,23 @@ const previewColumnStyle = (column) => {
 const previewBlockKey = (row, rowIndex, column, colIndex, blockIdx) => {
   return `${row?.id || rowIndex}:${column?.id || colIndex}:${blockIdx}`
 }
+
+// Each block's values, built once per page and data change. The template
+// used to build a new object on every render; blocks with collection data
+// reload when their values object changes and then emit pending/loaded,
+// which re-rendered the page and looped forever.
+const previewValuesByKey = computed(() => {
+  const map = {}
+  previewRows.value.forEach((row, rowIndex) => {
+    (row.columns || []).forEach((column, colIndex) => {
+      (column.blocks || []).forEach((blockRef, blockIdx) => {
+        const key = previewBlockKey(row, rowIndex, column, colIndex, blockIdx)
+        map[key] = resolveBlockValuesForPreview(blockRef, key)
+      })
+    })
+  })
+  return map
+})
 
 const previewBlockKeys = computed(() => {
   const keys = []
@@ -326,14 +340,6 @@ const loadPreviewData = async () => {
   try {
     state.bootstrapped = true
 
-    if (!previewSignature.value) {
-      state.error = 'Missing preview signature.'
-      return
-    }
-    if (previewSignature.value !== expectedPreviewSignature.value) {
-      state.error = 'Invalid preview signature.'
-      return
-    }
     if (!organizationId.value) {
       state.error = 'Missing organization for preview.'
       return
@@ -349,8 +355,9 @@ const loadPreviewData = async () => {
       orgId: organizationId.value,
       siteId: siteId.value,
       pageId: pageId.value,
-      signature: previewSignature.value,
+      token: previewToken.value,
       source: previewSource.value,
+      blockDrafts: previewBlockDrafts.value,
       routeLastSegment: routeLastSegment.value,
     })
     state.payload = response?.data || response || null
@@ -369,7 +376,7 @@ onMounted(() => {
   loadPreviewData()
 })
 
-watch(() => [organizationId.value, siteId.value, pageId.value, previewSignature.value, previewSource.value], () => {
+watch(() => [organizationId.value, siteId.value, pageId.value, previewToken.value, previewSource.value], () => {
   if (state.bootstrapped)
     loadPreviewData()
 })
@@ -397,6 +404,9 @@ watch(() => [organizationId.value, siteId.value, pageId.value, previewSignature.
       v-else
       :class="isThumbnailMode ? 'cms-preview-thumbnail-capture cms-auth-preview-logged-in' : 'cms-preview-render-page cms-auth-preview-logged-in'"
       :data-preview-ready="previewReady ? 'true' : 'false'"
+      :data-preview-block-drafts="(state.payload?.draftBlockIds || []).join(',')"
+      :data-preview-viewport="previewViewport || null"
+      :style="isThumbnailMode ? null : previewPageStyle"
     >
       <div :class="isThumbnailMode ? 'cms-preview-render-page cms-preview-thumbnail-content' : ''">
         <template v-if="previewRows.length">
@@ -425,13 +435,14 @@ watch(() => [organizationId.value, siteId.value, pageId.value, previewSignature.
                     :template="resolveBlockForPreview(blockRef).template"
                     :schema="resolveBlockForPreview(blockRef).schema"
                     :data-sources="resolveBlockForPreview(blockRef).dataSources"
-                    :values="resolveBlockValuesForPreview(blockRef, previewBlockKey(row, rowIndex, column, colIndex, blockIdx))"
+                    :values="previewValuesByKey[previewBlockKey(row, rowIndex, column, colIndex, blockIdx)] || EMPTY_PREVIEW_VALUES"
                     :meta="resolveBlockForPreview(blockRef).meta"
                     :theme="previewTheme"
                     :render-context="state.renderContext"
                     :route-last-segment="routeLastSegment"
                     :standalone-preview="true"
                     :preview-auth-logged-in="true"
+                    :viewport-mode="previewViewport || 'auto'"
                     @pending="setPreviewBlockPending(previewBlockKey(row, rowIndex, column, colIndex, blockIdx), $event)"
                     @loaded="setPreviewBlockLoaded(previewBlockKey(row, rowIndex, column, colIndex, blockIdx))"
                   />

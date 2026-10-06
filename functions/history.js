@@ -10,6 +10,7 @@ const {
   permissionCheck,
 } = require('./config.js')
 const historyConfig = require('./history.config.json')
+const { ignoredFieldsFor, onlyIgnoredFieldsChanged } = require('./helpers/historyFilter')
 
 const DEFAULTS = Object.freeze({
   historyCollection: 'history',
@@ -225,6 +226,8 @@ exports.trackHistory = onDocumentWritten(
     const beforeData = beforeExists ? (event.data.before.data() || null) : null
     const afterData = afterExists ? (event.data.after.data() || null) : null
     const action = getActionFromChange(beforeExists, afterExists)
+    if (action === 'update' && onlyIgnoredFieldsChanged(beforeData, afterData, ignoredFieldsFor(rule)))
+      return
 
     const historyEntry = buildHistoryEntry({
       orgId,

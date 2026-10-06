@@ -1,8 +1,10 @@
 <script setup lang="js">
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { BarChart3, CircleAlert, Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePenLine, FileStack, FileUp, FileX, FolderCog, FolderDown, FolderUp, FolderX, ImagePlus, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload, Users, X } from 'lucide-vue-next'
+import { BarChart3, Check, CircleAlert, ClipboardCheck, Copy, Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePenLine, FileStack, FileUp, FileX, FolderCog, FolderDown, FolderUp, FolderX, ImagePlus, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload, Users, X } from 'lucide-vue-next'
+import { buildPagePayloadFromTemplateDoc, buildThemeSettingsPayload, deriveThemeMenus, ensureMenuBuckets, ensureUniqueSlug, titleFromSlug } from '../../lib/cmsOperations'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
+import { buildPublishedSitePreviewUrl } from '../../lib/cmsPublishedSitePreview'
 
 const props = defineProps({
   site: {
@@ -47,44 +49,6 @@ const normalizeForCompare = (value) => {
 
 const stableSerialize = value => JSON.stringify(normalizeForCompare(value))
 const areEqualNormalized = (a, b) => stableSerialize(a) === stableSerialize(b)
-const hasStructuredDataCmsToken = value => typeof value === 'string' && /\{\{\s*cms-[^}]+\s*\}\}/.test(value)
-const parseStructuredDataValue = (value) => {
-  if (!value)
-    return null
-  if (typeof value === 'object')
-    return value
-  try {
-    return JSON.parse(value)
-  }
-  catch {
-    return null
-  }
-}
-const matchesDefaultStructuredDataShape = (current, defaultValue) => {
-  if (hasStructuredDataCmsToken(defaultValue))
-    return current === defaultValue
-  if (Array.isArray(defaultValue))
-    return Array.isArray(current)
-  if (defaultValue && typeof defaultValue === 'object') {
-    if (!current || typeof current !== 'object' || Array.isArray(current))
-      return false
-    const currentKeys = Object.keys(current).sort()
-    const defaultKeys = Object.keys(defaultValue).sort()
-    if (stableSerialize(currentKeys) !== stableSerialize(defaultKeys))
-      return false
-    return defaultKeys.every(key => matchesDefaultStructuredDataShape(current[key], defaultValue[key]))
-  }
-  return true
-}
-const isCustomStructuredDataTemplate = (value) => {
-  if (!String(value || '').trim())
-    return false
-  const current = parseStructuredDataValue(value)
-  const defaultValue = parseStructuredDataValue(buildPageStructuredData())
-  if (!current || !defaultValue)
-    return true
-  return !matchesDefaultStructuredDataShape(current, defaultValue)
-}
 const isJsonInvalid = (value) => {
   if (value === null || value === undefined)
     return false
@@ -103,6 +67,43 @@ const isJsonInvalid = (value) => {
 }
 
 const isTemplateSite = computed(() => props.site === 'templates')
+const runtimeConfig = useRuntimeConfig()
+const publishedSitePreviewUrl = computed(() => buildPublishedSitePreviewUrl(runtimeConfig.public.cmsFrontendUrl, props.site))
+const copyingPublishedSitePreview = ref(false)
+const publishedSitePreviewCopied = ref(false)
+let publishedSitePreviewCopyTimer = null
+const publishedSitePreviewUnavailableReason = computed(() => {
+  if (!publishedSitePreviewUrl.value)
+    return 'Configure the CMS frontend URL to copy a published site preview.'
+  if (!isSiteSettingPublished.value)
+    return 'Publish this site before copying its published preview URL.'
+  return ''
+})
+watch(publishedSitePreviewUrl, () => {
+  publishedSitePreviewCopied.value = false
+})
+const copyPublishedSitePreview = async () => {
+  if (copyingPublishedSitePreview.value || publishedSitePreviewUnavailableReason.value)
+    return
+  copyingPublishedSitePreview.value = true
+  try {
+    await navigator.clipboard.writeText(publishedSitePreviewUrl.value)
+    publishedSitePreviewCopied.value = true
+    if (publishedSitePreviewCopyTimer)
+      clearTimeout(publishedSitePreviewCopyTimer)
+    publishedSitePreviewCopyTimer = setTimeout(() => {
+      publishedSitePreviewCopied.value = false
+      publishedSitePreviewCopyTimer = null
+    }, 1800)
+    edgeFirebase?.toast?.success?.('Copied published site preview URL.')
+  }
+  catch {
+    edgeFirebase?.toast?.error?.('Unable to copy the published site preview URL. Check clipboard permission and try again.')
+  }
+  finally {
+    copyingPublishedSitePreview.value = false
+  }
+}
 const router = useRouter()
 const route = useRoute()
 
@@ -131,6 +132,7 @@ const state = reactive({
   menus: { 'Site Root': [], 'Not In Menu': [] },
   saving: false,
   siteSettings: false,
+  siteReadiness: false,
   hasError: false,
   updating: false,
   aiSectionOpen: false,
@@ -179,6 +181,32 @@ const sitePagePreviewSnapshotQueued = new Set()
 const sitePagePreviewBackendQueued = new Set()
 const sitePagePreviewForcedRendered = ref(new Set())
 const sitePagePreviewScales = ref({})
+const visibleSitePagePreviewIds = ref(new Set())
+const sitePagePreviewVisibilityObservers = new Map()
+const vPreviewVisible = {
+  mounted(element, binding) {
+    const docId = String(binding.value || '').trim()
+    if (!docId || visibleSitePagePreviewIds.value.has(docId))
+      return
+    if (typeof IntersectionObserver === 'undefined') {
+      visibleSitePagePreviewIds.value = new Set([...visibleSitePagePreviewIds.value, docId])
+      return
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some(entry => entry.isIntersecting))
+        return
+      visibleSitePagePreviewIds.value = new Set([...visibleSitePagePreviewIds.value, docId])
+      observer.disconnect()
+      sitePagePreviewVisibilityObservers.delete(element)
+    }, { rootMargin: '400px 0px' })
+    sitePagePreviewVisibilityObservers.set(element, observer)
+    observer.observe(element)
+  },
+  unmounted(element) {
+    sitePagePreviewVisibilityObservers.get(element)?.disconnect()
+    sitePagePreviewVisibilityObservers.delete(element)
+  },
+}
 let html2canvasModulePromise = null
 let sitePagePreviewSnapshotQueueRunning = false
 let sitePagePreviewSnapshotQueueStopped = false
@@ -966,168 +994,6 @@ const isExternalLinkEntry = entry => entry?.item && typeof entry.item === 'objec
 
 const TEMPLATE_PAGES_PATH = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/templates/pages`)
 const seededSiteIds = new Set()
-
-const slugify = (value) => {
-  return String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/(^-|-$)+/g, '')
-}
-
-const titleFromSlug = (slug) => {
-  return slug
-    .split(/[-_]/)
-    .filter(Boolean)
-    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ') || 'New Page'
-}
-
-const ensureMenuBuckets = (menus) => {
-  const normalized = (menus && typeof menus === 'object')
-    ? edgeGlobal.dupObject(menus)
-    : {}
-  if (!Array.isArray(normalized['Site Root']))
-    normalized['Site Root'] = []
-  if (!Array.isArray(normalized['Not In Menu']))
-    normalized['Not In Menu'] = []
-  return normalized
-}
-
-const ensureUniqueSlug = (candidate, templateDoc, usedSlugs) => {
-  const fallbackBase = slugify(templateDoc?.slug || templateDoc?.name || '')
-  let base = (candidate && candidate.trim().length) ? slugify(candidate) : ''
-  if (!base)
-    base = fallbackBase || `page-${usedSlugs.size + 1}`
-  let slugCandidate = base
-  let suffix = 2
-  while (usedSlugs.has(slugCandidate)) {
-    slugCandidate = `${base}-${suffix}`
-    suffix += 1
-  }
-  usedSlugs.add(slugCandidate)
-  return slugCandidate
-}
-
-const cloneBlocks = (blocks = []) => {
-  return Array.isArray(blocks) ? JSON.parse(JSON.stringify(blocks)) : []
-}
-
-const deriveBlockIdsFromDoc = (doc = {}) => {
-  const collectBlocks = (blocks) => {
-    if (!Array.isArray(blocks))
-      return []
-    return blocks
-      .map(block => block?.blockId)
-      .filter(Boolean)
-  }
-
-  const collectFromStructure = (structure) => {
-    if (!Array.isArray(structure))
-      return []
-    const ids = []
-    for (const row of structure) {
-      for (const column of row?.columns || []) {
-        if (Array.isArray(column?.blocks))
-          ids.push(...column.blocks.filter(Boolean))
-      }
-    }
-    return ids
-  }
-
-  const ids = new Set([
-    ...collectBlocks(doc.content),
-    ...collectBlocks(doc.postContent),
-    ...collectFromStructure(doc.structure),
-    ...collectFromStructure(doc.postStructure),
-  ])
-  return Array.from(ids)
-}
-
-const buildPagePayloadFromTemplateDoc = (templateDoc, slug, displayName = '') => {
-  const timestamp = Date.now()
-  const templateStructuredData = typeof templateDoc?.structuredData === 'string' ? templateDoc.structuredData.trim() : ''
-  const payload = {
-    name: displayName?.trim()?.length ? displayName : titleFromSlug(slug),
-    slug,
-    post: templateDoc?.post || false,
-    content: cloneBlocks(templateDoc?.content),
-    postContent: cloneBlocks(templateDoc?.postContent),
-    structure: cloneBlocks(templateDoc?.structure),
-    postStructure: cloneBlocks(templateDoc?.postStructure),
-    blockIds: [],
-    metaTitle: templateDoc?.metaTitle || '',
-    metaDescription: templateDoc?.metaDescription || '',
-    structuredData: templateStructuredData || buildPageStructuredData(),
-    structuredDataAiLocked: isCustomStructuredDataTemplate(templateStructuredData),
-    doc_created_at: timestamp,
-    last_updated: timestamp,
-  }
-  payload.blockIds = deriveBlockIdsFromDoc(payload)
-  return payload
-}
-
-const buildMenusFromDefaultPages = (defaultPages = []) => {
-  if (!Array.isArray(defaultPages) || !defaultPages.length)
-    return null
-  const menus = { 'Site Root': [], 'Not In Menu': [] }
-  const usedSlugs = new Set()
-  for (const entry of defaultPages) {
-    if (!entry?.pageId)
-      continue
-    const slug = ensureUniqueSlug(entry?.name || '', null, usedSlugs)
-    const menuTitle = String(entry?.menuTitle || entry?.name || '').trim() || titleFromSlug(slug)
-    menus['Site Root'].push({
-      name: slug,
-      menuTitle,
-      item: entry.pageId,
-      disableRename: !!entry?.disableRename,
-      disableDelete: !!entry?.disableDelete,
-    })
-  }
-  return menus
-}
-
-const deriveThemeMenus = (themeDoc = {}) => {
-  if (themeDoc?.defaultMenus && Object.keys(themeDoc.defaultMenus || {}).length)
-    return ensureMenuBuckets(themeDoc.defaultMenus)
-  if (Array.isArray(themeDoc?.defaultPages) && themeDoc.defaultPages.length)
-    return buildMenusFromDefaultPages(themeDoc.defaultPages)
-  return null
-}
-
-const shouldApplyThemeSetting = (currentValue, baseValue) => {
-  if (currentValue === undefined || currentValue === null)
-    return true
-  if (typeof currentValue === 'string')
-    return !currentValue.trim() || areEqualNormalized(currentValue, baseValue)
-  if (Array.isArray(currentValue))
-    return currentValue.length === 0 || areEqualNormalized(currentValue, baseValue)
-  if (typeof currentValue === 'object')
-    return Object.keys(currentValue).length === 0 || areEqualNormalized(currentValue, baseValue)
-  return areEqualNormalized(currentValue, baseValue)
-}
-
-const buildThemeSettingsPayload = (themeDoc = {}, siteDoc = {}) => {
-  if (!themeDoc?.defaultSiteSettings || typeof themeDoc.defaultSiteSettings !== 'object' || Array.isArray(themeDoc.defaultSiteSettings))
-    return {}
-  const baseDefaults = createSiteSettingsDefaults()
-  const payload = {}
-  for (const [key, baseValue] of Object.entries(baseDefaults)) {
-    if (!(key in themeDoc.defaultSiteSettings))
-      continue
-    let themeValue = themeDoc.defaultSiteSettings[key]
-    if (key === 'structuredData' && typeof themeValue === 'string' && !themeValue.trim())
-      themeValue = baseValue
-    if (key === 'contactSpam' && themeValue && typeof themeValue === 'object' && !Array.isArray(themeValue))
-      themeValue = { ...baseValue, ...themeValue }
-    if (areEqualNormalized(themeValue, baseValue))
-      continue
-    if (shouldApplyThemeSetting(siteDoc?.[key], baseValue))
-      payload[key] = themeValue
-  }
-  return payload
-}
 
 const normalizeContactSpamForCompare = (value) => {
   const defaults = createSiteSettingsDefaults().contactSpam || {}
@@ -3802,6 +3668,10 @@ const isSiteSettingPublished = computed(() => {
 })
 
 onBeforeUnmount(() => {
+  if (publishedSitePreviewCopyTimer)
+    clearTimeout(publishedSitePreviewCopyTimer)
+  sitePagePreviewVisibilityObservers.forEach(observer => observer.disconnect())
+  sitePagePreviewVisibilityObservers.clear()
   sitePagePreviewSnapshotQueueStopped = true
   sitePagePreviewSnapshotTimers.forEach(timer => clearTimeout(timer))
   sitePagePreviewSnapshotTimers.clear()
@@ -4335,11 +4205,29 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
         class="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-2 border border-slate-300 bg-slate-100 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
         :class="isTemplateSite ? 'min-h-[68px]' : ''"
       >
-        <div class="flex items-center gap-3">
-          <FileStack class="w-5 h-5" />
-          <span class="text-lg font-normal">
-            {{ siteData.name || 'Templates' }}
-          </span>
+        <div class="flex min-w-0 items-center gap-3">
+          <FileStack class="w-5 h-5 shrink-0" />
+          <div class="min-w-0">
+            <div class="truncate text-lg font-normal" :title="siteData.name || 'Templates'">
+              {{ siteData.name || 'Templates' }}
+            </div>
+            <span v-if="!isTemplateSite" class="inline-flex" :title="publishedSitePreviewUnavailableReason || 'Copy the published site preview URL'">
+              <edge-shad-button
+                type="button"
+                variant="ghost"
+                size="sm"
+                class="h-6 gap-1.5 px-0 text-[11px] text-slate-600 hover:bg-transparent hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
+                :disabled="Boolean(publishedSitePreviewUnavailableReason) || copyingPublishedSitePreview"
+                aria-label="Copy published site preview URL"
+                @click="copyPublishedSitePreview"
+              >
+                <Loader2 v-if="copyingPublishedSitePreview" class="h-3 w-3 animate-spin" aria-hidden="true" />
+                <Check v-else-if="publishedSitePreviewCopied" class="h-3 w-3" aria-hidden="true" />
+                <Copy v-else class="h-3 w-3" aria-hidden="true" />
+                <span aria-live="polite">{{ publishedSitePreviewCopied ? 'Copied!' : 'Published Site Preview' }}</span>
+              </edge-shad-button>
+            </span>
+          </div>
           <div
             v-if="!isTemplateSite && activeDomainError"
             class="rounded bg-red-100 px-3 py-1 text-[10px] font-medium text-red-700 whitespace-nowrap shadow-sm"
@@ -4521,6 +4409,10 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                 <DropdownMenuItem v-if="canEditSiteSettings" @click="state.siteSettings = true">
                   <FolderCog />
                   <span>Settings</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem v-if="!isTemplateSite" @click="state.siteReadiness = true">
+                  <ClipboardCheck />
+                  <span>Check Readiness</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem :disabled="state.importingPages" @click="triggerPageImport">
                   <Loader2 v-if="state.importingPages" class="animate-spin" />
@@ -4805,6 +4697,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                     <div
                       v-for="item in sitePageGridItems"
                       :key="item.docId"
+                      v-preview-visible="item.docId"
                       role="button"
                       tabindex="0"
                       class="w-full h-full"
@@ -4907,7 +4800,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                             </div>
                           </div>
                           <div
-                            v-else
+                            v-else-if="visibleSitePagePreviewIds.has(item.docId)"
                             :ref="element => setSitePagePreviewSnapshotRef(item, element)"
                             class="template-scale-wrapper"
                             data-cms-standalone-preview="true"
@@ -4969,6 +4862,15 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                                   </div>
                                 </template>
                               </div>
+                            </div>
+                          </div>
+                          <div
+                            v-else
+                            class="template-scale-wrapper"
+                            aria-label="Page preview loads when this card comes into view"
+                          >
+                            <div class="flex h-full min-h-40 w-full items-center justify-center bg-slate-100 text-xs font-medium text-slate-500 dark:bg-slate-900/60 dark:text-slate-400">
+                              Preview available on scroll
                             </div>
                           </div>
                           <div
@@ -5057,6 +4959,12 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
         </Transition>
       </div>
     </div>
+    <edge-cms-site-readiness-dialog
+      v-if="!isTemplateSite"
+      v-model="state.siteReadiness"
+      :site-id="props.site"
+      :site-name="siteData.name || ''"
+    />
     <edge-cms-json-export-progress-dialog
       v-model="state.exportDialogOpen"
       title="Exporting Pages"

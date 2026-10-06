@@ -442,7 +442,10 @@ const hasPublishDiff = (postId, draftPostOverride = null) => {
     return true
   }
   if (publishedPost && draftPost) {
-    return stableSerialize(postDocComparable(publishedPost)) !== stableSerialize(postDocComparable(draftPost))
+    // Publishing resolves library blocks into the public snapshot. Compare that
+    // snapshot with what the saved draft would publish, not its stored references.
+    const publishableDraft = resolveSyncedPostDoc(draftPost)
+    return stableSerialize(postDocComparable(publishedPost)) !== stableSerialize(postDocComparable(publishableDraft))
   }
   return false
 }
@@ -1213,7 +1216,7 @@ const resolveSyncedPostBlocks = (blocks = []) => {
   return blocks.map(block => resolveSyncedPostBlock(block))
 }
 
-const resolveSyncedPostDoc = (doc) => {
+function resolveSyncedPostDoc(doc) {
   if (!isPlainObject(doc))
     return doc
 
@@ -2906,6 +2909,7 @@ const publishPost = async (postId) => {
   try {
     const publishedPost = resolveSyncedPostDoc(edgeGlobal.dupObject(post || {}))
     delete publishedPost.publishAt
+    delete publishedPost.publishAtTimezone
     publishedPost.doc_created_at = Number.isFinite(publishedAtMillis) ? publishedAtMillis : Date.now()
     publishedPost.publishedAt = publishedAtIso
     await edgeFirebase.storeDoc(publishedCollectionKey.value, publishedPost)
@@ -2959,6 +2963,7 @@ const publishPostAt = async (postId, publishedAtIso) => {
   try {
     const publishedPost = resolveSyncedPostDoc(edgeGlobal.dupObject(post || {}))
     delete publishedPost.publishAt
+    delete publishedPost.publishAtTimezone
     publishedPost.doc_created_at = publishedAtMillis
     publishedPost.publishedAt = publishedAtIso
     await edgeFirebase.storeDoc(publishedCollectionKey.value, publishedPost)

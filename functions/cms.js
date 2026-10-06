@@ -23,7 +23,12 @@ const {
 
 const { createKvMirrorHandler } = require('./kv/kvMirror')
 const kv = require('./kv/kvClient')
-const { resolvePublicationFile, reconcilePublicationValues } = require('./helpers/cmsPublicationValues')
+const { blockDefinitionChanged, buildPageBlockUpdate } = require('./helpers/cmsBlockPropagation')
+const blockRevisions = require('./cmsBlockRevisions')
+const blockReleases = require('./cmsBlockReleases')
+const cmsOperations = require('./cmsOperations')
+const cmsAgentKeys = require('./cmsAgentKeys')
+const { buildPreviewUrl, issuePreviewToken, verifyPreviewToken } = require('./cmsPreviewTokens')
 const { removeCmsPageFromMenus } = require('./helpers/cmsPageDeletion')
 const { resolveSubmittedUserRouting } = require('./helpers/submittedUserRouting')
 
@@ -38,7 +43,6 @@ const CLOUDFLARE_PAGES_API_TOKEN = process.env.CLOUDFLARE_PAGES_API_TOKEN || ''
 const CLOUDFLARE_PAGES_PROJECT = process.env.CLOUDFLARE_PAGES_PROJECT || ''
 const DOMAIN_REGISTRY_COLLECTION = 'domain-registry'
 const DOMAINS_REGISTERED_COLLECTION = 'domains-registered'
-const EDGE_CMS_PREVIEW_RENDER_SIGNATURE_SALT = 'edge-cms-preview-render-v1'
 const SITE_PAGE_PREVIEW_THUMBNAIL_VERSION = 'backend-puppeteer-v1'
 const SITE_PAGE_PREVIEW_CAPTURE_WIDTH = 1600
 const SITE_PAGE_PREVIEW_VIEWPORT_HEIGHT = 900
@@ -1910,199 +1914,55 @@ const collectSyncedBlocks = (content, postContent) => {
   return syncedBlocks
 }
 
-const BLOCK_META_EXCLUDE_KEYS = new Set(['limit'])
-const BLOCK_DEFINITION_SYNC_FIELDS = ['content', 'template', 'templateVersion', 'schema', 'dataSources', 'blockUpdatedAt']
-
-const updateBlocksInArray = async (blocks, blockId, beforeData, afterData, { resolveFile = async () => null } = {}) => {
-  let touched = false
-  const beforeMeta = beforeData?.meta || {}
-  const afterMeta = afterData?.meta || {}
-  for (const block of blocks) {
-    if (block?.blockId !== blockId)
-      continue
-
-    await reconcilePublicationValues(block, beforeData, afterData, resolveFile, message => logger.warn(message))
-
-    for (const field of BLOCK_DEFINITION_SYNC_FIELDS) {
-      if (Object.prototype.hasOwnProperty.call(afterData, field))
-        block[field] = cloneValue(afterData[field])
-      else if (field !== 'content')
-        delete block[field]
-    }
-
-    block.meta = block.meta || {}
-    const srcMeta = afterMeta
-    for (const key of Object.keys(srcMeta)) {
-      block.meta[key] = block.meta[key] || {}
-      const src = srcMeta[key] || {}
-      const previousTemplateQueryItems = (beforeMeta[key]?.queryItems && typeof beforeMeta[key].queryItems === 'object')
-        ? beforeMeta[key].queryItems
-        : {}
-      const nextTemplateQueryItems = (src.queryItems && typeof src.queryItems === 'object')
-        ? src.queryItems
-        : {}
-      for (const metaKey of Object.keys(src)) {
-        if (metaKey === 'queryItems') {
-          const existingQueryItems = (block.meta[key].queryItems && typeof block.meta[key].queryItems === 'object')
-            ? block.meta[key].queryItems
-            : {}
-          const deletedTemplateKeys = Object.keys(previousTemplateQueryItems)
-            .filter(queryKey => !Object.prototype.hasOwnProperty.call(nextTemplateQueryItems, queryKey))
-          const nextQueryItems = { ...existingQueryItems }
-          for (const queryKey of deletedTemplateKeys)
-            delete nextQueryItems[queryKey]
-          block.meta[key].queryItems = {
-            ...nextQueryItems,
-            ...nextTemplateQueryItems,
-          }
-          continue
-        }
-        if (BLOCK_META_EXCLUDE_KEYS.has(metaKey))
-          continue
-        block.meta[key][metaKey] = src[metaKey]
-      }
-    }
-
-    touched = true
-  }
-  return touched
-}
-
-const buildPageBlockUpdate = async (pageData, blockId, beforeData, afterData, options) => {
-  const pageContent = Array.isArray(pageData.content) ? [...pageData.content] : []
-  const pagePostContent = Array.isArray(pageData.postContent) ? [...pageData.postContent] : []
-
-  const contentTouched = await updateBlocksInArray(pageContent, blockId, beforeData, afterData, options)
-  const postContentTouched = await updateBlocksInArray(pagePostContent, blockId, beforeData, afterData, options)
-
-  return {
-    touched: contentTouched || postContentTouched,
-    content: pageContent,
-    postContent: pagePostContent,
-  }
-}
-
-const getNextVersion = (value) => {
-  const numericVersion = Number(value)
-  if (!Number.isFinite(numericVersion))
-    return 1
-  return Math.max(0, Math.trunc(numericVersion)) + 1
-}
-
 exports.blockUpdated = onDocumentUpdated({ document: 'organizations/{orgId}/blocks/{blockId}', timeoutSeconds: 180 }, async (event) => {
-  const change = event.data
   const blockId = event.params.blockId
   const orgId = event.params.orgId
-  const beforeData = change.before.data() || {}
-  const afterData = change.after.data() || {}
+  const beforeData = event.data.before.data() || {}
+  const afterData = event.data.after.data() || {}
 
-  const sites = await db.collection('organizations').doc(orgId).collection('sites').get()
-  if (sites.empty)
-    logger.log(`No sites found in org ${orgId}`)
-
-  const processedSiteIds = new Set()
-
-  const updateDocsForSiteCollection = async (siteId, {
-    collectionName,
-    publishedCollectionName = '',
-    docLabel = 'doc',
-    updatePublished = true,
-    scopeLabel,
-  }) => {
-    const orgRef = db.collection('organizations').doc(orgId)
-    const siteRef = orgRef.collection('sites').doc(siteId)
-    const collections = [{ name: collectionName, published: false }]
-    if (updatePublished && publishedCollectionName)
-      collections.push({ name: publishedCollectionName, published: true })
-
-    // Query both snapshots independently: the draft may have removed a block
-    // that is still live, or added one that has never been published.
-    for (const { name, published } of collections) {
-      const pagesSnap = await siteRef.collection(name)
-        .where('blockIds', 'array-contains', blockId)
-        .get()
-
-      for (const pageDoc of pagesSnap.docs) {
-        await db.runTransaction(async (transaction) => {
-          // Re-read inside the transaction so an overlapping save, publish or
-          // unpublish cannot be overwritten by a stale query snapshot.
-          const currentDoc = await transaction.get(pageDoc.ref)
-          if (!currentDoc.exists)
-            return
-          const pageData = currentDoc.data() || {}
-          const publications = new Map()
-          const resolveFile = (reference) => {
-            if (!publications.has(reference))
-              publications.set(reference, resolvePublicationFile(transaction, orgRef, reference))
-            return publications.get(reference)
-          }
-          const { touched, content, postContent } = await buildPageBlockUpdate(pageData, blockId, beforeData, afterData, { resolveFile })
-          if (!touched)
-            return
-
-          const update = {}
-          if (Array.isArray(pageData.content))
-            update.content = content
-          if (Array.isArray(pageData.postContent))
-            update.postContent = postContent
-          if (collectionName === 'pages')
-            update.version = getNextVersion(pageData.version)
-          transaction.update(pageDoc.ref, update)
-
-          if (published && collectionName === 'pages') {
-            const versionMap = { pageVersions: { [pageDoc.id]: update.version } }
-            transaction.set(siteRef, versionMap, { merge: true })
-            transaction.set(orgRef.collection('published-site-settings').doc(siteId), versionMap, { merge: true })
-          }
-        })
-      }
-      logger.log(`Processed ${name} ${docLabel} references in ${scopeLabel} for block ${blockId}`)
-    }
+  // Metadata-only edits (name, tags, themes, type, previewType), revision
+  // pointer writes and no-op re-saves must not rewrite every instance or bump
+  // page versions, which invalidates the renderer's caches.
+  if (!blockDefinitionChanged(beforeData, afterData)) {
+    logger.log(`Block ${blockId} in org ${orgId} saved without definition changes; nothing to propagate`)
+    return
   }
+  // The release worker's own library write: its pages are already updated.
+  if (afterData.lastReleaseId && afterData.lastReleaseId !== beforeData.lastReleaseId)
+    return
 
-  for (const siteDoc of sites.docs) {
-    const siteId = siteDoc.id
-    processedSiteIds.add(siteId)
-    const updatePublished = siteId !== 'templates'
-    const scopeLabel = siteId === 'templates'
-      ? `templates site (org ${orgId})`
-      : `site ${siteId} (org ${orgId})`
-
-    await updateDocsForSiteCollection(siteId, {
-      collectionName: 'pages',
-      publishedCollectionName: 'published',
-      docLabel: 'page',
-      updatePublished,
-      scopeLabel,
-    })
-
-    await updateDocsForSiteCollection(siteId, {
-      collectionName: 'posts',
-      publishedCollectionName: 'published_posts',
-      docLabel: 'post',
-      updatePublished,
-      scopeLabel,
-    })
-  }
-
-  if (!processedSiteIds.has('templates')) {
-    await updateDocsForSiteCollection('templates', {
-      collectionName: 'pages',
-      publishedCollectionName: 'published',
-      docLabel: 'page',
-      updatePublished: false,
-      scopeLabel: `templates site (org ${orgId})`,
-    })
-
-    await updateDocsForSiteCollection('templates', {
-      collectionName: 'posts',
-      publishedCollectionName: 'published_posts',
-      docLabel: 'post',
-      updatePublished: false,
-      scopeLabel: `templates site (org ${orgId})`,
-    })
-  }
+  // Any other definition write reaches pages through a tracked release.
+  await blockReleases.startImplicitRelease({ orgId, blockId, beforeData, afterData, eventId: event.id })
 })
+
+// Library block draft revisions (cms-saveBlockDraft, cms-discardBlockDraft).
+exports.saveBlockDraft = blockRevisions.saveBlockDraft
+exports.discardBlockDraft = blockRevisions.discardBlockDraft
+
+// Library block releases (cms-dryRunBlockRelease, cms-executeBlockRelease,
+// cms-retryBlockRelease), their worker (cms-blockReleaseWorker), the
+// per-site revision report (cms-blockRevisionUsage) and the history
+// (cms-blockReleaseHistory).
+exports.dryRunBlockRelease = blockReleases.dryRunBlockRelease
+exports.executeBlockRelease = blockReleases.executeBlockRelease
+exports.retryBlockRelease = blockReleases.retryBlockRelease
+exports.blockReleaseWorker = blockReleases.blockReleaseWorker
+exports.blockRevisionUsage = blockReleases.blockRevisionUsage
+exports.blockReleaseHistory = blockReleases.blockReleaseHistory
+
+// CMS operations: validated, draft-only writes for building sites
+// (cms-checkOperation, cms-runOperation).
+exports.checkOperation = cmsOperations.checkOperation
+exports.runOperation = cmsOperations.runOperation
+exports.siteReadiness = cmsOperations.siteReadiness
+
+// Agent keys for the CMS operations (cms-createAgentKey, cms-listAgentKeys,
+// cms-revokeAgentKey) and the endpoint agents call with one
+// (cms-agentOperation, HTTP POST).
+exports.createAgentKey = cmsAgentKeys.createAgentKey
+exports.listAgentKeys = cmsAgentKeys.listAgentKeys
+exports.revokeAgentKey = cmsAgentKeys.revokeAgentKey
+exports.agentOperation = cmsAgentKeys.agentOperation
 
 exports.fontFileUpdated = onDocumentUpdated({ document: 'organizations/{orgId}/files/{fileId}', timeoutSeconds: 180 }, async (event) => {
   const before = event.data.before.data() || {}
@@ -3700,15 +3560,6 @@ const createPreviewSignatureHash = (value) => {
   return String(hash >>> 0)
 }
 
-const getCmsPreviewRenderSignature = ({ orgId, siteId, pageId }) => {
-  return createPreviewSignatureHash({
-    salt: EDGE_CMS_PREVIEW_RENDER_SIGNATURE_SALT,
-    orgId,
-    siteId,
-    pageId,
-  })
-}
-
 const normalizePreviewColumnsForSignature = (row) => {
   if (!Array.isArray(row?.columns) || !row.columns.length)
     return []
@@ -3762,25 +3613,31 @@ const resolveTemplateBlockForSignature = (pageDoc, blockRef, blocksById = {}) =>
       content: libraryBlock.content,
       values: libraryBlock.values || {},
       meta: libraryBlock.meta || {},
+      dataSources: libraryBlock.dataSources || {},
+      templateVersion: libraryBlock.templateVersion,
     }
   }
 
   const block = resolveTemplateBlockSourceForSignature(pageDoc, blockRef)
   if (!block)
     return null
+  const libraryBlock = block.blockId ? blocksById?.[block.blockId] : null
   if (block.content) {
     return {
       content: block.content,
       values: block.values || {},
       meta: block.meta || {},
+      dataSources: block.dataSources || libraryBlock?.dataSources || {},
+      templateVersion: block.templateVersion ?? libraryBlock?.templateVersion,
     }
   }
-  if (block.blockId && blocksById?.[block.blockId]) {
-    const libraryBlock = blocksById[block.blockId]
+  if (libraryBlock) {
     return {
       content: libraryBlock.content,
       values: block.values || libraryBlock.values || {},
       meta: block.meta || libraryBlock.meta || {},
+      dataSources: libraryBlock.dataSources || {},
+      templateVersion: libraryBlock.templateVersion,
     }
   }
   return null
@@ -3978,9 +3835,38 @@ const fetchCmsPreviewCollectionField = async ({ cfg, orgId, siteId, pageId, rout
   )
 }
 
+// Template v2 blocks declare collections in `dataSources`; turn each into the
+// collection config the legacy `meta` path uses, as the Hub editor does
+// (blockApi.vue dataSourcesToRuntimeMeta), with the instance's query items and
+// limit. Token previews have no signed-in user to load them in the browser.
+const cmsPreviewDataSourceConfigs = (dataSources, meta) => {
+  const configs = {}
+  for (const [field, source] of Object.entries(dataSources || {})) {
+    if (!source || typeof source !== 'object' || Array.isArray(source))
+      continue
+    if (!(source.type === 'collection' || source.collection || source.path || source.query || source.canonicalLookup))
+      continue
+    const collection = (source.collection && typeof source.collection === 'object' && !Array.isArray(source.collection)) ? { ...source.collection } : {}
+    for (const key of ['path', 'baseKey', 'uniqueKey', 'canonicalLookup', 'query', 'order', 'orgLevel']) {
+      if (source[key] !== undefined)
+        collection[key] = source[key]
+    }
+    const sourceMeta = meta?.[field]
+    const queryItems = (sourceMeta?.queryItems && typeof sourceMeta.queryItems === 'object' && !Array.isArray(sourceMeta.queryItems)) ? sourceMeta.queryItems : {}
+    const cfg = { ...source, type: 'array', collection, queryItems: { ...(source.queryItems || {}), ...queryItems } }
+    if (sourceMeta?.limit !== undefined && sourceMeta.limit !== null && sourceMeta.limit !== '')
+      cfg.limit = sourceMeta.limit
+    configs[field] = cfg
+  }
+  return configs
+}
+
 const resolveCmsPreviewBlockCollectionValues = async ({ block, orgId, siteId, pageId, routeLastSegment }) => {
   const values = {}
-  const entries = Object.entries(block?.meta || {})
+  const entries = [
+    ...Object.entries(block?.meta || {}),
+    ...Object.entries(cmsPreviewDataSourceConfigs(block?.dataSources, block?.meta)),
+  ]
   await Promise.all(entries.map(async ([field, cfg]) => {
     if (!cfg || typeof cfg !== 'object' || !cfg.collection)
       return
@@ -4002,7 +3888,7 @@ const resolveCmsPreviewCollectionValues = async ({ orgId, siteId, pageId, pageDa
     ;(row.columns || []).forEach((column, colIndex) => {
       ;(column.blocks || []).forEach((blockRef, blockIdx) => {
         const block = resolveTemplateBlockForSignature(pageData, blockRef, blocksById)
-        if (!block?.meta)
+        if (!block?.meta && !Object.keys(block?.dataSources || {}).length)
           return
         const blockKey = getCmsPreviewBlockKey(row, rowIndex, column, colIndex, blockIdx)
         tasks.push((async () => {
@@ -4170,19 +4056,17 @@ const firebaseStoragePublicUrl = ({ bucketName, filePath, token }) => {
   return `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodedPath}?alt=media&token=${token}`
 }
 
+// A preview link that works without signing in, for the thumbnail renderer:
+// a short-lived preview token (cmsPreviewTokens.js).
 const buildCmsPreviewRenderUrl = ({ baseUrl, orgId, siteId, pageId, mode = '', source = '' }) => {
-  const signature = getCmsPreviewRenderSignature({ orgId, siteId, pageId })
-  const url = new URL(`/cms-preview-render/${encodeURIComponent(siteId)}/${encodeURIComponent(pageId)}`, baseUrl)
-  url.searchParams.set('orgId', orgId)
-  url.searchParams.set('signature', signature)
-  if (mode)
-    url.searchParams.set('mode', mode)
-  if (source)
-    url.searchParams.set('source', source)
-  return url.toString()
+  const { token } = issuePreviewToken({ orgId, siteId, pageId, source: source === 'published' ? 'published' : 'draft' })
+  return buildPreviewUrl({ baseUrl, orgId, siteId, pageId, source, token, mode })
 }
 
-const readPreviewRenderContext = async ({ orgId, siteId, pageId, source = 'draft' }) => {
+// blockDrafts: show each block's unreleased draft instead of its released
+// definition (draft pages only), so an agent can check a fix before a developer
+// releases it.
+const readPreviewRenderContext = async ({ orgId, siteId, pageId, source = 'draft', blockDrafts = false }) => {
   const orgRef = db.collection('organizations').doc(orgId)
   const siteRef = orgRef.collection('sites').doc(siteId)
   const draftPageRef = siteRef.collection('pages').doc(pageId)
@@ -4206,7 +4090,27 @@ const readPreviewRenderContext = async ({ orgId, siteId, pageId, source = 'draft
     if (snap.exists)
       blocksById[String(blockId)] = snap.data() || {}
   }))
-  return { siteRef, pageRef: draftPageRef, renderPageRef, siteData, pageData, themeData, blocksById, source: usePublished ? 'published' : 'draft' }
+  if (blockDrafts && !usePublished) {
+    const revisions = await import('./helpers/cmsBlockRevisions.mjs')
+    const draftRevisionDocs = {}
+    await Promise.all(Object.entries(blocksById).map(async ([blockId, block]) => {
+      if (!revisions.isRevisionNumber(block?.draftRevision))
+        return
+      const snap = await orgRef.collection('blocks').doc(blockId).collection('revisions').doc(String(block.draftRevision)).get()
+      if (snap.exists)
+        draftRevisionDocs[blockId] = snap.data() || {}
+    }))
+    const withDrafts = revisions.blocksWithDraftDefinitions(blocksById, draftRevisionDocs)
+    // The page's instances hold their own copy of each block; copy the draft
+    // into them the way a release would, keeping their values.
+    let draftPage = JSON.parse(JSON.stringify(pageData))
+    for (const blockId of withDrafts.draftBlockIds) {
+      const update = await buildPageBlockUpdate(draftPage, blockId, blocksById[blockId], withDrafts.blocks[blockId])
+      draftPage = { ...draftPage, content: update.content, postContent: update.postContent }
+    }
+    return { siteRef, pageRef: draftPageRef, renderPageRef, siteData, pageData: draftPage, themeData, blocksById: withDrafts.blocks, draftBlockIds: withDrafts.draftBlockIds, source: 'draft' }
+  }
+  return { siteRef, pageRef: draftPageRef, renderPageRef, siteData, pageData, themeData, blocksById, draftBlockIds: [], source: usePublished ? 'published' : 'draft' }
 }
 
 const serializePreviewPayload = value => JSON.parse(JSON.stringify(value || null))
@@ -4226,15 +4130,19 @@ exports.getPreviewRenderPayload = onCall({ timeoutSeconds: 60, memory: '512MiB' 
   const orgId = String(data.orgId || '').trim()
   const siteId = String(data.siteId || '').trim()
   const pageId = String(data.pageId || '').trim()
-  const signature = String(data.signature || '').trim()
   const source = String(data.source || '').trim() === 'published' ? 'published' : 'draft'
   const routeLastSegment = String(data.routeLastSegment || '').trim()
-  if (!orgId || !siteId || !pageId || !signature)
+  if (!orgId || !siteId || !pageId)
     throw new HttpsError('invalid-argument', 'Missing preview render payload fields.')
-  if (signature !== getCmsPreviewRenderSignature({ orgId, siteId, pageId }))
-    throw new HttpsError('permission-denied', 'Invalid preview signature.')
+  // Draft content is private: a signed-in Hub user who can read the sites,
+  // or a preview token issued for exactly this page. (The old signature was a
+  // hash anyone could compute from the ids.)
+  const uid = request.auth?.uid
+  const signedInReader = !!uid && await permissionCheck(uid, 'read', `organizations/${orgId}/sites`)
+  if (!signedInReader && !verifyPreviewToken(data.token, { orgId, siteId, pageId, source }))
+    throw new HttpsError('permission-denied', 'Sign in to the Hub, or use a valid preview link. Preview links expire.')
 
-  const context = await readPreviewRenderContext({ orgId, siteId, pageId, source })
+  const context = await readPreviewRenderContext({ orgId, siteId, pageId, source, blockDrafts: data.blockDrafts === true })
   const collectionValues = await resolveCmsPreviewCollectionValuesWithTimeout({
     orgId,
     siteId,
@@ -4248,6 +4156,7 @@ exports.getPreviewRenderPayload = onCall({ timeoutSeconds: 60, memory: '512MiB' 
     page: serializePreviewPayload({ ...context.pageData, docId: pageId }),
     theme: serializePreviewPayload(context.themeData),
     blocks: serializePreviewPayload(context.blocksById),
+    draftBlockIds: context.draftBlockIds,
     collectionValues: serializePreviewPayload(collectionValues),
     renderContext: await fetchPreviewRenderContext({ orgId, siteId }),
   }

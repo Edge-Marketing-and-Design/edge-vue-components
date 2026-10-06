@@ -1,6 +1,7 @@
 <script setup>
 import { useVModel } from '@vueuse/core'
-import { ImagePlus } from 'lucide-vue-next'
+import { ImagePlus, Video } from 'lucide-vue-next'
+import { buildCloudflareVideoIframe, getCloudflareVideoIframeSrc } from '../../lib/cmsVideo'
 
 const props = defineProps({
   field: {
@@ -72,6 +73,8 @@ const richtextEnabledToggles = computed(() => {
 const state = reactive({
   mounted: false,
   imageOpen: false,
+  videoOpen: false,
+  videoError: '',
   richtextImageOpen: false,
   richtextFileOpen: false,
 })
@@ -91,6 +94,9 @@ const resolvedImageUrl = computed(() => {
 })
 
 const hasImageValue = computed(() => String(resolvedImageUrl.value || '').trim().length > 0)
+const isVideoPicker = computed(() => props.type === 'richtext' && props.schema?.picker === 'video')
+const selectedVideoEmbedUrl = computed(() => getCloudflareVideoIframeSrc(modelValue.value))
+const hasVideoValue = computed(() => Boolean(selectedVideoEmbedUrl.value))
 
 const optionConfig = computed(() => {
   let option = {}
@@ -151,6 +157,18 @@ const selectImage = async (url) => {
   state.imageOpen = false
 }
 
+const selectVideo = async (_url, item) => {
+  const iframe = buildCloudflareVideoIframe(item)
+  if (!iframe) {
+    state.videoError = 'This video is still processing in Cloudflare Stream. Wait a few minutes, then reopen the picker and select it again.'
+    return
+  }
+  modelValue.value = iframe
+  state.videoError = ''
+  await nextTick()
+  state.videoOpen = false
+}
+
 const openRichtextImagePicker = () => {
   state.richtextImageOpen = true
 }
@@ -186,7 +204,66 @@ onBeforeMount(async () => {
 
 <template>
   <div v-if="state.mounted">
-    <div v-if="props.type === 'richtext'">
+    <div v-if="isVideoPicker" class="space-y-2">
+      <div class="text-sm font-medium text-foreground">
+        {{ label }}
+      </div>
+      <div class="relative min-h-40 overflow-hidden rounded-md border border-border bg-black flex items-center justify-center">
+        <Dialog v-model:open="state.videoOpen">
+          <DialogTrigger as-child>
+            <edge-shad-button
+              v-if="!hasVideoValue"
+              type="button"
+              variant="outline"
+              class="h-40 w-full rounded-none border-dashed bg-background text-muted-foreground hover:text-foreground"
+            >
+              <Video class="h-5 w-5 mr-2" />
+              Select Video
+            </edge-shad-button>
+          </DialogTrigger>
+          <DialogTrigger v-if="hasVideoValue" as-child>
+            <div class="absolute inset-0 z-10 flex cursor-pointer items-center justify-center bg-black/80 opacity-0 transition-opacity hover:opacity-100">
+              <edge-shad-button type="button" variant="outline" class="bg-white text-black hover:bg-gray-200">
+                <Video class="h-5 w-5 mr-2" />
+                Replace Video
+              </edge-shad-button>
+            </div>
+          </DialogTrigger>
+          <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
+            <DialogHeader>
+              <DialogTitle>Select Video</DialogTitle>
+              <DialogDescription>
+                Newly uploaded videos can take a few minutes to become available from Cloudflare Stream.
+              </DialogDescription>
+            </DialogHeader>
+            <edge-cms-media-manager
+              :site="props.site"
+              :show-cms-site-filter="true"
+              cms-site-only-title="Current Site"
+              :select-mode="true"
+              :include-videos="true"
+              :videos-only="true"
+              media-type-default="videos"
+              :default-tags="hasImageTags ? props.schema.tags : []"
+              @select="selectVideo"
+            />
+          </DialogContent>
+        </Dialog>
+        <iframe
+          v-if="hasVideoValue"
+          :src="selectedVideoEmbedUrl"
+          :title="label"
+          class="aspect-video w-full"
+          allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture"
+          allowfullscreen
+          loading="lazy"
+        />
+      </div>
+      <p v-if="state.videoError" class="text-sm text-destructive" role="alert">
+        {{ state.videoError }}
+      </p>
+    </div>
+    <div v-else-if="props.type === 'richtext'">
       <edge-shad-html
         ref="richtextEditorRef"
         v-model="modelValue"

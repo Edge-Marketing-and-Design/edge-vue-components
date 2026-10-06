@@ -1,5 +1,10 @@
 <script setup>
 import { Download, MoreHorizontal } from 'lucide-vue-next'
+import { renderTemplateAsync } from '@edgedev/template-engine'
+import { safeParseTagConfig } from '../../lib/cmsTagConfig'
+import { guardOverrideRename } from '../../lib/cmsOverrideRename'
+import { checkImportedBlock, createBlockCheckError, normalizeBlockTypes, normalizeImportedDoc, resolveImportedBlockThemes } from '../../lib/cmsBlockImport'
+import { BLOCK_EXPORT_BASE_KEY, BlockSaveCancelledError, blockExportBase, loadLibraryBlockForEditing, planImportOverwrite, saveLibraryBlockEdit, saveWithBaseCheck, takeImportBase } from '../../lib/cmsBlockRevisionClient'
 const emit = defineEmits(['head'])
 const edgeFirebase = inject('edgeFirebase')
 const { saveJsonFiles } = useJsonFileSave()
@@ -27,8 +32,10 @@ const state = reactive({
   importDocIdValue: '',
   importConflictDialogOpen: false,
   importConflictDocId: '',
-  importErrorDialogOpen: false,
-  importErrorMessage: '',
+  importFailures: [],
+  importThemeDialog: null,
+  importResultsDialogOpen: false,
+  importReviewFiles: [],
   addBlockDialogOpen: false,
   addBlockTab: 'templates',
   selectedInitBlockDocId: BLANK_BLOCK_TEMPLATE_ID,
@@ -49,21 +56,6 @@ const TEMPLATE_PREVIEW_PLACEHOLDERS = {
   textarea: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.',
   richtext: '<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>',
   image: 'https://imagedelivery.net/h7EjKG0X9kOxmLp41mxOng/f1f7f610-dfa9-4011-08a3-7a98d95e7500/thumbnail',
-}
-
-function normalizeConfigLiteral(str) {
-  return str
-    .replace(/(\{|,)\s*([A-Za-z_][\w-]*)\s*:/g, '$1"$2":')
-    .replace(/'/g, '"')
-}
-
-function safeParseConfig(raw) {
-  try {
-    return JSON.parse(normalizeConfigLiteral(raw))
-  }
-  catch {
-    return null
-  }
 }
 
 const TAG_START_RE = /\{\{\{\#([A-Za-z0-9_-]+)\s*\{/g
@@ -138,7 +130,7 @@ const parseBlockTemplateModel = (html) => {
     return { values, meta }
 
   for (const { type, rawCfg } of iterateTags(html)) {
-    const cfg = safeParseConfig(rawCfg)
+    const cfg = safeParseTagConfig(rawCfg)
     if (!cfg || !cfg.field)
       continue
 
@@ -213,6 +205,10 @@ const blockImportConflictResolver = ref(null)
 const DEFAULT_BLOCK_IMPORT_ERROR_MESSAGE = 'Failed to import block JSON.'
 const OPTIONAL_BLOCK_IMPORT_KEYS = new Set(['previewType', 'type', 'isOverrideBlock'])
 const TEMPLATE_V2_BLOCK_IMPORT_KEYS = new Set(['templateVersion', 'template', 'schema', 'dataSources'])
+// The keys a file must have: the new-block schema's, less the optional ones.
+// Import fills the Template v2 fields first, so they are never missing.
+const importRequiredBlockKeys = () => Object.keys(blockNewDocSchema.value || {})
+  .filter(key => !OPTIONAL_BLOCK_IMPORT_KEYS.has(key) && !TEMPLATE_V2_BLOCK_IMPORT_KEYS.has(key))
 
 const openAddBlockDialog = () => {
   resetAddBlockDialogState()
@@ -226,38 +222,6 @@ const getThemeFromId = (themeId) => {
 
 const normalizePreviewType = (value) => {
   return value === 'dark' ? 'dark' : 'light'
-}
-
-const normalizeBlockTypes = (value, { fallbackToPage = true } = {}) => {
-  const hasExplicitTypeValue = !(
-    value === undefined
-    || value === null
-    || value === ''
-    || (Array.isArray(value) && value.length === 0)
-  )
-  const rawTypes = Array.isArray(value) ? value : [value]
-  const normalized = rawTypes
-    .map((typeValue) => {
-      if (typeValue && typeof typeValue === 'object') {
-        const objectValue = typeValue.name ?? typeValue.value ?? typeValue.title ?? typeValue.label ?? ''
-        return String(objectValue || '')
-      }
-      return String(typeValue || '')
-    })
-    .map(typeValue => typeValue.trim().toLowerCase())
-    .map((typeValue) => {
-      if (typeValue === 'page')
-        return 'Page'
-      if (typeValue === 'post')
-        return 'Post'
-      return ''
-    })
-    .filter(Boolean)
-
-  const uniqueNormalized = [...new Set(normalized)]
-  if (!uniqueNormalized.length && fallbackToPage && !hasExplicitTypeValue)
-    return ['Page']
-  return uniqueNormalized
 }
 
 const previewSurfaceClass = (value) => {
@@ -472,6 +436,12 @@ const exportAllBlocks = async () => {
       payload: {
         ...edgeGlobal.dupObject(blocksCollection.value?.[docId] || {}),
         docId,
+        // The released definition is exported; importing this file later is
+        // checked against the block's version at that time.
+        [BLOCK_EXPORT_BASE_KEY]: blockExportBase({
+          definitionDoc: blocksCollection.value?.[docId] || {},
+          releasedRevision: blocksCollection.value?.[docId]?.releasedRevision ?? null,
+        }),
       },
     }))
 
@@ -882,25 +852,6 @@ const readTextFile = file => new Promise((resolve, reject) => {
   reader.readAsText(file)
 })
 
-const normalizeImportedDoc = (payload, fallbackDocId = '') => {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload))
-    throw new Error('Invalid JSON payload. Expected an object.')
-
-  if (payload.document && typeof payload.document === 'object' && !Array.isArray(payload.document)) {
-    const normalized = { ...payload.document }
-    if (!normalized.docId && payload.docId)
-      normalized.docId = payload.docId
-    if (!normalized.docId && fallbackDocId)
-      normalized.docId = fallbackDocId
-    return normalized
-  }
-
-  const normalized = { ...payload }
-  if (!normalized.docId && fallbackDocId)
-    normalized.docId = fallbackDocId
-  return normalized
-}
-
 const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value)
 
 const cloneSchemaValue = (value) => {
@@ -920,29 +871,6 @@ const getDocDefaultsFromSchema = (schema = {}) => {
 }
 
 const getBlockDocDefaults = () => getDocDefaultsFromSchema(blockNewDocSchema.value || {})
-
-const normalizeImportedBlockVersion = (doc) => {
-  const normalizedVersion = Number(doc?.templateVersion) === 2 ? 2 : 1
-  doc.templateVersion = normalizedVersion
-
-  if (normalizedVersion === 2) {
-    if (typeof doc.template !== 'string')
-      doc.template = typeof doc.content === 'string' ? doc.content : ''
-    if (!isPlainObject(doc.schema))
-      doc.schema = {}
-    if (!isPlainObject(doc.dataSources))
-      doc.dataSources = {}
-    return doc
-  }
-
-  if (typeof doc.template !== 'string')
-    doc.template = ''
-  if (!isPlainObject(doc.schema))
-    doc.schema = {}
-  if (!isPlainObject(doc.dataSources))
-    doc.dataSources = {}
-  return doc
-}
 
 const slugifyBlockDocId = (value) => {
   return String(value || '')
@@ -1030,74 +958,53 @@ const createBlockFromTemplate = async () => {
   }
 }
 
-const validateImportedBlockDoc = (doc) => {
-  if (!isPlainObject(doc))
-    throw new Error('Invalid block document. Expected an object.')
+const getOrgThemeIds = () => Object.keys(edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`] || {})
 
-  normalizeImportedBlockVersion(doc)
+const importThemeResolver = ref(null)
 
-  const requiredKeys = Object.keys(blockNewDocSchema.value || {})
-    .filter(key => !OPTIONAL_BLOCK_IMPORT_KEYS.has(key))
-    .filter(key => doc.templateVersion === 2 || !TEMPLATE_V2_BLOCK_IMPORT_KEYS.has(key))
-  const missing = requiredKeys.filter(key => !Object.prototype.hasOwnProperty.call(doc, key))
-  if (missing.length)
-    throw new Error(`Missing required block key(s): ${missing.join(', ')}`)
-
-  return doc
+const confirmDroppedImportThemes = (details) => {
+  state.importThemeDialog = details
+  return new Promise((resolve) => {
+    importThemeResolver.value = resolve
+  })
 }
 
-const validateImportedBlockTypes = (doc) => {
-  if (!Object.prototype.hasOwnProperty.call(doc || {}, 'type')) {
-    doc.type = ['Page']
-    return doc
-  }
-
-  const normalizedTypes = normalizeBlockTypes(doc.type, { fallbackToPage: false })
-  if (!normalizedTypes.length)
-    throw new Error('Invalid "type" value. Use "Page", "Post", or both.')
-
-  doc.type = normalizedTypes
-  return doc
+const resolveDroppedImportThemes = (confirmed) => {
+  const resolve = importThemeResolver.value
+  importThemeResolver.value = null
+  state.importThemeDialog = null
+  resolve?.(confirmed === true)
 }
 
-const validateImportedBlockThemes = (doc) => {
+const importThemeDialogOpen = computed({
+  get: () => !!state.importThemeDialog,
+  set: (open) => {
+    if (!open)
+      resolveDroppedImportThemes(false)
+  },
+})
+
+// Returns false when the user declines to drop unknown theme ids, which skips
+// the file. Valid theme ids are always kept.
+const applyImportedBlockThemes = async (doc, fileName) => {
   if (Object.prototype.hasOwnProperty.call(doc || {}, 'themes') && !Array.isArray(doc?.themes)) {
     throw new Error('Invalid "themes" value. Expected an array of theme docIds.')
   }
+  if (!Array.isArray(doc?.themes) || !doc.themes.length)
+    return true
 
-  const importedThemes = Array.isArray(doc?.themes) ? doc.themes : []
-  if (!importedThemes.length)
-    return doc
-
-  const orgThemes = edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`] || {}
-  const missingThemeIds = []
-  let hasEmptyThemeId = false
-  const normalizedThemes = []
-  for (const themeId of importedThemes) {
-    const normalizedThemeId = String(themeId || '').trim()
-    if (!normalizedThemeId) {
-      hasEmptyThemeId = true
-      continue
-    }
-    if (!orgThemes[normalizedThemeId]) {
-      missingThemeIds.push(normalizedThemeId)
-      continue
-    }
-    normalizedThemes.push(normalizedThemeId)
-  }
-
-  if (hasEmptyThemeId || missingThemeIds.length) {
-    const uniqueMissingThemeIds = [...new Set(missingThemeIds)]
-    console.warn('[BlocksManager] Imported block contains unavailable theme ids. Importing with no theme.', {
-      docId: String(doc?.docId || ''),
-      missingThemeIds: uniqueMissingThemeIds,
-      hasEmptyThemeId,
+  const { themes, dropped } = resolveImportedBlockThemes(doc.themes, getOrgThemeIds())
+  if (dropped.length) {
+    const confirmed = await confirmDroppedImportThemes({
+      fileName,
+      dropped: dropped.map(themeId => themeId || '(empty theme id)'),
+      remaining: themes.length,
     })
-    doc.themes = []
-    return doc
+    if (!confirmed)
+      return false
   }
-  doc.themes = [...new Set(normalizedThemes)]
-  return doc
+  doc.themes = themes
+  return true
 }
 
 const makeUniqueDocId = (baseDocId, docsMap = {}) => {
@@ -1159,6 +1066,34 @@ watch(() => state.importConflictDialogOpen, (open) => {
   }
 })
 
+const overrideRename = reactive({ change: null, resolve: null })
+
+// An import that would replace changes made in the Hub after the file was
+// made; resolves true to replace them.
+const blockChanged = reactive({ conflict: null, resolve: null })
+const confirmBlockChanged = (details, blockId, blockName = '') => new Promise((resolve) => {
+  blockChanged.conflict = { details, blockId, blockName }
+  blockChanged.resolve = resolve
+})
+const resolveBlockChanged = (confirmed) => {
+  const resolve = blockChanged.resolve
+  blockChanged.conflict = null
+  blockChanged.resolve = null
+  resolve?.(confirmed === true)
+}
+
+const confirmOverrideRename = change => new Promise((resolve) => {
+  overrideRename.change = change
+  overrideRename.resolve = resolve
+})
+
+const resolveOverrideRename = (confirmed) => {
+  const resolve = overrideRename.resolve
+  overrideRename.change = null
+  overrideRename.resolve = null
+  resolve?.(confirmed === true)
+}
+
 const getImportDocId = async (incomingDoc, fallbackDocId = '') => {
   let nextDocId = String(incomingDoc?.docId || '').trim()
   if (!nextDocId)
@@ -1168,11 +1103,6 @@ const getImportDocId = async (incomingDoc, fallbackDocId = '') => {
   if (nextDocId.includes('/'))
     throw new Error('docId cannot include "/".')
   return nextDocId
-}
-
-const openImportErrorDialog = (message) => {
-  state.importErrorMessage = String(message || DEFAULT_BLOCK_IMPORT_ERROR_MESSAGE)
-  state.importErrorDialogOpen = true
 }
 
 const getBlockImportFailureReason = (error, message) => {
@@ -1201,7 +1131,23 @@ const triggerBlockImport = () => {
 const importSingleBlockFile = async (file, existingBlocks = {}) => {
   const fileText = await readTextFile(file)
   const parsed = JSON.parse(fileText)
-  const importedDoc = validateImportedBlockThemes(validateImportedBlockTypes(validateImportedBlockDoc(normalizeImportedDoc(parsed, ''))))
+  const rawDoc = normalizeImportedDoc(parsed, '')
+  // The version of the block the file was exported from, if it says. It is
+  // removed before the check, so it never becomes a block field.
+  const fileBase = takeImportBase(rawDoc)
+  // The same check as scripts/cms/validate-import.mjs.
+  const findings = await checkImportedBlock(rawDoc, {
+    knownThemeIds: getOrgThemeIds(),
+    renderTemplate: renderTemplateAsync,
+    requiredKeys: importRequiredBlockKeys(),
+  })
+  if (findings.hardError)
+    throw new Error(findings.hardError)
+  if (findings.blocking.length)
+    throw createBlockCheckError(findings.blocking)
+  const importedDoc = findings.doc
+  if (!await applyImportedBlockThemes(importedDoc, file?.name))
+    return null
   const incomingDocId = await getImportDocId(importedDoc, '')
   let targetDocId = incomingDocId
   let importDecision = 'create'
@@ -1209,7 +1155,7 @@ const importSingleBlockFile = async (file, existingBlocks = {}) => {
   if (existingBlocks[targetDocId]) {
     const decision = await requestBlockImportConflict(targetDocId)
     if (decision === 'cancel')
-      return
+      return null
     if (decision === 'new') {
       targetDocId = makeUniqueDocId(targetDocId, existingBlocks)
       if (typeof importedDoc.name === 'string' && importedDoc.name.trim() && !/\(Copy\)$/i.test(importedDoc.name.trim()))
@@ -1222,15 +1168,80 @@ const importSingleBlockFile = async (file, existingBlocks = {}) => {
   }
 
   const payload = { ...getBlockDocDefaults(), ...importedDoc, docId: targetDocId }
-  await edgeFirebase.storeDoc(blockCollectionPath.value, payload, targetDocId)
-  existingBlocks[targetDocId] = payload
 
-  if (importDecision === 'overwrite')
-    edgeFirebase?.toast?.success?.(`Overwrote block "${targetDocId}".`)
+  // Overwriting must not silently replace changes made in the Hub after the
+  // file was made, such as a hand edit in an unreleased draft.
+  let overwriteBase = null
+  if (importDecision === 'overwrite') {
+    const loaded = await loadLibraryBlockForEditing({
+      edgeFirebase,
+      organizationDocPath: edgeGlobal.edgeState.organizationDocPath,
+      blockId: targetDocId,
+    })
+    const { baseHash, conflict } = planImportOverwrite({ loaded, fileBase, nextDoc: payload })
+    overwriteBase = baseHash
+    if (conflict) {
+      if (!await confirmBlockChanged(conflict, targetDocId, payload.name)) {
+        edgeFirebase?.toast?.success?.(`Kept the newer version of "${targetDocId}" in the Hub; this file was not imported.`)
+        return null
+      }
+      overwriteBase = conflict.currentHash
+    }
+  }
+
+  // A new block has no instances, so it is written directly. Overwriting an
+  // existing block saves its definition as an unreleased draft revision and
+  // leaves every page as it is.
+  const writeImportedBlock = importDecision === 'overwrite'
+    ? () => saveWithBaseCheck({
+        blockId: targetDocId,
+        baseHash: overwriteBase,
+        confirm: details => confirmBlockChanged(details, targetDocId, payload.name),
+        save: base => saveLibraryBlockEdit({
+          edgeFirebase,
+          organizationDocPath: edgeGlobal.edgeState.organizationDocPath,
+          orgId: edgeGlobal.edgeState.currentOrganization,
+          blockId: targetDocId,
+          nextDoc: payload,
+          source: 'import',
+          baseHash: base,
+        }),
+      })
+    : () => edgeFirebase.storeDoc(blockCollectionPath.value, payload, targetDocId)
+  let result
+  try {
+    result = await guardOverrideRename({
+      storedDoc: importDecision === 'overwrite' ? existingBlocks[targetDocId] : null,
+      nextDoc: payload,
+      confirm: confirmOverrideRename,
+      write: writeImportedBlock,
+    })
+  }
+  catch (error) {
+    if (!(error instanceof BlockSaveCancelledError))
+      throw error
+    edgeFirebase?.toast?.success?.(`Kept the newer version of "${targetDocId}" in the Hub; this file was not imported.`)
+    return null
+  }
+  if (result?.cancelled)
+    return null
+  existingBlocks[targetDocId] = importDecision === 'overwrite' ? result.view : payload
+
+  if (importDecision === 'overwrite') {
+    const { status, draftRevision } = result.revision || {}
+    if (status === 'saved')
+      edgeFirebase?.toast?.success?.(`Saved the import of "${targetDocId}" as unreleased changes (revision ${draftRevision}). Pages are unchanged until it's released.`)
+    else if (status === 'discarded')
+      edgeFirebase?.toast?.success?.(`The import of "${targetDocId}" matches the released block, so its unreleased changes were discarded.`)
+    else
+      edgeFirebase?.toast?.success?.(`The import of "${targetDocId}" matches the released block. Only its details were updated.`)
+  }
   else if (importDecision === 'new')
     edgeFirebase?.toast?.success?.(`Imported block as new "${targetDocId}".`)
   else
     edgeFirebase?.toast?.success?.(`Imported block "${targetDocId}".`)
+
+  return { fileName: String(file?.name || targetDocId), docId: targetDocId, notices: findings.notices }
 }
 
 const handleBlockImport = async (event) => {
@@ -1246,17 +1257,32 @@ const handleBlockImport = async (event) => {
     if (!edgeFirebase.data?.[themesCollectionPath])
       await edgeFirebase.startSnapshot(themesCollectionPath)
 
+    // Every file's outcome is collected so one dialog can report the whole
+    // batch; a later failure no longer replaces an earlier one.
+    const reviewFiles = []
+    const failures = []
     for (const file of files) {
       try {
-        await importSingleBlockFile(file, existingBlocks)
+        const imported = await importSingleBlockFile(file, existingBlocks)
+        if (imported?.notices?.length)
+          reviewFiles.push(imported)
       }
       catch (error) {
         const message = error?.message || DEFAULT_BLOCK_IMPORT_ERROR_MESSAGE
         logBlockImportFailure(file, error, message)
         if (/^Import canceled\./i.test(message))
           continue
-        openImportErrorDialog(getBlockImportFailureReason(error, message))
+        failures.push({
+          fileName: String(file?.name || 'unknown-file'),
+          reason: getBlockImportFailureReason(error, message),
+          issues: Array.isArray(error?.issues) ? error.issues : [],
+        })
       }
+    }
+    if (failures.length || reviewFiles.length) {
+      state.importFailures = failures
+      state.importReviewFiles = reviewFiles
+      state.importResultsDialogOpen = true
     }
   }
   finally {
@@ -1585,6 +1611,8 @@ const handleBlockImport = async (event) => {
         </DialogFooter>
       </DialogContent>
     </edge-shad-dialog>
+    <edge-cms-override-rename-dialog :change="overrideRename.change" @resolve="resolveOverrideRename" />
+    <edge-cms-block-changed-dialog :conflict="blockChanged.conflict" @resolve="resolveBlockChanged" />
     <edge-shad-dialog v-model="state.importConflictDialogOpen">
       <DialogContent class="pt-8">
         <DialogHeader>
@@ -1592,7 +1620,9 @@ const handleBlockImport = async (event) => {
             Block Already Exists
           </DialogTitle>
           <DialogDescription>
-            <code>{{ state.importConflictDocId }}</code> already exists. Choose to overwrite it or import as a new block.
+            <code>{{ state.importConflictDocId }}</code> already exists. Overwrite saves the imported
+            definition as unreleased changes to that block; pages keep the released version until
+            it's released. Or import it as a new block.
           </DialogDescription>
         </DialogHeader>
         <DialogFooter class="pt-2 flex justify-between">
@@ -1608,18 +1638,83 @@ const handleBlockImport = async (event) => {
         </DialogFooter>
       </DialogContent>
     </edge-shad-dialog>
-    <edge-shad-dialog v-model="state.importErrorDialogOpen">
+    <edge-shad-dialog v-model="importThemeDialogOpen">
       <DialogContent class="pt-8">
         <DialogHeader>
           <DialogTitle class="text-left">
-            Import Failed
+            Unknown Themes
           </DialogTitle>
-          <DialogDescription class="text-left">
-            {{ state.importErrorMessage }}
+          <DialogDescription class="space-y-2 text-left">
+            <p>
+              <code>{{ state.importThemeDialog?.fileName }}</code> lists themes that don't exist in this organization:
+            </p>
+            <ul class="list-disc pl-5">
+              <li v-for="themeId in state.importThemeDialog?.dropped || []" :key="themeId">
+                <code>{{ themeId }}</code>
+              </li>
+            </ul>
+            <p v-if="state.importThemeDialog?.remaining">
+              Importing keeps its other {{ state.importThemeDialog.remaining }} theme(s) and drops these.
+            </p>
+            <p v-else>
+              None of its themes exist here, so it will import with no theme.
+            </p>
           </DialogDescription>
         </DialogHeader>
+        <DialogFooter class="pt-2 flex justify-between">
+          <edge-shad-button variant="outline" autofocus @click="resolveDroppedImportThemes(false)">
+            Skip This File
+          </edge-shad-button>
+          <edge-shad-button @click="resolveDroppedImportThemes(true)">
+            Import Without Unknown Themes
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
+    <edge-shad-dialog v-model="state.importResultsDialogOpen">
+      <DialogContent class="pt-8 max-w-3xl max-h-[85vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle class="text-left">
+            {{ state.importFailures.length ? 'Import Problems' : 'Import Review' }}
+          </DialogTitle>
+          <DialogDescription class="text-left">
+            <template v-if="state.importFailures.length">
+              {{ state.importFailures.length }} file(s) were not imported. Nothing was written for them.
+            </template>
+            <template v-if="state.importReviewFiles.length">
+              {{ state.importFailures.length ? ' ' : '' }}Imported blocks with warnings are listed below; warnings don't block imports.
+            </template>
+          </DialogDescription>
+        </DialogHeader>
+        <div class="min-h-0 flex-1 overflow-y-auto space-y-5 pr-1">
+          <div v-if="state.importFailures.length" class="space-y-4">
+            <h3 class="text-sm font-semibold text-destructive">
+              Not imported
+            </h3>
+            <section v-for="(failure, index) in state.importFailures" :key="`failed-${index}`" :aria-label="`${failure.fileName} not imported`">
+              <h4 class="text-sm font-semibold">
+                {{ failure.fileName }}
+              </h4>
+              <edge-cms-block-validation-issues v-if="failure.issues.length" class="mt-2" :issues="failure.issues" />
+              <p v-else class="mt-1 text-sm">
+                {{ failure.reason }}
+              </p>
+            </section>
+          </div>
+          <div v-if="state.importReviewFiles.length" class="space-y-4">
+            <h3 class="text-sm font-semibold">
+              Imported with warnings
+            </h3>
+            <section v-for="item in state.importReviewFiles" :key="item.docId" :aria-label="item.fileName">
+              <h4 class="text-sm font-semibold">
+                {{ item.fileName }} <span class="font-normal text-muted-foreground">→ {{ item.docId }}</span>
+              </h4>
+              <edge-cms-block-validation-issues class="mt-2" :issues="item.notices" />
+            </section>
+          </div>
+        </div>
         <DialogFooter class="pt-2">
-          <edge-shad-button @click="state.importErrorDialogOpen = false">
+          <edge-shad-button @click="state.importResultsDialogOpen = false">
             Close
           </edge-shad-button>
         </DialogFooter>

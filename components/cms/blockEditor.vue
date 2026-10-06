@@ -1,8 +1,14 @@
 <script setup>
-import { Code2, Download, HelpCircle, History, Loader2, Maximize2, Monitor, Plus, RotateCcw, Smartphone, Tablet, Trash2, Wand2 } from 'lucide-vue-next'
+import { Code2, Download, HelpCircle, History, ListChecks, Loader2, Maximize2, Monitor, Plus, Rocket, RotateCcw, Smartphone, Tablet, Trash2, Wand2 } from 'lucide-vue-next'
+import { renderTemplateAsync } from '@edgedev/template-engine'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { clearCmsTemplateV2LibraryState } from '../../composables/useCmsTemplateRuntimeMeta'
+import { guardOverrideRename } from '../../lib/cmsOverrideRename'
+import { validateBlock } from '../../lib/cmsBlockValidation'
+import { safeParseTagConfig } from '../../lib/cmsTagConfig'
+import { BLOCK_REVISION_DEFINITION_FIELDS, diffBlockMetadata } from '../../lib/cmsBlockRevisions'
+import { BLOCK_EXPORT_BASE_KEY, blockExportBase, discardLibraryBlockDraft, isBlockBaseChangedError, loadLibraryBlockForEditing, releasedRevisionOf, saveLibraryBlockEdit, saveWithBaseCheck } from '../../lib/cmsBlockRevisionClient'
 const props = defineProps({
   blockId: {
     type: String,
@@ -49,9 +55,18 @@ const state = reactive({
   editorKey: 0,
   editorHasUnsavedChanges: false,
   historyDialogOpen: false,
+  blockChecks: { status: 'idle', result: null, checkedAt: '', error: '' },
+  blockChecksOpen: false,
   historyLoading: false,
   historyRestoring: false,
   historyError: '',
+  // The library block as this editor loaded or last saved it: the draft
+  // revision's definition when one exists, otherwise the released one.
+  blockRevision: { view: null, releasedRevision: null, draftRevision: null, draftSource: '', draftUpdatedAt: '', baseHash: null },
+  discardDraftDialogOpen: false,
+  discardingDraft: false,
+  releaseDialogOpen: false,
+  releaseDialogRevision: null,
   historyItems: [],
   historySelectedId: '',
   historyPreviewBlock: null,
@@ -131,6 +146,7 @@ const v2SchemaTypeOptions = [
   { name: 'textarea', title: 'Textarea' },
   { name: 'richtext', title: 'Rich Text' },
   { name: 'image', title: 'Image' },
+  { name: 'video', title: 'Video' },
   { name: 'number', title: 'Number' },
   { name: 'array', title: 'Array' },
   { name: 'option', title: 'Select' },
@@ -141,6 +157,7 @@ const v2ArrayItemSchemaTypeOptions = [
   { name: 'textarea', title: 'Textarea' },
   { name: 'richtext', title: 'Rich Text' },
   { name: 'image', title: 'Image' },
+  { name: 'video', title: 'Video' },
   { name: 'number', title: 'Number' },
   { name: 'option', title: 'Select' },
 ]
@@ -186,6 +203,10 @@ const blocks = computed(() => {
 
 const currentBlock = computed(() => blocks.value?.[props.blockId] || null)
 
+// What this editor treats as saved. With an unreleased draft that is the
+// draft definition, not the live library block pages use.
+const savedEditorBlock = computed(() => state.blockRevision.view || currentBlock.value || null)
+
 const hasExplicitTemplateVersion = (doc) => {
   return !!doc && Object.prototype.hasOwnProperty.call(doc, 'templateVersion')
 }
@@ -193,7 +214,7 @@ const hasExplicitTemplateVersion = (doc) => {
 const isSavedTemplateV2Block = computed(() => {
   if (props.blockId === 'new')
     return false
-  return hasExplicitTemplateVersion(currentBlock.value) && normalizeTemplateVersion(currentBlock.value?.templateVersion) === 2
+  return hasExplicitTemplateVersion(savedEditorBlock.value) && normalizeTemplateVersion(savedEditorBlock.value?.templateVersion) === 2
 })
 
 const isSavedLegacyTemplateBlock = () => {
@@ -208,7 +229,7 @@ const stripTemplateV2DefaultsFromLegacyBlock = (doc) => {
   if (doc.templateConversion)
     return doc
 
-  const savedDoc = currentBlock.value || {}
+  const savedDoc = savedEditorBlock.value || {}
   if (hasExplicitTemplateVersion(savedDoc))
     doc.templateVersion = normalizeTemplateVersion(savedDoc.templateVersion)
   else
@@ -452,11 +473,11 @@ const dataSourceWizardStepItems = [
   { step: 5, title: 'Review' },
 ]
 const getTemplateV2SchemaWizardSteps = (entry) => {
-  const type = String(entry?.type || 'text').trim() || 'text'
+  const type = getTemplateV2SchemaEditorType(entry)
   const steps = [{ step: 1, title: 'Field' }]
-  if (!['array', 'publication'].includes(type))
+  if (!['array', 'video', 'publication'].includes(type))
     steps.push({ step: 2, title: 'Default' })
-  if (['array', 'image', 'richtext', 'publication', 'option'].includes(type))
+  if (['array', 'image', 'video', 'richtext', 'publication', 'option'].includes(type))
     steps.push({ step: 3, title: 'Settings' })
   steps.push({ step: 4, title: 'Review' })
   return steps
@@ -998,6 +1019,10 @@ const normalizeTemplateV2SchemaEntry = (schema, field) => {
   }
   if (schema[field].type === 'select')
     schema[field].type = 'option'
+  if (schema[field].type === 'video') {
+    schema[field].type = 'richtext'
+    schema[field].picker = 'video'
+  }
   if (schema[field].type === 'option')
     ensureTemplateV2SchemaOption(schema[field])
   if (schema[field].type === 'publication') {
@@ -1015,11 +1040,19 @@ const getTemplateV2SchemaEntries = (workingDoc) => {
   }))
 }
 
+function getTemplateV2SchemaEditorType(entry) {
+  if (entry?.type === 'richtext' && entry?.picker === 'video')
+    return 'video'
+  return String(entry?.type || 'text').trim() || 'text'
+}
+
 const normalizeTemplateV2SchemaConfig = (field, config) => {
   if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    const type = (typeof config === 'string' && config) ? config : 'text'
     return {
-      type: (typeof config === 'string' && config) ? config : 'text',
+      type: type === 'video' ? 'richtext' : type,
       label: titleFromKey(field),
+      ...(type === 'video' ? { picker: 'video' } : {}),
     }
   }
   const normalized = config
@@ -1027,6 +1060,10 @@ const normalizeTemplateV2SchemaConfig = (field, config) => {
     normalized.type = 'text'
   if (normalized.type === 'select')
     normalized.type = 'option'
+  if (normalized.type === 'video') {
+    normalized.type = 'richtext'
+    normalized.picker = 'video'
+  }
   if (!normalized.label && !normalized.title)
     normalized.label = titleFromKey(field)
   if (normalized.type === 'option')
@@ -1327,8 +1364,20 @@ const updateTemplateV2SchemaOptionRowField = (entry, index, field, value) => {
 const updateTemplateV2SchemaType = (entry, value) => {
   if (!entry || typeof entry !== 'object')
     return
+  const previousType = getTemplateV2SchemaEditorType(entry)
   const type = String(value || 'text').trim() || 'text'
-  entry.type = type === 'select' ? 'option' : type
+  const normalizedType = type === 'select' ? 'option' : type
+  if (normalizedType === 'video') {
+    entry.type = 'richtext'
+    entry.picker = 'video'
+    if (previousType !== 'video')
+      entry.value = ''
+  }
+  else {
+    entry.type = normalizedType
+    if (entry.picker === 'video')
+      delete entry.picker
+  }
   if (entry.type === 'option')
     ensureTemplateV2SchemaOption(entry)
   else
@@ -1341,6 +1390,8 @@ const updateTemplateV2SchemaType = (entry, value) => {
     delete entry.tags
     delete entry.variant
   }
+  if (entry.picker === 'video')
+    delete entry.variant
   if (entry.type === 'publication')
     entry.effect = normalizeTemplateV2PublicationEffect(entry.effect)
   if (state.schemaWizardDraft?.entry === entry) {
@@ -1353,8 +1404,20 @@ const updateTemplateV2SchemaType = (entry, value) => {
 const updateTemplateV2ArraySchemaType = (entry, value) => {
   if (!entry || typeof entry !== 'object')
     return
+  const previousType = getTemplateV2SchemaEditorType(entry)
   const type = String(value || 'text').trim() || 'text'
-  entry.type = type === 'select' ? 'option' : type
+  const normalizedType = type === 'select' ? 'option' : type
+  if (normalizedType === 'video') {
+    entry.type = 'richtext'
+    entry.picker = 'video'
+    if (previousType !== 'video')
+      entry.value = ''
+  }
+  else {
+    entry.type = normalizedType
+    if (entry.picker === 'video')
+      delete entry.picker
+  }
   if (entry.type === 'option')
     ensureTemplateV2SchemaOption(entry)
   else
@@ -1363,6 +1426,8 @@ const updateTemplateV2ArraySchemaType = (entry, value) => {
     delete entry.tags
     delete entry.variant
   }
+  if (entry.picker === 'video')
+    delete entry.variant
 }
 
 const updateTemplateV2SchemaArrayField = (entry, field, value) => {
@@ -1764,6 +1829,11 @@ const BLOCK_CONTENT_SNIPPETS = [
     description: 'Image field placeholder',
   },
   {
+    label: 'Video',
+    snippet: '{{{#richtext {"field": "videoField", "value": "", "picker": "video" }}}}',
+    description: 'Cloudflare Stream video picker',
+  },
+  {
     label: 'Publication',
     snippet: '{{{#publication {"field":"publicationPages","effect":"flip","value":{}}}}}',
     description: 'Publication picker that stores selected page image data',
@@ -2110,30 +2180,6 @@ const updateWorkingPreviewType = (nextValue) => {
     state.previewBlock.previewType = normalized
 }
 
-function normalizeConfigLiteral(str) {
-  // ensure keys are quoted: { title: "x", field: "y" } -> { "title": "x", "field": "y" }
-  return str
-    .replace(/(\{|,)\s*([A-Za-z_][\w-]*)\s*:/g, '$1"$2":')
-    // allow single quotes too
-    .replace(/'/g, '"')
-}
-
-function safeParseConfig(raw) {
-  try {
-    return JSON.parse(raw)
-  }
-  catch {
-    // Fall back to legacy loose config support below.
-  }
-
-  try {
-    return JSON.parse(normalizeConfigLiteral(raw))
-  }
-  catch {
-    return null
-  }
-}
-
 // --- Robust tag parsing: supports nested objects/arrays in the config ---
 // Matches `{{{#<type> { ... }}}}` and extracts a *balanced* `{ ... }` blob.
 const TAG_START_RE = /\{\{\{\#([A-Za-z0-9_-]+)\s*\{/g
@@ -2220,7 +2266,7 @@ const blockModel = (html) => {
     return { values, meta }
 
   for (const { type, rawCfg } of iterateTags(html)) {
-    const cfg = safeParseConfig(rawCfg)
+    const cfg = safeParseTagConfig(rawCfg)
     if (!cfg || !cfg.field)
       continue
 
@@ -2249,7 +2295,7 @@ const blockModel = (html) => {
       val = !val ? PLACEHOLDERS.textarea : String(val)
     }
     else if (type === 'richtext') {
-      val = !val ? PLACEHOLDERS.richtext : String(val)
+      val = cfg.picker === 'video' ? String(val || '') : (!val ? PLACEHOLDERS.richtext : String(val))
     }
 
     values[field] = val
@@ -2282,7 +2328,7 @@ function handleEditorLineClick(payload, workingDoc) {
   if (tag.type === 'if')
     return
 
-  const parsedCfg = safeParseConfig(tag.rawCfg)
+  const parsedCfg = safeParseTagConfig(tag.rawCfg)
   state.jsonEditorError = ''
   state.jsonEditorContent = parsedCfg ? JSON.stringify(parsedCfg, null, 2) : tag.rawCfg
   state.jsonEditorOpen = true
@@ -2361,7 +2407,7 @@ function handleJsonEditorSave() {
       target = tag
       break
     }
-    const cfg = safeParseConfig(tag.rawCfg)
+    const cfg = safeParseTagConfig(tag.rawCfg)
     if (cfg && String(cfg.field) === field) {
       target = tag
       break
@@ -2571,51 +2617,6 @@ const editorDocUpdates = (workingDoc) => {
 }
 
 const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value)
-
-const syncEditorStateFromBlockDoc = (doc) => {
-  if (!isPlainObject(doc))
-    return
-
-  const restoredDoc = edgeGlobal.dupObject(doc)
-  if (shouldAutoConvertTemplateV2Doc(restoredDoc)) {
-    const converted = convertLegacyBlockToTemplateV2(restoredDoc)
-    restoredDoc.templateVersion = 2
-    restoredDoc.template = converted.template
-    restoredDoc.content = converted.template
-    restoredDoc.schema = converted.schema
-    restoredDoc.dataSources = converted.dataSources
-    restoredDoc.values = undefined
-    restoredDoc.templateConversion = converted.conversion
-  }
-  let normalizedTypes = normalizeBlockTypes(restoredDoc.type)
-  if (!normalizedTypes.length)
-    normalizedTypes = ['Page']
-  restoredDoc.type = normalizedTypes
-  ensureTemplateV2Fields(restoredDoc)
-  if (!restoredDoc.docId)
-    restoredDoc.docId = props.blockId
-
-  state.editorWorkingDoc = restoredDoc
-  const parsed = blockModel(restoredDoc.content || '')
-  state.workingDoc = {
-    ...parsed,
-    type: normalizedTypes,
-    templateVersion: restoredDoc.templateVersion,
-    template: restoredDoc.template,
-    schema: restoredDoc.schema,
-    dataSources: restoredDoc.dataSources,
-    values: isWorkingTemplateV2Doc(restoredDoc) ? undefined : parsed.values,
-  }
-  state.previewBlock = buildPreviewBlock(restoredDoc, parsed)
-  state.previewSourceValues = edgeGlobal.dupObject(isWorkingTemplateV2Doc(restoredDoc) ? {} : (parsed.values || {}))
-  state.previewTemplateDirty = false
-  state.editorHasUnsavedChanges = false
-
-  const collectionPath = `${edgeGlobal.edgeState.organizationDocPath}/blocks`
-  if (!edgeFirebase.data?.[collectionPath])
-    edgeFirebase.data[collectionPath] = {}
-  edgeFirebase.data[collectionPath][props.blockId] = edgeGlobal.dupObject(restoredDoc)
-}
 
 onBeforeMount(async () => {
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/themes`]) {
@@ -2843,14 +2844,6 @@ const formatHistoryDate = (value) => {
   return new Date(millis).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })
 }
 
-function formatHistoryEntryLabel(item, index = 0) {
-  const dateLabel = formatHistoryDate(item?.createdAt)
-  const fallbackLabel = `Entry ${index + 1}`
-  if (dateLabel)
-    return dateLabel
-  return fallbackLabel
-}
-
 const getHistorySnapshotState = (item) => {
   if (isPlainObject(item?.afterData))
     return 'afterData'
@@ -2860,6 +2853,17 @@ const getHistorySnapshotState = (item) => {
 }
 
 const getHistorySnapshotDoc = item => item?.[getHistorySnapshotState(item)] || null
+
+// "Sep 25, 2026, 12:34 PM · revision 5": the date, and the released
+// revision the saved version holds (revision 0 before any release).
+function formatHistoryEntryLabel(item, index = 0) {
+  const dateLabel = formatHistoryDate(item?.createdAt) || `Entry ${index + 1}`
+  const snapshot = getHistorySnapshotDoc(item)
+  if (!snapshot)
+    return dateLabel
+  const revision = Number.isInteger(snapshot.releasedRevision) ? snapshot.releasedRevision : 0
+  return `${dateLabel} · revision ${revision}`
+}
 
 const buildComparableBlockDiffDoc = (doc) => {
   if (!doc || typeof doc !== 'object')
@@ -2962,7 +2966,7 @@ const historyPreviewItems = computed(() => {
     const historyDoc = getHistorySnapshotDoc(item)
     if (!historyDoc)
       return false
-    return !blockDocsMatchForDiff(historyDoc, currentBlock.value)
+    return !blockDocsMatchForDiff(historyDoc, savedEditorBlock.value)
   })
 })
 
@@ -3094,6 +3098,23 @@ const buildHighlightedDiffHtml = (sourceValue, compareValue) => {
   return html || '—'
 }
 
+// Text to compare for a field: objects as key-sorted JSON (so reordered keys
+// don't show as changes), lists of plain values joined, everything else as is.
+const sortKeysDeep = (value) => {
+  if (Array.isArray(value))
+    return value.map(sortKeysDeep)
+  if (isPlainObject(value))
+    return Object.fromEntries(Object.keys(value).sort().map(key => [key, sortKeysDeep(value[key])]))
+  return value
+}
+const diffTextOf = (value) => {
+  if (Array.isArray(value) && value.every(item => item === null || typeof item !== 'object'))
+    return value.map(item => String(item ?? '')).join(', ')
+  if (value !== null && typeof value === 'object')
+    return JSON.stringify(sortKeysDeep(value), null, 2)
+  return value
+}
+
 const buildBlockChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel } = {}) => {
   const changes = []
   const base = baseDoc || {}
@@ -3125,8 +3146,8 @@ const buildBlockChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel 
       compareLabel,
       base: summarizeBlockChangeValue(baseValue),
       compare: summarizeBlockChangeValue(compareValue),
-      baseHtml: buildHighlightedDiffHtml(baseValue, compareValue),
-      compareHtml: buildHighlightedDiffHtml(compareValue, baseValue),
+      baseHtml: buildHighlightedDiffHtml(diffTextOf(baseValue), diffTextOf(compareValue)),
+      compareHtml: buildHighlightedDiffHtml(diffTextOf(compareValue), diffTextOf(baseValue)),
     })
   })
 
@@ -3134,7 +3155,7 @@ const buildBlockChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel 
 }
 
 const historyDiffDetails = computed(() => {
-  return buildBlockChangeDetails(getHistorySnapshotDoc(selectedHistoryEntry.value), currentBlock.value, {
+  return buildBlockChangeDetails(getHistorySnapshotDoc(selectedHistoryEntry.value), savedEditorBlock.value, {
     baseLabel: 'Selected History',
     compareLabel: 'Current',
   })
@@ -3145,7 +3166,7 @@ const historyDiffBasePreviewBlock = computed(() => {
 })
 
 const historyDiffComparePreviewBlock = computed(() => {
-  return buildHistoryPreviewBlock(currentBlock.value)
+  return buildHistoryPreviewBlock(savedEditorBlock.value)
 })
 
 const historyDiffCountLabel = computed(() => {
@@ -3212,33 +3233,30 @@ const closeHistoryDialog = () => {
   state.historyDialogOpen = false
 }
 
-const restoreHistoryVersion = async () => {
+// Loads the selected version into the editor as unsaved changes. Saving it
+// then goes through the normal save, so a definition change becomes an
+// unreleased draft instead of reaching every page at once.
+const loadHistoryVersionIntoEditor = () => {
   const historyEntry = selectedHistoryEntry.value
-  if (!historyEntry?.historyId || !edgeFirebase?.user?.uid)
+  const snapshotDoc = getHistorySnapshotDoc(historyEntry)
+  const target = state.editorWorkingDoc
+  if (!historyEntry?.historyId || !isPlainObject(snapshotDoc) || !target)
     return
 
-  state.historyRestoring = true
   state.historyError = ''
-  try {
-    const targetState = getHistorySnapshotState(historyEntry)
-    await edgeFirebase.runFunction('history-restoreHistory', {
-      uid: edgeFirebase.user.uid,
-      historyId: historyEntry.historyId,
-      targetState,
-    })
-    syncEditorStateFromBlockDoc(getHistorySnapshotDoc(historyEntry))
-    state.showHistoryDiffDialog = false
-    state.historyDialogOpen = false
-    state.editorKey += 1
-    notifySuccess(`Restored block from ${formatHistoryEntryLabel(historyEntry)}.`)
+  const restored = edgeGlobal.dupObject(snapshotDoc)
+  for (const field of BLOCK_REVISION_DEFINITION_FIELDS) {
+    if (restored[field] === undefined)
+      delete target[field]
+    else
+      target[field] = restored[field]
   }
-  catch {
-    state.historyError = 'Failed to restore this version.'
-    notifyError('Failed to restore block history.')
-  }
-  finally {
-    state.historyRestoring = false
-  }
+  Object.assign(target, diffBlockMetadata(target, restored))
+  editorDocUpdates(target)
+  refreshWorkingTemplatePreview(target, { force: true })
+  state.showHistoryDiffDialog = false
+  state.historyDialogOpen = false
+  notifySuccess(`Loaded ${formatHistoryEntryLabel(historyEntry)} into the editor. Save to keep it.`)
 }
 
 const handleUnsavedChanges = (changes) => {
@@ -3252,48 +3270,257 @@ const clearTemplateConversionAfterSave = async (payload) => {
     return
 
   const collectionPath = `${edgeGlobal.edgeState.organizationDocPath}/blocks`
-  const currentStoredDoc = edgeFirebase.data?.[collectionPath]?.[docId] || {}
-  const cleanedDoc = edgeGlobal.dupObject({
-    ...currentStoredDoc,
-    ...(savedDoc || {}),
-    ...(state.workingDoc || {}),
-    ...(state.editorWorkingDoc || {}),
-  })
-  delete cleanedDoc.templateConversion
-  cleanedDoc.docId = docId
-
   try {
-    await edgeFirebase.storeDoc(collectionPath, cleanedDoc)
-    if (state.editorWorkingDoc?.docId === docId) {
-      Object.assign(state.editorWorkingDoc, edgeGlobal.dupObject(cleanedDoc))
-      delete state.editorWorkingDoc.templateConversion
+    // Only the notes field: writing the working document here would make an
+    // unreleased definition live.
+    const result = await edgeFirebase.changeDoc(collectionPath, docId, { templateConversion: null })
+    if (result?.success === false)
+      throw new Error(result.message)
+    for (const doc of [state.editorWorkingDoc, state.workingDoc, state.previewBlock, state.blockRevision.view]) {
+      if (doc)
+        delete doc.templateConversion
     }
-    if (state.workingDoc?.docId === docId) {
-      Object.assign(state.workingDoc, edgeGlobal.dupObject(cleanedDoc))
-      delete state.workingDoc.templateConversion
-    }
-    if (state.previewBlock?.blockId === docId || state.previewBlock?.id === docId)
-      delete state.previewBlock.templateConversion
-    if (edgeFirebase.data?.[collectionPath]?.[docId])
-      edgeFirebase.data[collectionPath][docId] = edgeGlobal.dupObject(cleanedDoc)
   }
   catch {
     notifyError('Saved block, but could not clear conversion notes.')
   }
 }
 
+const overrideRename = reactive({ change: null, resolve: null })
+
+const confirmOverrideRename = change => new Promise((resolve) => {
+  overrideRename.change = change
+  overrideRename.resolve = resolve
+})
+
+const resolveOverrideRename = (confirmed) => {
+  const resolve = overrideRename.resolve
+  overrideRename.change = null
+  overrideRename.resolve = null
+  resolve?.(confirmed === true)
+}
+
+// A save refused because the block changed after it was loaded; the dialog
+// resolves true to replace the newer version.
+const blockChanged = reactive({ conflict: null, resolve: null })
+
+const confirmBlockChanged = details => new Promise((resolve) => {
+  blockChanged.conflict = { details, blockId: props.blockId, blockName: currentBlock.value?.name || '' }
+  blockChanged.resolve = resolve
+})
+
+const resolveBlockChanged = (confirmed) => {
+  const resolve = blockChanged.resolve
+  blockChanged.conflict = null
+  blockChanged.resolve = null
+  resolve?.(confirmed === true)
+}
+
+// `baseHash` fingerprints the definition the editor started from: saves send
+// it so they never overwrite changes made elsewhere in the meantime.
+const setBlockRevisionState = ({ view, draft = null, releasedRevision = null, draftRevision = null, baseHash = null }) => {
+  state.blockRevision = {
+    view: view ? edgeGlobal.dupObject(view) : null,
+    releasedRevision,
+    draftRevision,
+    draftSource: draft?.source || '',
+    draftUpdatedAt: draft?.updatedAt || '',
+    baseHash,
+  }
+}
+
+// Opens an existing block with its unreleased draft definition, if any.
+const loadBlockDocument = async ({ docId }) => {
+  const { stored, draft, view, baseHash } = await loadLibraryBlockForEditing({
+    edgeFirebase,
+    organizationDocPath: edgeGlobal.edgeState.organizationDocPath,
+    blockId: docId,
+  })
+  if (!stored)
+    throw new Error('This block no longer exists.')
+  setBlockRevisionState({
+    view,
+    draft,
+    releasedRevision: releasedRevisionOf(stored),
+    draftRevision: draft ? stored.draftRevision : null,
+    baseHash,
+  })
+  return view
+}
+
+const DRAFT_SOURCE_LABELS = { 'editor': 'Block Editor', 'import': 'import', 'page-editor': 'page editor', 'agent': 'agent' }
+
+const unreleasedChangesLabel = computed(() => {
+  const { draftRevision, releasedRevision, draftSource } = state.blockRevision
+  if (draftRevision === null)
+    return ''
+  const from = DRAFT_SOURCE_LABELS[draftSource] ? ` from the ${DRAFT_SOURCE_LABELS[draftSource]}` : ''
+  return `Unreleased changes${from} (revision ${draftRevision}). Pages use revision ${releasedRevision ?? 0} until an organization admin releases these changes.`
+})
+
+const activeCanary = computed(() => currentBlock.value?.canary || state.blockRevision.view?.canary || null)
+
+// A new block has no instances, so it is written directly and its live
+// definition is revision 0. Edits to an existing block save metadata directly
+// and the definition as an unreleased draft revision.
+const writeBlockDoc = async (doc) => {
+  const organizationDocPath = edgeGlobal.edgeState.organizationDocPath
+  if (props.blockId === 'new')
+    return edgeFirebase.storeDoc(`${organizationDocPath}/blocks`, doc)
+
+  const { view, revision, baseHash } = await saveWithBaseCheck({
+    blockId: props.blockId,
+    baseHash: state.blockRevision.baseHash,
+    confirm: confirmBlockChanged,
+    save: base => saveLibraryBlockEdit({
+      edgeFirebase,
+      organizationDocPath,
+      orgId: edgeGlobal.edgeState.currentOrganization,
+      blockId: props.blockId,
+      nextDoc: doc,
+      source: 'editor',
+      baseHash: base,
+    }),
+  })
+  const keptDraft = (revision.draftRevision !== null && revision.draftRevision !== undefined)
+    ? { source: state.blockRevision.draftSource, updatedAt: state.blockRevision.draftUpdatedAt }
+    : null
+  setBlockRevisionState({
+    view,
+    draft: revision.status === 'saved' ? { source: 'editor', updatedAt: new Date().toISOString() } : keptDraft,
+    releasedRevision: revision.releasedRevision ?? null,
+    draftRevision: revision.draftRevision ?? null,
+    baseHash,
+  })
+  if (revision.status === 'saved')
+    notifySuccess(`Saved as unreleased changes (revision ${revision.draftRevision}). Pages are unchanged.`)
+  else if (revision.status === 'discarded')
+    notifySuccess('The definition matches the released block again, so the unreleased changes were discarded.')
+  return { docId: props.blockId, data: view }
+}
+
+// Runs before edge-editor writes, so a declined override rename stores nothing.
+const saveBlockDoc = async (doc) => {
+  try {
+    const result = await guardOverrideRename({
+      storedDoc: props.blockId === 'new' ? null : currentBlock.value,
+      nextDoc: doc,
+      confirm: confirmOverrideRename,
+      write: () => writeBlockDoc(doc),
+    })
+    if (result?.cancelled)
+      notifyError(`Not saved. The override block keeps its name "${currentBlock.value?.name || ''}"; your changes are still in the editor.`)
+    return result
+  }
+  catch (error) {
+    notifyError(String(error?.message || error || 'Failed to save the block.'))
+    throw error
+  }
+}
+
+// Opens the release dialog: on a revision to release, or on the history.
+const openReleaseDialog = (revisionNumber = null) => {
+  state.releaseDialogRevision = revisionNumber
+  state.releaseDialogOpen = true
+}
+
+// A finished release changes what the editor loads (the draft is released,
+// or the released definition moved), so reload it.
+const handleBlockReleased = () => {
+  if (!state.editorHasUnsavedChanges)
+    state.editorKey += 1
+}
+
+const discardUnreleasedChanges = async () => {
+  const draftRevision = state.blockRevision.draftRevision
+  if (draftRevision === null || state.discardingDraft)
+    return
+  state.discardingDraft = true
+  try {
+    await discardLibraryBlockDraft({
+      edgeFirebase,
+      orgId: edgeGlobal.edgeState.currentOrganization,
+      blockId: props.blockId,
+      draftRevision,
+      baseHash: state.blockRevision.baseHash,
+    })
+    state.discardDraftDialogOpen = false
+    state.editorKey += 1
+    notifySuccess(`Discarded unreleased revision ${draftRevision}.`)
+  }
+  catch (error) {
+    if (isBlockBaseChangedError(error))
+      state.discardDraftDialogOpen = false
+    notifyError(String(error?.message || error || 'Failed to discard the unreleased changes.'))
+  }
+  finally {
+    state.discardingDraft = false
+  }
+}
+
+// Advisory checks on the saved block. They run after the save completes and
+// never block it; the newest run wins if saves overlap.
+let blockChecksRun = 0
+const runBlockChecks = async (doc) => {
+  const run = ++blockChecksRun
+  state.blockChecks = { status: 'running', result: null, checkedAt: '', error: '' }
+  try {
+    const result = await validateBlock(edgeGlobal.dupObject(doc || {}), {
+      knownThemeIds: availableThemeIds.value,
+      renderTemplate: renderTemplateAsync,
+    })
+    if (run === blockChecksRun)
+      state.blockChecks = { status: 'done', result, checkedAt: new Date().toLocaleTimeString(), error: '' }
+  }
+  catch (error) {
+    if (run === blockChecksRun)
+      state.blockChecks = { status: 'failed', result: null, checkedAt: '', error: String(error?.message || error) }
+  }
+}
+
+const blockCheckIssues = computed(() => {
+  const result = state.blockChecks.result
+  return result ? [...result.errors, ...result.warnings] : []
+})
+
+const blockChecksLabel = computed(() => {
+  const { status, result } = state.blockChecks
+  if (status === 'running')
+    return 'Block checks: running'
+  if (status === 'failed')
+    return 'Block checks: could not run'
+  if (status !== 'done')
+    return 'Block checks: save to run'
+  const errors = result.errors.length
+  const warnings = result.warnings.length
+  if (!errors && !warnings)
+    return 'Block checks: no issues'
+  return `Block checks: ${errors} error(s), ${warnings} warning(s)`
+})
+
 const handleBlockSaved = async (payload) => {
+  runBlockChecks(payload?.data)
   refreshWorkingTemplatePreview(state.editorWorkingDoc, { force: true })
   await clearTemplateConversionAfterSave(payload)
 }
 
 const exportCurrentBlock = async () => {
-  const doc = blocks.value?.[props.blockId]
+  const doc = savedEditorBlock.value
   if (!doc || !doc.docId) {
     notifyError('Save this block before exporting.')
     return
   }
-  const exportPayload = { ...getBlockDocDefaults(), ...doc }
+  const exportPayload = {
+    ...getBlockDocDefaults(),
+    ...doc,
+    // The version exported (the draft if there is one), so importing this
+    // file after the block changed again is caught.
+    [BLOCK_EXPORT_BASE_KEY]: blockExportBase({
+      definitionDoc: doc,
+      releasedRevision: state.blockRevision.releasedRevision,
+      draftRevision: state.blockRevision.draftRevision,
+    }),
+  }
   const saved = await saveJsonFile(exportPayload, `block-${doc.docId}.json`)
   if (saved)
     notifySuccess(`Exported block "${doc.docId}".`)
@@ -3316,6 +3543,8 @@ const exportCurrentBlock = async () => {
       :show-footer="false"
       :no-close-after-save="true"
       :working-doc-overrides="editorWorkingDocOverrides"
+      :load-document="props.blockId === 'new' ? null : loadBlockDocument"
+      :save-handler="saveBlockDoc"
       @working-doc="editorDocUpdates"
       @unsaved-changes="handleUnsavedChanges"
       @saved="handleBlockSaved"
@@ -3375,6 +3604,38 @@ const exportCurrentBlock = async () => {
               size="icon"
               variant="outline"
               class="h-9 w-9"
+              :disabled="props.blockId === 'new' || !currentBlock"
+              title="Releases"
+              aria-label="Releases"
+              @click="openReleaseDialog()"
+            >
+              <Rocket class="h-4 w-4" />
+            </edge-shad-button>
+            <edge-shad-button
+              type="button"
+              size="icon"
+              variant="outline"
+              class="relative h-9 w-9"
+              :title="blockChecksLabel"
+              :aria-label="blockChecksLabel"
+              @click="state.blockChecksOpen = true"
+            >
+              <Loader2 v-if="state.blockChecks.status === 'running'" class="h-4 w-4 animate-spin" />
+              <ListChecks v-else class="h-4 w-4" />
+              <span
+                v-if="state.blockChecks.status === 'done' && blockCheckIssues.length"
+                class="absolute -right-1 -top-1 min-w-4 rounded-full px-1 text-[10px] font-semibold leading-4"
+                :class="state.blockChecks.result.errors.length ? 'bg-destructive text-destructive-foreground' : 'bg-muted-foreground text-background'"
+                aria-hidden="true"
+              >
+                {{ blockCheckIssues.length }}
+              </span>
+            </edge-shad-button>
+            <edge-shad-button
+              type="button"
+              size="icon"
+              variant="outline"
+              class="h-9 w-9"
               :disabled="props.blockId === 'new' || !blocks?.[props.blockId]"
               title="Export Block"
               aria-label="Export Block"
@@ -3387,6 +3648,37 @@ const exportCurrentBlock = async () => {
       </template>
       <template #main="slotProps">
         <div class="pt-4">
+          <div v-if="activeCanary" role="status" class="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
+            <div><p class="font-medium">Canary—not released everywhere</p><p class="mt-1">Revision {{ activeCanary.revisionNumber }} is assigned to {{ activeCanary.siteIds.length }} canary site(s). Other sites still use global revision {{ state.blockRevision.releasedRevision ?? 0 }}.</p></div>
+            <edge-shad-button v-if="isGlobalAdmin" type="button" size="sm" :disabled="state.editorHasUnsavedChanges || state.discardingDraft" :title="state.editorHasUnsavedChanges ? 'Save your changes before releasing.' : ''" @click="openReleaseDialog(activeCanary.revisionNumber)"><Rocket class="mr-2 h-4 w-4" />Release to all sites…</edge-shad-button>
+          </div>
+          <div
+            v-if="unreleasedChangesLabel"
+            role="status"
+            class="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
+          >
+            <span>{{ unreleasedChangesLabel }}</span>
+            <div class="flex gap-2">
+              <edge-shad-button
+                type="button"
+                size="sm"
+                :disabled="state.discardingDraft || state.editorHasUnsavedChanges"
+                :title="state.editorHasUnsavedChanges ? 'Save your changes before releasing.' : ''"
+                @click="openReleaseDialog(state.blockRevision.draftRevision)"
+              >
+                <Rocket class="mr-2 h-4 w-4" /> Release...
+              </edge-shad-button>
+              <edge-shad-button
+                type="button"
+                size="sm"
+                variant="outline"
+                :disabled="state.discardingDraft"
+                @click="state.discardDraftDialogOpen = true"
+              >
+                Discard unreleased changes
+              </edge-shad-button>
+            </div>
+          </div>
           <div class="flex w-full gap-2">
             <div class="flex-auto">
               <edge-shad-input
@@ -3635,7 +3927,7 @@ const exportCurrentBlock = async () => {
                       >
                         <span>{{ schemaItem.entry.label || schemaItem.field }}</span>
                         <span class="rounded border border-slate-200 px-2 py-0.5 text-[10px] uppercase tracking-wide text-slate-500 dark:border-slate-700">
-                          {{ schemaItem.entry.type || 'text' }}
+                          {{ getTemplateV2SchemaEditorType(schemaItem.entry) }}
                         </span>
                       </summary>
                       <div class="space-y-3 p-3">
@@ -3654,7 +3946,7 @@ const exportCurrentBlock = async () => {
                           placeholder="Heading"
                         />
                         <edge-shad-select
-                          :model-value="schemaItem.entry.type"
+                          :model-value="getTemplateV2SchemaEditorType(schemaItem.entry)"
                           :name="`schemaType-${schemaItem.field}`"
                           label="Type"
                           :items="v2SchemaTypeOptions"
@@ -3731,7 +4023,7 @@ const exportCurrentBlock = async () => {
                                 placeholder="Heading"
                               />
                               <edge-shad-select
-                                :model-value="arraySchemaItem.entry.type"
+                                :model-value="getTemplateV2SchemaEditorType(arraySchemaItem.entry)"
                                 :name="`arraySchemaType-${schemaItem.field}-${arraySchemaItem.field}`"
                                 label="Type"
                                 :items="v2ArrayItemSchemaTypeOptions"
@@ -3758,6 +4050,7 @@ const exportCurrentBlock = async () => {
                                 @update:model-value="updateTemplateV2SchemaArrayField(arraySchemaItem.entry, 'tags', $event)"
                               />
                               <edge-shad-select
+                                v-if="getTemplateV2SchemaEditorType(arraySchemaItem.entry) === 'image'"
                                 :model-value="arraySchemaItem.entry.variant || 'public'"
                                 :name="`arraySchemaVariant-${schemaItem.field}-${arraySchemaItem.field}`"
                                 label="Image Variant"
@@ -3898,6 +4191,7 @@ const exportCurrentBlock = async () => {
                           @update:model-value="updateTemplateV2SchemaArrayField(schemaItem.entry, 'tags', $event)"
                         />
                         <edge-shad-select
+                          v-if="getTemplateV2SchemaEditorType(schemaItem.entry) === 'image'"
                           :model-value="schemaItem.entry.variant || 'public'"
                           :name="`schemaVariant-${schemaItem.field}`"
                           label="Image Variant"
@@ -4005,7 +4299,7 @@ const exportCurrentBlock = async () => {
                         placeholder="Heading"
                       />
                       <edge-shad-select
-                        :model-value="state.schemaWizardDraft.entry.type"
+                        :model-value="getTemplateV2SchemaEditorType(state.schemaWizardDraft.entry)"
                         name="schemaWizardType"
                         label="Type"
                         :items="v2SchemaTypeOptions"
@@ -4131,7 +4425,7 @@ const exportCurrentBlock = async () => {
                                 placeholder="Heading"
                               />
                               <edge-shad-select
-                                :model-value="arraySchemaItem.entry.type"
+                                :model-value="getTemplateV2SchemaEditorType(arraySchemaItem.entry)"
                                 :name="`schemaWizardArrayType-${arraySchemaItem.field}`"
                                 label="Type"
                                 :items="v2ArrayItemSchemaTypeOptions"
@@ -4148,6 +4442,7 @@ const exportCurrentBlock = async () => {
                                 @update:model-value="updateTemplateV2SchemaArrayField(arraySchemaItem.entry, 'tags', $event)"
                               />
                               <edge-shad-select
+                                v-if="getTemplateV2SchemaEditorType(arraySchemaItem.entry) === 'image'"
                                 :model-value="arraySchemaItem.entry.variant || 'public'"
                                 :name="`schemaWizardArrayVariant-${arraySchemaItem.field}`"
                                 label="Image Variant"
@@ -4307,6 +4602,7 @@ const exportCurrentBlock = async () => {
                         @update:model-value="updateTemplateV2SchemaArrayField(state.schemaWizardDraft.entry, 'tags', $event)"
                       />
                       <edge-shad-select
+                        v-if="getTemplateV2SchemaEditorType(state.schemaWizardDraft.entry) === 'image'"
                         :model-value="state.schemaWizardDraft.entry.variant || 'public'"
                         name="schemaWizardVariant"
                         label="Image Variant"
@@ -4949,6 +5245,7 @@ const exportCurrentBlock = async () => {
                 language="handlebars"
                 name="content"
                 :enable-formatting="!isWorkingTemplateV2Doc(slotProps.workingDoc)"
+                format-single-line-on-open
                 height="calc(100vh - 316px)"
                 class="mb-0 flex-1"
                 @update:model-value="syncWorkingTemplateContent(slotProps.workingDoc, $event)"
@@ -5256,6 +5553,75 @@ const exportCurrentBlock = async () => {
         </div>
       </template>
     </edge-editor>
+    <edge-cms-override-rename-dialog :change="overrideRename.change" @resolve="resolveOverrideRename" />
+    <edge-cms-block-changed-dialog :conflict="blockChanged.conflict" @resolve="resolveBlockChanged" />
+    <edge-shad-dialog v-model="state.blockChecksOpen">
+      <DialogContent class="pt-8 max-w-3xl max-h-[85vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle class="text-left">
+            Block Checks
+          </DialogTitle>
+          <DialogDescription class="text-left">
+            Checks run on the saved block after each save. They never block saving.
+          </DialogDescription>
+        </DialogHeader>
+        <div class="min-h-0 flex-1 overflow-y-auto pr-1" aria-live="polite">
+          <p v-if="state.blockChecks.status === 'idle'" class="text-sm text-muted-foreground">
+            Save the block to run its checks.
+          </p>
+          <p v-else-if="state.blockChecks.status === 'running'" class="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 class="h-4 w-4 animate-spin" /> Running checks...
+          </p>
+          <p v-else-if="state.blockChecks.status === 'failed'" class="text-sm text-destructive">
+            The checks could not run: {{ state.blockChecks.error }}
+          </p>
+          <p v-else-if="!blockCheckIssues.length" class="text-sm">
+            No issues found at {{ state.blockChecks.checkedAt }}.
+          </p>
+          <template v-else>
+            <p class="mb-3 text-sm text-muted-foreground">
+              {{ state.blockChecks.result.errors.length }} error(s) and {{ state.blockChecks.result.warnings.length }} warning(s) at {{ state.blockChecks.checkedAt }}.
+            </p>
+            <edge-cms-block-validation-issues :issues="blockCheckIssues" />
+          </template>
+        </div>
+        <DialogFooter class="pt-2">
+          <edge-shad-button @click="state.blockChecksOpen = false">
+            Close
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
+    <edge-cms-block-release-dialog
+      v-if="props.blockId !== 'new'"
+      v-model="state.releaseDialogOpen"
+      :block-id="props.blockId"
+      :initial-revision="state.releaseDialogRevision"
+      @released="handleBlockReleased"
+    />
+    <edge-shad-dialog v-model="state.discardDraftDialogOpen">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle class="text-left">
+            Discard unreleased changes?
+          </DialogTitle>
+          <DialogDescription class="text-left">
+            Revision {{ state.blockRevision.draftRevision }} is discarded and the editor reloads the
+            released block (revision {{ state.blockRevision.releasedRevision ?? 0 }}). Pages are not
+            affected. Metadata such as the name and tags stays as saved.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter class="pt-2 flex justify-between">
+          <edge-shad-button variant="outline" :disabled="state.discardingDraft" @click="state.discardDraftDialogOpen = false">
+            Cancel
+          </edge-shad-button>
+          <edge-shad-button variant="destructive" :disabled="state.discardingDraft" @click="discardUnreleasedChanges">
+            <Loader2 v-if="state.discardingDraft" class="mr-2 h-4 w-4 animate-spin" />
+            Discard
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
     <edge-shad-dialog v-model="state.historyDialogOpen">
       <DialogContent class="max-w-[96vw] max-h-[92vh] overflow-hidden flex flex-col">
         <DialogHeader>
@@ -5263,10 +5629,11 @@ const exportCurrentBlock = async () => {
             Block History
           </DialogTitle>
           <DialogDescription class="text-left">
-            Select a saved version, preview it, and restore it if needed.
+            Select a saved version, preview it, and load it into the editor. Saving
+            it keeps it as unreleased changes; pages don't change until it's released.
           </DialogDescription>
         </DialogHeader>
-        <div class="min-w-0 space-y-4">
+        <div class="min-h-0 min-w-0 flex-1 space-y-4 overflow-y-auto pr-1">
           <div class="grid gap-4 md:grid-cols-[minmax(0,320px)_1fr] md:items-end">
             <div class="flex min-w-0 flex-col justify-end">
               <edge-shad-combobox
@@ -5316,14 +5683,14 @@ const exportCurrentBlock = async () => {
           <div class="min-w-0 rounded-md border border-slate-300 bg-card dark:border-slate-700">
             <div
               v-if="state.historyLoading"
-              class="flex h-[70vh] items-center justify-center gap-2 text-sm text-slate-500 dark:text-slate-400"
+              class="flex h-[55vh] items-center justify-center gap-2 text-sm text-slate-500 dark:text-slate-400"
             >
               <Loader2 class="h-4 w-4 animate-spin" />
               Loading history preview...
             </div>
             <div
               v-else-if="!state.historyPreviewBlock"
-              class="flex h-[70vh] items-center justify-center px-6 text-center text-sm text-slate-500 dark:text-slate-400"
+              class="flex h-[55vh] items-center justify-center px-6 text-center text-sm text-slate-500 dark:text-slate-400"
             >
               No older saved versions are available to preview.
             </div>
@@ -5334,8 +5701,9 @@ const exportCurrentBlock = async () => {
             >
               <div class="w-full mx-auto bg-white drop-shadow-[4px_4px_6px_rgba(0,0,0,0.5)] shadow-lg shadow-black/30" :class="[previewSurfaceClass, previewAuthClass]" style="transform: translateZ(0);">
                 <edge-cms-block
+                  :key="state.historySelectedId || 'history-preview'"
                   v-model="state.historyPreviewBlock"
-                  class="!h-[70vh] overflow-y-auto"
+                  class="!h-[55vh] overflow-y-auto"
                   :site-id="edgeGlobal.edgeState.blockEditorSite"
                   :render-context="state.previewRenderContext"
                   :theme="theme"
@@ -5354,17 +5722,16 @@ const exportCurrentBlock = async () => {
             </div>
           </div>
         </div>
-        <DialogFooter class="pt-2 flex justify-between">
+        <DialogFooter class="shrink-0 pt-2 flex justify-between">
           <edge-shad-button variant="outline" :disabled="state.historyRestoring" @click="closeHistoryDialog">
             Cancel
           </edge-shad-button>
           <edge-shad-button
-            :disabled="state.historyLoading || state.historyRestoring || !selectedHistoryEntry"
-            @click="restoreHistoryVersion"
+            :disabled="state.historyLoading || state.historyRestoring || !selectedHistoryEntry || !state.editorWorkingDoc"
+            @click="loadHistoryVersionIntoEditor"
           >
-            <Loader2 v-if="state.historyRestoring" class="mr-2 h-4 w-4 animate-spin" />
-            <RotateCcw v-else class="mr-2 h-4 w-4" />
-            Restore
+            <RotateCcw class="mr-2 h-4 w-4" />
+            Load into editor
           </edge-shad-button>
         </DialogFooter>
       </DialogContent>
@@ -5646,6 +6013,7 @@ const exportCurrentBlock = async () => {
                     <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#text {"field":"headline","value":"Hello","title":"Headline"}}}}
 {{{#textarea {"field":"intro","value":""}}}}
 {{{#richtext {"field":"body","value":""}}}}
+{{{#richtext {"field":"video","value":"","picker":"video"}}}}
 {{{#image {"field":"heroImage","value":"https://example.com/hero.jpg"}}}}</code></pre>
                   </section>
 
@@ -5671,11 +6039,41 @@ const exportCurrentBlock = async () => {
                       <div><code>richtext</code> → WYSIWYG editor (HTML is rendered as‑is).</div>
                       <div><code>number</code> → number input.</div>
                       <div><code>image</code> → image picker + preview.</div>
+                      <div><code>video</code> → Cloudflare Stream video picker + iframe preview.</div>
                       <div><code>publication</code> → publication picker that stores selected page image data.</div>
                       <div><code>array</code> → list editor (manual items) or data loader (API/collection).</div>
                     </div>
                     <p class="text-sm text-foreground">
                       Rich text image controls include size buttons, float left/none/right, and a width slider (10–100%).
+                    </p>
+                  </section>
+
+                  <section id="video-fields" class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Video Fields (Media Picker)
+                    </h3>
+                    <p class="text-sm text-foreground">
+                      Video inputs use the shared media manager, accept video uploads, and save a Cloudflare Stream iframe. Newly uploaded videos can take a few minutes to finish processing before they can be selected.
+                    </p>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;div class="aspect-video"&gt;{{ richtext(promoVideo) }}&lt;/div&gt;
+
+{{#for video in videos}}
+  &lt;div class="aspect-video"&gt;{{ richtext(video.embed) }}&lt;/div&gt;
+{{/for}}</code></pre>
+                    <p class="text-sm text-foreground">
+                      Always render video values with <code v-pre>{{ richtext(...) }}</code>, including Video fields inside array items. A bare <code v-pre>{{ promoVideo }}</code> can show the iframe as escaped text on the live site.
+                    </p>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{
+  "promoVideo": {
+    "type": "richtext",
+    "label": "Promo Video",
+    "picker": "video",
+    "value": "",
+    "tags": ["Videos"]
+  }
+}</code></pre>
+                    <p class="text-sm text-foreground">
+                      The friendly Inputs editor labels this configuration as Video. The stored <code>richtext</code> type is intentional so the value stays on the existing rich-text contract.
                     </p>
                   </section>
 
