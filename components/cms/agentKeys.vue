@@ -30,6 +30,7 @@ const state = reactive({
 
 const orgId = computed(() => edgeGlobal.edgeState.currentOrganization)
 const projectId = import.meta.env.VITE_FIREBASE_PROJECT_ID || ''
+const functionsRegion = import.meta.env.VITE_FIREBASE_FUNCTIONS_REGION || 'us-central1'
 const lifetimeItems = AGENT_KEY_LIFETIMES.map(days => ({ name: String(days), title: `${days} days` }))
 const STATUS_LABELS = { active: 'Active', expired: 'Expired', revoked: 'Revoked' }
 const formatDate = value => (value ? new Date(value).toLocaleString() : '—')
@@ -115,6 +116,8 @@ const revokeOpen = computed({
 })
 
 watch(orgId, (value) => {
+  state.created = null
+  state.confirmRevoke = null
   if (value)
     load()
 }, { immediate: true })
@@ -136,6 +139,11 @@ watch(orgId, (value) => {
       </edge-shad-button>
     </div>
 
+    <edge-cms-agent-connections />
+
+    <h3 class="text-lg font-semibold">
+      Organization keys
+    </h3>
     <p class="max-w-3xl text-sm text-muted-foreground">
       An agent key lets an agent, such as the Firebase MCP, build in this organization as you: create themes, draft pages,
       place blocks, fill in content and save block drafts. It can never publish a page or release a block. Each key works in
@@ -259,7 +267,7 @@ watch(orgId, (value) => {
               Endpoint
             </dt>
             <dd v-if="projectId">
-              <code class="break-all">{{ agentOperationEndpoint(projectId) }}</code>
+              <code class="break-all">{{ agentOperationEndpoint(projectId, functionsRegion) }}</code>
             </dd>
             <dt class="text-muted-foreground">
               Expires

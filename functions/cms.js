@@ -28,6 +28,7 @@ const blockRevisions = require('./cmsBlockRevisions')
 const blockReleases = require('./cmsBlockReleases')
 const cmsOperations = require('./cmsOperations')
 const cmsAgentKeys = require('./cmsAgentKeys')
+const cmsAgentConnections = require('./cmsAgentConnections')
 const { buildPreviewUrl, issuePreviewToken, verifyPreviewToken } = require('./cmsPreviewTokens')
 const { removeCmsPageFromMenus } = require('./helpers/cmsPageDeletion')
 const { resolveSubmittedUserRouting } = require('./helpers/submittedUserRouting')
@@ -1963,6 +1964,11 @@ exports.createAgentKey = cmsAgentKeys.createAgentKey
 exports.listAgentKeys = cmsAgentKeys.listAgentKeys
 exports.revokeAgentKey = cmsAgentKeys.revokeAgentKey
 exports.agentOperation = cmsAgentKeys.agentOperation
+exports.createAgentConnection = cmsAgentConnections.createAgentConnection
+exports.listAgentConnections = cmsAgentConnections.listAgentConnections
+exports.renewAgentConnection = cmsAgentConnections.renewAgentConnection
+exports.revokeAgentConnection = cmsAgentConnections.revokeAgentConnection
+exports.agentConnection = cmsAgentConnections.agentConnection
 
 exports.fontFileUpdated = onDocumentUpdated({ document: 'organizations/{orgId}/files/{fileId}', timeoutSeconds: 180 }, async (event) => {
   const before = event.data.before.data() || {}

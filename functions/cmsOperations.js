@@ -712,8 +712,8 @@ const performCheck = async ({ uid, orgId, operation }) => {
 }
 
 // Runs an authorized operation if its checksum still matches. `via` is
-// "hub" or "agent"; agent runs also record the key.
-const performRun = async ({ uid, orgId, operation, checksum, client = '', via = 'hub', agentKeyId = null }) => {
+// "hub" or "agent"; agent runs also record the key and parent connection.
+const performRun = async ({ uid, orgId, operation, checksum, client = '', via = 'hub', agentKeyId = null, agentConnectionId = null }) => {
   if (typeof checksum !== 'string' || !checksum)
     throw new HttpsError('invalid-argument', 'checksum is required: run cms-checkOperation first.')
   const now = Date.now()
@@ -729,6 +729,7 @@ const performRun = async ({ uid, orgId, operation, checksum, client = '', via = 
     runAt: new Date(now).toISOString(),
     via,
     agentKeyId,
+    agentConnectionId,
     client: String(client || '').slice(0, 100),
     status: 'applied',
   }
@@ -766,7 +767,7 @@ const performRun = async ({ uid, orgId, operation, checksum, client = '', via = 
     const { definition: _definition, ...recorded } = operation
     await auditRef.set({ ...auditBase, operation: recorded, changes: outcome.plan.changes, result })
   }
-  logger.log(`CMS operation ${operation.type} run by ${uid} via ${via}`, { orgId, result, agentKeyId })
+  logger.log(`CMS operation ${operation.type} run by ${uid} via ${via}`, { orgId, result, agentKeyId, agentConnectionId })
   return { operationId: auditRef.id, status: 'applied', result, summary: outcome.plan.summary }
 }
 

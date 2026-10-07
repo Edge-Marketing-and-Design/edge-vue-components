@@ -18,6 +18,19 @@ const DEFAULT_THEME_FONT_LIMIT = 100
 const MAX_DIFF_CHANGES = 500
 const MAX_DIFF_TEXT = 50000
 
+export function resolveCmsOrganization(requestedOrgId, config) {
+  const orgId = String(requestedOrgId || config.defaultOrgId || '').trim()
+  if (!orgId)
+    throw new Error('orgId is required. Pass it explicitly or configure defaultOrgId/EDGE_CMS_MCP_DEFAULT_ORG_ID.')
+  assertFirestoreSegment(orgId, 'orgId')
+  const allowed = config.allowedOrganizationIds || []
+  if (!Array.isArray(allowed))
+    throw new Error('allowedOrganizationIds must be an array.')
+  if (allowed.length && !allowed.includes(orgId))
+    throw new Error(`Organization is outside allowedOrganizationIds: ${orgId}`)
+  return orgId
+}
+
 export function createCmsToolService({
   db,
   config,
@@ -55,15 +68,7 @@ export function createCmsToolService({
     ...(credentials ? { credentials } : {}),
   })
 
-  const resolveOrgId = (requestedOrgId = '') => {
-    const configuredOrgId = String(requestedOrgId || config.defaultOrgId || '').trim()
-    if (!configuredOrgId) {
-      throw new Error(
-        'orgId is required. Pass it explicitly or configure defaultOrgId/EDGE_CMS_MCP_DEFAULT_ORG_ID.',
-      )
-    }
-    return assertFirestoreSegment(configuredOrgId, 'orgId')
-  }
+  const resolveOrgId = requestedOrgId => resolveCmsOrganization(requestedOrgId, config)
 
   const readProductionBlock = async ({ orgId: requestedOrgId, docId: requestedDocId }) => {
     const orgId = resolveOrgId(requestedOrgId)

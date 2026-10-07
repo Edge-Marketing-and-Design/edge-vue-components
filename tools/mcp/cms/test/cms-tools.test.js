@@ -9,10 +9,47 @@ import {
   collectBlockReferences,
   createCmsToolService,
   hashDocument,
+  resolveCmsOrganization,
   resolveVueOverride,
   validateBlockDocument,
   validateBlockWithRender,
 } from '../src/cms-tools.js'
+
+test('organization resolution enforces configured tenants including the default', () => {
+  const config = { defaultOrgId: 'allowed', allowedOrganizationIds: ['allowed'] }
+  assert.equal(resolveCmsOrganization('', config), 'allowed')
+  assert.equal(resolveCmsOrganization(' allowed ', config), 'allowed')
+  assert.throws(() => resolveCmsOrganization('other', config), /outside allowedOrganizationIds/)
+  assert.throws(() => resolveCmsOrganization('', { ...config, defaultOrgId: 'other' }), /outside allowedOrganizationIds/)
+  assert.throws(() => resolveCmsOrganization('allowed/blocks', config), /orgId/)
+  assert.throws(() => resolveCmsOrganization('allowed', { allowedOrganizationIds: 'allowed' }), /must be an array/)
+  assert.equal(resolveCmsOrganization('other', {}), 'other')
+})
+
+test('CMS reads reject disallowed organizations before accessing Firestore', async () => {
+  let reads = 0
+  const db = {
+    doc() {
+      reads++
+      throw new Error('Unexpected Firestore read')
+    },
+    collection() {
+      reads++
+      throw new Error('Unexpected Firestore read')
+    },
+  }
+  const service = createCmsToolService({
+    db,
+    config: { defaultOrgId: 'other', allowedOrganizationIds: ['allowed'] },
+    projectId: 'test-project',
+    repoRoot: os.tmpdir(),
+  })
+  for (const name of ['readProductionBlock', 'readProductionTheme', 'findBlock', 'findTheme', 'findUsage', 'auditBlocks', 'resolveOverride']) {
+    await assert.rejects(service[name]({ orgId: 'other', docId: 'hero', themeId: 'theme' }), /outside allowedOrganizationIds/, name)
+    await assert.rejects(service[name]({ docId: 'hero', themeId: 'theme' }), /outside allowedOrganizationIds/, `${name} default`)
+  }
+  assert.equal(reads, 0)
+})
 
 test('hashDocument is stable across object key ordering', () => {
   assert.equal(

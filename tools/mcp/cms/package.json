@@ -1,9 +1,9 @@
 {
   "name": "edge-cms-mcp",
   "type": "module",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
-  "description": "CMS MCP server for Edge Hubs: read-only Firestore and CMS block tools, plus draft-only CMS operations through an agent key.",
+  "description": "CMS MCP for Edge Hubs: bounded Firestore reads and draft operations through Hub-managed connections or organization keys.",
   "bin": {
     "edge-cms-mcp": "src/server.js"
   },
@@ -12,8 +12,8 @@
   },
   "scripts": {
     "start": "node src/server.js",
-    "check": "node --check src/server.js && node --check src/cms-tools.js && node --check src/credentials.js",
-    "test": "node --test test/*.test.js"
+    "check": "node --check src/server.js && node --check src/cms-tools.js && node --check src/credentials.js && node --check src/agent-connections.js && node --check src/agent-operations.js",
+    "test": "node --test test/*.test.js ../../../functions/tests/cms-agent-connections.unit.test.cjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
