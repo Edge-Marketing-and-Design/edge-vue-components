@@ -259,6 +259,20 @@ const clearExtraFields = () => {
 // eslint-disable-next-line vue/no-dupe-keys
 const modelValue = ref(null)
 
+const initialModelValue = () => {
+  if (props.modelValue !== undefined)
+    return edgeGlobal.dupObject(props.modelValue)
+  if (['array', 'objectList', 'stringArray', 'numberArray', 'intArray', 'integerArray', 'tags', 'selectTags'].includes(props.fieldType))
+    return []
+  if (props.fieldType === 'object')
+    return {}
+  if (props.fieldType === 'boolean')
+    return false
+  if (returnObject.value || ['number', 'integer', 'money'].includes(props.fieldType))
+    return null
+  return ''
+}
+
 const refreshArray = ref(true)
 const addArray = () => {
   if (state.arrayAdd === null || state.arrayAdd === '') {
@@ -526,19 +540,19 @@ onBeforeMount(async () => {
     state.fieldInsert.required = false
     state.fieldInsert.description = ''
   }
-  modelValue.value = edgeGlobal.dupObject(props.modelValue)
+  modelValue.value = initialModelValue()
   if (props.fieldType === 'objectList') {
-    props.modelValue.forEach((item, index) => {
+    modelValue.value?.forEach((item, index) => {
       state.objectListOriginalOrder[item.id] = index
     })
   }
   if (props.fieldType === 'object') {
-    if (!edgeGlobal.objHas(props.modelValue, 'flingKeyOrder')) {
-      if (props.modelValue === null) {
+    if (!edgeGlobal.objHas(modelValue.value, 'flingKeyOrder')) {
+      if (modelValue.value === null) {
         state.order = []
       }
       else {
-        state.order = Object.entries(props.modelValue).map(([key, value]) => {
+        state.order = Object.entries(modelValue.value).map(([key, value]) => {
           return {
             key,
           }
@@ -548,15 +562,15 @@ onBeforeMount(async () => {
       }
     }
     else {
-      state.order = edgeGlobal.dupObject(props.modelValue.flingKeyOrder)
+      state.order = edgeGlobal.dupObject(modelValue.value.flingKeyOrder)
     }
   }
   if (props.fieldType === 'array') {
-    if (props.modelValue === null) {
+    if (modelValue.value === null) {
       state.order = []
     }
     else {
-      state.order = props.modelValue.map((value, index) => {
+      state.order = modelValue.value.map((value, index) => {
         return {
           key: index,
           value,
@@ -740,7 +754,7 @@ watch(() => props.modelValue, (newValue) => {
 })
 
 watch(() => state.order, () => {
-  if (props.fieldType === 'object') {
+  if (props.fieldType === 'object' && modelValue.value !== null) {
     modelValue.value.flingKeyOrder = edgeGlobal.dupObject(state.order)
   }
   if (props.fromFunctions) {
