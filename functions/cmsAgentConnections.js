@@ -1,6 +1,7 @@
 // Hub-managed personal/device credentials. Keep identical in functions/.
 const { createHash, randomBytes, timingSafeEqual } = require('node:crypto')
-const { admin, db, onCall, onRequest, HttpsError, permissionCheck, logger } = require('./config.js')
+const { Timestamp } = require('firebase-admin/firestore')
+const { db, onCall, onRequest, HttpsError, permissionCheck, logger } = require('./config.js')
 
 const DAY_MS = 86400000
 const SESSION_MS = 15 * 60 * 1000
@@ -182,7 +183,7 @@ exports.agentConnection = onRequest({ timeoutSeconds: 60 }, async (req, res) => 
     if (siteSnap && !siteSnap.exists)
       throw new HttpsError('not-found', 'Site does not exist in the selected organization.')
     const expiresAt = new Date(Math.min(Date.now() + SESSION_MS, Date.parse(connection.data.expiresAt))).toISOString()
-    const data = { connectionId: connection.id, createdBy: connection.data.createdBy, orgId, siteId, scope, createdAt: new Date().toISOString(), expiresAt, expiresAtTimestamp: admin.firestore.Timestamp.fromMillis(Date.parse(expiresAt)), revokedAt: null }
+    const data = { connectionId: connection.id, createdBy: connection.data.createdBy, orgId, siteId, scope, createdAt: new Date().toISOString(), expiresAt, expiresAtTimestamp: Timestamp.fromMillis(Date.parse(expiresAt)), revokedAt: null }
     const session = await issue(sessions(), 'cmsas', data)
     await connection.ref.update({ lastUsedAt: new Date().toISOString() })
     res.json({ ok: true, sessionId: session.id, token: session.token, expiresAt, orgId, organizationName: String(orgSnap.data()?.name || orgId), siteId, siteName: siteSnap ? String(siteSnap.data()?.name || siteId) : null, scope })
