@@ -339,3 +339,62 @@ cms_contract kind=blocks
 npm --prefix edge/tools/mcp/cms test
 npm --prefix edge/tools/mcp/cms run check
 ```
+
+## Hub-managed connections (preferred for multi-org operators)
+
+Create a personal/device connection in **Dev Mode → Agent Keys → Hub connections**.
+Store its `cmsac.…` credential in one private file outside Git. Configure:
+
+```json
+{
+  "agentConnectionFile": "~/.config/your-hub/cms-agent-connection",
+  "agentConnectionEndpoint": "https://REGION-PROJECT.cloudfunctions.net/cms-agentConnection",
+  "defaultOrgId": "",
+  "allowedOrganizationIds": []
+}
+```
+
+`EDGE_CMS_AGENT_CONNECTION` can supply the credential instead of the file.
+Connection mode never falls back to `agentKeyFile` or `EDGE_CMS_AGENT_KEY`.
+Existing single-org key configurations continue to work when connection mode
+is not configured. Use HTTPS for production endpoints.
+
+1. Call `cms_agent_organizations`. Follow `nextStartAfter` until null, even if
+   a filtered page is empty. The Hub checks live permissions; new organizations
+   do not require another local key or config edit.
+2. Call `cms_open_session` with an exact `orgId`, `scope: "site"` and `siteId`.
+   Check the returned organization/site names against the job. For library/theme
+   work or creating a site, deliberately choose `scope: "organization"` instead.
+3. Pass the returned `sessionId` to check/run/preview/readiness along with the
+   target org/site. A wrong org/site handle is refused before sending an operation.
+   Run still needs the checksum from check.
+
+The client automatically renews short-lived credentials for that handle's exact
+original target. Handles do not change the target of another job and tokens stay
+private in process memory. After MCP restart, open a new session.
+
+Renew the parent connection in the Hub (7/30/90 days) without replacing its local
+credential. Revoke it there to stop all its issued sessions on their next request.
+Expired/revoked parents and lost permissions are refused, including for cached
+sessions. Expired connections can be renewed by their creator; revoked ones
+require a new connection. Each operator/device and each Hub has its own connection.
+
+Deploy shared `cms.js`, `cmsAgentKeys.js`, `cmsAgentConnections.js` and
+`cmsOperations.js` together;
+there are four connection callables plus the new HTTP endpoint. Make the HTTP
+endpoint reachable by MCP clients; credential validation remains inside it.
+The shared UI, Functions and MCP need a coordinated Edge pull. No per-Hub copy
+of connection logic is necessary. No new security rule or production content
+migration is required for activation. Sessions store both ISO `expiresAt` and
+native Firestore `expiresAtTimestamp` for the same expiry. Operators can enable
+a [Firestore TTL policy](https://firebase.google.com/docs/firestore/ttl) on the
+`agent-sessions` collection group using `expiresAtTimestamp`; this implementation
+does not enable it. Deletion is asynchronous, so authorization still checks
+expiry on every request. Older session records need a Timestamp backfill if
+they should be covered by the policy.
+
+Operation audits preserve `agentKeyId` (the session or legacy key ID) and record
+`agentConnectionId` directly for connection sessions, alongside the operator's
+`runBy` UID. Legacy-key and Hub-callable runs have a null connection ID.
+Connection and operator attribution remains available after session cleanup;
+historical audit records may lack the connection field.

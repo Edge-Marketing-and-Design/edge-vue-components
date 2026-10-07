@@ -10,8 +10,9 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
 import { blockDefinitionHash } from '../../../../lib/cmsBlockRevisions.js'
 import { CMS_OPERATION_TYPES } from '../../../../lib/cmsOperations.js'
+import { createConnectionClient, resolveConnectionKey } from './agent-connections.js'
 import { agentEndpoint, createAgentOperationClient, resolveAgentKey } from './agent-operations.js'
-import { createCmsToolService } from './cms-tools.js'
+import { createCmsToolService, resolveCmsOrganization } from './cms-tools.js'
 import { contractKinds, readContract } from './contracts.js'
 import { describeCredentials, resolveCredentials } from './credentials.js'
 
@@ -59,14 +60,23 @@ const cmsTools = createCmsToolService({
   credentials: credentialSummary,
 })
 
+const connectionMode = Boolean(config.agentConnectionFile || process.env.EDGE_CMS_AGENT_CONNECTION)
+const connections = connectionMode
+  ? createConnectionClient({
+    endpoint: config.agentConnectionEndpoint || agentEndpoint({ config }).replace(/cms-agentOperation$/, 'cms-agentConnection'),
+    getConnectionKey: () => resolveConnectionKey({ config }),
+  })
+  : null
+
 const agentOperations = createAgentOperationClient({
   endpoint: agentEndpoint({ config }),
   getKey: () => resolveAgentKey({ config }),
+  connections,
 })
 
 const server = new McpServer({
   name: config.serverName,
-  version: '0.5.0',
+  version: '0.6.0',
 })
 
 server.registerTool(
@@ -88,6 +98,9 @@ server.registerTool(
     if (normalizedPath) {
       assertAllowedPath(normalizedPath)
       assertDocumentPath(normalizedPath)
+    }
+    else if (config.allowedOrganizationIds.length) {
+      throw new Error('Root collection listing is unavailable with an organization allowlist.')
     }
 
     const collections = normalizedPath
@@ -529,7 +542,25 @@ server.registerTool(
 const OperationSchema = z.object({ type: z.enum(CMS_OPERATION_TYPES) }).passthrough()
   .describe('A CMS operation, e.g. { "type": "page.placeBlock", "siteId": "...", "pageId": "...", "blockId": "...", "values": { ... } }. Call cms_contract (kind "operations") first: it returns every type and its fields.')
 
-const resolveOrgId = orgId => orgId || config.defaultOrgId
+const resolveOrgId = orgId => resolveCmsOrganization(orgId, config)
+const SessionIdSchema = z.string().trim().min(1).optional().describe('Explicit target handle from cms_open_session. Required when using a Hub connection.')
+
+server.registerTool('cms_agent_organizations', {
+  title: 'Discover Agent Organizations',
+  description: 'List organizations currently editable through your Hub-issued connection. Refreshes Hub permissions; no local org/key list. Paginate with nextStartAfter.',
+  inputSchema: { startAfter: z.string().trim().optional(), limit: z.number().int().min(1).max(100).optional() },
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+}, async input => jsonResult(connections ? await connections.organizations(input) : { ok: false, code: 'connection-required', message: 'Configure a Hub-issued agent connection to discover its organizations.' }))
+
+server.registerTool('cms_open_session', {
+  title: 'Open a Targeted CMS Session',
+  description: 'Choose an explicit org and scope for this job. Site scope requires an exact site id and permits only page work/site updates there. Organization scope permits library/theme work and site creation. Returns a sessionId, never a credential. Pass that handle to check/run/preview/readiness; it refreshes automatically for the same target.',
+  inputSchema: { orgId: z.string().trim().min(1), scope: z.enum(['organization', 'site']), siteId: z.string().trim().min(1).optional() },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+}, async (input) => {
+  const orgId = resolveOrgId(input.orgId)
+  return jsonResult(connections ? await connections.open({ ...input, orgId }) : { ok: false, code: 'connection-required', message: 'Configure a Hub-issued agent connection to open sessions.' })
+})
 
 server.registerTool(
   'cms_check_operation',
@@ -537,6 +568,7 @@ server.registerTool(
     title: 'Check a CMS Operation',
     description: 'Plan a draft-only CMS operation through the Hub (themes, new sites and their SEO, draft pages and their SEO, block placement and content, new blocks, block drafts) and return what would change, any problems, and a checksum for cms_run_operation. Call cms_contract first for the operations contract and for every kind the operation writes (blocks, themes, posts), and build the operation from those fields. Writes nothing. Nothing can publish a page or release a block. Needs an agent key (Dev Mode > Agent Keys).',
     inputSchema: {
+      sessionId: SessionIdSchema,
       orgId: OptionalOrgIdSchema.describe('Organization id. Uses configured defaultOrgId when omitted.'),
       operation: OperationSchema,
     },
@@ -546,7 +578,7 @@ server.registerTool(
       idempotentHint: true,
     },
   },
-  async ({ orgId, operation }) => jsonResult(await agentOperations.check(resolveOrgId(orgId), operation)),
+  async ({ orgId, operation, sessionId }) => jsonResult(await agentOperations.check(resolveOrgId(orgId), operation, sessionId)),
 )
 
 server.registerTool(
@@ -555,6 +587,7 @@ server.registerTool(
     title: 'Run a CMS Operation',
     description: 'Run a draft-only CMS operation that cms_check_operation checked, with its checksum. The Hub refuses it if anything the check read has changed since, or if it has problems. Changes are drafts: pages are not published and blocks are not released. Every run is recorded in the organization\'s cmsOperations audit.',
     inputSchema: {
+      sessionId: SessionIdSchema,
       orgId: OptionalOrgIdSchema.describe('Organization id. Uses configured defaultOrgId when omitted.'),
       operation: OperationSchema,
       checksum: z.string().trim().min(1).describe('The checksum cms_check_operation returned for this exact operation.'),
@@ -565,7 +598,7 @@ server.registerTool(
       idempotentHint: false,
     },
   },
-  async ({ orgId, operation, checksum }) => jsonResult(await agentOperations.run(resolveOrgId(orgId), operation, checksum)),
+  async ({ orgId, operation, checksum, sessionId }) => jsonResult(await agentOperations.run(resolveOrgId(orgId), operation, checksum, sessionId)),
 )
 
 server.registerTool(
@@ -574,6 +607,7 @@ server.registerTool(
     title: 'Get a CMS Page Preview Link',
     description: 'Get a short-lived link (15 minutes) to the Hub\'s preview of one draft page (or its published copy), rendered with the Hub\'s own block renderer and the site\'s theme. Open it in a browser and screenshot it to compare what you built with the design. Vue override components are not shown (they render only on the public site). Needs an agent key.',
     inputSchema: {
+      sessionId: SessionIdSchema,
       orgId: OptionalOrgIdSchema.describe('Organization id. Uses configured defaultOrgId when omitted.'),
       siteId: z.string().trim().min(1).describe('Site document id.'),
       pageId: z.string().trim().min(1).describe('Page document id.'),
@@ -588,7 +622,7 @@ server.registerTool(
       idempotentHint: false,
     },
   },
-  async ({ orgId, siteId, pageId, source, blockDrafts, viewport, width }) => jsonResult(await agentOperations.preview(resolveOrgId(orgId), siteId, pageId, source, blockDrafts, { viewport, width })),
+  async ({ orgId, siteId, pageId, source, blockDrafts, viewport, width, sessionId }) => jsonResult(await agentOperations.preview(resolveOrgId(orgId), siteId, pageId, source, blockDrafts, { viewport, width, sessionId })),
 )
 
 // Adds the local renderer's answer to each override item: whether the
@@ -627,6 +661,7 @@ server.registerTool(
     title: 'Check a Site Is Ready',
     description: 'List what stops a site from being finished: failed block checks, invalid or empty required block content, blocks missing from the library, override blocks that need a Vue component (with whether the local emd-cms-front checkout has it), unreleased block drafts, pages behind the released block, empty pages, and pages never published or with unpublished changes. Reads only. Needs an agent key.',
     inputSchema: {
+      sessionId: SessionIdSchema,
       orgId: OptionalOrgIdSchema.describe('Organization id. Uses configured defaultOrgId when omitted.'),
       siteId: z.string().trim().min(1).describe('Site document id.'),
     },
@@ -636,9 +671,9 @@ server.registerTool(
       idempotentHint: true,
     },
   },
-  async ({ orgId, siteId }) => {
+  async ({ orgId, siteId, sessionId }) => {
     const org = resolveOrgId(orgId)
-    return jsonResult(await withLocalOverrideChecks(org, await agentOperations.readiness(org, siteId)))
+    return jsonResult(await withLocalOverrideChecks(org, await agentOperations.readiness(org, siteId, sessionId)))
   },
 )
 
@@ -698,14 +733,23 @@ async function loadConfig() {
   // An emulator config never talks to a real project.
   if (parsed.requireEmulator === true && !/^(127\.0\.0\.1|localhost|\[::1\]):\d+$/.test(process.env.FIRESTORE_EMULATOR_HOST || ''))
     throw new Error(`${configPath} is for the emulators: set FIRESTORE_EMULATOR_HOST to the local Firestore emulator.`)
+  const allowedOrgSetting = setting('ALLOWED_ORG_IDS') || process.env.EDGE_CMS_FIRESTORE_MCP_ALLOWED_ORG_IDS
+  const allowedOrganizationIds = allowedOrgSetting
+    ? allowedOrgSetting.split(',').map(value => value.trim()).filter(Boolean)
+    : (parsed.allowedOrganizationIds || [])
+  if (!Array.isArray(allowedOrganizationIds) || allowedOrganizationIds.some(value => typeof value !== 'string' || !value.trim()))
+    throw new Error(`${configPath} allowedOrganizationIds must be an array of nonempty organization ids.`)
 
   return {
     serverName: parsed.serverName || 'edge-cms',
     projectId: setting('PROJECT') || parsed.projectId,
     environment: setting('ENVIRONMENT') || parsed.environment || 'production',
     defaultOrgId: setting('DEFAULT_ORG_ID') || parsed.defaultOrgId || '',
+    allowedOrganizationIds,
     agentEndpoint: parsed.agentEndpoint || '',
     agentKeyFile: parsed.agentKeyFile || '',
+    agentConnectionFile: parsed.agentConnectionFile || '',
+    agentConnectionEndpoint: parsed.agentConnectionEndpoint || '',
     allowedPathPrefixes: parsed.allowedPathPrefixes || ['organizations'],
     collectionAliases: parsed.collectionAliases || {},
     maxSampleLimit: parsed.maxSampleLimit || 25,
@@ -770,6 +814,14 @@ function resolveConfiguredPath(input) {
 }
 
 function assertAllowedPath(firestorePath) {
+  if (config.allowedOrganizationIds.length) {
+    const [collection, orgId] = firestorePath.split('/')
+    if (collection === 'organizations') {
+      if (!orgId)
+        throw new Error('Organization collection scans are unavailable with an organization allowlist.')
+      resolveOrgId(orgId)
+    }
+  }
   const allowedPrefixes = config.allowedPathPrefixes || []
   const allowed = allowedPrefixes.some((prefix) => {
     const normalizedPrefix = normalizePath(prefix)

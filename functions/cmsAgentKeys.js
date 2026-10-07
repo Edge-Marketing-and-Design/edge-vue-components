@@ -20,6 +20,7 @@ const {
   permissionCheck,
 } = require('./config.js')
 const { authorizeOperation, gatherSiteReadiness, performCheck, performRun } = require('./cmsOperations.js')
+const { verifyAgentSession } = require('./cmsAgentConnections.js')
 const { buildPreviewUrl, issuePreviewToken, previewBaseUrl, previewTokensEnabled } = require('./cmsPreviewTokens.js')
 
 const DOC_ID_PATTERN = /^[^/]{1,1500}$/
@@ -202,7 +203,10 @@ exports.agentOperation = onRequest({ timeoutSeconds: 120 }, async (req, res) => 
   try {
     const body = (req.body && typeof req.body === 'object') ? req.body : {}
     const orgId = requireDocId(body.orgId, 'organization id')
-    const { uid, keyId, ref } = await verifyAgentKey(orgId, req.get ? req.get('authorization') : req.headers?.authorization)
+    const header = req.get ? req.get('authorization') : req.headers?.authorization
+    const { uid, keyId, ref, connectionId = null } = /^Bearer\s+cmsas\./i.test(String(header || ''))
+      ? await verifyAgentSession(orgId, header, body)
+      : await verifyAgentKey(orgId, header)
     let result
     if (body.action === 'preview') {
       result = await previewLink({ uid, orgId, body })
@@ -216,7 +220,7 @@ exports.agentOperation = onRequest({ timeoutSeconds: 120 }, async (req, res) => 
       const caller = await authorizeOperation({ uid, orgId, operation: body.operation })
       result = body.action === 'check'
         ? await performCheck(caller)
-        : await performRun({ ...caller, checksum: body.checksum, client: body.client, via: 'agent', agentKeyId: keyId })
+        : await performRun({ ...caller, checksum: body.checksum, client: body.client, via: 'agent', agentKeyId: keyId, agentConnectionId: connectionId })
     }
     else {
       throw new HttpsError('invalid-argument', 'action must be "check", "run", "preview" or "readiness".')

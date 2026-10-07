@@ -38,9 +38,18 @@ const NO_KEY_MESSAGE = 'No agent key is configured. Create one in the Hub (Dev M
 // the Hub's JSON answer plus `httpStatus`; refusals come back as
 // { ok: false, httpStatus, code, message, details } so the agent can see why
 // and fix the operation.
-export function createAgentOperationClient({ endpoint, getKey, fetchImpl = globalThis.fetch, client = 'edge-cms-mcp' }) {
-  const post = async (body) => {
-    const key = await getKey()
+export function createAgentOperationClient({ endpoint, getKey, connections, fetchImpl = globalThis.fetch, client = 'edge-cms-mcp' }) {
+  const post = async (body, sessionId) => {
+    let key
+    if (connections) {
+      const credential = await connections.credential(sessionId, body)
+      if (!credential.ok)
+        return { ...credential, httpStatus: credential.httpStatus || 0, details: null }
+      key = credential.token
+    }
+    else {
+      key = await getKey()
+    }
     if (!key)
       return { ok: false, httpStatus: 0, code: 'no-agent-key', message: NO_KEY_MESSAGE, details: null }
     let response
@@ -65,9 +74,9 @@ export function createAgentOperationClient({ endpoint, getKey, fetchImpl = globa
   }
   return {
     endpoint,
-    check: (orgId, operation) => post({ orgId, action: 'check', operation }),
-    run: (orgId, operation, checksum) => post({ orgId, action: 'run', operation, checksum }),
-    preview: (orgId, siteId, pageId, source = 'draft', blockDrafts = true, { viewport, width } = {}) => post({ orgId, action: 'preview', siteId, pageId, source, blockDrafts, ...(viewport ? { viewport } : {}), ...(width ? { width } : {}) }),
-    readiness: (orgId, siteId) => post({ orgId, action: 'readiness', siteId }),
+    check: (orgId, operation, sessionId) => post({ orgId, action: 'check', operation }, sessionId),
+    run: (orgId, operation, checksum, sessionId) => post({ orgId, action: 'run', operation, checksum }, sessionId),
+    preview: (orgId, siteId, pageId, source = 'draft', blockDrafts = true, { viewport, width, sessionId } = {}) => post({ orgId, action: 'preview', siteId, pageId, source, blockDrafts, ...(viewport ? { viewport } : {}), ...(width ? { width } : {}) }, sessionId),
+    readiness: (orgId, siteId, sessionId) => post({ orgId, action: 'readiness', siteId }, sessionId),
   }
 }
