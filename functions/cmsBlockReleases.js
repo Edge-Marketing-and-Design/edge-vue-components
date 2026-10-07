@@ -483,10 +483,15 @@ const markSuperseded = async (orgId, releaseId, release) => {
     const releaseRef = releaseRefOf(orgId, releaseId)
     const current = (await transaction.get(releaseRef)).data() || {}
     const revisionSnap = await transaction.get(revisionRefOf(blockRef, release.revisionNumber))
+    const blockSnap = await transaction.get(blockRef)
     if (!RUNNING_STATUSES.has(current.status))
       return
     const now = nowIso()
     transaction.update(releaseRef, { status: 'superseded', updatedAt: now, completedAt: now })
+    // A direct save can invalidate an implicit release before its own trigger
+    // claims ownership. Clear only our pointer, never a newer release's.
+    if (blockSnap.exists && blockSnap.data()?.activeReleaseId === releaseId)
+      transaction.update(blockRef, { activeReleaseId: null })
     // A revision that was live before this release (a reapply) stays live.
     if (revisionSnap.exists && revisionSnap.data()?.status === 'releasing' && revisionSnap.data()?.releaseId === releaseId) {
       const before = current.revisionStatusBefore
@@ -499,6 +504,7 @@ const markSuperseded = async (orgId, releaseId, release) => {
 // Applies one target. Each runs in its own transaction and re-reads the block,
 // so a newer release that has taken over the block always wins.
 const processTarget = async ({ orgId, releaseId, release, targetDoc }) => {
+  const core = await corePromise
   const blockRef = blockRefOf(orgId, release.blockId)
   return db.runTransaction(async (transaction) => {
     const targetSnap = await transaction.get(targetDoc.ref)
@@ -507,6 +513,8 @@ const processTarget = async ({ orgId, releaseId, release, targetDoc }) => {
       return null
     const blockSnap = await transaction.get(blockRef)
     if (!blockSnap.exists || blockSnap.data()?.activeReleaseId !== releaseId)
+      throw new ReleaseSuperseded(releaseId)
+    if (release.implicit && !core.blockDefinitionsEqual(blockSnap.data(), release.definition))
       throw new ReleaseSuperseded(releaseId)
     const outcome = await applyBlockToDocument(transaction, db, {
       orgId,
@@ -590,8 +598,13 @@ const finalizeRelease = async (core, { orgId, releaseId }) => {
     const hasOtherCanary = core.isRevisionNumber(canaryNumber) && canaryNumber !== release.revisionNumber
     const canarySnap = hasOtherCanary ? await transaction.get(revisionRefOf(blockRef, canaryNumber)) : null
     const now = nowIso()
-    if (!blockSnap.exists || block.activeReleaseId !== releaseId) {
+    const staleImplicit = release.implicit && !core.blockDefinitionsEqual(block, release.definition)
+    if (!blockSnap.exists || block.activeReleaseId !== releaseId || staleImplicit) {
       transaction.update(releaseRef, { status: 'superseded', updatedAt: now, completedAt: now })
+      if (blockSnap.exists && block.activeReleaseId === releaseId)
+        transaction.update(blockRef, { activeReleaseId: null })
+      if (revisionSnap.exists && revisionSnap.data()?.status === 'releasing' && revisionSnap.data()?.releaseId === releaseId)
+        transaction.update(revisionSnap.ref, { status: 'superseded', updatedAt: now })
       return 'superseded'
     }
 
@@ -734,6 +747,14 @@ const startImplicitRelease = async ({ orgId, blockId, beforeData, afterData, eve
   if ((await releaseRef.get()).exists)
     return { releaseId, status: 'duplicate' }
 
+  // Avoid planning targets for an already stale event. The transaction below
+  // repeats this check because a save may arrive while targets are prepared.
+  const currentSnap = await blockRef.get()
+  if (!currentSnap.exists)
+    return { releaseId, status: 'missing' }
+  if (!core.blockDefinitionsEqual(currentSnap.data(), afterData))
+    return { releaseId, status: 'stale' }
+
   const targets = await planBlockTargets(db, orgId, blockId)
   const now = nowIso()
   const definition = core.pickBlockDefinition(afterData)
@@ -748,6 +769,10 @@ const startImplicitRelease = async ({ orgId, blockId, beforeData, afterData, eve
     if (!blockSnap.exists)
       return null
     const block = blockSnap.data() || {}
+    // Firestore events are not ordered. An older definition must never take
+    // ownership from the definition currently stored on the library block.
+    if (!core.blockDefinitionsEqual(block, definition))
+      return 'stale'
     const released = core.isRevisionNumber(block.releasedRevision) ? block.releasedRevision : null
     const draft = core.isRevisionNumber(block.draftRevision) ? block.draftRevision : 0
     const last = core.isRevisionNumber(block.lastRevisionNumber) ? block.lastRevisionNumber : (released ?? 0)
@@ -803,6 +828,8 @@ const startImplicitRelease = async ({ orgId, blockId, beforeData, afterData, eve
     return { releaseId, status: 'missing' }
   if (revisionNumber === 'duplicate')
     return { releaseId, status: 'duplicate' }
+  if (revisionNumber === 'stale')
+    return { releaseId, status: 'stale' }
 
   await publishRelease(orgId, releaseId)
   logger.warn(`Block ${blockId} definition was written directly; started implicit release ${releaseId} of revision ${revisionNumber}`, { targets: targets.length })
