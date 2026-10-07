@@ -68,11 +68,13 @@ const isJsonInvalid = (value) => {
 
 const isTemplateSite = computed(() => props.site === 'templates')
 const runtimeConfig = useRuntimeConfig()
-const publishedSitePreviewUrl = computed(() => buildPublishedSitePreviewUrl(runtimeConfig.public.cmsFrontendUrl, props.site))
+const publishedSitePreviewUrl = computed(() => buildPublishedSitePreviewUrl(runtimeConfig.public.cmsFrontendUrl, props.site, edgeGlobal.edgeState.currentOrganization))
 const copyingPublishedSitePreview = ref(false)
 const publishedSitePreviewCopied = ref(false)
 let publishedSitePreviewCopyTimer = null
 const publishedSitePreviewUnavailableReason = computed(() => {
+  if (!edgeGlobal.edgeState.currentOrganization)
+    return 'Select an organization to copy a published site preview.'
   if (!publishedSitePreviewUrl.value)
     return 'Configure the CMS frontend URL to copy a published site preview.'
   if (!isSiteSettingPublished.value)
