@@ -15,6 +15,11 @@ export const cmsRoutes = [
     file: './edge/routes/cms/dashboard/blocks/[block].vue',
   },
   {
+    name: 'cms-dashboard-block-revisions-index',
+    path: '/app/dashboard/block-revisions',
+    file: './edge/routes/cms/dashboard/block-revisions/index.vue',
+  },
+  {
     name: 'cms-dashboard-media-index',
     path: '/app/dashboard/media',
     file: './edge/routes/cms/dashboard/media/index.vue',
