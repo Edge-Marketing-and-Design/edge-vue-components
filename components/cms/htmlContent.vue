@@ -6,6 +6,7 @@ import DOMPurify from 'dompurify'
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { syncCmsPreviewAuthState } from '../../lib/cmsPreviewAuthState'
+import { splitCssSelectorList } from '../../lib/cmsCssSelectors'
 import { BREAKPOINT_MIN_WIDTHS, rewriteViewportClassTokens } from '../../lib/cmsViewportClasses'
 import { useHead } from '#imports'
 
@@ -108,7 +109,7 @@ const scopeUtilityToBlockContent = (util) => {
   const selector = String(util.selector || '')
   if (!selector || selector.includes('.block-content'))
     return
-  const scoped = selector.split(',').map(part => `.block-content ${part.trim()}`).join(', ')
+  const scoped = splitCssSelectorList(selector).map(part => `.block-content ${part}`).join(', ')
   util.selector = `${selector}, ${scoped}`
 }
 
