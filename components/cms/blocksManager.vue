@@ -1,8 +1,9 @@
 <script setup>
-import { Download, MoreHorizontal } from 'lucide-vue-next'
+import { Download, MoreHorizontal, Rocket } from 'lucide-vue-next'
 import { renderTemplateAsync } from '@edgedev/template-engine'
 import { safeParseTagConfig } from '../../lib/cmsTagConfig'
 import { guardOverrideRename } from '../../lib/cmsOverrideRename'
+import { pendingBlockRevision, pendingReleaseBlocks } from '../../lib/cmsBlockReleaseBatch'
 import { checkImportedBlock, createBlockCheckError, normalizeBlockTypes, normalizeImportedDoc, resolveImportedBlockThemes } from '../../lib/cmsBlockImport'
 import { BLOCK_EXPORT_BASE_KEY, BlockSaveCancelledError, blockExportBase, loadLibraryBlockForEditing, planImportOverwrite, saveLibraryBlockEdit, saveWithBaseCheck, takeImportBase } from '../../lib/cmsBlockRevisionClient'
 const emit = defineEmits(['head'])
@@ -390,6 +391,7 @@ const themesCollection = computed(() => {
 })
 const blockCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/blocks`)
 const blocksCollection = computed(() => edgeFirebase.data?.[blockCollectionPath.value] || {})
+const pendingReleaseCount = computed(() => pendingReleaseBlocks(blocksCollection.value).length)
 
 const openBlocksExportDialog = (total) => {
   state.exportDialogOpen = true
@@ -1333,6 +1335,20 @@ const handleBlockImport = async (event) => {
       </template>
       <template #header-end>
         <div class="flex items-center gap-2">
+          <edge-shad-button
+            type="button"
+            variant="outline"
+            class="h-9"
+            :title="pendingReleaseCount ? 'Check and release blocks with pending revisions' : 'No blocks have pending revisions'"
+            @click="router.push('/app/dashboard/block-revisions')"
+          >
+            <Rocket class="mr-2 h-4 w-4" />
+            Revisions
+            <span
+              v-if="pendingReleaseCount"
+              class="ml-2 inline-flex min-w-5 items-center justify-center rounded-full bg-amber-500 px-1.5 text-xs font-semibold text-white"
+            >{{ pendingReleaseCount }}</span>
+          </edge-shad-button>
           <input
             ref="blockImportInputRef"
             type="file"
@@ -1494,6 +1510,13 @@ const handleBlockImport = async (event) => {
                     <p class="text-lg font-semibold leading-snug line-clamp-2 text-slate-900 dark:text-slate-100 flex-1">
                       {{ item.name }}
                     </p>
+                    <edge-chip
+                      v-if="pendingBlockRevision(item)?.kind === 'draft' || pendingBlockRevision(item)?.kind === 'canary'"
+                      class="mt-1 shrink-0 border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+                      :title="`${pendingBlockRevision(item).label}: revision ${pendingBlockRevision(item).revisionNumber}`"
+                    >
+                      {{ pendingBlockRevision(item).kind === 'canary' ? 'Canary' : 'Unreleased' }}
+                    </edge-chip>
                     <edge-chip
                       v-if="Number(item.templateVersion) === 2"
                       class="mt-1 shrink-0 border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
