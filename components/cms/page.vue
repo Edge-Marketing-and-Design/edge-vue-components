@@ -2,9 +2,10 @@
 import { ArrowDown, ArrowLeft, ArrowUp, Download, ExternalLink, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FileUp, FileWarning, FileX, History, Loader2, Maximize2, Monitor, MoreHorizontal, PanelTop, RotateCcw, Smartphone, Sparkles, Tablet, UploadCloud } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
-import { buildCmsSitePreviewUrl, findCmsPageRoute } from '../../lib/cmsPublishedSitePreview'
+import { buildCmsPublishedPageUrl, buildCmsSitePreviewUrl, findCmsPageRoute } from '../../lib/cmsPublishedSitePreview'
 
 const runtimeConfig = useRuntimeConfig()
+const publishedSiteOrigin = inject('cmsPublishedSiteOrigin', ref(''))
 const props = defineProps({
   site: {
     type: String,
@@ -1817,7 +1818,7 @@ const currentPageLiveUrl = computed(() => {
   const route = findCmsPageRoute(publishedSiteSettingsDoc.value?.menus, props.page)
   if (route === null)
     return ''
-  return buildCmsSitePreviewUrl(runtimeConfig.public.cmsFrontendUrl, props.site, edgeGlobal.edgeState.currentOrganization, { route })
+  return buildCmsPublishedPageUrl(runtimeConfig.public.cmsFrontendUrl, props.site, edgeGlobal.edgeState.currentOrganization, { route, origin: publishedSiteOrigin.value })
 })
 
 const currentPageDraftUrl = computed(() => {
@@ -3727,12 +3728,12 @@ const hasUnsavedChanges = (changes) => {
                   >
                     <a :href="currentPageLiveUrl" target="_blank" rel="noopener noreferrer">
                       <ExternalLink class="w-4 h-4" />
-                      <span>View Live Page</span>
+                      <span>View Published Page</span>
                     </a>
                   </DropdownMenuItem>
                   <DropdownMenuItem v-else-if="!props.isTemplateSite" disabled>
                     <ExternalLink class="w-4 h-4" />
-                    <span>View Live Page</span>
+                    <span>View Published Page</span>
                   </DropdownMenuItem>
                   <DropdownMenuItem v-if="!props.isTemplateSite && pagePublishStatus.key !== 'published' && currentPageDraftUrl" as-child>
                     <a :href="currentPageDraftUrl" target="_blank" rel="noopener noreferrer" title="Preview saved draft changes; unsaved edits are not included.">

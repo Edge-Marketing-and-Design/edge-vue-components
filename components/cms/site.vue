@@ -4,7 +4,7 @@ import * as z from 'zod'
 import { BarChart3, Check, CircleAlert, ClipboardCheck, Copy, Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePenLine, FileStack, FileUp, FileX, FolderCog, FolderDown, FolderUp, FolderX, ImagePlus, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload, Users, X } from 'lucide-vue-next'
 import { buildPagePayloadFromTemplateDoc, buildThemeSettingsPayload, deriveThemeMenus, ensureMenuBuckets, ensureUniqueSlug, titleFromSlug } from '../../lib/cmsOperations'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
-import { buildCmsSitePreviewUrl, buildPublishedSitePreviewUrl } from '../../lib/cmsPublishedSitePreview'
+import { buildCmsSitePreviewUrl, buildPublishedSitePreviewUrl, getCmsPublishedSiteOrigin } from '../../lib/cmsPublishedSitePreview'
 
 const props = defineProps({
   site: {
@@ -460,6 +460,9 @@ const domainError = computed(() => {
   return String(publishedSiteSettings.value?.domainError || '').trim()
 })
 const domainRegistryHeaderError = ref('')
+const headerDomainRegistry = ref({})
+const headerDomainRegistryKey = ref('')
+let headerDomainRequest = 0
 const activeDomainError = computed(() => {
   const persisted = String(domainError.value || '').trim()
   if (persisted)
@@ -475,14 +478,33 @@ const headerDomains = computed(() => {
   const values = Array.isArray(siteData.value?.domains) ? siteData.value.domains : []
   return Array.from(new Set(values.map(normalizeHeaderDomain).filter(Boolean)))
 })
+const requestedHeaderDomains = computed(() => [...new Set([
+  ...headerDomains.value,
+  ...(Array.isArray(publishedSiteSettings.value?.domains) ? publishedSiteSettings.value.domains : []).map(normalizeHeaderDomain).filter(Boolean),
+])])
+const headerDomainLookupKey = computed(() => `${props.site}:${edgeGlobal?.edgeState?.currentOrganization || ''}:${requestedHeaderDomains.value.join('|')}`)
+const publishedSiteOrigin = computed(() => {
+  if (!isSiteSettingPublished.value || headerDomainRegistryKey.value !== headerDomainLookupKey.value)
+    return ''
+  return getCmsPublishedSiteOrigin(publishedSiteSettings.value, headerDomainRegistry.value, {
+    orgId: edgeGlobal.edgeState.currentOrganization,
+    siteId: props.site,
+  })
+})
+provide('cmsPublishedSiteOrigin', publishedSiteOrigin)
 const fetchHeaderDomainRegistryError = async () => {
+  const requestId = ++headerDomainRequest
+  const lookupKey = headerDomainLookupKey.value
+  headerDomainRegistry.value = {}
+  headerDomainRegistryKey.value = ''
+  domainRegistryHeaderError.value = ''
   if (!edgeFirebase?.runFunction) {
     domainRegistryHeaderError.value = ''
     return
   }
   const orgId = String(edgeGlobal?.edgeState?.currentOrganization || '').trim()
   const siteId = String(props.site || '').trim()
-  if (!orgId || !siteId || !headerDomains.value.length) {
+  if (!orgId || !siteId || !requestedHeaderDomains.value.length) {
     domainRegistryHeaderError.value = ''
     return
   }
@@ -490,25 +512,31 @@ const fetchHeaderDomainRegistryError = async () => {
     const response = await edgeFirebase.runFunction('cms-getCloudflarePagesProject', {
       orgId,
       siteId,
-      domains: headerDomains.value,
+      domains: requestedHeaderDomains.value,
     })
+    if (requestId !== headerDomainRequest || lookupKey !== headerDomainLookupKey.value)
+      return
     const registry = response?.data?.domainRegistry
     if (!registry || typeof registry !== 'object') {
       domainRegistryHeaderError.value = ''
       return
     }
+    headerDomainRegistry.value = registry
+    headerDomainRegistryKey.value = lookupKey
     const errors = headerDomains.value
       .map(domain => String(registry?.[domain]?.dnsSyncError || '').trim())
       .filter(Boolean)
     domainRegistryHeaderError.value = errors[0] || ''
   }
   catch {
+    if (requestId !== headerDomainRequest)
+      return
     domainRegistryHeaderError.value = ''
   }
 }
 
 watch(
-  () => `${props.site}:${edgeGlobal?.edgeState?.currentOrganization || ''}:${headerDomains.value.join('|')}`,
+  [headerDomainLookupKey, domainError],
   async () => {
     await fetchHeaderDomainRegistryError()
   },
@@ -4217,7 +4245,16 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
             <div class="truncate text-lg font-normal" :title="siteData.name || 'Templates'">
               {{ siteData.name || 'Templates' }}
             </div>
-            <span v-if="!isTemplateSite" class="inline-flex" :title="publishedSitePreviewUnavailableReason || 'Copy the published site preview URL'">
+            <a
+              v-if="!isTemplateSite && publishedSiteOrigin"
+              :href="publishedSiteOrigin"
+              target="_blank" rel="noopener noreferrer"
+              class="inline-flex h-6 items-center gap-1.5 text-[11px] text-slate-600 hover:text-slate-900 hover:underline dark:text-slate-400 dark:hover:text-slate-100"
+            >
+              <ExternalLink class="h-3 w-3" aria-hidden="true" />
+              View Published Site
+            </a>
+            <span v-else-if="!isTemplateSite" class="inline-flex" :title="publishedSitePreviewUnavailableReason || 'Copy the published site preview URL'">
               <edge-shad-button
                 type="button"
                 variant="ghost"
@@ -4784,12 +4821,12 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                                 >
                                   <a :href="getSitePageLiveUrl(item)" target="_blank" rel="noopener noreferrer" @click.stop>
                                     <ExternalLink />
-                                    <span>View Live Page</span>
+                                    <span>View Published Page</span>
                                   </a>
                                 </DropdownMenuItem>
                                 <DropdownMenuItem v-else disabled>
                                   <ExternalLink />
-                                  <span>View Live Page</span>
+                                  <span>View Published Page</span>
                                 </DropdownMenuItem>
                                 <DropdownMenuItem v-if="isPublishedPageDiff(item.docId) && getSitePageDraftUrl(item)" as-child>
                                   <a :href="getSitePageDraftUrl(item)" target="_blank" rel="noopener noreferrer" @click.stop>

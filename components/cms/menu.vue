@@ -4,9 +4,10 @@ import { Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2,
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
-import { buildCmsSitePreviewUrl, findCmsPageRoute } from '../../lib/cmsPublishedSitePreview'
+import { buildCmsPublishedPageUrl, buildCmsSitePreviewUrl, findCmsPageRoute } from '../../lib/cmsPublishedSitePreview'
 
 const runtimeConfig = useRuntimeConfig()
+const publishedSiteOrigin = inject('cmsPublishedSiteOrigin', ref(''))
 
 const props = defineProps({
   prevModelValue: {
@@ -297,7 +298,7 @@ const buildLivePageUrl = (menuName, pageEntry) => {
   const route = findCmsPageRoute(publishedSettings?.menus, pageEntry?.item)
   if (route === null)
     return ''
-  return buildCmsSitePreviewUrl(runtimeConfig.public.cmsFrontendUrl, props.site, edgeGlobal.edgeState.currentOrganization, { route })
+  return buildCmsPublishedPageUrl(runtimeConfig.public.cmsFrontendUrl, props.site, edgeGlobal.edgeState.currentOrganization, { route, origin: publishedSiteOrigin.value })
 }
 
 const buildDraftPageUrl = (menuName, pageEntry) => {
@@ -1582,12 +1583,12 @@ const theme = computed(() => {
                       >
                         <a :href="buildLivePageUrl(menuName, element)" target="_blank" rel="noopener noreferrer">
                           <ExternalLink />
-                          <span>View Live Page</span>
+                          <span>View Published Page</span>
                         </a>
                       </DropdownMenuItem>
                       <DropdownMenuItem v-else-if="!props.isTemplateSite" disabled>
                         <ExternalLink />
-                        <span>View Live Page</span>
+                        <span>View Published Page</span>
                       </DropdownMenuItem>
                       <DropdownMenuItem v-if="!props.isTemplateSite && isPublishedPageDiff(element.item) && buildDraftPageUrl(menuName, element)" as-child>
                         <a :href="buildDraftPageUrl(menuName, element)" target="_blank" rel="noopener noreferrer" title="Preview saved draft changes; unsaved edits are not included.">
