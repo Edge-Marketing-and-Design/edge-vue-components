@@ -2,6 +2,9 @@
 import { ArrowDown, ArrowLeft, ArrowUp, Download, ExternalLink, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FileUp, FileWarning, FileX, History, Loader2, Maximize2, Monitor, MoreHorizontal, PanelTop, RotateCcw, Smartphone, Sparkles, Tablet, UploadCloud } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
+import { buildCmsSitePreviewUrl, findCmsPageRoute } from '../../lib/cmsPublishedSitePreview'
+
+const runtimeConfig = useRuntimeConfig()
 const props = defineProps({
   site: {
     type: String,
@@ -1808,83 +1811,22 @@ const publishedSiteSettingsDoc = computed(() => {
 
 const isExternalMenuLink = entry => entry?.item && typeof entry.item === 'object' && entry.item.type === 'external'
 
-const normalizeDomain = (value) => {
-  if (!value)
+const currentPageLiveUrl = computed(() => {
+  if (!publishedPage.value || props.isTemplateSite)
     return ''
-  let normalized = String(value).trim().toLowerCase()
-  if (!normalized)
+  const route = findCmsPageRoute(publishedSiteSettingsDoc.value?.menus, props.page)
+  if (route === null)
     return ''
-  if (normalized.includes('://')) {
-    try {
-      normalized = new URL(normalized).host
-    }
-    catch {
-      normalized = normalized.split('://').pop() || normalized
-    }
-  }
-  normalized = normalized.split('/')[0] || ''
-  return normalized.replace(/\.+$/g, '')
-}
-
-const firstValidDomain = (domains) => {
-  if (!Array.isArray(domains))
-    return ''
-  for (const domain of domains) {
-    const normalized = normalizeDomain(domain)
-    if (normalized)
-      return normalized
-  }
-  return ''
-}
-
-const normalizePathSlug = value => String(value || '').trim().toLowerCase()
-
-const currentPageLiveOrigin = computed(() => {
-  if (props.isTemplateSite)
-    return ''
-  const host = firstValidDomain(publishedSiteSettingsDoc.value?.domains) || firstValidDomain(siteDoc.value?.domains)
-  return host ? `https://${host}` : ''
+  return buildCmsSitePreviewUrl(runtimeConfig.public.cmsFrontendUrl, props.site, edgeGlobal.edgeState.currentOrganization, { route })
 })
 
-const findPageRouteSegments = (menus, pageId, folderSlugs = []) => {
-  for (const menuItems of Object.values(menus || {})) {
-    if (!Array.isArray(menuItems))
-      continue
-    for (const entry of menuItems) {
-      if (isExternalMenuLink(entry))
-        continue
-      if (typeof entry?.item === 'string' && entry.item === pageId) {
-        const pageSlug = normalizePathSlug(entry?.name)
-        if (!pageSlug)
-          return []
-        return [...folderSlugs, pageSlug]
-      }
-      if (entry?.item && typeof entry.item === 'object') {
-        const folderSlug = Object.keys(entry.item || {})[0]
-        if (!folderSlug)
-          continue
-        const nested = findPageRouteSegments(entry.item[folderSlug], pageId, [...folderSlugs, normalizePathSlug(folderSlug)])
-        if (nested.length)
-          return nested
-      }
-    }
-  }
-  return []
-}
-
-const currentPageLiveUrl = computed(() => {
-  const origin = currentPageLiveOrigin.value
-  if (!origin || props.isTemplateSite)
+const currentPageDraftUrl = computed(() => {
+  if (!currentPage.value || props.isTemplateSite)
     return ''
-
-  const routeSegments = findPageRouteSegments(siteDoc.value?.menus || {}, props.page, [])
-  if (!routeSegments.length)
+  const route = findCmsPageRoute(siteDoc.value?.menus, props.page)
+  if (route === null)
     return ''
-
-  if (routeSegments.length === 1 && routeSegments[0] === 'home')
-    return `${origin}/`
-
-  return `${origin}/${routeSegments.map(segment => encodeURIComponent(segment)).join('/')}`
+  return buildCmsSitePreviewUrl(runtimeConfig.public.cmsFrontendUrl, props.site, edgeGlobal.edgeState.currentOrganization, { route, draft: true })
 })
 
 const currentMenuPageEntry = computed(() => {
@@ -2115,6 +2057,7 @@ const historyVersionItems = computed(() => {
 const renderedHistoryPreviewDoc = computed(() => resolveSyncedPageDoc(state.historyPreviewDoc))
 
 const pagePublishStatus = computed(() => getPagePublishStatus(props.page))
+const pageStatusPreviewUrl = computed(() => pagePublishStatus.value.key === 'published' ? currentPageLiveUrl.value : currentPageDraftUrl.value)
 
 const pagesCollectionPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`)
 const pagesCollection = computed(() => edgeFirebase.data?.[pagesCollectionPath.value] || {})
@@ -3642,6 +3585,18 @@ const hasUnsavedChanges = (changes) => {
               <FileX v-else class="h-3.5 w-3.5 shrink-0 text-slate-500 dark:text-slate-300" />
               <span>{{ pageStatusDisplayLabel }}</span>
             </div>
+            <a
+              v-if="pageStatusPreviewUrl"
+              :href="pageStatusPreviewUrl"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-flex items-center gap-1 text-[11px] underline underline-offset-2 hover:text-foreground sm:text-xs"
+              :title="pagePublishStatus.key === 'published' ? 'View the published page.' : 'Preview saved draft changes; unsaved edits are not included.'"
+            >
+              <ExternalLink class="h-3 w-3" aria-hidden="true" />
+              {{ pagePublishStatus.key === 'published' ? 'View Published Page' : 'Preview Changes' }}
+            </a>
+            <span v-if="showingUnsavedChanges" class="text-[11px] text-amber-700 dark:text-amber-300">Save to include your latest edits in the external preview.</span>
             <span class="text-[11px] leading-none text-gray-500 dark:text-gray-400">Last Published: {{ lastPublishedTime(page) }}</span>
             <edge-shad-button
               v-if="pagePublishStatus.canPublish"
@@ -3778,6 +3733,12 @@ const hasUnsavedChanges = (changes) => {
                   <DropdownMenuItem v-else-if="!props.isTemplateSite" disabled>
                     <ExternalLink class="w-4 h-4" />
                     <span>View Live Page</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem v-if="!props.isTemplateSite && pagePublishStatus.key !== 'published' && currentPageDraftUrl" as-child>
+                    <a :href="currentPageDraftUrl" target="_blank" rel="noopener noreferrer" title="Preview saved draft changes; unsaved edits are not included.">
+                      <ExternalLink class="w-4 h-4" />
+                      <span>Preview Changes</span>
+                    </a>
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     :disabled="slotProps.unsavedChanges || !currentPage || !props.page || props.page === 'new'"
