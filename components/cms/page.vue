@@ -1143,12 +1143,19 @@ const effectiveThemeId = computed(() => {
   return lastStableThemeId.value
 })
 
+// Isolated preview canvas (docs/features/cms/iframe-canvas.md): Preview mode
+// renders the page in one iframe (pageCanvas.vue); Edit Layout renders each
+// block in its own canvas (htmlContent.vue).
+const { enabled: canvasPreviewEnabled, toggle: toggleCanvasPreview } = useCmsCanvasPreview()
+const pageCanvasEnabled = computed(() => canvasPreviewEnabled.value && !state.editMode)
+
 const pagePreviewRenderKey = computed(() => {
   const siteKey = String(props.site || '')
   const pageKey = String(props.page || '')
   const themeKey = String((effectiveThemeId.value || selectedThemeId.value || 'no-theme'))
   const modeKey = state.editMode ? 'edit' : 'preview'
-  return `${siteKey}:${pageKey}:${themeKey}:${modeKey}`
+  const canvasKey = canvasPreviewEnabled.value ? 'canvas' : 'runtime'
+  return `${siteKey}:${pageKey}:${themeKey}:${modeKey}:${canvasKey}`
 })
 
 const parsedTheme = computed(() => {
@@ -3701,6 +3708,17 @@ const hasUnsavedChanges = (changes) => {
                 <component :is="option.icon" class="w-3.5 h-3.5" />
               </edge-shad-button>
             </div>
+            <div v-if="!state.editMode" class="flex shrink-0 items-center px-1">
+              <button
+                type="button"
+                class="inline-flex shrink-0 items-center whitespace-nowrap rounded-md border px-2.5 py-1 text-xs font-medium shadow-sm transition-colors"
+                :class="canvasPreviewEnabled ? 'border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700' : 'border-slate-300 bg-white/90 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200'"
+                title="Render previews in an isolated canvas with the public site's CSS (applies across the Hub)"
+                @click="toggleCanvasPreview"
+              >
+                {{ canvasPreviewEnabled ? 'Iframe canvas: on' : 'Iframe canvas: off' }}
+              </button>
+            </div>
             <div v-if="!state.editMode && isRestrictedContentEnabled" class="flex shrink-0 items-center gap-2 px-1">
               <label class="inline-flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded-md border border-slate-300 bg-white/90 px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:bg-slate-800">
                 <Checkbox
@@ -4174,150 +4192,157 @@ const hasUnsavedChanges = (changes) => {
                     </PopoverContent>
                   </Popover>
                 </div>
-                <draggable
-                  v-if="slotProps.workingDoc?.structure && slotProps.workingDoc.structure.length > 0"
-                  v-model="slotProps.workingDoc.structure"
-                  item-key="id"
-                  :disabled="true"
+                <edge-cms-page-canvas
+                  :enabled="pageCanvasEnabled"
+                  :theme="theme"
+                  :head="headObject"
+                  :viewport-mode="previewViewportMode"
                 >
-                  <template #item="{ element: row, index: rowIndex }">
-                    <div class="space-y-2">
-                      <div v-if="state.editMode" class="flex px-4 flex-wrap items-center gap-2 justify-between">
-                        <div class="flex flex-wrap items-center gap-2">
-                          <edge-shad-button
-                            variant="outline"
-                            size="icon"
-                            class="h-8 w-8"
-                            :disabled="rowIndex === 0"
-                            @click="moveRow(slotProps.workingDoc, rowIndex, -1, false)"
-                          >
-                            <ArrowUp class="h-4 w-4" />
-                          </edge-shad-button>
-                          <edge-shad-button
-                            variant="outline"
-                            size="icon"
-                            class="h-8 w-8"
-                            :disabled="rowIndex === (slotProps.workingDoc?.structure?.length || 0) - 1"
-                            @click="moveRow(slotProps.workingDoc, rowIndex, 1, false)"
-                          >
-                            <ArrowDown class="h-4 w-4" />
-                          </edge-shad-button>
-                          <edge-shad-button variant="outline" size="icon" class="h-8 w-8" @click="openRowSettings(row, false)">
-                            <Settings class="h-4 w-4" />
+                  <draggable
+                    v-if="slotProps.workingDoc?.structure && slotProps.workingDoc.structure.length > 0"
+                    v-model="slotProps.workingDoc.structure"
+                    item-key="id"
+                    :disabled="true"
+                  >
+                    <template #item="{ element: row, index: rowIndex }">
+                      <div class="space-y-2">
+                        <div v-if="state.editMode" class="flex px-4 flex-wrap items-center gap-2 justify-between">
+                          <div class="flex flex-wrap items-center gap-2">
+                            <edge-shad-button
+                              variant="outline"
+                              size="icon"
+                              class="h-8 w-8"
+                              :disabled="rowIndex === 0"
+                              @click="moveRow(slotProps.workingDoc, rowIndex, -1, false)"
+                            >
+                              <ArrowUp class="h-4 w-4" />
+                            </edge-shad-button>
+                            <edge-shad-button
+                              variant="outline"
+                              size="icon"
+                              class="h-8 w-8"
+                              :disabled="rowIndex === (slotProps.workingDoc?.structure?.length || 0) - 1"
+                              @click="moveRow(slotProps.workingDoc, rowIndex, 1, false)"
+                            >
+                              <ArrowDown class="h-4 w-4" />
+                            </edge-shad-button>
+                            <edge-shad-button variant="outline" size="icon" class="h-8 w-8" @click="openRowSettings(row, false)">
+                              <Settings class="h-4 w-4" />
+                            </edge-shad-button>
+                          </div>
+                          <edge-shad-button variant="destructive" size="icon" class="text-white" @click="slotProps.workingDoc.structure.splice(rowIndex, 1); cleanupOrphanBlocks(slotProps.workingDoc, false)">
+                            <Trash class="h-4 w-4" />
                           </edge-shad-button>
                         </div>
-                        <edge-shad-button variant="destructive" size="icon" class="text-white" @click="slotProps.workingDoc.structure.splice(rowIndex, 1); cleanupOrphanBlocks(slotProps.workingDoc, false)">
-                          <Trash class="h-4 w-4" />
-                        </edge-shad-button>
-                      </div>
-                      <div
-                        class="mx-auto"
-                        :class="[rowWidthClass(row.width), backgroundClass(row.background), state.editMode ? 'shadow-sm border border-gray-200/70 p-4' : 'shadow-none border-0 p-0']"
-                        :style="{ ...rowBackgroundStyle(row.background), ...rowSpacingStyle(row) }"
-                      >
-                        <div :class="[rowGridClass(row), rowVerticalAlignClass(row)]" :style="rowGridStyle(row)">
-                          <div
-                            v-for="(column, colIndex) in row.columns"
-                            :key="column.id || colIndex"
-                            class="space-y-2"
-                            :class="[state.editMode ? 'rounded-md bg-white/80 p-3 border border-dashed border-gray-200' : '', columnMobileOrderClass(row, colIndex)]"
-                            :style="{ ...columnSpanStyle(column), ...columnMobileOrderStyle(row, colIndex) }"
-                          >
-                            <edge-button-divider v-if="state.editMode" class="my-1">
-                              <edge-cms-block-picker :site-id="props.site" :theme="theme" :allowed-types="templateAllowedBlockTypes(slotProps.workingDoc)" @pick="(block) => addBlockToColumn(rowIndex, colIndex, 0, block, slotProps, false)" />
-                            </edge-button-divider>
-                            <draggable
-                              v-model="column.blocks"
-                              :group="{ name: 'page-blocks', pull: true, put: true }"
-                              :item-key="blockKey"
-                              handle=".block-drag-handle"
-                              ghost-class="block-ghost"
-                              chosen-class="block-dragging"
-                              drag-class="block-dragging"
+                        <div
+                          class="mx-auto"
+                          :class="[rowWidthClass(row.width), backgroundClass(row.background), state.editMode ? 'shadow-sm border border-gray-200/70 p-4' : 'shadow-none border-0 p-0']"
+                          :style="{ ...rowBackgroundStyle(row.background), ...rowSpacingStyle(row) }"
+                        >
+                          <div :class="[rowGridClass(row), rowVerticalAlignClass(row)]" :style="rowGridStyle(row)">
+                            <div
+                              v-for="(column, colIndex) in row.columns"
+                              :key="column.id || colIndex"
+                              class="space-y-2"
+                              :class="[state.editMode ? 'rounded-md bg-white/80 p-3 border border-dashed border-gray-200' : '', columnMobileOrderClass(row, colIndex)]"
+                              :style="{ ...columnSpanStyle(column), ...columnMobileOrderStyle(row, colIndex) }"
                             >
-                              <template #item="{ element: blockId, index: blockPosition }">
-                                <div class="space-y-2">
-                                  <div :key="blockId" class="relative group">
-                                    <edge-cms-block
-                                      v-if="blockIndex(slotProps.workingDoc, blockId, false) !== -1"
-                                      :key="`${pagePreviewRenderKey}:${blockId}:${effectiveThemeId}:list`"
-                                      v-model="slotProps.workingDoc.content[blockIndex(slotProps.workingDoc, blockId, false)]"
-                                      :site-id="selectedPreviewContextSiteId"
-                                      :render-context="pagePreviewRenderContext"
-                                      :edit-mode="state.editMode"
-                                      :override-clicks-in-edit-mode="state.editMode"
-                                      :allow-preview-content-edit="!state.editMode && canOpenPreviewBlockContentEditor"
-                                      :contain-fixed="state.editMode"
-                                      :viewport-mode="previewViewportMode"
-                                      :preview-auth-logged-in="state.previewAuthLoggedIn"
-                                      :block-id="blockId"
-                                      :theme="theme"
-                                      :center-preview-toolbar="!state.editMode && isNonNavigationBlockInFirstContentRow(slotProps.workingDoc, blockId, false)"
-                                      :allow-protection-editor="isRestrictedContentEnabled"
-                                      @delete="(block) => deleteBlock(block, slotProps)"
-                                    />
-                                    <div
-                                      v-if="state.editMode"
-                                      class="block-drag-handle pointer-events-none absolute inset-x-0 top-2 flex justify-center opacity-0 transition group-hover:opacity-100 z-30"
-                                    >
-                                      <div class="pointer-events-auto inline-flex items-center justify-center rounded-full bg-white/90 shadow px-2 py-1 text-gray-700 cursor-grab">
-                                        <Grip class="w-4 h-4" />
+                              <edge-button-divider v-if="state.editMode" class="my-1">
+                                <edge-cms-block-picker :site-id="props.site" :theme="theme" :allowed-types="templateAllowedBlockTypes(slotProps.workingDoc)" @pick="(block) => addBlockToColumn(rowIndex, colIndex, 0, block, slotProps, false)" />
+                              </edge-button-divider>
+                              <draggable
+                                v-model="column.blocks"
+                                :group="{ name: 'page-blocks', pull: true, put: true }"
+                                :item-key="blockKey"
+                                handle=".block-drag-handle"
+                                ghost-class="block-ghost"
+                                chosen-class="block-dragging"
+                                drag-class="block-dragging"
+                              >
+                                <template #item="{ element: blockId, index: blockPosition }">
+                                  <div class="space-y-2">
+                                    <div :key="blockId" class="relative group">
+                                      <edge-cms-block
+                                        v-if="blockIndex(slotProps.workingDoc, blockId, false) !== -1"
+                                        :key="`${pagePreviewRenderKey}:${blockId}:${effectiveThemeId}:list`"
+                                        v-model="slotProps.workingDoc.content[blockIndex(slotProps.workingDoc, blockId, false)]"
+                                        :site-id="selectedPreviewContextSiteId"
+                                        :render-context="pagePreviewRenderContext"
+                                        :edit-mode="state.editMode"
+                                        :override-clicks-in-edit-mode="state.editMode"
+                                        :allow-preview-content-edit="!state.editMode && canOpenPreviewBlockContentEditor"
+                                        :contain-fixed="state.editMode"
+                                        :viewport-mode="previewViewportMode"
+                                        :preview-auth-logged-in="state.previewAuthLoggedIn"
+                                        :block-id="blockId"
+                                        :theme="theme"
+                                        :center-preview-toolbar="!state.editMode && isNonNavigationBlockInFirstContentRow(slotProps.workingDoc, blockId, false)"
+                                        :allow-protection-editor="isRestrictedContentEnabled"
+                                        @delete="(block) => deleteBlock(block, slotProps)"
+                                      />
+                                      <div
+                                        v-if="state.editMode"
+                                        class="block-drag-handle pointer-events-none absolute inset-x-0 top-2 flex justify-center opacity-0 transition group-hover:opacity-100 z-30"
+                                      >
+                                        <div class="pointer-events-auto inline-flex items-center justify-center rounded-full bg-white/90 shadow px-2 py-1 text-gray-700 cursor-grab">
+                                          <Grip class="w-4 h-4" />
+                                        </div>
                                       </div>
                                     </div>
+                                    <div v-if="state.editMode && column.blocks.length > blockPosition + 1" class="w-full">
+                                      <edge-button-divider class="my-2">
+                                        <edge-cms-block-picker :site-id="props.site" :theme="theme" :allowed-types="templateAllowedBlockTypes(slotProps.workingDoc)" @pick="(block) => addBlockToColumn(rowIndex, colIndex, blockPosition + 1, block, slotProps, false)" />
+                                      </edge-button-divider>
+                                    </div>
                                   </div>
-                                  <div v-if="state.editMode && column.blocks.length > blockPosition + 1" class="w-full">
-                                    <edge-button-divider class="my-2">
-                                      <edge-cms-block-picker :site-id="props.site" :theme="theme" :allowed-types="templateAllowedBlockTypes(slotProps.workingDoc)" @pick="(block) => addBlockToColumn(rowIndex, colIndex, blockPosition + 1, block, slotProps, false)" />
-                                    </edge-button-divider>
-                                  </div>
-                                </div>
-                              </template>
-                            </draggable>
-                            <edge-button-divider v-if="state.editMode && column.blocks.length > 0" class="my-1">
-                              <edge-cms-block-picker :site-id="props.site" :theme="theme" :allowed-types="templateAllowedBlockTypes(slotProps.workingDoc)" @pick="(block) => addBlockToColumn(rowIndex, colIndex, column.blocks.length, block, slotProps, false)" />
-                            </edge-button-divider>
+                                </template>
+                              </draggable>
+                              <edge-button-divider v-if="state.editMode && column.blocks.length > 0" class="my-1">
+                                <edge-cms-block-picker :site-id="props.site" :theme="theme" :allowed-types="templateAllowedBlockTypes(slotProps.workingDoc)" @pick="(block) => addBlockToColumn(rowIndex, colIndex, column.blocks.length, block, slotProps, false)" />
+                              </edge-button-divider>
+                            </div>
                           </div>
                         </div>
+                        <edge-button-divider
+                          v-if="state.editMode && rowIndex < (slotProps.workingDoc?.structure?.length || 0) - 1"
+                          class="my-2"
+                        >
+                          <Popover v-model:open="state.addRowPopoverOpen.listBetween[row.id]">
+                            <PopoverTrigger as-child>
+                              <edge-shad-button class="bg-slate-300 text-slate-900 hover:bg-slate-400 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600 text-xs h-[32px]">
+                                Add Row
+                              </edge-shad-button>
+                            </PopoverTrigger>
+                            <PopoverContent class="w-[360px]">
+                              <div class="grid grid-cols-2 gap-2">
+                                <button
+                                  v-for="option in LAYOUT_OPTIONS"
+                                  :key="option.id"
+                                  type="button"
+                                  class="border rounded-md p-2 transition bg-white hover:border-primary text-left w-full"
+                                  :class="isLayoutSelected(option.id, false) ? 'border-primary ring-1 ring-primary/40' : 'border-gray-200'"
+                                  @click="selectLayout(option.spans, false); addRowAndClose(slotProps.workingDoc, option.id, rowIndex + 1, false, 'between', row.id)"
+                                >
+                                  <div class="text-[11px] font-medium mb-1">
+                                    {{ option.label }}
+                                  </div>
+                                  <div class="w-full h-8 grid gap-[2px]" style="grid-template-columns: repeat(6, minmax(0, 1fr));">
+                                    <div
+                                      v-for="(span, idx) in option.spans"
+                                      :key="idx"
+                                      class="bg-gray-200 rounded-sm"
+                                      :style="{ gridColumn: `span ${span} / span ${span}` }"
+                                    />
+                                  </div>
+                                </button>
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                        </edge-button-divider>
                       </div>
-                      <edge-button-divider
-                        v-if="state.editMode && rowIndex < (slotProps.workingDoc?.structure?.length || 0) - 1"
-                        class="my-2"
-                      >
-                        <Popover v-model:open="state.addRowPopoverOpen.listBetween[row.id]">
-                          <PopoverTrigger as-child>
-                            <edge-shad-button class="bg-slate-300 text-slate-900 hover:bg-slate-400 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600 text-xs h-[32px]">
-                              Add Row
-                            </edge-shad-button>
-                          </PopoverTrigger>
-                          <PopoverContent class="w-[360px]">
-                            <div class="grid grid-cols-2 gap-2">
-                              <button
-                                v-for="option in LAYOUT_OPTIONS"
-                                :key="option.id"
-                                type="button"
-                                class="border rounded-md p-2 transition bg-white hover:border-primary text-left w-full"
-                                :class="isLayoutSelected(option.id, false) ? 'border-primary ring-1 ring-primary/40' : 'border-gray-200'"
-                                @click="selectLayout(option.spans, false); addRowAndClose(slotProps.workingDoc, option.id, rowIndex + 1, false, 'between', row.id)"
-                              >
-                                <div class="text-[11px] font-medium mb-1">
-                                  {{ option.label }}
-                                </div>
-                                <div class="w-full h-8 grid gap-[2px]" style="grid-template-columns: repeat(6, minmax(0, 1fr));">
-                                  <div
-                                    v-for="(span, idx) in option.spans"
-                                    :key="idx"
-                                    class="bg-gray-200 rounded-sm"
-                                    :style="{ gridColumn: `span ${span} / span ${span}` }"
-                                  />
-                                </div>
-                              </button>
-                            </div>
-                          </PopoverContent>
-                        </Popover>
-                      </edge-button-divider>
-                    </div>
-                  </template>
-                </draggable>
+                    </template>
+                  </draggable>
+                </edge-cms-page-canvas>
                 <edge-button-divider v-if="state.editMode && slotProps.workingDoc?.structure && slotProps.workingDoc.structure.length > 0" class="my-2">
                   <Popover v-model:open="state.addRowPopoverOpen.listBottom">
                     <PopoverTrigger as-child>
@@ -4435,151 +4460,158 @@ const hasUnsavedChanges = (changes) => {
                     </PopoverContent>
                   </Popover>
                 </div>
-                <draggable
-                  v-if="slotProps.workingDoc?.postStructure && slotProps.workingDoc.postStructure.length > 0"
-                  v-model="slotProps.workingDoc.postStructure"
-                  item-key="id"
-                  :disabled="true"
+                <edge-cms-page-canvas
+                  :enabled="pageCanvasEnabled"
+                  :theme="theme"
+                  :head="headObject"
+                  :viewport-mode="previewViewportMode"
                 >
-                  <template #item="{ element: row, index: rowIndex }">
-                    <div class="space-y-2">
-                      <div v-if="state.editMode" class="flex flex-wrap items-center gap-2 justify-between">
-                        <div class="flex flex-wrap items-center gap-2">
-                          <edge-shad-button
-                            variant="outline"
-                            size="icon"
-                            class="h-8 w-8"
-                            :disabled="rowIndex === 0"
-                            @click="moveRow(slotProps.workingDoc, rowIndex, -1, true)"
-                          >
-                            <ArrowUp class="h-4 w-4" />
-                          </edge-shad-button>
-                          <edge-shad-button
-                            variant="outline"
-                            size="icon"
-                            class="h-8 w-8"
-                            :disabled="rowIndex === (slotProps.workingDoc?.postStructure?.length || 0) - 1"
-                            @click="moveRow(slotProps.workingDoc, rowIndex, 1, true)"
-                          >
-                            <ArrowDown class="h-4 w-4" />
-                          </edge-shad-button>
-                          <edge-shad-button variant="outline" size="icon" class="h-8 w-8" @click="openRowSettings(row, true)">
-                            <Settings class="h-4 w-4" />
+                  <draggable
+                    v-if="slotProps.workingDoc?.postStructure && slotProps.workingDoc.postStructure.length > 0"
+                    v-model="slotProps.workingDoc.postStructure"
+                    item-key="id"
+                    :disabled="true"
+                  >
+                    <template #item="{ element: row, index: rowIndex }">
+                      <div class="space-y-2">
+                        <div v-if="state.editMode" class="flex flex-wrap items-center gap-2 justify-between">
+                          <div class="flex flex-wrap items-center gap-2">
+                            <edge-shad-button
+                              variant="outline"
+                              size="icon"
+                              class="h-8 w-8"
+                              :disabled="rowIndex === 0"
+                              @click="moveRow(slotProps.workingDoc, rowIndex, -1, true)"
+                            >
+                              <ArrowUp class="h-4 w-4" />
+                            </edge-shad-button>
+                            <edge-shad-button
+                              variant="outline"
+                              size="icon"
+                              class="h-8 w-8"
+                              :disabled="rowIndex === (slotProps.workingDoc?.postStructure?.length || 0) - 1"
+                              @click="moveRow(slotProps.workingDoc, rowIndex, 1, true)"
+                            >
+                              <ArrowDown class="h-4 w-4" />
+                            </edge-shad-button>
+                            <edge-shad-button variant="outline" size="icon" class="h-8 w-8" @click="openRowSettings(row, true)">
+                              <Settings class="h-4 w-4" />
+                            </edge-shad-button>
+                          </div>
+                          <edge-shad-button variant="destructive" size="icon" class="text-white" @click="slotProps.workingDoc.postStructure.splice(rowIndex, 1); cleanupOrphanBlocks(slotProps.workingDoc, true)">
+                            <Trash class="h-4 w-4" />
                           </edge-shad-button>
                         </div>
-                        <edge-shad-button variant="destructive" size="icon" class="text-white" @click="slotProps.workingDoc.postStructure.splice(rowIndex, 1); cleanupOrphanBlocks(slotProps.workingDoc, true)">
-                          <Trash class="h-4 w-4" />
-                        </edge-shad-button>
-                      </div>
-                      <div
-                        class="mx-auto"
-                        :class="[rowWidthClass(row.width), backgroundClass(row.background), state.editMode ? 'shadow-sm border border-gray-200/70 p-4' : 'shadow-none border-0 p-0']"
-                        :style="{ ...rowBackgroundStyle(row.background), ...rowSpacingStyle(row) }"
-                      >
-                        <div :class="[rowGridClass(row), rowVerticalAlignClass(row)]" :style="rowGridStyle(row)">
-                          <div
-                            v-for="(column, colIndex) in row.columns"
-                            :key="column.id || colIndex"
-                            class="space-y-2"
-                            :class="[state.editMode ? 'rounded-md bg-white/80 p-3 border border-dashed border-gray-200' : '', columnMobileOrderClass(row, colIndex)]"
-                            :style="{ ...columnSpanStyle(column), ...columnMobileOrderStyle(row, colIndex) }"
-                          >
-                            <edge-button-divider v-if="state.editMode" class="my-1">
-                              <edge-cms-block-picker :site-id="props.site" :theme="theme" :allowed-types="templateAllowedBlockTypes(slotProps.workingDoc)" @pick="(block) => addBlockToColumn(rowIndex, colIndex, 0, block, slotProps, true)" />
-                            </edge-button-divider>
-                            <draggable
-                              v-model="column.blocks"
-                              :group="{ name: 'post-blocks', pull: true, put: true }"
-                              :item-key="blockKey"
-                              handle=".block-drag-handle"
-                              ghost-class="block-ghost"
-                              chosen-class="block-dragging"
-                              drag-class="block-dragging"
+                        <div
+                          class="mx-auto"
+                          :class="[rowWidthClass(row.width), backgroundClass(row.background), state.editMode ? 'shadow-sm border border-gray-200/70 p-4' : 'shadow-none border-0 p-0']"
+                          :style="{ ...rowBackgroundStyle(row.background), ...rowSpacingStyle(row) }"
+                        >
+                          <div :class="[rowGridClass(row), rowVerticalAlignClass(row)]" :style="rowGridStyle(row)">
+                            <div
+                              v-for="(column, colIndex) in row.columns"
+                              :key="column.id || colIndex"
+                              class="space-y-2"
+                              :class="[state.editMode ? 'rounded-md bg-white/80 p-3 border border-dashed border-gray-200' : '', columnMobileOrderClass(row, colIndex)]"
+                              :style="{ ...columnSpanStyle(column), ...columnMobileOrderStyle(row, colIndex) }"
                             >
-                              <template #item="{ element: blockId, index: blockPosition }">
-                                <div class="space-y-2">
-                                  <div :key="blockId" class="relative group">
-                                    <edge-cms-block
-                                      v-if="blockIndex(slotProps.workingDoc, blockId, true) !== -1"
-                                      :key="`${pagePreviewRenderKey}:${blockId}:${effectiveThemeId}:post:${previewRouteLastSegment || 'auto'}`"
-                                      v-model="slotProps.workingDoc.postContent[blockIndex(slotProps.workingDoc, blockId, true)]"
-                                      :render-context="pagePreviewRenderContext"
-                                      :edit-mode="state.editMode"
-                                      :override-clicks-in-edit-mode="state.editMode"
-                                      :allow-preview-content-edit="!state.editMode && canOpenPreviewBlockContentEditor"
-                                      :contain-fixed="state.editMode"
-                                      :viewport-mode="previewViewportMode"
-                                      :preview-auth-logged-in="state.previewAuthLoggedIn"
-                                      :block-id="blockId"
-                                      :theme="theme"
-                                      :site-id="selectedPreviewContextSiteId"
-                                      :route-last-segment="previewRouteLastSegment"
-                                      :center-preview-toolbar="!state.editMode && isNonNavigationBlockInFirstContentRow(slotProps.workingDoc, blockId, true)"
-                                      :allow-protection-editor="isRestrictedContentEnabled"
-                                      @delete="(block) => deleteBlock(block, slotProps, true)"
-                                    />
-                                    <div
-                                      v-if="state.editMode"
-                                      class="block-drag-handle pointer-events-none absolute inset-x-0 top-2 flex justify-center opacity-0 transition group-hover:opacity-100 z-30"
-                                    >
-                                      <div class="pointer-events-auto inline-flex items-center justify-center rounded-full bg-white/90 shadow px-2 py-1 text-gray-700 cursor-grab">
-                                        <Grip class="w-4 h-4" />
+                              <edge-button-divider v-if="state.editMode" class="my-1">
+                                <edge-cms-block-picker :site-id="props.site" :theme="theme" :allowed-types="templateAllowedBlockTypes(slotProps.workingDoc)" @pick="(block) => addBlockToColumn(rowIndex, colIndex, 0, block, slotProps, true)" />
+                              </edge-button-divider>
+                              <draggable
+                                v-model="column.blocks"
+                                :group="{ name: 'post-blocks', pull: true, put: true }"
+                                :item-key="blockKey"
+                                handle=".block-drag-handle"
+                                ghost-class="block-ghost"
+                                chosen-class="block-dragging"
+                                drag-class="block-dragging"
+                              >
+                                <template #item="{ element: blockId, index: blockPosition }">
+                                  <div class="space-y-2">
+                                    <div :key="blockId" class="relative group">
+                                      <edge-cms-block
+                                        v-if="blockIndex(slotProps.workingDoc, blockId, true) !== -1"
+                                        :key="`${pagePreviewRenderKey}:${blockId}:${effectiveThemeId}:post:${previewRouteLastSegment || 'auto'}`"
+                                        v-model="slotProps.workingDoc.postContent[blockIndex(slotProps.workingDoc, blockId, true)]"
+                                        :render-context="pagePreviewRenderContext"
+                                        :edit-mode="state.editMode"
+                                        :override-clicks-in-edit-mode="state.editMode"
+                                        :allow-preview-content-edit="!state.editMode && canOpenPreviewBlockContentEditor"
+                                        :contain-fixed="state.editMode"
+                                        :viewport-mode="previewViewportMode"
+                                        :preview-auth-logged-in="state.previewAuthLoggedIn"
+                                        :block-id="blockId"
+                                        :theme="theme"
+                                        :site-id="selectedPreviewContextSiteId"
+                                        :route-last-segment="previewRouteLastSegment"
+                                        :center-preview-toolbar="!state.editMode && isNonNavigationBlockInFirstContentRow(slotProps.workingDoc, blockId, true)"
+                                        :allow-protection-editor="isRestrictedContentEnabled"
+                                        @delete="(block) => deleteBlock(block, slotProps, true)"
+                                      />
+                                      <div
+                                        v-if="state.editMode"
+                                        class="block-drag-handle pointer-events-none absolute inset-x-0 top-2 flex justify-center opacity-0 transition group-hover:opacity-100 z-30"
+                                      >
+                                        <div class="pointer-events-auto inline-flex items-center justify-center rounded-full bg-white/90 shadow px-2 py-1 text-gray-700 cursor-grab">
+                                          <Grip class="w-4 h-4" />
+                                        </div>
                                       </div>
                                     </div>
+                                    <div v-if="state.editMode && column.blocks.length > blockPosition + 1" class="w-full">
+                                      <edge-button-divider class="my-2">
+                                        <edge-cms-block-picker :site-id="props.site" :theme="theme" :allowed-types="templateAllowedBlockTypes(slotProps.workingDoc)" @pick="(block) => addBlockToColumn(rowIndex, colIndex, blockPosition + 1, block, slotProps, true)" />
+                                      </edge-button-divider>
+                                    </div>
                                   </div>
-                                  <div v-if="state.editMode && column.blocks.length > blockPosition + 1" class="w-full">
-                                    <edge-button-divider class="my-2">
-                                      <edge-cms-block-picker :site-id="props.site" :theme="theme" :allowed-types="templateAllowedBlockTypes(slotProps.workingDoc)" @pick="(block) => addBlockToColumn(rowIndex, colIndex, blockPosition + 1, block, slotProps, true)" />
-                                    </edge-button-divider>
-                                  </div>
-                                </div>
-                              </template>
-                            </draggable>
-                            <edge-button-divider v-if="state.editMode && column.blocks.length > 0" class="my-1">
-                              <edge-cms-block-picker :site-id="props.site" :theme="theme" :allowed-types="templateAllowedBlockTypes(slotProps.workingDoc)" @pick="(block) => addBlockToColumn(rowIndex, colIndex, column.blocks.length, block, slotProps, true)" />
-                            </edge-button-divider>
+                                </template>
+                              </draggable>
+                              <edge-button-divider v-if="state.editMode && column.blocks.length > 0" class="my-1">
+                                <edge-cms-block-picker :site-id="props.site" :theme="theme" :allowed-types="templateAllowedBlockTypes(slotProps.workingDoc)" @pick="(block) => addBlockToColumn(rowIndex, colIndex, column.blocks.length, block, slotProps, true)" />
+                              </edge-button-divider>
+                            </div>
                           </div>
                         </div>
+                        <edge-button-divider
+                          v-if="state.editMode && rowIndex < (slotProps.workingDoc?.postStructure?.length || 0) - 1"
+                          class="my-2"
+                        >
+                          <Popover v-model:open="state.addRowPopoverOpen.postBetween[row.id]">
+                            <PopoverTrigger as-child>
+                              <edge-shad-button class="bg-slate-300 text-slate-900 hover:bg-slate-400 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600 text-xs h-[32px]">
+                                Add Row
+                              </edge-shad-button>
+                            </PopoverTrigger>
+                            <PopoverContent class="w-[360px]">
+                              <div class="grid grid-cols-2 gap-2">
+                                <button
+                                  v-for="option in LAYOUT_OPTIONS"
+                                  :key="option.id"
+                                  type="button"
+                                  class="border rounded-md p-2 transition bg-white hover:border-primary text-left w-full"
+                                  :class="isLayoutSelected(option.id, true) ? 'border-primary ring-1 ring-primary/40' : 'border-gray-200'"
+                                  @click="selectLayout(option.spans, true); addRowAndClose(slotProps.workingDoc, option.id, rowIndex + 1, true, 'between', row.id)"
+                                >
+                                  <div class="text-[11px] font-medium mb-1">
+                                    {{ option.label }}
+                                  </div>
+                                  <div class="w-full h-8 grid gap-[2px]" style="grid-template-columns: repeat(6, minmax(0, 1fr));">
+                                    <div
+                                      v-for="(span, idx) in option.spans"
+                                      :key="idx"
+                                      class="bg-gray-200 rounded-sm"
+                                      :style="{ gridColumn: `span ${span} / span ${span}` }"
+                                    />
+                                  </div>
+                                </button>
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                        </edge-button-divider>
                       </div>
-                      <edge-button-divider
-                        v-if="state.editMode && rowIndex < (slotProps.workingDoc?.postStructure?.length || 0) - 1"
-                        class="my-2"
-                      >
-                        <Popover v-model:open="state.addRowPopoverOpen.postBetween[row.id]">
-                          <PopoverTrigger as-child>
-                            <edge-shad-button class="bg-slate-300 text-slate-900 hover:bg-slate-400 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600 text-xs h-[32px]">
-                              Add Row
-                            </edge-shad-button>
-                          </PopoverTrigger>
-                          <PopoverContent class="w-[360px]">
-                            <div class="grid grid-cols-2 gap-2">
-                              <button
-                                v-for="option in LAYOUT_OPTIONS"
-                                :key="option.id"
-                                type="button"
-                                class="border rounded-md p-2 transition bg-white hover:border-primary text-left w-full"
-                                :class="isLayoutSelected(option.id, true) ? 'border-primary ring-1 ring-primary/40' : 'border-gray-200'"
-                                @click="selectLayout(option.spans, true); addRowAndClose(slotProps.workingDoc, option.id, rowIndex + 1, true, 'between', row.id)"
-                              >
-                                <div class="text-[11px] font-medium mb-1">
-                                  {{ option.label }}
-                                </div>
-                                <div class="w-full h-8 grid gap-[2px]" style="grid-template-columns: repeat(6, minmax(0, 1fr));">
-                                  <div
-                                    v-for="(span, idx) in option.spans"
-                                    :key="idx"
-                                    class="bg-gray-200 rounded-sm"
-                                    :style="{ gridColumn: `span ${span} / span ${span}` }"
-                                  />
-                                </div>
-                              </button>
-                            </div>
-                          </PopoverContent>
-                        </Popover>
-                      </edge-button-divider>
-                    </div>
-                  </template>
-                </draggable>
+                    </template>
+                  </draggable>
+                </edge-cms-page-canvas>
                 <edge-button-divider v-if="state.editMode && slotProps.workingDoc?.postStructure && slotProps.workingDoc.postStructure.length > 0" class="my-2">
                   <Popover v-model:open="state.addRowPopoverOpen.postBottom">
                     <PopoverTrigger as-child>

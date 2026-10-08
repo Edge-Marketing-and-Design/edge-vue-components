@@ -73,6 +73,14 @@ const props = defineProps({
 const emit = defineEmits(['loaded'])
 const renderInstanceId = `cms-block-render-${Math.random().toString(36).slice(2, 10)}`
 const htmlReady = ref(false)
+const htmlContentRef = ref(null)
+
+// Publication slots live in the block's own document, which is an iframe when
+// the canvas preview is on, so resolve them there instead of by selector.
+const publicationTarget = (publication) => {
+  const root = htmlContentRef.value?.contentRoot?.()
+  return root?.querySelector?.(publication.target) || publication.target
+}
 const templateV2Html = ref('')
 // A manual preview refresh remounts this component and starts with a fresh cache.
 const templateV2ApiRequestCache = new Map()
@@ -1053,6 +1061,7 @@ const handleHtmlLoaded = async () => {
 
 <template>
   <edge-cms-html-content
+    ref="htmlContentRef"
     :html="renderedBlock.html"
     :theme="theme"
     :isolated="props.isolated"
@@ -1066,7 +1075,7 @@ const handleHtmlLoaded = async () => {
       <Teleport
         v-for="publication in renderedBlock.publications"
         :key="publication.id"
-        :to="publication.target"
+        :to="publicationTarget(publication)"
       >
         <edge-cms-publication-preview
           :pages="publication.pages"

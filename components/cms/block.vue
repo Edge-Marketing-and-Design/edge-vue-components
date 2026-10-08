@@ -378,6 +378,11 @@ const modelValue = useVModel(props, 'modelValue', emit)
 const blockFormRef = ref(null)
 const previewContentEditorRef = ref(null)
 const fieldEditorPreviewRef = ref(null)
+// Prototype canvas: block content lives in the canvas iframe's document.
+const resolvePreviewContentRoot = (root) => {
+  const canvasRoot = root?.querySelector?.('iframe[data-cms-canvas]')?.contentDocument?.getElementById('cms-canvas-root')
+  return canvasRoot || root
+}
 const editorSplitContainerRef = ref(null)
 const activePreviewField = ref('')
 const fieldEditorPreviewLoadedTick = ref(0)
@@ -1733,7 +1738,7 @@ const fieldEditorPreviewCanvasClass = computed(() => {
 })
 
 const clearActivePreviewHighlights = () => {
-  const root = fieldEditorPreviewRef.value
+  const root = resolvePreviewContentRoot(fieldEditorPreviewRef.value)
   if (!root || typeof document === 'undefined')
     return
 
@@ -1991,7 +1996,7 @@ const syncActivePreviewHighlight = () => {
   if (!field)
     return
 
-  const root = fieldEditorPreviewRef.value
+  const root = resolvePreviewContentRoot(fieldEditorPreviewRef.value)
   if (!root)
     return
 
@@ -2726,7 +2731,8 @@ const getTagsFromPosts = computed(() => {
 </script>
 
 <template>
-  <div>
+  <!-- data-cms-chrome: Hub editor controls; a page canvas scopes Hub CSS here. -->
+  <div data-cms-chrome>
     <div
       v-if="!shouldHideForLoggedOutPreview"
       :class="[{ 'cursor-pointer': canOpenEditor }, blockWrapperClass]"

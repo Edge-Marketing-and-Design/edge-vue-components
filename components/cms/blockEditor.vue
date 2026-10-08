@@ -2564,11 +2564,17 @@ const theme = computed(() => {
   }
 })
 
+// Isolated preview canvas (docs/features/cms/iframe-canvas.md). The toggle is
+// global; the block editor adds its theme head and a minimum height for blocks
+// with fixed elements (a nav's slide-out panel).
+const { enabled: canvasPreviewEnabled, toggle: toggleCanvasPreview } = useCmsCanvasPreview()
+const canvasEditorOptions = reactive({ head: {}, fixedMinHeight: 'calc(100vh - 300px)' })
+
 const previewThemeRenderKey = computed(() => {
   const themeId = String(edgeGlobal.edgeState.blockEditorTheme || 'no-theme')
   const siteId = String(edgeGlobal.edgeState.blockEditorSite || 'no-site')
   const previewType = normalizePreviewType(state.previewBlock?.previewType)
-  return `${themeId}:${siteId}:${state.previewViewport}:${previewType}:${state.previewRefreshRevision}`
+  return `${themeId}:${siteId}:${state.previewViewport}:${previewType}:${state.previewRefreshRevision}:${canvasPreviewEnabled.value ? 'canvas' : 'runtime'}`
 })
 
 const headObject = computed(() => {
@@ -2584,6 +2590,11 @@ const headObject = computed(() => {
 watch(headObject, (newHeadElements) => {
   emit('head', newHeadElements)
 }, { immediate: true, deep: true })
+
+watch(headObject, (head) => {
+  canvasEditorOptions.head = head || {}
+}, { immediate: true, deep: true })
+provide('edgeCmsCanvas', canvasEditorOptions)
 
 const editorDocUpdates = (workingDoc) => {
   if (workingDoc && props.blockId === 'new' && workingDoc.templateVersion === undefined)
@@ -5514,6 +5525,15 @@ const exportCurrentBlock = async () => {
                       <component :is="option.icon" class="w-3.5 h-3.5" />
                     </edge-shad-button>
                   </div>
+                  <button
+                    type="button"
+                    class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border px-2.5 py-1 text-xs font-medium shadow-sm transition-colors"
+                    :class="canvasPreviewEnabled ? 'border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700' : 'border-slate-300 bg-white/90 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200'"
+                    title="Render previews in an isolated canvas with the public site's CSS (applies across the Hub)"
+                    @click="toggleCanvasPreview"
+                  >
+                    {{ canvasPreviewEnabled ? 'Iframe canvas: on' : 'Iframe canvas: off' }}
+                  </button>
                   <label v-if="previewAuthToggleVisible" class="inline-flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded-md border border-slate-300 bg-white/90 px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:bg-slate-800">
                     <Checkbox
                       :model-value="!state.previewAuthLoggedIn"

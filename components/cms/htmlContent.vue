@@ -4,7 +4,8 @@ import presetWind4 from '@unocss/preset-wind4'
 import initUnocssRuntime, { defineConfig } from '@unocss/runtime'
 import DOMPurify from 'dompurify'
 
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { CANVAS_EDITOR_CSS, CANVAS_SRCDOC, buildCanvasSiteCss, buildChromeCss, canvasContentHeight, canvasHeadLinks, collectCanvasClassTokensFromHtml, guardCanvasNavigation, revealCanvasBody, upsertCanvasStyle } from '../../lib/cmsCanvas'
 import { syncCmsPreviewAuthState } from '../../lib/cmsPreviewAuthState'
 import { splitCssSelectorList } from '../../lib/cmsCssSelectors'
 import { BREAKPOINT_MIN_WIDTHS, rewriteViewportClassTokens } from '../../lib/cmsViewportClasses'
@@ -619,6 +620,11 @@ async function initEmblaCarousels(scope) {
 function initCmsNavHelpers(scope) {
   if (!scope || !import.meta.client)
     return
+  // Prototype canvas: use the scope's own document and window, so scroll,
+  // resize and click listeners attach to an iframe canvas's frame.
+  // eslint-disable-next-line no-restricted-globals
+  const document = scope.ownerDocument || globalThis.document
+  const window = document.defaultView || globalThis.window
 
   const existingCleanupFns = Array.isArray(scope.__cmsNavCleanupFns)
     ? scope.__cmsNavCleanupFns
@@ -1703,7 +1709,228 @@ function rewriteAllClasses(scopeEl, theme, isolated = true, viewportMode = 'auto
   })
 }
 
+// --- Isolated preview canvas (docs/features/cms/iframe-canvas.md) ---
+// With the canvas preview on (useCmsCanvasPreview), the block renders inside a
+// same-origin iframe instead of the shared Hub document. Its CSS comes from the
+// template engine's generator, the one the public renderer uses, so there is no
+// Hub runtime, class rewriting or scoping. Inside a page canvas (pageCanvas.vue)
+// the block is already in the page's iframe and renders as plain HTML.
+const { enabled: canvasPreviewEnabled } = useCmsCanvasPreview()
+// Optional editor settings: `fixedMinHeight` (block editor), `head` (theme head).
+const canvasOptions = inject('edgeCmsCanvas', null)
+const pageCanvas = inject('edgeCmsPageCanvas', null)
+const pageCanvasActive = computed(() => Boolean(pageCanvas?.active))
+const canvasEnabled = computed(() => canvasPreviewEnabled.value && !pageCanvasActive.value)
+let inlineCanvas = false
+const canvasFrame = ref(null)
+const canvasMount = ref(null)
+const canvasHeight = ref(150)
+// Thumbnail grids can hold dozens of blocks; a canvas starts when it nears view.
+const canvasActive = ref(false)
+// What the canvas shows. It only advances once the CSS for it is in place, so
+// an edit never flashes unstyled content.
+const canvasHtml = ref('')
+let canvasRun = 0
+let canvasCleanups = []
+
+const canvasRoot = () => (canvasEnabled.value ? canvasMount.value : hostEl.value)
+
+// A fixed-position element (nav panel, modal) fills the frame's viewport, so a
+// frame sized to its content would clip it. Editors that preview one block at a
+// time (the block editor) provide a minimum height for that case.
+const canvasHasFixed = ref(false)
+const canvasMinHeight = computed(() => (canvasHasFixed.value && canvasOptions?.fixedMinHeight) || null)
+
+// Device widths render at their true size and scale down to fit, so the block's
+// own breakpoints respond (no class rewriting).
+const CANVAS_VIEWPORT_WIDTHS = { large: 1280, medium: 992, mobile: 420 }
+const canvasAvailableWidth = ref(0)
+const canvasViewportWidth = computed(() => CANVAS_VIEWPORT_WIDTHS[props.viewportMode] || 0)
+const canvasScale = computed(() => {
+  const target = canvasViewportWidth.value
+  const available = canvasAvailableWidth.value
+  if (!target || !available || target <= available)
+    return 1
+  return Math.max(0.1, available / target)
+})
+const canvasFrameStyle = computed(() => ({
+  width: canvasViewportWidth.value ? `${canvasViewportWidth.value}px` : '100%',
+  height: `${canvasHeight.value}px`,
+  minHeight: canvasMinHeight.value,
+  zoom: canvasScale.value === 1 ? null : canvasScale.value,
+}))
+
+// Theme fonts: the editor's theme head when provided, otherwise the font
+// stylesheets the Hub page already loaded for this theme.
+const canvasHead = () => {
+  if (canvasOptions?.head?.link?.length)
+    return canvasOptions.head
+  const link = Array.from(document.querySelectorAll('link[rel="stylesheet"], link[rel="preconnect"]'))
+    .filter(el => /fonts\.googleapis|fonts\.gstatic|typekit|files\.edgemarketingdesign\.com/.test(el.href))
+    .map(el => ({ rel: el.rel, href: el.href, ...(el.hasAttribute('crossorigin') ? { crossorigin: el.getAttribute('crossorigin') } : {}) }))
+  return { link }
+}
+
+async function writeCanvasCss(html) {
+  const doc = canvasFrame.value?.contentDocument
+  if (!doc?.head)
+    return false
+  const run = ++canvasRun
+  const css = await buildCanvasSiteCss(collectCanvasClassTokensFromHtml(html), props.theme, themeExtraCSS.value)
+  if (run !== canvasRun)
+    return false
+  upsertCanvasStyle(doc, 'cms-canvas-site-css', css)
+  return true
+}
+
+function detectCanvasFixed() {
+  const win = canvasFrame.value?.contentWindow
+  if (!win || !canvasMount.value)
+    return
+  canvasHasFixed.value = Array.from(canvasMount.value.querySelectorAll('*'))
+    .some(el => win.getComputedStyle(el).position === 'fixed')
+}
+
+function syncCanvasHeight() {
+  const doc = canvasFrame.value?.contentDocument
+  if (!doc?.documentElement)
+    return
+  const next = canvasContentHeight(doc)
+  if (next && Math.abs(next - canvasHeight.value) > 1)
+    canvasHeight.value = next
+}
+
+// DOM events inside the iframe don't reach ancestors in the Hub document, so
+// clicks are re-dispatched on the iframe element. The original target is kept
+// so block.vue's selector checks still see the element that was clicked.
+function forwardCanvasClick(event) {
+  const frameEl = canvasFrame.value
+  if (!frameEl)
+    return
+  const proxy = new MouseEvent(event.type, {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    button: event.button,
+    buttons: event.buttons,
+    ctrlKey: event.ctrlKey,
+    shiftKey: event.shiftKey,
+    altKey: event.altKey,
+    metaKey: event.metaKey,
+  })
+  Object.defineProperty(proxy, 'target', { value: event.target })
+  frameEl.dispatchEvent(proxy)
+  if (proxy.defaultPrevented)
+    event.preventDefault()
+  if (proxy.cancelBubble)
+    event.stopPropagation()
+}
+
+// Hub components teleported into this canvas (the publication viewer) need the
+// Hub's styles; added only when present, so thumbnail frames stay light.
+function syncCanvasChromeCss() {
+  const doc = canvasFrame.value?.contentDocument
+  if (doc && canvasMount.value?.querySelector('[data-cms-chrome]'))
+    upsertCanvasStyle(doc, 'cms-canvas-chrome-css', buildChromeCss(document))
+}
+
+async function showCanvasContent() {
+  const html = safeHtml.value
+  if (!(await writeCanvasCss(html)))
+    return
+  canvasHtml.value = html
+  await nextTick()
+  const root = canvasMount.value
+  if (!root)
+    return
+  syncCmsPreviewAuthState(root, props.previewAuthLoggedIn)
+  initEmblaCarousels(root)
+  initCmsNavHelpers(root)
+  detectCanvasFixed()
+  syncCanvasChromeCss()
+  syncCanvasHeight()
+  revealCanvasBody(canvasFrame.value?.contentDocument)
+  hasMounted = true
+  notifyLoaded()
+}
+
+async function initCanvas() {
+  const frameEl = canvasFrame.value
+  const doc = frameEl?.contentDocument
+  if (!doc)
+    return
+  canvasCleanups.forEach(fn => fn())
+  canvasCleanups = []
+  canvasHeadLinks(doc, canvasHead())
+  upsertCanvasStyle(doc, 'cms-canvas-editor-css', CANVAS_EDITOR_CSS)
+  canvasMount.value = doc.getElementById('cms-canvas-root')
+
+  doc.addEventListener('click', forwardCanvasClick, true)
+  canvasCleanups.push(() => doc.removeEventListener('click', forwardCanvasClick, true))
+  canvasCleanups.push(guardCanvasNavigation(doc))
+  if (hostEl.value) {
+    const hostObserver = new ResizeObserver(() => {
+      canvasAvailableWidth.value = hostEl.value?.clientWidth || 0
+    })
+    hostObserver.observe(hostEl.value)
+    canvasAvailableWidth.value = hostEl.value.clientWidth
+    canvasCleanups.push(() => hostObserver.disconnect())
+  }
+  const FrameResizeObserver = frameEl.contentWindow?.ResizeObserver || ResizeObserver
+  const observer = new FrameResizeObserver(() => syncCanvasHeight())
+  observer.observe(doc.documentElement)
+  if (doc.body)
+    observer.observe(doc.body)
+  canvasCleanups.push(() => observer.disconnect())
+  doc.fonts?.ready?.then(() => syncCanvasHeight())
+  await showCanvasContent()
+}
+
+function refreshCanvas() {
+  if (!canvasMount.value)
+    return
+  showCanvasContent()
+}
+
+function startCanvasWhenVisible() {
+  const el = hostEl.value
+  if (!el || typeof IntersectionObserver === 'undefined') {
+    canvasActive.value = true
+    return
+  }
+  const observer = new IntersectionObserver((entries) => {
+    if (entries.some(entry => entry.isIntersecting)) {
+      canvasActive.value = true
+      observer.disconnect()
+    }
+  }, { rootMargin: '600px' })
+  observer.observe(el)
+  canvasCleanups.push(() => observer.disconnect())
+}
+
+async function initInlineCanvas() {
+  const root = hostEl.value
+  syncCmsPreviewAuthState(root, props.previewAuthLoggedIn)
+  initEmblaCarousels(root)
+  initCmsNavHelpers(root)
+  pageCanvas?.contentChanged?.()
+  await nextTick()
+  hasMounted = true
+  notifyLoaded()
+}
+
 onMounted(async () => {
+  if (canvasEnabled.value) {
+    startCanvasWhenVisible()
+    return
+  }
+  // Teleported into the page canvas iframe: its document already has the
+  // site CSS, so skip the Hub runtime and class rewriting entirely.
+  if (pageCanvasActive.value && hostEl.value?.ownerDocument && hostEl.value.ownerDocument !== globalThis.document) {
+    inlineCanvas = true
+    await initInlineCanvas()
+    return
+  }
   await ensureUnoRuntime()
 
   // Apply global theme once (keeps one style tag for vars; blocks can still override locally if needed)
@@ -1729,6 +1956,14 @@ watch(
   async (val) => {
     // Wait for DOM to reflect new v-html, then (re)wire behaviors and class mappings
     await nextTick()
+    if (canvasEnabled.value) {
+      refreshCanvas()
+      return
+    }
+    if (inlineCanvas) {
+      initInlineCanvas()
+      return
+    }
     // setGlobalThemeVars(props.theme)
     setScopedThemeVars(hostEl.value, props.theme)
 
@@ -1746,6 +1981,12 @@ watch(
 watch(
   () => props.theme,
   async (val) => {
+    if (canvasEnabled.value) {
+      refreshCanvas()
+      return
+    }
+    if (inlineCanvas)
+      return
     // 1) Write scoped CSS variables from the raw theme object
     setScopedThemeVars(hostEl.value, val)
     setScopedExtraCss(hostEl.value, typeof val?.extraCSS === 'string' ? val.extraCSS : '')
@@ -1765,6 +2006,9 @@ watch(
   () => props.viewportMode,
   async () => {
     await nextTick()
+    // The canvas width is the viewport; its own media queries respond.
+    if (canvasEnabled.value || inlineCanvas)
+      return
     rewriteAllClasses(hostEl.value, props.theme, props.isolated, props.viewportMode)
     syncCmsPreviewAuthState(hostEl.value, props.previewAuthLoggedIn)
     // Viewport button changes can alter preview surface width without a window resize.
@@ -1786,11 +2030,17 @@ watch(
   () => props.previewAuthLoggedIn,
   async (loggedIn) => {
     await nextTick()
-    syncCmsPreviewAuthState(hostEl.value, loggedIn)
+    syncCmsPreviewAuthState(canvasRoot(), loggedIn)
   },
 )
 
+// The element holding the rendered block: the canvas mount when the block is
+// in its own canvas, otherwise the host (also inside a page canvas).
+defineExpose({ contentRoot: () => canvasRoot() })
+
 onBeforeUnmount(() => {
+  canvasCleanups.forEach(fn => fn())
+  canvasCleanups = []
   if (hostEl.value && Array.isArray(hostEl.value.__cmsNavCleanupFns)) {
     hostEl.value.__cmsNavCleanupFns.forEach((cleanup) => {
       try {
@@ -1805,8 +2055,26 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <!-- Prototype: isolated canvas; the block renders in the iframe's document -->
+  <div v-if="canvasEnabled" ref="hostEl" data-cms-canvas-host>
+    <iframe
+      v-if="canvasActive"
+      ref="canvasFrame"
+      data-cms-canvas
+      title="Block canvas"
+      class="block w-full border-0"
+      :style="canvasFrameStyle"
+      :srcdoc="CANVAS_SRCDOC"
+      @load="initCanvas"
+    />
+    <div v-else :style="{ height: `${canvasHeight}px` }" />
+    <Teleport v-if="canvasMount" :to="canvasMount">
+      <component :is="props.comp" v-if="props.comp" />
+      <div v-else v-html="canvasHtml" />
+    </Teleport>
+  </div>
   <!-- Runtime CSS applies inside this container -->
-  <div ref="hostEl" class="block-content" :data-theme-scope="scopeId">
+  <div v-else ref="hostEl" class="block-content" :data-theme-scope="scopeId" data-cms-content>
     <component :is="props.comp" v-if="props.comp" />
     <div v-else v-html="safeHtml" />
   </div>

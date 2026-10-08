@@ -98,6 +98,11 @@ const previewHead = computed(() => parseHeadDoc(themeDoc.value))
 
 useHead(() => previewHead.value || {})
 
+// Isolated canvas (docs/features/cms/iframe-canvas.md): on with the Hub-wide
+// toggle, or for a single link with ?canvas=1.
+const { enabled: canvasPreviewEnabled } = useCmsCanvasPreview()
+const pageCanvasEnabled = computed(() => canvasPreviewEnabled.value || String(route.query.canvas || '') === '1')
+
 const normalizePreviewColumns = (row) => {
   if (!Array.isArray(row?.columns) || !row.columns.length)
     return []
@@ -409,48 +414,54 @@ watch(() => [organizationId.value, siteId.value, pageId.value, previewToken.valu
       :style="isThumbnailMode ? null : previewPageStyle"
     >
       <div :class="isThumbnailMode ? 'cms-preview-render-page cms-preview-thumbnail-content' : ''">
-        <template v-if="previewRows.length">
-          <div
-            v-for="(row, rowIndex) in previewRows"
-            :key="`${pageId}-row-${row.id || rowIndex}`"
-            class="w-full"
-          >
-            <div :class="previewGridClass(row)">
-              <div
-                v-for="(column, colIndex) in row.columns"
-                :key="`${pageId}-row-${row.id || rowIndex}-col-${column.id || colIndex}`"
-                class="min-w-0"
-                :style="previewColumnStyle(column)"
-              >
+        <edge-cms-page-canvas
+          v-if="previewRows.length"
+          :enabled="pageCanvasEnabled"
+          :theme="previewTheme || {}"
+          :head="previewHead || {}"
+          fit="content"
+        >
+            <div
+              v-for="(row, rowIndex) in previewRows"
+              :key="`${pageId}-row-${row.id || rowIndex}`"
+              class="w-full"
+            >
+              <div :class="previewGridClass(row)">
                 <div
-                  v-for="(blockRef, blockIdx) in column.blocks || []"
-                  :key="`${pageId}-row-${row.id || rowIndex}-col-${column.id || colIndex}-block-${blockIdx}`"
+                  v-for="(column, colIndex) in row.columns"
+                  :key="`${pageId}-row-${row.id || rowIndex}-col-${column.id || colIndex}`"
+                  class="min-w-0"
+                  :style="previewColumnStyle(column)"
                 >
-                  <edge-cms-block-api
-                    v-if="resolveBlockForPreview(blockRef)"
-                    :key="`${siteId}:${pageId}:${previewBlockKey(row, rowIndex, column, colIndex, blockIdx)}`"
-                    :site-id="siteId"
-                    :content="resolveBlockForPreview(blockRef).content"
-                    :template-version="resolveBlockForPreview(blockRef).templateVersion"
-                    :template="resolveBlockForPreview(blockRef).template"
-                    :schema="resolveBlockForPreview(blockRef).schema"
-                    :data-sources="resolveBlockForPreview(blockRef).dataSources"
-                    :values="previewValuesByKey[previewBlockKey(row, rowIndex, column, colIndex, blockIdx)] || EMPTY_PREVIEW_VALUES"
-                    :meta="resolveBlockForPreview(blockRef).meta"
-                    :theme="previewTheme"
-                    :render-context="state.renderContext"
-                    :route-last-segment="routeLastSegment"
-                    :standalone-preview="true"
-                    :preview-auth-logged-in="true"
-                    :viewport-mode="previewViewport || 'auto'"
-                    @pending="setPreviewBlockPending(previewBlockKey(row, rowIndex, column, colIndex, blockIdx), $event)"
-                    @loaded="setPreviewBlockLoaded(previewBlockKey(row, rowIndex, column, colIndex, blockIdx))"
-                  />
+                  <div
+                    v-for="(blockRef, blockIdx) in column.blocks || []"
+                    :key="`${pageId}-row-${row.id || rowIndex}-col-${column.id || colIndex}-block-${blockIdx}`"
+                  >
+                    <edge-cms-block-api
+                      v-if="resolveBlockForPreview(blockRef)"
+                      :key="`${siteId}:${pageId}:${previewBlockKey(row, rowIndex, column, colIndex, blockIdx)}`"
+                      :site-id="siteId"
+                      :content="resolveBlockForPreview(blockRef).content"
+                      :template-version="resolveBlockForPreview(blockRef).templateVersion"
+                      :template="resolveBlockForPreview(blockRef).template"
+                      :schema="resolveBlockForPreview(blockRef).schema"
+                      :data-sources="resolveBlockForPreview(blockRef).dataSources"
+                      :values="previewValuesByKey[previewBlockKey(row, rowIndex, column, colIndex, blockIdx)] || EMPTY_PREVIEW_VALUES"
+                      :meta="resolveBlockForPreview(blockRef).meta"
+                      :theme="previewTheme"
+                      :render-context="state.renderContext"
+                      :route-last-segment="routeLastSegment"
+                      :standalone-preview="true"
+                      :preview-auth-logged-in="true"
+                      :viewport-mode="previewViewport || 'auto'"
+                      @pending="setPreviewBlockPending(previewBlockKey(row, rowIndex, column, colIndex, blockIdx), $event)"
+                      @loaded="setPreviewBlockLoaded(previewBlockKey(row, rowIndex, column, colIndex, blockIdx))"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        </template>
+        </edge-cms-page-canvas>
         <div v-else class="flex min-h-screen items-center justify-center text-sm text-slate-500">
           No blocks yet.
         </div>

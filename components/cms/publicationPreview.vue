@@ -218,7 +218,8 @@ const magazine = computed(() => {
 </script>
 
 <template>
-  <div ref="publicationShellRef" class="edge-cms-publication-preview flex w-full flex-col items-center bg-white text-slate-900" :style="shellStyle">
+  <!-- data-cms-chrome: Hub UI; inside a preview canvas it gets the Hub's styles. -->
+  <div ref="publicationShellRef" data-cms-chrome class="edge-cms-publication-preview flex w-full flex-col items-center bg-white text-slate-900" :style="shellStyle">
     <div class="relative h-14 w-full border-b border-slate-200 bg-transparent">
       <div
         :id="controlsId"
