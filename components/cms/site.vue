@@ -4,7 +4,7 @@ import * as z from 'zod'
 import { BarChart3, Check, CircleAlert, ClipboardCheck, Copy, Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePenLine, FileStack, FileUp, FileX, FolderCog, FolderDown, FolderUp, FolderX, ImagePlus, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload, Users, X } from 'lucide-vue-next'
 import { buildPagePayloadFromTemplateDoc, buildThemeSettingsPayload, deriveThemeMenus, ensureMenuBuckets, ensureUniqueSlug, titleFromSlug } from '../../lib/cmsOperations'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
-import { buildPublishedSitePreviewUrl } from '../../lib/cmsPublishedSitePreview'
+import { buildCmsSitePreviewUrl, buildPublishedSitePreviewUrl, getCmsPublishedSiteOrigin } from '../../lib/cmsPublishedSitePreview'
 
 const props = defineProps({
   site: {
@@ -69,6 +69,7 @@ const isJsonInvalid = (value) => {
 const isTemplateSite = computed(() => props.site === 'templates')
 const runtimeConfig = useRuntimeConfig()
 const publishedSitePreviewUrl = computed(() => buildPublishedSitePreviewUrl(runtimeConfig.public.cmsFrontendUrl, props.site, edgeGlobal.edgeState.currentOrganization))
+const draftSitePreviewUrl = computed(() => buildCmsSitePreviewUrl(runtimeConfig.public.cmsFrontendUrl, props.site, edgeGlobal.edgeState.currentOrganization, { draft: true }))
 const copyingPublishedSitePreview = ref(false)
 const publishedSitePreviewCopied = ref(false)
 let publishedSitePreviewCopyTimer = null
@@ -459,6 +460,9 @@ const domainError = computed(() => {
   return String(publishedSiteSettings.value?.domainError || '').trim()
 })
 const domainRegistryHeaderError = ref('')
+const headerDomainRegistry = ref({})
+const headerDomainRegistryKey = ref('')
+let headerDomainRequest = 0
 const activeDomainError = computed(() => {
   const persisted = String(domainError.value || '').trim()
   if (persisted)
@@ -474,14 +478,33 @@ const headerDomains = computed(() => {
   const values = Array.isArray(siteData.value?.domains) ? siteData.value.domains : []
   return Array.from(new Set(values.map(normalizeHeaderDomain).filter(Boolean)))
 })
+const requestedHeaderDomains = computed(() => [...new Set([
+  ...headerDomains.value,
+  ...(Array.isArray(publishedSiteSettings.value?.domains) ? publishedSiteSettings.value.domains : []).map(normalizeHeaderDomain).filter(Boolean),
+])])
+const headerDomainLookupKey = computed(() => `${props.site}:${edgeGlobal?.edgeState?.currentOrganization || ''}:${requestedHeaderDomains.value.join('|')}`)
+const publishedSiteOrigin = computed(() => {
+  if (!isSiteSettingPublished.value || headerDomainRegistryKey.value !== headerDomainLookupKey.value)
+    return ''
+  return getCmsPublishedSiteOrigin(publishedSiteSettings.value, headerDomainRegistry.value, {
+    orgId: edgeGlobal.edgeState.currentOrganization,
+    siteId: props.site,
+  })
+})
+provide('cmsPublishedSiteOrigin', publishedSiteOrigin)
 const fetchHeaderDomainRegistryError = async () => {
+  const requestId = ++headerDomainRequest
+  const lookupKey = headerDomainLookupKey.value
+  headerDomainRegistry.value = {}
+  headerDomainRegistryKey.value = ''
+  domainRegistryHeaderError.value = ''
   if (!edgeFirebase?.runFunction) {
     domainRegistryHeaderError.value = ''
     return
   }
   const orgId = String(edgeGlobal?.edgeState?.currentOrganization || '').trim()
   const siteId = String(props.site || '').trim()
-  if (!orgId || !siteId || !headerDomains.value.length) {
+  if (!orgId || !siteId || !requestedHeaderDomains.value.length) {
     domainRegistryHeaderError.value = ''
     return
   }
@@ -489,25 +512,31 @@ const fetchHeaderDomainRegistryError = async () => {
     const response = await edgeFirebase.runFunction('cms-getCloudflarePagesProject', {
       orgId,
       siteId,
-      domains: headerDomains.value,
+      domains: requestedHeaderDomains.value,
     })
+    if (requestId !== headerDomainRequest || lookupKey !== headerDomainLookupKey.value)
+      return
     const registry = response?.data?.domainRegistry
     if (!registry || typeof registry !== 'object') {
       domainRegistryHeaderError.value = ''
       return
     }
+    headerDomainRegistry.value = registry
+    headerDomainRegistryKey.value = lookupKey
     const errors = headerDomains.value
       .map(domain => String(registry?.[domain]?.dnsSyncError || '').trim())
       .filter(Boolean)
     domainRegistryHeaderError.value = errors[0] || ''
   }
   catch {
+    if (requestId !== headerDomainRequest)
+      return
     domainRegistryHeaderError.value = ''
   }
 }
 
 watch(
-  () => `${props.site}:${edgeGlobal?.edgeState?.currentOrganization || ''}:${headerDomains.value.join('|')}`,
+  [headerDomainLookupKey, domainError],
   async () => {
     await fetchHeaderDomainRegistryError()
   },
@@ -2908,6 +2937,9 @@ const getSitePageLiveUrl = (item) => {
   return pageMenuRef.value?.buildLivePageUrl?.(item.menuEntry.menuName, item.menuEntry) || ''
 }
 
+const getSitePageDraftUrl = item => pageMenuRef.value?.buildDraftPageUrl?.(item.menuEntry?.menuName, item.menuEntry || { item: item.docId }) || ''
+const getSitePageStatusPreviewUrl = item => isPublishedPageDiff(item.docId) ? getSitePageDraftUrl(item) : getSitePageLiveUrl(item)
+
 const isSitePagePublished = item => !!pageMenuRef.value?.isPublishedPage?.(item?.docId)
 const isSitePageRenameDisabled = item => !!pageMenuRef.value?.isRenameDisabled?.(item?.menuEntry)
 const isSitePageDeleteDisabled = (item) => {
@@ -4213,7 +4245,16 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
             <div class="truncate text-lg font-normal" :title="siteData.name || 'Templates'">
               {{ siteData.name || 'Templates' }}
             </div>
-            <span v-if="!isTemplateSite" class="inline-flex" :title="publishedSitePreviewUnavailableReason || 'Copy the published site preview URL'">
+            <a
+              v-if="!isTemplateSite && publishedSiteOrigin"
+              :href="publishedSiteOrigin"
+              target="_blank" rel="noopener noreferrer"
+              class="inline-flex h-6 items-center gap-1.5 text-[11px] text-slate-600 hover:text-slate-900 hover:underline dark:text-slate-400 dark:hover:text-slate-100"
+            >
+              <ExternalLink class="h-3 w-3" aria-hidden="true" />
+              View Published Site
+            </a>
+            <span v-else-if="!isTemplateSite" class="inline-flex" :title="publishedSitePreviewUnavailableReason || 'Copy the published site preview URL'">
               <edge-shad-button
                 type="button"
                 variant="ghost"
@@ -4338,22 +4379,35 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
             <div class="relative flex flex-col items-end">
               <Transition name="fade" mode="out-in">
                 <div v-if="isSiteDiff || isAnyPagesDiff" key="unpublished" class="flex gap-2 items-center">
-                  <edge-shad-button
-                    v-if="isSiteDiff"
-                    variant="outline"
-                    class="flex gap-1 items-center border-yellow-300 bg-yellow-100 px-3 py-1 text-xs text-yellow-800 hover:bg-yellow-100 hover:text-yellow-900"
-                    @click="state.showSiteSettingsDiffDialog = true"
-                  >
-                    <CircleAlert class="!text-yellow-800 w-3 h-6" />
-                    <span class="font-medium text-[10px]">
-                      {{ useMenuPublishLabels ? 'Unpublished Menu' : 'Unpublished Settings' }}
-                    </span>
-                  </edge-shad-button>
-                  <div v-else class="flex gap-1 items-center bg-yellow-100 text-xs py-1 px-3 text-yellow-800 rounded">
-                    <CircleAlert class="!text-yellow-800 w-3 h-6" />
-                    <span class="font-medium text-[10px]">
-                      Unpublished Pages
-                    </span>
+                  <div class="flex flex-col items-center gap-1" data-cms-unpublished-preview>
+                    <edge-shad-button
+                      v-if="isSiteDiff"
+                      variant="outline"
+                      class="flex gap-1 items-center border-yellow-300 bg-yellow-100 px-3 py-1 text-xs text-yellow-800 hover:bg-yellow-100 hover:text-yellow-900"
+                      @click="state.showSiteSettingsDiffDialog = true"
+                    >
+                      <CircleAlert class="!text-yellow-800 w-3 h-6" />
+                      <span class="font-medium text-[10px]">
+                        {{ useMenuPublishLabels ? 'Unpublished Menu' : 'Unpublished Settings' }}
+                      </span>
+                    </edge-shad-button>
+                    <div v-else class="flex gap-1 items-center bg-yellow-100 text-xs py-1 px-3 text-yellow-800 rounded">
+                      <CircleAlert class="!text-yellow-800 w-3 h-6" />
+                      <span class="font-medium text-[10px]">
+                        Unpublished Pages
+                      </span>
+                    </div>
+                    <a
+                      v-if="draftSitePreviewUrl"
+                      :href="draftSitePreviewUrl"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[11px] text-amber-700 underline underline-offset-2 hover:text-amber-900 dark:text-amber-300 dark:hover:text-amber-200"
+                      title="Open saved draft settings and pages. Sign in to preview; unsaved edits are not included."
+                    >
+                      <ExternalLink class="h-3 w-3" aria-hidden="true" />
+                      Preview Changes
+                    </a>
                   </div>
                   <edge-shad-button
                     class="h-8 px-4 text-xs gap-2 bg-slate-700 text-white hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300 shadow-sm"
@@ -4714,6 +4768,19 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                                 {{ item.name }}
                               </p>
                               <div class="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                                <a
+                                  v-if="!isTemplateSite && getSitePageStatusPreviewUrl(item)"
+                                  :href="getSitePageStatusPreviewUrl(item)"
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  class="inline-flex items-center gap-1 underline underline-offset-2 hover:text-foreground"
+                                  :title="isPublishedPageDiff(item.docId) ? 'Preview saved draft changes; unsaved edits are not included.' : 'View the published page.'"
+                                  @click.stop
+                                  @keyup.enter.stop
+                                >
+                                  <ExternalLink class="h-3 w-3" aria-hidden="true" />
+                                  {{ isPublishedPageDiff(item.docId) ? 'Preview Changes' : 'View Published Page' }}
+                                </a>
                                 <span :class="getSitePageMenuBadgeClass(item)">
                                   {{ getSitePageMenuLabel(item) }}
                                 </span>
@@ -4754,12 +4821,18 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                                 >
                                   <a :href="getSitePageLiveUrl(item)" target="_blank" rel="noopener noreferrer" @click.stop>
                                     <ExternalLink />
-                                    <span>View Live Page</span>
+                                    <span>View Published Page</span>
                                   </a>
                                 </DropdownMenuItem>
                                 <DropdownMenuItem v-else disabled>
                                   <ExternalLink />
-                                  <span>View Live Page</span>
+                                  <span>View Published Page</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem v-if="isPublishedPageDiff(item.docId) && getSitePageDraftUrl(item)" as-child>
+                                  <a :href="getSitePageDraftUrl(item)" target="_blank" rel="noopener noreferrer" @click.stop>
+                                    <ExternalLink />
+                                    <span>Preview Changes</span>
+                                  </a>
                                 </DropdownMenuItem>
                                 <DropdownMenuItem @click="exportSitePage(item)">
                                   <Download />
