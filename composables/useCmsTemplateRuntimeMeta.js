@@ -37,9 +37,25 @@ export const clearCmsTemplateV2LibraryState = (doc, { keepLibraryMeta = false } 
   return doc
 }
 
+// A placed instance stores each schema field's default `value`, so the saved
+// page carries what the block editor and preview show; the public renderer
+// reads only stored values.
+const getCmsTemplateV2SchemaDefaults = (schema) => {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema))
+    return {}
+  return Object.entries(schema).reduce((defaults, [field, config]) => {
+    if (config && typeof config === 'object' && !Array.isArray(config) && Object.prototype.hasOwnProperty.call(config, 'value'))
+      defaults[field] = JSON.parse(JSON.stringify(config.value ?? null))
+    return defaults
+  }, {})
+}
+
 export const prepareCmsTemplateV2PickedBlock = (doc) => {
   if (!doc || typeof doc !== 'object' || Array.isArray(doc) || doc.synced)
     return doc
 
-  return clearCmsTemplateV2LibraryState(doc)
+  clearCmsTemplateV2LibraryState(doc)
+  if (Number(doc.templateVersion) === 2)
+    doc.values = getCmsTemplateV2SchemaDefaults(doc.schema)
+  return doc
 }
