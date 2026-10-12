@@ -1,5 +1,5 @@
 <script setup>
-import { Download, MoreHorizontal, Rocket, Tags } from 'lucide-vue-next'
+import { Download, MoreHorizontal, Replace, Rocket, Tags } from 'lucide-vue-next'
 import { renderTemplateAsync } from '@edgedev/template-engine'
 import { safeParseTagConfig } from '../../lib/cmsTagConfig'
 import { guardOverrideRename } from '../../lib/cmsOverrideRename'
@@ -23,6 +23,7 @@ const state = reactive({
   selectedBlockDocIds: [],
   bulkDeleteDialogOpen: false,
   blockTagListOpen: false,
+  blockRetagOpen: false,
   bulkDeleting: false,
   exportingBlocks: false,
   exportDialogOpen: false,
@@ -1375,6 +1376,10 @@ const handleBlockImport = async (event) => {
                 <Tags class="h-4 w-4" />
                 <span>Block Tags</span>
               </DropdownMenuItem>
+              <DropdownMenuItem v-if="canEditBlockTagList" @click="state.blockRetagOpen = true">
+                <Replace class="h-4 w-4" />
+                <span>Retag Blocks</span>
+              </DropdownMenuItem>
               <DropdownMenuItem :disabled="state.importingJson" @click="triggerBlockImport">
                 <Loader2 v-if="state.importingJson" class="h-4 w-4 animate-spin" />
                 <Upload v-else class="h-4 w-4" />
@@ -1639,6 +1644,7 @@ const handleBlockImport = async (event) => {
       </DialogContent>
     </edge-shad-dialog>
     <edge-cms-block-tag-list-dialog v-if="canEditBlockTagList" v-model="state.blockTagListOpen" :blocks="blocksCollection" />
+    <edge-cms-block-retag-dialog v-if="canEditBlockTagList" v-model="state.blockRetagOpen" :blocks="blocksCollection" />
     <edge-cms-override-rename-dialog :change="overrideRename.change" @resolve="resolveOverrideRename" />
     <edge-cms-block-changed-dialog :conflict="blockChanged.conflict" @resolve="resolveBlockChanged" />
     <edge-shad-dialog v-model="state.importConflictDialogOpen">
