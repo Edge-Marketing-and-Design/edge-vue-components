@@ -2,6 +2,8 @@
 import { Plus } from 'lucide-vue-next'
 import { prepareCmsTemplateV2PickedBlock } from '../../composables/useCmsTemplateRuntimeMeta'
 import { applyLibraryBlockIdentity } from '../../lib/cmsPickedBlock'
+import { pickerTagOptions } from '../../lib/cmsBlockTags'
+import { useCmsBlockTagList } from '../../composables/useCmsBlockTagList'
 
 const props = defineProps({
   blockOverride: {
@@ -365,27 +367,10 @@ const blockLoaded = (isLoading, index) => {
   }
 }
 
-const getTagsFromBlocks = computed(() => {
-  const tagsSet = new Set()
-
-  Object.values(blocks.value || {}).forEach((block) => {
-    if (block.tags && Array.isArray(block.tags)) {
-      block.tags.forEach(tag => tagsSet.add(tag))
-    }
-  })
-
-  // Convert to array of objects
-  const tagsArray = Array.from(tagsSet).map(tag => ({ name: tag, title: tag }))
-
-  // Sort alphabetically
-  tagsArray.sort((a, b) => a.title.localeCompare(b.title))
-
-  // Remove "Quick Picks" if it exists
-  const filtered = tagsArray.filter(tag => tag.name !== 'Quick Picks')
-
-  // Always prepend it
-  return [{ name: 'Quick Picks', title: 'Quick Picks' }, ...filtered]
-})
+// Quick Picks first (the picker opens on it); with an organization tag list,
+// the listed tags blocks carry, in list order.
+const blockTagList = useCmsBlockTagList()
+const getTagsFromBlocks = computed(() => pickerTagOptions(blockTagList.value, blocks.value))
 
 const hasActiveFilters = computed(() => pickerState.value.selectedTags.length > 0)
 
