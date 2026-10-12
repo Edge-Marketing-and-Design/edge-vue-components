@@ -453,6 +453,23 @@ const planPage = async (core, reader, { orgId, uid, now, operation }) => {
 
 // ---- Blocks ----
 
+// The organization's block tag list (cmsBlockTags on the organization
+// document), read through the plan so a list change stales a check. Empty
+// means unrestricted.
+const readBlockTagList = async (validation, reader, orgId) => {
+  const snap = await reader.doc(orgRefOf(orgId))
+  return validation.normalizeBlockTagList(snap.exists ? snap.data()?.cmsBlockTags : null)
+}
+
+// Tag rule findings: notices while they are warnings, problems once they
+// are errors (BLOCK_TAG_RULE_SEVERITY).
+const addBlockTagFindings = (plan, findings) => {
+  plan.problems.push(...findings.filter(issue => issue.severity === 'error').map(issue => `${issue.code}: ${issue.message}`))
+  const notices = findings.filter(issue => issue.severity !== 'error').map(issue => `${issue.code}: ${issue.message}`)
+  if (notices.length)
+    plan.notices = [...(plan.notices || []), ...notices]
+}
+
 const planBlock = async (core, reader, { orgId, uid, now, operation }) => {
   const plan = createPlan()
   const blocks = orgRefOf(orgId).collection('blocks')
@@ -469,14 +486,15 @@ const planBlock = async (core, reader, { orgId, uid, now, operation }) => {
       plan.problems.push(`Block "${blockId}" already exists. Use block.draft to change it.`)
     plan.problems.push(...core.designReferenceProblems(block.meta?.design, 'block.meta.design'))
     const themes = await reader.query(orgRefOf(orgId).collection('themes'), `organizations/${orgId}/themes`)
+    const validation = await validationPromise
+    const blockTagList = await readBlockTagList(validation, reader, orgId)
     const [{ checkImportedBlock }, engine] = await loadImportCheck()
-    const findings = await checkImportedBlock(block, { knownThemeIds: themes.docs.map(doc => doc.id), renderTemplate: engine.renderTemplateAsync })
+    const findings = await checkImportedBlock(block, { knownThemeIds: themes.docs.map(doc => doc.id), blockTagList, renderTemplate: engine.renderTemplateAsync })
     if (findings.hardError)
       plan.problems.push(findings.hardError)
     plan.problems.push(...findings.blocking.map(issue => `${issue.code}: ${issue.message}`))
     const isThemeName = issue => String(issue.code || '').startsWith('theme.')
     plan.notices = findings.notices.filter(issue => !isThemeName(issue)).map(issue => `${issue.code}: ${issue.message}`)
-    const validation = await validationPromise
     const themeDocs = Object.fromEntries(themes.docs.map(doc => [doc.id, doc.data()]))
     const selectedThemes = (findings.doc || block).themes
     const namedFindings = validation.themeNameFindings(validation.templateClassStrings((findings.doc || block).content), commonThemeTokens(selectedThemes, themeDocs))
@@ -514,8 +532,13 @@ const planBlock = async (core, reader, { orgId, uid, now, operation }) => {
     plan.problems.push(`Block "${blockId}" changed since you loaded it (its ${current === block ? 'released definition' : `unreleased draft, revision ${block.draftRevision}`} is different). Load it again before drafting.`)
     plan.currentHash = revisionsCore.blockDefinitionHash(current)
   }
+  // Tags are library metadata, not part of the definition: a draft neither
+  // saves nor releases them. The rules check the tags the block carries.
+  const validation = await validationPromise
+  addBlockTagFindings(plan, validation.blockTagFindings(block.tags, await readBlockTagList(validation, reader, orgId)))
+  if (isPlainObject(operation.definition) && operation.definition.tags !== undefined)
+    plan.notices = [...(plan.notices || []), 'definition.tags is ignored: tags are block metadata, which a draft does not save. Change them in the Block Editor.']
   if (isPlainObject(operation.definition) && typeof operation.definition.content === 'string') {
-    const validation = await validationPromise
     const themes = await reader.query(orgRefOf(orgId).collection('themes'), `organizations/${orgId}/themes`)
     const themeDocs = Object.fromEntries(themes.docs.map(doc => [doc.id, doc.data()]))
     const blockThemes = Array.isArray(operation.definition.themes) ? operation.definition.themes : block.themes

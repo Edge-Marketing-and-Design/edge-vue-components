@@ -30,7 +30,9 @@ Collection/document paths can use configured aliases such as `@listings` when `d
 - `cms_find_block`: find production library blocks by exact `docId` or bounded name/tag/type/theme search. Results are in document id order; pass `nextStartAfter` back as `startAfter` to page past `limit`.
 - `cms_audit_blocks`: validate every production library block in an
   organization with the shared block validator and Hub import settings. It
-  applies the required keys and organization themes, runs render checks with
+  applies the required keys, organization themes and the organization's block
+  tag list (`cmsBlockTags`: tags outside it, and content tag counts other than
+  one or two, summarized under `summary.blockTags`), runs render checks with
   empty and sample Data Source records, and reports renderer ownership. It
   reads production once, writes the full per-block report to
   `.tmp/cms-block-audits/<orgId>/<timestamp>.json`, and returns a summary by

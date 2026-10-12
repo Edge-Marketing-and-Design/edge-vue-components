@@ -350,7 +350,7 @@ server.registerTool(
   'cms_audit_blocks',
   {
     title: 'Audit Production CMS Blocks',
-    description: 'Validate every production CMS library block in an organization with the Hub\'s shared block validator, using Hub import settings (required keys, organization themes, render checks with empty and sample Data Source records, renderer ownership). Reads production only; writes the full per-block report to a local file and returns a summary by rule.',
+    description: 'Validate every production CMS library block in an organization with the Hub\'s shared block validator, using Hub import settings (required keys, organization themes, the organization\'s block tag list, render checks with empty and sample Data Source records, renderer ownership). Reads production only; writes the full per-block report to a local file and returns a summary by rule.',
     inputSchema: {
       orgId: OptionalOrgIdSchema.describe('Organization id. Uses configured defaultOrgId when omitted.'),
       themeName: OptionalCmsSearchSchema.describe('Optional public renderer theme name used for override diagnostics.'),
