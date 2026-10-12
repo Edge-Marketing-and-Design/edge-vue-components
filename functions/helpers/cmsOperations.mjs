@@ -688,6 +688,7 @@ export const siteSettingsDefaults = () => ({
   trackingFacebookPixel: '',
   trackingGoogleAnalytics: '',
   trackingAdroll: '',
+  trackingAdrollPixelId: '',
   trackingConsentEnabled: true,
   trackingConsentMessage: DEFAULT_TRACKING_CONSENT_MESSAGE,
   sureFeedURL: '',

@@ -1492,9 +1492,15 @@ watch(() => [
         />
         <edge-shad-input
           v-model="props.settings.trackingAdroll"
-          label="AdRoll ID"
+          label="AdRoll Advertiser ID"
           name="trackingAdroll"
-          placeholder="ADROLL-ID"
+          placeholder="ADVERTISER-ID"
+        />
+        <edge-shad-input
+          v-model="props.settings.trackingAdrollPixelId"
+          label="AdRoll Pixel ID"
+          name="trackingAdrollPixelId"
+          placeholder="PIXEL-ID"
         />
         <edge-shad-input
           v-model="props.settings.sureFeedURL"
