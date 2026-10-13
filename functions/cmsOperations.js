@@ -6,8 +6,8 @@
 // - cms-runOperation plans it again inside a transaction and writes only if
 //   the checksum still matches, so nothing that changed in between is
 //   overwritten.
-// Operations never write published pages, releases or themes that live sites
-// use. Every run is recorded in organizations/{orgId}/cmsOperations.
+// Operations never write published pages or posts, releases or themes that
+// live sites use. Every run is recorded in organizations/{orgId}/cmsOperations.
 // Keep identical to edge/functions/cmsOperations.js.
 const { createHash, randomUUID } = require('node:crypto')
 const {
@@ -30,7 +30,7 @@ const loadImportCheck = () => Promise.all([
 ])
 
 const DOC_ID_PATTERN = /^[^/]{1,1500}$/
-const PERMISSION_TARGETS = { theme: 'themes', page: 'sites', block: 'blocks', site: 'sites' }
+const PERMISSION_TARGETS = { theme: 'themes', page: 'sites', block: 'blocks', site: 'sites', post: 'sites' }
 const MAX_VALUE_BYTES = 200000
 
 const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -269,8 +269,6 @@ const loadSiteAndPage = async (reader, plan, { orgId, siteId, pageId }) => {
   return { siteRef, site: siteSnap.data() || {}, pageRef, page: pageSnap.data() || {} }
 }
 
-const areaKeys = area => (area === 'post' ? ['postContent', 'postStructure'] : ['content', 'structure'])
-
 // The site's existing synced instance of a block, from the draft pages that
 // list it (as the Hub's blockPicker and menu editor find it).
 const findSyncedInstance = async (reader, siteRef, blockId) => {
@@ -317,18 +315,151 @@ const pageFieldUpdate = (core, plan, fields, type) => {
 
 const instanceLabel = instance => instance?.name || instance?.blockId
 
-// page.moveBlock { instanceId, index, area? }: `index` is the row position
-// after the move, clamped as page.placeBlock clamps it. An instance alone in
-// its row moves with the row (layout and settings kept); one sharing a row
-// leaves its column for a new full-width row. Rows left empty are removed,
-// as page.removeBlock removes them. The instance itself is not changed.
-const planMoveBlock = (core, plan, { now, uid, operation, page, next, pageRef, siteId, pageId, found }) => {
+// ---- Block bodies: where the block operations write ----
+// A draft page has a main area and a post area, each content + structure,
+// with page editor rows and a version; a draft post has one body with post
+// editor rows and no version. The block operations below work on either.
+
+const pageBody = (core, { pageRef, page, siteId, pageId }) => ({
+  ref: pageRef,
+  label: `draft page ${pageId}`,
+  ids: { siteId, pageId },
+  areas: { main: ['content', 'structure'], post: ['postContent', 'postStructure'] },
+  createRow: core.createFullWidthRow,
+  blockIds: core.derivePageBlockIds,
+  refuseBlock: () => null,
+  versioned: fields => ({ ...fields, version: core.getNextVersion(page.version) }),
+})
+
+const postBody = (core, { postRef, siteId, postId }) => ({
+  ref: postRef,
+  label: `draft post ${postId}`,
+  ids: { siteId, postId },
+  areas: { main: ['content', 'structure'] },
+  createRow: core.createPostRow,
+  blockIds: core.derivePostBlockIds,
+  // The post editor's picker offers Post blocks only.
+  refuseBlock: block => (core.isPostBlock(block) ? null : `"${block.name || block.docId}" is not a Post block (its types: ${core.normalizeBlockTypes(block.type).join(', ') || 'none'}); the post editor only places blocks whose type includes Post.`),
+  versioned: fields => fields,
+})
+
+const areaOfKey = (body, key) => Object.entries(body.areas).find(([, keys]) => keys[0] === key)?.[0] || 'main'
+
+// placeBlock { blockId, values?, index?, area? }: a new instance of a library
+// block in a new full-width row at `index` (default last).
+const planPlaceBlock = async (core, reader, plan, { orgId, uid, now, operation, siteRef, body, next }) => {
+  const blockId = requireDocId(operation.blockId, 'block id')
+  const blockSnap = await reader.doc(orgRefOf(orgId).collection('blocks').doc(blockId))
+  if (!blockSnap.exists) {
+    plan.problems.push(`Library block "${blockId}" does not exist.`)
+    return plan
+  }
+  const block = blockSnap.data() || {}
+  const refused = body.refuseBlock({ ...block, docId: blockId })
+  if (refused) {
+    plan.problems.push(refused)
+    return plan
+  }
+  // A synced block (site chrome) shares one instance's values across the
+  // site's pages. As the Hub's picker does, copy the instance the site
+  // already has; the first one comes with the theme's seeded pages or is
+  // placed in the Hub, and its values are edited in the Hub.
+  const syncedSource = block.synced ? await findSyncedInstance(reader, siteRef, blockId) : null
+  if (block.synced && !syncedSource)
+    plan.problems.push(`"${block.name || blockId}" is a synced block and this site has no instance of it yet; place the first one in the Hub.`)
+  if (block.synced && operation.values !== undefined)
+    plan.problems.push(`"${block.name || blockId}" is a synced block; its values are shared across the site and edited in the Hub.`)
+  const [contentKey, structureKey] = body.areas[operation.area === 'post' ? 'post' : 'main']
+  const taken = core.pageIds(next)
+  const instance = core.buildInstanceFromLibraryBlock(block, { id: core.generateShortId(taken), blockId })
+  if (syncedSource) {
+    instance.synced = true
+    instance.values = clone(syncedSource.values || {})
+    instance.meta = clone(syncedSource.meta || {})
+    if (isPlainObject(syncedSource.protection))
+      instance.protection = clone(syncedSource.protection)
+    if (syncedSource.blockUpdatedAt !== undefined)
+      instance.blockUpdatedAt = syncedSource.blockUpdatedAt
+  }
+  else if (operation.values !== undefined) {
+    if (Number(instance.templateVersion) !== 2)
+      plan.problems.push('Values can only be set on Template v2 blocks.')
+    else if (!isPlainObject(operation.values) || valuesTooLarge(operation.values))
+      plan.problems.push('values must be an object under 200 KB.')
+    else
+      instance.values = clone(operation.values)
+  }
+  if (Number(instance.templateVersion) === 2 && !instance.synced)
+    plan.problems.push(...core.validateInstanceValues(instance.schema, instance.values))
+  const rows = Array.isArray(next[structureKey]) ? next[structureKey] : []
+  const index = Number.isInteger(operation.index) ? Math.min(Math.max(operation.index, 0), rows.length) : rows.length
+  const row = body.createRow({ rowId: core.generateShortId(taken), columnId: core.generateShortId(taken), instanceIds: [instance.id] })
+  next[contentKey] = [...(Array.isArray(next[contentKey]) ? next[contentKey] : []), instance]
+  next[structureKey] = [...rows.slice(0, index), row, ...rows.slice(index)]
+  addWrite(plan, body.ref, body.versioned({
+    [contentKey]: next[contentKey],
+    [structureKey]: next[structureKey],
+    blockIds: body.blockIds(next),
+    ...stamp(uid, now),
+  }), 'update', `Place "${block.name || blockId}" on ${body.label} as row ${index + 1}${syncedSource ? ' (synced; values shared with the site)' : ''}.`)
+  plan.result = { ...body.ids, instanceId: instance.id, rowId: row.id }
+  return plan
+}
+
+// setValues { instanceId, values, replace? }: a non-synced Template v2
+// instance's values, merged unless `replace`.
+const planSetValues = (core, plan, { uid, now, operation, next, body, found }) => {
+  const { instance, key, index } = found
+  if (Number(instance.templateVersion) !== 2)
+    plan.problems.push('Values can only be set on Template v2 blocks.')
+  if (instance.synced)
+    plan.problems.push('This is a synced block; edit its values in the Hub.')
+  if (!isPlainObject(operation.values) || valuesTooLarge(operation.values)) {
+    plan.problems.push('values must be an object under 200 KB.')
+    return plan
+  }
+  const values = operation.replace === true
+    ? clone(operation.values)
+    : { ...(isPlainObject(instance.values) ? instance.values : {}), ...clone(operation.values) }
+  plan.problems.push(...core.validateInstanceValues(instance.schema, values))
+  next[key][index] = { ...instance, values, blockUpdatedAt: new Date(now).toISOString() }
+  addWrite(plan, body.ref, body.versioned({ [key]: next[key], ...stamp(uid, now) }), 'update', `Set ${Object.keys(operation.values).join(', ')} on "${instanceLabel(instance)}" (${instance.id}) on ${body.label}.`)
+  plan.result = { ...body.ids, instanceId: instance.id }
+  return plan
+}
+
+// removeBlock { instanceId }: the instance, its column reference, and rows
+// left empty.
+const planRemoveBlock = (plan, { uid, now, next, body, found }) => {
+  const { key, index, instance } = found
+  const structureKey = body.areas[areaOfKey(body, key)][1]
+  next[key].splice(index, 1)
+  next[structureKey] = (Array.isArray(next[structureKey]) ? next[structureKey] : [])
+    .map(row => ({ ...row, columns: (row.columns || []).map(column => ({ ...column, blocks: (column.blocks || []).filter(id => id !== instance.id) })) }))
+    .filter(row => (row.columns || []).some(column => column.blocks.length))
+  addWrite(plan, body.ref, body.versioned({
+    [key]: next[key],
+    [structureKey]: next[structureKey],
+    blockIds: body.blockIds(next),
+    ...stamp(uid, now),
+  }), 'update', `Remove "${instanceLabel(instance)}" (${instance.id}) from ${body.label}.`)
+  plan.result = { ...body.ids }
+  return plan
+}
+
+// moveBlock { instanceId, index, area? }: `index` is the row position after
+// the move, clamped as placeBlock clamps it. An instance alone in its row
+// moves with the row (layout and settings kept); one sharing a row leaves
+// its column for a new full-width row. Rows left empty are removed, as
+// removeBlock removes them. The instance itself is not changed.
+const planMoveBlock = (core, plan, { now, uid, operation, next, body, found }) => {
   const { key, instance } = found
   const instanceId = instance.id
-  const area = key === 'postContent' ? 'post' : 'main'
+  const area = areaOfKey(body, key)
   const label = instanceLabel(instance)
-  if (operation.area !== undefined && !['main', 'post'].includes(operation.area)) {
-    plan.problems.push('area must be "main" or "post".')
+  const areas = Object.keys(body.areas)
+  if (operation.area !== undefined && !areas.includes(operation.area)) {
+    plan.problems.push(`area must be ${areas.map(name => `"${name}"`).join(' or ')}.`)
     return plan
   }
   if (operation.area !== undefined && operation.area !== area) {
@@ -339,12 +470,12 @@ const planMoveBlock = (core, plan, { now, uid, operation, page, next, pageRef, s
     plan.problems.push('index must be a whole number: the row position to move to (0 is the first row).')
     return plan
   }
-  const structureKey = areaKeys(area)[1]
+  const structureKey = body.areas[area][1]
   const rows = Array.isArray(next[structureKey]) ? next[structureKey] : []
   const holds = column => (Array.isArray(column?.blocks) ? column.blocks : []).includes(instanceId)
   const from = rows.findIndex(row => (row?.columns || []).some(holds))
   if (from < 0) {
-    plan.problems.push(`"${label}" (${instanceId}) isn't in any row of draft page ${pageId}; remove it and place the block again.`)
+    plan.problems.push(`"${label}" (${instanceId}) isn't in any row of ${body.label}; remove it and place the block again.`)
     return plan
   }
   const row = rows[from]
@@ -353,7 +484,7 @@ const planMoveBlock = (core, plan, { now, uid, operation, page, next, pageRef, s
   let remaining = rows.filter((_, index) => index !== from)
   if (!alone) {
     const taken = core.pageIds(next)
-    moved = core.createFullWidthRow({ rowId: core.generateShortId(taken), columnId: core.generateShortId(taken), instanceIds: [instanceId] })
+    moved = body.createRow({ rowId: core.generateShortId(taken), columnId: core.generateShortId(taken), instanceIds: [instanceId] })
     remaining = rows.map((candidate, index) => (index !== from
       ? candidate
       : { ...candidate, columns: (candidate.columns || []).map(column => ({ ...column, blocks: (Array.isArray(column?.blocks) ? column.blocks : []).filter(id => id !== instanceId) })) }))
@@ -366,15 +497,31 @@ const planMoveBlock = (core, plan, { now, uid, operation, page, next, pageRef, s
     return plan
   }
   next[structureKey] = structure
-  addWrite(plan, pageRef, {
+  addWrite(plan, body.ref, body.versioned({
     [structureKey]: structure,
-    version: core.getNextVersion(page.version),
     ...stamp(uid, now),
-  }, 'update', alone
-    ? `Move row ${from + 1} with "${label}" (${instanceId}) to row ${index + 1} on draft page ${pageId}; its layout and settings are kept.`
-    : `Move "${label}" (${instanceId}) out of row ${from + 1} into a new full-width row at row ${index + 1} on draft page ${pageId}.`)
-  plan.result = { siteId, pageId, instanceId, rowId: moved.id, index, area }
+  }), 'update', alone
+    ? `Move row ${from + 1} with "${label}" (${instanceId}) to row ${index + 1} on ${body.label}; its layout and settings are kept.`
+    : `Move "${label}" (${instanceId}) out of row ${from + 1} into a new full-width row at row ${index + 1} on ${body.label}.`)
+  plan.result = { ...body.ids, instanceId, rowId: moved.id, index, area }
   return plan
+}
+
+// The block operations on an existing instance: setValues, moveBlock and
+// removeBlock, by the operation's verb.
+const planInstanceOperation = (core, plan, { now, uid, operation, next, body }) => {
+  const instanceId = requireDocId(operation.instanceId, 'instance id')
+  const found = findInstance(next, instanceId)
+  if (!found) {
+    plan.problems.push(`${body.label[0].toUpperCase()}${body.label.slice(1)} has no block instance "${instanceId}".`)
+    return plan
+  }
+  const verb = operation.type.split('.')[1]
+  if (verb === 'moveBlock')
+    return planMoveBlock(core, plan, { now, uid, operation, next, body, found })
+  if (verb === 'setValues')
+    return planSetValues(core, plan, { uid, now, operation, next, body, found })
+  return planRemoveBlock(plan, { uid, now, next, body, found })
 }
 
 const planPage = async (core, reader, { orgId, uid, now, operation }) => {
@@ -417,7 +564,7 @@ const planPage = async (core, reader, { orgId, uid, now, operation }) => {
   const { siteRef, pageRef, page } = await loadSiteAndPage(reader, plan, { orgId, siteId, pageId })
   if (!pageRef)
     return plan
-  const next = JSON.parse(JSON.stringify(page))
+  const next = clone(page)
   plan.result = { siteId, pageId }
 
   if (operation.type === 'page.update') {
@@ -433,106 +580,203 @@ const planPage = async (core, reader, { orgId, uid, now, operation }) => {
     return plan
   }
 
-  if (operation.type === 'page.placeBlock') {
-    const blockId = requireDocId(operation.blockId, 'block id')
-    const blockSnap = await reader.doc(orgRefOf(orgId).collection('blocks').doc(blockId))
-    if (!blockSnap.exists) {
-      plan.problems.push(`Library block "${blockId}" does not exist.`)
-      return plan
+  const body = pageBody(core, { pageRef, page, siteId, pageId })
+  if (operation.type === 'page.placeBlock')
+    return planPlaceBlock(core, reader, plan, { orgId, uid, now, operation, siteRef, body, next })
+  return planInstanceOperation(core, plan, { now, uid, operation, next, body })
+}
+
+// ---- Posts ----
+// Drafts only, shaped as the post editor (posts.vue) saves them. Nothing here
+// writes published_posts or a post's publication fields (publishAt,
+// publishAtTimezone, publishedAt, doc_created_at of an existing post,
+// hidePublishedDate) or an imported post's legacyBlog.
+
+const POST_CREATE_KEYS = ['type', 'siteId', 'title', 'blurb', 'name', 'tags', 'featuredImage', 'postType', 'event', 'templateId']
+
+// The site's restricted-content rule ids, as the post editor lists them.
+const restrictionRuleIds = site => (Array.isArray(site?.restrictedContent?.rules) ? site.restrictedContent.rules : [])
+  .map((rule, index) => String((isPlainObject(rule) ? (rule.id || rule.docId) : '') || `rule-${index + 1}`).trim())
+  .filter(Boolean)
+
+// The other draft posts' slugs, for a unique one (posts.vue ensureUniqueSlug).
+const takenPostSlugs = async (reader, postsRef, exceptId = null) => {
+  const snap = await reader.query(postsRef, postsRef.path)
+  return new Set(snap.docs.filter(doc => doc.id !== exceptId).map(doc => String(doc.data()?.name || '').trim()).filter(Boolean))
+}
+
+// The fields post.create and post.update share, checked with the post
+// editor's rules. Returns the values to write.
+const postFieldValues = (core, plan, fields) => {
+  const values = {}
+  if (fields.title !== undefined) {
+    if (typeof fields.title !== 'string' || !fields.title.trim())
+      plan.problems.push('A post needs a title.')
+    else
+      values.title = fields.title
+  }
+  if (fields.blurb !== undefined) {
+    if (typeof fields.blurb !== 'string' || !fields.blurb.trim())
+      plan.problems.push('A post needs a blurb (its preview text).')
+    else if (fields.blurb.length > core.POST_BLURB_MAX)
+      plan.problems.push(`The blurb must be at most ${core.POST_BLURB_MAX} characters (it has ${fields.blurb.length}).`)
+    else
+      values.blurb = fields.blurb
+  }
+  if (fields.tags !== undefined) {
+    if (!Array.isArray(fields.tags) || fields.tags.some(tag => typeof tag !== 'string'))
+      plan.problems.push('tags must be a list of strings.')
+    else
+      values.tags = [...fields.tags]
+  }
+  if (fields.featuredImage !== undefined) {
+    if (typeof fields.featuredImage !== 'string')
+      plan.problems.push('featuredImage must be a string: one image URL or storage path.')
+    else
+      values.featuredImage = fields.featuredImage.trim()
+  }
+  return values
+}
+
+const planPost = async (core, reader, { orgId, uid, now, operation }) => {
+  const plan = createPlan()
+  const siteId = requireDocId(operation.siteId, 'site id')
+  const siteRef = orgRefOf(orgId).collection('sites').doc(siteId)
+  const siteSnap = await reader.doc(siteRef)
+  if (!siteSnap.exists) {
+    plan.problems.push(`Site "${siteId}" does not exist.`)
+    return plan
+  }
+  const site = siteSnap.data() || {}
+  const postsRef = siteRef.collection('posts')
+
+  if (operation.type === 'post.create') {
+    for (const key of Object.keys(operation)) {
+      if (!POST_CREATE_KEYS.includes(key))
+        plan.problems.push(`"${key}" can't be set by post.create (allowed: ${POST_CREATE_KEYS.filter(name => name !== 'type').join(', ')}). Publication is done in the Hub.`)
     }
-    const block = blockSnap.data() || {}
-    // A synced block (site chrome) shares one instance's values across the
-    // site's pages. As the Hub's picker does, copy the instance the site
-    // already has; the first one comes with the theme's seeded pages or is
-    // placed in the Hub, and its values are edited in the Hub.
-    const syncedSource = block.synced ? await findSyncedInstance(reader, siteRef, blockId) : null
-    if (block.synced && !syncedSource)
-      plan.problems.push(`"${block.name || blockId}" is a synced block and this site has no instance of it yet; place the first one in the Hub.`)
-    if (block.synced && operation.values !== undefined)
-      plan.problems.push(`"${block.name || blockId}" is a synced block; its values are shared across the site and edited in the Hub.`)
-    const [contentKey, structureKey] = areaKeys(operation.area)
-    const taken = core.pageIds(next)
-    const instance = core.buildInstanceFromLibraryBlock(block, { id: core.generateShortId(taken), blockId })
-    if (syncedSource) {
-      instance.synced = true
-      instance.values = clone(syncedSource.values || {})
-      instance.meta = clone(syncedSource.meta || {})
-      if (isPlainObject(syncedSource.protection))
-        instance.protection = clone(syncedSource.protection)
-      if (syncedSource.blockUpdatedAt !== undefined)
-        instance.blockUpdatedAt = syncedSource.blockUpdatedAt
-    }
-    else if (operation.values !== undefined) {
-      if (Number(instance.templateVersion) !== 2)
-        plan.problems.push('Values can only be set on Template v2 blocks.')
-      else if (!isPlainObject(operation.values) || valuesTooLarge(operation.values))
-        plan.problems.push('values must be an object under 200 KB.')
+    if (operation.title === undefined)
+      plan.problems.push('A post needs a title.')
+    if (operation.blurb === undefined)
+      plan.problems.push('A post needs a blurb (its preview text).')
+    const values = postFieldValues(core, plan, operation)
+    if (operation.postType !== undefined && !['post', 'event'].includes(operation.postType))
+      plan.problems.push('postType must be "post" or "event".')
+    const postType = core.normalizePostType(operation.postType)
+    let event = core.savedPostEvent(isPlainObject(operation.event) ? operation.event : {})
+    plan.problems.push(...core.postEventProblems(operation.event, { type: postType, merged: event }))
+    if (postType === 'event')
+      event = core.computePostEvent(event, now)
+    if (operation.name !== undefined && (typeof operation.name !== 'string' || !core.slugify(operation.name)))
+      plan.problems.push('name must be a slug, like "spring-open-house".')
+    const slug = core.uniquePostSlug((typeof operation.name === 'string' && operation.name.trim()) ? operation.name : (values.title || ''), await takenPostSlugs(reader, postsRef))
+    if (typeof operation.name === 'string' && core.slugify(operation.name) && slug !== core.slugify(operation.name))
+      plan.notices = [...(plan.notices || []), `The slug "${core.slugify(operation.name)}" is taken on this site; the post gets "${slug}".`]
+
+    // A Post template page's body, copied as the new-post dialog copies it.
+    let body = { content: [], structure: [] }
+    let templateLabel = ''
+    const templateId = optionalDocId(operation.templateId, 'template id')
+    if (templateId) {
+      const templateSnap = await reader.doc(orgRefOf(orgId).collection('sites').doc('templates').collection('pages').doc(templateId))
+      const template = templateSnap.exists ? (templateSnap.data() || {}) : null
+      if (!template)
+        plan.problems.push(`Template page "${templateId}" does not exist on the templates site.`)
+      else if (!core.isPostTemplatePage(template))
+        plan.problems.push(`Template page "${templateId}" is not a Post template (the new-post dialog offers templates-site pages whose type includes Post and that are not post template pages).`)
       else
-        instance.values = clone(operation.values)
+        body = core.postTemplateBody(template)
+      templateLabel = template ? ` from template "${template.name || templateId}"` : ''
     }
-    if (Number(instance.templateVersion) === 2 && !instance.synced)
-      plan.problems.push(...core.validateInstanceValues(instance.schema, instance.values))
-    const rows = Array.isArray(next[structureKey]) ? next[structureKey] : []
-    const index = Number.isInteger(operation.index) ? Math.min(Math.max(operation.index, 0), rows.length) : rows.length
-    const row = core.createFullWidthRow({ rowId: core.generateShortId(taken), columnId: core.generateShortId(taken), instanceIds: [instance.id] })
-    next[contentKey] = [...(Array.isArray(next[contentKey]) ? next[contentKey] : []), instance]
-    next[structureKey] = [...rows.slice(0, index), row, ...rows.slice(index)]
-    addWrite(plan, pageRef, {
-      [contentKey]: next[contentKey],
-      [structureKey]: next[structureKey],
-      blockIds: core.derivePageBlockIds(next),
-      version: core.getNextVersion(page.version),
+    const taken = core.pageIds(body)
+    body = core.normalizePostBody({ ...body, createId: () => core.generateShortId(taken) })
+
+    const postRef = postsRef.doc()
+    const post = {
+      name: slug,
+      title: values.title || '',
+      tags: values.tags || [],
+      blurb: values.blurb || '',
+      content: body.content,
+      structure: body.structure,
+      featuredImage: values.featuredImage || '',
+      restrictionRuleId: '',
+      type: postType,
+      event,
+      blockIds: core.derivePostBlockIds(body),
+      docId: postRef.id,
+      doc_created_at: now,
       ...stamp(uid, now),
-    }, 'update', `Place "${block.name || blockId}" on draft page ${pageId} as row ${index + 1}${syncedSource ? ' (synced; values shared with the site)' : ''}.`)
-    plan.result = { siteId, pageId, instanceId: instance.id, rowId: row.id }
-    return plan
-  }
-
-  const instanceId = requireDocId(operation.instanceId, 'instance id')
-  const found = findInstance(next, instanceId)
-  if (!found) {
-    plan.problems.push(`Draft page ${pageId} has no block instance "${instanceId}".`)
-    return plan
-  }
-
-  if (operation.type === 'page.moveBlock')
-    return planMoveBlock(core, plan, { now, uid, operation, page, next, pageRef, siteId, pageId, found })
-
-  if (operation.type === 'page.setValues') {
-    const { instance, key, index } = found
-    if (Number(instance.templateVersion) !== 2)
-      plan.problems.push('Values can only be set on Template v2 blocks.')
-    if (instance.synced)
-      plan.problems.push('This is a synced block; edit its values in the Hub.')
-    if (!isPlainObject(operation.values) || valuesTooLarge(operation.values)) {
-      plan.problems.push('values must be an object under 200 KB.')
-      return plan
     }
-    const values = operation.replace === true
-      ? JSON.parse(JSON.stringify(operation.values))
-      : { ...(isPlainObject(instance.values) ? instance.values : {}), ...JSON.parse(JSON.stringify(operation.values)) }
-    plan.problems.push(...core.validateInstanceValues(instance.schema, values))
-    next[key][index] = { ...instance, values, blockUpdatedAt: new Date(now).toISOString() }
-    addWrite(plan, pageRef, { [key]: next[key], version: core.getNextVersion(page.version), ...stamp(uid, now) }, 'update', `Set ${Object.keys(operation.values).join(', ')} on "${instance.name || instance.blockId}" (${instanceId}) on draft page ${pageId}.`)
-    plan.result = { siteId, pageId, instanceId }
+    addWrite(plan, postRef, post, 'set', `Create draft ${postType} "${post.title}" at ${slug} on ${siteId}${templateLabel}. Nothing is published.`)
+    plan.result = { siteId, postId: postRef.id, name: slug }
     return plan
   }
 
-  // page.removeBlock: the instance, its column reference, and rows left empty.
-  const { key, index, instance } = found
-  next[key].splice(index, 1)
-  const structureKey = key === 'postContent' ? 'postStructure' : 'structure'
-  next[structureKey] = (Array.isArray(next[structureKey]) ? next[structureKey] : [])
-    .map(row => ({ ...row, columns: (row.columns || []).map(column => ({ ...column, blocks: (column.blocks || []).filter(id => id !== instanceId) })) }))
-    .filter(row => (row.columns || []).some(column => column.blocks.length))
-  addWrite(plan, pageRef, {
-    [key]: next[key],
-    [structureKey]: next[structureKey],
-    blockIds: core.derivePageBlockIds(next),
-    version: core.getNextVersion(page.version),
-    ...stamp(uid, now),
-  }, 'update', `Remove "${instance.name || instance.blockId}" (${instanceId}) from draft page ${pageId}.`)
-  return plan
+  const postId = requireDocId(operation.postId, 'post id')
+  const postRef = postsRef.doc(postId)
+  const postSnap = await reader.doc(postRef)
+  if (!postSnap.exists) {
+    plan.problems.push(`Draft post "${postId}" does not exist on site "${siteId}".`)
+    return plan
+  }
+  const post = postSnap.data() || {}
+  plan.result = { siteId, postId }
+
+  if (operation.type === 'post.update') {
+    const fields = isPlainObject(operation.fields) ? operation.fields : {}
+    if (!Object.keys(fields).length)
+      plan.problems.push('No post fields to change.')
+    for (const key of Object.keys(fields)) {
+      if (!core.POST_UPDATE_FIELDS.includes(key))
+        plan.problems.push(`"${key}" can't be set by post.update (allowed: ${core.POST_UPDATE_FIELDS.join(', ')}). Publication, scheduling and dates are set in the Hub.`)
+    }
+    const update = postFieldValues(core, plan, fields)
+    if (fields.name !== undefined) {
+      const wanted = typeof fields.name === 'string' ? core.slugify(fields.name) : ''
+      if (!wanted) {
+        plan.problems.push('name must be a slug, like "spring-open-house".')
+      }
+      else {
+        update.name = core.uniquePostSlug(wanted, await takenPostSlugs(reader, postsRef, postId))
+        if (update.name !== wanted)
+          plan.notices = [...(plan.notices || []), `The slug "${wanted}" is taken on this site; the post gets "${update.name}".`]
+      }
+    }
+    if (fields.event !== undefined) {
+      const postType = core.normalizePostType(post.type)
+      const merged = core.savedPostEvent({ ...(isPlainObject(post.event) ? post.event : {}), ...(isPlainObject(fields.event) ? fields.event : {}) })
+      plan.problems.push(...core.postEventProblems(fields.event, { type: postType, merged, timezoneKnown: typeof post.event?.timezone === 'string' && !!post.event.timezone }))
+      update.event = postType === 'event' ? core.computePostEvent(merged, now) : merged
+    }
+    if (fields.restrictionRuleId !== undefined) {
+      const rules = restrictionRuleIds(site)
+      if (typeof fields.restrictionRuleId !== 'string' || (fields.restrictionRuleId && !rules.includes(fields.restrictionRuleId)))
+        plan.problems.push(`restrictionRuleId must be empty (public) or one of the site's restricted-content rules: ${rules.join(', ') || 'none'}.`)
+      else
+        update.restrictionRuleId = fields.restrictionRuleId
+    }
+    addWrite(plan, postRef, { ...update, ...stamp(uid, now) }, 'update', `Update draft post ${postId}: ${Object.keys(update).join(', ')}. Nothing is published.`)
+    return plan
+  }
+
+  // Block operations: on the post's body as the post editor holds it after
+  // opening (normalizePostBuilderDoc). A legacy HTML body is migrated by
+  // opening the post in the Hub.
+  if (operation.area !== undefined && operation.area !== 'main') {
+    plan.problems.push('Posts have one body; area is for pages.')
+    return plan
+  }
+  if (post.content !== undefined && !Array.isArray(post.content)) {
+    plan.problems.push(`Draft post ${postId} still has a legacy HTML body; open it in the Hub's post editor once to turn it into blocks.`)
+    return plan
+  }
+  const taken = core.pageIds(post)
+  const next = { ...clone(post), ...core.normalizePostBody({ content: post.content, structure: post.structure, createId: () => core.generateShortId(taken) }) }
+  const body = postBody(core, { postRef, siteId, postId })
+  if (operation.type === 'post.placeBlock')
+    return planPlaceBlock(core, reader, plan, { orgId, uid, now, operation, siteRef, body, next })
+  return planInstanceOperation(core, plan, { now, uid, operation, next, body })
 }
 
 // ---- Blocks ----
@@ -774,6 +1018,8 @@ const planOperation = async (reader, context) => {
     return planPage(core, reader, context)
   if (area === 'site')
     return planSite(core, reader, context)
+  if (area === 'post')
+    return planPost(core, reader, context)
   return planBlock(core, reader, context)
 }
 
@@ -1049,6 +1295,98 @@ const gatherPageOutline = async ({ orgId, siteId, pageId, source = 'draft', incl
   }
 }
 
+// ---- Post reads (agent post editing) ----
+
+const POSTS_MAX = 500
+const POST_LIST_MAX = 100
+
+// The library blocks a set of posts uses, at most PAGE_OUTLINE_MAX_BLOCKS.
+const readLibraryBlocks = async (orgId, docs, what) => {
+  const blockIds = [...new Set(docs.flatMap(doc => (Array.isArray(doc?.content) ? doc.content : []).map(instance => String(instance?.blockId || '')).filter(Boolean)))]
+  if (blockIds.length > PAGE_OUTLINE_MAX_BLOCKS)
+    throw new HttpsError('failed-precondition', `${what} use ${blockIds.length} library blocks; post reads read at most ${PAGE_OUTLINE_MAX_BLOCKS}. Ask for fewer posts.`)
+  const blocks = {}
+  await Promise.all(blockIds.map(async (blockId) => {
+    const snap = await orgRefOf(orgId).collection('blocks').doc(blockId).get()
+    if (snap.exists)
+      blocks[blockId] = snap.data() || {}
+  }))
+  return blocks
+}
+
+// A site's posts, newest first, with their publication state (the Hub's
+// status: the draft resolved as publishing resolves it, compared with the
+// snapshot). Filtered by type and tag, paged by postId. Reads only.
+const gatherSitePosts = async ({ orgId, siteId, type = null, tag = null, limit = 50, startAfter = null }) => {
+  const core = await corePromise
+  if (type !== null && type !== undefined && !['post', 'event'].includes(type))
+    throw new HttpsError('invalid-argument', 'type must be "post" or "event".')
+  if (tag !== null && tag !== undefined && typeof tag !== 'string')
+    throw new HttpsError('invalid-argument', 'tag must be a string.')
+  const count = (limit === undefined || limit === null) ? 50 : Number(limit)
+  if (!Number.isInteger(count) || count < 1 || count > POST_LIST_MAX)
+    throw new HttpsError('invalid-argument', `limit must be a whole number from 1 to ${POST_LIST_MAX}.`)
+  const { siteRef, site } = await loadSite(orgId, siteId)
+  const postsSnap = await siteRef.collection('posts').limit(POSTS_MAX + 1).get()
+  const publishedSnap = await siteRef.collection('published_posts').limit(POSTS_MAX + 1).get()
+  const posts = Object.fromEntries(postsSnap.docs.slice(0, POSTS_MAX).map(doc => [doc.id, doc.data() || {}]))
+  const published = Object.fromEntries(publishedSnap.docs.slice(0, POSTS_MAX).map(doc => [doc.id, doc.data() || {}]))
+  const cursor = startAfter ? String(startAfter) : null
+  if (cursor && !posts[cursor] && !published[cursor])
+    throw new HttpsError('invalid-argument', `startAfter "${cursor}" is not a post on this site.`)
+  const selected = core.selectSitePosts({ posts, published, type: type || null, tag: tag || null, limit: count, startAfter: cursor })
+  const blocks = await readLibraryBlocks(orgId, selected.postIds.map(postId => posts[postId]), 'These posts')
+  return {
+    siteId,
+    siteName: String(site.name || ''),
+    posts: selected.postIds.map(postId => core.describePost({ postId, post: posts[postId] || null, live: published[postId] || null, blocks })),
+    matched: selected.matched,
+    nextStartAfter: selected.nextStartAfter,
+    postCount: Object.keys(posts).length,
+    truncated: postsSnap.size > POSTS_MAX || publishedSnap.size > POSTS_MAX,
+  }
+}
+
+// One post as its fields and body outline (buildPostOutline in
+// helpers/cmsOperations.mjs): the draft, or its published snapshot, with
+// the routes the site's post template pages give it. Reads only.
+const gatherPostOutline = async ({ orgId, siteId, postId, source = 'draft', includeValues = true, includeSchema = false }) => {
+  const core = await corePromise
+  const from = source === 'published' ? 'published' : 'draft'
+  const { siteRef, site } = await loadSite(orgId, siteId)
+  const draftSnap = await siteRef.collection('posts').doc(postId).get()
+  const liveSnap = await siteRef.collection('published_posts').doc(postId).get()
+  const post = from === 'published' ? liveSnap : draftSnap
+  if (!post.exists)
+    throw new HttpsError('not-found', `${from === 'published' ? 'Published' : 'Draft'} post "${postId}" does not exist on site "${siteId}".`)
+  const draft = draftSnap.exists ? (draftSnap.data() || {}) : null
+  const live = liveSnap.exists ? (liveSnap.data() || {}) : null
+  const data = post.data() || {}
+  const blocks = await readLibraryBlocks(orgId, [draft, live], 'The post')
+  // Post routes: the draft menus and pages, or the published ones.
+  let menus = site.menus
+  let routePages = await siteRef.collection('pages').where('post', '==', true).limit(READINESS_MAX_PAGES).get()
+  if (from === 'published') {
+    const settings = await orgRefOf(orgId).collection('published-site-settings').doc(siteId).get()
+    menus = settings.exists ? settings.data()?.menus : null
+    routePages = await siteRef.collection('published').where('post', '==', true).limit(READINESS_MAX_PAGES).get()
+  }
+  const pages = Object.fromEntries(routePages.docs.map(doc => [doc.id, doc.data() || {}]))
+  return {
+    siteId,
+    ...core.buildPostOutline({
+      postId,
+      post: data,
+      source: from,
+      status: core.postPublicationStatus(draft, live, blocks),
+      paths: siteId === 'templates' ? [] : core.postRoutePaths(menus, pages, data.name),
+      blocks,
+      includeValues: includeValues !== false,
+      includeSchema: includeSchema === true,
+    }),
+  }
+}
+
 // For the agent endpoint (cmsAgentKeys.js); cms.js doesn't re-export these.
 exports.authorizeOperation = authorizeOperation
 exports.performCheck = performCheck
@@ -1056,3 +1394,5 @@ exports.performRun = performRun
 exports.gatherSiteReadiness = gatherSiteReadiness
 exports.gatherSitePages = gatherSitePages
 exports.gatherPageOutline = gatherPageOutline
+exports.gatherSitePosts = gatherSitePosts
+exports.gatherPostOutline = gatherPostOutline

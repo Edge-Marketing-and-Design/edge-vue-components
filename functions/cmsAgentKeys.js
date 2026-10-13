@@ -19,7 +19,7 @@ const {
   HttpsError,
   permissionCheck,
 } = require('./config.js')
-const { authorizeOperation, gatherPageOutline, gatherSitePages, gatherSiteReadiness, performCheck, performRun } = require('./cmsOperations.js')
+const { authorizeOperation, gatherPageOutline, gatherPostOutline, gatherSitePages, gatherSitePosts, gatherSiteReadiness, performCheck, performRun } = require('./cmsOperations.js')
 const { verifyAgentSession } = require('./cmsAgentConnections.js')
 const { buildPreviewUrl, issuePreviewToken, previewBaseUrl, previewTokensEnabled } = require('./cmsPreviewTokens.js')
 
@@ -167,8 +167,10 @@ const HTTP_STATUS = {
 // POST { orgId, action: 'check' | 'run', operation, checksum?, client? }
 // or { orgId, action: 'preview', siteId, pageId, source?, blockDrafts? },
 // { orgId, action: 'readiness', siteId }, { orgId, action: 'pages', siteId }
-// or { orgId, action: 'page', siteId, pageId, source?, includeValues?,
-// includeSchema? } with
+// { orgId, action: 'page', siteId, pageId, source?, includeValues?,
+// includeSchema? }, { orgId, action: 'posts', siteId, type?, tag?, limit?,
+// startAfter? } or { orgId, action: 'post', siteId, postId, source?,
+// includeValues?, includeSchema? } with
 // Authorization: Bearer <agent key>. Runs the draft-only CMS operations as
 // the key's creator, or returns a short-lived preview link for one page the
 // creator can read. Responses are JSON: { ok: true, ... } or
@@ -237,6 +239,28 @@ exports.agentOperation = onRequest({ timeoutSeconds: 120 }, async (req, res) => 
         includeSchema: body.includeSchema === true,
       })
     }
+    else if (body.action === 'posts') {
+      await requireSiteRead(uid, orgId)
+      result = await gatherSitePosts({
+        orgId,
+        siteId: requireDocId(body.siteId, 'site id'),
+        type: body.type ?? null,
+        tag: body.tag ?? null,
+        limit: body.limit,
+        startAfter: body.startAfter ? requireDocId(body.startAfter, 'startAfter post id') : null,
+      })
+    }
+    else if (body.action === 'post') {
+      await requireSiteRead(uid, orgId)
+      result = await gatherPostOutline({
+        orgId,
+        siteId: requireDocId(body.siteId, 'site id'),
+        postId: requireDocId(body.postId, 'post id'),
+        source: body.source === 'published' ? 'published' : 'draft',
+        includeValues: body.includeValues !== false,
+        includeSchema: body.includeSchema === true,
+      })
+    }
     else if (body.action === 'check' || body.action === 'run') {
       const caller = await authorizeOperation({ uid, orgId, operation: body.operation })
       result = body.action === 'check'
@@ -244,7 +268,7 @@ exports.agentOperation = onRequest({ timeoutSeconds: 120 }, async (req, res) => 
         : await performRun({ ...caller, checksum: body.checksum, client: body.client, via: 'agent', agentKeyId: keyId, agentConnectionId: connectionId })
     }
     else {
-      throw new HttpsError('invalid-argument', 'action must be "check", "run", "preview", "readiness", "pages" or "page".')
+      throw new HttpsError('invalid-argument', 'action must be "check", "run", "preview", "readiness", "pages", "page", "posts" or "post".')
     }
     const used = await ref.get()
     await ref.update({ lastUsedAt: new Date().toISOString(), useCount: (used.data()?.useCount || 0) + 1 })

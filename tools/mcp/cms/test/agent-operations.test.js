@@ -55,10 +55,18 @@ test('check and run post the operation with the key and return the Hub\'s answer
   assert.deepEqual(JSON.parse(requests[7].init.body), { orgId: 'org1', action: 'page', siteId: 'site1', pageId: 'home', source: 'draft', includeValues: true, includeSchema: false, client: 'edge-cms-mcp' })
   await client.page('org1', 'site1', 'home', { source: 'published', includeValues: false, includeSchema: true })
   assert.deepEqual(JSON.parse(requests[8].init.body), { orgId: 'org1', action: 'page', siteId: 'site1', pageId: 'home', source: 'published', includeValues: false, includeSchema: true, client: 'edge-cms-mcp' })
+  await client.posts('org1', 'site1')
+  assert.deepEqual(JSON.parse(requests[9].init.body), { orgId: 'org1', action: 'posts', siteId: 'site1', client: 'edge-cms-mcp' })
+  await client.posts('org1', 'site1', { type: 'event', tag: 'Training', limit: 10, startAfter: 'p9' })
+  assert.deepEqual(JSON.parse(requests[10].init.body), { orgId: 'org1', action: 'posts', siteId: 'site1', type: 'event', tag: 'Training', limit: 10, startAfter: 'p9', client: 'edge-cms-mcp' })
+  await client.post('org1', 'site1', 'p1')
+  assert.deepEqual(JSON.parse(requests[11].init.body), { orgId: 'org1', action: 'post', siteId: 'site1', postId: 'p1', source: 'draft', includeValues: true, includeSchema: false, client: 'edge-cms-mcp' })
+  await client.post('org1', 'site1', 'p1', { source: 'published', includeValues: false, includeSchema: true })
+  assert.deepEqual(JSON.parse(requests[12].init.body), { orgId: 'org1', action: 'post', siteId: 'site1', postId: 'p1', source: 'published', includeValues: false, includeSchema: true, client: 'edge-cms-mcp' })
   assert.ok(requests.every(request => request.init.headers.authorization === 'Bearer cmsak.k.s'))
 })
 
-test('page reads send the session credential for their sessionId', async () => {
+test('page and post reads send the session credential for their sessionId', async () => {
   const seen = []
   const connections = {
     credential: async (sessionId, body) => {
@@ -82,6 +90,11 @@ test('page reads send the session credential for their sessionId', async () => {
   assert.ok(requests.every(init => init.headers.authorization === 'Bearer cmsas.session'))
   assert.equal((await client.pages('org1', 'site1')).code, 'session-required')
   assert.equal(requests.length, 2)
+  await client.posts('org1', 'site1', { sessionId: 'site-handle' })
+  await client.post('org1', 'site1', 'p1', { sessionId: 'site-handle' })
+  assert.deepEqual(seen.slice(-2), [{ sessionId: 'site-handle', action: 'posts', siteId: 'site1' }, { sessionId: 'site-handle', action: 'post', siteId: 'site1' }])
+  assert.equal((await client.posts('org1', 'site1')).code, 'session-required')
+  assert.equal(requests.length, 4)
 })
 
 test('a missing key, an unreachable endpoint and a non-JSON reply are explained, not thrown', async () => {

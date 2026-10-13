@@ -41,7 +41,7 @@ Collection/document paths can use configured aliases such as `@listings` when `d
 - `cms_status`: compare the immutable checkout base, editable local block, and current production document.
 - `cms_diff`: diff `base-local`, `base-production`, or `local-production`.
 - `cms_resolve_override`: report the exact matching `emd-cms-front` Vue override, ambiguity, or CMS HTML fallback.
-- `cms_find_usage`: find persisted page/template instances whose `blockId` references the library block.
+- `cms_find_usage`: find persisted instances whose `blockId` references the library block, in each site's pages, the templates site, and each site's draft posts and published snapshots. Page hits are `kind: "page"` (`pageId`, `pageName`, `pageType`); post hits are `kind: "post"` (`postId`, `title`, `slug`, `source` `draft` or `published`); both carry `instanceId` and `fieldPath`. Scans are bounded (`maxCmsPageScanDocuments`, `maxCmsPostScanDocuments`, default 500 per collection); `scanned` lists each collection and whether its `scanTruncated`.
 - `cms_validate`: validate a local or production block with the Hub's shared
   block validator (`edge/lib/cmsBlockValidation.js`). It checks Template v2
   structure, schema, and grammar, including unbalanced loops and
@@ -164,6 +164,24 @@ name cannot silently select the wrong theme. Its response includes:
   values). Use the ids and row indexes with `page.setValues`,
   `page.moveBlock` and `page.removeBlock`. `source: "published"` reads the
   published copy; `includeSchema: true` adds each instance's schema.
+- `cms_list_posts`: a site's posts and events, newest first, each with
+  `postId`, `name` (slug), title, type, tags, `publishedAt`, `publishAt`,
+  status (`draft`, `published`, `unpublished-changes` as the Hub's post
+  editor compares it, or `missing` for a snapshot without a draft) and
+  `blockIds`. Filter by `type` or `tag`; page with `limit` and
+  `startAfter` (`nextStartAfter`).
+- `cms_get_post`: one post's fields (title, blurb, tags, featured image,
+  restriction rule, the event for events, publication dates, `imported`)
+  with `paths` (the URLs the site's post template pages serve it at) and its
+  body as rows, columns and instances like `cms_get_page`. Use the ids and
+  row indexes with `post.setValues`, `post.moveBlock` and
+  `post.removeBlock`.
+
+Post operations (`post.create`, `post.update`, `post.placeBlock`,
+`post.setValues`, `post.moveBlock`, `post.removeBlock`) write draft posts
+only. A post's kind is `postType` (`post` or `event`), since `type` names
+the operation. Publishing, scheduling, dates and an imported post's
+`legacyBlog` stay with the Hub.
 
 The end-to-end workflow that uses these tools is the `edge-design-to-site`
 skill (`edge/skills/edge-design-to-site`).
@@ -381,7 +399,8 @@ is not configured. Use HTTPS for production endpoints.
    Check the returned organization/site names against the job. For library/theme
    work or creating a site, deliberately choose `scope: "organization"` instead.
 3. Pass the returned `sessionId` to check/run/preview/readiness and the page
-   reads (`cms_list_pages`, `cms_get_page`) along with the
+   and post reads (`cms_list_pages`, `cms_get_page`, `cms_list_posts`,
+   `cms_get_post`) along with the
    target org/site. A wrong org/site handle is refused before sending an operation.
    Run still needs the checksum from check.
 
