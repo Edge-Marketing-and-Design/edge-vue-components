@@ -44,6 +44,8 @@ test('the MCP rejects tenant escapes before database reads or agent requests', a
     ['cms_find_block', {}],
     ['cms_preview_url', { orgId: 'other', siteId: 'site', pageId: 'home' }],
     ['cms_site_readiness', { orgId: 'other', siteId: 'site' }],
+    ['cms_list_pages', { orgId: 'other', siteId: 'site' }],
+    ['cms_get_page', { orgId: 'other', siteId: 'site', pageId: 'home' }],
     ['cms_check_operation', { orgId: 'other', operation: { type: 'page.setValues' } }],
     ['cms_run_operation', { orgId: 'other', operation: { type: 'page.setValues' }, checksum: 'test' }],
     ['firestore_get_document', { documentPath: 'organizations/other/blocks/hero' }],

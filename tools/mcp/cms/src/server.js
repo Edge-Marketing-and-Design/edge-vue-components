@@ -540,7 +540,7 @@ server.registerTool(
 )
 
 const OperationSchema = z.object({ type: z.enum(CMS_OPERATION_TYPES) }).passthrough()
-  .describe('A CMS operation, e.g. { "type": "page.placeBlock", "siteId": "...", "pageId": "...", "blockId": "...", "values": { ... } }. Call cms_contract (kind "operations") first: it returns every type and its fields.')
+  .describe('A CMS operation, e.g. { "type": "page.placeBlock", "siteId": "...", "pageId": "...", "blockId": "...", "values": { ... } } or { "type": "page.moveBlock", "siteId": "...", "pageId": "...", "instanceId": "...", "index": 0 }. page.create takes optional SEO "fields" like page.update. Call cms_contract (kind "operations") first: it returns every type and its fields. Read a page with cms_get_page for its instance ids and row order.')
 
 const resolveOrgId = orgId => resolveCmsOrganization(orgId, config)
 const SessionIdSchema = z.string().trim().min(1).optional().describe('Explicit target handle from cms_open_session. Required when using a Hub connection.')
@@ -554,7 +554,7 @@ server.registerTool('cms_agent_organizations', {
 
 server.registerTool('cms_open_session', {
   title: 'Open a Targeted CMS Session',
-  description: 'Choose an explicit org and scope for this job. Site scope requires an exact site id and permits only page work/site updates there. Organization scope permits library/theme work and site creation. Returns a sessionId, never a credential. Pass that handle to check/run/preview/readiness; it refreshes automatically for the same target.',
+  description: 'Choose an explicit org and scope for this job. Site scope requires an exact site id and permits only page work/site updates there. Organization scope permits library/theme work and site creation. Returns a sessionId, never a credential. Pass that handle to check/run/preview/readiness and the page reads (cms_list_pages, cms_get_page); it refreshes automatically for the same target.',
   inputSchema: { orgId: z.string().trim().min(1), scope: z.enum(['organization', 'site']), siteId: z.string().trim().min(1).optional() },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
 }, async (input) => {
@@ -566,7 +566,7 @@ server.registerTool(
   'cms_check_operation',
   {
     title: 'Check a CMS Operation',
-    description: 'Plan a draft-only CMS operation through the Hub (themes, new sites and their SEO, draft pages and their SEO, block placement and content, new blocks, block drafts) and return what would change, any problems, and a checksum for cms_run_operation. Call cms_contract first for the operations contract and for every kind the operation writes (blocks, themes, posts), and build the operation from those fields. Writes nothing. Nothing can publish a page or release a block. Needs an agent key (Dev Mode > Agent Keys).',
+    description: 'Plan a draft-only CMS operation through the Hub (themes, new sites and their SEO, draft pages and their SEO, block placement, order and content, new blocks, block drafts) and return what would change, any problems, and a checksum for cms_run_operation. Call cms_contract first for the operations contract and for every kind the operation writes (blocks, themes, posts), and build the operation from those fields. Writes nothing. Nothing can publish a page or release a block. Needs an agent key (Dev Mode > Agent Keys).',
     inputSchema: {
       sessionId: SessionIdSchema,
       orgId: OptionalOrgIdSchema.describe('Organization id. Uses configured defaultOrgId when omitted.'),
@@ -675,6 +675,48 @@ server.registerTool(
     const org = resolveOrgId(orgId)
     return jsonResult(await withLocalOverrideChecks(org, await agentOperations.readiness(org, siteId, sessionId)))
   },
+)
+
+server.registerTool(
+  'cms_list_pages',
+  {
+    title: 'List a Site\'s Pages',
+    description: 'List a site\'s menus as a tree (Site Root, other menus, Not In Menu; folders and external links included) with each page\'s pageId, slug, menu title, URL path and status: draft (never published), published, or unpublished-changes. Pages in no menu are listed under unlisted. Reads only. Needs an agent key or a site session.',
+    inputSchema: {
+      sessionId: SessionIdSchema,
+      orgId: OptionalOrgIdSchema.describe('Organization id. Uses configured defaultOrgId when omitted.'),
+      siteId: z.string().trim().min(1).describe('Site document id.'),
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+    },
+  },
+  async ({ orgId, siteId, sessionId }) => jsonResult(await agentOperations.pages(resolveOrgId(orgId), siteId, sessionId)),
+)
+
+server.registerTool(
+  'cms_get_page',
+  {
+    title: 'Read a CMS Page',
+    description: 'Read one page as an outline instead of the raw document: its SEO fields (and the post* fields when it has a post view), version and status, then per area (main, and post when present) its rows in order, each with its column spans and the instances in each column: instanceId, blockId, name, synced and override flags, whether it is behind the released block, and its values. Use the instance ids and row indexes with page.setValues, page.moveBlock and page.removeBlock. Schemas are left out unless includeSchema is true (cms_find_block and cms_block_base have them). Reads only. Needs an agent key or a site session.',
+    inputSchema: {
+      sessionId: SessionIdSchema,
+      orgId: OptionalOrgIdSchema.describe('Organization id. Uses configured defaultOrgId when omitted.'),
+      siteId: z.string().trim().min(1).describe('Site document id.'),
+      pageId: z.string().trim().min(1).describe('Page document id (from cms_list_pages).'),
+      source: z.enum(['draft', 'published']).optional().default('draft'),
+      includeValues: z.boolean().optional().default(true).describe('Include each instance\'s values.'),
+      includeSchema: z.boolean().optional().default(false).describe('Include each instance\'s schema (large).'),
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+    },
+  },
+  async ({ orgId, siteId, pageId, source, includeValues, includeSchema, sessionId }) => jsonResult(await agentOperations.page(resolveOrgId(orgId), siteId, pageId, { source, includeValues, includeSchema, sessionId })),
 )
 
 server.registerTool(
