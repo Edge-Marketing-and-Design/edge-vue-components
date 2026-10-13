@@ -423,6 +423,10 @@ const planPage = async (core, reader, { orgId, uid, now, operation }) => {
   if (operation.type === 'page.update') {
     const fields = isPlainObject(operation.fields) ? operation.fields : {}
     const update = pageFieldUpdate(core, plan, fields, 'page.update')
+    // As the Hub's AI SEO leaves it alone: a page copied from a template with
+    // custom structured data keeps it until someone edits it in the Hub.
+    if (page.structuredDataAiLocked === true && update.structuredData !== undefined)
+      plan.problems.push(`Draft page ${pageId} has custom structured data from its template (structuredDataAiLocked), which AI edits leave alone; change it in the Hub's page settings.`)
     if (!Object.keys(fields).length)
       plan.problems.push('No page fields to change.')
     addWrite(plan, pageRef, { ...update, version: core.getNextVersion(page.version), ...stamp(uid, now) }, 'update', `Update draft page ${pageId}: ${Object.keys(update).join(', ')}.`)

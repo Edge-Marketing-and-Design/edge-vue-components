@@ -700,7 +700,7 @@ server.registerTool(
   'cms_get_page',
   {
     title: 'Read a CMS Page',
-    description: 'Read one page as an outline instead of the raw document: its SEO fields (and the post* fields when it has a post view), version and status, then per area (main, and post when present) its rows in order, each with its column spans and the instances in each column: instanceId, blockId, name, synced and override flags, whether it is behind the released block, and its values. Use the instance ids and row indexes with page.setValues, page.moveBlock and page.removeBlock. Schemas are left out unless includeSchema is true (cms_find_block and cms_block_base have them). Reads only. Needs an agent key or a site session.',
+    description: 'Read one page as an outline instead of the raw document: its SEO fields (and the post* fields when it has a post view), structuredDataAiLocked (true: its custom structured data is left to the Hub, and page.update refuses structuredData), version and status, then per area (main, and post when present) its rows in order, each with its column spans and the instances in each column: instanceId, blockId, name, synced and override flags, whether it is behind the released block, and its values. Use the instance ids and row indexes with page.setValues, page.moveBlock and page.removeBlock. Schemas are left out unless includeSchema is true (cms_find_block and cms_block_base have them). Reads only. Needs an agent key or a site session.',
     inputSchema: {
       sessionId: SessionIdSchema,
       orgId: OptionalOrgIdSchema.describe('Organization id. Uses configured defaultOrgId when omitted.'),

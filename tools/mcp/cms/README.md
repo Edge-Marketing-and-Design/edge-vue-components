@@ -155,7 +155,9 @@ name cannot silently select the wrong theme. Its response includes:
   Menu, with folders and external links) and each page's `pageId`, slug,
   menu title, URL path and status (`draft`, `published`,
   `unpublished-changes`); pages in no menu are under `unlisted`.
-- `cms_get_page`: one page as an outline: its SEO fields, version and status,
+- `cms_get_page`: one page as an outline: its SEO fields (with
+  `structuredDataAiLocked`: `page.update` refuses `structuredData` on a locked
+  page, as the Hub's AI SEO leaves it alone), version and status,
   then per area (`main`, and `post` when the page has a post view) its rows
   in order with column spans and each column's instances (`instanceId`,
   `blockId`, name, synced and override flags, `behind` the released block,
