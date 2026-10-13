@@ -13,7 +13,7 @@ Read this before building any package here. The JSON block is read by the scaffo
   "themeName": "<theme name as shown in the Hub>",
   "blockPrefix": "<kebab prefix for docIds, e.g. mule>",
   "namePrefix": "<Name prefix for block names, e.g. Mule>",
-  "tags": ["Navigation", "Hero", "Content", "CTA", "Footer", "Calculator", "Quick Picks"],
+  "tags": ["<the organization's block tag list from the Hub (cmsBlockTags), in order, e.g. Navigation, Hero, Content, Call to Action, Cards & Grids, Form, Footer, Quick Picks>"],
   "chrome": { "navigation": "<block name>", "footer": "<block name>", "cta": "<block name or empty>" },
   "overrideFolder": "app/blocks/<project>-<organizationId>",
   "validatorPath": "scripts/cms/validate-import.mjs",

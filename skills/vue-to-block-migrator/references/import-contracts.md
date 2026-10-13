@@ -47,7 +47,7 @@ Generate a direct JSON document with these fields:
   "values": {},
   "Instructions": "Edit the heading and feature content in the page editor.",
   "aiInstructions": "Keep claims factual and concise. Do not invent statistics.",
-  "tags": ["Website"],
+  "tags": ["Cards & Grids"],
   "themes": ["target-theme-id"],
   "type": ["Page"],
   "previewType": "light",
@@ -65,6 +65,7 @@ Required package rules:
 - Library `values` is normally `{}`.
 - `Instructions` and `aiInstructions` are present even if empty.
 - `tags`, `themes`, and `type` are arrays.
+- `tags` holds one or two content tags from the organization's block tag list, plus `Quick Picks` only for the picker's first view; never empty.
 - `type` contains `Page`, `Post`, or both.
 - `previewType` is `light` or `dark`.
 - `synced` is boolean; `version` is numeric.

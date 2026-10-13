@@ -299,6 +299,84 @@ const findInstance = (page, instanceId) => {
 
 const valuesTooLarge = values => Buffer.byteLength(JSON.stringify(values || {})) > MAX_VALUE_BYTES
 
+// page.update's fields, and page.create's optional ones: the page SEO
+// strings, with the structured data checked.
+const pageFieldUpdate = (core, plan, fields, type) => {
+  const update = {}
+  for (const [key, value] of Object.entries(fields)) {
+    if (!core.PAGE_UPDATE_FIELDS.includes(key))
+      plan.problems.push(`"${key}" can't be set by ${type} (allowed: ${core.PAGE_UPDATE_FIELDS.join(', ')}).`)
+    else if (typeof value !== 'string')
+      plan.problems.push(`${key} must be a string.`)
+    else
+      update[key] = value
+  }
+  addStructuredDataFindings(core, plan, update)
+  return update
+}
+
+const instanceLabel = instance => instance?.name || instance?.blockId
+
+// page.moveBlock { instanceId, index, area? }: `index` is the row position
+// after the move, clamped as page.placeBlock clamps it. An instance alone in
+// its row moves with the row (layout and settings kept); one sharing a row
+// leaves its column for a new full-width row. Rows left empty are removed,
+// as page.removeBlock removes them. The instance itself is not changed.
+const planMoveBlock = (core, plan, { now, uid, operation, page, next, pageRef, siteId, pageId, found }) => {
+  const { key, instance } = found
+  const instanceId = instance.id
+  const area = key === 'postContent' ? 'post' : 'main'
+  const label = instanceLabel(instance)
+  if (operation.area !== undefined && !['main', 'post'].includes(operation.area)) {
+    plan.problems.push('area must be "main" or "post".')
+    return plan
+  }
+  if (operation.area !== undefined && operation.area !== area) {
+    plan.problems.push(`"${label}" (${instanceId}) is in the ${area} area; blocks can't move between the main and post areas. Remove it and place the block in the other area.`)
+    return plan
+  }
+  if (!Number.isInteger(operation.index)) {
+    plan.problems.push('index must be a whole number: the row position to move to (0 is the first row).')
+    return plan
+  }
+  const structureKey = areaKeys(area)[1]
+  const rows = Array.isArray(next[structureKey]) ? next[structureKey] : []
+  const holds = column => (Array.isArray(column?.blocks) ? column.blocks : []).includes(instanceId)
+  const from = rows.findIndex(row => (row?.columns || []).some(holds))
+  if (from < 0) {
+    plan.problems.push(`"${label}" (${instanceId}) isn't in any row of draft page ${pageId}; remove it and place the block again.`)
+    return plan
+  }
+  const row = rows[from]
+  const alone = (row.columns || []).reduce((count, column) => count + (Array.isArray(column?.blocks) ? column.blocks.length : 0), 0) === 1
+  let moved = row
+  let remaining = rows.filter((_, index) => index !== from)
+  if (!alone) {
+    const taken = core.pageIds(next)
+    moved = core.createFullWidthRow({ rowId: core.generateShortId(taken), columnId: core.generateShortId(taken), instanceIds: [instanceId] })
+    remaining = rows.map((candidate, index) => (index !== from
+      ? candidate
+      : { ...candidate, columns: (candidate.columns || []).map(column => ({ ...column, blocks: (Array.isArray(column?.blocks) ? column.blocks : []).filter(id => id !== instanceId) })) }))
+  }
+  remaining = remaining.filter(candidate => (candidate?.columns || []).some(column => Array.isArray(column?.blocks) && column.blocks.length))
+  const index = Math.min(Math.max(operation.index, 0), remaining.length)
+  const structure = [...remaining.slice(0, index), moved, ...remaining.slice(index)]
+  if (stableStringify(structure) === stableStringify(rows)) {
+    plan.problems.push(`"${label}" (${instanceId}) is already row ${from + 1}; nothing to move.`)
+    return plan
+  }
+  next[structureKey] = structure
+  addWrite(plan, pageRef, {
+    [structureKey]: structure,
+    version: core.getNextVersion(page.version),
+    ...stamp(uid, now),
+  }, 'update', alone
+    ? `Move row ${from + 1} with "${label}" (${instanceId}) to row ${index + 1} on draft page ${pageId}; its layout and settings are kept.`
+    : `Move "${label}" (${instanceId}) out of row ${from + 1} into a new full-width row at row ${index + 1} on draft page ${pageId}.`)
+  plan.result = { siteId, pageId, instanceId, rowId: moved.id, index, area }
+  return plan
+}
+
 const planPage = async (core, reader, { orgId, uid, now, operation }) => {
   const plan = createPlan()
   const siteId = requireDocId(operation.siteId, 'site id')
@@ -317,9 +395,17 @@ const planPage = async (core, reader, { orgId, uid, now, operation }) => {
       plan.problems.push('A page needs a name.')
     const menus = core.withRootMenus(site.menus)
     const slug = core.uniqueRootSlug(menus, title)
+    let fields = {}
+    if (operation.fields !== undefined) {
+      if (isPlainObject(operation.fields))
+        fields = pageFieldUpdate(core, plan, operation.fields, 'page.create')
+      else
+        plan.problems.push('fields must be an object of page fields.')
+    }
     const pageId = randomUUID()
     const pageRef = siteRef.collection('pages').doc(pageId)
-    addWrite(plan, pageRef, { ...core.blankPagePayload(slug, now), docId: pageId, uid }, 'set', `Create draft page "${title}" at /${slug} on ${siteId}.`)
+    const withFields = Object.keys(fields).length ? ` with ${Object.keys(fields).join(', ')}` : ''
+    addWrite(plan, pageRef, { ...core.blankPagePayload(slug, now), ...fields, docId: pageId, uid }, 'set', `Create draft page "${title}" at /${slug} on ${siteId}${withFields}.`)
     if (core.ROOT_MENUS.includes(menuName))
       menus[menuName].push({ name: slug, menuTitle: title, item: pageId })
     addWrite(plan, siteRef, { menus, ...stamp(uid, now) }, 'update', `Add it to the "${menuName}" menu.`)
@@ -336,16 +422,11 @@ const planPage = async (core, reader, { orgId, uid, now, operation }) => {
 
   if (operation.type === 'page.update') {
     const fields = isPlainObject(operation.fields) ? operation.fields : {}
-    const update = {}
-    for (const [key, value] of Object.entries(fields)) {
-      if (!core.PAGE_UPDATE_FIELDS.includes(key))
-        plan.problems.push(`"${key}" can't be set by page.update (allowed: ${core.PAGE_UPDATE_FIELDS.join(', ')}).`)
-      else if (typeof value !== 'string')
-        plan.problems.push(`${key} must be a string.`)
-      else
-        update[key] = value
-    }
-    addStructuredDataFindings(core, plan, update)
+    const update = pageFieldUpdate(core, plan, fields, 'page.update')
+    // As the Hub's AI SEO leaves it alone: a page copied from a template with
+    // custom structured data keeps it until someone edits it in the Hub.
+    if (page.structuredDataAiLocked === true && update.structuredData !== undefined)
+      plan.problems.push(`Draft page ${pageId} has custom structured data from its template (structuredDataAiLocked), which AI edits leave alone; change it in the Hub's page settings.`)
     if (!Object.keys(fields).length)
       plan.problems.push('No page fields to change.')
     addWrite(plan, pageRef, { ...update, version: core.getNextVersion(page.version), ...stamp(uid, now) }, 'update', `Update draft page ${pageId}: ${Object.keys(update).join(', ')}.`)
@@ -414,6 +495,9 @@ const planPage = async (core, reader, { orgId, uid, now, operation }) => {
     return plan
   }
 
+  if (operation.type === 'page.moveBlock')
+    return planMoveBlock(core, plan, { now, uid, operation, page, next, pageRef, siteId, pageId, found })
+
   if (operation.type === 'page.setValues') {
     const { instance, key, index } = found
     if (Number(instance.templateVersion) !== 2)
@@ -453,6 +537,23 @@ const planPage = async (core, reader, { orgId, uid, now, operation }) => {
 
 // ---- Blocks ----
 
+// The organization's block tag list (cmsBlockTags on the organization
+// document), read through the plan so a list change stales a check. Empty
+// means unrestricted.
+const readBlockTagList = async (validation, reader, orgId) => {
+  const snap = await reader.doc(orgRefOf(orgId))
+  return validation.normalizeBlockTagList(snap.exists ? snap.data()?.cmsBlockTags : null)
+}
+
+// Tag rule findings: notices while they are warnings, problems once they
+// are errors (BLOCK_TAG_RULE_SEVERITY).
+const addBlockTagFindings = (plan, findings) => {
+  plan.problems.push(...findings.filter(issue => issue.severity === 'error').map(issue => `${issue.code}: ${issue.message}`))
+  const notices = findings.filter(issue => issue.severity !== 'error').map(issue => `${issue.code}: ${issue.message}`)
+  if (notices.length)
+    plan.notices = [...(plan.notices || []), ...notices]
+}
+
 const planBlock = async (core, reader, { orgId, uid, now, operation }) => {
   const plan = createPlan()
   const blocks = orgRefOf(orgId).collection('blocks')
@@ -469,14 +570,15 @@ const planBlock = async (core, reader, { orgId, uid, now, operation }) => {
       plan.problems.push(`Block "${blockId}" already exists. Use block.draft to change it.`)
     plan.problems.push(...core.designReferenceProblems(block.meta?.design, 'block.meta.design'))
     const themes = await reader.query(orgRefOf(orgId).collection('themes'), `organizations/${orgId}/themes`)
+    const validation = await validationPromise
+    const blockTagList = await readBlockTagList(validation, reader, orgId)
     const [{ checkImportedBlock }, engine] = await loadImportCheck()
-    const findings = await checkImportedBlock(block, { knownThemeIds: themes.docs.map(doc => doc.id), renderTemplate: engine.renderTemplateAsync })
+    const findings = await checkImportedBlock(block, { knownThemeIds: themes.docs.map(doc => doc.id), blockTagList, renderTemplate: engine.renderTemplateAsync })
     if (findings.hardError)
       plan.problems.push(findings.hardError)
     plan.problems.push(...findings.blocking.map(issue => `${issue.code}: ${issue.message}`))
     const isThemeName = issue => String(issue.code || '').startsWith('theme.')
     plan.notices = findings.notices.filter(issue => !isThemeName(issue)).map(issue => `${issue.code}: ${issue.message}`)
-    const validation = await validationPromise
     const themeDocs = Object.fromEntries(themes.docs.map(doc => [doc.id, doc.data()]))
     const selectedThemes = (findings.doc || block).themes
     const namedFindings = validation.themeNameFindings(validation.templateClassStrings((findings.doc || block).content), commonThemeTokens(selectedThemes, themeDocs))
@@ -514,8 +616,13 @@ const planBlock = async (core, reader, { orgId, uid, now, operation }) => {
     plan.problems.push(`Block "${blockId}" changed since you loaded it (its ${current === block ? 'released definition' : `unreleased draft, revision ${block.draftRevision}`} is different). Load it again before drafting.`)
     plan.currentHash = revisionsCore.blockDefinitionHash(current)
   }
+  // Tags are library metadata, not part of the definition: a draft neither
+  // saves nor releases them. The rules check the tags the block carries.
+  const validation = await validationPromise
+  addBlockTagFindings(plan, validation.blockTagFindings(block.tags, await readBlockTagList(validation, reader, orgId)))
+  if (isPlainObject(operation.definition) && operation.definition.tags !== undefined)
+    plan.notices = [...(plan.notices || []), 'definition.tags is ignored: tags are block metadata, which a draft does not save. Change them in the Block Editor.']
   if (isPlainObject(operation.definition) && typeof operation.definition.content === 'string') {
-    const validation = await validationPromise
     const themes = await reader.query(orgRefOf(orgId).collection('themes'), `organizations/${orgId}/themes`)
     const themeDocs = Object.fromEntries(themes.docs.map(doc => [doc.id, doc.data()]))
     const blockThemes = Array.isArray(operation.definition.themes) ? operation.definition.themes : block.themes
@@ -870,8 +977,82 @@ exports.siteReadiness = onCall({ timeoutSeconds: 120, memory: '512MiB' }, async 
   return gatherSiteReadiness({ orgId, siteId })
 })
 
+// ---- Page reads (agent page editing) ----
+
+const PAGE_OUTLINE_MAX_BLOCKS = 200
+
+const loadSite = async (orgId, siteId) => {
+  const siteRef = orgRefOf(orgId).collection('sites').doc(siteId)
+  const siteSnap = await siteRef.get()
+  if (!siteSnap.exists)
+    throw new HttpsError('not-found', `Site "${siteId}" does not exist.`)
+  return { siteRef, site: siteSnap.data() || {} }
+}
+
+// The site's menus and pages with their publication state (buildSitePages
+// in helpers/cmsOperations.mjs). Reads only.
+const gatherSitePages = async ({ orgId, siteId }) => {
+  const core = await corePromise
+  const { siteRef, site } = await loadSite(orgId, siteId)
+  const pagesSnap = await siteRef.collection('pages').limit(READINESS_MAX_PAGES + 1).get()
+  const publishedSnap = await siteRef.collection('published').limit(READINESS_MAX_PAGES + 1).get()
+  const pages = Object.fromEntries(pagesSnap.docs.slice(0, READINESS_MAX_PAGES).map(doc => [doc.id, doc.data() || {}]))
+  const published = Object.fromEntries(publishedSnap.docs.slice(0, READINESS_MAX_PAGES).map(doc => [doc.id, doc.data() || {}]))
+  return {
+    siteId,
+    siteName: String(site.name || ''),
+    ...core.buildSitePages({ site, pages, published }),
+    pageCount: Object.keys(pages).length,
+    truncated: pagesSnap.size > READINESS_MAX_PAGES || publishedSnap.size > READINESS_MAX_PAGES,
+  }
+}
+
+// One page as an outline (buildPageOutline in helpers/cmsOperations.mjs):
+// the draft, or its published copy with the route the published menus give
+// it. Reads only.
+const gatherPageOutline = async ({ orgId, siteId, pageId, source = 'draft', includeValues = true, includeSchema = false }) => {
+  const core = await corePromise
+  const from = source === 'published' ? 'published' : 'draft'
+  const { siteRef, site } = await loadSite(orgId, siteId)
+  const draftSnap = await siteRef.collection('pages').doc(pageId).get()
+  const liveSnap = await siteRef.collection('published').doc(pageId).get()
+  const page = from === 'published' ? liveSnap : draftSnap
+  if (!page.exists)
+    throw new HttpsError('not-found', `${from === 'published' ? 'Published' : 'Draft'} page "${pageId}" does not exist on site "${siteId}".`)
+  let menus = site.menus
+  if (from === 'published') {
+    const settings = await orgRefOf(orgId).collection('published-site-settings').doc(siteId).get()
+    menus = settings.exists ? settings.data()?.menus : null
+  }
+  const data = page.data() || {}
+  const blockIds = [...new Set([...(data.content || []), ...(data.postContent || [])].map(instance => String(instance?.blockId || '')).filter(Boolean))]
+  if (blockIds.length > PAGE_OUTLINE_MAX_BLOCKS)
+    throw new HttpsError('failed-precondition', `The page uses ${blockIds.length} library blocks; outlines read at most ${PAGE_OUTLINE_MAX_BLOCKS}.`)
+  const blocks = {}
+  await Promise.all(blockIds.map(async (blockId) => {
+    const snap = await orgRefOf(orgId).collection('blocks').doc(blockId).get()
+    if (snap.exists)
+      blocks[blockId] = snap.data() || {}
+  }))
+  return {
+    siteId,
+    ...core.buildPageOutline({
+      pageId,
+      page: data,
+      source: from,
+      status: draftSnap.exists ? core.pagePublicationStatus(draftSnap.data() || {}, liveSnap.exists ? (liveSnap.data() || {}) : null) : 'missing',
+      path: core.pageRoutePath(menus, pageId),
+      blocks,
+      includeValues: includeValues !== false,
+      includeSchema: includeSchema === true,
+    }),
+  }
+}
+
 // For the agent endpoint (cmsAgentKeys.js); cms.js doesn't re-export these.
 exports.authorizeOperation = authorizeOperation
 exports.performCheck = performCheck
 exports.performRun = performRun
 exports.gatherSiteReadiness = gatherSiteReadiness
+exports.gatherSitePages = gatherSitePages
+exports.gatherPageOutline = gatherPageOutline

@@ -6,6 +6,8 @@ import * as z from 'zod'
 import { clearCmsTemplateV2LibraryState } from '../../composables/useCmsTemplateRuntimeMeta'
 import { guardOverrideRename } from '../../lib/cmsOverrideRename'
 import { validateBlock } from '../../lib/cmsBlockValidation'
+import { editorTagOptions, offListBlockTags } from '../../lib/cmsBlockTags'
+import { useCmsBlockTagList } from '../../composables/useCmsBlockTagList'
 import { safeParseTagConfig } from '../../lib/cmsTagConfig'
 import { BLOCK_REVISION_DEFINITION_FIELDS, diffBlockMetadata } from '../../lib/cmsBlockRevisions'
 import { BLOCK_EXPORT_BASE_KEY, blockExportBase, discardLibraryBlockDraft, isBlockBaseChangedError, loadLibraryBlockForEditing, releasedRevisionOf, saveLibraryBlockEdit, saveWithBaseCheck } from '../../lib/cmsBlockRevisionClient'
@@ -2732,27 +2734,22 @@ const currentBlockPath = computed(() => {
   return `${orgPath}/blocks/${blockId}`
 })
 
-const getTagsFromBlocks = computed(() => {
-  const tagsSet = new Set()
+// The organization's block tag list; empty means unrestricted (every tag in
+// the library is offered and new ones can be typed).
+const blockTagList = useCmsBlockTagList()
 
-  Object.values(blocks.value || {}).forEach((block) => {
-    if (block.tags && Array.isArray(block.tags)) {
-      block.tags.forEach(tag => tagsSet.add(tag))
-    }
-  })
+// With a list, the block's own off-list tags stay visible, marked, until
+// they are removed.
+const blockTagOptions = currentTags => editorTagOptions(blockTagList.value, blocks.value, currentTags)
+  .map(item => ((blockTagList.value.length && !blockTagList.value.includes(item.name)) ? { ...item, title: `${item.name} (not in the list)` } : item))
 
-  // Convert to array of objects
-  const tagsArray = Array.from(tagsSet).map(tag => ({ name: tag, title: tag }))
-
-  // Sort alphabetically
-  tagsArray.sort((a, b) => a.title.localeCompare(b.title))
-
-  // Remove "Quick Picks" if it exists
-  const filtered = tagsArray.filter(tag => tag.name !== 'Quick Picks')
-
-  // Always prepend it
-  return [{ name: 'Quick Picks', title: 'Quick Picks' }, ...filtered]
-})
+const blockTagFieldDescription = (currentTags) => {
+  if (!blockTagList.value.length)
+    return ''
+  const offList = offListBlockTags(currentTags, blockTagList.value).length
+  const rule = 'Pick one or two content tags, plus Quick Picks for the picker\'s first view.'
+  return offList ? `${rule} Remove the ${offList === 1 ? 'tag' : `${offList} tags`} not in the list.` : rule
+}
 
 const cloneSchemaValue = (value) => {
   if (isPlainObject(value) || Array.isArray(value))
@@ -3469,6 +3466,7 @@ const runBlockChecks = async (doc) => {
   try {
     const result = await validateBlock(edgeGlobal.dupObject(doc || {}), {
       knownThemeIds: availableThemeIds.value,
+      blockTagList: blockTagList.value,
       renderTemplate: renderTemplateAsync,
     })
     if (run === blockChecksRun)
@@ -3693,11 +3691,12 @@ const exportCurrentBlock = async () => {
             <div class="flex-auto">
               <edge-shad-select-tags
                 v-model="slotProps.workingDoc.tags"
-                :items="getTagsFromBlocks"
+                :items="blockTagOptions(slotProps.workingDoc.tags)"
                 name="tags"
                 placeholder="Select tags"
                 label="Tags"
-                :allow-additions="true"
+                :description="blockTagFieldDescription(slotProps.workingDoc.tags)"
+                :allow-additions="!blockTagList.length"
                 class="w-full max-w-[800px] mx-auto mb-5 text-black"
               />
             </div>
@@ -6025,7 +6024,7 @@ const exportCurrentBlock = async () => {
                     </h3>
                     <div class="text-sm text-foreground space-y-1">
                       <div><strong>Name</strong> is the library name of the block.</div>
-                      <div><strong>Tags</strong> are for filtering blocks in the picker.</div>
+                      <div><strong>Tags</strong> are for filtering blocks in the picker and the library. When the organization has a block tag list, pick one or two content tags from it, plus Quick Picks to show the block in the picker's first view.</div>
                       <div><strong>Allowed Themes</strong> limits where this block can be used.</div>
                       <div><strong>Synced Block</strong> means edits are shared across all instances.</div>
                     </div>

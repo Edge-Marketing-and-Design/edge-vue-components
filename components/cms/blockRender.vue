@@ -152,15 +152,13 @@ const getTemplateV2SchemaDefaults = (schema) => {
   }, {})
 }
 
-const normalizeTemplateV2Values = (values, schema) => {
-  const defaults = getTemplateV2SchemaDefaults(schema)
-  const normalized = { ...defaults, ...(values || {}) }
-  Object.entries(defaults).forEach(([field, value]) => {
-    if (normalized[field] === '')
-      normalized[field] = value
-  })
-  return normalized
-}
+// Same rule as the public renderer (emd-cms-front shared/cmsBlockSchemaDefaults.js):
+// only fields the instance has never saved take the schema default; a saved
+// value, including an empty string, renders as saved.
+const normalizeTemplateV2Values = (values, schema) => ({
+  ...getTemplateV2SchemaDefaults(schema),
+  ...(values || {}),
+})
 
 const replaceTemplateV2RuntimeTokens = (value, tokens) => {
   if (typeof value === 'string') {

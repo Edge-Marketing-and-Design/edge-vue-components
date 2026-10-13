@@ -80,7 +80,12 @@ export const assertBlockBasics = (block, file, { themeId, allowedTags = null, de
   assert.ok(['light', 'dark'].includes(block.previewType), `${file}: previewType must be light or dark`)
   assert.equal(typeof block.synced, 'boolean', `${file}: synced must be boolean`)
   assert.ok(block.Instructions.trim() && block.aiInstructions.trim(), `${file}: Instructions and aiInstructions are required`)
-  if (allowedTags) for (const tag of block.tags) assert.ok(allowedTags.includes(tag), `${file}: tag "${tag}" is not in the project tag set`)
+  if (allowedTags) {
+    for (const tag of block.tags) assert.ok(allowedTags.includes(tag), `${file}: tag "${tag}" is not in the project tag set`)
+    // One or two content tags; Quick Picks (the picker's first view) doesn't count.
+    const contentTags = new Set(block.tags.filter(tag => tag !== 'Quick Picks'))
+    assert.ok(contentTags.size >= 1 && contentTags.size <= 2, `${file}: a block needs one or two content tags (Quick Picks not counted); it has ${contentTags.size}`)
+  }
   for (const [name, input] of Object.entries(block.schema)) validateInput(input, `${file}.schema.${name}`)
   assert.doesNotMatch(block.template, /<script\b/i, `${file}: script tags are not supported`)
   assert.doesNotMatch(block.template, /\s(?:v-if|v-for|v-model|@click|onclick)\s*=/i, `${file}: Vue directives and inline handlers are not supported`)
