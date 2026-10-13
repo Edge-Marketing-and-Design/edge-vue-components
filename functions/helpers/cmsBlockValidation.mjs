@@ -653,8 +653,25 @@ export const validateBlockDocument = (doc, options = {}) => {
 
 const stripTags = html => String(html || '').replace(/<[^>]*>/g, ' ')
 
-const checkRenderedOutput = (report, html, pass, contentRules) => {
-  const leftover = html.match(/\{\{\{?\s*[#/]?[\w$]|source\(/)
+// Publication fields render to a {{{#publication {...} }}} marker that the
+// public renderer swaps for the flipbook. The engine URI-encodes the marker's
+// context, so its JSON holds no braces. Only markers for a field the schema
+// declares as a publication are expected output.
+const stripPublicationMarkers = (html, schema) => html.replace(
+  /\{\{\{\s*#publication\s*(\{[^{}]*\})\s*\}\}\}/g,
+  (marker, json) => {
+    try {
+      const field = JSON.parse(json)?.field
+      return typeof field === 'string' && schema?.[field]?.type === 'publication' ? '' : marker
+    }
+    catch {
+      return marker
+    }
+  },
+)
+
+const checkRenderedOutput = (report, html, pass, contentRules, schema) => {
+  const leftover = stripPublicationMarkers(html, schema).match(/\{\{\{?\s*[#/]?[\w$]|source\(/)
   if (leftover)
     report.add('error', 'render.unresolved-syntax', 'template', `The ${pass} render left template syntax "${leftover[0]}" in its output.`)
   const htmlProblem = findUnbalancedHtml(html)
@@ -710,7 +727,7 @@ export const validateBlockRender = async (doc, options = {}) => {
       report.add('error', 'render.error', 'template', `The ${pass.name} render failed: ${error?.message || error}.`)
       continue
     }
-    checkRenderedOutput(report, String(html ?? ''), pass.name, contentRules)
+    checkRenderedOutput(report, String(html ?? ''), pass.name, contentRules, isObject(doc.schema) ? doc.schema : {})
   }
   return finish(report)
 }
