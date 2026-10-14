@@ -7217,7 +7217,7 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
 
     return {
       success: true,
-      registrationCode: audienceUserId,
+      registrationCode: stagedUserDocId,
       audienceUserId,
       memberId: audienceUserId,
       registrationMode: effectiveRegistrationMode,
