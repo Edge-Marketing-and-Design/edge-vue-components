@@ -704,8 +704,8 @@ test('validateBlockWithRender reports skipped render checks without an engine', 
   assert.ok(result.info.some(message => message.includes('Render checks were skipped')))
 })
 
-const auditService = (tempRoot, collections) => {
-  const db = createFakeFirestore({ collections })
+const auditService = (tempRoot, collections, documents = {}) => {
+  const db = createFakeFirestore({ collections, documents })
   const service = createCmsToolService({
     db,
     config: {
@@ -774,6 +774,34 @@ test('auditBlocks validates every block with Hub import settings and writes a lo
   assert.deepEqual(report.results.map(item => item.docId), ['agent-grid', 'broken', 'legacy', 'unknown-theme'])
   assert.deepEqual(report.summary, result.summary)
   assert.equal(db.writeCalls, 0)
+})
+
+test('auditBlocks applies the organization\'s block tag list and summarizes the tag rules', async (t) => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'cms-audit-tags-test-'))
+  t.after(() => rm(tempRoot, { recursive: true, force: true }))
+  const blocks = {
+    'listed': { ...sharedBlock({ docId: 'listed' }), synced: false, version: 1, tags: ['Cards & Grids', 'Quick Picks'] },
+    'off-list': { ...sharedBlock({ docId: 'off-list' }), synced: false, version: 1, tags: ['clearwater-main', 'agents'] },
+    'untagged': { ...sharedBlock({ docId: 'untagged' }), synced: false, version: 1, tags: [] },
+  }
+  const { service } = auditService(tempRoot, { 'organizations/org-123/blocks': blocks }, {
+    'organizations/org-123': { name: 'Org', cmsBlockTags: ['Hero', 'Cards & Grids', 'Quick Picks'] },
+  })
+  const result = await service.auditBlocks({ includeRender: false })
+  assert.deepEqual(result.summary.blockTags, {
+    list: ['Hero', 'Cards & Grids', 'Quick Picks'],
+    restricted: true,
+    blocksWithTagFindings: 2,
+    offListTags: ['agents', 'clearwater-main'],
+  })
+  const rule = code => result.summary.byRule.find(entry => entry.code === code)
+  assert.deepEqual(rule('tags.not-in-list'), { severity: 'warning', code: 'tags.not-in-list', findings: 2, blocks: 1 })
+  assert.equal(rule('tags.content-count').blocks, 1, 'only the untagged block; two off-list tags still count as two')
+  assert.equal(result.summary.blocksWithErrors, 0, 'warnings until the switch')
+
+  const { service: open } = auditService(tempRoot, { 'organizations/org-123/blocks': blocks })
+  const unrestricted = await open.auditBlocks({ includeRender: false })
+  assert.deepEqual(unrestricted.summary.blockTags, { list: [], restricted: false, blocksWithTagFindings: 0, offListTags: [] })
 })
 
 test('auditBlocks reports skipped render checks when asked not to render', async (t) => {

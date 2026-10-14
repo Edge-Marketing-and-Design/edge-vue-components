@@ -197,6 +197,11 @@ exports.agentConnection = onRequest({ timeoutSeconds: 60 }, async (req, res) => 
   }
 })
 
+// What a site session may ask of cms-agentOperation: page operations and
+// site.update on its site, and reads of that site (preview, readiness, the
+// page list and page outlines).
+const SITE_SESSION_ACTIONS = ['check', 'run', 'preview', 'readiness', 'pages', 'page']
+
 // Parent revocation/expiry and current creator permissions are authoritative.
 exports.verifyAgentSession = async (orgId, header, body) => {
   const session = await authenticate(sessions(), 'cmsas', header)
@@ -211,6 +216,8 @@ exports.verifyAgentSession = async (orgId, header, body) => {
     throw new HttpsError('permission-denied', 'Session belongs to a different organization.')
   const type = body.operation?.type || ''
   if (session.data.scope === 'site') {
+    if (!SITE_SESSION_ACTIONS.includes(body.action))
+      throw new HttpsError('permission-denied', `Site sessions allow only: ${SITE_SESSION_ACTIONS.join(', ')}.`)
     const target = (body.action === 'check' || body.action === 'run') ? body.operation?.siteId : body.siteId
     if (target !== session.data.siteId)
       throw new HttpsError('permission-denied', 'Session belongs to a different site.')

@@ -31,6 +31,7 @@ const cmsAgentKeys = require('./cmsAgentKeys')
 const cmsAgentConnections = require('./cmsAgentConnections')
 const { buildPreviewUrl, issuePreviewToken, verifyPreviewToken } = require('./cmsPreviewTokens')
 const { removeCmsPageFromMenus } = require('./helpers/cmsPageDeletion')
+const { buildPostKvMetadata, postCanonicalKey } = require('./helpers/cmsPostKvMetadata')
 const { resolveSubmittedUserRouting } = require('./helpers/submittedUserRouting')
 
 const SITE_AI_TOPIC = 'site-ai-bootstrap'
@@ -2042,45 +2043,6 @@ const toBool = (value, fallback = false) => {
     return value
   return fallback
 }
-const MAX_KV_METADATA_BYTES = 1024
-const postCanonicalKey = ({ orgId, siteId, postId }) => `posts:${orgId}:${siteId}:${postId}`
-const metadataSizeBytes = value => Buffer.byteLength(JSON.stringify(value), 'utf8')
-
-const normalizePostTags = (value) => {
-  if (!Array.isArray(value))
-    return []
-  const seen = new Set()
-  const out = []
-  for (const item of value) {
-    const tag = String(item || '').trim()
-    if (!tag || seen.has(tag))
-      continue
-    seen.add(tag)
-    out.push(tag)
-  }
-  return out
-}
-
-const fitPostTagsToMetadataBudget = ({ metadataBase, tags, canonicalKey, maxBytes = MAX_KV_METADATA_BYTES }) => {
-  const normalizedTags = normalizePostTags(tags)
-  if (!normalizedTags.length)
-    return []
-
-  const withAllTags = { ...metadataBase, tags: normalizedTags, canonical: canonicalKey }
-  if (metadataSizeBytes(withAllTags) <= maxBytes)
-    return normalizedTags
-
-  const fitted = []
-  for (const tag of normalizedTags) {
-    const candidate = [...fitted, tag]
-    const withCandidate = { ...metadataBase, tags: candidate, canonical: canonicalKey }
-    if (metadataSizeBytes(withCandidate) > maxBytes)
-      break
-    fitted.push(tag)
-  }
-  return fitted
-}
-
 const eventEndAtMs = (eventData = {}) => {
   const endAtUtc = String(eventData.endAtUtc || '').trim()
   if (endAtUtc) {
@@ -2182,34 +2144,7 @@ exports.onPostWritten = createKvMirrorHandler({
   serialize: data => JSON.stringify(data),
 
   // tiny metadata so you can render lists without N GETs (stored in meta:{key})
-  makeMetadata: (data, params) => {
-    const eventData = (data && typeof data.event === 'object') ? data.event : {}
-    const startAt = String(eventData.startAt || '')
-    const endAt = String(eventData.endAt || '')
-    const metadataBase = {
-      title: data?.title || '',
-      blurb: data?.blurb || '',
-      doc_created_at: data?.doc_created_at || '',
-      featuredImage: data?.featuredImage || '',
-      name: data?.name || '',
-      type: (String(data?.type || 'post').trim().toLowerCase() || 'post'),
-      event: {
-        startAt,
-        endAt,
-        isPast: toBool(eventData.isPast, false),
-        locationName: String(eventData.locationName || ''),
-      },
-    }
-    const canonicalKey = postCanonicalKey(params || {})
-    const fittedTags = fitPostTagsToMetadataBudget({
-      metadataBase,
-      tags: data?.tags,
-      canonicalKey,
-    })
-    if (fittedTags.length)
-      metadataBase.tags = fittedTags
-    return metadataBase
-  },
+  makeMetadata: buildPostKvMetadata,
 
   timeoutSeconds: 180,
 })
@@ -7282,7 +7217,7 @@ exports.restrictedContentBeginRegistration = onCall(async (request) => {
 
     return {
       success: true,
-      registrationCode: audienceUserId,
+      registrationCode: stagedUserDocId,
       audienceUserId,
       memberId: audienceUserId,
       registrationMode: effectiveRegistrationMode,

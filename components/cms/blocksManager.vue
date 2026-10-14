@@ -1,9 +1,11 @@
 <script setup>
-import { Download, MoreHorizontal, Rocket } from 'lucide-vue-next'
+import { Download, MoreHorizontal, Replace, Rocket, Tags } from 'lucide-vue-next'
 import { renderTemplateAsync } from '@edgedev/template-engine'
 import { safeParseTagConfig } from '../../lib/cmsTagConfig'
 import { guardOverrideRename } from '../../lib/cmsOverrideRename'
 import { pendingBlockRevision, pendingReleaseBlocks } from '../../lib/cmsBlockReleaseBatch'
+import { NOT_IN_LIST_FILTER_VALUE, hasOffListBlockTag, libraryTagOptions } from '../../lib/cmsBlockTags'
+import { useCmsBlockTagList } from '../../composables/useCmsBlockTagList'
 import { checkImportedBlock, createBlockCheckError, normalizeBlockTypes, normalizeImportedDoc, resolveImportedBlockThemes } from '../../lib/cmsBlockImport'
 import { BLOCK_EXPORT_BASE_KEY, BlockSaveCancelledError, blockExportBase, loadLibraryBlockForEditing, planImportOverwrite, saveLibraryBlockEdit, saveWithBaseCheck, takeImportBase } from '../../lib/cmsBlockRevisionClient'
 const emit = defineEmits(['head'])
@@ -20,6 +22,8 @@ const state = reactive({
   themesFilter: [],
   selectedBlockDocIds: [],
   bulkDeleteDialogOpen: false,
+  blockTagListOpen: false,
+  blockRetagOpen: false,
   bulkDeleting: false,
   exportingBlocks: false,
   exportDialogOpen: false,
@@ -354,15 +358,15 @@ const loadPreviewRenderContext = async () => {
   state.previewRenderContext = null
 }
 
+// The organization's block tag list; empty means unrestricted. With a list
+// the filter offers the listed tags in order, and "Not in list" while blocks
+// still carry other tags.
+const blockTagList = useCmsBlockTagList()
+const canEditBlockTagList = computed(() => edgeGlobal.isAdminGlobal(edgeFirebase).value)
+
 const tagOptions = computed(() => {
-  const tagsSet = new Set()
   const blocks = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`] || {}
-  Object.values(blocks).forEach((block) => {
-    if (Array.isArray(block.tags))
-      block.tags.forEach(tag => tagsSet.add(tag))
-  })
-  const tagItems = Array.from(tagsSet).sort((a, b) => a.localeCompare(b)).map(tag => ({ name: tag, title: tag }))
-  return [{ name: NO_TAGS_FILTER_VALUE, title: 'No Tags' }, ...tagItems]
+  return [{ name: NO_TAGS_FILTER_VALUE, title: 'No Tags' }, ...libraryTagOptions(blockTagList.value, blocks)]
 })
 
 const themeOptions = computed(() => {
@@ -636,20 +640,16 @@ const applyTagSelectionFilter = (items = []) => {
     return items
 
   const includeNoTags = selectedFilters.includes(NO_TAGS_FILTER_VALUE)
-  const selectedTags = selectedFilters.filter(value => value !== NO_TAGS_FILTER_VALUE)
+  const includeNotInList = selectedFilters.includes(NOT_IN_LIST_FILTER_VALUE)
+  const selectedTags = selectedFilters.filter(value => value !== NO_TAGS_FILTER_VALUE && value !== NOT_IN_LIST_FILTER_VALUE)
 
   return items.filter((item) => {
     const tags = Array.isArray(item?.tags) ? item.tags : []
     const hasNoTags = tags.length === 0
-    const hasSelectedTag = selectedTags.length > 0
-      ? tags.some(tag => selectedTags.includes(tag))
-      : false
+    const hasSelectedTag = (selectedTags.length > 0 && tags.some(tag => selectedTags.includes(tag)))
+      || (includeNotInList && hasOffListBlockTag(item, blockTagList.value))
 
-    if (includeNoTags && selectedTags.length > 0)
-      return hasNoTags || hasSelectedTag
-    if (includeNoTags)
-      return hasNoTags
-    return hasSelectedTag
+    return (includeNoTags && hasNoTags) || hasSelectedTag
   })
 }
 
@@ -1140,6 +1140,7 @@ const importSingleBlockFile = async (file, existingBlocks = {}) => {
   // The same check as scripts/cms/validate-import.mjs.
   const findings = await checkImportedBlock(rawDoc, {
     knownThemeIds: getOrgThemeIds(),
+    blockTagList: blockTagList.value,
     renderTemplate: renderTemplateAsync,
     requiredKeys: importRequiredBlockKeys(),
   })
@@ -1371,6 +1372,14 @@ const handleBlockImport = async (event) => {
               </edge-shad-button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem v-if="canEditBlockTagList" @click="state.blockTagListOpen = true">
+                <Tags class="h-4 w-4" />
+                <span>Block Tags</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem v-if="canEditBlockTagList" @click="state.blockRetagOpen = true">
+                <Replace class="h-4 w-4" />
+                <span>Retag Blocks</span>
+              </DropdownMenuItem>
               <DropdownMenuItem :disabled="state.importingJson" @click="triggerBlockImport">
                 <Loader2 v-if="state.importingJson" class="h-4 w-4 animate-spin" />
                 <Upload v-else class="h-4 w-4" />
@@ -1634,6 +1643,8 @@ const handleBlockImport = async (event) => {
         </DialogFooter>
       </DialogContent>
     </edge-shad-dialog>
+    <edge-cms-block-tag-list-dialog v-if="canEditBlockTagList" v-model="state.blockTagListOpen" :blocks="blocksCollection" />
+    <edge-cms-block-retag-dialog v-if="canEditBlockTagList" v-model="state.blockRetagOpen" :blocks="blocksCollection" />
     <edge-cms-override-rename-dialog :change="overrideRename.change" @resolve="resolveOverrideRename" />
     <edge-cms-block-changed-dialog :conflict="blockChanged.conflict" @resolve="resolveBlockChanged" />
     <edge-shad-dialog v-model="state.importConflictDialogOpen">

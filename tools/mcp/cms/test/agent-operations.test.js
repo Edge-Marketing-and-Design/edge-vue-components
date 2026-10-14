@@ -49,6 +49,39 @@ test('check and run post the operation with the key and return the Hub\'s answer
   assert.equal(JSON.parse(requests[4].init.body).viewport, 'mobile')
   await client.preview('org1', 'site1', 'home', 'draft', true, { width: 768 })
   assert.equal(JSON.parse(requests[5].init.body).width, 768)
+  await client.pages('org1', 'site1')
+  assert.deepEqual(JSON.parse(requests[6].init.body), { orgId: 'org1', action: 'pages', siteId: 'site1', client: 'edge-cms-mcp' })
+  await client.page('org1', 'site1', 'home')
+  assert.deepEqual(JSON.parse(requests[7].init.body), { orgId: 'org1', action: 'page', siteId: 'site1', pageId: 'home', source: 'draft', includeValues: true, includeSchema: false, client: 'edge-cms-mcp' })
+  await client.page('org1', 'site1', 'home', { source: 'published', includeValues: false, includeSchema: true })
+  assert.deepEqual(JSON.parse(requests[8].init.body), { orgId: 'org1', action: 'page', siteId: 'site1', pageId: 'home', source: 'published', includeValues: false, includeSchema: true, client: 'edge-cms-mcp' })
+  assert.ok(requests.every(request => request.init.headers.authorization === 'Bearer cmsak.k.s'))
+})
+
+test('page reads send the session credential for their sessionId', async () => {
+  const seen = []
+  const connections = {
+    credential: async (sessionId, body) => {
+      seen.push({ sessionId, action: body.action, siteId: body.siteId })
+      return sessionId === 'site-handle' ? { ok: true, token: 'cmsas.session' } : { ok: false, code: 'session-required', message: 'open one' }
+    },
+  }
+  const requests = []
+  const client = createAgentOperationClient({
+    endpoint: 'https://hub/fn',
+    connections,
+    getKey: async () => assert.fail('connection mode never uses a key'),
+    fetchImpl: async (url, init) => {
+      requests.push(init)
+      return { status: 200, json: async () => ({ ok: true }) }
+    },
+  })
+  await client.pages('org1', 'site1', 'site-handle')
+  await client.page('org1', 'site1', 'home', { sessionId: 'site-handle' })
+  assert.deepEqual(seen, [{ sessionId: 'site-handle', action: 'pages', siteId: 'site1' }, { sessionId: 'site-handle', action: 'page', siteId: 'site1' }])
+  assert.ok(requests.every(init => init.headers.authorization === 'Bearer cmsas.session'))
+  assert.equal((await client.pages('org1', 'site1')).code, 'session-required')
+  assert.equal(requests.length, 2)
 })
 
 test('a missing key, an unreachable endpoint and a non-JSON reply are explained, not thrown', async () => {

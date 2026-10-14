@@ -11,10 +11,14 @@ import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 
-const inputs = process.argv.slice(2)
+// --tags="Navigation,Hero,..." is the organization's block tag list (Hub:
+// cmsBlockTags on the organization). With it, every tag must be listed.
+const tagsArg = process.argv.slice(2).find(arg => arg.startsWith('--tags='))
+const allowedTags = tagsArg ? tagsArg.slice('--tags='.length).split(',').map(tag => tag.trim()).filter(Boolean) : null
+const inputs = process.argv.slice(2).filter(arg => !arg.startsWith('--tags='))
 
 if (!inputs.length) {
-  console.error('Usage: validate-cms-import.mjs <json-file-or-package-directory> [...]')
+  console.error('Usage: validate-cms-import.mjs [--tags="Tag A,Tag B"] <json-file-or-package-directory> [...]')
   process.exit(2)
 }
 
@@ -129,8 +133,19 @@ function validateBlock(document, file) {
     errors.push(`${file}: dataSources must be an object`)
   if (!isObject(document.values))
     errors.push(`${file}: values must be an object`)
-  if (!Array.isArray(document.tags))
+  if (!Array.isArray(document.tags)) {
     errors.push(`${file}: tags must be an array`)
+  }
+  else {
+    // One or two content tags; Quick Picks (the picker's first view) doesn't count.
+    const contentTags = new Set(document.tags.filter(tag => tag !== 'Quick Picks'))
+    if (contentTags.size < 1 || contentTags.size > 2)
+      errors.push(`${file}: a block needs one or two content tags from the organization's list (Quick Picks not counted); it has ${contentTags.size}`)
+    for (const tag of allowedTags ? document.tags : []) {
+      if (!allowedTags.includes(tag))
+        errors.push(`${file}: tag "${tag}" is not in the organization's block tag list`)
+    }
+  }
   if (!Array.isArray(document.themes))
     errors.push(`${file}: themes must be an array`)
   if (typeof document.synced !== 'boolean')

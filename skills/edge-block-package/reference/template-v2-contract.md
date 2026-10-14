@@ -26,7 +26,7 @@ Every generated library block must have this shape:
   "values": {},
   "Instructions": "Edit the heading in the page editor.",
   "aiInstructions": "Keep the heading factual. Do not invent claims.",
-  "tags": ["Template v2"],
+  "tags": ["Content"],
   "themes": [],
   "type": ["Page"],
   "previewType": "light",

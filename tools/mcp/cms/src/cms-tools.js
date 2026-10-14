@@ -3,6 +3,7 @@ import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
   mergeValidationResults,
+  normalizeBlockTagList,
   validateBlock,
   validateBlockRender,
   validateBlockDocument as validateSharedBlockDocument,
@@ -374,11 +375,15 @@ export function createCmsToolService({
     )
     const listedLimit = boundedNumber(listLimit, config.maxCmsResultLimit || 100, DEFAULT_RESULT_LIMIT)
     const collectionPath = `organizations/${orgId}/blocks`
-    const [blocksSnapshot, themesSnapshot] = await Promise.all([
+    const [blocksSnapshot, themesSnapshot, orgSnapshot] = await Promise.all([
       db.collection(collectionPath).limit(scanLimit + 1).get(),
       db.collection(`organizations/${orgId}/themes`).limit(themeScanLimit + 1).get(),
+      db.doc(`organizations/${orgId}`).get(),
     ])
     const knownThemeIds = themesSnapshot.docs.slice(0, themeScanLimit).map(doc => doc.id)
+    // The organization's block tag list; empty means unrestricted, so the tag
+    // rules report nothing.
+    const blockTagList = normalizeBlockTagList(orgSnapshot.exists ? orgSnapshot.data()?.cmsBlockTags : null)
     const renderTemplate = includeRender ? await loadRenderTemplate() : null
     const blockDocs = blocksSnapshot.docs.slice(0, scanLimit).sort((a, b) => compareDocIds(a.id, b.id))
 
@@ -393,7 +398,7 @@ export function createCmsToolService({
       })
       let validation
       try {
-        validation = await validateBlock(block, { knownThemeIds, renderTemplate, ownership: override })
+        validation = await validateBlock(block, { knownThemeIds, blockTagList, renderTemplate, ownership: override })
       }
       catch (error) {
         validation = {
@@ -410,6 +415,7 @@ export function createCmsToolService({
         renderingOwner: getRenderingOwner(override?.status),
         containsRedactedValues: containsRedactedValue(block),
         firestoreUpdateTime: timestampToIso(snapshotDoc.updateTime),
+        tags: Array.isArray(block?.tags) ? block.tags : [],
         errors: validation.errors,
         warnings: validation.warnings,
         info: validation.info,
@@ -420,6 +426,7 @@ export function createCmsToolService({
       scanTruncated: blocksSnapshot.size > scanLimit,
       themeScanTruncated: themesSnapshot.size > themeScanLimit,
       knownThemeCount: knownThemeIds.length,
+      blockTags: summarizeBlockTagRules(results, blockTagList),
       renderChecks: renderTemplate ? 'ran' : (includeRender ? 'skipped-engine-unavailable' : 'skipped-by-request'),
     })
     const auditedAt = new Date().toISOString()
@@ -1649,6 +1656,19 @@ function isPlainObject(value) {
 
 function compareDocIds(a, b) {
   return a < b ? -1 : a > b ? 1 : 0
+}
+
+// The tag rules' share of an audit: the organization list, and the blocks
+// with a tag outside it or a content tag count other than one or two.
+export function summarizeBlockTagRules(results, blockTagList) {
+  const isTagFinding = issue => String(issue.code || '').startsWith('tags.')
+  const flagged = results.filter(item => [...item.errors, ...item.warnings].some(isTagFinding))
+  return {
+    list: blockTagList,
+    restricted: blockTagList.length > 0,
+    blocksWithTagFindings: flagged.length,
+    offListTags: [...new Set(results.flatMap(item => (item.tags || []).filter(tag => blockTagList.length && !blockTagList.includes(tag))))].sort(),
+  }
 }
 
 export function summarizeBlockAudit(results, extra = {}) {

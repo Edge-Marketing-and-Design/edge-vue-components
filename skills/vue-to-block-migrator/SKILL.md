@@ -188,7 +188,7 @@ Every generated library block must include:
   "values": {},
   "Instructions": "Edit the heading in the page editor.",
   "aiInstructions": "Write a concise factual heading. Do not invent claims.",
-  "tags": [],
+  "tags": ["Hero"],
   "themes": [],
   "type": ["Page"],
   "previewType": "light",
@@ -207,6 +207,7 @@ Rules:
 - Keep instance Data Source overrides in page-instance `meta`, not in library definitions.
 - Use `label`, not legacy `title`, for new Input labels.
 - Choose `previewType`, `type`, `themes`, and `synced` intentionally.
+- Tag every block: one or two tags for the generic kind of content it shows, from the organization's block tag list (`cmsBlockTags` on `organizations/{orgId}`; read it with the Firebase MCP, or from the project's `importfiles/PROJECT.md`), plus `Quick Picks` only if it belongs in the block picker's first view (not counted). Never `[]`, and never feature, collection, theme or version tags; what the block shows stays in its name. With no list in the Hub, ask the operator. The edge-block-package skill has the full rule.
 - Include useful `Instructions` and restrictive, context-aware `aiInstructions`.
 
 ### 6. Use supported Template v2 grammar
@@ -345,7 +346,7 @@ Run the package's own validator when present, then run the skill validator:
 
 ```bash
 SKILL_DIR="${CODEX_HOME:-$HOME/.codex}/skills/vue-to-block-migrator"
-node "$SKILL_DIR/scripts/validate-cms-import.mjs" /absolute/path/to/package-or-json
+node "$SKILL_DIR/scripts/validate-cms-import.mjs" --tags="<the organization's block tag list, comma-separated>" /absolute/path/to/package-or-json
 ```
 
 This skill is versioned in the shared Edge code (`edge/skills/` in every

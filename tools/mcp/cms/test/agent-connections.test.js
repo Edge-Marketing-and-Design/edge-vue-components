@@ -91,7 +91,10 @@ test('all operation actions use the requested handle; connection mode never fall
   await operations.run('a', { type: 'page.update', siteId: 's' }, 'hash', session.sessionId)
   await operations.preview('a', 's', 'home', 'draft', true, { sessionId: session.sessionId })
   await operations.readiness('a', 's', session.sessionId)
-  assert.deepEqual(requests.map(init => JSON.parse(init.body).action), ['check', 'run', 'preview', 'readiness'])
+  await operations.pages('a', 's', session.sessionId)
+  await operations.page('a', 's', 'home', { sessionId: session.sessionId })
+  assert.equal((await operations.pages('a', 'other', session.sessionId)).code, 'session-target-mismatch')
+  assert.deepEqual(requests.map(init => JSON.parse(init.body).action), ['check', 'run', 'preview', 'readiness', 'pages', 'page'])
   assert.ok(requests.every(init => init.headers.authorization === `Bearer ${token}`))
 })
 test('missing credentials, invalid targets, server target mismatches and non-JSON responses are safe refusals', async () => {
@@ -113,4 +116,12 @@ test('missing credentials, invalid targets, server target mismatches and non-JSO
     }),
   })
   assert.equal((await badJson.organizations()).code, 'bad-response')
+})
+test('an organization session refuses page reads before any request', async () => {
+  const env = setup()
+  const session = await env.client.open({ orgId: 'a', scope: 'organization' })
+  const before = env.requests.length
+  assert.equal((await env.client.credential(session.sessionId, { orgId: 'a', action: 'pages', siteId: 's' })).code, 'session-target-mismatch')
+  assert.equal((await env.client.credential(session.sessionId, { orgId: 'a', action: 'page', siteId: 's', pageId: 'home' })).code, 'session-target-mismatch')
+  assert.equal(env.requests.length, before)
 })

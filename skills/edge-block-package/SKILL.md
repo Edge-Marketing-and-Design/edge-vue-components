@@ -28,7 +28,7 @@ The words below mean exactly this, here and in the contracts:
 
 ## Read first
 
-1. `<importfiles>/PROJECT.md`. It carries the organization, site, and theme ids, the block prefix, the tag set, the chrome block names, the override folder, and where approved copy lives. If it is missing, gather those facts from the operator and write it before building anything (template: `templates/PROJECT.template.md`).
+1. `<importfiles>/PROJECT.md`. It carries the organization, site, and theme ids, the block prefix, the block tag list (`tags`, a mirror of the organization's list in the Hub), the chrome block names, the override folder, and where approved copy lives. If it is missing, gather those facts from the operator and write it before building anything (template: `templates/PROJECT.template.md`).
 2. The precedent package for that Hub (PROJECT.md names it). Match its file shape exactly.
 3. The design handoff or content plan, in full, before writing a block. Design files are annotations, not authority.
 
@@ -46,7 +46,7 @@ The words below mean exactly this, here and in the contracts:
 
 ## Rules the validator should enforce
 
-- `templateVersion: 2`, `content === template`, library `values: {}`, defaults in `schema[field].value`, inputs use `label` (never `title`), `themes: [themeId]`, tags from the project's set, `type` includes `Post` only where authors may place the block in posts.
+- `templateVersion: 2`, `content === template`, library `values: {}`, defaults in `schema[field].value`, inputs use `label` (never `title`), `themes: [themeId]`, one or two content tags from the project's list (Block tags, below), `type` includes `Post` only where authors may place the block in posts.
 - Site data: a Data Source for the site record (logo, social links, contact) uses `path: "sites"` with `canonicalLookup: { key: "{orgId}:{siteId}" }`, never the site's literal id, so the block works on any site (the checker warns `sources.site-id`).
 - Theme names: start brand-new themes from the Hub's `edge/lib/cmsThemeDefaults.mjs`; retain its baseline. Prefer baseline classes for portability, but custom tokens are allowed if every selected theme declares them (`reference/theme-guidelines.md`). `--standard-theme` is a baseline-only portability audit; deliberate extensions use normal import validation plus `cms_check_operation` with real theme context. No hard-coded colors. Each block sets its base font and text color (`font-sans text-text`); new themes leave `apply` empty because the public renderer ignores it.
 - Balanced HTML; no `<script>`; no Vue directives or inline handlers; conditionals as `{{{#if {"cond":"..."} }}}`; every declared data source called with `source("name")` and vice versa; literal utility classes only; no JSON-LD in blocks.
@@ -55,6 +55,14 @@ The words below mean exactly this, here and in the contracts:
 - Numbers come from a source the validator can recompute (a shared model, a fixture); hand-typed figures fail.
 - Override blocks: name normalizes (camelCase) to an existing Vue file; schema carries every value the Vue component reads; `isOverrideBlock: true`; manifest `rendererChanges: true`. The block is the design source of truth and the override matches it (`reference/override-blocks.md`).
 - Design map: every manifest block entry carries `design` (`{ "source": "figma", "file": "<fileKey>", "node": "<nodeId>", "name": "<layer name>" }`, or `{ "source": "handoff", "path": "...", "section": "..." }`), and the block carries the same object as `meta.design`: a library-only field that `block.create` and `block.draft` accept and a release never copies to instances (cms-blocks contract). `PROJECT.md` keeps the file-level reference and the design revision date. The validator warns when an entry has no `design`; a later design change is traced through this map (`reference/block-updates.md`).
+
+## Block tags
+
+- **The list.** Each organization keeps one flat list of block tags in the Hub: `cmsBlockTags` on `organizations/{orgId}`, edited by an organization admin under Blocks → Block Actions → Block Tags. Read it before tagging (Firebase MCP `firestore_get_document` on the organization, or `cms_audit_blocks` → `summary.blockTags.list`). `PROJECT.md`'s `tags` mirrors it; when they differ the Hub wins, so update `PROJECT.md`. No list in the Hub means tags are unrestricted; use `PROJECT.md`'s set.
+- **The rule.** One or two tags for the generic kind of content the block shows (Hero, Content, Cards & Grids, Form, Footer...), plus `Quick Picks` only when the block should appear in the block picker's first view; `Quick Picks` doesn't count toward the two. Never an empty array.
+- **What a tag is not.** No feature, collection, theme, site, version or page tags (`clearwater-main`, `Website v2`, `careers`, `webcams`). What the block shows stays in its name, which library search finds.
+- **Enforcement.** The package validator refuses tags outside `PROJECT.md`'s list and content tag counts other than one or two. The Hub's import, Block Editor checks and `block.create` report `tags.not-in-list` and `tags.content-count` (warnings now, errors once every block is retagged).
+- **Existing blocks.** Tags are block metadata, not part of the definition: `block.draft` ignores `definition.tags` and a release never changes tags. Change an existing block's tags in the Block Editor (or an Overwrite import), which saves them directly with no page changes.
 
 ## Package layout
 

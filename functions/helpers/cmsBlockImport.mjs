@@ -125,9 +125,10 @@ export const normalizeBlockTypes = (value, { fallbackToPage = true } = {}) => {
 // - `notices`: warnings, listed after import.
 // - `doc`: the normalized block import would continue with.
 // `requiredKeys` defaults to the keys the Hub's new-block schema requires.
-export const checkImportedBlock = async (rawDoc, { knownThemeIds = null, renderTemplate = null, requiredKeys = HUB_REQUIRED_BLOCK_KEYS } = {}) => {
+// `blockTagList` is the organization's block tag list (none = unrestricted).
+export const checkImportedBlock = async (rawDoc, { knownThemeIds = null, blockTagList = null, renderTemplate = null, requiredKeys = HUB_REQUIRED_BLOCK_KEYS } = {}) => {
   // Validate the file as written, before the Hub fills in defaults.
-  const validation = await validateBlock(isPlainObject(rawDoc) ? JSON.parse(JSON.stringify(rawDoc)) : rawDoc, { knownThemeIds, renderTemplate })
+  const validation = await validateBlock(isPlainObject(rawDoc) ? JSON.parse(JSON.stringify(rawDoc)) : rawDoc, { knownThemeIds, blockTagList, renderTemplate })
   const { blocking, notices } = collectImportFindings(validation)
   if (!isPlainObject(rawDoc))
     return { hardError: 'Invalid block document. Expected an object.', blocking, notices, doc: null }
