@@ -17,6 +17,7 @@ export const CMS_OPERATION_TYPES = Object.freeze([
   'page.placeBlock',
   'page.setValues',
   'page.removeBlock',
+  'page.moveBlock',
   'block.create',
   'block.draft',
   'site.create',
@@ -618,6 +619,169 @@ export const buildSiteReadiness = ({ site = {}, theme = null, pages = {}, publis
   const order = { error: 0, warning: 1, info: 2 }
   items.sort((a, b) => order[a.severity] - order[b.severity])
   return { ready: counts.error === 0, counts, items }
+}
+
+// ---- Page lists and outlines (agent page reads) ----
+// What an agent sees of a site's pages and of one page, instead of the raw
+// documents. Reads only.
+
+// A draft page's publication state, as the readiness report compares it:
+// `draft` (never published), `unpublished-changes` (its version is newer
+// than the published copy's) or `published`.
+export const pagePublicationStatus = (page, live) => {
+  if (!live)
+    return 'draft'
+  return Number(page?.version) > Number(live?.version) ? 'unpublished-changes' : 'published'
+}
+
+const routeSlug = value => String(value || '').trim().toLowerCase()
+// The route the Hub's page links use (cmsPublishedSitePreview.js
+// findCmsPageRoute): "/" for a top-level "home" page, otherwise the folder
+// and page slugs. Menus other than the two root menus prefix their own slug.
+const routePath = (folders, slug) => ((!folders.length && slug === 'home') ? '/' : `/${[...folders, slug].join('/')}`)
+const menuFolders = name => (ROOT_MENUS.includes(name) ? [] : [routeSlug(name)])
+const menuOrder = name => (name === 'Site Root' ? 0 : name === 'Not In Menu' ? 2 : 1)
+
+// The site's menus as a tree, in the Sites page's order (Site Root, other
+// menus, Not In Menu), with each page's id, slug, menu title, path and
+// publication state. Pages in no menu are listed in `unlisted`.
+// - pages: { [pageId]: draft page }, published: { [pageId]: published page }
+export const buildSitePages = ({ site = {}, pages = {}, published = {} }) => {
+  const listed = new Set()
+  const describePage = (pageId) => {
+    const page = pages[pageId]
+    if (!page)
+      return { pageId, exists: false, status: 'missing' }
+    return { pageId, exists: true, status: pagePublicationStatus(page, published[pageId]), version: Number.isFinite(Number(page.version)) ? Number(page.version) : null, post: page.post === true }
+  }
+  const visit = (entries, folders) => (Array.isArray(entries) ? entries : []).flatMap((entry) => {
+    if (!entry || entry.item == null || entry.item === '')
+      return []
+    if (isExternalLinkEntry(entry))
+      return [{ kind: 'external', name: String(entry.name || ''), url: String(entry.item.url || '') }]
+    if (typeof entry.item === 'string') {
+      listed.add(entry.item)
+      const slug = routeSlug(entry.name)
+      return [{ kind: 'page', ...describePage(entry.item), slug: String(entry.name || ''), menuTitle: String(entry.menuTitle || ''), path: slug ? routePath(folders, slug) : null }]
+    }
+    if (isPlainObject(entry.item)) {
+      const folderSlug = Object.keys(entry.item)[0]
+      if (!folderSlug)
+        return []
+      return [{ kind: 'folder', slug: folderSlug, menuTitle: String(entry.menuTitle || entry.folderTitle || entry.name || ''), entries: visit(entry.item[folderSlug], [...folders, routeSlug(folderSlug)]) }]
+    }
+    return []
+  })
+  const menus = Object.entries(withRootMenus(site.menus))
+    .map(([name, entries], index) => ({ name, entries, index }))
+    .sort((a, b) => menuOrder(a.name) - menuOrder(b.name) || a.index - b.index)
+    .map(({ name, entries }) => ({ menu: name, entries: visit(entries, menuFolders(name)) }))
+  const unlisted = Object.keys(pages)
+    .filter(pageId => !listed.has(pageId))
+    .sort()
+    .map(pageId => ({ ...describePage(pageId), slug: String(pages[pageId]?.name || '') }))
+  return { menus, unlisted }
+}
+
+// A page's route from saved menus, or null when no menu lists it.
+export const pageRoutePath = (menus, pageId) => {
+  const visit = (entries, folders) => {
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      if (entry?.item === pageId) {
+        const slug = routeSlug(entry.name)
+        if (slug)
+          return routePath(folders, slug)
+        continue
+      }
+      if (isPlainObject(entry?.item) && !isExternalLinkEntry(entry)) {
+        for (const [folder, children] of Object.entries(entry.item)) {
+          const found = visit(children, [...folders, routeSlug(folder)])
+          if (found !== null)
+            return found
+        }
+      }
+    }
+    return null
+  }
+  if (!pageId || !isPlainObject(menus))
+    return null
+  for (const [name, entries] of Object.entries(menus)) {
+    const found = visit(entries, menuFolders(name))
+    if (found !== null)
+      return found
+  }
+  return null
+}
+
+const PAGE_OUTLINE_FIELDS = ['metaTitle', 'metaDescription', 'structuredData']
+const POST_OUTLINE_FIELDS = ['postMetaTitle', 'postMetaDescription', 'postStructuredData']
+
+// A page as rows, columns and instances in order, per area (`main`, and
+// `post` when the page has a post view), instead of the raw document.
+// Instances the content lists but no column places are in the area's
+// `unplaced`; a column reference with no instance is `{ instanceId,
+// missing: true }`.
+// - blocks: { [blockId]: library block } for the page's instances
+export const buildPageOutline = ({ pageId, page = {}, source = 'draft', status = null, path = null, blocks = {}, includeValues = true, includeSchema = false }) => {
+  const describeInstance = (instance) => {
+    const library = blocks[instance?.blockId] || null
+    const released = Number.isInteger(library?.releasedRevision) ? library.releasedRevision : null
+    const held = Number.isInteger(instance?.blockRevision) ? instance.blockRevision : null
+    return {
+      instanceId: instance?.id || null,
+      blockId: instance?.blockId || null,
+      name: String(instance?.name || library?.name || ''),
+      templateVersion: Number(instance?.templateVersion) || null,
+      synced: instance?.synced === true,
+      override: (instance?.isOverrideBlock ?? library?.isOverrideBlock) === true,
+      blockRevision: held,
+      releasedRevision: released,
+      behind: released !== null && held !== null && held < released,
+      ...(library ? {} : { libraryMissing: true }),
+      ...(includeValues ? { values: clone(isPlainObject(instance?.values) ? instance.values : {}) } : {}),
+      ...(includeSchema ? { schema: clone(isPlainObject(instance?.schema) ? instance.schema : {}) } : {}),
+    }
+  }
+  const outlineArea = (contentKey, structureKey) => {
+    const instances = Array.isArray(page[contentKey]) ? page[contentKey] : []
+    const byId = new Map(instances.filter(instance => instance?.id).map(instance => [instance.id, instance]))
+    const placed = new Set()
+    const rows = (Array.isArray(page[structureKey]) ? page[structureKey] : []).map((row, index) => {
+      const columns = (Array.isArray(row?.columns) ? row.columns : []).map(column => ({
+        columnId: column?.id || null,
+        span: Number.isFinite(Number(column?.span)) ? Number(column.span) : null,
+        instances: (Array.isArray(column?.blocks) ? column.blocks : []).map((reference) => {
+          const instanceId = typeof reference === 'string' ? reference : reference?.id
+          placed.add(instanceId)
+          return byId.has(instanceId) ? describeInstance(byId.get(instanceId)) : { instanceId: instanceId || null, missing: true }
+        }),
+      }))
+      return { rowId: row?.id || null, index, width: row?.width || null, layout: columns.map(column => column.span), columns }
+    })
+    const unplaced = instances.filter(instance => !placed.has(instance?.id)).map(describeInstance)
+    return { rows, ...(unplaced.length ? { unplaced } : {}) }
+  }
+  const hasPost = page.post === true
+    || (Array.isArray(page.postStructure) && page.postStructure.length > 0)
+    || (Array.isArray(page.postContent) && page.postContent.length > 0)
+  const fields = hasPost ? [...PAGE_OUTLINE_FIELDS, ...POST_OUTLINE_FIELDS] : PAGE_OUTLINE_FIELDS
+  return {
+    pageId,
+    source,
+    name: String(page.name || ''),
+    path,
+    status,
+    post: page.post === true,
+    structuredDataAiLocked: page.structuredDataAiLocked === true,
+    ...Object.fromEntries(fields.map(key => [key, typeof page[key] === 'string' ? page[key] : ''])),
+    version: Number.isFinite(Number(page.version)) ? Number(page.version) : null,
+    last_updated: page.last_updated ?? null,
+    areas: {
+      main: outlineArea('content', 'structure'),
+      ...(hasPost ? { post: outlineArea('postContent', 'postStructure') } : {}),
+    },
+    blockIds: Array.isArray(page.blockIds) ? [...page.blockIds] : [],
+  }
 }
 
 // ---- Sites (edge/composables/siteSettingsTemplate.js; edge/components/cms/site.vue seedNewSiteFromTheme) ----

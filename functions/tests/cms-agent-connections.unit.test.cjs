@@ -175,6 +175,28 @@ test('session credentials isolate organizations and same-id sites, and cannot es
   assert.equal((await session(env, created.token, { orgId: 'missing' })).statusCode, 403)
   assert.equal((await op(env, created.token)).statusCode, 401, 'parent credential cannot execute directly')
 })
+test('site sessions read only their own site\'s pages; organization sessions are refused page reads', async () => {
+  const env = setup()
+  const created = await create(env)
+  env.allowed.add('b')
+  const site = (await session(env, created.token)).body
+  const read = (token, body) => post(env.keys.agentOperation, token, { orgId: 'a', ...body })
+  const pages = await read(site.token, { action: 'pages', siteId: 's' })
+  assert.equal(pages.statusCode, 200)
+  assert.equal(pages.body.siteName, 'Site A')
+  const page = await read(site.token, { action: 'page', siteId: 's', pageId: 'home' })
+  assert.equal(page.statusCode, 200)
+  assert.equal(page.body.pageId, 'home')
+  assert.equal((await read(site.token, { action: 'pages', siteId: 't' })).statusCode, 403, 'another site')
+  assert.equal((await read(site.token, { action: 'page', siteId: 't', pageId: 'home' })).statusCode, 403)
+  assert.equal((await read(site.token, { action: 'page', siteId: 's', pageId: 'home', orgId: 'b' })).statusCode, 403, 'the same site id in another organization')
+  assert.equal((await read(site.token, { action: 'publish', siteId: 's' })).statusCode, 403, 'site sessions allow only the listed actions')
+  const org = (await session(env, created.token, { scope: 'organization', siteId: undefined })).body
+  assert.equal((await read(org.token, { action: 'pages', siteId: 's' })).statusCode, 403)
+  assert.equal((await read(org.token, { action: 'page', siteId: 's', pageId: 'home' })).statusCode, 403)
+  env.allowed.delete('a')
+  assert.equal((await read(site.token, { action: 'pages', siteId: 's' })).statusCode, 403, 'lost access stops reads too')
+})
 test('revoked/expired parents and lost current permissions stop already issued sessions', async () => {
   const env = setup()
   const created = await create(env)

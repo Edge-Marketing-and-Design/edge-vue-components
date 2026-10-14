@@ -128,9 +128,9 @@ name cannot silently select the wrong theme. Its response includes:
 
 ## Draft-only CMS operations (agent key)
 
-- `cms_check_operation`: plan an operation (theme, new site, draft page,
-  block placement and content, new block, block draft) and get what would change,
-  any problems, and a checksum. Writes nothing.
+- `cms_check_operation`: plan an operation (theme, new site, draft page and
+  its SEO, block placement, order and content, new block, block draft) and
+  get what would change, any problems, and a checksum. Writes nothing.
 - `cms_run_operation`: run a checked operation with its checksum. The Hub
   refuses it if anything the check read changed since, or if it has
   problems. Results are drafts, recorded in the Hub's `cms-operations`
@@ -151,6 +151,19 @@ name cannot silently select the wrong theme. Its response includes:
   readiness codes are in the operations contract, `cms_contract` kind
   `operations`), with whether the local `emd-cms-front` checkout has each
   override component.
+- `cms_list_pages`: a site's menus as a tree (Site Root, other menus, Not In
+  Menu, with folders and external links) and each page's `pageId`, slug,
+  menu title, URL path and status (`draft`, `published`,
+  `unpublished-changes`); pages in no menu are under `unlisted`.
+- `cms_get_page`: one page as an outline: its SEO fields (with
+  `structuredDataAiLocked`: `page.update` refuses `structuredData` on a locked
+  page, as the Hub's AI SEO leaves it alone), version and status,
+  then per area (`main`, and `post` when the page has a post view) its rows
+  in order with column spans and each column's instances (`instanceId`,
+  `blockId`, name, synced and override flags, `behind` the released block,
+  values). Use the ids and row indexes with `page.setValues`,
+  `page.moveBlock` and `page.removeBlock`. `source: "published"` reads the
+  published copy; `includeSchema: true` adds each instance's schema.
 
 The end-to-end workflow that uses these tools is the `edge-design-to-site`
 skill (`edge/skills/edge-design-to-site`).
@@ -367,7 +380,8 @@ is not configured. Use HTTPS for production endpoints.
 2. Call `cms_open_session` with an exact `orgId`, `scope: "site"` and `siteId`.
    Check the returned organization/site names against the job. For library/theme
    work or creating a site, deliberately choose `scope: "organization"` instead.
-3. Pass the returned `sessionId` to check/run/preview/readiness along with the
+3. Pass the returned `sessionId` to check/run/preview/readiness and the page
+   reads (`cms_list_pages`, `cms_get_page`) along with the
    target org/site. A wrong org/site handle is refused before sending an operation.
    Run still needs the checksum from check.
 

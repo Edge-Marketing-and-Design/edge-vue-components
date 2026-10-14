@@ -19,7 +19,7 @@ const {
   HttpsError,
   permissionCheck,
 } = require('./config.js')
-const { authorizeOperation, gatherSiteReadiness, performCheck, performRun } = require('./cmsOperations.js')
+const { authorizeOperation, gatherPageOutline, gatherSitePages, gatherSiteReadiness, performCheck, performRun } = require('./cmsOperations.js')
 const { verifyAgentSession } = require('./cmsAgentConnections.js')
 const { buildPreviewUrl, issuePreviewToken, previewBaseUrl, previewTokensEnabled } = require('./cmsPreviewTokens.js')
 
@@ -165,12 +165,20 @@ const HTTP_STATUS = {
 }
 
 // POST { orgId, action: 'check' | 'run', operation, checksum?, client? }
-// or { orgId, action: 'preview', siteId, pageId, source?, blockDrafts? }, or
-// { orgId, action: 'readiness', siteId } with
+// or { orgId, action: 'preview', siteId, pageId, source?, blockDrafts? },
+// { orgId, action: 'readiness', siteId }, { orgId, action: 'pages', siteId }
+// or { orgId, action: 'page', siteId, pageId, source?, includeValues?,
+// includeSchema? } with
 // Authorization: Bearer <agent key>. Runs the draft-only CMS operations as
 // the key's creator, or returns a short-lived preview link for one page the
 // creator can read. Responses are JSON: { ok: true, ... } or
 // { ok: false, code, message, details }.
+
+// Reads of the organization's sites need the creator's read permission.
+const requireSiteRead = async (uid, orgId) => {
+  if (!await permissionCheck(uid, 'read', `organizations/${orgId}/sites`))
+    throw new HttpsError('permission-denied', 'Not allowed to read sites in this organization.')
+}
 
 // A preview link for one draft (or published) page, for checking what the
 // agent built.
@@ -178,8 +186,7 @@ const previewLink = async ({ uid, orgId, body }) => {
   const siteId = requireDocId(body.siteId, 'site id')
   const pageId = requireDocId(body.pageId, 'page id')
   const source = body.source === 'published' ? 'published' : 'draft'
-  if (!await permissionCheck(uid, 'read', `organizations/${orgId}/sites`))
-    throw new HttpsError('permission-denied', 'Not allowed to read sites in this organization.')
+  await requireSiteRead(uid, orgId)
   if (!previewTokensEnabled())
     throw new HttpsError('failed-precondition', 'Preview links are not configured: set CMS_PREVIEW_TOKEN_SECRET in the Functions environment.')
   const page = await db.collection('organizations').doc(orgId).collection('sites').doc(siteId).collection(source === 'published' ? 'published' : 'pages').doc(pageId).get()
@@ -212,9 +219,23 @@ exports.agentOperation = onRequest({ timeoutSeconds: 120 }, async (req, res) => 
       result = await previewLink({ uid, orgId, body })
     }
     else if (body.action === 'readiness') {
-      if (!await permissionCheck(uid, 'read', `organizations/${orgId}/sites`))
-        throw new HttpsError('permission-denied', 'Not allowed to read sites in this organization.')
+      await requireSiteRead(uid, orgId)
       result = await gatherSiteReadiness({ orgId, siteId: requireDocId(body.siteId, 'site id') })
+    }
+    else if (body.action === 'pages') {
+      await requireSiteRead(uid, orgId)
+      result = await gatherSitePages({ orgId, siteId: requireDocId(body.siteId, 'site id') })
+    }
+    else if (body.action === 'page') {
+      await requireSiteRead(uid, orgId)
+      result = await gatherPageOutline({
+        orgId,
+        siteId: requireDocId(body.siteId, 'site id'),
+        pageId: requireDocId(body.pageId, 'page id'),
+        source: body.source === 'published' ? 'published' : 'draft',
+        includeValues: body.includeValues !== false,
+        includeSchema: body.includeSchema === true,
+      })
     }
     else if (body.action === 'check' || body.action === 'run') {
       const caller = await authorizeOperation({ uid, orgId, operation: body.operation })
@@ -223,7 +244,7 @@ exports.agentOperation = onRequest({ timeoutSeconds: 120 }, async (req, res) => 
         : await performRun({ ...caller, checksum: body.checksum, client: body.client, via: 'agent', agentKeyId: keyId, agentConnectionId: connectionId })
     }
     else {
-      throw new HttpsError('invalid-argument', 'action must be "check", "run", "preview" or "readiness".')
+      throw new HttpsError('invalid-argument', 'action must be "check", "run", "preview", "readiness", "pages" or "page".')
     }
     const used = await ref.get()
     await ref.update({ lastUsedAt: new Date().toISOString(), useCount: (used.data()?.useCount || 0) + 1 })
