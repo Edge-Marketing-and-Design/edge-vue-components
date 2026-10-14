@@ -53,6 +53,10 @@ const props = defineProps({
     type: String,
     default: 'auto',
   },
+  previewFixedMinHeight: {
+    type: String,
+    default: '',
+  },
   renderContext: {
     type: Object,
     default: null,
@@ -623,6 +627,7 @@ const resolveScopedCollectionSource = async (sourceName, sourceConfig, overrides
 
 <template>
   <edge-cms-block-render
+    :preview-fixed-min-height="props.previewFixedMinHeight"
     :theme="props.theme"
     :content="loadingRender(props.content)"
     :template-version="props.templateVersion"

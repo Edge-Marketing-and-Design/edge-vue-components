@@ -85,10 +85,6 @@ const props = defineProps({
     type: Boolean,
     default: true,
   },
-  centerPreviewToolbar: {
-    type: Boolean,
-    default: false,
-  },
 })
 const emit = defineEmits(['update:modelValue', 'delete'])
 const edgeFirebase = inject('edgeFirebase')
@@ -386,6 +382,198 @@ const resolvePreviewContentRoot = (root) => {
 const editorSplitContainerRef = ref(null)
 const activePreviewField = ref('')
 const fieldEditorPreviewLoadedTick = ref(0)
+const previewBlockRef = ref(null)
+const previewToolbarRef = ref(null)
+const previewToolbarPosition = ref(null)
+const savedPreviewToolbarPosition = ref(null)
+const previewToolbarDragging = ref(false)
+const previewToolbarOverflow = ref(false)
+const previewToolbarHovered = ref(false)
+const previewToolbarFocused = ref(false)
+const previewToolbarRaised = computed(() => previewToolbarOverflow.value && (previewToolbarHovered.value || previewToolbarFocused.value || previewToolbarDragging.value))
+let stopPreviewToolbarDrag = () => {}
+const sourceBlockDocId = computed(() => {
+  const direct = String(modelValue.value?.blockId || '').trim()
+  if (direct)
+    return direct
+  return String(props.blockId || '').trim()
+})
+const previewToolbarStorageKey = computed(() => {
+  const uid = edgeFirebase?.user?.uid
+  const orgPath = edgeGlobal.edgeState.organizationDocPath
+  const blockId = sourceBlockDocId.value
+  return (uid && orgPath && blockId)
+    ? `edge:cms:preview-toolbar:v1:${JSON.stringify([uid, orgPath, blockId])}`
+    : ''
+})
+
+const previewToolbarMetrics = () => {
+  const surface = previewBlockRef.value
+  const toolbar = previewToolbarRef.value
+  if (!surface || !toolbar)
+    return null
+  const surfaceRect = surface.getBoundingClientRect()
+  const toolbarRect = toolbar.getBoundingClientRect()
+  const scaleX = surfaceRect.width / (surface.offsetWidth || surfaceRect.width) || 1
+  const scaleY = surfaceRect.height / (surface.offsetHeight || surfaceRect.height) || scaleX
+  const navHeight = surface.querySelector('.cms-nav-main, [data-cms-nav-main]')?.getBoundingClientRect().height || 0
+  const height = Math.max(surface.clientHeight, navHeight / scaleY)
+  const overlappingNavigation = [...surface.ownerDocument.querySelectorAll('.cms-nav-main, [data-cms-nav-main]')]
+    .filter(nav => !surface.contains(nav))
+    .map(nav => nav.getBoundingClientRect())
+    .filter(rect => rect.width > 0 && rect.height > 0 && rect.right > surfaceRect.left && rect.left < surfaceRect.right && rect.bottom > surfaceRect.top && rect.top < surfaceRect.bottom)
+  return {
+    left: surfaceRect.left,
+    top: surfaceRect.top,
+    x: (toolbarRect.left - surfaceRect.left) / scaleX,
+    y: (toolbarRect.top - surfaceRect.top) / scaleY,
+    scaleX,
+    scaleY,
+    toolbarWidth: toolbar.offsetWidth,
+    toolbarHeight: toolbar.offsetHeight,
+    height,
+    overlappingNavigation,
+    maxX: Math.max(0, surface.clientWidth - toolbar.offsetWidth),
+    maxY: Math.max(0, height - toolbar.offsetHeight),
+  }
+}
+
+const movePreviewToolbar = (x, y, metrics = previewToolbarMetrics()) => {
+  if (!metrics)
+    return
+  const nextX = Math.max(0, Math.min(metrics.maxX, x))
+  let nextY = Math.max(0, Math.min(metrics.maxY, y))
+  for (const nav of metrics.overlappingNavigation) {
+    const left = metrics.left + nextX * metrics.scaleX
+    const top = metrics.top + nextY * metrics.scaleY
+    if (left < nav.right && left + metrics.toolbarWidth * metrics.scaleX > nav.left && top < nav.bottom && top + metrics.toolbarHeight * metrics.scaleY > nav.top)
+      nextY = (nav.bottom - metrics.top) / metrics.scaleY + 8
+  }
+  previewToolbarOverflow.value = nextY + metrics.toolbarHeight > metrics.height
+  previewToolbarPosition.value = { x: nextX, y: nextY }
+}
+
+const initializePreviewToolbarPosition = (event) => {
+  previewToolbarHovered.value = true
+  if (previewToolbarDragging.value)
+    return
+  const metrics = previewToolbarMetrics()
+  if (!metrics)
+    return
+  if (savedPreviewToolbarPosition.value) {
+    movePreviewToolbar(savedPreviewToolbarPosition.value.x, savedPreviewToolbarPosition.value.y, metrics)
+    return
+  }
+  movePreviewToolbar(
+    (event.clientX - metrics.left) / metrics.scaleX + 12,
+    (event.clientY - metrics.top) / metrics.scaleY + 12,
+    metrics,
+  )
+}
+
+const savePreviewToolbarPosition = () => {
+  if (!previewToolbarStorageKey.value || !previewToolbarPosition.value)
+    return
+  savedPreviewToolbarPosition.value = { ...previewToolbarPosition.value }
+  try {
+    localStorage.setItem(previewToolbarStorageKey.value, JSON.stringify(savedPreviewToolbarPosition.value))
+  }
+  catch {}
+}
+
+watch(previewToolbarStorageKey, (key) => {
+  stopPreviewToolbarDrag()
+  previewToolbarPosition.value = null
+  previewToolbarOverflow.value = false
+  savedPreviewToolbarPosition.value = null
+  if (!key)
+    return
+  try {
+    const position = JSON.parse(localStorage.getItem(key))
+    if (Number.isFinite(position?.x) && Number.isFinite(position?.y)) {
+      savedPreviewToolbarPosition.value = { x: position.x, y: position.y }
+      previewToolbarPosition.value = { ...savedPreviewToolbarPosition.value }
+      movePreviewToolbar(position.x, position.y)
+    }
+  }
+  catch {}
+}, { immediate: true })
+
+const previewToolbarStyle = computed(() => ({
+  ...(previewToolbarPosition.value
+    ? { left: `${previewToolbarPosition.value.x}px`, top: `${previewToolbarPosition.value.y}px`, right: 'auto', transform: 'none', translate: 'none' }
+    : {}),
+  ...(previewToolbarDragging.value ? { opacity: '1' } : {}),
+  ...(previewToolbarRaised.value ? { zIndex: '10002' } : {}),
+}))
+
+const nudgePreviewToolbar = (x, y) => {
+  const metrics = previewToolbarMetrics()
+  if (!metrics)
+    return
+  const position = previewToolbarPosition.value || metrics
+  movePreviewToolbar(position.x + x, position.y + y, metrics)
+  savePreviewToolbarPosition()
+}
+
+const startPreviewToolbarDrag = (event) => {
+  if (event.button !== 0)
+    return
+  const metrics = previewToolbarMetrics()
+  if (!metrics)
+    return
+  stopPreviewToolbarDrag()
+  const handle = event.currentTarget
+  const doc = handle.ownerDocument
+  const { clientX, clientY, pointerId } = event
+  movePreviewToolbar(metrics.x, metrics.y, metrics)
+  previewToolbarDragging.value = true
+  handle.setPointerCapture(pointerId)
+  let moved = false
+  const onMove = (moveEvent) => {
+    if (moveEvent.pointerId !== pointerId)
+      return
+    moved = true
+    movePreviewToolbar(
+      metrics.x + (moveEvent.clientX - clientX) / metrics.scaleX,
+      metrics.y + (moveEvent.clientY - clientY) / metrics.scaleY,
+    )
+  }
+  const onEnd = (endEvent) => {
+    if (endEvent.pointerId === pointerId) {
+      if (moved && endEvent.type === 'pointerup')
+        savePreviewToolbarPosition()
+      stopPreviewToolbarDrag()
+    }
+  }
+  stopPreviewToolbarDrag = () => {
+    doc.removeEventListener('pointermove', onMove)
+    doc.removeEventListener('pointerup', onEnd)
+    doc.removeEventListener('pointercancel', onEnd)
+    if (handle.hasPointerCapture(pointerId))
+      handle.releasePointerCapture(pointerId)
+    previewToolbarDragging.value = false
+    stopPreviewToolbarDrag = () => {}
+  }
+  doc.addEventListener('pointermove', onMove)
+  doc.addEventListener('pointerup', onEnd)
+  doc.addEventListener('pointercancel', onEnd)
+}
+
+watch([previewBlockRef, previewToolbarRef], ([surface, toolbar], _old, onCleanup) => {
+  if (!surface || !toolbar)
+    return
+  const observer = new ResizeObserver(() => {
+    const position = savedPreviewToolbarPosition.value || previewToolbarPosition.value
+    if (position && !previewToolbarDragging.value)
+      movePreviewToolbar(position.x, position.y)
+  })
+  observer.observe(surface)
+  observer.observe(toolbar)
+  surface.ownerDocument.querySelectorAll('.cms-nav-main, [data-cms-nav-main]').forEach(nav => observer.observe(nav))
+  onCleanup(() => observer.disconnect())
+})
+
 const editorPanelRightWidth = ref(BLOCK_EDITOR_PANEL_DEFAULTS.page)
 const editorPanelResizing = ref(false)
 const editorPanelPointerMove = ref(null)
@@ -434,6 +622,7 @@ const state = reactive({
   blockContentError: '',
 })
 
+const showFieldEditorPreview = computed(() => props.editMode || !props.standalonePreview)
 const isPostEditorContext = computed(() => props.allowRichtextImageTools === true)
 const editorPanelStorageKey = computed(() => isPostEditorContext.value
   ? BLOCK_EDITOR_PANEL_STORAGE_KEYS.post
@@ -483,7 +672,7 @@ const nudgeEditorPanelWidth = (delta) => {
 }
 
 const startEditorPanelResize = (event) => {
-  if (!props.editMode)
+  if (!showFieldEditorPreview.value)
     return
   const container = editorSplitContainerRef.value
   if (!container)
@@ -591,12 +780,6 @@ const normalizeBlockTypes = (value, { fallbackToPage = true } = {}) => {
 }
 
 const resolvedPreviewType = computed(() => normalizePreviewType(modelValue.value?.previewType))
-const sourceBlockDocId = computed(() => {
-  const direct = String(modelValue.value?.blockId || '').trim()
-  if (direct)
-    return direct
-  return String(props.blockId || '').trim()
-})
 const sourceBlocksCollectionPath = computed(() => {
   const orgPath = String(edgeGlobal.edgeState.organizationDocPath || '').trim()
   return orgPath ? `${orgPath}/blocks` : ''
@@ -767,10 +950,9 @@ const blockWrapperClass = computed(() => ({
 }))
 
 const blockWrapperStyle = computed(() => {
-  if (!shouldContainFixedPreview.value || !props.editMode)
-    return null
   return {
-    transform: 'translateZ(0)',
+    ...((shouldContainFixedPreview.value && props.editMode) ? { transform: 'translateZ(0)' } : {}),
+    ...(previewToolbarRaised.value ? { isolation: 'auto', overflow: 'visible' } : {}),
   }
 })
 
@@ -2065,10 +2247,10 @@ watch(editorPanelStorageKey, () => {
 }, { immediate: true })
 
 watch(
-  () => [activePreviewField.value, fieldEditorPreviewLoadedTick.value, state.open, state.editorMode, props.editMode, state.draft],
+  () => [activePreviewField.value, fieldEditorPreviewLoadedTick.value, state.open, state.editorMode, showFieldEditorPreview.value, state.draft],
   async () => {
     await nextTick()
-    if (!props.editMode || !state.open || state.editorMode !== 'fields') {
+    if (!showFieldEditorPreview.value || !state.open || state.editorMode !== 'fields') {
       clearActivePreviewHighlights()
       return
     }
@@ -2098,6 +2280,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  stopPreviewToolbarDrag()
   if (editorPanelPointerMove.value)
     window.removeEventListener('pointermove', editorPanelPointerMove.value)
   if (editorPanelPointerUp.value)
@@ -2735,9 +2918,14 @@ const getTagsFromPosts = computed(() => {
   <div data-cms-chrome>
     <div
       v-if="!shouldHideForLoggedOutPreview"
+      ref="previewBlockRef"
       :class="[{ 'cursor-pointer': canOpenEditor }, blockWrapperClass]"
       :style="blockWrapperStyle"
       class="relative group isolate"
+      @pointerenter="initializePreviewToolbarPosition"
+      @pointerleave="previewToolbarHovered = false"
+      @focusin="previewToolbarFocused = true"
+      @focusout="previewToolbarFocused = $event.currentTarget.contains($event.relatedTarget)"
       @click.capture="openEditor($event)"
     >
       <!-- Content -->
@@ -2768,14 +2956,28 @@ const getTagsFromPosts = computed(() => {
       </div>
       <div
         v-if="canShowPreviewToolbar"
+        ref="previewToolbarRef"
         data-cms-block-control
-        class="pointer-events-none absolute right-8 opacity-0 transition-opacity duration-200 group-hover:opacity-100"
-        :class="[props.centerPreviewToolbar ? 'top-1/2 -translate-y-1/2' : 'top-2', hasNavigationContent ? 'z-[10001]' : 'z-[9999]']"
+        class="pointer-events-none absolute right-8 top-2 opacity-0 transition-opacity duration-200 group-hover:opacity-100 focus-within:opacity-100"
+        :class="hasNavigationContent ? 'z-[10001]' : 'z-[9999]'"
+        :style="previewToolbarStyle"
       >
         <div class="pointer-events-auto flex min-w-[180px] flex-col rounded-md border border-slate-300 bg-white/95 p-1 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-950/95">
-          <span class="w-full min-w-0 truncate px-2 pb-1 text-center text-[10px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
-            {{ previewBlockDisplayName }}
-          </span>
+          <button
+            type="button"
+            class="flex w-full min-w-0 cursor-grab touch-none select-none items-center justify-center gap-1 px-2 pb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500 active:cursor-grabbing dark:text-slate-400"
+            aria-label="Move block edit controls"
+            title="Drag to move edit controls. Arrow keys also move them."
+            @pointerdown.stop.prevent="startPreviewToolbarDrag"
+            @click.stop.prevent
+            @keydown.left.stop.prevent="nudgePreviewToolbar(-16, 0)"
+            @keydown.right.stop.prevent="nudgePreviewToolbar(16, 0)"
+            @keydown.up.stop.prevent="nudgePreviewToolbar(0, -16)"
+            @keydown.down.stop.prevent="nudgePreviewToolbar(0, 16)"
+          >
+            <GripVertical class="h-3 w-3 shrink-0" aria-hidden="true" />
+            <span class="truncate">{{ previewBlockDisplayName }}</span>
+          </button>
           <div class="flex w-full items-center justify-center gap-1 border-t border-slate-200 pt-1 dark:border-slate-800">
             <edge-shad-button
               v-if="canShowPreviewDevControls"
@@ -2808,8 +3010,8 @@ const getTagsFromPosts = computed(() => {
           </div>
         </div>
       </div>
-      <!-- Darken overlay on hover -->
-      <div v-if="props.editMode" class="pointer-events-none absolute inset-0 bg-black/50 opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-10" />
+      <!-- Shade blocks only when the preview is being used for layout editing. -->
+      <div v-if="shouldDisableInteractivePreview" class="pointer-events-none absolute inset-0 bg-black/50 opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-10" />
 
       <!-- Hover controls -->
       <div
@@ -2867,7 +3069,7 @@ const getTagsFromPosts = computed(() => {
         v-if="state.afterLoad"
         :side="state.editorMode === 'content' ? 'left' : 'right'"
         class="flex h-full min-h-0 flex-col overflow-hidden bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-50"
-        :class="state.editorMode === 'content' || props.editMode
+        :class="state.editorMode === 'content' || showFieldEditorPreview
           ? 'w-full max-w-none sm:max-w-none md:max-w-none'
           : 'w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl'"
       >
@@ -3036,13 +3238,13 @@ const getTagsFromPosts = computed(() => {
             </div>
           </SheetHeader>
 
-          <edge-shad-form ref="blockFormRef" :class="props.editMode ? 'flex min-h-0 flex-1 flex-col' : ''">
+          <edge-shad-form ref="blockFormRef" :class="showFieldEditorPreview ? 'flex min-h-0 flex-1 flex-col' : ''">
             <div
               ref="editorSplitContainerRef"
-              :class="props.editMode ? 'grid min-h-0 flex-1 overflow-hidden px-6 pb-4 pt-3' : ''"
-              :style="props.editMode ? { gridTemplateColumns: editorPanelGridTemplateColumns } : undefined"
+              :class="showFieldEditorPreview ? 'grid min-h-0 flex-1 overflow-hidden px-6 pb-4 pt-3' : ''"
+              :style="showFieldEditorPreview ? { gridTemplateColumns: editorPanelGridTemplateColumns } : undefined"
             >
-              <div v-if="props.editMode" class="min-h-0 rounded-md border border-border bg-card overflow-hidden flex flex-col">
+              <div v-if="showFieldEditorPreview" class="min-h-0 rounded-md border border-border bg-card overflow-hidden flex flex-col">
                 <div class="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/40">
                   <span class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Live Preview</span>
                   <div class="ml-auto flex shrink-0 items-center gap-2">
@@ -3092,8 +3294,9 @@ const getTagsFromPosts = computed(() => {
                         :values="fieldEditorPreviewBlock.values"
                         :meta="fieldEditorPreviewBlock.meta"
                         :viewport-mode="previewViewportMode"
+                        preview-fixed-min-height="calc(100vh - 360px)"
                         :render-context="effectiveRenderContext"
-                        :standalone-preview="true"
+                        :standalone-preview="props.standalonePreview"
                         :preview-auth-logged-in="state.previewAuthLoggedIn"
                         @loaded="handleFieldEditorPreviewLoaded"
                       />
@@ -3102,7 +3305,7 @@ const getTagsFromPosts = computed(() => {
                 </div>
               </div>
               <div
-                v-if="props.editMode"
+                v-if="showFieldEditorPreview"
                 class="relative flex h-full items-center justify-center cursor-col-resize"
                 role="separator"
                 aria-label="Resize editor panels"
@@ -3117,12 +3320,12 @@ const getTagsFromPosts = computed(() => {
                   <GripVertical class="h-3.5 w-3.5 text-muted-foreground" />
                 </div>
               </div>
-              <div :class="props.editMode ? 'min-h-0 flex flex-col overflow-hidden rounded-md border border-border bg-card' : ''">
-                <div v-if="props.editMode && editableMetaEntries.length > 0" class="shrink-0 border-b border-border bg-muted/30 px-4 py-2 text-[11px] font-medium text-muted-foreground">
+              <div :class="showFieldEditorPreview ? 'min-h-0 flex flex-col overflow-hidden rounded-md border border-border bg-card' : ''">
+                <div v-if="showFieldEditorPreview && editableMetaEntries.length > 0" class="shrink-0 border-b border-border bg-muted/30 px-4 py-2 text-[11px] font-medium text-muted-foreground">
                   Scroll this panel for more fields.
                 </div>
                 <div
-                  :class="props.editMode
+                  :class="showFieldEditorPreview
                     ? 'flex-1 min-h-0 overflow-y-auto p-4 space-y-4'
                     : modelValue.synced
                       ? 'h-[calc(100vh-160px)] p-6 space-y-4 overflow-y-auto'
@@ -3223,7 +3426,7 @@ const getTagsFromPosts = computed(() => {
                       <div class="prose prose-sm max-w-none" v-html="editorInstructionsHtml" />
                     </AlertDescription>
                   </Alert>
-                  <Alert v-if="editableMetaEntries.length === 0" variant="info" :class="props.editMode ? 'mb-4' : 'mt-4 mb-4'">
+                  <Alert v-if="editableMetaEntries.length === 0" variant="info" :class="showFieldEditorPreview ? 'mb-4' : 'mt-4 mb-4'">
                     <AlertTitle>No editable fields found</AlertTitle>
                     <AlertDescription class="text-sm">
                       This block does not have any editable fields defined.
@@ -3677,7 +3880,7 @@ const getTagsFromPosts = computed(() => {
                     </div>
                   </template>
                 </div>
-                <div :class="props.editMode ? 'shrink-0 border-t border-border bg-card px-4 py-3' : 'sticky bottom-0 bg-background px-6 pb-4 pt-2'">
+                <div :class="showFieldEditorPreview ? 'shrink-0 border-t border-border bg-card px-4 py-3' : 'sticky bottom-0 bg-background px-6 pb-4 pt-2'">
                   <Alert v-if="state.validationErrors.length" variant="destructive" class="mb-3">
                     <AlertTitle>Fix the highlighted fields</AlertTitle>
                     <AlertDescription class="text-sm">

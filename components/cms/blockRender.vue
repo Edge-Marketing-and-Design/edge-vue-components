@@ -48,13 +48,13 @@ const props = defineProps({
     type: Object,
     default: null,
   },
-  isolated: {
-    type: Boolean,
-    default: true,
-  },
   viewportMode: {
     type: String,
     default: 'auto',
+  },
+  previewFixedMinHeight: {
+    type: String,
+    default: '',
   },
   renderContext: {
     type: Object,
@@ -1060,9 +1060,9 @@ const handleHtmlLoaded = async () => {
 <template>
   <edge-cms-html-content
     ref="htmlContentRef"
+    :preview-fixed-min-height="props.previewFixedMinHeight"
     :html="renderedBlock.html"
     :theme="theme"
-    :isolated="props.isolated"
     :viewport-mode="props.viewportMode"
     :standalone-preview="props.standalonePreview"
     :preview-auth-logged-in="props.previewAuthLoggedIn"

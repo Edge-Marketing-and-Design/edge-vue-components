@@ -30,6 +30,7 @@ const safeInstanceKey = computed(() => {
 })
 
 const controlsId = computed(() => `edge-cms-publication-controls-${safeInstanceKey.value}-${localInstanceKey}`)
+const controlsRef = ref(null)
 const publicationShellRef = ref(null)
 const containerWidth = ref(0)
 const pageAspectRatio = ref(0)
@@ -223,6 +224,7 @@ const magazine = computed(() => {
     <div class="relative h-14 w-full border-b border-slate-200 bg-transparent">
       <div
         :id="controlsId"
+        ref="controlsRef"
         class="absolute inset-0 z-0 flex items-center justify-center"
       />
     </div>
@@ -235,46 +237,47 @@ const magazine = computed(() => {
       <div v-if="magazine" class="w-full" :style="magazineStyle">
         <Magazine
           :key="magazineRenderKey"
-          :teleport-flipbook-controls="controlsId"
           :effect="normalizedEffect"
           :magazine="magazine"
           class="h-full w-full bg-white"
           @click.stop.prevent
         >
           <template #controls="flipbook">
-            <div class="flex w-full items-center justify-center gap-1">
-              <button
-                class="edge-cms-publication-control-button"
-                type="button"
-                :disabled="!flipbook.canFlipLeft"
-                aria-label="Previous page"
-                @click="flipbook.flipLeft"
-              >
-                <ChevronLeftCircle class="m-1" :size="24" />
-              </button>
+            <Teleport v-if="controlsRef" :to="controlsRef">
+              <div class="flex w-full items-center justify-center gap-1">
+                <button
+                  class="edge-cms-publication-control-button"
+                  type="button"
+                  :disabled="!flipbook.canFlipLeft"
+                  aria-label="Previous page"
+                  @click="flipbook.flipLeft"
+                >
+                  <ChevronLeftCircle class="m-1" :size="24" />
+                </button>
 
-              <div class="mx-2 min-w-[6.5rem] text-center text-sm font-medium text-slate-900">
-                Page {{ flipbook.page }} of {{ flipbook.numPages }}
+                <div class="mx-2 min-w-[6.5rem] text-center text-sm font-medium text-slate-900">
+                  Page {{ flipbook.page }} of {{ flipbook.numPages }}
+                </div>
+
+                <button
+                  class="edge-cms-publication-control-button"
+                  type="button"
+                  :disabled="!flipbook.canFlipRight"
+                  aria-label="Next page"
+                  @click="flipbook.flipRight"
+                >
+                  <ChevronRightCircle class="m-1" :size="24" />
+                </button>
+                <button
+                  class="edge-cms-publication-control-button"
+                  type="button"
+                  aria-label="Open fullscreen"
+                  @click="flipbook.openFullscreen(flipbook.viewport)"
+                >
+                  <Fullscreen class="m-1" :size="24" />
+                </button>
               </div>
-
-              <button
-                class="edge-cms-publication-control-button"
-                type="button"
-                :disabled="!flipbook.canFlipRight"
-                aria-label="Next page"
-                @click="flipbook.flipRight"
-              >
-                <ChevronRightCircle class="m-1" :size="24" />
-              </button>
-              <button
-                class="edge-cms-publication-control-button"
-                type="button"
-                aria-label="Open fullscreen"
-                @click="flipbook.openFullscreen(flipbook.viewport)"
-              >
-                <Fullscreen class="m-1" :size="24" />
-              </button>
-            </div>
+            </Teleport>
           </template>
         </Magazine>
       </div>

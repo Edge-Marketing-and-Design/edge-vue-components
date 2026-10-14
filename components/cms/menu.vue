@@ -1804,7 +1804,6 @@ const theme = computed(() => {
                                       :values="resolveTemplateBlockForPreview(template, blockRef).values"
                                       :meta="resolveTemplateBlockForPreview(template, blockRef).meta"
                                       :theme="theme"
-                                      :isolated="true"
                                     />
                                   </div>
                                 </div>
@@ -1881,7 +1880,6 @@ const theme = computed(() => {
                                       :values="resolveTemplateBlockForPreview(existingPage, blockRef).values"
                                       :meta="resolveTemplateBlockForPreview(existingPage, blockRef).meta"
                                       :theme="theme"
-                                      :isolated="true"
                                     />
                                   </div>
                                 </div>

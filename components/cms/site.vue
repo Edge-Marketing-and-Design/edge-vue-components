@@ -1864,6 +1864,10 @@ const getSitePagePreviewScale = (pageDoc) => {
 
 const sitePagePreviewScaleStyle = pageDoc => ({
   transform: `translateX(-50%) scale(${getSitePagePreviewScale(pageDoc)})`,
+  height: `${400 / getSitePagePreviewScale(pageDoc)}px`,
+  minHeight: '0',
+  padding: '0',
+  marginBottom: '0',
 })
 
 const updateSitePagePreviewScale = (pageDoc, element) => {
@@ -4173,7 +4177,6 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                                       :meta="resolveTemplateBlockForPreview(item, blockRef).meta"
                                       :theme="selectedTemplatePreviewTheme"
                                       :render-context="state.templatePageRenderContext"
-                                      :isolated="true"
                                     />
                                   </div>
                                 </div>
@@ -4887,49 +4890,57 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                           >
                             <div class="template-scale-inner">
                               <div class="template-scale-content space-y-4" :style="sitePagePreviewScaleStyle(item)">
-                                <template v-if="templatePageHasPreview(item) && sitePreviewThemeReady">
-                                  <div
-                                    v-for="(row, rowIndex) in templatePreviewRows(item)"
-                                    :key="`${item.docId}-row-${row.id || rowIndex}`"
-                                    class="w-full"
-                                  >
-                                    <div :class="previewGridClass(row)">
-                                      <div
-                                        v-for="(column, colIndex) in row.columns"
-                                        :key="`${item.docId}-row-${row.id || rowIndex}-col-${column.id || colIndex}`"
-                                        class="min-w-0"
-                                        :style="previewColumnStyle(column)"
-                                      >
+                                <edge-cms-page-canvas
+                                  v-if="templatePageHasPreview(item) && sitePreviewThemeReady"
+                                  :key="getSitePagePreviewKey(item.docId)"
+                                  enabled
+                                  :theme="sitePreviewTheme || {}"
+                                  :head="sitePreviewHead"
+                                  fit="viewport"
+                                >
+                                  <div class="space-y-4">
+                                    <div
+                                      v-for="(row, rowIndex) in templatePreviewRows(item)"
+                                      :key="`${item.docId}-row-${row.id || rowIndex}`"
+                                      class="w-full"
+                                    >
+                                      <div :class="previewGridClass(row)">
                                         <div
-                                          v-for="(blockRef, blockIdx) in column.blocks || []"
-                                          :key="`${item.docId}-row-${row.id || rowIndex}-col-${column.id || colIndex}-block-${blockIdx}`"
-                                          class="relative"
+                                          v-for="(column, colIndex) in row.columns"
+                                          :key="`${item.docId}-row-${row.id || rowIndex}-col-${column.id || colIndex}`"
+                                          class="min-w-0"
+                                          :style="previewColumnStyle(column)"
                                         >
-                                          <edge-cms-override-block-badge
-                                            :is-override-block="resolveTemplateBlockForPreview(item, blockRef)?.isOverrideBlock === true"
-                                            :scale-compensation="1 / getSitePagePreviewScale(item)"
-                                          />
-                                          <edge-cms-block-api
-                                            v-if="resolveTemplateBlockForPreview(item, blockRef)"
-                                            :key="getPagePreviewBlockRenderKey(getSitePagePreviewKey(item.docId), item, blockRef, blockIdx)"
-                                            :site-id="props.site"
-                                            :content="resolveTemplateBlockForPreview(item, blockRef).content"
-                                            :template-version="resolveTemplateBlockForPreview(item, blockRef).templateVersion"
-                                            :template="resolveTemplateBlockForPreview(item, blockRef).template"
-                                            :schema="resolveTemplateBlockForPreview(item, blockRef).schema"
-                                            :data-sources="resolveTemplateBlockForPreview(item, blockRef).dataSources"
-                                            :values="resolveTemplateBlockForPreview(item, blockRef).values"
-                                            :meta="resolveTemplateBlockForPreview(item, blockRef).meta"
-                                            :theme="sitePreviewTheme"
-                                            :render-context="state.sitePageRenderContext"
-                                            :isolated="true"
-                                            @pending="setSitePagePreviewBlockPending(item, getSitePagePreviewBlockPendingKey(row, rowIndex, column, colIndex, blockIdx), $event)"
-                                          />
+                                          <div
+                                            v-for="(blockRef, blockIdx) in column.blocks || []"
+                                            :key="`${item.docId}-row-${row.id || rowIndex}-col-${column.id || colIndex}-block-${blockIdx}`"
+                                            class="relative"
+                                          >
+                                            <edge-cms-override-block-badge
+                                              :is-override-block="resolveTemplateBlockForPreview(item, blockRef)?.isOverrideBlock === true"
+                                              :scale-compensation="1 / getSitePagePreviewScale(item)"
+                                            />
+                                            <edge-cms-block-api
+                                              v-if="resolveTemplateBlockForPreview(item, blockRef)"
+                                              :key="getPagePreviewBlockRenderKey(getSitePagePreviewKey(item.docId), item, blockRef, blockIdx)"
+                                              :site-id="props.site"
+                                              :content="resolveTemplateBlockForPreview(item, blockRef).content"
+                                              :template-version="resolveTemplateBlockForPreview(item, blockRef).templateVersion"
+                                              :template="resolveTemplateBlockForPreview(item, blockRef).template"
+                                              :schema="resolveTemplateBlockForPreview(item, blockRef).schema"
+                                              :data-sources="resolveTemplateBlockForPreview(item, blockRef).dataSources"
+                                              :values="resolveTemplateBlockForPreview(item, blockRef).values"
+                                              :meta="resolveTemplateBlockForPreview(item, blockRef).meta"
+                                              :theme="sitePreviewTheme"
+                                              :render-context="state.sitePageRenderContext"
+                                              @pending="setSitePagePreviewBlockPending(item, getSitePagePreviewBlockPendingKey(row, rowIndex, column, colIndex, blockIdx), $event)"
+                                            />
+                                          </div>
                                         </div>
                                       </div>
                                     </div>
                                   </div>
-                                </template>
+                                </edge-cms-page-canvas>
                                 <template v-else-if="state.pagePreviewsLoading">
                                   <div class="flex h-32 flex-col items-center justify-center gap-3 mt-[100px] text-muted-foreground">
                                     <Loader2 class="h-100 w-100 animate-spin" />

@@ -1,6 +1,4 @@
 <script setup>
-import { rewriteViewportClassTokens } from '../../../../lib/cmsViewportClasses'
-
 const route = useRoute()
 const edgeFirebase = inject('edgeFirebase')
 
@@ -48,10 +46,6 @@ const previewWidth = computed(() => {
 // The transform makes the page the containing block for fixed elements (a
 // fixed nav bar), so they stay inside the simulated width, not the window.
 const previewPageStyle = computed(() => (previewWidth.value ? { width: `${previewWidth.value}px`, padding: '0', transform: 'translateZ(0)' } : {}))
-// Row layouts follow the simulated canvas too.
-const previewViewportClass = className => (previewViewport.value
-  ? rewriteViewportClassTokens(className.split(' '), { forcedWidth: previewWidth.value }).join(' ')
-  : className)
 const orgPath = computed(() => organizationId.value ? `organizations/${organizationId.value}` : '')
 
 const siteDoc = computed(() => state.payload?.site || null)
@@ -97,11 +91,6 @@ const parseHeadDoc = (doc) => {
 const previewHead = computed(() => parseHeadDoc(themeDoc.value))
 
 useHead(() => previewHead.value || {})
-
-// Isolated canvas (docs/features/cms/iframe-canvas.md): on with the Hub-wide
-// toggle, or for a single link with ?canvas=1.
-const { enabled: canvasPreviewEnabled } = useCmsCanvasPreview()
-const pageCanvasEnabled = computed(() => canvasPreviewEnabled.value || String(route.query.canvas || '') === '1')
 
 const normalizePreviewColumns = (row) => {
   if (!Array.isArray(row?.columns) || !row.columns.length)
@@ -215,7 +204,7 @@ const hasPreviewSpans = row => (row?.columns || []).some(hasExplicitPreviewSpan)
 
 const previewGridClass = (row) => {
   if (hasPreviewSpans(row))
-    return previewViewportClass('grid grid-cols-1 sm:grid-cols-6 gap-4')
+    return 'grid grid-cols-1 sm:grid-cols-6 gap-4'
   const count = row?.columns?.length || 1
   const map = {
     1: 'grid grid-cols-1 gap-4',
@@ -225,7 +214,7 @@ const previewGridClass = (row) => {
     5: 'grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-4',
     6: 'grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-4',
   }
-  return previewViewportClass(map[count] || 'grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-4')
+  return map[count] || 'grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-4'
 }
 
 const previewColumnStyle = (column) => {
@@ -416,7 +405,7 @@ watch(() => [organizationId.value, siteId.value, pageId.value, previewToken.valu
       <div :class="isThumbnailMode ? 'cms-preview-render-page cms-preview-thumbnail-content' : ''">
         <edge-cms-page-canvas
           v-if="previewRows.length"
-          :enabled="pageCanvasEnabled"
+          enabled
           :theme="previewTheme || {}"
           :head="previewHead || {}"
           fit="content"

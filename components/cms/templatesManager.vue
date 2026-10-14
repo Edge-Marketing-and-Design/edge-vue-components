@@ -1247,7 +1247,6 @@ watch(themeCollection, () => {
                                     :meta="resolveTemplateBlockForPreview(item, blockRef).meta"
                                     :theme="selectedTemplatePreviewTheme"
                                     :render-context="state.templatePageRenderContext"
-                                    :isolated="true"
                                   />
                                 </div>
                               </div>
@@ -1415,7 +1414,6 @@ watch(themeCollection, () => {
                                     :meta="resolveTemplateBlockForPreview(template, blockRef).meta"
                                     :theme="selectedTemplatePreviewTheme"
                                     :render-context="state.templatePageRenderContext"
-                                    :isolated="true"
                                   />
                                 </div>
                               </div>

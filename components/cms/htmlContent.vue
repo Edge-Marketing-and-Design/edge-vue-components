@@ -1,15 +1,8 @@
 <script setup>
-import presetWind4 from '@unocss/preset-wind4'
-
-import initUnocssRuntime, { defineConfig } from '@unocss/runtime'
 import DOMPurify from 'dompurify'
-
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { CANVAS_EDITOR_CSS, CANVAS_SRCDOC, buildCanvasSiteCss, buildChromeCss, canvasContentHeight, canvasHeadLinks, collectCanvasClassTokensFromHtml, guardCanvasNavigation, revealCanvasBody, upsertCanvasStyle } from '../../lib/cmsCanvas'
 import { syncCmsPreviewAuthState } from '../../lib/cmsPreviewAuthState'
-import { splitCssSelectorList } from '../../lib/cmsCssSelectors'
-import { BREAKPOINT_MIN_WIDTHS, rewriteViewportClassTokens } from '../../lib/cmsViewportClasses'
-import { useHead } from '#imports'
 
 const props = defineProps({
   html: {
@@ -20,10 +13,6 @@ const props = defineProps({
     type: Object,
     default: () => ({}),
   },
-  isolated: {
-    type: Boolean,
-    default: true,
-  },
   comp: {
     type: String,
     required: false,
@@ -32,6 +21,10 @@ const props = defineProps({
   viewportMode: {
     type: String,
     default: 'auto',
+  },
+  previewFixedMinHeight: {
+    type: String,
+    default: '',
   },
   standalonePreview: {
     type: Boolean,
@@ -45,7 +38,6 @@ const props = defineProps({
 
 const emit = defineEmits(['loaded'])
 
-const scopeId = `hc-${Math.random().toString(36).slice(2)}`
 const SANITIZE_OPTIONS = {
   ADD_TAGS: ['iframe'],
   ADD_ATTR: [
@@ -69,357 +61,6 @@ const themeExtraCSS = computed(() => {
   return typeof value === 'string' ? value : ''
 })
 
-const toCssVarToken = (key) => {
-  return String(key || '')
-    .trim()
-    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
-    .replace(/[\s_]+/g, '-')
-    .replace(/[^a-zA-Z0-9-]/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
-    .toLowerCase()
-}
-
-const isSafeLegacyVarKey = key => /^[A-Za-z0-9_-]+$/.test(String(key || ''))
-
-const pushVarDecl = (decls, prefix, key, value) => {
-  const token = toCssVarToken(key)
-  if (!token)
-    return
-
-  const normalizedName = `--${prefix}-${token}`
-  decls.push(`${normalizedName}: ${value};`)
-
-  const legacyKey = String(key || '')
-  if (!isSafeLegacyVarKey(legacyKey))
-    return
-
-  const legacyName = `--${prefix}-${legacyKey}`
-  if (legacyName !== normalizedName)
-    decls.push(`${legacyName}: ${value};`)
-}
-
-const cssVarRef = (prefix, key) => `var(--${prefix}-${toCssVarToken(key)})`
-const escapeClassToken = value => String(value || '').replace(/([^a-zA-Z0-9_-])/g, '\\$1')
-
-// Adds `.block-content <selector>` to each utility selector (see the runtime
-// config below).
-const scopeUtilityToBlockContent = (util) => {
-  if (util.layer && util.layer !== 'default')
-    return
-  const selector = String(util.selector || '')
-  if (!selector || selector.includes('.block-content'))
-    return
-  const scoped = splitCssSelectorList(selector).map(part => `.block-content ${part}`).join(', ')
-  util.selector = `${selector}, ${scoped}`
-}
-
-// --- UnoCSS Runtime singleton (global, one init for the whole app) ---
-async function ensureUnoRuntime() {
-  if (typeof window === 'undefined')
-    return
-  // If already started, nothing to do.
-  if (window.__unoRuntimeStarted === true)
-    return
-  // If another component is initializing, await that shared promise.
-  if (window.__unoInitPromise) {
-    await window.__unoInitPromise
-    return
-  }
-  // Create a shared promise on window so all components can await the same init.
-  window.__unoInitPromise = (async () => {
-    // Pre-init de-dupe: keep only one style tag per Uno layer if any exist
-    const preSheets = Array.from(document.querySelectorAll('style[data-unocss-runtime-layer]'))
-    if (preSheets.length > 0) {
-      const seen = new Set()
-      preSheets.forEach((el) => {
-        const layer = el.getAttribute('data-unocss-runtime-layer') || ''
-        if (seen.has(layer))
-          el.parentNode && el.parentNode.removeChild(el)
-        else seen.add(layer)
-      })
-    }
-    await initUnocssRuntime({
-      defaults: defineConfig({
-        presets: [presetWind4()],
-        shortcuts: [],
-        // The runtime injects its styles before every Hub stylesheet, so the
-        // Hub's own Tailwind (which also has .m-0, .p-0, ...) won any tie
-        // inside a block: `m-0 mt-8` rendered with no top margin (X29). Each
-        // utility also gets a `.block-content` selector, so inside block
-        // canvases block classes beat the Hub's by specificity and keep
-        // UnoCSS's own order among themselves; elsewhere nothing changes.
-        postprocess: [scopeUtilityToBlockContent],
-      }),
-      observe: true,
-    })
-    // Post-init de-dupe: if multiple parallel inits slipped through, collapse to one per layer.
-    const postSheets = Array.from(document.querySelectorAll('style[data-unocss-runtime-layer]'))
-    if (postSheets.length > 0) {
-      const seen = new Set()
-      postSheets.forEach((el) => {
-        const layer = el.getAttribute('data-unocss-runtime-layer') || ''
-        if (seen.has(layer))
-          el.parentNode && el.parentNode.removeChild(el)
-        else seen.add(layer)
-      })
-    }
-    window.__unoRuntimeStarted = true
-    window.__unoInitPromise = null
-  })()
-  await window.__unoInitPromise
-}
-
-// --- Global theme variables (single style tag) ---
-function buildGlobalThemeCSS(theme) {
-  const t = normalizeTheme(theme || {})
-  const { colors, fontFamily, fontSize, borderRadius, boxShadow } = t
-  const decls = []
-  Object.entries(colors).forEach(([k, v]) => pushVarDecl(decls, 'color', k, Array.isArray(v) ? v[0] : v))
-  Object.entries(fontFamily).forEach(([k, v]) => {
-    const val = Array.isArray(v) ? v.map(x => (x.includes(' ') ? `'${x}'` : x)).join(', ') : v
-    pushVarDecl(decls, 'font', k, val)
-  })
-  Object.entries(fontSize).forEach(([k, v]) => {
-    if (Array.isArray(v)) {
-      const [size, opts] = v
-      pushVarDecl(decls, 'font-size', k, size)
-      if (opts && opts.lineHeight)
-        pushVarDecl(decls, 'line-height', k, opts.lineHeight)
-    }
-    else {
-      pushVarDecl(decls, 'font-size', k, v)
-    }
-  })
-  Object.entries(borderRadius).forEach(([k, v]) => pushVarDecl(decls, 'radius', k, v))
-  Object.entries(boxShadow).forEach(([k, v]) => pushVarDecl(decls, 'shadow', k, v))
-  return `:root{${decls.join('')}}`
-}
-
-function buildScopedThemeCSS(theme, scopeId) {
-  const t = normalizeTheme(theme || {})
-  const { colors, fontFamily, fontSize, borderRadius, boxShadow } = t
-  const decls = []
-  Object.entries(colors).forEach(([k, v]) => pushVarDecl(decls, 'color', k, Array.isArray(v) ? v[0] : v))
-  Object.entries(fontFamily).forEach(([k, v]) => {
-    const val = Array.isArray(v) ? v.map(x => (x.includes(' ') ? `'${x}'` : x)).join(', ') : v
-    pushVarDecl(decls, 'font', k, val)
-  })
-  Object.entries(fontSize).forEach(([k, v]) => {
-    if (Array.isArray(v)) {
-      const [size, opts] = v
-      pushVarDecl(decls, 'font-size', k, size)
-      if (opts?.lineHeight)
-        pushVarDecl(decls, 'line-height', k, opts.lineHeight)
-    }
-    else {
-      pushVarDecl(decls, 'font-size', k, v)
-    }
-  })
-  Object.entries(borderRadius).forEach(([k, v]) => pushVarDecl(decls, 'radius', k, v))
-  Object.entries(boxShadow).forEach(([k, v]) => pushVarDecl(decls, 'shadow', k, v))
-
-  const rules = [`[data-theme-scope="${scopeId}"]{${decls.join('')}}`]
-  Object.keys(colors || {}).forEach((key) => {
-    const escapedKey = escapeClassToken(key)
-    const colorRef = cssVarRef('color', key)
-    rules.push(`[data-theme-scope="${scopeId}"] .bg-${escapedKey}{background-color:${colorRef} !important;}`)
-    rules.push(`[data-theme-scope="${scopeId}"] .text-${escapedKey}{color:${colorRef} !important;}`)
-    rules.push(`[data-theme-scope="${scopeId}"] .border-${escapedKey}{border-color:${colorRef} !important;}`)
-  })
-  return rules.join('')
-}
-
-function setGlobalThemeVars(theme) {
-  if (typeof window === 'undefined')
-    return
-  const sheetId = 'htmlcontent-theme-global'
-  let styleEl = document.getElementById(sheetId)
-  if (!styleEl) {
-    styleEl = document.createElement('style')
-    styleEl.id = sheetId
-    document.head.appendChild(styleEl)
-  }
-  styleEl.textContent = buildGlobalThemeCSS(theme)
-  window.__htmlcontentGlobalTheme = true
-}
-
-function splitTopLevelSelectors(selectorText) {
-  const parts = []
-  let current = ''
-  let parenDepth = 0
-  let bracketDepth = 0
-  let inString = ''
-
-  for (let i = 0; i < selectorText.length; i++) {
-    const char = selectorText[i]
-    const prevChar = selectorText[i - 1]
-
-    if (inString) {
-      current += char
-      if (char === inString && prevChar !== '\\')
-        inString = ''
-      continue
-    }
-
-    if (char === '"' || char === '\'') {
-      inString = char
-      current += char
-      continue
-    }
-
-    if (char === '(') {
-      parenDepth++
-      current += char
-      continue
-    }
-
-    if (char === ')') {
-      parenDepth = Math.max(0, parenDepth - 1)
-      current += char
-      continue
-    }
-
-    if (char === '[') {
-      bracketDepth++
-      current += char
-      continue
-    }
-
-    if (char === ']') {
-      bracketDepth = Math.max(0, bracketDepth - 1)
-      current += char
-      continue
-    }
-
-    if (char === ',' && parenDepth === 0 && bracketDepth === 0) {
-      if (current.trim())
-        parts.push(current.trim())
-      current = ''
-      continue
-    }
-
-    current += char
-  }
-
-  if (current.trim())
-    parts.push(current.trim())
-
-  return parts
-}
-
-function prefixScopedSelector(selector, scopeSelector) {
-  const trimmed = String(selector || '').trim()
-  if (!trimmed)
-    return ''
-  if (trimmed.includes(scopeSelector))
-    return trimmed
-  if (trimmed === ':root' || trimmed === 'html' || trimmed === 'body')
-    return scopeSelector
-
-  const normalized = trimmed
-    .replace(/\b:root\b/g, scopeSelector)
-    .replace(/\bhtml\b/g, scopeSelector)
-    .replace(/\bbody\b/g, scopeSelector)
-
-  if (normalized !== trimmed)
-    return normalized
-
-  return `${scopeSelector} ${trimmed}`
-}
-
-function scopeCssText(cssText, scopeId) {
-  const source = String(cssText || '')
-  const scopeSelector = `[data-theme-scope="${scopeId}"].block-content`
-  if (!source.trim() || !scopeId)
-    return source
-
-  const recurse = (input) => {
-    let output = ''
-    let index = 0
-
-    while (index < input.length) {
-      const openIndex = input.indexOf('{', index)
-      if (openIndex === -1) {
-        output += input.slice(index)
-        break
-      }
-
-      const prelude = input.slice(index, openIndex)
-      let depth = 1
-      let cursor = openIndex + 1
-      let inString = ''
-
-      while (cursor < input.length && depth > 0) {
-        const char = input[cursor]
-        const prevChar = input[cursor - 1]
-        if (inString) {
-          if (char === inString && prevChar !== '\\')
-            inString = ''
-          cursor++
-          continue
-        }
-        if (char === '"' || char === '\'') {
-          inString = char
-          cursor++
-          continue
-        }
-        if (char === '{')
-          depth++
-        else if (char === '}')
-          depth--
-        cursor++
-      }
-
-      if (depth !== 0) {
-        output += input.slice(index)
-        break
-      }
-
-      const inner = input.slice(openIndex + 1, cursor - 1)
-      const trimmedPrelude = prelude.trim()
-
-      if (trimmedPrelude.startsWith('@')) {
-        const atRuleName = trimmedPrelude.match(/^@([a-zA-Z-]+)/)?.[1]?.toLowerCase() || ''
-        const shouldRecurse = ['media', 'supports', 'layer', 'container', 'scope', 'document'].includes(atRuleName)
-        output += `${prelude}{${shouldRecurse ? recurse(inner) : inner}}`
-      }
-      else {
-        const scopedPrelude = splitTopLevelSelectors(prelude)
-          .map(selector => prefixScopedSelector(selector, scopeSelector))
-          .filter(Boolean)
-          .join(', ')
-        output += `${scopedPrelude}{${inner}}`
-      }
-
-      index = cursor
-    }
-
-    return output
-  }
-
-  return recurse(source)
-}
-
-function setScopedExtraCss(scopeEl, cssText) {
-  if (!scopeEl || typeof document === 'undefined')
-    return
-
-  const scopeId = scopeEl.getAttribute('data-theme-scope')
-  if (!scopeId)
-    return
-
-  const sheetId = `htmlcontent-theme-extra-inline-${scopeId}`
-  let styleEl = scopeEl.querySelector(`#${sheetId}`)
-  if (!styleEl) {
-    styleEl = document.createElement('style')
-    styleEl.id = sheetId
-    scopeEl.prepend(styleEl)
-  }
-
-  styleEl.textContent = scopeCssText(cssText, scopeId)
-}
-
 const hostEl = ref(null)
 let hasMounted = false
 
@@ -437,21 +78,6 @@ const safeHtml = computed(() => {
   return DOMPurify.sanitize(c, SANITIZE_OPTIONS)
 })
 
-// Inject theme CSS variables into <head> for SSR + client
-useHead(() => {
-  const style = [
-    { id: `htmlcontent-theme-vars-${scopeId}`, children: buildScopedThemeCSS(props.theme, scopeId) },
-  ]
-  if (themeExtraCSS.value.trim()) {
-    style.push({
-      id: `htmlcontent-theme-extra-${scopeId}`,
-      children: scopeCssText(themeExtraCSS.value, scopeId),
-    })
-  }
-  return { style }
-})
-
-// --- Embla initializer (runs client-side only) ---
 async function initEmblaCarousels(scope) {
   if (!scope || !import.meta.client)
     return
@@ -462,6 +88,8 @@ async function initEmblaCarousels(scope) {
     import('embla-carousel-fade'),
   ])
 
+  if (!scope.isConnected)
+    return
   const roots = scope.querySelectorAll('[data-carousel]:not([data-embla])')
 
   roots.forEach((root) => {
@@ -573,7 +201,7 @@ async function initEmblaCarousels(scope) {
       const snaps = api.scrollSnapList() // snap positions, not slides
       const initial = api.selectedScrollSnap()
       snaps.forEach((_snap, i) => {
-        const b = document.createElement('button')
+        const b = scope.ownerDocument.createElement('button')
         b.type = 'button'
         b.className = 'h-2 w-2 rounded-full bg-gray-300 aria-[current=true]:bg-gray-800'
         b.setAttribute('aria-current', String(i === initial))
@@ -612,17 +240,14 @@ async function initEmblaCarousels(scope) {
     // Mark initialized
     root.setAttribute('data-embla', 'true')
 
-    // Optional: store API for cleanup if needed later
-    // root._emblaApi = api
+    root._emblaApi = api
   })
 }
 
 function initCmsNavHelpers(scope) {
   if (!scope || !import.meta.client)
     return
-  // Prototype canvas: use the scope's own document and window, so scroll,
-  // resize and click listeners attach to an iframe canvas's frame.
-  // eslint-disable-next-line no-restricted-globals
+  // Helpers follow the canvas document and its viewport.
   const document = scope.ownerDocument || globalThis.document
   const window = document.defaultView || globalThis.window
 
@@ -657,50 +282,13 @@ function initCmsNavHelpers(scope) {
         .filter(Boolean)
     }
 
-    const normalizeRuntimeToken = (token) => {
-      if (!token)
-        return token
-      const parts = token.split(':')
-      const core = parts.pop()
-      const nakedCore = core.startsWith('!') ? core.slice(1) : core
-      const hasBreakpoint = parts.some((part) => {
-        const normalized = part.replace(/^!/, '')
-        return Object.prototype.hasOwnProperty.call(BREAKPOINT_MIN_WIDTHS, normalized)
-      })
-      const isTextSize = /^text-(xs|sm|base|lg|xl|\d+xl)$/.test(nakedCore)
-      const isFontUtility = /^font-([\w-]+|\[[^\]]+\])$/.test(nakedCore)
-      const nextCore = (hasBreakpoint || isTextSize || isFontUtility) && !core.startsWith('!')
-        ? `!${core}`
-        : core
-      return [...parts, nextCore].join(':')
-    }
-
-    const tokenVariants = (token) => {
-      if (!token)
-        return []
-      const variants = new Set([token])
-      const parts = token.split(':')
-      const core = parts.pop()
-      const nakedCore = core.startsWith('!') ? core.slice(1) : core
-      variants.add([...parts, nakedCore].join(':'))
-      variants.add([...parts, `!${nakedCore}`].join(':'))
-      return Array.from(variants).filter(Boolean)
-    }
-
-    const mapRuntimeTokens = (rawValue) => {
-      const mapped = toVarBackedUtilities(rawValue, props.theme)
-      return toClassTokens(mapped).map(normalizeRuntimeToken)
-    }
-
+    const mapRuntimeTokens = toClassTokens
     const replaceClassTokens = (el, currentTokens, nextTokens) => {
       if (!el)
         return nextTokens
-      currentTokens
-        .flatMap(tokenVariants)
-        .forEach(token => el.classList.remove(token))
-      const normalizedNextTokens = (nextTokens || []).map(normalizeRuntimeToken)
-      normalizedNextTokens.forEach(token => el.classList.add(token))
-      return normalizedNextTokens
+      currentTokens.forEach(token => el.classList.remove(token))
+      nextTokens.forEach(token => el.classList.add(token))
+      return nextTokens
     }
 
     const getAncestorElements = (el) => {
@@ -760,12 +348,8 @@ function initCmsNavHelpers(scope) {
       || navRow?.querySelector('a')
       || null
     const panelHiddenClass = position === 'left' ? '-translate-x-full' : 'translate-x-full'
-    const previewSurface = root.closest('[data-cms-preview-surface]')
-    const shouldContainFixedInPreview = Boolean(previewSurface)
     const forceTopScrollState = props.standalonePreview || root.closest('[data-cms-standalone-preview="true"]')
     const stickyEnabled = root.classList.contains('cms-nav-sticky') || parseBoolean(root.getAttribute('data-cms-nav-sticky'))
-    const getPreviewMode = () => String(previewSurface?.getAttribute('data-cms-preview-mode') || 'preview').toLowerCase()
-    const shouldPinInsidePreview = () => shouldContainFixedInPreview && getPreviewMode() === 'preview' && stickyEnabled
     const hideOnDown = root.classList.contains('cms-nav-hide-on-down') || parseBoolean(root.getAttribute('data-cms-nav-hide-on-down'))
     const scrollThreshold = Number(root.getAttribute('data-cms-nav-scroll-threshold') || 10)
     const hideThreshold = Number(root.getAttribute('data-cms-nav-hide-threshold') || 80)
@@ -777,97 +361,17 @@ function initCmsNavHelpers(scope) {
     const hiddenClassTokens = mapRuntimeTokens(root.getAttribute('data-cms-nav-hidden-class') || '-translate-y-full opacity-0')
     const visibleClassTokens = mapRuntimeTokens(root.getAttribute('data-cms-nav-visible-class') || 'translate-y-0 opacity-100')
     const transitionClassTokens = mapRuntimeTokens(root.getAttribute('data-cms-nav-transition-class') || 'transition-all duration-300')
-    const resolvePreviewPinAnchor = () => {
-      if (!previewSurface)
-        return null
-      const candidates = getAncestorElements(previewSurface).filter(isScrollableElement)
-      const scrollingCandidate = candidates.find(el => (el.scrollHeight - el.clientHeight) > 1)
-      return scrollingCandidate || candidates[0] || previewSurface
-    }
-    const resolvePreviewScrollTarget = () => {
-      if (!previewSurface)
-        return null
-      if (isScrollableElement(previewSurface) && (previewSurface.scrollHeight - previewSurface.clientHeight) > 1)
-        return previewSurface
-      const candidates = getAncestorElements(previewSurface).filter(isScrollableElement)
-      const scrollingCandidate = candidates.find(el => (el.scrollHeight - el.clientHeight) > 1)
-      return scrollingCandidate || candidates[0] || previewSurface
-    }
-    let previewPinAnchor = resolvePreviewPinAnchor()
-    let previewScrollTarget = resolvePreviewScrollTarget()
-    const refreshPreviewTargets = () => {
-      if (!shouldContainFixedInPreview)
-        return
-      const nextPinAnchor = resolvePreviewPinAnchor()
-      const nextScrollTarget = resolvePreviewScrollTarget()
-      if (nextPinAnchor)
-        previewPinAnchor = nextPinAnchor
-      if (nextScrollTarget)
-        previewScrollTarget = nextScrollTarget
-    }
-    const previewScrollAncestors = previewSurface
-      ? getAncestorElements(previewSurface).filter(isScrollableElement)
-      : []
-    const scrollTargets = shouldContainFixedInPreview
-      ? Array.from(new Set([previewSurface, previewScrollTarget, previewPinAnchor, ...previewScrollAncestors].filter(Boolean)))
-      : collectScrollTargets(root)
-    const windowScrollY = () => window.scrollY || document.documentElement.scrollTop || 0
+    const scrollTargets = collectScrollTargets(root)
     const readScrollY = () => {
       if (forceTopScrollState)
         return 0
-      if (shouldContainFixedInPreview) {
-        refreshPreviewTargets()
-        const scopedTargets = Array.from(new Set([previewSurface, previewScrollTarget, previewPinAnchor, ...previewScrollAncestors].filter(Boolean)))
-        let scopedMaxScrollY = 0
-        let hasScopedTarget = false
-        scopedTargets.forEach((target) => {
-          if (!target || target === window || target === document)
-            return
-          if (typeof target.scrollTop !== 'number')
-            return
-          hasScopedTarget = true
-          scopedMaxScrollY = Math.max(scopedMaxScrollY, Number(target.scrollTop || 0))
-        })
-        if (hasScopedTarget)
-          return scopedMaxScrollY
-      }
-      let maxScrollY = windowScrollY()
-      scrollTargets.forEach((target) => {
-        if (!target || target === window || target === document)
-          return
-        const current = Number(target.scrollTop || 0)
-        if (current > maxScrollY)
-          maxScrollY = current
-      })
-      return maxScrollY
-    }
-
-    const readPinAnchorTop = () => {
-      refreshPreviewTargets()
-      if (!previewPinAnchor || typeof previewPinAnchor.getBoundingClientRect !== 'function')
-        return 0
-      return Math.round(previewPinAnchor.getBoundingClientRect().top)
+      return Math.max(window.scrollY || 0, ...scrollTargets.map(target => Number(target.scrollTop || 0)))
     }
 
     let appliedNavTokens = []
     let appliedRowTokens = []
     let appliedVisibilityTokens = []
     let lastScrollY = readScrollY()
-    let pinnedViewportTop = null
-    let pinnedOffsetFromSurface = null
-    const resolvePinnedTop = () => {
-      const anchorTop = readPinAnchorTop()
-      const rootTop = Math.round(root.getBoundingClientRect().top)
-      const measuredOffset = Math.max(0, rootTop - anchorTop)
-      if (pinnedOffsetFromSurface == null) {
-        pinnedOffsetFromSurface = measuredOffset
-      }
-      pinnedViewportTop = Math.max(anchorTop + pinnedOffsetFromSurface, anchorTop, 0)
-      return pinnedViewportTop
-    }
-    if (shouldPinInsidePreview())
-      pinnedViewportTop = resolvePinnedTop()
-
     if (navRow) {
       navRow.classList.remove('flex-row', 'flex-row-reverse', 'justify-between', 'justify-center', 'flex-wrap', 'flex-wrap-reverse')
       navRow.classList.add('flex', 'flex-nowrap', 'items-center', 'gap-6')
@@ -901,64 +405,9 @@ function initCmsNavHelpers(scope) {
       }
     }
 
-    const applyNavPinMode = () => {
-      if (!navMain)
-        return
-      if (shouldPinInsidePreview()) {
-        // Pin to viewport with explicit left/width so it stays within preview surface.
-        root.classList.remove('cms-nav-preview-relative')
-        navMain.classList.remove('sticky', 'absolute', 'inset-x-0')
-        navMain.classList.add('fixed', 'top-0')
-      }
-      else if (shouldContainFixedInPreview) {
-        // In preview but non-sticky: overlay within preview surface and scroll away naturally.
-        root.classList.add('cms-nav-preview-relative')
-        navMain.classList.remove('fixed', 'sticky')
-        navMain.classList.add('absolute', 'inset-x-0', 'top-0')
-      }
-      else {
-        root.classList.remove('cms-nav-preview-relative')
-        navMain.classList.remove('absolute')
-        if (stickyEnabled) {
-          navMain.classList.remove('sticky')
-          navMain.classList.add('fixed', 'inset-x-0', 'top-0')
-        }
-      }
-    }
-    applyNavPinMode()
-
-    const clearPinnedPreviewPosition = () => {
-      if (!navMain)
-        return
-      navMain.style.left = ''
-      navMain.style.width = ''
-      navMain.style.right = ''
-      navMain.style.top = ''
-      navMain.style.bottom = ''
-    }
-
-    const readPreviewSurfaceScale = () => {
-      if (!previewSurface || typeof window === 'undefined')
-        return 1
-      const zoomValue = previewSurface.style?.zoom || window.getComputedStyle(previewSurface).zoom
-      const parsed = Number.parseFloat(String(zoomValue || '1'))
-      if (!Number.isFinite(parsed) || parsed <= 0)
-        return 1
-      return parsed
-    }
-
-    const updatePinnedPreviewPosition = () => {
-      if (!shouldPinInsidePreview() || !navMain || !previewSurface)
-        return
-      const surfaceRect = previewSurface.getBoundingClientRect()
-      const previewScale = readPreviewSurfaceScale()
-      if (pinnedViewportTop == null)
-        pinnedViewportTop = resolvePinnedTop()
-      navMain.style.left = `${Math.round(surfaceRect.left / previewScale)}px`
-      navMain.style.width = `${Math.round(surfaceRect.width / previewScale)}px`
-      navMain.style.right = 'auto'
-      navMain.style.bottom = 'auto'
-      navMain.style.top = `${Math.round(pinnedViewportTop / previewScale)}px`
+    if (navMain && stickyEnabled) {
+      navMain.classList.remove('sticky')
+      navMain.classList.add('fixed', 'inset-x-0', 'top-0')
     }
 
     if (navMain && transitionClassTokens.length) {
@@ -1141,7 +590,6 @@ function initCmsNavHelpers(scope) {
       const currentScrollY = readScrollY()
       const isScrolled = currentScrollY > scrollThreshold
       setScrolledState(isScrolled)
-      updatePinnedPreviewPosition()
 
       if (hideOnDown && navMain) {
         const delta = currentScrollY - lastScrollY
@@ -1197,111 +645,37 @@ function initCmsNavHelpers(scope) {
 
     setOpen(root.classList.contains(openClass) || root.getAttribute('data-cms-nav-open') === 'true')
     handleScroll()
-    if (shouldPinInsidePreview())
-      updatePinnedPreviewPosition()
-    else
-      clearPinnedPreviewPosition()
 
-    toggles.forEach((btn) => {
-      btn.addEventListener('click', (event) => {
-        event.preventDefault()
-        event.stopPropagation()
-        setOpen(!isOpen())
-      })
-    })
-
-    closeButtons.forEach((btn) => {
-      btn.addEventListener('click', (event) => {
-        event.preventDefault()
-        event.stopPropagation()
-        setOpen(false)
-      })
-    })
-
-    if (overlay) {
-      overlay.addEventListener('click', (event) => {
-        event.preventDefault()
-        event.stopPropagation()
-        setOpen(false)
-      })
+    const onToggleClick = (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      setOpen(!isOpen())
     }
-
-    if (closeOnLink) {
-      links.forEach((link) => {
-        link.addEventListener('click', () => {
-          setOpen(false)
-        })
-      })
+    const onCloseClick = (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      setOpen(false)
     }
+    const onLinkClick = () => setOpen(false)
+    toggles.forEach(btn => btn.addEventListener('click', onToggleClick))
+    closeButtons.forEach(btn => btn.addEventListener('click', onCloseClick))
+    overlay?.addEventListener('click', onCloseClick)
+    if (closeOnLink)
+      links.forEach(link => link.addEventListener('click', onLinkClick))
 
     const scrollListeners = scrollTargets
     scrollListeners.forEach((target) => {
       target.addEventListener('scroll', handleScroll, { passive: true })
     })
-    let previewModeObserver = null
-    let previewSurfaceObserver = null
-    let previewSurfaceAttrObserver = null
-    let pinSyncRaf = 0
-    const schedulePinnedPositionSync = () => {
-      if (pinSyncRaf)
-        cancelAnimationFrame(pinSyncRaf)
-      pinSyncRaf = requestAnimationFrame(() => {
-        pinSyncRaf = 0
-        updatePinnedPreviewPosition()
-      })
-    }
-    const handlePreviewModeMutation = () => {
-      pinnedViewportTop = null
-      pinnedOffsetFromSurface = null
-      applyNavPinMode()
-      if (shouldPinInsidePreview()) {
-        updatePinnedPreviewPosition()
-      }
-      else {
-        clearPinnedPreviewPosition()
-      }
-      handleScroll()
-    }
-    if (previewSurface) {
-      previewModeObserver = new MutationObserver((entries) => {
-        if (entries.some(entry => entry.type === 'attributes' && entry.attributeName === 'data-cms-preview-mode'))
-          handlePreviewModeMutation()
-      })
-      previewModeObserver.observe(previewSurface, {
-        attributes: true,
-        attributeFilter: ['data-cms-preview-mode'],
-      })
-      // Viewport-mode switches change preview width/position without a window resize.
-      // Keep fixed nav left/width aligned to the preview surface as it transitions.
-      if (typeof ResizeObserver !== 'undefined') {
-        previewSurfaceObserver = new ResizeObserver(() => {
-          schedulePinnedPositionSync()
-        })
-        previewSurfaceObserver.observe(previewSurface)
-        if (previewPinAnchor && previewPinAnchor !== previewSurface)
-          previewSurfaceObserver.observe(previewPinAnchor)
-      }
-      previewSurfaceAttrObserver = new MutationObserver((entries) => {
-        if (entries.some(entry => entry.type === 'attributes' && (entry.attributeName === 'class' || entry.attributeName === 'style')))
-          schedulePinnedPositionSync()
-      })
-      previewSurfaceAttrObserver.observe(previewSurface, {
-        attributes: true,
-        attributeFilter: ['class', 'style'],
-      })
-      previewSurface.addEventListener('transitionrun', schedulePinnedPositionSync)
-      previewSurface.addEventListener('transitionstart', schedulePinnedPositionSync)
-      previewSurface.addEventListener('transitionend', schedulePinnedPositionSync)
-      previewSurface.addEventListener('transitioncancel', schedulePinnedPositionSync)
-    }
-    const handleResize = () => {
-      if (shouldPinInsidePreview() && pinnedViewportTop == null)
-        pinnedViewportTop = resolvePinnedTop()
-      updatePinnedPreviewPosition()
-    }
+    const handleResize = () => handleScroll()
     window.addEventListener('resize', handleResize, { passive: true })
 
     scope.__cmsNavCleanupFns.push(() => {
+      toggles.forEach(btn => btn.removeEventListener('click', onToggleClick))
+      closeButtons.forEach(btn => btn.removeEventListener('click', onCloseClick))
+      overlay?.removeEventListener('click', onCloseClick)
+      if (closeOnLink)
+        links.forEach(link => link.removeEventListener('click', onLinkClick))
       folderCleanupFns.forEach((cleanup) => {
         try {
           cleanup()
@@ -1312,416 +686,29 @@ function initCmsNavHelpers(scope) {
         target.removeEventListener('scroll', handleScroll)
       })
       window.removeEventListener('resize', handleResize)
-      if (previewModeObserver)
-        previewModeObserver.disconnect()
-      if (previewSurfaceObserver)
-        previewSurfaceObserver.disconnect()
-      if (previewSurfaceAttrObserver)
-        previewSurfaceAttrObserver.disconnect()
-      if (previewSurface) {
-        previewSurface.removeEventListener('transitionrun', schedulePinnedPositionSync)
-        previewSurface.removeEventListener('transitionstart', schedulePinnedPositionSync)
-        previewSurface.removeEventListener('transitionend', schedulePinnedPositionSync)
-        previewSurface.removeEventListener('transitioncancel', schedulePinnedPositionSync)
-      }
-      if (pinSyncRaf)
-        cancelAnimationFrame(pinSyncRaf)
-      clearPinnedPreviewPosition()
     })
   })
 }
 
-function renderSafeHtml(content) {
-  if (hostEl.value) {
-    // The HTML is already in the DOM via v-html; just (re)wire behaviors
-    initEmblaCarousels(hostEl.value)
-    initCmsNavHelpers(hostEl.value)
-  }
-}
-
-function getStandalonePreviewContentRoot() {
-  const host = hostEl.value
-  if (!host)
-    return null
-  const children = Array.from(host.children || [])
-  const direct = children.find((child) => {
-    if (!(child instanceof HTMLElement))
-      return false
-    const tag = child.tagName.toLowerCase()
-    return !['style', 'script', 'link', 'meta'].includes(tag)
+let helperRoot = null
+function cleanupPreviewHelpers() {
+  if (!helperRoot)
+    return
+  for (const cleanup of helperRoot.__cmsNavCleanupFns || [])
+    cleanup()
+  helperRoot.__cmsNavCleanupFns = []
+  helperRoot.querySelectorAll('[data-embla]').forEach((root) => {
+    root._emblaApi?.destroy()
+    delete root._emblaApi
+    root.removeAttribute('data-embla')
   })
-  return direct || host
+  helperRoot = null
 }
 
-function getFirstRenderableElement(root) {
-  if (!root || typeof document === 'undefined')
-    return null
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, {
-    acceptNode(node) {
-      if (!node || !(node instanceof HTMLElement))
-        return NodeFilter.FILTER_SKIP
-      if (node === root)
-        return NodeFilter.FILTER_SKIP
-      const tag = node.tagName.toLowerCase()
-      if (['script', 'style', 'link', 'meta'].includes(tag))
-        return NodeFilter.FILTER_SKIP
-      return NodeFilter.FILTER_ACCEPT
-    },
-  })
-  return walker.nextNode()
-}
-
-function resolveStandalonePreviewTargetElement() {
-  const contentRoot = getStandalonePreviewContentRoot()
-  let target = getFirstRenderableElement(contentRoot)
-  if (!target)
-    return null
-
-  for (;;) {
-    const onlyChild = target.children?.length === 1 ? target.firstElementChild : null
-    const ownText = Array.from(target.childNodes || []).some((node) => {
-      return node.nodeType === Node.TEXT_NODE && String(node.textContent || '').trim().length > 0
-    })
-    const hasOwnHooks = target.hasAttribute('data-viewport-base-class')
-      || target.hasAttribute('class')
-      || target.hasAttribute('style')
-      || target.hasAttribute('id')
-
-    if (!onlyChild || ownText || hasOwnHooks)
-      break
-
-    if (!(onlyChild instanceof HTMLElement))
-      break
-
-    const childTag = onlyChild.tagName.toLowerCase()
-    if (['style', 'script', 'link', 'meta'].includes(childTag))
-      break
-
-    target = onlyChild
-  }
-
-  return target
-}
-
-function resetStandalonePreviewOverrides(root) {
-  if (!root)
-    return
-  root.querySelectorAll('[data-cms-standalone-reset-margin-top]').forEach((el) => {
-    el.style.removeProperty('margin-top')
-    el.removeAttribute('data-cms-standalone-reset-margin-top')
-  })
-  root.querySelectorAll('[data-cms-standalone-reset-top]').forEach((el) => {
-    el.style.removeProperty('top')
-    el.removeAttribute('data-cms-standalone-reset-top')
-  })
-  root.querySelectorAll('[data-cms-standalone-reset-translate]').forEach((el) => {
-    el.style.removeProperty('translate')
-    el.removeAttribute('data-cms-standalone-reset-translate')
-  })
-}
-
-function syncStandalonePreviewInset() {
-  const host = hostEl.value
-  if (!host || typeof window === 'undefined')
-    return
-
-  if (!props.standalonePreview) {
-    host.style.removeProperty('padding-top')
-    host.style.removeProperty('display')
-    resetStandalonePreviewOverrides(host)
-    host.removeAttribute('data-cms-standalone-preview')
-    return
-  }
-
-  host.setAttribute('data-cms-standalone-preview', 'true')
-  host.style.removeProperty('padding-top')
-  host.style.display = 'flow-root'
-  resetStandalonePreviewOverrides(host)
-
-  const firstElement = resolveStandalonePreviewTargetElement()
-  if (!firstElement)
-    return
-
-  const computedStyle = window.getComputedStyle(firstElement)
-  const marginTop = Number.parseFloat(computedStyle.marginTop || '0')
-  if (Number.isFinite(marginTop) && marginTop < 0) {
-    firstElement.style.setProperty('margin-top', '0px', 'important')
-    firstElement.setAttribute('data-cms-standalone-reset-margin-top', 'true')
-  }
-
-  const topValue = Number.parseFloat(computedStyle.top || '0')
-  if (computedStyle.position !== 'static' && Number.isFinite(topValue) && topValue < 0) {
-    firstElement.style.setProperty('top', '0px', 'important')
-    firstElement.setAttribute('data-cms-standalone-reset-top', 'true')
-  }
-
-  const hostRect = host.getBoundingClientRect()
-  const adjustedRect = firstElement.getBoundingClientRect()
-  const overflowTop = hostRect.top - adjustedRect.top
-  if (overflowTop > 1) {
-    firstElement.style.setProperty('translate', `0 ${Math.ceil(overflowTop)}px`, 'important')
-    firstElement.setAttribute('data-cms-standalone-reset-translate', 'true')
-  }
-}
-
-function normalizeTheme(input = {}) {
-  const t = input || {}
-  const ext = t.extend || {}
-  return {
-    colors: ext.colors || {},
-    fontFamily: ext.fontFamily || {},
-    fontSize: ext.fontSize || {},
-    borderRadius: ext.borderRadius || {},
-    boxShadow: ext.boxShadow || {},
-    apply: (t.apply || {}),
-    slots: (t.slots || {}),
-    variants: (t.variants || {}),
-  }
-}
-
-function setScopedThemeVars(scopeEl, theme) {
-  if (!scopeEl)
-    return
-  // ensure a stable scope attribute so the style can target only this block
-  if (!scopeEl.hasAttribute('data-theme-scope')) {
-    scopeEl.setAttribute('data-theme-scope', Math.random().toString(36).slice(2))
-  }
-  const scopeId = scopeEl.getAttribute('data-theme-scope')
-
-  const sheetId = `htmlcontent-theme-${scopeId}`
-  let styleEl = document.getElementById(sheetId)
-  if (!styleEl) {
-    styleEl = document.createElement('style')
-    styleEl.id = sheetId
-    document.head.appendChild(styleEl)
-  }
-
-  styleEl.textContent = buildScopedThemeCSS(theme, scopeId)
-}
-
-// An opacity modifier as a whole percent: `50` stays, `[0.03]` and `[3%]`
-// become `3`. Anything else keeps its brackets.
-const bracketOpacityToPercent = (value) => {
-  const raw = String(value || '')
-  if (!raw.startsWith('['))
-    return raw
-  const inner = raw.slice(1, -1).trim()
-  const percent = inner.endsWith('%') ? Number(inner.slice(0, -1)) : Number(inner) * 100
-  return (Number.isFinite(percent) && percent >= 0 && percent <= 100) ? String(Math.round(percent * 100) / 100) : raw
-}
-
-// Convert utility tokens like text-brand/bg-surface/rounded-xl/shadow-card
-// into variable-backed arbitrary values so we don't need to mutate Uno's theme.
-
-function toVarBackedUtilities(classList, theme) {
-  if (!classList)
-    return ''
-  const tokens = normalizeTheme(theme)
-  const colorKeys = new Set(Object.keys(tokens.colors))
-  const radiusKeys = new Set(Object.keys(tokens.borderRadius))
-  const shadowKeys = new Set(Object.keys(tokens.boxShadow))
-
-  return classList
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((cls) => {
-      // colors: every color utility (text, bg, border and its sides, gradient
-      // stops, ring, outline, decoration, divide, fill, stroke, accent, caret,
-      // placeholder) mapped to the theme variable when the key exists. Only
-      // text/bg/border were, so a gradient's from-surface generated nothing
-      // in the Hub (the Hub's UnoCSS has no theme colors) while the public
-      // site drew it.
-      const colorMatch = /^(border-[xytrblse]|ring-offset|text|bg|border|from|via|to|ring|outline|decoration|divide|fill|stroke|accent|caret|placeholder)-(.*)$/.exec(cls)
-      if (colorMatch) {
-        const [, kind, rawKey] = colorMatch
-
-        // support opacity suffix: bg-secondary/50, text-primary/80, and the
-        // bracketed form (text-primary/[0.03], /[3%]) as a whole percent;
-        // unmatched, the class fell through and rendered black (X30).
-        let key = rawKey
-        let opacity = null
-        const alphaMatch = /^(.+)\/(\d{1,3}|\[[^\]]+\])$/.exec(rawKey)
-        if (alphaMatch) {
-          key = alphaMatch[1]
-          opacity = bracketOpacityToPercent(alphaMatch[2])
-        }
-
-        if (colorKeys.has(key)) {
-          const varRef = cssVarRef('color', key)
-          return opacity ? `${kind}-[${varRef}]/${opacity}` : `${kind}-[${varRef}]`
-        }
-
-        return cls
-      }
-
-      // radius
-      const radiusMatch = /^rounded-(.*)$/.exec(cls)
-      if (radiusMatch) {
-        const key = radiusMatch[1]
-        if (radiusKeys.has(key))
-          return `rounded-[${cssVarRef('radius', key)}]`
-        return cls
-      }
-
-      // shadow
-      const shadowMatch = /^shadow-(.*)$/.exec(cls)
-      if (shadowMatch) {
-        const key = shadowMatch[1]
-        if (shadowKeys.has(key))
-          return `shadow-[${cssVarRef('shadow', key)}]`
-        return cls
-      }
-
-      // font family classes, including custom keys like "brand"
-      if (cls === 'font-sans')
-        return `font-[${cssVarRef('font', 'sans')}]`
-      if (cls === 'font-serif')
-        return `font-[${cssVarRef('font', 'serif')}]`
-      if (cls === 'font-mono')
-        return `font-[${cssVarRef('font', 'mono')}]`
-
-      const ffMatch = /^font-([\w-]+)$/.exec(cls)
-      if (ffMatch) {
-        const key = ffMatch[1]
-        if (Object.prototype.hasOwnProperty.call(tokens.fontFamily, key))
-          return `font-[${cssVarRef('font', key)}]`
-      }
-
-      return cls
-    })
-    .join(' ')
-}
-
-function readElementClass(el) {
-  if (!el)
-    return ''
-  if (typeof el.className === 'string')
-    return el.className
-  if (el.className && typeof el.className.baseVal === 'string')
-    return el.className.baseVal
-  return el.getAttribute('class') || ''
-}
-
-function writeElementClass(el, nextClass = '') {
-  if (!el)
-    return
-  const normalized = typeof nextClass === 'string' ? nextClass : String(nextClass || '')
-  if (typeof el.className === 'string') {
-    el.className = normalized
-    return
-  }
-  el.setAttribute('class', normalized)
-}
-
-function appendElementClasses(el, classList) {
-  const additions = typeof classList === 'string' ? classList.trim() : ''
-  if (!additions)
-    return
-  const base = readElementClass(el)
-  writeElementClass(el, `${base} ${additions}`.trim())
-}
-
-function applyThemeClasses(scopeEl, theme, variant = 'light') {
-  if (!scopeEl)
-    return
-  const t = normalizeTheme(theme)
-  // Theme `apply` rules (root, link, heading, button, badge) are not applied:
-  // the public renderer ignores them, so adding them here only made the
-  // editor differ from the published site (a heading rule overrode blocks'
-  // own heading classes). Blocks set their own base font and colors
-  // (docs/data-contracts/cms-themes/README.md).
-  const v = (t.variants && t.variants[variant]) || {}
-  const slots = JSON.parse(JSON.stringify(t.slots || {}))
-  if (v.slots) {
-    // shallow merge per slot key
-    Object.entries(v.slots).forEach(([slotKey, obj]) => {
-      slots[slotKey] = { ...(slots[slotKey] || {}), ...obj }
-    })
-  }
-
-  // Slot-based mapping via data-slot attributes
-  const mapSlot = (slotBase, obj) => {
-    if (!obj)
-      return
-    Object.entries(obj).forEach(([part, classes]) => {
-      const sel = `[data-slot="${slotBase}.${part}"]`
-      scopeEl.querySelectorAll(sel).forEach((el) => {
-        appendElementClasses(el, toVarBackedUtilities(classes, t))
-      })
-    })
-  }
-  Object.entries(slots).forEach(([slotKey, val]) => {
-    mapSlot(slotKey, val)
-  })
-}
-
-// Responsive classes in sized canvases: edge/lib/cmsViewportClasses.js.
-const VIEWPORT_WIDTHS = {
-  auto: null,
-  full: null,
-  large: 1280,
-  medium: 992,
-  mobile: 480,
-}
-
-const viewportModeToWidth = (mode) => {
-  if (!mode)
-    return null
-  if (Object.prototype.hasOwnProperty.call(VIEWPORT_WIDTHS, mode))
-    return VIEWPORT_WIDTHS[mode]
-  return null
-}
-
-function rewriteAllClasses(scopeEl, theme, isolated = true, viewportMode = 'auto') {
-  if (!scopeEl)
-    return
-  const forcedWidth = viewportModeToWidth(viewportMode)
-  const mapCore = core => toVarBackedUtilities(core, theme)
-
-  scopeEl.querySelectorAll('[class]').forEach((el) => {
-    let base = el.dataset.viewportBaseClass
-    if (typeof base !== 'string') {
-      base = readElementClass(el)
-      el.dataset.viewportBaseClass = base
-    }
-    const orig = typeof base === 'string' ? base : String(base || '')
-    if (!orig.trim())
-      return
-    const origTokens = orig.split(/\s+/).filter(Boolean)
-    const mappedTokens = rewriteViewportClassTokens(origTokens, { forcedWidth, mapCore }).filter(Boolean)
-    if (isolated) {
-      const mapped = mappedTokens.join(' ')
-      writeElementClass(el, mapped)
-      return
-    }
-
-    const prevApplied = (el.dataset.themeAugmentedClasses || '').split(/\s+/).filter(Boolean)
-    if (prevApplied.length)
-      prevApplied.forEach(cls => el.classList.remove(cls))
-
-    const additions = mappedTokens.filter(cls => cls && !origTokens.includes(cls))
-    additions.forEach(cls => el.classList.add(cls))
-
-    if (additions.length)
-      el.dataset.themeAugmentedClasses = additions.join(' ')
-    else
-      delete el.dataset.themeAugmentedClasses
-  })
-}
-
-// --- Isolated preview canvas (docs/features/cms/iframe-canvas.md) ---
-// With the canvas preview on (useCmsCanvasPreview), the block renders inside a
-// same-origin iframe instead of the shared Hub document. Its CSS comes from the
-// template engine's generator, the one the public renderer uses, so there is no
-// Hub runtime, class rewriting or scoping. Inside a page canvas (pageCanvas.vue)
-// the block is already in the page's iframe and renders as plain HTML.
-const { enabled: canvasPreviewEnabled } = useCmsCanvasPreview()
-// Optional editor settings: `fixedMinHeight` (block editor), `head` (theme head).
 const canvasOptions = inject('edgeCmsCanvas', null)
 const pageCanvas = inject('edgeCmsPageCanvas', null)
-const pageCanvasActive = computed(() => Boolean(pageCanvas?.active))
-const canvasEnabled = computed(() => canvasPreviewEnabled.value && !pageCanvasActive.value)
-let inlineCanvas = false
+const inPageCanvas = ref(Boolean(pageCanvas?.active))
+const canvasEnabled = computed(() => !inPageCanvas.value)
 const canvasFrame = ref(null)
 const canvasMount = ref(null)
 const canvasHeight = ref(150)
@@ -1739,7 +726,7 @@ const canvasRoot = () => (canvasEnabled.value ? canvasMount.value : hostEl.value
 // frame sized to its content would clip it. Editors that preview one block at a
 // time (the block editor) provide a minimum height for that case.
 const canvasHasFixed = ref(false)
-const canvasMinHeight = computed(() => (canvasHasFixed.value && canvasOptions?.fixedMinHeight) || null)
+const canvasMinHeight = computed(() => (canvasHasFixed.value && (props.previewFixedMinHeight || canvasOptions?.fixedMinHeight)) || null)
 
 // Device widths render at their true size and scale down to fit, so the block's
 // own breakpoints respond (no class rewriting).
@@ -1838,11 +825,13 @@ async function showCanvasContent() {
   const html = safeHtml.value
   if (!(await writeCanvasCss(html)))
     return
+  cleanupPreviewHelpers()
   canvasHtml.value = html
   await nextTick()
   const root = canvasMount.value
   if (!root)
     return
+  helperRoot = root
   syncCmsPreviewAuthState(root, props.previewAuthLoggedIn)
   initEmblaCarousels(root)
   initCmsNavHelpers(root)
@@ -1910,6 +899,7 @@ function startCanvasWhenVisible() {
 
 async function initInlineCanvas() {
   const root = hostEl.value
+  helperRoot = root
   syncCmsPreviewAuthState(root, props.previewAuthLoggedIn)
   initEmblaCarousels(root)
   initCmsNavHelpers(root)
@@ -1920,142 +910,48 @@ async function initInlineCanvas() {
 }
 
 onMounted(async () => {
-  if (canvasEnabled.value) {
-    startCanvasWhenVisible()
-    return
-  }
-  // Teleported into the page canvas iframe: its document already has the
-  // site CSS, so skip the Hub runtime and class rewriting entirely.
-  if (pageCanvasActive.value && hostEl.value?.ownerDocument && hostEl.value.ownerDocument !== globalThis.document) {
-    inlineCanvas = true
-    await initInlineCanvas()
-    return
-  }
-  await ensureUnoRuntime()
-
-  // Apply global theme once (keeps one style tag for vars; blocks can still override locally if needed)
-  // setGlobalThemeVars(props.theme)
-  setScopedThemeVars(hostEl.value, props.theme)
-  setScopedExtraCss(hostEl.value, themeExtraCSS.value)
-  // If you later need per-block overrides, keep the next line; otherwise, it can be omitted.
-  // setScopedThemeVars(hostEl.value, normalizeTheme(props.theme))
-  applyThemeClasses(hostEl.value, props.theme, (props.theme && props.theme.variant) || 'light')
-  rewriteAllClasses(hostEl.value, props.theme, props.isolated, props.viewportMode)
-  syncCmsPreviewAuthState(hostEl.value, props.previewAuthLoggedIn)
-  // Initialize behaviors after class rewriting so helpers use final class state.
-  initEmblaCarousels(hostEl.value)
-  initCmsNavHelpers(hostEl.value)
+  // Sheets inherit the page provider but render in the Hub document.
+  inPageCanvas.value = Boolean(hostEl.value?.ownerDocument && hostEl.value.ownerDocument !== globalThis.document)
   await nextTick()
-  syncStandalonePreviewInset()
-  hasMounted = true
-  notifyLoaded()
+  if (canvasEnabled.value)
+    startCanvasWhenVisible()
+  else
+    await initInlineCanvas()
 })
 
-watch(
-  () => props.html,
-  async (val) => {
-    // Wait for DOM to reflect new v-html, then (re)wire behaviors and class mappings
-    await nextTick()
-    if (canvasEnabled.value) {
-      refreshCanvas()
-      return
-    }
-    if (inlineCanvas) {
-      initInlineCanvas()
-      return
-    }
-    // setGlobalThemeVars(props.theme)
-    setScopedThemeVars(hostEl.value, props.theme)
+watch(() => props.html, async () => {
+  if (!canvasEnabled.value)
+    cleanupPreviewHelpers()
+  await nextTick()
+  if (canvasEnabled.value)
+    refreshCanvas()
+  else
+    await initInlineCanvas()
+})
 
-    applyThemeClasses(hostEl.value, props.theme, (props.theme && props.theme.variant) || 'light')
-    rewriteAllClasses(hostEl.value, props.theme, props.isolated, props.viewportMode)
-    syncCmsPreviewAuthState(hostEl.value, props.previewAuthLoggedIn)
-    initEmblaCarousels(hostEl.value)
-    initCmsNavHelpers(hostEl.value)
-    await nextTick()
-    syncStandalonePreviewInset()
-    notifyLoaded()
-  },
-)
+watch(() => [props.theme, canvasOptions?.head], () => {
+  if (!canvasEnabled.value || !canvasMount.value)
+    return
+  canvasHeadLinks(canvasFrame.value.contentDocument, canvasHead())
+  refreshCanvas()
+}, { deep: true })
 
-watch(
-  () => props.theme,
-  async (val) => {
-    if (canvasEnabled.value) {
-      refreshCanvas()
-      return
-    }
-    if (inlineCanvas)
-      return
-    // 1) Write scoped CSS variables from the raw theme object
-    setScopedThemeVars(hostEl.value, val)
-    setScopedExtraCss(hostEl.value, typeof val?.extraCSS === 'string' ? val.extraCSS : '')
-    // 2) Apply classes based on `apply`, `slots`, and optional variants
-    applyThemeClasses(hostEl.value, val, (val && val.variant) || 'light')
-    rewriteAllClasses(hostEl.value, val, props.isolated, props.viewportMode)
-    syncCmsPreviewAuthState(hostEl.value, props.previewAuthLoggedIn)
-    initCmsNavHelpers(hostEl.value)
-    await nextTick()
-    syncStandalonePreviewInset()
-    notifyLoaded()
-  },
-  { immediate: true, deep: true },
-)
+watch(() => props.previewAuthLoggedIn, async (loggedIn) => {
+  await nextTick()
+  syncCmsPreviewAuthState(canvasRoot(), loggedIn)
+})
 
-watch(
-  () => props.viewportMode,
-  async () => {
-    await nextTick()
-    // The canvas width is the viewport; its own media queries respond.
-    if (canvasEnabled.value || inlineCanvas)
-      return
-    rewriteAllClasses(hostEl.value, props.theme, props.isolated, props.viewportMode)
-    syncCmsPreviewAuthState(hostEl.value, props.previewAuthLoggedIn)
-    // Viewport button changes can alter preview surface width without a window resize.
-    // Reinitialize nav helpers so fixed nav left/width is recalculated immediately.
-    initCmsNavHelpers(hostEl.value)
-    syncStandalonePreviewInset()
-  },
-)
-
-watch(
-  () => props.standalonePreview,
-  async () => {
-    await nextTick()
-    syncStandalonePreviewInset()
-  },
-)
-
-watch(
-  () => props.previewAuthLoggedIn,
-  async (loggedIn) => {
-    await nextTick()
-    syncCmsPreviewAuthState(canvasRoot(), loggedIn)
-  },
-)
-
-// The element holding the rendered block: the canvas mount when the block is
-// in its own canvas, otherwise the host (also inside a page canvas).
-defineExpose({ contentRoot: () => canvasRoot() })
+defineExpose({ contentRoot: canvasRoot })
 
 onBeforeUnmount(() => {
+  canvasRun += 1
+  cleanupPreviewHelpers()
   canvasCleanups.forEach(fn => fn())
   canvasCleanups = []
-  if (hostEl.value && Array.isArray(hostEl.value.__cmsNavCleanupFns)) {
-    hostEl.value.__cmsNavCleanupFns.forEach((cleanup) => {
-      try {
-        cleanup()
-      }
-      catch {}
-    })
-    hostEl.value.__cmsNavCleanupFns = []
-  }
-  // UnoCSS runtime attaches globally; no per-component teardown required.
 })
 </script>
 
 <template>
-  <!-- Prototype: isolated canvas; the block renders in the iframe's document -->
   <div v-if="canvasEnabled" ref="hostEl" data-cms-canvas-host>
     <iframe
       v-if="canvasActive"
@@ -2073,15 +969,8 @@ onBeforeUnmount(() => {
       <div v-else v-html="canvasHtml" />
     </Teleport>
   </div>
-  <!-- Runtime CSS applies inside this container -->
-  <div v-else ref="hostEl" class="block-content" :data-theme-scope="scopeId" data-cms-content>
+  <div v-else ref="hostEl" class="block-content" data-cms-content>
     <component :is="props.comp" v-if="props.comp" />
     <div v-else v-html="safeHtml" />
   </div>
 </template>
-
-<style>
-.cms-nav-preview-relative {
-  position: relative;
-}
-</style>

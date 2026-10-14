@@ -632,35 +632,6 @@ const blockIndex = (workingDoc, blockId, isPost = false) => {
   return (workingDoc[contentKey] || []).findIndex(block => block.id === blockId)
 }
 
-const isNavigationBlock = (block) => {
-  const content = String(block?.content || '').toLowerCase()
-  return content.includes('cms-nav-') || content.includes('data-cms-nav')
-}
-
-const isNonNavigationBlockInFirstContentRow = (workingDoc, blockId, isPost = false) => {
-  if (!workingDoc || !blockId)
-    return false
-  const contentKey = isPost ? 'postContent' : 'content'
-  const structureKey = isPost ? 'postStructure' : 'structure'
-  const blocksById = new Map((workingDoc[contentKey] || []).map(block => [block.id, block]))
-
-  for (const row of workingDoc[structureKey] || []) {
-    const nonNavigationBlockIds = []
-
-    for (const column of row.columns || []) {
-      for (const candidateBlockId of column.blocks || []) {
-        const block = blocksById.get(candidateBlockId)
-        if (block && !isNavigationBlock(block))
-          nonNavigationBlockIds.push(candidateBlockId)
-      }
-    }
-
-    if (nonNavigationBlockIds.length)
-      return nonNavigationBlockIds.includes(blockId)
-  }
-  return false
-}
-
 const removeBlockFromStructure = (workingDoc, blockId, isPost = false) => {
   const structureKey = isPost ? 'postStructure' : 'structure'
   for (const row of workingDoc[structureKey] || []) {
@@ -1150,16 +1121,14 @@ const effectiveThemeId = computed(() => {
 // Isolated preview canvas (docs/features/cms/iframe-canvas.md): Preview mode
 // renders the page in one iframe (pageCanvas.vue); Edit Layout renders each
 // block in its own canvas (htmlContent.vue).
-const { enabled: canvasPreviewEnabled, toggle: toggleCanvasPreview } = useCmsCanvasPreview()
-const pageCanvasEnabled = computed(() => canvasPreviewEnabled.value && !state.editMode)
+const pageCanvasEnabled = computed(() => !state.editMode)
 
 const pagePreviewRenderKey = computed(() => {
   const siteKey = String(props.site || '')
   const pageKey = String(props.page || '')
   const themeKey = String((effectiveThemeId.value || selectedThemeId.value || 'no-theme'))
   const modeKey = state.editMode ? 'edit' : 'preview'
-  const canvasKey = canvasPreviewEnabled.value ? 'canvas' : 'runtime'
-  return `${siteKey}:${pageKey}:${themeKey}:${modeKey}:${canvasKey}`
+  return `${siteKey}:${pageKey}:${themeKey}:${modeKey}`
 })
 
 const parsedTheme = computed(() => {
@@ -3664,17 +3633,6 @@ const hasUnsavedChanges = (changes) => {
                 <component :is="option.icon" class="w-3.5 h-3.5" />
               </edge-shad-button>
             </div>
-            <div v-if="!state.editMode" class="flex shrink-0 items-center px-1">
-              <button
-                type="button"
-                class="inline-flex shrink-0 items-center whitespace-nowrap rounded-md border px-2.5 py-1 text-xs font-medium shadow-sm transition-colors"
-                :class="canvasPreviewEnabled ? 'border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700' : 'border-slate-300 bg-white/90 text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200'"
-                title="Render previews in an isolated canvas with the public site's CSS (applies across the Hub)"
-                @click="toggleCanvasPreview"
-              >
-                {{ canvasPreviewEnabled ? 'Iframe canvas: on' : 'Iframe canvas: off' }}
-              </button>
-            </div>
             <div v-if="!state.editMode && isRestrictedContentEnabled" class="flex shrink-0 items-center gap-2 px-1">
               <label class="inline-flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap rounded-md border border-slate-300 bg-white/90 px-2.5 py-1 text-xs font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200 dark:hover:bg-slate-800">
                 <Checkbox
@@ -4238,7 +4196,6 @@ const hasUnsavedChanges = (changes) => {
                                         :preview-auth-logged-in="state.previewAuthLoggedIn"
                                         :block-id="blockId"
                                         :theme="theme"
-                                        :center-preview-toolbar="!state.editMode && isNonNavigationBlockInFirstContentRow(slotProps.workingDoc, blockId, false)"
                                         :allow-protection-editor="isRestrictedContentEnabled"
                                         @delete="(block) => deleteBlock(block, slotProps)"
                                       />
@@ -4507,7 +4464,6 @@ const hasUnsavedChanges = (changes) => {
                                         :theme="theme"
                                         :site-id="selectedPreviewContextSiteId"
                                         :route-last-segment="previewRouteLastSegment"
-                                        :center-preview-toolbar="!state.editMode && isNonNavigationBlockInFirstContentRow(slotProps.workingDoc, blockId, true)"
                                         :allow-protection-editor="isRestrictedContentEnabled"
                                         @delete="(block) => deleteBlock(block, slotProps, true)"
                                       />

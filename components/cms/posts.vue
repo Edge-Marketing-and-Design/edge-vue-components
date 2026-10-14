@@ -3564,7 +3564,6 @@ const reindexPublishedPostsToKv = async () => {
                               :theme="theme"
                               :site-id="props.site"
                               :render-context="postTemplatePreviewContext"
-                              :isolated="true"
                             />
                           </div>
                         </div>
