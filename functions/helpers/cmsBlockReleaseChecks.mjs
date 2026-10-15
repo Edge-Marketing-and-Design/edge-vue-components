@@ -27,6 +27,26 @@ const isObject = value => !!value && typeof value === 'object' && !Array.isArray
 const owns = (object, key) => Object.prototype.hasOwnProperty.call(object || {}, key)
 
 const THEME_NAME_CODES = new Set(['theme.color-name', 'theme.font-name', 'theme.radius-name'])
+// Shared by release checks and saved-block editor advice.
+export const contextualBlockThemeWarnings = ({ doc, originalWarnings, themeContexts, themeNameFindings, templateClassStrings }) => {
+  const contextual = Array.isArray(themeContexts) && themeContexts.length > 0
+    && typeof themeNameFindings === 'function' && typeof templateClassStrings === 'function'
+  const warnings = originalWarnings.filter(issue => !contextual || !THEME_NAME_CODES.has(issue.code))
+  if (contextual) {
+    const classes = templateClassStrings(doc.template || doc.content || '')
+    for (const context of themeContexts) {
+      const findings = themeNameFindings(classes, themeTokens(context.theme)).filter(issue => THEME_NAME_CODES.has(issue.code))
+      for (const finding of findings) {
+        const message = context.theme
+          ? `${context.siteName} · ${context.phase} · Theme “${context.themeName}”: ${finding.message.replace('outside the standard theme names', 'not defined in this theme or the standard names')}`
+          : `${context.siteName} · ${context.phase} · Theme “${context.themeName}” is unavailable; cannot verify custom names. ${finding.message}`
+        for (const targetPath of context.paths)
+          warnings.push({ code: finding.code, path: 'template', targetPath, siteId: context.siteId, themeId: context.themeId, themeName: context.themeName, context: context.phase, message })
+      }
+    }
+  }
+  return warnings
+}
 const parseTheme = (value) => {
   if (isObject(value))
     return value
@@ -223,24 +243,10 @@ export const runReleaseChecks = async ({
     .map(change => ({ ...change, instances: instancesUsing(instances, change) }))
 
   const errors = validation.errors.map(({ code, path, message }) => ({ code, path, message }))
-  const contextual = Array.isArray(themeContexts) && themeContexts.length > 0
-    && typeof themeNameFindings === 'function' && typeof templateClassStrings === 'function'
-  const warnings = validation.warnings
-    .filter(issue => !contextual || !THEME_NAME_CODES.has(issue.code))
-    .map(({ code, path, message }) => ({ code, path, message }))
-  if (contextual) {
-    const classes = templateClassStrings(doc.template || doc.content || '')
-    for (const context of themeContexts) {
-      const findings = themeNameFindings(classes, themeTokens(context.theme)).filter(issue => THEME_NAME_CODES.has(issue.code))
-      for (const finding of findings) {
-        const message = context.theme
-          ? `${context.siteName} · ${context.phase} · Theme “${context.themeName}”: ${finding.message.replace('outside the standard theme names', 'not defined in this theme or the standard names')}`
-          : `${context.siteName} · ${context.phase} · Theme “${context.themeName}” is unavailable; cannot verify custom names. ${finding.message}`
-        for (const targetPath of context.paths)
-          warnings.push({ code: finding.code, path: 'template', targetPath, siteId: context.siteId, themeId: context.themeId, themeName: context.themeName, context: context.phase, message })
-      }
-    }
-  }
+  const warnings = contextualBlockThemeWarnings({
+    doc, originalWarnings: validation.warnings.map(({ code, path, message }) => ({ code, path, message })),
+    themeContexts, themeNameFindings, templateClassStrings,
+  })
   // A release deletes the fields the revision lacks. Content, library values
   // and a Template v2 template must never go; anything else is flagged.
   const isTemplateV2 = Number(doc.templateVersion) === 2

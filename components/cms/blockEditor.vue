@@ -5,7 +5,7 @@ import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { clearCmsTemplateV2LibraryState } from '../../composables/useCmsTemplateRuntimeMeta'
 import { guardOverrideRename } from '../../lib/cmsOverrideRename'
-import { validateBlock } from '../../lib/cmsBlockValidation'
+import { validateEditorBlock } from '../../lib/cmsBlockEditorChecks'
 import { editorTagOptions, offListBlockTags } from '../../lib/cmsBlockTags'
 import { useCmsBlockTagList } from '../../composables/useCmsBlockTagList'
 import { safeParseTagConfig } from '../../lib/cmsTagConfig'
@@ -3473,7 +3473,8 @@ const runBlockChecks = async (doc) => {
   const run = ++blockChecksRun
   state.blockChecks = { status: 'running', result: null, checkedAt: '', error: '' }
   try {
-    const result = await validateBlock(edgeGlobal.dupObject(doc || {}), {
+    const result = await validateEditorBlock(edgeGlobal.dupObject(doc || {}), {
+      themes: edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/themes`] || {},
       knownThemeIds: availableThemeIds.value,
       blockTagList: blockTagList.value,
       renderTemplate: renderTemplateAsync,
@@ -3501,6 +3502,8 @@ const blockChecksLabel = computed(() => {
   if (status !== 'done')
     return 'Block checks: save to run'
   const errors = result.errors.length
+  if (result.contentChecksSkipped === 'override')
+    return 'Block checks: skipped for override block'
   const warnings = result.warnings.length
   if (!errors && !warnings)
     return 'Block checks: no issues'
@@ -5584,6 +5587,9 @@ const exportCurrentBlock = async () => {
           </p>
           <p v-else-if="state.blockChecks.status === 'failed'" class="text-sm text-destructive">
             The checks could not run: {{ state.blockChecks.error }}
+          </p>
+          <p v-else-if="state.blockChecks.result?.contentChecksSkipped === 'override'" class="text-sm">
+            Content checks skipped for this override block. Its Vue component is not validated here.
           </p>
           <p v-else-if="!blockCheckIssues.length" class="text-sm">
             No issues found at {{ state.blockChecks.checkedAt }}.
