@@ -14,6 +14,13 @@ here can publish a page, release a block, or touch Cloudflare KV.
 `cms_checkout_block` only writes local files beneath the configured
 workspace.
 
+Tool names, descriptions and input schemas live in
+`edge/lib/cmsAgentMcpTools.js`, shared with the Hub's remote MCP endpoint
+(`cmsAgentMcp`, `edge/functions/cmsAgentMcp.js`), which serves the
+Hub-endpoint tools to editors without a checkout. Change a tool there, not in
+`src/server.js`, and keep its two copies under `edge/functions/helpers/` and
+`functions/helpers/` identical (`test/tool-definitions.test.js` checks).
+
 ## Generic Firestore Tools
 
 - `firestore_list_collections`: list child collections at the root or below a document path.

@@ -152,6 +152,31 @@ const verifyConnection = async (header) => {
     throw new HttpsError('permission-denied', 'Connection is not authorized for CMS drafts.')
   return connection
 }
+// A 15-minute cmsas.… session for one explicit target, checked against the
+// creator's current Hub rights. Used by cms-agentConnection and cms-agentMcp.
+const issueAgentSession = async (connection, body = {}) => {
+  const orgId = docId(body.orgId, 'organization id')
+  const scope = body.scope
+  if (scope !== 'organization' && scope !== 'site')
+    throw new HttpsError('invalid-argument', 'Choose organization or site scope explicitly.')
+  const siteId = scope === 'site' ? docId(body.siteId, 'site id') : null
+  if (scope === 'organization' && body.siteId)
+    throw new HttpsError('invalid-argument', 'Organization sessions cannot select a site.')
+  if (!await canBuild(connection.data.createdBy, orgId))
+    throw new HttpsError('permission-denied', 'No current CMS edit access to this organization.')
+  const org = db.collection('organizations').doc(orgId)
+  const orgSnap = await org.get()
+  if (!orgSnap.exists)
+    throw new HttpsError('not-found', 'Organization does not exist.')
+  const siteSnap = siteId ? await org.collection('sites').doc(siteId).get() : null
+  if (siteSnap && !siteSnap.exists)
+    throw new HttpsError('not-found', 'Site does not exist in the selected organization.')
+  const expiresAt = new Date(Math.min(Date.now() + SESSION_MS, Date.parse(connection.data.expiresAt))).toISOString()
+  const data = { connectionId: connection.id, createdBy: connection.data.createdBy, orgId, siteId, scope, createdAt: new Date().toISOString(), expiresAt, expiresAtTimestamp: Timestamp.fromMillis(Date.parse(expiresAt)), revokedAt: null }
+  const session = await issue(sessions(), 'cmsas', data)
+  await connection.ref.update({ lastUsedAt: new Date().toISOString() })
+  return { sessionId: session.id, token: session.token, expiresAt, orgId, organizationName: String(orgSnap.data()?.name || orgId), siteId, siteName: siteSnap ? String(siteSnap.data()?.name || siteId) : null, scope }
+}
 exports.agentConnection = onRequest({ timeoutSeconds: 60 }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ ok: false, code: 'method-not-allowed', message: 'Use POST.' })
@@ -166,27 +191,7 @@ exports.agentConnection = onRequest({ timeoutSeconds: 60 }, async (req, res) => 
     }
     if (body.action !== 'session')
       throw new HttpsError('invalid-argument', 'action must be organizations or session.')
-    const orgId = docId(body.orgId, 'organization id')
-    const scope = body.scope
-    if (scope !== 'organization' && scope !== 'site')
-      throw new HttpsError('invalid-argument', 'Choose organization or site scope explicitly.')
-    const siteId = scope === 'site' ? docId(body.siteId, 'site id') : null
-    if (scope === 'organization' && body.siteId)
-      throw new HttpsError('invalid-argument', 'Organization sessions cannot select a site.')
-    if (!await canBuild(connection.data.createdBy, orgId))
-      throw new HttpsError('permission-denied', 'No current CMS edit access to this organization.')
-    const org = db.collection('organizations').doc(orgId)
-    const orgSnap = await org.get()
-    if (!orgSnap.exists)
-      throw new HttpsError('not-found', 'Organization does not exist.')
-    const siteSnap = siteId ? await org.collection('sites').doc(siteId).get() : null
-    if (siteSnap && !siteSnap.exists)
-      throw new HttpsError('not-found', 'Site does not exist in the selected organization.')
-    const expiresAt = new Date(Math.min(Date.now() + SESSION_MS, Date.parse(connection.data.expiresAt))).toISOString()
-    const data = { connectionId: connection.id, createdBy: connection.data.createdBy, orgId, siteId, scope, createdAt: new Date().toISOString(), expiresAt, expiresAtTimestamp: Timestamp.fromMillis(Date.parse(expiresAt)), revokedAt: null }
-    const session = await issue(sessions(), 'cmsas', data)
-    await connection.ref.update({ lastUsedAt: new Date().toISOString() })
-    res.json({ ok: true, sessionId: session.id, token: session.token, expiresAt, orgId, organizationName: String(orgSnap.data()?.name || orgId), siteId, siteName: siteSnap ? String(siteSnap.data()?.name || siteId) : null, scope })
+    res.json({ ok: true, ...await issueAgentSession(connection, body) })
   }
   catch (error) {
     const statuses = { 'invalid-argument': 400, 'unauthenticated': 401, 'permission-denied': 403, 'not-found': 404, 'failed-precondition': 409 }
@@ -196,6 +201,9 @@ exports.agentConnection = onRequest({ timeoutSeconds: 60 }, async (req, res) => 
     res.status(status).json({ ok: false, code: status === 500 ? 'internal' : error.code, message: status === 500 ? 'Connection request failed.' : error.message })
   }
 })
+exports.verifyConnection = verifyConnection
+exports.organizationPage = organizationPage
+exports.issueAgentSession = issueAgentSession
 
 // What a site session may ask of cms-agentOperation: page operations and
 // site.update on its site, and reads of that site (preview, readiness, the

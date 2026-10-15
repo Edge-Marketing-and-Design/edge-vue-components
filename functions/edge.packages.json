@@ -3,7 +3,9 @@
     "acorn": "8.11.3",
     "@edgedev/template-engine": "26.10.2",
     "@sparticuz/chromium": "149.0.0",
-    "puppeteer-core": "25.1.0"
+    "puppeteer-core": "25.1.0",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "zod": "3.25.76"
   },
   "devDependencies": {}
 }

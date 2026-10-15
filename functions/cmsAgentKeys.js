@@ -202,6 +202,61 @@ const previewLink = async ({ uid, orgId, body }) => {
   const applied = new URL(url).searchParams
   return { url, expiresAt, blockDrafts, viewport: applied.get('viewport') || null, width: applied.get('width') ? Number(applied.get('width')) : null }
 }
+// One agent request: verifies the bearer (an agent key or a connection
+// session), runs the action as its creator and returns the action's result.
+// Throws HttpsError on refusal. cms-agentOperation serves it over HTTP and
+// cms-agentMcp calls it in-process.
+const handleAgentRequest = async ({ header, body }) => {
+  const orgId = requireDocId(body.orgId, 'organization id')
+  const { uid, keyId, ref, connectionId = null } = /^Bearer\s+cmsas\./i.test(String(header || ''))
+    ? await verifyAgentSession(orgId, header, body)
+    : await verifyAgentKey(orgId, header)
+  let result
+  if (body.action === 'preview') {
+    result = await previewLink({ uid, orgId, body })
+  }
+  else if (body.action === 'readiness') {
+    await requireSiteRead(uid, orgId)
+    result = await gatherSiteReadiness({ orgId, siteId: requireDocId(body.siteId, 'site id') })
+  }
+  else if (body.action === 'pages') {
+    await requireSiteRead(uid, orgId)
+    result = await gatherSitePages({ orgId, siteId: requireDocId(body.siteId, 'site id') })
+  }
+  else if (body.action === 'page') {
+    await requireSiteRead(uid, orgId)
+    result = await gatherPageOutline({
+      orgId,
+      siteId: requireDocId(body.siteId, 'site id'),
+      pageId: requireDocId(body.pageId, 'page id'),
+      source: body.source === 'published' ? 'published' : 'draft',
+      includeValues: body.includeValues !== false,
+      includeSchema: body.includeSchema === true,
+    })
+  }
+  else if (body.action === 'check' || body.action === 'run') {
+    const caller = await authorizeOperation({ uid, orgId, operation: body.operation })
+    result = body.action === 'check'
+      ? await performCheck(caller)
+      : await performRun({ ...caller, checksum: body.checksum, client: body.client, via: 'agent', agentKeyId: keyId, agentConnectionId: connectionId })
+  }
+  else {
+    throw new HttpsError('invalid-argument', 'action must be "check", "run", "preview", "readiness", "pages" or "page".')
+  }
+  const used = await ref.get()
+  await ref.update({ lastUsedAt: new Date().toISOString(), useCount: (used.data()?.useCount || 0) + 1 })
+  return result
+}
+
+// The HTTP status and JSON body for a refusal or failure.
+const agentErrorResponse = (error) => {
+  const code = (error instanceof HttpsError || error?.code) ? String(error.code) : 'internal'
+  const status = HTTP_STATUS[code] || 500
+  if (status === 500)
+    logger.error('Agent operation failed', { error: error?.message })
+  return { status, body: { ok: false, code, message: status === 500 ? 'The operation failed.' : String(error.message || ''), details: error?.details || null } }
+}
+
 exports.agentOperation = onRequest({ timeoutSeconds: 120 }, async (req, res) => {
   if (req.method !== 'POST') {
     res.status(405).json({ ok: false, code: 'method-not-allowed', message: 'Use POST.' })
@@ -209,55 +264,17 @@ exports.agentOperation = onRequest({ timeoutSeconds: 120 }, async (req, res) => 
   }
   try {
     const body = (req.body && typeof req.body === 'object') ? req.body : {}
-    const orgId = requireDocId(body.orgId, 'organization id')
-    const header = req.get ? req.get('authorization') : req.headers?.authorization
-    const { uid, keyId, ref, connectionId = null } = /^Bearer\s+cmsas\./i.test(String(header || ''))
-      ? await verifyAgentSession(orgId, header, body)
-      : await verifyAgentKey(orgId, header)
-    let result
-    if (body.action === 'preview') {
-      result = await previewLink({ uid, orgId, body })
-    }
-    else if (body.action === 'readiness') {
-      await requireSiteRead(uid, orgId)
-      result = await gatherSiteReadiness({ orgId, siteId: requireDocId(body.siteId, 'site id') })
-    }
-    else if (body.action === 'pages') {
-      await requireSiteRead(uid, orgId)
-      result = await gatherSitePages({ orgId, siteId: requireDocId(body.siteId, 'site id') })
-    }
-    else if (body.action === 'page') {
-      await requireSiteRead(uid, orgId)
-      result = await gatherPageOutline({
-        orgId,
-        siteId: requireDocId(body.siteId, 'site id'),
-        pageId: requireDocId(body.pageId, 'page id'),
-        source: body.source === 'published' ? 'published' : 'draft',
-        includeValues: body.includeValues !== false,
-        includeSchema: body.includeSchema === true,
-      })
-    }
-    else if (body.action === 'check' || body.action === 'run') {
-      const caller = await authorizeOperation({ uid, orgId, operation: body.operation })
-      result = body.action === 'check'
-        ? await performCheck(caller)
-        : await performRun({ ...caller, checksum: body.checksum, client: body.client, via: 'agent', agentKeyId: keyId, agentConnectionId: connectionId })
-    }
-    else {
-      throw new HttpsError('invalid-argument', 'action must be "check", "run", "preview", "readiness", "pages" or "page".')
-    }
-    const used = await ref.get()
-    await ref.update({ lastUsedAt: new Date().toISOString(), useCount: (used.data()?.useCount || 0) + 1 })
+    const result = await handleAgentRequest({ header: req.get ? req.get('authorization') : req.headers?.authorization, body })
     res.status(200).json({ ok: true, ...result })
   }
   catch (error) {
-    const code = (error instanceof HttpsError || error?.code) ? String(error.code) : 'internal'
-    const status = HTTP_STATUS[code] || 500
-    if (status === 500)
-      logger.error('Agent operation failed', { error: error?.message })
-    res.status(status).json({ ok: false, code, message: status === 500 ? 'The operation failed.' : String(error.message || ''), details: error?.details || null })
+    const { status, body } = agentErrorResponse(error)
+    res.status(status).json(body)
   }
 })
+
+exports.handleAgentRequest = handleAgentRequest
+exports.agentErrorResponse = agentErrorResponse
 
 // For tests.
 exports.verifyAgentKey = verifyAgentKey
