@@ -15,8 +15,10 @@ import {
   readBlockRelease,
   releasableRevisionItems,
   releaseProgress,
+  releaseScopeSiteIds,
   retryBlockRelease,
   rollbackRevision,
+  selectableReleaseSites,
 } from '../../lib/cmsBlockReleaseClient'
 
 // Releases a library block revision to pages: dry run and checks, then a
@@ -42,6 +44,7 @@ const state = reactive({
   error: '',
   revision: '',
   scopeMode: 'all',
+  canaryRollbackScope: false,
   siteIds: [],
   plan: null,
   planning: false,
@@ -53,12 +56,20 @@ const state = reactive({
 
 const orgId = computed(() => edgeGlobal.edgeState.currentOrganization)
 const isAdmin = computed(() => edgeGlobal.isAdminGlobal(edgeFirebase).value)
-const siteItems = computed(() => Object.values(edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`] || {})
+const sitesData = computed(() => edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`])
+const sitesLoaded = computed(() => Boolean(sitesData.value))
+const siteItems = computed(() => selectableReleaseSites(sitesData.value))
+const reportSiteItems = computed(() => Object.values(sitesData.value || {})
   .filter(site => site?.docId)
   .map(site => ({ title: site.name || site.docId, name: site.docId })))
-const siteName = siteId => siteItems.value.find(site => site.name === siteId)?.title || siteId
+const siteName = siteId => siteId === 'templates' ? 'Templates (library)' : reportSiteItems.value.find(site => site.name === siteId)?.title || siteId
+const organizationName = computed(() => edgeFirebase.data?.[`organizations/${orgId.value}`]?.name || orgId.value)
+const hasSites = computed(() => siteItems.value.length > 0)
+const hasMultipleSites = computed(() => siteItems.value.length > 1)
+const fullReleaseLabel = computed(() => siteItems.value.length === 1 ? `Release to ${siteItems.value[0].title}…` : 'Release to all sites in this organization…')
+const scopeLabel = (scope, kind) => (!scope || scope === 'all') && siteItems.value.length === 1 ? siteItems.value[0].title : describeScope(scope, kind)
 const revisionItems = computed(() => releasableRevisionItems(state.history))
-const scopeItems = [{ title: 'All sites', name: 'all' }, { title: 'Selected sites (canary)', name: 'sites' }]
+const scopeItems = [{ title: 'All sites in this organization', name: 'all' }, { title: 'Selected sites (canary)', name: 'sites' }]
 const issueGroups = computed(() => groupedReleaseIssues(state.plan?.checks))
 const comparisonRevision = computed(() => state.revision === '' ? releaseComparisonRevision(state.history) : Number(state.revision))
 const usageSites = computed(() => {
@@ -83,10 +94,13 @@ const checksTruncated = computed(() => {
 const progress = computed(() => releaseProgress(state.release))
 const rollbackTo = computed(() => rollbackRevision(state.history))
 const canaryRollback = computed(() => canaryRollbackPlan(state.history))
-const selectedSiteIds = computed(() => (state.scopeMode === 'sites' ? state.siteIds : null))
-const canExecute = computed(() => releaseCanExecute(state.plan, { isAdmin: isAdmin.value, confirmBreaking: state.confirmBreaking, executing: state.executing }))
+const selectedSiteIds = computed(() => releaseScopeSiteIds({ sites: siteItems.value, scopeMode: state.scopeMode, siteIds: state.siteIds, canaryRollback: state.canaryRollbackScope }))
+const canCheck = computed(() => sitesLoaded.value && hasSites.value && Boolean(state.revision)
+  && (selectedSiteIds.value === null || selectedSiteIds.value.length > 0))
+const canExecute = computed(() => canCheck.value && releaseCanExecute(state.plan, { isAdmin: isAdmin.value, confirmBreaking: state.confirmBreaking, executing: state.executing }))
 const checkStatusLabel = computed(() => {
   const plan = state.plan
+  if (plan?.checks.contentChecksSkipped === 'override') return 'Override block: content checks skipped'
   if (plan?.checks.status === 'passed') return 'Checks passed'
   if (plan?.checks.status === 'blocked') return plan.blocked ? 'Release blocked' : 'Validation issues reported'
   if (plan?.checks.status === 'breaking') return plan.breakingConfirmationRequired ? 'Breaking changes need confirmation' : 'Breaking changes reported'
@@ -119,9 +133,11 @@ const resetPlan = () => {
   state.confirmBreaking = false
 }
 
-watch(() => [state.revision, state.scopeMode, state.siteIds.join(',')], resetPlan)
+watch(() => [orgId.value, state.revision, state.scopeMode, state.siteIds.join(','), siteItems.value.map(site => site.name).join(','), state.canaryRollbackScope], resetPlan)
 
 const runDryRun = async () => {
+  if (!canCheck.value)
+    return
   resetPlan()
   state.planning = true
   state.error = ''
@@ -205,12 +221,21 @@ const retry = async (releaseId) => {
   }
 }
 
+const startAnotherRelease = () => {
+  state.release = null
+  state.canaryRollbackScope = false
+  state.scopeMode = 'all'
+  state.siteIds = []
+  resetPlan()
+}
+
 const startRollback = () => {
   if (rollbackTo.value === null)
     return
   state.release = null
   state.revision = String(rollbackTo.value)
   state.scopeMode = 'all'
+  state.canaryRollbackScope = false
   state.tab = 'release'
 }
 
@@ -223,6 +248,7 @@ const startCanaryRollback = () => {
   state.release = null
   state.revision = String(plan.revisionNumber)
   state.scopeMode = 'sites'
+  state.canaryRollbackScope = true
   state.siteIds = plan.siteIds
   state.tab = 'release'
 }
@@ -232,6 +258,7 @@ const startCanaryPromotion = () => {
   state.release = null
   state.revision = String(state.history.canary.revisionNumber)
   state.scopeMode = 'all'
+  state.canaryRollbackScope = false
   state.siteIds = []
   resetPlan()
   state.tab = 'release'
@@ -256,6 +283,7 @@ watch(() => props.modelValue, async (open) => {
   state.release = null
   state.error = ''
   state.scopeMode = 'all'
+  state.canaryRollbackScope = false
   state.siteIds = []
   state.tab = props.initialRevision === null ? 'history' : 'release'
   await loadHistory()
@@ -278,6 +306,7 @@ const close = () => emit('update:modelValue', false)
         </DialogTitle>
         <DialogDescription class="text-left">
           Releasing applies a revision to every page that uses this block. Check it first; nothing changes until you release.
+          <span class="mt-1 block">Organization: {{ organizationName }}. Releases never affect other organizations.</span>
         </DialogDescription>
       </DialogHeader>
 
@@ -324,9 +353,9 @@ const close = () => emit('update:modelValue', false)
           <div v-if="progress.finished && state.history?.canary" class="rounded-lg border p-4" :class="RELEASE_BADGE_CLASSES.mixed">
             <p class="font-medium">Canary—not released everywhere</p>
             <p class="mt-1 text-sm">Revision {{ state.history.canary.revisionNumber }} is assigned to {{ state.history.canary.siteIds.length }} canary site(s). Other sites keep their previous revision. Check site outcomes below for any failed documents.</p>
-            <edge-shad-button v-if="isAdmin" type="button" size="sm" class="mt-3" @click="startCanaryPromotion">Release to all sites…</edge-shad-button>
+            <edge-shad-button v-if="isAdmin" type="button" size="sm" class="mt-3" @click="startCanaryPromotion">{{ fullReleaseLabel }}</edge-shad-button>
           </div>
-          <edge-cms-block-release-targets :key="state.release.releaseId" :release-id="state.release.releaseId" :sites="siteItems" :refresh-key="String(state.release.updatedAt || state.release.status)" />
+          <edge-cms-block-release-targets :key="state.release.releaseId" :release-id="state.release.releaseId" :sites="reportSiteItems" :refresh-key="String(state.release.updatedAt || state.release.status)" />
           <div v-if="isAdmin && canRetryRelease(state.release)" class="flex justify-end">
             <edge-shad-button type="button" :disabled="state.retrying" @click="retry(state.release.releaseId)">
               <Loader2 v-if="state.retrying" class="mr-2 h-4 w-4 animate-spin" />
@@ -334,7 +363,7 @@ const close = () => emit('update:modelValue', false)
             </edge-shad-button>
           </div>
           <div v-if="progress.finished" class="flex justify-end">
-            <edge-shad-button type="button" variant="outline" @click="state.release = null">
+            <edge-shad-button type="button" variant="outline" @click="startAnotherRelease">
               Start another release
             </edge-shad-button>
           </div>
@@ -346,11 +375,19 @@ const close = () => emit('update:modelValue', false)
           </p>
           <template v-else>
             <div class="grid gap-3 md:grid-cols-2">
-              <edge-shad-select v-model="state.revision" label="Revision" :items="revisionItems" placeholder="Choose a revision" />
-              <edge-shad-select v-model="state.scopeMode" label="Where" :items="scopeItems" />
+              <edge-shad-select v-model="state.revision" label="Revision" :items="revisionItems" :disabled="state.canaryRollbackScope" placeholder="Choose a revision" />
+              <edge-shad-select v-if="hasMultipleSites && !state.canaryRollbackScope" v-model="state.scopeMode" label="Where" :items="scopeItems" />
+              <div v-else class="space-y-2">
+                <p class="text-sm font-medium">Where</p>
+                <p class="flex min-h-10 items-center rounded-md border bg-muted/40 px-3 py-2 text-sm" role="status">
+                  {{ !sitesLoaded ? 'Loading sites…' : !hasSites ? 'No sites in this organization' : state.canaryRollbackScope ? state.siteIds.map(siteName).join(', ') : siteItems[0].title }}
+                </p>
+              </div>
             </div>
+            <p v-if="sitesLoaded && !hasSites" class="text-sm text-muted-foreground" role="status">Create a site before starting a release. Templates are not a website.</p>
+            <p v-if="state.canaryRollbackScope" class="text-sm text-muted-foreground">Rolling back the existing canary on its original sites; this does not change the full-release scope.</p>
             <edge-shad-select-tags
-              v-if="state.scopeMode === 'sites'"
+              v-if="hasMultipleSites && state.scopeMode === 'sites' && !state.canaryRollbackScope"
               v-model="state.siteIds"
               label="Canary sites"
               :items="siteItems"
@@ -363,7 +400,7 @@ const close = () => emit('update:modelValue', false)
               <edge-shad-button
                 type="button"
                 variant="outline"
-                :disabled="state.planning || !state.revision || (state.scopeMode === 'sites' && !state.siteIds.length)"
+                :disabled="state.planning || !canCheck"
                 @click="runDryRun"
               >
                 <Loader2 v-if="state.planning" class="mr-2 h-4 w-4 animate-spin" />
@@ -374,7 +411,7 @@ const close = () => emit('update:modelValue', false)
 
           <div v-if="state.plan" class="space-y-3 rounded-md border p-3" aria-live="polite">
             <div class="flex flex-wrap items-center justify-between gap-2 text-sm">
-              <span class="font-medium">{{ describeRelease(state.plan) }}: {{ describeScope(state.plan.scope, state.plan.kind) }}</span>
+              <span class="font-medium">{{ describeRelease(state.plan) }}: {{ scopeLabel(state.plan.scope, state.plan.kind) }}</span>
               <span class="text-muted-foreground">Released now: revision {{ state.plan.releasedRevision }}</span>
             </div>
             <dl class="grid grid-cols-2 gap-3 rounded-lg bg-muted/50 p-4 sm:grid-cols-4">
@@ -407,7 +444,7 @@ const close = () => emit('update:modelValue', false)
             <div class="flex items-start gap-3 rounded-lg border p-3" :class="RELEASE_BADGE_CLASSES[state.plan.checks.status === 'passed' ? 'current' : state.plan.checks.status === 'blocked' ? 'failed' : 'mixed']">
               <CheckCircle2 v-if="state.plan.checks.status === 'passed'" class="mt-0.5 h-5 w-5 shrink-0" />
               <TriangleAlert v-else class="mt-0.5 h-5 w-5 shrink-0" />
-              <div><p class="text-sm font-medium">{{ checkStatusLabel }}</p><p class="mt-1 text-xs">{{ state.plan.checks.counts.instances }} instances · {{ state.plan.checks.counts.rendered }} distinct renders<template v-if="issueGroups.length"> · {{ issueGroups.length }} reported issue types</template></p></div>
+              <div><p class="text-sm font-medium">{{ checkStatusLabel }}</p><p class="mt-1 text-xs">{{ state.plan.checks.counts.instances }} instances<template v-if="state.plan.checks.contentChecksSkipped === 'override'"> · Revision, scope and propagation safeguards still apply. The Vue component is not validated here.</template><template v-else> · {{ state.plan.checks.counts.rendered }} distinct renders<template v-if="issueGroups.length"> · {{ issueGroups.length }} reported issue types</template></template></p></div>
             </div>
             <div v-if="issueGroups.length" class="space-y-2">
               <details v-for="group in issueGroups" :key="group.key" class="rounded-lg border">
@@ -442,7 +479,7 @@ const close = () => emit('update:modelValue', false)
           <div v-if="state.history?.canary" class="rounded-lg border p-4" :class="RELEASE_BADGE_CLASSES.mixed">
             <p class="flex items-center gap-2 font-medium"><TriangleAlert class="h-4 w-4" />Canary—not released everywhere</p>
             <p class="mt-1">Revision {{ state.history.canary.revisionNumber }} is assigned to {{ state.history.canary.siteIds.length }} canary site(s). The global release remains revision {{ state.history.releasedRevision }}.</p>
-            <edge-shad-button v-if="isAdmin" type="button" size="sm" class="mt-3" @click="startCanaryPromotion">Release to all sites…</edge-shad-button>
+            <edge-shad-button v-if="isAdmin" type="button" size="sm" class="mt-3" @click="startCanaryPromotion">{{ fullReleaseLabel }}</edge-shad-button>
           </div>
           <div class="flex flex-wrap items-center justify-between gap-2">
             <span>
@@ -507,7 +544,7 @@ const close = () => emit('update:modelValue', false)
                   Retry
                 </edge-shad-button>
                 </div>
-                <edge-cms-block-release-targets :release-id="item.releaseId" :sites="siteItems" />
+                <edge-cms-block-release-targets :release-id="item.releaseId" :sites="reportSiteItems" />
               </li>
             </ul>
           </div>
@@ -522,7 +559,7 @@ const close = () => emit('update:modelValue', false)
         <edge-shad-button v-if="state.tab === 'release' && !state.release && isAdmin" type="button" :disabled="!canExecute" @click="runRelease">
           <Loader2 v-if="state.executing" class="mr-2 h-4 w-4 animate-spin" />
           <Rocket v-else class="mr-2 h-4 w-4" />
-          {{ state.plan?.kind === 'promote' ? 'Release to all sites' : 'Release' }}
+          {{ state.plan?.kind === 'promote' ? fullReleaseLabel.replace(/…$/, '') : 'Release' }}
         </edge-shad-button>
       </DialogFooter>
     </DialogContent>

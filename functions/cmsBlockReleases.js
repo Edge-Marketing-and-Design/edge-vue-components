@@ -124,7 +124,28 @@ const isScoped = scope => scope !== 'all'
 // render of every instance with its own values, and schema compatibility.
 const checkRelease = async ({ orgId, blockId, block, revision, targets }) => {
   const [checks, validation, engine] = await loadCheckModules()
+  // No content/theme checks or their Firestore reads for renderer-owned blocks.
+  // Revision, checksum, scope, permission and worker safeguards stay outside
+  // this helper and continue to apply unchanged.
+  if (revision.definition?.isOverrideBlock === true)
+    return checks.runReleaseChecks({ blockId, blockDoc: block, definition: revision.definition, targets })
   const themes = await orgRefOf(orgId).collection('themes').get()
+  const themeDocs = Object.fromEntries(themes.docs.map(doc => [doc.id, doc.data()]))
+  const siteIds = [...new Set(targets.map(target => target.siteId).filter(id => id !== 'templates'))]
+  const settings = await Promise.all(siteIds.map(async (siteId) => {
+    const [draft, published] = await Promise.all([
+      orgRefOf(orgId).collection('sites').doc(siteId).get(),
+      orgRefOf(orgId).collection('published-site-settings').doc(siteId).get(),
+    ])
+    return { siteId, draft: draft.exists ? draft.data() : {}, published: published.exists ? published.data() : {} }
+  }))
+  const themeContexts = checks.buildReleaseThemeContexts({
+    targets,
+    sites: Object.fromEntries(settings.map(item => [item.siteId, item.draft])),
+    publishedSites: Object.fromEntries(settings.map(item => [item.siteId, item.published])),
+    themes: themeDocs,
+    blockThemes: Array.isArray(block.themes) ? block.themes : [],
+  })
   const core = await corePromise
   return checks.runReleaseChecks({
     blockId,
@@ -136,6 +157,9 @@ const checkRelease = async ({ orgId, blockId, block, revision, targets }) => {
     validateBlockRender: validation.validateBlockRender,
     renderTemplate: engine.renderTemplateAsync,
     knownThemeIds: themes.docs.map(doc => doc.id),
+    themeContexts,
+    themeNameFindings: validation.themeNameFindings,
+    templateClassStrings: validation.templateClassStrings,
   })
 }
 

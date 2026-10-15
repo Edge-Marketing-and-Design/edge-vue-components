@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "acorn": "8.11.3",
     "@edgedev/firebase": "latest",
     "@edgedev/edgecomponents": "latest",
     "@edgedev/template-engine": "latest",
