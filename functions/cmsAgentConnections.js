@@ -197,10 +197,10 @@ exports.agentConnection = onRequest({ timeoutSeconds: 60 }, async (req, res) => 
   }
 })
 
-// What a site session may ask of cms-agentOperation: page operations and
-// site.update on its site, and reads of that site (preview, readiness, the
-// page list and page outlines).
-const SITE_SESSION_ACTIONS = ['check', 'run', 'preview', 'readiness', 'pages', 'page']
+// What a site session may ask of cms-agentOperation: page and post
+// operations and site.update on its site, and reads of that site (preview,
+// readiness, the page and post lists and outlines).
+const SITE_SESSION_ACTIONS = ['check', 'run', 'preview', 'readiness', 'pages', 'page', 'posts', 'post']
 
 // Parent revocation/expiry and current creator permissions are authoritative.
 exports.verifyAgentSession = async (orgId, header, body) => {
@@ -221,12 +221,12 @@ exports.verifyAgentSession = async (orgId, header, body) => {
     const target = (body.action === 'check' || body.action === 'run') ? body.operation?.siteId : body.siteId
     if (target !== session.data.siteId)
       throw new HttpsError('permission-denied', 'Session belongs to a different site.')
-    if ((body.action === 'check' || body.action === 'run') && !type.startsWith('page.') && type !== 'site.update')
-      throw new HttpsError('permission-denied', 'Site sessions only allow page operations and updates to this site.')
+    if ((body.action === 'check' || body.action === 'run') && !type.startsWith('page.') && !type.startsWith('post.') && type !== 'site.update')
+      throw new HttpsError('permission-denied', 'Site sessions only allow page and post operations and updates to this site.')
   }
   else if (session.data.scope === 'organization') {
     if (!['check', 'run'].includes(body.action) || (!type.startsWith('block.') && !type.startsWith('theme.') && type !== 'site.create'))
-      throw new HttpsError('permission-denied', 'Organization sessions only allow library/theme work and site creation. Open a site session for page work.')
+      throw new HttpsError('permission-denied', 'Organization sessions only allow library/theme work and site creation. Open a site session for page and post work.')
   }
   else {
     throw new HttpsError('permission-denied', 'Invalid session scope.')

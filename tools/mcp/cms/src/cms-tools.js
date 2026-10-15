@@ -686,6 +686,12 @@ export function createCmsToolService({
       config.maxCmsPageScanDocuments || DEFAULT_PAGE_LIMIT,
       DEFAULT_PAGE_LIMIT,
     )
+    // Posts per collection (each site's draft posts and published snapshots).
+    const maxPostsPerSite = boundedNumber(
+      config.maxCmsPostScanDocuments,
+      config.maxCmsPostScanDocuments || DEFAULT_PAGE_LIMIT,
+      DEFAULT_PAGE_LIMIT,
+    )
     let siteIds = []
     let siteScanTruncated = false
 
@@ -722,6 +728,7 @@ export function createCmsToolService({
         const references = collectBlockReferences(pageData, docId)
         for (const reference of references) {
           usages.push({
+            kind: 'page',
             siteId,
             pageId: pageSnapshot.id,
             pageName: firstNonEmptyString(pageData?.name, pageData?.title, pageData?.menuTitle),
@@ -732,6 +739,43 @@ export function createCmsToolService({
             resultTruncated = true
             break
           }
+        }
+        if (resultTruncated)
+          break
+      }
+      if (resultTruncated)
+        break
+
+      // Post bodies: drafts and the published snapshots the public site reads.
+      for (const [collection, source] of [['posts', 'draft'], ['published_posts', 'published']]) {
+        const postsPath = `organizations/${orgId}/sites/${siteId}/${collection}`
+        const postsSnapshot = await db.collection(postsPath).limit(maxPostsPerSite + 1).get()
+        const posts = postsSnapshot.docs.slice(0, maxPostsPerSite)
+        scanned.push({
+          siteId,
+          collectionPath: postsPath,
+          scannedDocuments: posts.length,
+          scanTruncated: postsSnapshot.size > maxPostsPerSite,
+        })
+        for (const postSnapshot of posts) {
+          const postData = sanitizeValue(postSnapshot.data())
+          for (const reference of collectBlockReferences(postData, docId)) {
+            usages.push({
+              kind: 'post',
+              siteId,
+              postId: postSnapshot.id,
+              source,
+              title: firstNonEmptyString(postData?.title),
+              slug: firstNonEmptyString(postData?.name),
+              ...reference,
+            })
+            if (usages.length >= resultLimit) {
+              resultTruncated = true
+              break
+            }
+          }
+          if (resultTruncated)
+            break
         }
         if (resultTruncated)
           break
