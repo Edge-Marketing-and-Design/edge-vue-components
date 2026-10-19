@@ -27,6 +27,7 @@ export const useCmsNewDocs = () => {
     extraCSS: {
       value: '',
     },
+    typeRoles: { value: { sectionTitle: '', sectionIntro: '' } },
     version: 1,
     defaultPages: { value: [] },
     defaultMenus: {

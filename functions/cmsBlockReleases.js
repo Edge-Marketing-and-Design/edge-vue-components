@@ -160,6 +160,7 @@ const checkRelease = async ({ orgId, blockId, block, revision, targets }) => {
     themeContexts,
     themeNameFindings: validation.themeNameFindings,
     templateClassStrings: validation.templateClassStrings,
+    sectionTypeRoleFindings: validation.sectionTypeRoleFindings,
   })
 }
 
