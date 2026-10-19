@@ -335,6 +335,21 @@ test('findUsage scans site pages and templates without Firestore writes', async 
           postContent: [{ id: 'post-hero', blockId: 'hero', name: 'Hero' }],
         },
       },
+      'organizations/org-123/sites/site-one/posts': {
+        'training-1': {
+          name: 'safety-training',
+          title: 'Safety Training',
+          content: [{ id: 'body-hero', blockId: 'hero', name: 'Hero' }, { id: 'other', blockId: 'cta' }],
+        },
+        'training-2': { name: 'no-hero', title: 'No Hero', content: [{ id: 'x', blockId: 'cta' }] },
+      },
+      'organizations/org-123/sites/site-one/published_posts': {
+        'training-1': {
+          name: 'safety-training',
+          title: 'Safety Training',
+          content: [{ id: 'body-hero', blockId: 'hero', name: 'Hero' }],
+        },
+      },
     },
   })
   const service = createCmsToolService({
@@ -351,11 +366,48 @@ test('findUsage scans site pages and templates without Firestore writes', async 
   })
 
   const result = await service.findUsage({ docId: 'hero' })
-  assert.equal(result.usageCount, 2)
-  assert.deepEqual(result.usages.map(usage => [usage.siteId, usage.pageId]), [
-    ['site-one', 'home'],
-    ['templates', 'post-template'],
+  assert.equal(result.usageCount, 4)
+  assert.deepEqual(result.usages.map(usage => [usage.kind, usage.siteId, usage.pageId || usage.postId, usage.source || null]), [
+    ['page', 'site-one', 'home', null],
+    ['post', 'site-one', 'training-1', 'draft'],
+    ['post', 'site-one', 'training-1', 'published'],
+    ['page', 'templates', 'post-template', null],
   ])
+  assert.deepEqual(result.usages[1], { kind: 'post', siteId: 'site-one', postId: 'training-1', source: 'draft', title: 'Safety Training', slug: 'safety-training', fieldPath: 'content[0]', instanceId: 'body-hero', instanceName: 'Hero' })
+  assert.deepEqual(result.scanned.map(entry => entry.collectionPath.split('/').slice(3).join('/')), [
+    'site-one/pages',
+    'site-one/posts',
+    'site-one/published_posts',
+    'templates/pages',
+    'templates/posts',
+    'templates/published_posts',
+  ])
+  assert.ok(result.scanned.every(entry => entry.scanTruncated === false))
+  assert.equal(db.writeCalls, 0)
+})
+
+test('findUsage reports a post scan that read fewer posts than the site has', async (t) => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'cms-usage-posts-test-'))
+  t.after(() => rm(tempRoot, { recursive: true, force: true }))
+  const db = createFakeFirestore({
+    collections: {
+      'organizations/org-123/sites/site-one/posts': {
+        a: { name: 'a', title: 'A', content: [{ id: 'i1', blockId: 'hero' }] },
+        b: { name: 'b', title: 'B', content: [{ id: 'i2', blockId: 'hero' }] },
+      },
+    },
+  })
+  const service = createCmsToolService({
+    db,
+    config: { defaultOrgId: 'org-123', environment: 'production', maxCmsPostScanDocuments: 1, cmsWorkspaceRoot: path.join(tempRoot, 'workspace'), cmsRendererRepoPath: path.join(tempRoot, 'renderer') },
+    projectId: 'clearwater-hub',
+    sanitizeValue: value => value,
+    repoRoot: tempRoot,
+  })
+  const result = await service.findUsage({ docId: 'hero', siteId: 'site-one' })
+  assert.deepEqual(result.usages.map(usage => usage.postId), ['a'])
+  const drafts = result.scanned.find(entry => entry.collectionPath.endsWith('/site-one/posts'))
+  assert.deepEqual([drafts.scannedDocuments, drafts.scanTruncated], [1, true])
   assert.equal(db.writeCalls, 0)
 })
 

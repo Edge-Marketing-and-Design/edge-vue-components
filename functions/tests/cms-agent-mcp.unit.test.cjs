@@ -18,7 +18,7 @@ class HttpsError extends Error {
   }
 }
 
-const REMOTE_TOOLS = ['cms_agent_organizations', 'cms_open_session', 'cms_check_operation', 'cms_run_operation', 'cms_preview_url', 'cms_site_readiness', 'cms_list_pages', 'cms_get_page']
+const REMOTE_TOOLS = ['cms_agent_organizations', 'cms_open_session', 'cms_check_operation', 'cms_run_operation', 'cms_preview_url', 'cms_site_readiness', 'cms_list_pages', 'cms_get_page', 'cms_list_posts', 'cms_get_post']
 
 const setup = async (t) => {
   const fake = createFakeDb({
@@ -160,7 +160,12 @@ test('a connection lists only the remote tools and reads and drafts through the 
   assert.equal(audit.agentConnectionId, env.created.connectionId)
   assert.equal(audit.runBy, 'owner')
   assert.equal(audit.client, 'edge-cms-remote-mcp')
-  assert.equal(sessionCount(env), 1, 'one site session serves the reads, the check and the run')
+  const posts = await callTool(client, 'cms_list_posts', { orgId: 'a', siteId: 's' })
+  assert.equal(posts.ok, true, posts.message)
+  assert.deepEqual(posts.posts, [])
+  const missingPost = await callTool(client, 'cms_get_post', { orgId: 'a', siteId: 's', postId: 'absent' })
+  assert.equal(missingPost.code, 'not-found')
+  assert.equal(sessionCount(env), 1, 'one site session serves the page and post reads, the check and the run')
   assert.ok(!JSON.stringify([pages, page, check, run]).includes('cmsas.'), 'no session credential reaches the client')
 })
 
@@ -187,6 +192,7 @@ test('organization and site scope are enforced on every call', async (t) => {
   assert.equal((await callTool(client, 'cms_list_pages', { sessionId: opened.sessionId, orgId: 'b', siteId: 's' })).code, 'permission-denied')
   const blocked = await callTool(client, 'cms_check_operation', { sessionId: opened.sessionId, orgId: 'a', operation: { type: 'theme.update', themeId: 'x' } })
   assert.equal(blocked.code, 'permission-denied', 'a site session cannot do theme work')
+  assert.equal((await callTool(client, 'cms_list_posts', { sessionId: opened.sessionId, orgId: 'a', siteId: 't' })).code, 'permission-denied', 'post reads stay on the session\'s site')
 
   const second = await env.connections.createAgentConnection({ auth: { uid: 'owner' }, data: { uid: 'owner', orgId: 'a', name: 'Second device' } })
   const other = await connect(t, env, second.token)

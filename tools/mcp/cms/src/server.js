@@ -278,6 +278,8 @@ const handlers = {
   },
   cms_list_pages: async ({ orgId, siteId, sessionId }) => jsonResult(await agentOperations.pages(resolveOrgId(orgId), siteId, sessionId)),
   cms_get_page: async ({ orgId, siteId, pageId, source, includeValues, includeSchema, sessionId }) => jsonResult(await agentOperations.page(resolveOrgId(orgId), siteId, pageId, { source, includeValues, includeSchema, sessionId })),
+  cms_list_posts: async ({ orgId, siteId, type, tag, limit, startAfter, sessionId }) => jsonResult(await agentOperations.posts(resolveOrgId(orgId), siteId, { type, tag, limit, startAfter, sessionId })),
+  cms_get_post: async ({ orgId, siteId, postId, source, includeValues, includeSchema, sessionId }) => jsonResult(await agentOperations.post(resolveOrgId(orgId), siteId, postId, { source, includeValues, includeSchema, sessionId })),
   async cms_block_base({ orgId, docId }) {
     const org = resolveOrgId(orgId)
     const blockRef = db.collection('organizations').doc(org).collection('blocks').doc(docId)

@@ -18,6 +18,8 @@ export const CMS_AGENT_REMOTE_TOOL_NAMES = Object.freeze([
   'cms_site_readiness',
   'cms_list_pages',
   'cms_get_page',
+  'cms_list_posts',
+  'cms_get_post',
 ])
 
 const READ = { readOnlyHint: true, destructiveHint: false, idempotentHint: true }
@@ -33,7 +35,7 @@ export function cmsAgentToolDefinitions({ z, operationTypes, contractKinds = [],
   const CmsThemeIdSchema = z.string().trim().min(1).describe('Exact CMS theme Firestore document id.')
   const OptionalCmsSearchSchema = z.string().trim().optional().default('')
   const OperationSchema = z.object({ type: z.enum(operationTypes) }).passthrough()
-    .describe('A CMS operation, e.g. { "type": "page.placeBlock", "siteId": "...", "pageId": "...", "blockId": "...", "values": { ... } } or { "type": "page.moveBlock", "siteId": "...", "pageId": "...", "instanceId": "...", "index": 0 }. page.create takes optional SEO "fields" like page.update. Call cms_contract (kind "operations") first: it returns every type and its fields. Read a page with cms_get_page for its instance ids and row order.')
+    .describe('A CMS operation, e.g. { "type": "page.placeBlock", "siteId": "...", "pageId": "...", "blockId": "...", "values": { ... } }, { "type": "page.moveBlock", "siteId": "...", "pageId": "...", "instanceId": "...", "index": 0 } or { "type": "post.create", "siteId": "...", "title": "...", "blurb": "...", "templateId?": "..." }. page.create takes optional SEO "fields" like page.update. post.* operations write draft posts only (post.create, post.update with "fields", and post.placeBlock/setValues/moveBlock/removeBlock with "postId"); a post\'s kind is "postType" (post or event), since "type" is the operation. Call cms_contract (kind "operations") first: it returns every type and its fields. Read a page with cms_get_page, or a post with cms_get_post, for its instance ids and row order.')
   // Local only: the remote server cannot read the editor's files.
   const OperationFileSchema = z.string().trim().min(1).optional()
     .describe('Path to a .json file holding the whole operation, instead of `operation`. Use it for large operations (block definitions) written by a script, so they are sent exactly as written. Relative paths start at the Hub checkout; the file must be inside the checkout, the block workspace or the temp directory. Send the same file to cms_run_operation.')
@@ -185,7 +187,7 @@ export function cmsAgentToolDefinitions({ z, operationTypes, contractKinds = [],
     {
       name: 'cms_find_usage',
       title: 'Find CMS Block Usage',
-      description: 'Find persisted blockId references to a CMS library block in bounded organization page and template scans.',
+      description: 'Find persisted blockId references to a CMS library block in bounded scans of the organization\'s pages, templates and posts (each site\'s draft posts and published snapshots). Each usage has kind "page" (siteId, pageId, pageName, pageType) or "post" (siteId, postId, title, slug, source draft or published), with its instanceId and fieldPath. scanned lists every collection read; scanTruncated marks one with more documents than were read.',
       inputSchema: {
         orgId: orgIdSchema(),
         docId: CmsDocIdSchema,
@@ -250,15 +252,15 @@ export function cmsAgentToolDefinitions({ z, operationTypes, contractKinds = [],
       name: 'cms_open_session',
       title: 'Open a Targeted CMS Session',
       description: remote
-        ? 'Optional. Check that your connection can work on an explicit org and scope, and get a sessionId handle for it. Site scope requires an exact site id and permits only page work/site updates there. Organization scope permits library/theme work and site creation. Returns a sessionId, never a credential. Other tools work without it: pass orgId (and siteId) and the server opens and renews the session itself.'
-        : 'Choose an explicit org and scope for this job. Site scope requires an exact site id and permits only page work/site updates there. Organization scope permits library/theme work and site creation. Returns a sessionId, never a credential. Pass that handle to check/run/preview/readiness and the page reads (cms_list_pages, cms_get_page); it refreshes automatically for the same target.',
+        ? 'Optional. Check that your connection can work on an explicit org and scope, and get a sessionId handle for it. Site scope requires an exact site id and permits only page and post work/site updates there. Organization scope permits library/theme work and site creation. Returns a sessionId, never a credential. Other tools work without it: pass orgId (and siteId) and the server opens and renews the session itself.'
+        : 'Choose an explicit org and scope for this job. Site scope requires an exact site id and permits only page and post work/site updates there. Organization scope permits library/theme work and site creation. Returns a sessionId, never a credential. Pass that handle to check/run/preview/readiness and the page and post reads (cms_list_pages, cms_get_page, cms_list_posts, cms_get_post); it refreshes automatically for the same target.',
       inputSchema: { orgId: z.string().trim().min(1), scope: z.enum(['organization', 'site']), siteId: z.string().trim().min(1).optional() },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
     },
     {
       name: 'cms_check_operation',
       title: 'Check a CMS Operation',
-      description: 'Plan a draft-only CMS operation through the Hub (themes, new sites and their SEO, draft pages and their SEO, block placement, order and content, new blocks, block drafts) and return what would change, any problems, and a checksum for cms_run_operation. Call cms_contract first for the operations contract and for every kind the operation writes (blocks, themes, posts), and build the operation from those fields. Writes nothing. Nothing can publish a page or release a block. Needs an agent key (Dev Mode > Agent Keys).',
+      description: 'Plan a draft-only CMS operation through the Hub (themes, new sites and their SEO, draft pages and their SEO, draft posts and their fields, block placement, order and content on pages and posts, new blocks, block drafts) and return what would change, any problems, and a checksum for cms_run_operation. Call cms_contract first for the operations contract and for every kind the operation writes (blocks, themes, posts), and build the operation from those fields. Writes nothing. Nothing can publish a page or post or release a block. Needs an agent key (Dev Mode > Agent Keys).',
       inputSchema: {
         sessionId: SessionIdSchema,
         orgId: orgIdSchema(),
@@ -269,7 +271,7 @@ export function cmsAgentToolDefinitions({ z, operationTypes, contractKinds = [],
     {
       name: 'cms_run_operation',
       title: 'Run a CMS Operation',
-      description: 'Run a draft-only CMS operation that cms_check_operation checked, with its checksum. The Hub refuses it if anything the check read has changed since, or if it has problems. Changes are drafts: pages are not published and blocks are not released. Every run is recorded in the organization\'s cmsOperations audit.',
+      description: 'Run a draft-only CMS operation that cms_check_operation checked, with its checksum. The Hub refuses it if anything the check read has changed since, or if it has problems. Changes are drafts: pages and posts are not published and blocks are not released. Every run is recorded in the organization\'s cmsOperations audit.',
       inputSchema: {
         sessionId: SessionIdSchema,
         orgId: orgIdSchema(),
@@ -327,6 +329,36 @@ export function cmsAgentToolDefinitions({ z, operationTypes, contractKinds = [],
         orgId: orgIdSchema(),
         siteId: z.string().trim().min(1).describe('Site document id.'),
         pageId: z.string().trim().min(1).describe('Page document id (from cms_list_pages).'),
+        source: z.enum(['draft', 'published']).optional().default('draft'),
+        includeValues: z.boolean().optional().default(true).describe('Include each instance\'s values.'),
+        includeSchema: z.boolean().optional().default(false).describe('Include each instance\'s schema (large).'),
+      },
+      annotations: READ,
+    },
+    {
+      name: 'cms_list_posts',
+      title: 'List a Site\'s Posts',
+      description: 'List a site\'s posts and events, newest first: each post\'s postId, name (its slug), title, type (post or event), tags, publishedAt, publishAt (a scheduled publication), status (draft: never published; published; unpublished-changes: the saved draft differs from what is live, compared as the Hub compares it; missing: published with no draft) and the library blockIds it uses. Filter by type or tag; page with startAfter (the last postId of the previous page, from nextStartAfter). Reads only. Needs an agent key or a site session.',
+      inputSchema: {
+        sessionId: SessionIdSchema,
+        orgId: orgIdSchema(),
+        siteId: z.string().trim().min(1).describe('Site document id.'),
+        type: z.enum(['post', 'event']).optional().describe('Only posts or only events.'),
+        tag: z.string().trim().min(1).optional().describe('Only posts with this exact tag.'),
+        limit: z.number().int().min(1).max(100).optional().describe('Posts per page (default 50).'),
+        startAfter: z.string().trim().min(1).optional().describe('nextStartAfter from the previous page.'),
+      },
+      annotations: READ,
+    },
+    {
+      name: 'cms_get_post',
+      title: 'Read a CMS Post',
+      description: 'Read one post as its fields and an outline instead of the raw document: name (slug), the URL paths the site\'s post template pages serve it at (paths), status, type, title, blurb, tags, featuredImage, restrictionRuleId, the event for events, publishedAt, publishAt, hidePublishedDate and whether it was imported (imported: its legacyBlog audit fields are never changed), then its body as rows in order with column spans and the instances in each column: instanceId, blockId, name, synced and override flags, whether it is behind the released block, and its values. Use the instance ids and row indexes with post.setValues, post.moveBlock and post.removeBlock. Schemas are left out unless includeSchema is true. Reads only. Needs an agent key or a site session.',
+      inputSchema: {
+        sessionId: SessionIdSchema,
+        orgId: orgIdSchema(),
+        siteId: z.string().trim().min(1).describe('Site document id.'),
+        postId: z.string().trim().min(1).describe('Post document id (from cms_list_posts).'),
         source: z.enum(['draft', 'published']).optional().default('draft'),
         includeValues: z.boolean().optional().default(true).describe('Include each instance\'s values.'),
         includeSchema: z.boolean().optional().default(false).describe('Include each instance\'s schema (large).'),

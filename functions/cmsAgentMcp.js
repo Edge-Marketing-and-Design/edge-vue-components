@@ -16,7 +16,7 @@ const CLIENT = 'edge-cms-remote-mcp'
 const SERVER_INFO = { name: 'edge-cms', version: '0.1.0' }
 // Renew a cached session this long before it expires.
 const RENEW_MS = 60 * 1000
-const SITE_READS = ['preview', 'readiness', 'pages', 'page']
+const SITE_READS = ['preview', 'readiness', 'pages', 'page', 'posts', 'post']
 
 const definitionsPromise = Promise.all([import('./helpers/cmsAgentMcpTools.mjs'), import('./helpers/cmsOperations.mjs')])
 
@@ -62,7 +62,7 @@ const createRemoteCms = ({ now = Date.now, issueSession = issueAgentSession, han
   // One cms-agentOperation action as a site or organization session.
   const call = async (connection, input, body) => {
     const type = body.operation?.type || ''
-    const siteScoped = SITE_READS.includes(body.action) || type.startsWith('page.') || type === 'site.update'
+    const siteScoped = SITE_READS.includes(body.action) || type.startsWith('page.') || type.startsWith('post.') || type === 'site.update'
     const siteId = (body.action === 'check' || body.action === 'run') ? body.operation?.siteId : body.siteId
     const target = await targetFor(connection, input, siteScoped ? 'site' : 'organization', siteId)
     const request = { ...body, orgId: target.orgId, client: CLIENT }
@@ -101,6 +101,8 @@ const createRemoteCms = ({ now = Date.now, issueSession = issueAgentSession, han
     cms_site_readiness: tool(({ siteId, ...input }) => call(connection, input, { action: 'readiness', siteId })),
     cms_list_pages: tool(({ siteId, ...input }) => call(connection, input, { action: 'pages', siteId })),
     cms_get_page: tool(({ siteId, pageId, source, includeValues, includeSchema, ...input }) => call(connection, input, { action: 'page', siteId, pageId, source, includeValues, includeSchema })),
+    cms_list_posts: tool(({ siteId, type, tag, limit, startAfter, ...input }) => call(connection, input, { action: 'posts', siteId, ...(type ? { type } : {}), ...(tag ? { tag } : {}), ...(limit ? { limit } : {}), ...(startAfter ? { startAfter } : {}) })),
+    cms_get_post: tool(({ siteId, postId, source, includeValues, includeSchema, ...input }) => call(connection, input, { action: 'post', siteId, postId, source, includeValues, includeSchema })),
   })
 
   return { handlers, sessions }

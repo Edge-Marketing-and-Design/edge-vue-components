@@ -68,7 +68,7 @@ export function createConnectionClient({ endpoint, getConnectionKey, fetchImpl =
         return { ok: false, code: 'session-required', message: 'Open an explicit target with cms_open_session and pass its sessionId.' }
       const targetSite = ['check', 'run'].includes(body.action) ? body.operation?.siteId : body.siteId
       const type = body.operation?.type || ''
-      const siteOperation = ['preview', 'readiness', 'pages', 'page'].includes(body.action) || type.startsWith('page.') || type === 'site.update'
+      const siteOperation = ['preview', 'readiness', 'pages', 'page', 'posts', 'post'].includes(body.action) || type.startsWith('page.') || type.startsWith('post.') || type === 'site.update'
       if (body.orgId !== session.target.orgId || (session.target.scope === 'site' && (!siteOperation || targetSite !== session.target.siteId)) || (session.target.scope === 'organization' && siteOperation))
         return { ok: false, code: 'session-target-mismatch', message: 'This request does not match the selected organization/site session. Open a separate session for another target.' }
       if (Date.parse(session.result.expiresAt) <= now() + 30000) {

@@ -36,6 +36,8 @@ let cleanups = []
 let cssTimer = null
 let settleTimer = null
 let cssRun = 0
+let cssBuilding = false
+let cssAgain = false
 let knownTokens = new Set()
 let headSignature = ''
 let firstRevealAt = 0
@@ -65,40 +67,72 @@ const elementTokens = el => String(el.getAttribute?.('class') || '').split(/\s+/
 // Hub chrome classes are styled by the scoped Hub CSS, not the site CSS.
 const isChromeOnly = el => Boolean(el.closest?.('[data-cms-chrome]')) && !el.closest('[data-cms-content]')
 
+// True when the written site CSS doesn't cover an element's classes (or its descendants').
+function isUnstyled(el) {
+  return [el, ...el.querySelectorAll('[class]')]
+    .filter(node => !isChromeOnly(node))
+    .some(node => elementTokens(node).some(t => !knownTokens.has(t)))
+}
+
 // Hides an element until the site CSS covers its classes (returns true if held).
 function holdIfUnstyled(el) {
   if (!el?.querySelectorAll)
     return false
-  const missing = [el, ...el.querySelectorAll('[class]')]
-    .filter(node => !isChromeOnly(node))
-    .some(node => elementTokens(node).some(t => !knownTokens.has(t)))
+  const missing = isUnstyled(el)
   if (missing)
     el.setAttribute('data-cms-canvas-pending', '')
   return missing
 }
 
+// Reveals the held elements the written CSS now covers. Content added while
+// the CSS was building stays held for the next run.
 function releasePending(doc) {
   doc.querySelectorAll('[data-cms-canvas-pending]').forEach((el) => {
+    if (isUnstyled(el))
+      return
     el.removeAttribute('data-cms-canvas-pending')
     el.setAttribute('data-cms-canvas-revealed', '')
     el.addEventListener('animationend', () => el.removeAttribute('data-cms-canvas-revealed'), { once: true })
   })
 }
 
+// Runs never overlap: a request during a build (cold loads import UnoCSS, so
+// the first one is slow) runs again after it, instead of discarding it.
 async function writeSiteCss() {
   const doc = frame.value?.contentDocument
   if (!doc?.head || !mount.value)
     return
-  const run = ++cssRun
-  const tokens = collectCanvasClassTokens(mount.value)
-  const css = await buildCanvasSiteCss(tokens, props.theme, extraCss.value)
-  if (run !== cssRun)
+  if (cssBuilding) {
+    cssAgain = true
     return
+  }
+  cssBuilding = true
+  cssAgain = false
+  const run = cssRun
+  const tokens = collectCanvasClassTokens(mount.value)
+  let css
+  try {
+    css = await buildCanvasSiteCss(tokens, props.theme, extraCss.value)
+  }
+  finally {
+    cssBuilding = false
+  }
+  // The frame reloaded (or unmounted) while building.
+  if (run !== cssRun || frame.value?.contentDocument !== doc || !mount.value) {
+    if (cssAgain)
+      scheduleSiteCss()
+    return
+  }
   upsertCanvasStyle(doc, 'cms-page-canvas-site-css', css)
   knownTokens = tokens
   releasePending(doc)
   if (props.fit === 'content')
     contentHeight.value = canvasContentHeight(doc)
+  const current = collectCanvasClassTokens(mount.value)
+  if (cssAgain || [...current].some(t => !tokens.has(t))) {
+    scheduleSiteCss()
+    return
+  }
   scheduleReveal()
 }
 
@@ -107,14 +141,22 @@ function scheduleSiteCss() {
   cssTimer = setTimeout(writeSiteCss, 30)
 }
 
-// First reveal: once CSS is written and content has stopped changing.
+// First reveal: once CSS covers everything in the frame and content has stopped
+// changing, or after MAX_FIRST_REVEAL_MS (anything still unstyled stays held).
 function scheduleReveal() {
   const doc = frame.value?.contentDocument
   if (!doc || doc.body?.dataset.cmsCanvasShown)
     return
   clearTimeout(settleTimer)
   const waited = Date.now() - firstRevealAt
-  settleTimer = setTimeout(() => revealCanvasBody(doc), waited > MAX_FIRST_REVEAL_MS ? 0 : SETTLE_MS)
+  if (waited > MAX_FIRST_REVEAL_MS) {
+    revealCanvasBody(doc)
+    return
+  }
+  settleTimer = setTimeout(() => {
+    if (!doc.querySelector('[data-cms-canvas-pending]'))
+      revealCanvasBody(doc)
+  }, SETTLE_MS)
 }
 
 function onMutations(records) {
@@ -173,6 +215,7 @@ async function onLoad() {
   cleanups = []
   headSignature = ''
   knownTokens = new Set()
+  cssRun++
   firstRevealAt = Date.now()
   writeHead()
   mount.value = doc.getElementById('cms-canvas-root')

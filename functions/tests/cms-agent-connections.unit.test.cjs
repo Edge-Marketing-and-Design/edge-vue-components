@@ -21,6 +21,8 @@ const setup = () => {
     'organizations/b/sites/s': { name: 'Site B', menus: {} },
     'organizations/a/sites/s/pages/home': { name: 'Home', content: [], structure: [], version: 1 },
     'organizations/b/sites/s/pages/home': { name: 'Home', content: [], structure: [], version: 1 },
+    'organizations/a/sites/s/posts/p1': { name: 'first', title: 'First', blurb: 'One', content: [], structure: [] },
+    'organizations/a/sites/t/posts/p1': { name: 'other', title: 'Other', blurb: 'Two', content: [], structure: [] },
   })
   const allowed = new Set(['a'])
   const configPath = require.resolve(path.join(functionRoot, 'config.js'))
@@ -196,6 +198,28 @@ test('site sessions read only their own site\'s pages; organization sessions are
   assert.equal((await read(org.token, { action: 'page', siteId: 's', pageId: 'home' })).statusCode, 403)
   env.allowed.delete('a')
   assert.equal((await read(site.token, { action: 'pages', siteId: 's' })).statusCode, 403, 'lost access stops reads too')
+})
+test('site sessions read and edit only their own site\'s posts; organization sessions are refused both', async () => {
+  const env = setup()
+  const created = await create(env)
+  const site = (await session(env, created.token)).body
+  const read = (token, body) => post(env.keys.agentOperation, token, { orgId: 'a', ...body })
+  const posts = await read(site.token, { action: 'posts', siteId: 's' })
+  assert.equal(posts.statusCode, 200)
+  assert.deepEqual(posts.body.posts.map(entry => entry.postId), ['p1'])
+  const one = await read(site.token, { action: 'post', siteId: 's', postId: 'p1' })
+  assert.equal(one.statusCode, 200)
+  assert.equal(one.body.title, 'First')
+  const update = { type: 'post.update', siteId: 's', postId: 'p1', fields: { title: 'Renamed' } }
+  assert.equal((await op(env, site.token, { operation: update })).statusCode, 200, 'post operations on its own site')
+  assert.equal((await read(site.token, { action: 'posts', siteId: 't' })).statusCode, 403, 'another site')
+  assert.equal((await read(site.token, { action: 'post', siteId: 't', postId: 'p1' })).statusCode, 403)
+  assert.equal((await op(env, site.token, { operation: { ...update, siteId: 't' } })).statusCode, 403)
+  const org = (await session(env, created.token, { scope: 'organization', siteId: undefined })).body
+  assert.equal((await read(org.token, { action: 'posts', siteId: 's' })).statusCode, 403)
+  assert.equal((await read(org.token, { action: 'post', siteId: 's', postId: 'p1' })).statusCode, 403)
+  assert.equal((await op(env, org.token, { operation: update })).statusCode, 403)
+  assert.equal((await op(env, org.token, { operation: { type: 'post.create', siteId: 's', title: 'x', blurb: 'y' } })).statusCode, 403)
 })
 test('revoked/expired parents and lost current permissions stop already issued sessions', async () => {
   const env = setup()
