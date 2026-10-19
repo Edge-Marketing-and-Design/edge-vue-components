@@ -3,11 +3,63 @@
 // (Dev Mode > Agent Keys). The endpoint can only check and run the CMS
 // operations and read sites and pages; nothing here can publish a page or
 // release a block.
-import { readFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { readFile, realpath, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
 const expandHome = (filePath, homeDir) => (filePath.startsWith('~/') ? path.join(homeDir, filePath.slice(2)) : filePath)
+
+export const MAX_OPERATION_FILE_BYTES = 2 * 1024 * 1024
+
+// An operation read from a local JSON file, so a large operation (a whole
+// block definition) reaches the Hub exactly as a script wrote it instead of
+// being retyped into the tool call. The file must be a .json file inside one
+// of `roots` (the Hub checkout, the block workspace, the temp directory).
+// Returns { ok: true, operation, source } or a refusal like the Hub's.
+export async function loadOperationFile(file, { roots = [], baseDir = process.cwd(), homeDir = os.homedir(), readFileImpl = readFile, realpathImpl = realpath, statImpl = stat } = {}) {
+  const refuse = (code, message) => ({ ok: false, httpStatus: 0, code, message, details: null })
+  const requested = String(file || '').trim()
+  if (!requested.toLowerCase().endsWith('.json'))
+    return refuse('operation-file-invalid', `operationFile must be a .json file: ${requested || '(empty)'}`)
+  let resolved
+  try {
+    resolved = await realpathImpl(path.resolve(baseDir, expandHome(requested, homeDir)))
+  }
+  catch (error) {
+    if (error?.code === 'ENOENT')
+      return refuse('operation-file-missing', `operationFile does not exist: ${requested}`)
+    throw error
+  }
+  const allowedRoots = []
+  for (const root of roots.filter(Boolean)) {
+    try {
+      allowedRoots.push(await realpathImpl(path.resolve(baseDir, root)))
+    }
+    catch {}
+  }
+  const inside = allowedRoots.some(root => resolved === root || resolved.startsWith(root + path.sep))
+  if (!inside)
+    return refuse('operation-file-outside', `operationFile must be inside the Hub checkout, the block workspace or the temp directory: ${resolved}`)
+  const { size } = await statImpl(resolved)
+  if (size > MAX_OPERATION_FILE_BYTES)
+    return refuse('operation-file-invalid', `operationFile is ${size} bytes; the limit is ${MAX_OPERATION_FILE_BYTES}.`)
+  const text = String(await readFileImpl(resolved, 'utf8'))
+  let operation
+  try {
+    operation = JSON.parse(text)
+  }
+  catch (error) {
+    return refuse('operation-file-invalid', `operationFile is not valid JSON: ${error.message}`)
+  }
+  if (!operation || typeof operation !== 'object' || Array.isArray(operation) || typeof operation.type !== 'string')
+    return refuse('operation-file-invalid', 'operationFile must hold one operation object with a "type".')
+  return {
+    ok: true,
+    operation,
+    source: { path: resolved, bytes: size, sha256: createHash('sha256').update(text).digest('hex') },
+  }
+}
 
 // The key, from EDGE_CMS_AGENT_KEY or the file named by the config's
 // agentKeyFile. Null when neither is set.

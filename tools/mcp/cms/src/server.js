@@ -2,6 +2,7 @@
 
 import './node-version.js'
 import { readFile } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import admin from 'firebase-admin'
@@ -12,7 +13,7 @@ import { cmsAgentToolDefinitions } from '../../../../lib/cmsAgentMcpTools.js'
 import { blockDefinitionHash } from '../../../../lib/cmsBlockRevisions.js'
 import { CMS_OPERATION_TYPES } from '../../../../lib/cmsOperations.js'
 import { createConnectionClient, resolveConnectionKey } from './agent-connections.js'
-import { agentEndpoint, createAgentOperationClient, resolveAgentKey } from './agent-operations.js'
+import { agentEndpoint, createAgentOperationClient, loadOperationFile, resolveAgentKey } from './agent-operations.js'
 import { createCmsToolService, resolveCmsOrganization } from './cms-tools.js'
 import { contractKinds, readContract } from './contracts.js'
 import { describeCredentials, resolveCredentials } from './credentials.js'
@@ -73,6 +74,32 @@ const server = new McpServer({
 })
 
 const resolveOrgId = orgId => resolveCmsOrganization(orgId, config)
+
+const OperationSchema = z.object({ type: z.enum(CMS_OPERATION_TYPES) }).passthrough()
+
+// Exactly one of `operation` or `operationFile`. Returns { operation, source }
+// or { refusal } in the Hub's refusal shape.
+async function resolveOperationInput({ operation, operationFile }) {
+  if (operation && operationFile)
+    return { refusal: { ok: false, httpStatus: 0, code: 'operation-input', message: 'Send either operation or operationFile, not both.', details: null } }
+  if (!operationFile) {
+    if (!operation)
+      return { refusal: { ok: false, httpStatus: 0, code: 'operation-input', message: 'Send operation or operationFile.', details: null } }
+    return { operation, source: null }
+  }
+  const loaded = await loadOperationFile(operationFile, {
+    baseDir: repoRoot,
+    roots: [repoRoot, path.resolve(repoRoot, config.cmsWorkspaceRoot), os.tmpdir(), '/tmp'],
+  })
+  if (!loaded.ok)
+    return { refusal: loaded }
+  const parsed = OperationSchema.safeParse(loaded.operation)
+  if (!parsed.success)
+    return { refusal: { ok: false, httpStatus: 0, code: 'operation-file-invalid', message: `operationFile does not hold a valid operation: ${parsed.error.issues.map(issue => issue.message).join('; ')}`, details: null } }
+  return { operation: parsed.data, source: loaded.source }
+}
+
+const withOperationSource = (result, source) => (source ? { ...result, operationFile: source } : result)
 
 // Adds the local renderer's answer to each override item: whether the
 // emd-cms-front checkout has the block's Vue component.
@@ -230,8 +257,20 @@ const handlers = {
     const orgId = resolveOrgId(input.orgId)
     return jsonResult(connections ? await connections.open({ ...input, orgId }) : { ok: false, code: 'connection-required', message: 'Configure a Hub-issued agent connection to open sessions.' })
   },
-  cms_check_operation: async ({ orgId, operation, sessionId }) => jsonResult(await agentOperations.check(resolveOrgId(orgId), operation, sessionId)),
-  cms_run_operation: async ({ orgId, operation, checksum, sessionId }) => jsonResult(await agentOperations.run(resolveOrgId(orgId), operation, checksum, sessionId)),
+  async cms_check_operation({ orgId, operation, operationFile, sessionId }) {
+    const org = resolveOrgId(orgId)
+    const input = await resolveOperationInput({ operation, operationFile })
+    if (input.refusal)
+      return jsonResult(input.refusal)
+    return jsonResult(withOperationSource(await agentOperations.check(org, input.operation, sessionId), input.source))
+  },
+  async cms_run_operation({ orgId, operation, operationFile, checksum, sessionId }) {
+    const org = resolveOrgId(orgId)
+    const input = await resolveOperationInput({ operation, operationFile })
+    if (input.refusal)
+      return jsonResult(input.refusal)
+    return jsonResult(withOperationSource(await agentOperations.run(org, input.operation, checksum, sessionId), input.source))
+  },
   cms_preview_url: async ({ orgId, siteId, pageId, source, blockDrafts, viewport, width, sessionId }) => jsonResult(await agentOperations.preview(resolveOrgId(orgId), siteId, pageId, source, blockDrafts, { viewport, width, sessionId })),
   async cms_site_readiness({ orgId, siteId, sessionId }) {
     const org = resolveOrgId(orgId)

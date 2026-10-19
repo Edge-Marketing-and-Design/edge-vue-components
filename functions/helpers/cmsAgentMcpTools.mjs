@@ -34,6 +34,12 @@ export function cmsAgentToolDefinitions({ z, operationTypes, contractKinds = [],
   const OptionalCmsSearchSchema = z.string().trim().optional().default('')
   const OperationSchema = z.object({ type: z.enum(operationTypes) }).passthrough()
     .describe('A CMS operation, e.g. { "type": "page.placeBlock", "siteId": "...", "pageId": "...", "blockId": "...", "values": { ... } } or { "type": "page.moveBlock", "siteId": "...", "pageId": "...", "instanceId": "...", "index": 0 }. page.create takes optional SEO "fields" like page.update. Call cms_contract (kind "operations") first: it returns every type and its fields. Read a page with cms_get_page for its instance ids and row order.')
+  // Local only: the remote server cannot read the editor's files.
+  const OperationFileSchema = z.string().trim().min(1).optional()
+    .describe('Path to a .json file holding the whole operation, instead of `operation`. Use it for large operations (block definitions) written by a script, so they are sent exactly as written. Relative paths start at the Hub checkout; the file must be inside the checkout, the block workspace or the temp directory. Send the same file to cms_run_operation.')
+  const operationInput = remote
+    ? { operation: OperationSchema }
+    : { operation: OperationSchema.optional(), operationFile: OperationFileSchema }
   const SessionIdSchema = remote
     ? z.string().trim().min(1).optional().describe('Optional handle from cms_open_session. Without it the server opens and renews the session for orgId (and the site) itself.')
     : z.string().trim().min(1).optional().describe('Explicit target handle from cms_open_session. Required when using a Hub connection.')
@@ -256,7 +262,7 @@ export function cmsAgentToolDefinitions({ z, operationTypes, contractKinds = [],
       inputSchema: {
         sessionId: SessionIdSchema,
         orgId: orgIdSchema(),
-        operation: OperationSchema,
+        ...operationInput,
       },
       annotations: READ,
     },
@@ -267,7 +273,7 @@ export function cmsAgentToolDefinitions({ z, operationTypes, contractKinds = [],
       inputSchema: {
         sessionId: SessionIdSchema,
         orgId: orgIdSchema(),
-        operation: OperationSchema,
+        ...operationInput,
         checksum: z.string().trim().min(1).describe('The checksum cms_check_operation returned for this exact operation.'),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },

@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import test from 'node:test'
-import { agentEndpoint, createAgentOperationClient, resolveAgentKey } from '../src/agent-operations.js'
+import { MAX_OPERATION_FILE_BYTES, agentEndpoint, createAgentOperationClient, loadOperationFile, resolveAgentKey } from '../src/agent-operations.js'
 
 test('the agent key comes from EDGE_CMS_AGENT_KEY, else the configured key file', async () => {
   assert.equal(await resolveAgentKey({ env: { EDGE_CMS_AGENT_KEY: ' cmsak.a.b ' }, config: { agentKeyFile: '~/k' } }), 'cmsak.a.b')
@@ -99,4 +103,38 @@ test('a missing key, an unreachable endpoint and a non-JSON reply are explained,
   }
   const html = createAgentOperationClient({ endpoint: 'x', getKey: async () => 'k', fetchImpl: async () => ({ status: 502, json: notJson }) })
   assert.deepEqual(await html.check('org1', { type: 'page.update' }), { httpStatus: 502, ok: false, code: 'bad-response', message: 'The endpoint returned HTTP 502 without JSON.' })
+})
+
+test('an operation file inside an allowed root is read exactly as written', async (t) => {
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'cms-opfile-')))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const text = JSON.stringify({ type: 'block.draft', blockId: 'nav', definition: { content: '<path d="M0 55.69 37.7"/>' } })
+  await writeFile(path.join(root, 'op.json'), text)
+  const loaded = await loadOperationFile('op.json', { baseDir: root, roots: [root] })
+  assert.equal(loaded.ok, true)
+  assert.equal(loaded.operation.definition.content, '<path d="M0 55.69 37.7"/>')
+  assert.deepEqual(loaded.source, { path: path.join(root, 'op.json'), bytes: Buffer.byteLength(text), sha256: createHash('sha256').update(text).digest('hex') })
+})
+
+test('operation files outside the roots, missing, oversized or not operations are refused', async (t) => {
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'cms-opfile-')))
+  const outside = await realpath(await mkdtemp(path.join(os.tmpdir(), 'cms-opfile-out-')))
+  t.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(outside, { recursive: true, force: true })]))
+  await mkdir(path.join(root, 'allowed'))
+  const allowed = path.join(root, 'allowed')
+  await writeFile(path.join(outside, 'secret.json'), '{"type":"page.update"}')
+  await symlink(path.join(outside, 'secret.json'), path.join(allowed, 'link.json'))
+  await writeFile(path.join(allowed, 'bad.json'), '{"type":')
+  await writeFile(path.join(allowed, 'list.json'), '[]')
+  await writeFile(path.join(allowed, 'op.txt'), '{"type":"page.update"}')
+  await writeFile(path.join(allowed, 'big.json'), `{"type":"page.update","pad":"${'x'.repeat(MAX_OPERATION_FILE_BYTES)}"}`)
+  const load = file => loadOperationFile(file, { baseDir: allowed, roots: [allowed] })
+  assert.equal((await load(path.join(outside, 'secret.json'))).code, 'operation-file-outside')
+  assert.equal((await load(`../../${path.basename(outside)}/secret.json`)).code, 'operation-file-outside')
+  assert.equal((await load('link.json')).code, 'operation-file-outside')
+  assert.equal((await load('absent.json')).code, 'operation-file-missing')
+  assert.equal((await load('op.txt')).code, 'operation-file-invalid')
+  assert.equal((await load('bad.json')).code, 'operation-file-invalid')
+  assert.equal((await load('list.json')).code, 'operation-file-invalid')
+  assert.equal((await load('big.json')).code, 'operation-file-invalid')
 })

@@ -18,6 +18,9 @@ const LOCAL_TOOLS = [
 // are optional, and readiness has no local emd-cms-front check.
 const REMOTE_FIELDS = ['orgId', 'sessionId']
 const REMOTE_DESCRIPTIONS = ['cms_open_session', 'cms_site_readiness']
+// Local only: operationFile reads a file on the editor's machine, so the
+// remote check/run require the inline operation.
+const LOCAL_ONLY_FIELDS = ['operationFile']
 
 const listTools = async (remote) => {
   const server = new McpServer({ name: 'definitions-test', version: '1.0.0' })
@@ -59,12 +62,23 @@ test('local and remote definitions match for the shared subset', async () => {
     assert.deepEqual(remote.annotations, own.annotations, remote.name)
     if (!REMOTE_DESCRIPTIONS.includes(remote.name))
       assert.equal(remote.description, own.description, remote.name)
-    assert.deepEqual(Object.keys(remote.inputSchema.properties).sort(), Object.keys(own.inputSchema.properties).sort(), remote.name)
+    assert.deepEqual(Object.keys(remote.inputSchema.properties).sort(), Object.keys(own.inputSchema.properties).filter(field => !LOCAL_ONLY_FIELDS.includes(field)).sort(), remote.name)
     for (const [field, schema] of Object.entries(remote.inputSchema.properties)) {
       if (!REMOTE_FIELDS.includes(field) || remote.name === 'cms_open_session')
         assert.deepEqual(schema, own.inputSchema.properties[field], `${remote.name}.${field}`)
     }
-    const required = list => (list || []).filter(field => !REMOTE_FIELDS.includes(field)).sort()
+    const required = list => (list || []).filter(field => !REMOTE_FIELDS.includes(field) && field !== 'operation').sort()
     assert.deepEqual(required(remote.inputSchema.required), required(own.inputSchema.required), remote.name)
+  }
+})
+
+test('operationFile is local only; the remote check and run require the inline operation', async () => {
+  const local = Object.fromEntries((await listTools(false)).map(tool => [tool.name, tool]))
+  const remote = Object.fromEntries((await listTools(true)).map(tool => [tool.name, tool]))
+  for (const name of ['cms_check_operation', 'cms_run_operation']) {
+    assert.ok(local[name].inputSchema.properties.operationFile, name)
+    assert.ok(!(local[name].inputSchema.required || []).includes('operation'), name)
+    assert.equal(remote[name].inputSchema.properties.operationFile, undefined, name)
+    assert.ok(remote[name].inputSchema.required.includes('operation'), name)
   }
 })

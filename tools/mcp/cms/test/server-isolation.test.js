@@ -48,6 +48,7 @@ test('the MCP rejects tenant escapes before database reads or agent requests', a
     ['cms_get_page', { orgId: 'other', siteId: 'site', pageId: 'home' }],
     ['cms_check_operation', { orgId: 'other', operation: { type: 'page.setValues' } }],
     ['cms_run_operation', { orgId: 'other', operation: { type: 'page.setValues' }, checksum: 'test' }],
+    ['cms_check_operation', { orgId: 'other', operationFile: '/etc/hosts.json' }],
     ['firestore_get_document', { documentPath: 'organizations/other/blocks/hero' }],
     ['firestore_get_document', { documentPath: '@blocks/hero' }],
   ]) {
@@ -55,6 +56,21 @@ test('the MCP rejects tenant escapes before database reads or agent requests', a
     assert.equal(result.isError, true, name)
     assert.match(result.content[0].text, /outside allowedOrganizationIds/, name)
   }
+  for (const [args, code] of [
+    [{ orgId: 'allowed' }, 'operation-input'],
+    [{ orgId: 'allowed', operation: { type: 'page.setValues' }, operationFile: 'op.json' }, 'operation-input'],
+    [{ orgId: 'allowed', operationFile: '/etc/hosts' }, 'operation-file-invalid'],
+    [{ orgId: 'allowed', operationFile: 'absent-operation.json' }, 'operation-file-missing'],
+  ]) {
+    const result = await client.callTool({ name: 'cms_check_operation', arguments: args })
+    assert.equal(JSON.parse(result.content[0].text).code, code, JSON.stringify(args))
+  }
+  const operationFile = path.join(root, 'operation.json')
+  await writeFile(operationFile, JSON.stringify({ type: 'page.setValues', siteId: 'site', pageId: 'home', instanceId: 'a', values: {} }))
+  const fromFile = JSON.parse((await client.callTool({ name: 'cms_check_operation', arguments: { orgId: 'allowed', operationFile } })).content[0].text)
+  assert.equal(fromFile.code, 'no-agent-key')
+  assert.match(fromFile.operationFile.path, /operation\.json$/)
+  assert.match(fromFile.operationFile.sha256, /^[0-9a-f]{64}$/)
   for (const [name, args] of [
     ['firestore_list_collections', {}],
     ['firestore_sample_collection', { collectionPath: 'organizations' }],

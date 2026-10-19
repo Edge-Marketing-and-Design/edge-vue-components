@@ -142,6 +142,13 @@ name cannot silently select the wrong theme. Its response includes:
   refuses it if anything the check read changed since, or if it has
   problems. Results are drafts, recorded in the Hub's `cms-operations`
   audit log with the organization and the key.
+- Both take the operation inline (`operation`) or as `operationFile`: a
+  path to a `.json` file holding the whole operation, read by the server and
+  sent exactly as written. Use a file for large operations such as a
+  `block.draft` from a generator, so nothing is retyped. Relative paths start
+  at the Hub checkout; the file must be inside the checkout, the block
+  workspace or the temp directory, and at most 2 MB. Results then include
+  `operationFile` (path, bytes, sha256); send the same file to the run.
 - `cms_block_base`: a block's current definition (open draft, else released)
   and its fingerprint, which `block.draft` must send as `baseHash`.
 - `cms_preview_url`: a 15-minute link to the Hub's preview of one draft page
