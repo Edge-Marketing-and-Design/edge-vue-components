@@ -3695,14 +3695,29 @@ const getTagsFromPosts = computed(() => {
                       </div>
                     </div>
                     <div v-else-if="entry.meta?.type === 'image'" class="w-full" @focusin="setActivePreviewField(entry.field)" @mousedown.capture="setActivePreviewField(entry.field)">
-                      <div class="mb-2 text-sm font-medium text-foreground">
-                        {{ genTitleFromField(entry) }}
+                      <div class="mb-2 flex w-full items-center justify-between gap-2">
+                        <span class="min-w-0 text-sm font-medium text-foreground">{{ genTitleFromField(entry) }}</span>
+                        <edge-shad-button
+                          v-if="state.draft[entry.field]"
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          class="ml-auto h-6 shrink-0 gap-1 px-2 text-xs text-muted-foreground hover:text-destructive"
+                          :aria-label="`Clear ${genTitleFromField(entry)}`"
+                          title="Clear this field without deleting the image from the media library"
+                          @click.stop="state.draft[entry.field] = ''; state.imageOpenByField[entry.field] = false"
+                        >
+                          <X class="h-3 w-3" />Clear image
+                        </edge-shad-button>
                       </div>
                       <div class="relative py-2 rounded-md flex items-center justify-center" :class="previewBackgroundClass(state.draft[entry.field])">
-                        <div class="bg-black/80 absolute left-0 top-0 w-full h-full opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center z-10 cursor-pointer">
+                        <div
+                          class="w-full transition-opacity flex items-center justify-center z-10"
+                          :class="state.draft[entry.field] ? 'absolute inset-0 h-full bg-black/80 opacity-0 hover:opacity-100 focus-within:opacity-100' : 'relative min-h-20'"
+                        >
                           <Dialog v-model:open="state.imageOpenByField[entry.field]">
                             <DialogTrigger as-child>
-                              <edge-shad-button variant="outline" class="bg-white text-black hover:bg-gray-200">
+                              <edge-shad-button type="button" variant="outline" class="bg-white text-black hover:bg-gray-200">
                                 <ImagePlus class="h-5 w-5 mr-2" />
                                 Select Image
                               </edge-shad-button>
