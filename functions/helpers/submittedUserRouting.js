@@ -12,21 +12,23 @@ const getNamedValue = (source, fieldName) => {
   return key ? source[key] : ''
 }
 
-const getSubmittedUserId = (data) => {
-  const direct = normalizeUserId(getNamedValue(data, 'userId'))
+// userId identifies the visitor, never the recipient. Do not use it as a
+// compatibility fallback: authenticated org members would receive their own forms.
+const getSubmittedRecipientUserId = (data) => {
+  const direct = normalizeUserId(getNamedValue(data, 'recipientUserId'))
   if (direct)
     return direct
 
   for (const containerName of ['fields', 'formFields', 'formData']) {
     const container = getNamedValue(data, containerName)
-    const objectValue = normalizeUserId(getNamedValue(container, 'userId'))
+    const objectValue = normalizeUserId(getNamedValue(container, 'recipientUserId'))
     if (objectValue)
       return objectValue
     if (!Array.isArray(container))
       continue
     for (const field of container) {
       const name = normalizeUserId(field?.field || field?.name || field?.fieldName || field?.key)
-      if (name.toLowerCase() !== 'userid')
+      if (name.toLowerCase() !== 'recipientuserid')
         continue
       const value = normalizeUserId(field?.value ?? field?.fieldValue ?? field?.val)
       if (value)
@@ -46,7 +48,7 @@ const findUserByRegisteredId = async (collectionRef, userId) => {
 
 const resolveSubmittedUserRouting = async ({ db, orgId, data }) => {
   const normalizedOrgId = String(orgId || '').trim()
-  const userId = getSubmittedUserId(data)
+  const userId = getSubmittedRecipientUserId(data)
   if (!normalizedOrgId || !userId)
     return null
 
@@ -72,7 +74,7 @@ const resolveSubmittedUserRouting = async ({ db, orgId, data }) => {
 }
 
 module.exports = {
-  getSubmittedUserId,
+  getSubmittedRecipientUserId,
   normalizeEmail,
   resolveSubmittedUserRouting,
 }

@@ -1732,7 +1732,7 @@ exports.trackHistory = onRequest(async (req, res) => {
       timestamp: now,
     })
     const siteId = typeof data?.siteId === 'string' ? data.siteId.trim() : ''
-    const authUserId = typeof data?.userId === 'string' ? data.userId.trim() : ''
+    const authUserId = typeof payload.userId === 'string' ? payload.userId.trim() : ''
     if (siteId && authUserId) {
       try {
         await syncAudienceHistoryUuidForUser({
