@@ -16,7 +16,7 @@ workspace.
 
 Tool names, descriptions and input schemas live in
 `edge/lib/cmsAgentMcpTools.js`, shared with the Hub's remote MCP endpoint
-(`cmsAgentMcp`, `edge/functions/cmsAgentMcp.js`), which serves the
+(`cms-agentMcp`, `edge/functions/cmsAgentMcp.js`), which serves the
 Hub-endpoint tools to editors without a checkout. Change a tool there, not in
 `src/server.js`, and keep its two copies under `edge/functions/helpers/` and
 `functions/helpers/` identical (`test/tool-definitions.test.js` checks).

@@ -40,7 +40,7 @@ test('the three copies of the shared tool definitions are byte-identical', () =>
   const hubCopy = new URL('../functions/helpers/cmsAgentMcpTools.mjs', edgeRoot)
   if (existsSync(hubCopy))
     assert.equal(readFileSync(hubCopy, 'utf8'), source)
-  for (const file of ['cmsAgentMcp.js', 'cmsAgentConnections.js', 'cmsAgentKeys.js']) {
+  for (const file of ['cms.js', 'cmsAgentMcp.js', 'cmsAgentConnections.js', 'cmsAgentKeys.js']) {
     const deployed = new URL(`../functions/${file}`, edgeRoot)
     if (existsSync(deployed))
       assert.equal(readFileSync(deployed, 'utf8'), readFileSync(new URL(`functions/${file}`, edgeRoot), 'utf8'), file)

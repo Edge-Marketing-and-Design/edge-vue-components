@@ -226,3 +226,12 @@ test('sessions are reused, renewed before expiry and reissued when the Hub stops
   const stale = await env.remote.handlers({ ...connection, data: { ...connection.data, revokedAt: null } }).cms_list_pages({ orgId: 'a', siteId: 's' })
   assert.equal(JSON.parse(stale.content[0].text).code, 'unauthenticated', 'a revoked parent stops cached sessions')
 })
+
+test('the endpoint deploys in the cms group as cms-agentMcp', () => {
+  const { readFileSync } = require('node:fs')
+  const cms = readFileSync(path.join(functionRoot, 'cms.js'), 'utf8')
+  assert.match(cms, /^const cmsAgentMcp = require\('\.\/cmsAgentMcp'\)$/m)
+  assert.match(cms, /^exports\.agentMcp = cmsAgentMcp\.agentMcp$/m)
+  assert.match(readFileSync(path.join(functionRoot, 'index.js'), 'utf8'), /^exports\.cms = require\('\.\/cms'\)$/m)
+  assert.doesNotMatch(readFileSync(path.join(functionRoot, 'index.js'), 'utf8'), /cmsAgentMcp/, 'exported once, from cms.js')
+})

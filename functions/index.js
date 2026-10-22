@@ -6,5 +6,4 @@ exports.history = require('./history')
 exports.registration = require('./stagedUserNotifications')
 exports.edgeMedia = require('./edgeMedia')
 exports.siteWebAnalytics = require('./siteWebAnalytics')
-exports.cmsAgentMcp = require('./cmsAgentMcp').agentMcp
 // END EXTRA EDGE functions
