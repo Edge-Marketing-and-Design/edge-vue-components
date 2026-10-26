@@ -1,5 +1,6 @@
 <script setup lang="js">
 import { CheckCircle2, CircleAlert, Loader2, RefreshCw } from 'lucide-vue-next'
+import { normalizeAnalyticsEvents } from '../../lib/cmsOperations'
 
 const props = defineProps({
   settings: {
@@ -356,6 +357,22 @@ const trackingConsentMessage = computed({
     Reflect.set(props.settings, 'trackingConsentMessage', String(value || ''))
   },
 })
+
+const hasGoogleAnalyticsId = computed(() => !!String(props.settings?.trackingGoogleAnalytics || '').trim())
+const analyticsEvents = computed(() => normalizeAnalyticsEvents(props.settings?.analyticsEvents))
+// Turning the master switch off keeps the category values; nothing is sent
+// while it is off.
+const analyticsEventSwitch = key => computed({
+  get: () => analyticsEvents.value[key],
+  set: (value) => {
+    Reflect.set(props.settings, 'analyticsEvents', { ...analyticsEvents.value, [key]: !!value })
+  },
+})
+const analyticsEventsEnabled = analyticsEventSwitch('enabled')
+const analyticsEventForms = analyticsEventSwitch('forms')
+const analyticsEventContactClicks = analyticsEventSwitch('contactClicks')
+const analyticsEventAccountSignUps = analyticsEventSwitch('accountSignUps')
+const analyticsEventCategoriesDisabled = computed(() => !analyticsEventsEnabled.value || !hasGoogleAnalyticsId.value)
 
 const normalizeDomain = (value) => {
   if (!value)
@@ -1490,6 +1507,53 @@ watch(() => [
           name="trackingGoogleAnalytics"
           placeholder="G-XXXXXXX"
         />
+        <div class="space-y-3 rounded-xl border border-border/60 p-4">
+          <edge-cms-boolean-card
+            v-model="analyticsEventsEnabled"
+            name="analyticsEvents.enabled"
+            label="Send events to Google Analytics"
+            class="w-full"
+            checked-label="Sending Events"
+            unchecked-label="Not Sending Events"
+          >
+            Send the events turned on below to this site's Google Analytics ID.
+          </edge-cms-boolean-card>
+          <p class="text-xs text-muted-foreground">
+            Events need the site renderer's event support before any are sent. Which events count as key events is set in Google Analytics.
+          </p>
+          <p v-if="!hasGoogleAnalyticsId" class="text-xs text-muted-foreground">
+            Add a Google Analytics ID to choose events.
+          </p>
+          <div class="space-y-3">
+            <edge-cms-boolean-card
+              v-model="analyticsEventForms"
+              name="analyticsEvents.forms"
+              label="Form submissions"
+              :disabled="analyticsEventCategoriesDisabled"
+              class="w-full"
+              checked-label="On"
+              unchecked-label="Off"
+            />
+            <edge-cms-boolean-card
+              v-model="analyticsEventContactClicks"
+              name="analyticsEvents.contactClicks"
+              label="Phone and email clicks"
+              :disabled="analyticsEventCategoriesDisabled"
+              class="w-full"
+              checked-label="On"
+              unchecked-label="Off"
+            />
+            <edge-cms-boolean-card
+              v-model="analyticsEventAccountSignUps"
+              name="analyticsEvents.accountSignUps"
+              label="Account sign-ups"
+              :disabled="analyticsEventCategoriesDisabled"
+              class="w-full"
+              checked-label="On"
+              unchecked-label="Off"
+            />
+          </div>
+        </div>
         <edge-shad-input
           v-model="props.settings.trackingAdroll"
           label="AdRoll Advertiser ID"
