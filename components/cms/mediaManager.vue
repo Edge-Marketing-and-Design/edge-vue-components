@@ -972,8 +972,13 @@ const openMediaView = (item) => {
   state.workingDoc = item
 }
 
+// Selecting before Cloudflare Images versions exist would save the R2 original.
+const isSelectPendingOptimization = item => props.selectMode && !resolvedEmitOverride.value && isImageMediaItem(item) && isMediaImageOptimizing(item)
+
 const itemClick = (item) => {
   if (props.selectMode) {
+    if (isSelectPendingOptimization(item))
+      return
     const selectedUrl = isImageMediaItem(item)
       ? (edgeGlobal.getImage(item, resolvedImageVariant.value) || getEdgeMediaImageVariant(item, resolvedImageVariant.value) || item?.r2URL || item?.r2Url || '')
       : (item?.r2URL || item?.r2Url || edgeGlobal.getImage(item, resolvedImageVariant.value) || '')
@@ -1451,11 +1456,13 @@ const siteQueryValue = computed(() => resolveCmsSiteScopeValues())
               <div
                 v-for="item in filteredFiles"
                 :key="item.docId"
-                class="w-full cursor-pointer"
+                class="w-full"
+                :class="isSelectPendingOptimization(item) ? 'cursor-wait' : 'cursor-pointer'"
                 @click="itemClick(item)"
               >
                 <edge-cms-media-card
                   :item="item"
+                  :optimizing="isSelectPendingOptimization(item)"
                   :selected="state.selected.includes(item.docId)"
                   class="block w-full h-full"
                   :select-mode="props.selectMode"

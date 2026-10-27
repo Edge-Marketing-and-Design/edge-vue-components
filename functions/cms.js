@@ -34,6 +34,7 @@ const { buildPreviewUrl, issuePreviewToken, verifyPreviewToken } = require('./cm
 const { removeCmsPageFromMenus } = require('./helpers/cmsPageDeletion')
 const { buildPostKvMetadata, postCanonicalKey } = require('./helpers/cmsPostKvMetadata')
 const { resolveSubmittedUserRouting } = require('./helpers/submittedUserRouting')
+const { verifyHistoryIdentity, appendIdentityHistory } = require('./helpers/historyIdentity')
 
 const SITE_AI_TOPIC = 'site-ai-bootstrap'
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || ''
@@ -471,6 +472,7 @@ const syncAudienceHistoryUuidForUser = async ({
   siteId,
   userId,
   historyUuid,
+  identityEmail,
 }) => {
   const normalizedOrgId = String(orgId || '').trim()
   const normalizedSiteId = String(siteId || '').trim()
@@ -486,7 +488,7 @@ const syncAudienceHistoryUuidForUser = async ({
   }
 
   const userData = userSnap.data() || {}
-  const email = normalizeEmail(userData?.meta?.email || userData?.email || userData?.contactEmail || '')
+  const email = normalizeEmail(identityEmail || userData?.meta?.email || userData?.email || userData?.contactEmail || '')
   const name = String(userData?.meta?.name || userData?.name || '').trim()
   if (!email) {
     logger.warn('History sync user email missing', { orgId: normalizedOrgId, siteId: normalizedSiteId, userId: normalizedUserId })
@@ -496,14 +498,18 @@ const syncAudienceHistoryUuidForUser = async ({
   const audienceUsersRef = db.collection('organizations').doc(normalizedOrgId)
     .collection('sites').doc(normalizedSiteId)
     .collection('audience-users')
-  const audienceByEmailSnap = await audienceUsersRef.where('email', '==', email).limit(1).get()
+  const byUser = await audienceUsersRef.where('userId', '==', normalizedUserId).limit(1).get()
+  const byAuth = byUser.empty ? await audienceUsersRef.where('authUid', '==', normalizedUserId).limit(1).get() : byUser
+  const audienceByEmailSnap = byAuth.empty ? await audienceUsersRef.where('email', '==', email).limit(1).get() : byAuth
   const nowMs = Date.now()
 
   if (!audienceByEmailSnap.empty) {
     const audienceDoc = audienceByEmailSnap.docs[0]
     const audienceData = audienceDoc.data() || {}
+    const existingOwner = String(audienceData.userId || audienceData.authUid || '').trim()
+    if (existingOwner && existingOwner !== normalizedUserId)
+      throw new Error('Audience identity conflict; history was not attached.')
     const updatePayload = {
-      email,
       history_uuid: Firestore.FieldValue.arrayUnion(normalizedHistoryUuid),
       last_updated: nowMs,
     }
@@ -1670,6 +1676,19 @@ exports.trackHistory = onRequest(async (req, res) => {
     return
   }
 
+  let identity
+  try {
+    identity = await verifyHistoryIdentity(payload, token => admin.auth().verifyIdToken(token, true))
+  }
+  catch (error) {
+    res.status(error.status || 401).json({ error: error.message })
+    return
+  }
+  if (uuid.includes('/') || (typeof data?.oldUuid === 'string' && data.oldUuid.includes('/'))) {
+    res.status(400).json({ error: 'Invalid history id' })
+    return
+  }
+
   const historyRef = db.collection('organizations').doc(orgId).collection('lead-history')
   const oldUuid = typeof data?.oldUuid === 'string' ? data.oldUuid.trim() : ''
   const now = Firestore.FieldValue.serverTimestamp()
@@ -1690,50 +1709,12 @@ exports.trackHistory = onRequest(async (req, res) => {
   }
 
   try {
-    let docRef = null
-    let exists = false
-
-    if (oldUuid) {
-      const oldUuidSnap = await historyRef
-        .where('oldUuids', 'array-contains', oldUuid)
-        .limit(1)
-        .get()
-      if (!oldUuidSnap.empty) {
-        docRef = oldUuidSnap.docs[0].ref
-        exists = true
-      }
-    }
-
-    if (!docRef)
-      docRef = uuid ? historyRef.doc(uuid) : historyRef.doc()
-
-    if (uuid) {
-      const snap = await docRef.get()
-      exists = snap.exists
-    }
-
-    const updateData = {
-      ...historyBase,
-      updatedAt: now,
-      lastActionAt: now,
-      lastAction: action,
-      lastData: data,
-    }
-    if (oldUuid)
-      updateData.oldUuids = Firestore.FieldValue.arrayUnion(oldUuid)
-    if (!exists) {
-      updateData.createdAt = now
-      updateData.firstActionAt = now
-    }
-
-    await docRef.set(updateData, { merge: true })
-    await docRef.collection('actions').add({
-      action,
-      data,
-      timestamp: now,
-    })
     const siteId = typeof data?.siteId === 'string' ? data.siteId.trim() : ''
-    const authUserId = typeof payload.userId === 'string' ? payload.userId.trim() : ''
+    const docRef = await appendIdentityHistory({
+      db, historyRef, uuid, oldUuid, identity, action, data, base: historyBase, now,
+      audienceRef: siteId ? db.collection('organizations').doc(orgId).collection('sites').doc(siteId).collection('audience-users') : null,
+    })
+    const authUserId = identity?.uid || ''
     if (siteId && authUserId) {
       try {
         await syncAudienceHistoryUuidForUser({
@@ -1741,6 +1722,7 @@ exports.trackHistory = onRequest(async (req, res) => {
           siteId,
           userId: authUserId,
           historyUuid: docRef.id,
+          identityEmail: identity.email,
         })
       }
       catch (error) {
@@ -1757,6 +1739,7 @@ exports.trackHistory = onRequest(async (req, res) => {
         data,
         timestamp: now,
         uuid: docRef.id,
+        ...(identity ? { authenticatedUserId: identity.uid, authenticatedEmail: identity.email } : {}),
       }
 
       leadActionRef = await leadActionsRef.add(leadActionPayload)

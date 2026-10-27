@@ -36,6 +36,7 @@ export const useSiteSettingsTemplate = () => {
       trackingAdrollPixelId: { bindings: { 'field-type': 'text', 'label': 'AdRoll Pixel ID' }, cols: '12', value: defaults.trackingAdrollPixelId },
       trackingConsentEnabled: { bindings: { 'field-type': 'boolean', 'label': 'Require Tracking Consent' }, cols: '12', value: defaults.trackingConsentEnabled },
       trackingConsentMessage: { bindings: { 'field-type': 'textarea', 'label': 'Tracking Consent Message' }, cols: '12', value: defaults.trackingConsentMessage },
+      analyticsEvents: { value: defaults.analyticsEvents },
       sureFeedURL: { bindings: { 'field-type': 'text', 'label': 'Sure Feedback' }, cols: '12', value: defaults.sureFeedURL },
       socialFacebook: { bindings: { 'field-type': 'text', 'label': 'Facebook URL' }, cols: '12', value: defaults.socialFacebook },
       socialInstagram: { bindings: { 'field-type': 'text', 'label': 'Instagram URL' }, cols: '12', value: defaults.socialInstagram },

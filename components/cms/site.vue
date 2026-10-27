@@ -2,7 +2,7 @@
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { BarChart3, Check, CircleAlert, ClipboardCheck, Copy, Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePenLine, FileStack, FileUp, FileX, FolderCog, FolderDown, FolderUp, FolderX, ImagePlus, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload, Users, X } from 'lucide-vue-next'
-import { buildPagePayloadFromTemplateDoc, buildThemeSettingsPayload, deriveThemeMenus, ensureMenuBuckets, ensureUniqueSlug, titleFromSlug } from '../../lib/cmsOperations'
+import { buildPagePayloadFromTemplateDoc, buildThemeSettingsPayload, deriveThemeMenus, ensureMenuBuckets, ensureUniqueSlug, normalizeAnalyticsEvents, titleFromSlug } from '../../lib/cmsOperations'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
 import { buildCmsSitePreviewUrl, buildPublishedSitePreviewUrl, getCmsPublishedSiteOrigin } from '../../lib/cmsPublishedSitePreview'
 
@@ -267,6 +267,12 @@ const schemas = {
     trackingAdrollPixelId: z.string().optional(),
     trackingConsentEnabled: z.boolean().optional(),
     trackingConsentMessage: z.string().optional(),
+    analyticsEvents: z.object({
+      enabled: z.boolean().optional(),
+      forms: z.boolean().optional(),
+      contactClicks: z.boolean().optional(),
+      accountSignUps: z.boolean().optional(),
+    }).optional(),
     sureFeedURL: z.string().optional(),
     socialFacebook: z.string().optional(),
     socialInstagram: z.string().optional(),
@@ -1273,6 +1279,7 @@ const isSiteDiff = computed(() => {
       trackingAdrollPixelId: publishedSite.trackingAdrollPixelId || '',
       trackingConsentEnabled: publishedSite.trackingConsentEnabled !== false,
       trackingConsentMessage: publishedSite.trackingConsentMessage || defaultSiteSettings.trackingConsentMessage,
+      analyticsEvents: normalizeAnalyticsEvents(publishedSite.analyticsEvents),
       sureFeedURL: publishedSite.sureFeedURL,
       socialFacebook: publishedSite.socialFacebook,
       socialInstagram: publishedSite.socialInstagram,
@@ -1308,6 +1315,7 @@ const isSiteDiff = computed(() => {
       trackingAdrollPixelId: siteData.value.trackingAdrollPixelId || '',
       trackingConsentEnabled: siteData.value.trackingConsentEnabled !== false,
       trackingConsentMessage: siteData.value.trackingConsentMessage || defaultSiteSettings.trackingConsentMessage,
+      analyticsEvents: normalizeAnalyticsEvents(siteData.value.analyticsEvents),
       sureFeedURL: siteData.value.sureFeedURL,
       socialFacebook: siteData.value.socialFacebook,
       socialInstagram: siteData.value.socialInstagram,
@@ -1348,6 +1356,7 @@ const SITE_SETTINGS_DIFF_FIELDS = [
   { key: 'trackingAdrollPixelId', label: 'AdRoll Pixel ID' },
   { key: 'trackingConsentEnabled', label: 'Require Tracking Consent', format: 'boolean' },
   { key: 'trackingConsentMessage', label: 'Tracking Consent Message' },
+  { key: 'analyticsEvents', label: 'Google Analytics Events', format: 'analyticsEvents' },
   { key: 'sureFeedURL', label: 'SureFeed URL' },
   { key: 'socialFacebook', label: 'Facebook' },
   { key: 'socialInstagram', label: 'Instagram' },
@@ -1359,9 +1368,23 @@ const SITE_SETTINGS_DIFF_FIELDS = [
   { key: 'contactSpam', label: 'Contact Spam' },
 ]
 
+const ANALYTICS_EVENT_LABELS = {
+  forms: 'Form submissions',
+  contactClicks: 'Phone and email clicks',
+  accountSignUps: 'Account sign-ups',
+}
+
 const summarizeSiteSettingsValue = (value, format = '') => {
   if (format === 'boolean')
     return value === true ? 'Yes' : value === false ? 'No' : '—'
+
+  if (format === 'analyticsEvents') {
+    const events = normalizeAnalyticsEvents(value)
+    const categories = Object.entries(ANALYTICS_EVENT_LABELS)
+      .filter(([key]) => events[key])
+      .map(([, label]) => label)
+    return `${events.enabled ? 'On' : 'Off'}${categories.length ? ` (${categories.join(', ')})` : ''}`
+  }
 
   if (format === 'menus') {
     if (!value || typeof value !== 'object')
@@ -1422,6 +1445,10 @@ const siteSettingsDiffDetails = computed(() => {
       baseValue = baseValue || defaultSiteSettings.trackingConsentMessage
       compareValue = compareValue || defaultSiteSettings.trackingConsentMessage
     }
+    if (field.key === 'analyticsEvents') {
+      baseValue = normalizeAnalyticsEvents(baseValue)
+      compareValue = normalizeAnalyticsEvents(compareValue)
+    }
     if (areEqualNormalized(baseValue, compareValue))
       return
     details.push({
@@ -1443,6 +1470,7 @@ const publishSiteSettings = async ({ siteVersion = null, bumpVersion = true } = 
     ...siteData.value,
     trackingConsentEnabled: siteData.value?.trackingConsentEnabled !== false,
     trackingConsentMessage: siteData.value?.trackingConsentMessage || defaultSiteSettings.trackingConsentMessage,
+    analyticsEvents: normalizeAnalyticsEvents(siteData.value?.analyticsEvents),
     version: nextVersion,
   }
   if (bumpVersion) {
@@ -1489,6 +1517,7 @@ const discardSiteSettings = async () => {
       trackingAdrollPixelId: publishedSite.trackingAdrollPixelId || '',
       trackingConsentEnabled: publishedSite.trackingConsentEnabled !== false,
       trackingConsentMessage: publishedSite.trackingConsentMessage || defaultSiteSettings.trackingConsentMessage,
+      analyticsEvents: normalizeAnalyticsEvents(publishedSite.analyticsEvents),
       sureFeedURL: publishedSite.sureFeedURL || '',
       socialFacebook: publishedSite.socialFacebook || '',
       socialInstagram: publishedSite.socialInstagram || '',
