@@ -25,6 +25,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  optimizing: {
+    type: Boolean,
+    default: false,
+  },
 })
 const emits = defineEmits(['select', 'delete', 'view', 'viewJson'])
 const {
@@ -279,6 +283,14 @@ const uploadIconComponent = computed(() => {
         >
           <Loader2 v-if="!['Failed', 'Complete'].includes(publicationProgressLabel)" class="h-3.5 w-3.5 animate-spin" />
           <span class="truncate">{{ publicationProgressLabel }}</span>
+        </div>
+        <div
+          v-if="props.optimizing"
+          class="mt-1 flex items-center gap-1.5 text-[11px] font-medium text-sky-700 dark:text-sky-300"
+          role="status"
+        >
+          <Loader2 class="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          <span class="truncate">Optimizing image. You can select it when it's ready.</span>
         </div>
       </div>
     </CardContent>
