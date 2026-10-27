@@ -1,7 +1,7 @@
 <div class="w-full bg-transparent">
   <div class="p-8 max-w-screen-lg mx-auto">
     <ul class="list-inside">
-      {{{#array {"field":"list", "api": "https://api.clearwaterproperties.com/api/front/offices", "apiField": "data", "apiQuery": "", "limit": 4, "value": [] }}}}
+      {{{#array {"field":"list","limit":4,"value":[]}}}}
         <li class="list-disc">
           {{item.name}} - {{item.geo.lat}} : {{item.geo.lng}}
 
