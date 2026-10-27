@@ -201,6 +201,19 @@ const ensureDefaultMenusObject = (doc = state.workingDoc) => {
   return doc.defaultMenus
 }
 
+// Section type classes the block validator checks against
+// (docs/data-contracts/cms-themes/README.md). Empty means not checked.
+const ensureTypeRoles = (doc = state.workingDoc) => {
+  if (!doc)
+    return
+  if (!doc.typeRoles || typeof doc.typeRoles !== 'object' || Array.isArray(doc.typeRoles))
+    doc.typeRoles = {}
+  for (const key of ['sectionTitle', 'sectionIntro']) {
+    if (typeof doc.typeRoles[key] !== 'string')
+      doc.typeRoles[key] = ''
+  }
+}
+
 const ensureDefaultSiteSettings = (doc = state.workingDoc) => {
   if (!doc)
     return {}
@@ -430,6 +443,7 @@ const syncDefaultPagesFromMenus = () => {
 
 const editorDocUpdates = (workingDoc) => {
   state.workingDoc = workingDoc
+  ensureTypeRoles(state.workingDoc)
   ensureDefaultPagesArray(state.workingDoc)
   ensureDefaultMenusObject(state.workingDoc)
   ensureDefaultSiteSettings(state.workingDoc)
@@ -553,6 +567,7 @@ const buildComparableThemeDoc = (doc) => {
     theme: normalizedDoc.theme ?? '',
     headJSON: normalizedDoc.headJSON ?? '',
     extraCSS: normalizedDoc.extraCSS ?? '',
+    typeRoles: isPlainObject(normalizedDoc.typeRoles) ? normalizedDoc.typeRoles : {},
     defaultPages: Array.isArray(normalizedDoc.defaultPages) ? normalizedDoc.defaultPages : [],
     defaultMenus: isPlainObject(normalizedDoc.defaultMenus) ? normalizedDoc.defaultMenus : {},
     defaultSiteSettings: isPlainObject(normalizedDoc.defaultSiteSettings) ? normalizedDoc.defaultSiteSettings : {},
@@ -566,7 +581,7 @@ const themeDocsMatchForDiff = (baseDoc, compareDoc) => {
   )
 }
 
-const THEME_DIFF_FIELD_KEYS = ['name', 'theme', 'headJSON', 'extraCSS', 'defaultPages', 'defaultMenus', 'defaultSiteSettings']
+const THEME_DIFF_FIELD_KEYS = ['name', 'theme', 'headJSON', 'extraCSS', 'typeRoles', 'defaultPages', 'defaultMenus', 'defaultSiteSettings']
 
 const resolveHistoryThemeFieldValue = (item, key, currentDoc) => {
   const afterDoc = isPlainObject(item?.afterData) ? item.afterData : null
@@ -929,6 +944,7 @@ const buildThemeChangeDetails = (baseDoc, compareDoc, { baseLabel, compareLabel 
     { key: 'theme', label: 'Theme JSON', diffOnly: true },
     { key: 'headJSON', label: 'Head JSON' },
     { key: 'extraCSS', label: 'Extra CSS', diffOnly: true },
+    { key: 'typeRoles', label: 'Type Roles' },
     { key: 'defaultMenus', label: 'Default Templates' },
     { key: 'defaultSiteSettings', label: 'Default Site Settings' },
   ]
@@ -1023,6 +1039,7 @@ const buildThemeHistoryChangeDetails = (item, compareDoc, { baseLabel, compareLa
     { key: 'theme', label: 'Theme JSON', diffOnly: true },
     { key: 'headJSON', label: 'Head JSON' },
     { key: 'extraCSS', label: 'Extra CSS', diffOnly: true },
+    { key: 'typeRoles', label: 'Type Roles' },
     { key: 'defaultMenus', label: 'Default Templates' },
     { key: 'defaultSiteSettings', label: 'Default Site Settings' },
   ]
@@ -1364,7 +1381,23 @@ onBeforeMount(async () => {
                   />
                 </TabsContent>
 
-                <TabsContent value="extra-css" class="mt-4">
+                <TabsContent value="extra-css" class="mt-4 space-y-4">
+                  <div v-if="slotProps.workingDoc.typeRoles" class="grid gap-4 sm:grid-cols-2">
+                    <edge-shad-input
+                      v-model="slotProps.workingDoc.typeRoles.sectionTitle"
+                      label="Section title class"
+                      name="typeRoles.sectionTitle"
+                      placeholder="e.g. cw-section__title"
+                      description="Blocks' section headings use this class from Extra CSS; their own sizes get a warning."
+                    />
+                    <edge-shad-input
+                      v-model="slotProps.workingDoc.typeRoles.sectionIntro"
+                      label="Section intro class"
+                      name="typeRoles.sectionIntro"
+                      placeholder="e.g. cw-section__intro"
+                      description="The intro after a section heading uses this class; leave both empty to skip the check."
+                    />
+                  </div>
                   <edge-cms-code-editor
                     v-model="slotProps.workingDoc.extraCSS"
                     title="Extra CSS"

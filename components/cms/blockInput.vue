@@ -1,6 +1,6 @@
 <script setup>
 import { useVModel } from '@vueuse/core'
-import { ImagePlus, Video } from 'lucide-vue-next'
+import { ImagePlus, Video, X } from 'lucide-vue-next'
 import { buildCloudflareVideoIframe, getCloudflareVideoIframeSrc } from '../../lib/cmsVideo'
 
 const props = defineProps({
@@ -154,6 +154,11 @@ const normalizeSelectedImageUrl = (url) => {
 const selectImage = async (url) => {
   modelValue.value = normalizeSelectedImageUrl(url)
   await nextTick()
+  state.imageOpen = false
+}
+
+const clearImage = () => {
+  modelValue.value = ''
   state.imageOpen = false
 }
 
@@ -345,8 +350,20 @@ onBeforeMount(async () => {
       <edge-shad-select v-model="modelValue" :name="field" :label="label" :item-title="optionConfig.itemTitle" :item-value="optionConfig.itemValue" :items="optionConfig.items" />
     </div>
     <div v-else-if="props.type === 'image'" class="space-y-2">
-      <div class="mb-2 text-sm font-medium text-foreground">
-        {{ label }}
+      <div class="mb-2 flex w-full items-center justify-between gap-2">
+        <span class="min-w-0 text-sm font-medium text-foreground">{{ label }}</span>
+        <edge-shad-button
+          v-if="hasImageValue"
+          type="button"
+          size="sm"
+          variant="ghost"
+          class="ml-auto h-6 shrink-0 gap-1 px-2 text-xs text-muted-foreground hover:text-destructive"
+          :aria-label="`Clear ${label}`"
+          title="Clear this field without deleting the image from the media library"
+          @click.stop="clearImage"
+        >
+          <X class="h-3 w-3" />Clear image
+        </edge-shad-button>
       </div>
       <div class="relative py-2 rounded-md flex items-center justify-center border border-border">
         <Dialog v-model:open="state.imageOpen">

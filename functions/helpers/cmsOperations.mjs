@@ -63,7 +63,7 @@ export const NEW_BLOCK_DEFAULTS = Object.freeze({
 })
 
 // Theme fields an operation may write.
-export const THEME_FIELDS = Object.freeze(['name', 'theme', 'headJSON', 'extraCSS', 'defaultPages', 'defaultMenus', 'defaultSiteSettings'])
+export const THEME_FIELDS = Object.freeze(['name', 'theme', 'headJSON', 'extraCSS', 'typeRoles', 'defaultPages', 'defaultMenus', 'defaultSiteSettings'])
 
 const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value)
 const clone = value => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)))
@@ -479,6 +479,21 @@ export const themeFieldProblems = (fields) => {
   }
   if (fields?.extraCSS !== undefined && typeof fields.extraCSS !== 'string')
     problems.push('extraCSS must be a string.')
+  // typeRoles names the classes a theme's Extra CSS defines for section type
+  // (cmsBlockValidation.js sectionTypeRoleFindings): one class name each.
+  if (fields?.typeRoles !== undefined) {
+    if (!isPlainObject(fields.typeRoles)) {
+      problems.push('typeRoles must be an object of class names.')
+    }
+    else {
+      for (const [key, value] of Object.entries(fields.typeRoles)) {
+        if (!['sectionTitle', 'sectionIntro'].includes(key))
+          problems.push(`typeRoles.${key} is not a type role (sectionTitle, sectionIntro).`)
+        else if (typeof value !== 'string' || (value.trim() && !/^-?[_a-zA-Z][\w-]*$/.test(value.trim())))
+          problems.push(`typeRoles.${key} must be one class name, or empty.`)
+      }
+    }
+  }
   for (const key of Object.keys(fields || {})) {
     if (!THEME_FIELDS.includes(key))
       problems.push(`"${key}" is not a theme field an operation can set.`)

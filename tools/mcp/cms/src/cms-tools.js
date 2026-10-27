@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
+  commonTypeRoles,
   mergeValidationResults,
   normalizeBlockTagList,
   validateBlock,
@@ -381,6 +382,7 @@ export function createCmsToolService({
       db.doc(`organizations/${orgId}`).get(),
     ])
     const knownThemeIds = themesSnapshot.docs.slice(0, themeScanLimit).map(doc => doc.id)
+    const themeDocs = Object.fromEntries(themesSnapshot.docs.slice(0, themeScanLimit).map(doc => [doc.id, doc.data()]))
     // The organization's block tag list; empty means unrestricted, so the tag
     // rules report nothing.
     const blockTagList = normalizeBlockTagList(orgSnapshot.exists ? orgSnapshot.data()?.cmsBlockTags : null)
@@ -398,7 +400,9 @@ export function createCmsToolService({
       })
       let validation
       try {
-        validation = await validateBlock(block, { knownThemeIds, blockTagList, renderTemplate, ownership: override })
+        // Type roles from the block's allowed themes (none: not checked).
+        const typeRoles = commonTypeRoles((Array.isArray(block?.themes) ? block.themes : []).map(id => themeDocs[id]).filter(Boolean))
+        validation = await validateBlock(block, { knownThemeIds, blockTagList, renderTemplate, ownership: override, typeRoles })
       }
       catch (error) {
         validation = {

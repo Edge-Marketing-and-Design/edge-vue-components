@@ -158,6 +158,15 @@ const commonThemeTokens = (blockThemes, themeDocs) => {
   }))
 }
 
+// Type roles warn only: a block that sets its own section type still saves.
+const addTypeRoleFindings = (validation, plan, content, blockThemes, themeDocs) => {
+  const ids = Array.isArray(blockThemes) ? blockThemes : []
+  const roles = validation.commonTypeRoles(ids.map(id => themeDocs[id]).filter(Boolean))
+  const messages = validation.sectionTypeRoleFindings(content, roles).map(issue => `${issue.code}: ${issue.message}`)
+  if (messages.length)
+    plan.notices = [...(plan.notices || []), ...messages]
+}
+
 const addThemeNameFindings = (plan, findings, strict) => {
   const messages = findings.map(issue => `${issue.code}: ${issue.message}`)
   if (strict)
@@ -827,6 +836,7 @@ const planBlock = async (core, reader, { orgId, uid, now, operation }) => {
     const selectedThemes = (findings.doc || block).themes
     const namedFindings = validation.themeNameFindings(validation.templateClassStrings((findings.doc || block).content), commonThemeTokens(selectedThemes, themeDocs))
     addThemeNameFindings(plan, namedFindings, blockTargetsStandardThemes(validation, selectedThemes, themeDocs))
+    addTypeRoleFindings(validation, plan, (findings.doc || block).content, selectedThemes, themeDocs)
     const doc = { ...JSON.parse(JSON.stringify(core.NEW_BLOCK_DEFAULTS)), ...(findings.doc || block), docId: blockId, doc_created_at: now, ...stamp(uid, now) }
     addWrite(plan, ref, doc, 'set', `Create library block "${doc.name || blockId}" (${blockId}). Nothing uses it yet.`)
     plan.result = { blockId }
@@ -872,6 +882,7 @@ const planBlock = async (core, reader, { orgId, uid, now, operation }) => {
     const blockThemes = Array.isArray(operation.definition.themes) ? operation.definition.themes : block.themes
     const findings = validation.themeNameFindings(validation.templateClassStrings(operation.definition.content), commonThemeTokens(blockThemes, themeDocs))
     addThemeNameFindings(plan, findings, blockTargetsStandardThemes(validation, blockThemes, themeDocs))
+    addTypeRoleFindings(validation, plan, operation.definition.content, blockThemes, themeDocs)
   }
   if (isPlainObject(operation.definition)) {
     // Describe what the save will store: fields the request leaves out keep

@@ -7175,16 +7175,43 @@ const exportCurrentBlock = async () => {
   "emailTo": { "type": "text", "label": "Email To", "value": "" }
 }</code></pre>
                       <p>
-                        To route a user-specific form, submit the user's registered <code>userId</code> in a hidden input. Use a real
+                        To route a user-specific form, submit the recipient's registered user ID as <code>recipientUserId</code> in a hidden input. Use a real
                         registered user ID from the form's data context; do not put an email address in this field.
                       </p>
-                      <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;input type="hidden" name="userId" value="{{ userId }}" /&gt;</code></pre>
+                      <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;input type="hidden" name="recipientUserId" value="{{ userId }}" /&gt;</code></pre>
                       <div class="space-y-1">
-                        <div>The server requires an exact organization-user match for the submitted <code>userId</code>.</div>
+                        <div>Only set a recipient for a form intentionally addressed to an organization member, such as an agent-profile form. Omit it on generic/property inquiries; do not use a property's MLS agent ID.</div>
+                        <div>The server requires an exact organization-user match for the submitted <code>recipientUserId</code>.</div>
+                        <div><code>userId</code> identifies the visitor and never selects an email recipient or assigned agent.</div>
                         <div>Email resolves from the matched user's <code>meta.contactEmail</code>, then <code>meta.email</code>.</div>
                         <div>A valid match overrides block <code>emailTo</code> and site <code>contactEmail</code>.</div>
                         <div>If the user is missing or has no valid email, normal block and site email fallbacks remain in effect.</div>
                       </div>
+                    </div>
+                  </section>
+
+                  <section class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Clearwater Lead Source + Newsletter
+                    </h3>
+                    <div class="text-sm text-foreground space-y-2">
+                      <p>
+                        In Clearwater, <code>type</code> supplies the intended lead Source. Use an existing Hub Source value,
+                        such as <code>Home Valuation</code>. Missing values default to <code>Contact Form</code>.
+                        Spam checks preserve a legitimate submitted Source; confirmed spam retains the existing spam handling.
+                        Existing leads keep their established Source behavior.
+                      </p>
+                      <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;input type="hidden" name="type" value="Home Valuation" /&gt;</code></pre>
+                      <p>
+                        For a newsletter subscription, use <code>newsletter=true</code>. This marks the subscription separately
+                        from Source. The legacy <code>type=Newsletter</code> also marks a subscription and normalizes the lead
+                        type to <code>Contact Form</code>.
+                      </p>
+                      <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>&lt;input type="hidden" name="newsletter" value="true" /&gt;</code></pre>
+                      <p>
+                        <code>funnel</code> is descriptive metadata only. It does not set Source, select an email recipient,
+                        or assign an agent. Keep using the shared form helper and history endpoint.
+                      </p>
                     </div>
                   </section>
 
