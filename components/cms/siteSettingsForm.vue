@@ -1,6 +1,6 @@
 <script setup lang="js">
 import { CheckCircle2, CircleAlert, Loader2, RefreshCw } from 'lucide-vue-next'
-import { normalizeAnalyticsEvents } from '../../lib/cmsOperations'
+import { normalizeAnalyticsEvents, normalizeSiteDomainSettings } from '../../lib/cmsOperations'
 
 const props = defineProps({
   settings: {
@@ -331,6 +331,8 @@ const domainError = computed(() => String(props.domainError || '').trim())
 const serverPagesProject = ref('')
 const domainRegistry = ref({})
 const loadingDomainRegistry = ref(false)
+const domainLookupError = ref('')
+const domainRegistryInFlight = new Set()
 const hasLoadedDomainRegistry = ref(false)
 const retryingDomainSync = reactive({})
 const retryingWebAnalytics = ref(false)
@@ -444,10 +446,11 @@ const getCloudflarePagesDomain = (domain) => {
   return `www.${domain}`
 }
 
-const normalizedDomains = computed(() => {
-  const values = Array.isArray(props.settings?.domains) ? props.settings.domains : []
-  return Array.from(new Set(values.map(normalizeDomain).filter(Boolean)))
-})
+const updateSiteDomains = (domains) => {
+  Object.assign(props.settings, normalizeSiteDomainSettings({ ...props.settings, domains }))
+}
+
+const normalizedDomains = computed(() => normalizeSiteDomainSettings(props.settings).domains)
 
 const dnsEligibleDomains = computed(() => normalizedDomains.value.filter(shouldDisplayDomainDnsRecords))
 const NO_CANONICAL_DOMAIN_VALUE = '__no_forward__'
@@ -471,11 +474,13 @@ const normalizeCanonicalDomain = () => {
   if (!dnsEligibleDomains.value.length)
     return
   const hasSavedValue = Object.prototype.hasOwnProperty.call(props.settings || {}, 'canonicalDomain')
-  const current = normalizeDomain(props.settings?.canonicalDomain)
+  const current = normalizeSiteDomainSettings(props.settings).canonicalDomain || ''
   if (hasSavedValue && current === '')
     return
   if (!dnsEligibleDomains.value.includes(current))
     Reflect.set(props.settings, 'canonicalDomain', dnsEligibleDomains.value[0] || '')
+  else if (props.settings.canonicalDomain !== current)
+    Reflect.set(props.settings, 'canonicalDomain', current)
 }
 
 const organizationId = computed(() => String(edgeGlobal?.edgeState?.currentOrganization || '').trim())
@@ -484,7 +489,8 @@ const shouldShowDomainRegistryLoading = computed(() => {
     return false
   return loadingDomainRegistry.value || !hasLoadedDomainRegistry.value
 })
-const DOMAIN_REGISTRY_POLL_MS = 2500
+const DOMAIN_REGISTRY_POLL_MS = 15000
+let domainRegistryPollCount = 0
 let domainRegistryPollTimer = null
 
 const buildFallbackDomainEntry = (domain) => {
@@ -580,8 +586,10 @@ const parseFunctionError = (error, fallback = 'Request failed.') => {
 
 const fetchDomainRegistry = async (options = {}) => {
   const { background = false } = options
-  if (!edgeFirebase?.runFunction)
+  const lookupKey = `${props.siteId}:${organizationId.value}:${normalizedDomains.value.join('|')}`
+  if (!edgeFirebase?.runFunction || domainRegistryInFlight.has(lookupKey))
     return
+  domainRegistryInFlight.add(lookupKey)
   const domains = normalizedDomains.value
   if (!background)
     loadingDomainRegistry.value = true
@@ -591,6 +599,9 @@ const fetchDomainRegistry = async (options = {}) => {
       siteId: props.siteId || '',
       domains,
     })
+    if (lookupKey !== `${props.siteId}:${organizationId.value}:${normalizedDomains.value.join('|')}`)
+      return
+    domainLookupError.value = ''
     serverPagesProject.value = String(response?.data?.project || '').trim()
     const nextRegistry = response?.data?.domainRegistry
     if (domains.length && nextRegistry && typeof nextRegistry === 'object')
@@ -600,11 +611,13 @@ const fetchDomainRegistry = async (options = {}) => {
     hasLoadedDomainRegistry.value = true
   }
   catch {
-    serverPagesProject.value = ''
-    domainRegistry.value = {}
+    if (lookupKey !== `${props.siteId}:${organizationId.value}:${normalizedDomains.value.join('|')}`)
+      return
+    domainLookupError.value = 'Unable to check domain status. Check again or reopen these settings.'
     hasLoadedDomainRegistry.value = true
   }
   finally {
+    domainRegistryInFlight.delete(lookupKey)
     if (!background)
       loadingDomainRegistry.value = false
   }
@@ -629,10 +642,11 @@ const retryDomainSync = async (domain) => {
     const allClear = response?.data?.allClear === true
     edgeFirebase?.toast?.success?.(
       allClear
-        ? `Retried DNS sync for ${normalizedDomain}; domain errors are clear.`
-        : `Retried DNS sync for ${normalizedDomain}.`,
+        ? `Domain connection verified for ${normalizedDomain}.`
+        : `Checked ${normalizedDomain}. Review its connection status below.`,
     )
     await fetchDomainRegistry()
+    startDomainRegistryPolling()
   }
   catch (error) {
     edgeFirebase?.toast?.error?.(parseFunctionError(error, 'Unable to retry DNS sync.'))
@@ -675,8 +689,12 @@ const startDomainRegistryPolling = () => {
     return
   if (!normalizedDomains.value.length)
     return
-  domainRegistryPollTimer = setInterval(() => {
-    fetchDomainRegistry({ background: true }).catch(() => {})
+  domainRegistryPollCount = 0
+  domainRegistryPollTimer = setInterval(async () => {
+    await fetchDomainRegistry({ background: true })
+    domainRegistryPollCount++
+    if (domainRegistryPollCount >= 10 || (domainRegistryPollCount >= 2 && domainDnsEntries.value.every(entry => entry.connectionStatus === 'active')))
+      stopDomainRegistryPolling()
   }, DOMAIN_REGISTRY_POLL_MS)
 }
 
@@ -899,12 +917,16 @@ watch(() => [
     </TabsContent>
     <TabsContent value="domains" class="pt-4 space-y-4">
       <edge-shad-tags
-        v-model="props.settings.domains"
+        :model-value="props.settings.domains"
+        @update:model-value="updateSiteDomains"
         name="domains"
         label="Domains"
-        placeholder="Add or remove domains"
+        placeholder="example.com (www is managed automatically)"
         class="w-full"
       />
+      <p class="text-xs text-muted-foreground">
+        Enter the domain without www. Both versions are connected automatically. Other subdomains are kept as entered.
+      </p>
       <edge-shad-select
         v-if="showCanonicalDomain"
         :model-value="normalizeDomain(props.settings.canonicalDomain) || NO_CANONICAL_DOMAIN_VALUE"
@@ -947,7 +969,7 @@ watch(() => [
           >
             <Loader2 v-if="isRetryingDomainSync(domainRetryTarget)" class="h-3.5 w-3.5 animate-spin" />
             <RefreshCw v-else class="h-3.5 w-3.5" />
-            Retry DNS Sync
+            Check again
           </edge-shad-button>
         </div>
         <AlertDescription class="text-sm">
@@ -983,6 +1005,7 @@ watch(() => [
         <p class="text-sm text-muted-foreground">
           Records are listed for each domain.
         </p>
+        <p v-if="domainLookupError" class="text-sm text-red-700" role="alert">{{ domainLookupError }}</p>
         <p v-if="shouldShowDomainRegistryLoading" class="text-xs text-muted-foreground">
           Waiting for latest domain sync results...
         </p>
@@ -1023,7 +1046,7 @@ watch(() => [
                 Manual DNS needed
               </span>
               <edge-shad-button
-                v-if="entry.dnsSyncError || entry.wwwError || entry.apexError"
+                v-if="entry.dnsEligible"
                 type="button"
                 size="sm"
                 variant="outline"
@@ -1037,9 +1060,12 @@ watch(() => [
               </edge-shad-button>
             </div>
           </div>
-          <p v-if="entry.wwwAdded || entry.apexAdded" class="text-xs text-muted-foreground">
-            The domain has been connected to the website. DNS controls whether visitors can reach it.
-          </p>
+          <div class="rounded border p-3 text-sm" :class="entry.connectionStatus === 'failed' || entry.connectionError ? 'border-red-300 bg-red-50 text-red-800' : entry.connectionStatus === 'active' ? 'border-green-300 bg-green-50 text-green-800' : entry.connectionStatus === 'pending' ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-border bg-muted text-muted-foreground'" role="status">
+            <p class="font-semibold">{{ entry.connectionStatus === 'failed' || entry.connectionError ? 'Domain connection needs attention' : entry.connectionStatus === 'active' ? 'Domain active' : entry.connectionStatus === 'pending' ? 'Awaiting Cloudflare verification' : 'Domain verification status unavailable' }}</p>
+            <p>www: {{ entry.wwwStatus || 'unknown' }} · Root: {{ entry.apexStatus || 'unknown' }}</p>
+            <p v-if="entry.connectionError || entry.wwwError || entry.apexError" class="break-words">{{ entry.connectionError || entry.wwwError || entry.apexError }}</p>
+            <p v-if="entry.connectionCheckedAt" class="mt-1 text-xs">Last checked {{ new Date(entry.connectionCheckedAt).toLocaleString() }}</p>
+          </div>
           <div class="space-y-2 text-sm">
             <div class="grid grid-cols-[70px_1fr] gap-3">
               <div class="text-muted-foreground">
