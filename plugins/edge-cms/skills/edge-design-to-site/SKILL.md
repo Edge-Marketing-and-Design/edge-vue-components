@@ -37,7 +37,7 @@ You work through the Hub's CMS MCP. Everything you write is a draft:
 | `cms_preview_url` | A 15-minute link to the Hub's render of one draft page, with your unreleased block drafts by default |
 | `cms_site_readiness` | What stops the site from being finished |
 
-Operations (fields from `cms_contract`, kind `operations`): `theme.create`, `theme.update` (only themes no published site uses), `theme.propose` (for a live theme), `site.create`, `site.update` (the site's SEO only), `page.create`, `page.update`, `page.placeBlock`, `page.setValues`, `page.removeBlock`, `block.create`, `block.draft`.
+Operations (fields from `cms_contract`, kind `operations`): `theme.create`, `theme.update` (only themes no published site uses), `theme.propose` (for a live theme), `site.create`, `site.update` (the site's SEO only), `page.create`, `page.update`, `page.placeBlock`, `page.setValues`, `page.moveBlock`, `page.removeBlock`, `block.create`, `block.draft`, and for posts (when the handoff covers them) `post.create`, `post.update`, `post.placeBlock`, `post.setValues`, `post.moveBlock`, `post.removeBlock`.
 
 You never publish a page, release a block, change a live theme, or edit `emd-cms-front`. The developer does those, in the Hub, after checkpoint 2.
 

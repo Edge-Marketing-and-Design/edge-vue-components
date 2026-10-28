@@ -1,6 +1,7 @@
 {
   "name": "edge",
   "owner": { "name": "Edge Marketing Design" },
+  "metadata": { "description": "Edge Marketing Design's plugins for building and editing Edge CMS sites in a Hub." },
   "plugins": [
     {
       "name": "edge-cms",
