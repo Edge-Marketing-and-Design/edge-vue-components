@@ -5,7 +5,9 @@
 // the same code as cms-agentConnection and cms-agentOperation in-process, so
 // every call re-runs their checks (connection not revoked or expired, the
 // creator's current Hub roles, organization and site scope, per-operation
-// permissions). Tool names and schemas come from the shared definitions in
+// permissions). Claude connectors can sign in with OAuth instead
+// (cmsAgentOAuth.js): their cmsat.… access tokens resolve to a grant shaped
+// like a Hub connection, so the same checks apply. Tool names and schemas come from the shared definitions in
 // helpers/cmsAgentMcpTools.mjs, which the local MCP also uses.
 // The workflow guide (agentGuide/, shared Edge) and this Hub's data contracts
 // (agent-contracts/, copied from docs/data-contracts by the Hub's
@@ -17,6 +19,7 @@ const { db, onRequest, HttpsError, logger } = require('./config.js')
 const { issueAgentSession, organizationPage, verifyConnection } = require('./cmsAgentConnections.js')
 const { agentErrorResponse, handleAgentRequest } = require('./cmsAgentKeys.js')
 const { readContractNotes } = require('./cmsAgentContractNotes.js')
+const { bearerChallenge, oauthUrls, protectedResourceMetadata, verifyAccessToken } = require('./cmsAgentOAuth.js')
 
 const CLIENT = 'edge-cms-remote-mcp'
 const SERVER_INFO = { name: 'edge-cms', version: '0.1.0' }
@@ -179,6 +182,15 @@ const rpcError = (res, status, message, headers = {}) => {
 
 // Serves one MCP request. Exported for tests with an injected remote.
 const serveMcp = async (req, res, remote) => {
+  const urls = oauthUrls()
+  const route = String(req.path || req.url || '/').split('?')[0].replace(/\/+$/, '')
+  if (req.method === 'GET' && route.endsWith('/.well-known/oauth-protected-resource') && urls.issuer) {
+    res.status(200)
+    res.set('Cache-Control', 'public, max-age=300')
+    res.set('Access-Control-Allow-Origin', '*')
+    res.json(protectedResourceMetadata(urls))
+    return
+  }
   if (req.method !== 'POST') {
     rpcError(res, 405, 'This MCP server is stateless: send JSON-RPC messages with POST.', { Allow: 'POST' })
     return
@@ -186,11 +198,11 @@ const serveMcp = async (req, res, remote) => {
   const header = req.get ? req.get('authorization') : req.headers?.authorization
   let connection
   try {
-    connection = await verifyConnection(header)
+    connection = /^(?:Bearer\s+)?cmsat\./i.test(String(header || '').trim()) ? await verifyAccessToken(header, urls) : await verifyConnection(header)
   }
   catch (error) {
     const { status, body } = agentErrorResponse(error)
-    const challenge = status === 401 ? { 'WWW-Authenticate': 'Bearer error="invalid_token"' } : {}
+    const challenge = status === 401 ? { 'WWW-Authenticate': bearerChallenge(urls, { tokenSent: Boolean(header) }) } : {}
     rpcError(res, status, body.message, challenge)
     return
   }

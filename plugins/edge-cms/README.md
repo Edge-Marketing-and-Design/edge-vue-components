@@ -41,6 +41,9 @@ another file, and `EDGE_CMS_HUB_URL` at another Hub's endpoint
 is emd-cms. The desktop app doesn't read shell variables, so they only help
 in a terminal.
 
+claude.ai and Claude Desktop don't need the file: add the endpoint as a
+custom connector there and click Connect to sign in with your Hub account.
+
 If you already added the remote server by hand (for example `emd-cms-remote`
 in `~/.claude.json`), remove it after installing so the tools don't appear
 twice.
@@ -56,4 +59,16 @@ with `claude plugin validate edge/plugins/edge-cms` and the marketplace with
 The renderer guide reaches remote agents only through the Hub deploy: after
 emd-cms-front changes `docs/cms-template-v2-blocks.md`, run
 `node scripts/cms/sync-agent-contracts.mjs` in the Hub and deploy its
-Functions. Codex packaging waits for the Codex setup.
+Functions.
+
+## Codex
+
+The same folder is a Codex plugin: `.codex-plugin/plugin.json` points at the
+same `skills/` and at `.codex-mcp.json`, Codex's own server file (Codex
+refuses the Claude-only `headersHelper` in `.mcp.json`). Codex signs in with
+OAuth on first use; its client id (`https://chatgpt.com/oauth/codex/client.json`)
+is on the Hub's allowlist in `functions/cmsAgentOAuth.js`. Codex reads the
+marketplace from `edge/.claude-plugin/marketplace.json`. The server URL is
+emd-cms's; another Hub needs its own entry. `edge/tests/codexPlugin.test.mjs`
+checks the package against the rules Codex applies when it loads a plugin;
+it hasn't been installed in a real Codex yet.

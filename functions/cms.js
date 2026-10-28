@@ -30,6 +30,7 @@ const cmsOperations = require('./cmsOperations')
 const cmsAgentKeys = require('./cmsAgentKeys')
 const cmsAgentConnections = require('./cmsAgentConnections')
 const cmsAgentMcp = require('./cmsAgentMcp')
+const cmsAgentOAuth = require('./cmsAgentOAuth')
 const { buildPreviewUrl, issuePreviewToken, verifyPreviewToken } = require('./cmsPreviewTokens')
 const { removeCmsPageFromMenus } = require('./helpers/cmsPageDeletion')
 const { buildPostKvMetadata, postCanonicalKey } = require('./helpers/cmsPostKvMetadata')
@@ -1956,6 +1957,11 @@ exports.revokeAgentConnection = cmsAgentConnections.revokeAgentConnection
 exports.agentConnection = cmsAgentConnections.agentConnection
 // The remote CMS MCP (cms-agentMcp, Streamable HTTP).
 exports.agentMcp = cmsAgentMcp.agentMcp
+// OAuth sign-in for it (cms-agentOAuth: metadata, authorize, token) and the
+// Hub consent screen's calls.
+exports.agentOAuth = cmsAgentOAuth.agentOAuth
+exports.describeAgentAuthorization = cmsAgentOAuth.describeAgentAuthorization
+exports.decideAgentAuthorization = cmsAgentOAuth.decideAgentAuthorization
 
 exports.fontFileUpdated = onDocumentUpdated({ document: 'organizations/{orgId}/files/{fileId}', timeoutSeconds: 180 }, async (event) => {
   const before = event.data.before.data() || {}

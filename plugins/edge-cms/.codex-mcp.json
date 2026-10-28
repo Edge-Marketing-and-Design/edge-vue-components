@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "edge-cms": {
+      "type": "http",
+      "url": "https://us-west1-emd-cms.cloudfunctions.net/cms-agentMcp",
+      "oauth_resource": "https://us-west1-emd-cms.cloudfunctions.net/cms-agentMcp",
+      "scopes": [
+        "cms-drafts"
+      ],
+      "tool_timeout_sec": 540
+    }
+  }
+}

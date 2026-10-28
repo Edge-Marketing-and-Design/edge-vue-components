@@ -37,6 +37,9 @@ const describe = (connectionId, data) => ({
   revokedAt: data.revokedAt || null,
   lastUsedAt: data.lastUsedAt || null,
   hint: data.hint,
+  // OAuth sign-ins (cmsAgentOAuth.js) are connections too.
+  kind: data.kind || 'connection',
+  client: data.client || null,
 })
 const requireActive = (data, label) => {
   if (data.revokedAt)
@@ -126,6 +129,8 @@ exports.renewAgentConnection = onCall({ timeoutSeconds: 60 }, async (request) =>
       throw new HttpsError('permission-denied', 'Only the creator can renew this connection.')
     if (data.revokedAt)
       throw new HttpsError('failed-precondition', 'A revoked connection cannot be renewed. Create a new one.')
+    if (data.kind === 'oauth')
+      throw new HttpsError('failed-precondition', 'A sign-in renews itself while it is used. Sign in again from the app after it expires.')
     const renewed = { expiresAt: new Date(Math.max(requestedExpiry, Date.parse(data.expiresAt) || 0)).toISOString(), renewedAt: new Date().toISOString() }
     transaction.update(ref, renewed)
     return describe(ref.id, { ...data, ...renewed })
@@ -149,6 +154,8 @@ exports.revokeAgentConnection = onCall({ timeoutSeconds: 60 }, async (request) =
 })
 const verifyConnection = async (header) => {
   const connection = await authenticate(connections(), 'cmsac', header)
+  if (connection.data.kind === 'oauth')
+    throw new HttpsError('unauthenticated', 'Invalid Hub-issued credential.')
   if (connection.data.scope !== 'cms-drafts')
     throw new HttpsError('permission-denied', 'Connection is not authorized for CMS drafts.')
   return connection
