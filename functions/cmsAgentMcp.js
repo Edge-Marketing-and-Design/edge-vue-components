@@ -125,6 +125,7 @@ const createRemoteCms = ({ now = Date.now, issueSession = issueAgentSession, han
         return { ok: false, code: 'unknown-kind', message: kinds.length ? `Unknown contract kind "${kind}". Known kinds: ${kinds.join(', ')}.` : 'This Hub has not bundled its data contracts (scripts/cms/sync-agent-contracts.mjs).', kinds }
       return describeContract(key, contracts[key], withGeneratedOperations(readFileSync(path.join(contractsDir, `${key}.md`), 'utf8')))
     }),
+    cms_schema: tool(({ collection, siteId, limit, ...input }) => call(connection, input, { action: 'schema', collection, ...(siteId ? { siteId } : {}), ...(limit ? { limit } : {}) })),
     cms_guide: tool(async ({ section }) => {
       const { selectGuideSection } = (await definitionsPromise)[0]
       return selectGuideSection(readFileSync(guideFile, 'utf8'), section)

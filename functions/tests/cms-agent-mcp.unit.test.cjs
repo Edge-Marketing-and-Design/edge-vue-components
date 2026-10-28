@@ -18,7 +18,7 @@ class HttpsError extends Error {
   }
 }
 
-const REMOTE_TOOLS = ['cms_find_block', 'cms_audit_blocks', 'cms_find_usage', 'cms_validate', 'cms_find_theme', 'cms_get_theme', 'cms_contract', 'cms_guide', 'cms_agent_organizations', 'cms_open_session', 'cms_check_operation', 'cms_run_operation', 'cms_preview_url', 'cms_site_readiness', 'cms_list_pages', 'cms_get_page', 'cms_list_posts', 'cms_get_post', 'cms_block_base']
+const REMOTE_TOOLS = ['cms_find_block', 'cms_audit_blocks', 'cms_find_usage', 'cms_validate', 'cms_find_theme', 'cms_get_theme', 'cms_contract', 'cms_schema', 'cms_guide', 'cms_agent_organizations', 'cms_open_session', 'cms_check_operation', 'cms_run_operation', 'cms_preview_url', 'cms_site_readiness', 'cms_list_pages', 'cms_get_page', 'cms_list_posts', 'cms_get_post', 'cms_block_base']
 
 const setup = async (t) => {
   const fake = createFakeDb({
@@ -393,4 +393,55 @@ test('the remote server sends its rules on initialize and serves the guide and t
   const empty = env.mcp.createRemoteCms({ contractsDir: path.join(require('node:os').tmpdir(), 'no-agent-contracts') })
   const missing = JSON.parse((await empty.handlers({ id: 'c', data: {} }).cms_contract({ kind: 'operations' })).content[0].text)
   assert.match(missing.message, /has not bundled its data contracts/)
+})
+
+test('cms_schema describes what a collection stores, without values, for the operator', async (t) => {
+  const env = await setup(t)
+  for (const [docPath, data] of Object.entries({
+    'organizations/a/sites/s/published/about': { name: 'About', content: { main: [] }, structure: [], publishedAt: '2026-10-01' },
+    'organizations/a/blocks/listing-grid': { name: 'Listing grid', content: '<div>{{ loading }}</div>', dataSources: { listings: { path: 'listings' }, people: { path: 'users' } }, tags: [], themes: ['main'], synced: false, version: 1 },
+    'organizations/a/listings/l1': { name: 'Lake house', price: 450000, city: 'Polson', photos: ['a.jpg'] },
+    'organizations/a/listings/l2': { name: 'Cabin', price: 210000, city: 'Bigfork' },
+    'organizations/a/users/u1': { email: 'person@example.com' },
+  }))
+    env.docs.set(docPath, data)
+  const added = []
+  env.hooks.beforeAdd = (path, data) => added.push({ path, data })
+  const client = await connect(t, env)
+
+  const blocks = await callTool(client, 'cms_schema', { orgId: 'a', collection: 'blocks' })
+  assert.equal(blocks.ok, true, blocks.message)
+  assert.equal(blocks.sampled, 3)
+  const field = name => blocks.fields.find(item => item.path === name)
+  assert.deepEqual(field('name'), { path: 'name', types: ['string'], presence: 100 })
+  assert.equal(field('dataSources').presence, 33)
+  assert.ok(!/Welcome|<section>|Lake house/.test(JSON.stringify(blocks)), 'no values')
+
+  const pages = await callTool(client, 'cms_schema', { orgId: 'a', collection: 'pages', siteId: 's' })
+  assert.equal(pages.collectionPath, 'organizations/a/sites/s/pages')
+  assert.equal(pages.comparison.with, 'published-pages')
+  assert.ok(pages.comparison.onlyThere.includes('publishedAt'))
+  assert.ok(pages.comparison.onlyHere.includes('version'))
+  assert.equal((await callTool(client, 'cms_schema', { orgId: 'a', collection: 'pages' })).code, 'invalid-argument', 'pages need a site')
+
+  const listings = await callTool(client, 'cms_schema', { orgId: 'a', collection: 'listings' })
+  assert.equal(listings.ok, true, listings.message)
+  assert.deepEqual(listings.dataSource.usedBy, ['listing-grid'])
+  assert.equal(listings.fields.find(item => item.path === 'photos').presence, 50)
+  assert.deepEqual(listings.fields.find(item => item.path === 'price').types, ['number'])
+
+  assert.equal((await callTool(client, 'cms_schema', { orgId: 'a', collection: 'users' })).code, 'permission-denied', 'personal data is never described, even when a block reads it')
+  const unknown = await callTool(client, 'cms_schema', { orgId: 'a', collection: 'webcams' })
+  assert.equal(unknown.code, 'invalid-argument', 'only collections the library reads')
+  assert.match(unknown.message, /listings/)
+
+  const again = await callTool(client, 'cms_schema', { orgId: 'a', collection: 'listings' })
+  assert.ok(again.cachedAt, 'a recent shape is reused')
+  env.denied.add('read:organizations/a/listings')
+  assert.equal((await callTool(client, 'cms_schema', { orgId: 'a', collection: 'listings' })).code, 'permission-denied', 'rights are checked even when cached')
+
+  const records = added.filter(entry => entry.path === 'organizations/a/cmsAgentReads').map(entry => entry.data)
+  assert.deepEqual(records.map(entry => entry.tool), ['schema', 'schema', 'schema', 'schema'])
+  assert.ok(records.every(entry => entry.docIds.length === 0))
+  assert.ok(!/Lake house|Polson/.test(JSON.stringify(records)))
 })

@@ -9,7 +9,7 @@
 const { Timestamp } = require('firebase-admin/firestore')
 const { db, HttpsError, logger, permissionCheck } = require('./config.js')
 
-const LIBRARY_READ_ACTIONS = ['blocks', 'block', 'themes', 'theme', 'usage', 'audit', 'validate']
+const LIBRARY_READ_ACTIONS = ['blocks', 'block', 'themes', 'theme', 'usage', 'audit', 'validate', 'schema']
 // What each action reads, for the permission check.
 const READ_TARGETS = {
   blocks: ['blocks'],
@@ -19,7 +19,13 @@ const READ_TARGETS = {
   usage: ['blocks', 'sites'],
   audit: ['blocks', 'themes'],
   validate: ['blocks'],
+  // schema: checked per collection in read().
+  schema: [],
 }
+// A described shape is reused for this long, per organization, collection
+// and site; permissions and the audit still run on every request.
+const SHAPE_CACHE_MS = 5 * 60 * 1000
+const shapeCache = new Map()
 const AUDIT_DAYS = 90
 const AUDIT_DOC_IDS = 20
 // Findings listed per block in a remote audit.
@@ -53,8 +59,34 @@ const loadReads = () => {
 const text = value => (typeof value === 'string' ? value.trim() : '')
 const listLimit = value => Math.max(1, Math.min(Number.isInteger(value) ? value : 25, 100))
 
+const requireRead = async (uid, orgId, target) => {
+  if (!await permissionCheck(uid, 'read', `organizations/${orgId}/${target}`))
+    throw new HttpsError('permission-denied', `Not allowed to read ${target} in this organization.`)
+}
+
 // The action's result, and what the audit records about it.
-const read = async (reads, orgId, body) => {
+const read = async (reads, orgId, body, uid) => {
+  if (body.action === 'schema') {
+    const collection = text(body.collection)
+    const siteId = text(body.siteId)
+    // Finding a Data Source collection reads the library.
+    if (!['blocks', 'themes', 'sites', 'pages', 'published-pages', 'posts', 'published-posts'].includes(collection))
+      await requireRead(uid, orgId, 'blocks')
+    const target = await reads.resolveShapeCollection({ orgId, collection, siteId })
+    for (const name of target.reads)
+      await requireRead(uid, orgId, name)
+    const key = [orgId, target.name, siteId, body.limit || ''].join('|')
+    const cached = shapeCache.get(key)
+    let result
+    if (cached && Date.now() - cached.at < SHAPE_CACHE_MS) {
+      result = { ...cached.result, cachedAt: new Date(cached.at).toISOString() }
+    }
+    else {
+      result = await reads.liveShape({ orgId, collection, siteId, limit: body.limit })
+      shapeCache.set(key, { at: Date.now(), result })
+    }
+    return { result, docIds: [], resultCount: result.sampled, truncated: result.truncated || result.fieldsTruncated }
+  }
   if (body.action === 'blocks') {
     const result = await reads.findBlock({ orgId, docId: text(body.docId), query: text(body.query), exactName: text(body.exactName), tag: text(body.tag), type: text(body.type), theme: text(body.theme), limit: body.limit, startAfter: text(body.startAfter) })
     return { result, docIds: result.matches.map(match => match.docId), resultCount: result.returnedDocuments, truncated: result.resultTruncated || result.scanTruncated }
@@ -133,12 +165,10 @@ const recordRead = async ({ orgId, action, siteId, docIds, resultCount, truncate
 
 // Runs one library read for a verified caller and records it.
 const runLibraryRead = async ({ uid, orgId, body, keyId = null, connectionId = null }) => {
-  for (const target of READ_TARGETS[body.action]) {
-    if (!await permissionCheck(uid, 'read', `organizations/${orgId}/${target}`))
-      throw new HttpsError('permission-denied', `Not allowed to read ${target} in this organization.`)
-  }
+  for (const target of READ_TARGETS[body.action])
+    await requireRead(uid, orgId, target)
   const reads = await loadReads()
-  const { result, docIds, resultCount, truncated } = await read(reads, orgId, body)
+  const { result, docIds, resultCount, truncated } = await read(reads, orgId, body, uid)
   // Awaited so the write finishes before Cloud Run stops the instance's CPU.
   await recordRead({ orgId, action: body.action, siteId: text(body.siteId), docIds, resultCount, truncated, uid, keyId, connectionId })
   return result
