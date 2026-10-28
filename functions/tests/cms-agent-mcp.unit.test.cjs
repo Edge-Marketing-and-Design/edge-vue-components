@@ -18,7 +18,7 @@ class HttpsError extends Error {
   }
 }
 
-const REMOTE_TOOLS = ['cms_find_block', 'cms_audit_blocks', 'cms_find_usage', 'cms_validate', 'cms_find_theme', 'cms_get_theme', 'cms_agent_organizations', 'cms_open_session', 'cms_check_operation', 'cms_run_operation', 'cms_preview_url', 'cms_site_readiness', 'cms_list_pages', 'cms_get_page', 'cms_list_posts', 'cms_get_post', 'cms_block_base']
+const REMOTE_TOOLS = ['cms_find_block', 'cms_audit_blocks', 'cms_find_usage', 'cms_validate', 'cms_find_theme', 'cms_get_theme', 'cms_contract', 'cms_guide', 'cms_agent_organizations', 'cms_open_session', 'cms_check_operation', 'cms_run_operation', 'cms_preview_url', 'cms_site_readiness', 'cms_list_pages', 'cms_get_page', 'cms_list_posts', 'cms_get_post', 'cms_block_base']
 
 const setup = async (t) => {
   const fake = createFakeDb({
@@ -358,4 +358,36 @@ test('cms_validate checks an inline definition or a library block\'s current def
   assert.ok(!JSON.stringify(records).includes('Card'), 'no content in the audit')
   env.denied.add('read:organizations/a/blocks')
   assert.equal((await callTool(client, 'cms_validate', { orgId: 'a', docId: 'hero' })).code, 'permission-denied')
+})
+
+test('the remote server sends its rules on initialize and serves the guide and this Hub\'s contracts', async (t) => {
+  const env = await setup(t)
+  const client = await connect(t, env)
+  assert.match(client.getInstructions(), /draft/)
+  assert.match(client.getInstructions(), /cms_guide/)
+
+  const guide = await callTool(client, 'cms_guide', {})
+  assert.equal(guide.ok, true)
+  assert.ok(guide.sections.includes('Rules'))
+  const rules = await callTool(client, 'cms_guide', { section: 'rules' })
+  assert.equal(rules.section, 'Rules')
+  assert.match(rules.markdown, /^## Rules/)
+  assert.equal((await callTool(client, 'cms_guide', { section: 'nope' })).code, 'unknown-section')
+
+  const { readFileSync } = require('node:fs')
+  const index = JSON.parse(readFileSync(path.join(functionRoot, 'agent-contracts/index.json'), 'utf8')).contracts
+  const contract = await callTool(client, 'cms_contract', { kind: ' Operations ' })
+  assert.equal(contract.ok, true, contract.message)
+  assert.equal(contract.kind, 'operations')
+  assert.equal(contract.path, index.operations)
+  assert.equal(contract.markdown, readFileSync(path.join(functionRoot, 'agent-contracts/operations.md'), 'utf8'))
+  const unknown = await callTool(client, 'cms_contract', { kind: 'nope' })
+  assert.equal(unknown.code, 'unknown-kind')
+  assert.deepEqual(unknown.kinds, Object.keys(index))
+  const description = (await client.listTools()).tools.find(tool => tool.name === 'cms_contract').description
+  assert.ok(Object.keys(index).every(kind => description.includes(kind)), 'the tool lists the bundled kinds')
+
+  const empty = env.mcp.createRemoteCms({ contractsDir: path.join(require('node:os').tmpdir(), 'no-agent-contracts') })
+  const missing = JSON.parse((await empty.handlers({ id: 'c', data: {} }).cms_contract({ kind: 'operations' })).content[0].text)
+  assert.match(missing.message, /has not bundled its data contracts/)
 })

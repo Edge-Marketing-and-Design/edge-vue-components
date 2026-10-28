@@ -7,7 +7,12 @@
 // creator's current Hub roles, organization and site scope, per-operation
 // permissions). Tool names and schemas come from the shared definitions in
 // helpers/cmsAgentMcpTools.mjs, which the local MCP also uses.
+// The workflow guide (agentGuide/, shared Edge) and this Hub's data contracts
+// (agent-contracts/, copied from docs/data-contracts by the Hub's
+// scripts/cms/sync-agent-contracts.mjs) are read from the deployed bundle.
 // Keep identical in functions/.
+const { readFileSync } = require('node:fs')
+const path = require('node:path')
 const { db, onRequest, HttpsError, logger } = require('./config.js')
 const { issueAgentSession, organizationPage, verifyConnection } = require('./cmsAgentConnections.js')
 const { agentErrorResponse, handleAgentRequest } = require('./cmsAgentKeys.js')
@@ -19,6 +24,19 @@ const RENEW_MS = 60 * 1000
 const SITE_READS = ['preview', 'readiness', 'pages', 'page', 'posts', 'post']
 
 const definitionsPromise = Promise.all([import('./helpers/cmsAgentMcpTools.mjs'), import('./helpers/cmsOperations.mjs')])
+const GUIDE_FILE = path.join(__dirname, 'agentGuide', 'cms-agent-guide.md')
+const CONTRACTS_DIR = path.join(__dirname, 'agent-contracts')
+
+// { kind: source path } from the bundle's index, or {} when this Hub has not
+// bundled its contracts.
+const readContractIndex = (dir = CONTRACTS_DIR) => {
+  try {
+    return JSON.parse(readFileSync(path.join(dir, 'index.json'), 'utf8')).contracts || {}
+  }
+  catch {
+    return {}
+  }
+}
 
 const jsonResult = value => ({ content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] })
 const refusal = (error) => {
@@ -29,7 +47,8 @@ const refusal = (error) => {
 // The tool handlers for one verified connection. Sessions are cached per
 // instance by connection and target; the cache only saves session writes,
 // since every call is checked again by the Hub code.
-const createRemoteCms = ({ now = Date.now, issueSession = issueAgentSession, handle = handleAgentRequest, listOrganizations = organizationPage } = {}) => {
+const createRemoteCms = ({ now = Date.now, issueSession = issueAgentSession, handle = handleAgentRequest, listOrganizations = organizationPage, guideFile = GUIDE_FILE, contractsDir = CONTRACTS_DIR } = {}) => {
+  const contracts = readContractIndex(contractsDir)
   const sessions = new Map()
   const sessionFor = async (connection, target, { fresh = false } = {}) => {
     const key = [connection.id, target.orgId, target.scope, target.siteId || ''].join('|')
@@ -98,6 +117,18 @@ const createRemoteCms = ({ now = Date.now, issueSession = issueAgentSession, han
     cms_find_theme: tool(({ docId, query, exactName, limit, ...input }) => call(connection, input, { action: 'themes', docId, query, exactName, limit })),
     cms_get_theme: tool(({ themeId, includeCustomFonts, ...input }) => call(connection, input, { action: 'theme', themeId, includeCustomFonts })),
     cms_block_base: tool(({ docId, ...input }) => call(connection, input, { action: 'block', docId })),
+    cms_contract: tool(async ({ kind }) => {
+      const { describeContract } = (await definitionsPromise)[0]
+      const key = String(kind || '').trim().toLowerCase()
+      const kinds = Object.keys(contracts)
+      if (!contracts[key])
+        return { ok: false, code: 'unknown-kind', message: kinds.length ? `Unknown contract kind "${kind}". Known kinds: ${kinds.join(', ')}.` : 'This Hub has not bundled its data contracts (scripts/cms/sync-agent-contracts.mjs).', kinds }
+      return describeContract(key, contracts[key], readFileSync(path.join(contractsDir, `${key}.md`), 'utf8'))
+    }),
+    cms_guide: tool(async ({ section }) => {
+      const { selectGuideSection } = (await definitionsPromise)[0]
+      return selectGuideSection(readFileSync(guideFile, 'utf8'), section)
+    }),
     cms_agent_organizations: tool(input => listOrganizations(connection.data.createdBy, input)),
     cms_open_session: tool(async ({ orgId, scope, siteId }) => {
       const { session } = await sessionFor(connection, { orgId, scope, ...(siteId ? { siteId } : {}) })
@@ -114,17 +145,17 @@ const createRemoteCms = ({ now = Date.now, issueSession = issueAgentSession, han
     cms_get_post: tool(({ siteId, postId, source, includeValues, includeSchema, ...input }) => call(connection, input, { action: 'post', siteId, postId, source, includeValues, includeSchema })),
   })
 
-  return { handlers, sessions }
+  return { handlers, sessions, contractKinds: Object.keys(contracts) }
 }
 
 // The MCP server for one request: the remote subset of the shared tools.
 const buildServer = async (connection, remote) => {
-  const [{ cmsAgentToolDefinitions }, { CMS_OPERATION_TYPES }] = await definitionsPromise
+  const [{ cmsAgentToolDefinitions, CMS_AGENT_INSTRUCTIONS }, { CMS_OPERATION_TYPES }] = await definitionsPromise
   const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js')
   const { z } = require('zod')
-  const server = new McpServer(SERVER_INFO)
+  const server = new McpServer(SERVER_INFO, { instructions: CMS_AGENT_INSTRUCTIONS })
   const handlers = remote.handlers(connection)
-  for (const { name, ...definition } of cmsAgentToolDefinitions({ z, operationTypes: CMS_OPERATION_TYPES, remote: true })) {
+  for (const { name, ...definition } of cmsAgentToolDefinitions({ z, operationTypes: CMS_OPERATION_TYPES, contractKinds: remote.contractKinds, remote: true })) {
     if (!handlers[name])
       throw new Error(`No remote handler for the CMS tool ${name}.`)
     server.registerTool(name, definition, handlers[name])

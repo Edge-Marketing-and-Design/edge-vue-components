@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
+import { describeContract } from '../../../../lib/cmsAgentMcpTools.js'
 
 // The data contracts an agent writes against, read from the Hub checkout the
 // server runs in (the same root that resolves the renderer path). Nothing is
@@ -15,9 +16,6 @@ export const CONTRACT_KINDS = Object.freeze({
 })
 
 export const contractKinds = () => Object.keys(CONTRACT_KINDS)
-
-const LAST_VERIFIED = /^Last verified:\s*(.+?)\s*$/m
-const TITLE = /^#\s+(.+?)\s*$/m
 
 export const contractPath = (kind) => {
   const key = String(kind || '').trim().toLowerCase()
@@ -55,12 +53,5 @@ export async function readContract({ kind, repoRoot, readFileImpl = readFile }) 
     }
     throw error
   }
-  return {
-    ok: true,
-    kind: key,
-    path: relativePath,
-    title: markdown.match(TITLE)?.[1] || '',
-    lastVerified: markdown.match(LAST_VERIFIED)?.[1] || null,
-    markdown,
-  }
+  return describeContract(key, relativePath, markdown)
 }

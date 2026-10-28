@@ -9,7 +9,7 @@ import admin from 'firebase-admin'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
-import { cmsAgentToolDefinitions } from '../../../../lib/cmsAgentMcpTools.js'
+import { cmsAgentToolDefinitions, selectGuideSection } from '../../../../lib/cmsAgentMcpTools.js'
 import { CMS_OPERATION_TYPES } from '../../../../lib/cmsOperations.js'
 import { createConnectionClient, resolveConnectionKey } from './agent-connections.js'
 import { agentEndpoint, createAgentOperationClient, loadOperationFile, resolveAgentKey } from './agent-operations.js'
@@ -251,6 +251,8 @@ const handlers = {
   cms_find_theme: async input => jsonResult(await cmsTools.findTheme(input)),
   cms_get_theme: async input => jsonResult(await cmsTools.getTheme(input)),
   cms_contract: async ({ kind }) => jsonResult(await readContract({ kind, repoRoot })),
+  // The guide the remote server serves, from this checkout's Edge copy.
+  cms_guide: async ({ section }) => jsonResult(selectGuideSection(await readFile(path.resolve(__dirname, '../../../../functions/agentGuide/cms-agent-guide.md'), 'utf8'), section)),
   cms_agent_organizations: async input => jsonResult(connections ? await connections.organizations(input) : { ok: false, code: 'connection-required', message: 'Configure a Hub-issued agent connection to discover its organizations.' }),
   async cms_open_session(input) {
     const orgId = resolveOrgId(input.orgId)

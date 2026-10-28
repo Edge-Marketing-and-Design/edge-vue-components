@@ -27,6 +27,11 @@ in `edge/lib/cmsAgentReads.js`. This server runs them on its read-only service
 account; the remote endpoint runs the same code as the operator. Keep its two
 copies under `edge/functions/helpers/` and `functions/helpers/` identical.
 
+`cms_guide` serves `edge/functions/agentGuide/cms-agent-guide.md`, the same
+workflow guide the remote endpoint serves. The remote `cms_contract` reads the
+Hub's contracts from `functions/agent-contracts/`; after editing a contract,
+run `node scripts/cms/sync-agent-contracts.mjs` in the Hub.
+
 ## Generic Firestore Tools
 
 - `firestore_list_collections`: list child collections at the root or below a document path.

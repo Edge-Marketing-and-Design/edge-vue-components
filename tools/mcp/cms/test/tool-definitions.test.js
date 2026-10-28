@@ -11,13 +11,13 @@ import { CMS_OPERATION_TYPES } from '../../../../lib/cmsOperations.js'
 const edgeRoot = new URL('../../../../', import.meta.url)
 const LOCAL_TOOLS = [
   'firestore_list_collections', 'firestore_get_document', 'firestore_sample_collection', 'firestore_infer_schema', 'firestore_compare_schema', 'firestore_find_field',
-  'cms_find_block', 'cms_audit_blocks', 'cms_checkout_block', 'cms_status', 'cms_diff', 'cms_resolve_override', 'cms_find_usage', 'cms_validate', 'cms_find_theme', 'cms_get_theme', 'cms_contract',
+  'cms_find_block', 'cms_audit_blocks', 'cms_checkout_block', 'cms_status', 'cms_diff', 'cms_resolve_override', 'cms_find_usage', 'cms_validate', 'cms_find_theme', 'cms_get_theme', 'cms_contract', 'cms_guide',
   'cms_agent_organizations', 'cms_open_session', 'cms_check_operation', 'cms_run_operation', 'cms_preview_url', 'cms_site_readiness', 'cms_list_pages', 'cms_get_page', 'cms_list_posts', 'cms_get_post', 'cms_block_base',
 ]
 // Remote-only wording: orgId comes from the call (no defaultOrgId), sessions
 // are optional, and readiness has no local emd-cms-front check.
 const REMOTE_FIELDS = ['orgId', 'sessionId']
-const REMOTE_DESCRIPTIONS = ['cms_open_session', 'cms_site_readiness', 'cms_audit_blocks', 'cms_validate']
+const REMOTE_DESCRIPTIONS = ['cms_open_session', 'cms_site_readiness', 'cms_audit_blocks', 'cms_validate', 'cms_contract']
 // Local only: operationFile reads a file on the editor's machine, so the
 // remote check/run require the inline operation; themeName feeds override
 // checks against the emd-cms-front checkout.
@@ -103,4 +103,24 @@ test('operationFile is local only; the remote check and run require the inline o
     assert.equal(remote[name].inputSchema.properties.operationFile, undefined, name)
     assert.ok(remote[name].inputSchema.required.includes('operation'), name)
   }
+})
+
+test('the guide and contracts the servers serve are well formed', async () => {
+  const { describeContract, selectGuideSection } = await import('../../../../lib/cmsAgentMcpTools.js')
+  const guide = readFileSync(new URL('functions/agentGuide/cms-agent-guide.md', edgeRoot), 'utf8')
+  const whole = selectGuideSection(guide)
+  assert.ok(whole.sections.includes('Rules') && whole.sections.length >= 5, whole.sections.join(', '))
+  for (const name of whole.sections) {
+    const part = selectGuideSection(guide, name.toUpperCase())
+    assert.equal(part.ok, true, name)
+    assert.ok(part.markdown.startsWith(`## ${name}`), name)
+    assert.ok(!part.markdown.slice(3).includes('\n## '), `${name} holds one section`)
+  }
+  assert.equal(selectGuideSection(guide, 'nope').code, 'unknown-section')
+  // Every tool the guide names exists locally.
+  const local = (await listTools(false)).map(tool => tool.name)
+  for (const [name] of guide.matchAll(/\bcms_[a-z_]+\b/g))
+    assert.ok(local.includes(name), `the guide names an unknown tool: ${name}`)
+  const contract = describeContract('k', 'p.md', '# Title here\n\nLast verified: 2026-10-27\n')
+  assert.deepEqual([contract.title, contract.lastVerified], ['Title here', '2026-10-27'])
 })
