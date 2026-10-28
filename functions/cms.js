@@ -3606,248 +3606,54 @@ const collectPreviewBlockIds = (pageData = {}) => {
   return Array.from(ids)
 }
 
-const resolveCmsPreviewCollectionTokens = (input, { orgId, siteId, pageId, routeLastSegment } = {}) => {
-  const replaceTokens = (raw) => {
-    let resolved = String(raw)
-    if (orgId)
-      resolved = resolved.replaceAll('{orgId}', orgId)
-    if (siteId)
-      resolved = resolved.replaceAll('{siteId}', siteId)
-    if (pageId)
-      resolved = resolved.replaceAll('{pageId}', pageId)
-    if (routeLastSegment)
-      resolved = resolved.replaceAll('{routeLastSegment}', routeLastSegment)
-    return resolved
-  }
-
-  if (typeof input === 'string')
-    return replaceTokens(input)
-  if (Array.isArray(input))
-    return input.map(item => resolveCmsPreviewCollectionTokens(item, { orgId, siteId, pageId, routeLastSegment }))
-  if (input && typeof input === 'object') {
-    return Object.entries(input).reduce((acc, [key, value]) => {
-      acc[key] = resolveCmsPreviewCollectionTokens(value, { orgId, siteId, pageId, routeLastSegment })
-      return acc
-    }, {})
-  }
-  return input
-}
-
-const hasUnresolvedCmsPreviewToken = (value) => {
-  try {
-    return JSON.stringify(value).includes('{')
-  }
-  catch {
-    return false
-  }
-}
-
-const getCmsPreviewCollectionPath = ({ orgId, siteId, cfg }) => {
-  const path = String(cfg?.collection?.path || '').trim()
-  if (!path)
-    return ''
-  if (path === 'posts' || path === 'post')
-    return `organizations/${orgId}/sites/${siteId}/published_posts`
-  return `organizations/${orgId}/${path}`
-}
-
-const compareCmsPreviewCollectionValues = (aValue, bValue) => {
-  if (aValue == null && bValue == null)
-    return 0
-  if (aValue == null)
-    return 1
-  if (bValue == null)
-    return -1
-  return String(aValue).localeCompare(String(bValue), undefined, { numeric: true, sensitivity: 'base' })
-}
-
-const getCmsPreviewValueAtPath = (source, path) => {
-  if (!path || typeof path !== 'string')
-    return source
-  return path.split('.').reduce((acc, key) => {
-    if (acc == null || typeof acc !== 'object')
-      return undefined
-    return acc[key]
-  }, source)
-}
-
-const applyCmsPreviewCollectionOrder = (records, orderList = []) => {
-  if (!Array.isArray(records) || !Array.isArray(orderList) || orderList.length === 0)
-    return Array.isArray(records) ? records : []
-
-  const validOrders = orderList.filter(order => order && typeof order.field === 'string' && order.field.trim())
-  if (!validOrders.length)
-    return records
-
-  return [...records].sort((a, b) => {
-    for (const order of validOrders) {
-      const direction = String(order.direction || 'asc').toLowerCase() === 'desc' ? -1 : 1
-      const compared = compareCmsPreviewCollectionValues(
-        getCmsPreviewValueAtPath(a, order.field),
-        getCmsPreviewValueAtPath(b, order.field),
-      )
-      if (compared !== 0)
-        return compared * direction
-    }
-    return 0
-  })
-}
-
-const buildCmsPreviewCollectionQuery = ({ cfg, orgId, siteId, pageId, routeLastSegment }) => {
-  const tokenContext = { orgId, siteId, pageId, routeLastSegment }
-  const currentQuery = Array.isArray(cfg?.collection?.query)
-    ? resolveCmsPreviewCollectionTokens(JSON.parse(JSON.stringify(cfg.collection.query)), tokenContext)
-    : []
-
-  for (const queryKey in cfg?.queryItems || {}) {
-    const rawValue = cfg.queryItems[queryKey]
-    if (!rawValue) {
-      const findIndex = currentQuery.findIndex(q => q.field === queryKey)
-      if (findIndex > -1)
-        currentQuery.splice(findIndex, 1)
-      continue
-    }
-
-    const queryOption = cfg?.queryOptions?.find(option => option.field === queryKey)
-    const operator = queryOption?.operator || '=='
-    let queryValue = resolveCmsPreviewCollectionTokens(rawValue, tokenContext)
-    if (operator === 'array-contains-any' && !Array.isArray(queryValue))
-      queryValue = [queryValue]
-
-    const newQuery = { field: queryKey, operator, value: queryValue }
-    const findIndex = currentQuery.findIndex(q => q.field === queryKey)
-    if (findIndex > -1)
-      currentQuery[findIndex] = newQuery
-    else
-      currentQuery.push(newQuery)
-  }
-
-  return currentQuery.filter(query => query?.field && query?.operator && !hasUnresolvedCmsPreviewToken(query?.value))
-}
-
-const fetchCmsPreviewCollectionField = async ({ cfg, orgId, siteId, pageId, routeLastSegment }) => {
-  const collectionPath = getCmsPreviewCollectionPath({ orgId, siteId, cfg })
-  if (!collectionPath)
-    return []
-
-  const tokenContext = { orgId, siteId, pageId, routeLastSegment }
-  const canonicalLookupKey = String(cfg?.collection?.canonicalLookup?.key || '').trim()
-  const resolvedCanonicalLookupKey = canonicalLookupKey
-    ? resolveCmsPreviewCollectionTokens(canonicalLookupKey, tokenContext)
-    : ''
-
-  if (resolvedCanonicalLookupKey && !hasUnresolvedCmsPreviewToken(resolvedCanonicalLookupKey)) {
-    const canonicalSegments = resolvedCanonicalLookupKey.split(':').filter(Boolean)
-    const docId = canonicalSegments[canonicalSegments.length - 1]
-    if (docId) {
-      const snap = await db.doc(`${collectionPath}/${docId}`).get()
-      return snap.exists ? [{ docId: snap.id, ...(snap.data() || {}) }] : []
-    }
-  }
-
-  let queryRef = db.collection(collectionPath)
-  for (const query of buildCmsPreviewCollectionQuery({ cfg, orgId, siteId, pageId, routeLastSegment }))
-    queryRef = queryRef.where(query.field, query.operator, query.value)
-  for (const order of Array.isArray(cfg?.collection?.order) ? cfg.collection.order : []) {
-    if (order?.field)
-      queryRef = queryRef.orderBy(order.field, String(order.direction || 'asc').toLowerCase() === 'desc' ? 'desc' : 'asc')
-  }
-
-  const limit = Number(cfg?.limit)
-  const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 250) : 250
-  const snap = await queryRef.limit(safeLimit).get()
-  return applyCmsPreviewCollectionOrder(
-    snap.docs.map(doc => ({ docId: doc.id, ...(doc.data() || {}) })),
-    cfg?.collection?.order,
-  )
-}
-
-// Template v2 blocks declare collections in `dataSources`; turn each into the
-// collection config the legacy `meta` path uses, as the Hub editor does
-// (blockApi.vue dataSourcesToRuntimeMeta), with the instance's query items and
-// limit. Token previews have no signed-in user to load them in the browser.
-const cmsPreviewDataSourceConfigs = (dataSources, meta) => {
-  const configs = {}
-  for (const [field, source] of Object.entries(dataSources || {})) {
-    if (!source || typeof source !== 'object' || Array.isArray(source))
-      continue
-    if (!(source.type === 'collection' || source.collection || source.path || source.query || source.canonicalLookup))
-      continue
-    const collection = (source.collection && typeof source.collection === 'object' && !Array.isArray(source.collection)) ? { ...source.collection } : {}
-    for (const key of ['path', 'baseKey', 'uniqueKey', 'canonicalLookup', 'query', 'order', 'orgLevel']) {
-      if (source[key] !== undefined)
-        collection[key] = source[key]
-    }
-    const sourceMeta = meta?.[field]
-    const queryItems = (sourceMeta?.queryItems && typeof sourceMeta.queryItems === 'object' && !Array.isArray(sourceMeta.queryItems)) ? sourceMeta.queryItems : {}
-    const cfg = { ...source, type: 'array', collection, queryItems: { ...(source.queryItems || {}), ...queryItems } }
-    if (sourceMeta?.limit !== undefined && sourceMeta.limit !== null && sourceMeta.limit !== '')
-      cfg.limit = sourceMeta.limit
-    configs[field] = cfg
-  }
-  return configs
-}
-
-const resolveCmsPreviewBlockCollectionValues = async ({ block, orgId, siteId, pageId, routeLastSegment }) => {
-  const values = {}
-  const entries = [
-    ...Object.entries(block?.meta || {}),
-    ...Object.entries(cmsPreviewDataSourceConfigs(block?.dataSources, block?.meta)),
-  ]
-  await Promise.all(entries.map(async ([field, cfg]) => {
-    if (!cfg || typeof cfg !== 'object' || !cfg.collection)
-      return
-    values[field] = await fetchCmsPreviewCollectionField({ cfg, orgId, siteId, pageId, routeLastSegment })
-  }))
-  return values
-}
-
 const getCmsPreviewBlockKey = (row, rowIndex, column, colIndex, blockIdx) => {
   return `${row?.id || rowIndex}:${column?.id || colIndex}:${blockIdx}`
 }
 
-const resolveCmsPreviewCollectionValues = async ({ orgId, siteId, pageId, pageData, blocksById, routeLastSegment }) => {
+let previewSourceModulesPromise
+const loadPreviewSourceModules = () => {
+  previewSourceModulesPromise = previewSourceModulesPromise || Promise.all([
+    import('./helpers/cmsDataSourceRecords.mjs'),
+    import('@edgedev/template-engine').catch(() => null),
+  ])
+  return previewSourceModulesPromise
+}
+
+// Each block's Data Source records, keyed by its preview block key, loaded as
+// the public site loads them (helpers/cmsDataSourceRecords.mjs): from the KV
+// mirror, or Firestore in the emulator. A source that fails keeps its inline
+// value and is listed in `problems`.
+const resolveCmsPreviewCollectionValues = async ({ orgId, siteId, pageId, pageData, blocksById, routeLastSegment }, timeoutMs = 8000) => {
+  const [records, engine] = await loadPreviewSourceModules()
+  const deadline = Date.now() + timeoutMs
+  const kvOptions = engine ? records.scopedKvClientOptions({ orgId, env: process.env, deadline }) : null
   const rows = templatePreviewRowsForSignature({ ...pageData, docId: pageId })
   const valuesByBlockKey = {}
+  const problems = []
   const tasks = []
 
   rows.forEach((row, rowIndex) => {
     ;(row.columns || []).forEach((column, colIndex) => {
       ;(column.blocks || []).forEach((blockRef, blockIdx) => {
         const block = resolveTemplateBlockForSignature(pageData, blockRef, blocksById)
-        if (!block?.meta && !Object.keys(block?.dataSources || {}).length)
+        if (!block || !records.blockDataSources(block, { orgId, siteId, routeLastSegment }).length)
           return
         const blockKey = getCmsPreviewBlockKey(row, rowIndex, column, colIndex, blockIdx)
         tasks.push((async () => {
-          const values = await resolveCmsPreviewBlockCollectionValues({ block, orgId, siteId, pageId, routeLastSegment })
-          if (Object.keys(values).length)
-            valuesByBlockKey[blockKey] = values
+          const loaded = await records.loadBlockSources({ block, orgId, siteId, routeLastSegment, engine, kvOptions, db, deadline })
+          if (Object.keys(loaded.values).length)
+            valuesByBlockKey[blockKey] = loaded.values
+          for (const source of loaded.sources) {
+            if (source.problem)
+              problems.push({ blockKey, blockId: typeof blockRef === 'string' ? blockRef : (blockRef?.blockId || null), source: source.name, problem: source.problem })
+          }
         })())
       })
     })
   })
 
   await Promise.all(tasks)
-  return valuesByBlockKey
-}
-
-const resolveCmsPreviewCollectionValuesWithTimeout = async (options, timeoutMs = 8000) => {
-  let timeoutId = null
-  try {
-    return await Promise.race([
-      resolveCmsPreviewCollectionValues(options),
-      new Promise((resolve) => {
-        timeoutId = setTimeout(() => resolve({}), timeoutMs)
-      }),
-    ])
-  }
-  catch {
-    return {}
-  }
-  finally {
-    if (timeoutId)
-      clearTimeout(timeoutId)
-  }
+  return { valuesByBlockKey, problems }
 }
 
 const getSitePagePreviewPageRowsSignature = (pageDoc) => {
@@ -4070,21 +3876,28 @@ exports.getPreviewRenderPayload = onCall({ timeoutSeconds: 60, memory: '512MiB' 
     throw new HttpsError('permission-denied', 'Sign in to the Hub, or use a valid preview link. Preview links expire.')
 
   const context = await readPreviewRenderContext({ orgId, siteId, pageId, source, blockDrafts: data.blockDrafts === true })
-  const collectionValues = await resolveCmsPreviewCollectionValuesWithTimeout({
-    orgId,
-    siteId,
-    pageId,
-    pageData: context.pageData,
-    blocksById: context.blocksById,
-    routeLastSegment,
-  })
+  let collections = { valuesByBlockKey: {}, problems: [] }
+  try {
+    collections = await resolveCmsPreviewCollectionValues({
+      orgId,
+      siteId,
+      pageId,
+      pageData: context.pageData,
+      blocksById: context.blocksById,
+      routeLastSegment,
+    })
+  }
+  catch (error) {
+    collections.problems.push({ blockKey: null, blockId: null, source: null, problem: String(error?.message || error) })
+  }
   return {
     site: serializePreviewPayload(context.siteData),
     page: serializePreviewPayload({ ...context.pageData, docId: pageId }),
     theme: serializePreviewPayload(context.themeData),
     blocks: serializePreviewPayload(context.blocksById),
     draftBlockIds: context.draftBlockIds,
-    collectionValues: serializePreviewPayload(collectionValues),
+    collectionValues: serializePreviewPayload(collections.valuesByBlockKey),
+    collectionProblems: serializePreviewPayload(collections.problems),
     renderContext: await fetchPreviewRenderContext({ orgId, siteId }),
   }
 })

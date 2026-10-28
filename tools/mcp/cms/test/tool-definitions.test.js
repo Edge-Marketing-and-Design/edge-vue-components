@@ -11,7 +11,7 @@ import { CMS_OPERATION_TYPES } from '../../../../lib/cmsOperations.js'
 const edgeRoot = new URL('../../../../', import.meta.url)
 const LOCAL_TOOLS = [
   'firestore_list_collections', 'firestore_get_document', 'firestore_sample_collection', 'firestore_infer_schema', 'firestore_compare_schema', 'firestore_find_field',
-  'cms_find_block', 'cms_audit_blocks', 'cms_checkout_block', 'cms_status', 'cms_diff', 'cms_resolve_override', 'cms_find_usage', 'cms_validate', 'cms_find_theme', 'cms_get_theme', 'cms_contract', 'cms_schema', 'cms_guide',
+  'cms_find_block', 'cms_audit_blocks', 'cms_checkout_block', 'cms_status', 'cms_diff', 'cms_resolve_override', 'cms_find_usage', 'cms_validate', 'cms_render_block', 'cms_find_theme', 'cms_get_theme', 'cms_contract', 'cms_schema', 'cms_guide',
   'cms_agent_organizations', 'cms_list_sites', 'cms_open_session', 'cms_check_operation', 'cms_run_operation', 'cms_preview_url', 'cms_site_readiness', 'cms_list_pages', 'cms_get_page', 'cms_list_posts', 'cms_get_post', 'cms_block_base',
 ]
 // Remote-only wording: orgId comes from the call (no defaultOrgId), sessions
@@ -50,7 +50,7 @@ test('the three copies of the shared tool definitions and library reads are byte
     if (existsSync(hubCopy))
       assert.equal(readFileSync(hubCopy, 'utf8'), source, name)
   }
-  for (const file of ['cms.js', 'cmsAgentMcp.js', 'cmsAgentConnections.js', 'cmsAgentKeys.js', 'cmsAgentLibraryReads.js', 'tests/support/fakeFirestore.cjs']) {
+  for (const file of ['cms.js', 'cmsAgentMcp.js', 'cmsAgentConnections.js', 'cmsAgentKeys.js', 'cmsAgentLibraryReads.js', 'cmsAgentRender.js', 'tests/support/fakeFirestore.cjs']) {
     const deployed = new URL(`../functions/${file}`, edgeRoot)
     if (existsSync(deployed))
       assert.equal(readFileSync(deployed, 'utf8'), readFileSync(new URL(`functions/${file}`, edgeRoot), 'utf8'), file)

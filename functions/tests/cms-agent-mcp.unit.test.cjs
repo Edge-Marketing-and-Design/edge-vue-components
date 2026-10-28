@@ -18,7 +18,7 @@ class HttpsError extends Error {
   }
 }
 
-const REMOTE_TOOLS = ['cms_find_block', 'cms_audit_blocks', 'cms_find_usage', 'cms_validate', 'cms_find_theme', 'cms_get_theme', 'cms_contract', 'cms_schema', 'cms_guide', 'cms_agent_organizations', 'cms_open_session', 'cms_check_operation', 'cms_run_operation', 'cms_preview_url', 'cms_site_readiness', 'cms_list_pages', 'cms_get_page', 'cms_list_posts', 'cms_get_post', 'cms_block_base']
+const REMOTE_TOOLS = ['cms_find_block', 'cms_audit_blocks', 'cms_find_usage', 'cms_validate', 'cms_render_block', 'cms_find_theme', 'cms_get_theme', 'cms_contract', 'cms_schema', 'cms_guide', 'cms_agent_organizations', 'cms_list_sites', 'cms_open_session', 'cms_check_operation', 'cms_run_operation', 'cms_preview_url', 'cms_site_readiness', 'cms_list_pages', 'cms_get_page', 'cms_list_posts', 'cms_get_post', 'cms_block_base']
 
 const setup = async (t) => {
   const fake = createFakeDb({
@@ -40,7 +40,7 @@ const setup = async (t) => {
   const denied = new Set()
   const configPath = require.resolve(path.join(functionRoot, 'config.js'))
   const original = require.cache[configPath]
-  const modulePaths = ['cmsAgentMcp.js', 'cmsAgentConnections.js', 'cmsAgentKeys.js', 'cmsAgentLibraryReads.js', 'cmsAgentContractNotes.js', 'cmsOperations.js', 'cmsBlockRevisions.js'].map(file => require.resolve(path.join(functionRoot, file)))
+  const modulePaths = ['cmsAgentMcp.js', 'cmsAgentConnections.js', 'cmsAgentKeys.js', 'cmsAgentLibraryReads.js', 'cmsAgentRender.js', 'cmsAgentContractNotes.js', 'cmsOperations.js', 'cmsBlockRevisions.js'].map(file => require.resolve(path.join(functionRoot, file)))
   require.cache[configPath] = {
     id: configPath,
     loaded: true,
@@ -307,6 +307,25 @@ test('library reads need current read rights and an organization session', async
   assert.equal((await callTool(client, 'cms_find_block', { orgId: 'b' })).code, 'permission-denied', 'no rights in another organization')
 })
 
+test('cms_list_sites lists the organization\'s sites without the templates site, with read rights', async (t) => {
+  const env = await setup(t)
+  env.docs.set('organizations/a/sites/templates', { name: 'Templates' })
+  env.docs.get('organizations/a/sites/s').domains = ['a.example.com']
+  env.docs.get('organizations/a/sites/s').theme = 'main'
+  const client = await connect(t, env)
+  const listed = await callTool(client, 'cms_list_sites', { orgId: 'a' })
+  assert.equal(listed.ok, true, listed.message)
+  assert.deepEqual(listed.sites, [
+    { siteId: 's', name: 'Site A', domains: ['a.example.com'], canonicalDomain: '', theme: 'main' },
+    { siteId: 't', name: 'Other Site', domains: [], canonicalDomain: '', theme: '' },
+  ])
+  assert.equal(listed.scanTruncated, false)
+  assert.deepEqual(readAudits(env).map(record => [record.tool, record.docIds]), [['sites', ['s', 't']]])
+  env.denied.add('read:organizations/a/sites')
+  assert.equal((await callTool(client, 'cms_list_sites', { orgId: 'a' })).code, 'permission-denied')
+  assert.equal((await callTool(client, 'cms_list_sites', { orgId: 'b' })).code, 'permission-denied', 'no rights in another organization')
+})
+
 test('a failed audit write never fails the read', async (t) => {
   const env = await setup(t)
   env.hooks.beforeAdd = () => {
@@ -387,6 +406,13 @@ test('the remote server sends its rules on initialize and serves the guide and t
   assert.ok(contract.markdown.includes('| `theme.live` | Propose it; a person applies it in the theme editor. |'), 'explanation overrides are served')
   assert.ok(!contract.markdown.includes(OPERATIONS_CONTRACT_MARKER), 'the operations section is generated')
   assert.match(contract.markdown, /### `page\.setValues`/)
+  const renderer = await callTool(client, 'cms_contract', { kind: 'renderer', section: 'agent quick contract' })
+  assert.equal(renderer.ok, true, renderer.message)
+  assert.equal(renderer.path, index.renderer)
+  assert.equal(renderer.section, 'Agent quick contract')
+  assert.match(renderer.markdown, /^## Agent quick contract/)
+  assert.ok(renderer.sections.includes('Data Sources'))
+  assert.equal((await callTool(client, 'cms_contract', { kind: 'renderer', section: 'nope' })).code, 'unknown-section')
   const unknown = await callTool(client, 'cms_contract', { kind: 'nope' })
   assert.equal(unknown.code, 'unknown-kind')
   assert.deepEqual(unknown.kinds, Object.keys(index))
@@ -447,4 +473,147 @@ test('cms_schema describes what a collection stores, without values, for the ope
   assert.deepEqual(records.map(entry => entry.tool), ['schema', 'schema', 'schema', 'schema'])
   assert.ok(records.every(entry => entry.docIds.length === 0))
   assert.ok(!/Lake house|Polson/.test(JSON.stringify(records)))
+})
+
+// Serves the KV REST API and the override manifest in place of Cloudflare;
+// everything else (the MCP client's own requests) goes to the real fetch.
+const stubNetwork = (t, { kvKeys = [], manifest = null } = {}) => {
+  const realFetch = globalThis.fetch
+  const saved = { ...process.env }
+  Object.assign(process.env, { CF_ACCOUNT_ID: 'acct', CLOUDFLARE_NAMESPACE_ID: 'ns', CLOUDFLARE_API_KEY: 'kv-token', CMS_RENDERER_MANIFEST_URL: 'https://front.example/_edge/block-overrides.json' })
+  const calls = []
+  globalThis.fetch = async (input, init) => {
+    const url = String(input)
+    if (url.startsWith('https://front.example/')) {
+      calls.push(url)
+      return manifest ? new Response(JSON.stringify(manifest), { status: 200 }) : new Response('missing', { status: 404 })
+    }
+    if (!url.startsWith('https://api.cloudflare.com/'))
+      return realFetch(input, init)
+    calls.push(url)
+    const parsed = new URL(url)
+    if (parsed.pathname.endsWith('/keys')) {
+      const prefix = parsed.searchParams.get('prefix')
+      return new Response(JSON.stringify({ result: kvKeys.filter(key => key.name.startsWith(prefix)) }), { status: 200 })
+    }
+    const key = decodeURIComponent(parsed.pathname.split('/values/')[1])
+    const found = kvKeys.find(entry => entry.name === key)
+    return found ? new Response(JSON.stringify(found.metadata), { status: 200 }) : new Response('', { status: 404 })
+  }
+  t.after(() => {
+    globalThis.fetch = realFetch
+    process.env = saved
+  })
+  return calls
+}
+
+const postKey = (orgId, docId, title, tags) => ({ name: `posts:${orgId}:s:${docId}`, metadata: { canonical: `posts:${orgId}:s:${docId}`, title, tags, name: docId } })
+const postList = {
+  name: 'Post List',
+  templateVersion: 2,
+  template: '<ul>{{#for post in source("posts")}}<li class="text-primary">{{ post.title }}</li>{{/for}}</ul><p>{{ heading }}</p>',
+  content: '<ul></ul>',
+  schema: { heading: { type: 'text', label: 'Heading', value: 'Latest' } },
+  dataSources: { posts: { type: 'collection', path: 'posts', uniqueKey: '{orgId}:{siteId}', query: [{ field: 'tags', operator: 'array-contains', value: 'News' }], order: [{ field: 'title', direction: 'asc' }], limit: 200 } },
+  values: {},
+}
+
+test('cms_render_block renders a definition with the site theme and live KV records, and audits without content', async (t) => {
+  const env = await setup(t)
+  env.docs.get('organizations/a/sites/s').theme = 'main'
+  const calls = stubNetwork(t, {
+    kvKeys: [postKey('a', 'p2', 'Second', ['News']), postKey('a', 'p1', 'First', ['News']), postKey('a', 'p3', 'Other', ['Events']), postKey('b', 'x', 'Org B post', ['News'])],
+    manifest: { version: 1, commit: 'abc123', builtAt: '2026-10-28T00:00:00Z', components: ['auth.vue'] },
+  })
+  const added = []
+  env.hooks.beforeAdd = (path, data) => added.push({ path, data })
+  const client = await connect(t, env)
+
+  const live = await callTool(client, 'cms_render_block', { orgId: 'a', siteId: 's', definition: postList })
+  assert.equal(live.ok, true, live.message)
+  assert.match(live.html, /<li class="text-primary">First<\/li><li class="text-primary">Second<\/li><\/ul><p>Latest<\/p>/)
+  assert.ok(!live.html.includes('Org B'), 'another organization\'s records stay out')
+  assert.deepEqual(live.sources.map(source => [source.name, source.loadedFrom, source.records]), [['posts', 'kv', 2]])
+  assert.ok(live.problems.some(problem => /lowered to 50/.test(problem)), 'the limit is capped')
+  assert.equal(live.themeId, 'main')
+  assert.match(live.document, /^<!doctype html>/)
+  assert.match(live.document, /--color-primary|\.x\{\}/)
+  assert.equal(live.renderingOwner, 'cms')
+  assert.equal(live.override.commit, 'abc123')
+  assert.ok(calls.every(url => !url.includes(':b:') && !url.includes('%3Ab%3A')))
+
+  const sample = await callTool(client, 'cms_render_block', { orgId: 'a', definition: postList, data: 'sample', values: { heading: 'Given' } })
+  assert.equal(sample.sources[0].loadedFrom, 'sample')
+  assert.match(sample.html, /<p>Given<\/p>/)
+  assert.ok(sample.problems.some(problem => /unthemed/.test(problem)))
+  const empty = await callTool(client, 'cms_render_block', { orgId: 'a', siteId: 's', docId: 'hero', data: 'empty' })
+  assert.equal(empty.source, 'released')
+  assert.match(empty.html, /Welcome/)
+
+  const records = added.filter(entry => entry.path === 'organizations/a/cmsAgentReads').map(entry => entry.data)
+  assert.deepEqual(records.map(entry => [entry.tool, entry.docIds]), [['render', []], ['render', []], ['render', ['hero']]])
+  assert.equal(records[0].resultCount, 2)
+  assert.ok(!/First|Second|Latest|Given|<li/.test(JSON.stringify(records)), 'no records, values or HTML in the audit')
+})
+
+test('cms_render_block reads only what the operator may read', async (t) => {
+  const env = await setup(t)
+  stubNetwork(t, { kvKeys: [postKey('a', 'p1', 'First', ['News'])] })
+  const client = await connect(t, env)
+  env.denied.add('read:organizations/a/sites')
+  assert.equal((await callTool(client, 'cms_render_block', { orgId: 'a', siteId: 's', definition: postList })).code, 'permission-denied', 'a site needs read rights on sites')
+  env.denied.delete('read:organizations/a/sites')
+  env.denied.add('read:organizations/a/themes')
+  assert.equal((await callTool(client, 'cms_render_block', { orgId: 'a', siteId: 's', themeId: 'main', definition: postList })).code, 'permission-denied')
+  env.denied.delete('read:organizations/a/themes')
+
+  const people = { ...postList, dataSources: { posts: { type: 'collection', path: 'users', value: [] } } }
+  const refused = await callTool(client, 'cms_render_block', { orgId: 'a', definition: people })
+  assert.match(refused.sources[0].problem, /personal data/)
+  assert.equal(refused.sources[0].records, 0)
+  const api = { ...postList, dataSources: { posts: { api: 'http://169.254.169.254/latest', value: [{ title: 'Inline' }] } } }
+  const notFetched = await callTool(client, 'cms_render_block', { orgId: 'a', definition: api })
+  assert.match(notFetched.sources[0].problem, /not loaded by the Hub/)
+  assert.match(notFetched.html, /Inline/)
+  const foreign = { ...postList, dataSources: { posts: { ...postList.dataSources.posts, uniqueKey: 'b:s' } } }
+  const scoped = await callTool(client, 'cms_render_block', { orgId: 'a', siteId: 's', definition: foreign })
+  assert.match(scoped.sources[0].problem, /outside organization/)
+  assert.equal((await callTool(client, 'cms_render_block', { orgId: 'a' })).code, 'invalid-argument')
+  assert.equal((await callTool(client, 'cms_render_block', { orgId: 'b', definition: postList })).code, 'permission-denied')
+})
+
+test('validate, the audit and readiness check overrides against the deployed manifest', async (t) => {
+  const env = await setup(t)
+  const calls = stubNetwork(t, { manifest: { version: 1, commit: 'front123', builtAt: '2026-10-28T00:00:00Z', components: ['auth.vue', 'project-a/muleCalculator.vue', 'heroBanner.vue'] } })
+  env.docs.set('organizations/a/blocks/calc', { name: 'Mule Calculator', content: '<div>Calculator</div>', values: {}, tags: [], themes: ['main'], synced: false, version: 1, isOverrideBlock: true })
+  env.docs.set('organizations/a/sites/s/pages/tools', { name: 'Tools', content: [{ id: 'i1', blockId: 'calc', name: 'Mule Calculator', content: '<div>Calculator</div>', isOverrideBlock: true }], structure: [{ id: 'r', columns: [{ id: 'c', blocks: ['i1'] }] }], version: 1 })
+  const client = await connect(t, env)
+
+  const flagged = await callTool(client, 'cms_validate', { orgId: 'a', docId: 'calc' })
+  assert.equal(flagged.renderingOwner, 'public-frontend-vue-override')
+  assert.match(flagged.renderer, /front123/)
+  const unflagged = await callTool(client, 'cms_validate', { orgId: 'a', definition: { name: 'Hero Banner', content: '<div>x</div>' } })
+  assert.equal(unflagged.renderingOwner, 'cms')
+  assert.ok(unflagged.info.some(line => /isn't marked isOverrideBlock/.test(line)))
+
+  const audit = await callTool(client, 'cms_audit_blocks', { orgId: 'a', includeRender: false })
+  assert.equal(audit.summary.vueOverrideBlocks, 1)
+  assert.match(audit.renderer, /front123/)
+
+  env.docs.delete('organizations/a/sites/s/pages/about')
+  const readiness = await callTool(client, 'cms_site_readiness', { orgId: 'a', siteId: 's' })
+  assert.equal(readiness.ok, true, readiness.message)
+  const item = readiness.items.find(entry => entry.code === 'block.override')
+  assert.deepEqual([item.deployedRenderer.status, item.deployedRenderer.file, item.deployedRenderer.commit], ['vue-override', 'project-a/muleCalculator.vue', 'front123'])
+  assert.equal(calls.filter(url => url.startsWith('https://front.example/')).length, 1, 'the manifest is cached')
+})
+
+test('an unreadable manifest reports overrides as unverified', async (t) => {
+  const env = await setup(t)
+  stubNetwork(t, { manifest: null })
+  env.docs.set('organizations/a/blocks/calc', { name: 'Mule Calculator', content: '<div>Calculator</div>', values: {}, tags: [], themes: [], synced: false, version: 1, isOverrideBlock: true })
+  const client = await connect(t, env)
+  const result = await callTool(client, 'cms_validate', { orgId: 'a', docId: 'calc' })
+  assert.equal(result.renderingOwner, 'unverified')
+  assert.match(result.renderer, /could not be read: HTTP 404/)
 })

@@ -357,6 +357,9 @@ const loadPreviewData = async () => {
     state.payload = response?.data || response || null
     state.renderContext = state.payload?.renderContext || null
     hydratePreviewCollections(state.payload)
+    // Data Sources that didn't load keep their inline value; say why.
+    for (const problem of state.payload?.collectionProblems || [])
+      console.warn('[cms-preview] Data Source not loaded:', problem)
   }
   catch (error) {
     state.error = error?.message || 'Unable to load preview.'
@@ -399,6 +402,7 @@ watch(() => [organizationId.value, siteId.value, pageId.value, previewToken.valu
       :class="isThumbnailMode ? 'cms-preview-thumbnail-capture cms-auth-preview-logged-in' : 'cms-preview-render-page cms-auth-preview-logged-in'"
       :data-preview-ready="previewReady ? 'true' : 'false'"
       :data-preview-block-drafts="(state.payload?.draftBlockIds || []).join(',')"
+      :data-preview-collection-problems="(state.payload?.collectionProblems || []).length"
       :data-preview-viewport="previewViewport || null"
       :style="isThumbnailMode ? null : previewPageStyle"
     >

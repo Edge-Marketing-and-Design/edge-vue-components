@@ -14,10 +14,12 @@ import {
   MCP_REQUIRED_BLOCK_KEYS,
   assertFirestoreSegment,
   boundedNumber,
+  componentCandidateNames,
   containsRedactedValue,
   createCmsReads,
   hashDocument,
   isPlainObject,
+  resolveOverrideFromComponents,
   stableStringify,
   toMcpValidation,
 } from '../../../../lib/cmsAgentReads.js'
@@ -114,7 +116,7 @@ export function createCmsToolService({
     const { summary, results } = await reads.auditBlocks({
       orgId,
       includeRender,
-      ownershipFor: block => resolveVueOverride({ rendererRepoPath, orgId, blockName: block?.name || '', themeName }),
+      ownershipFor: block => resolveVueOverride({ rendererRepoPath, orgId, blockName: block?.name || '', themeName, isOverrideBlock: block?.isOverrideBlock === true }),
     })
     const auditedAt = new Date().toISOString()
     const reportPath = path.join(auditRoot, orgId, `${auditedAt.replace(/[:.]/g, '-')}.json`)
@@ -169,6 +171,7 @@ export function createCmsToolService({
       orgId,
       blockName: resolvedBlockName,
       themeName,
+      isOverrideBlock: productionBlock ? productionBlock.data?.isOverrideBlock === true : null,
     })
 
     return {
@@ -220,6 +223,7 @@ export function createCmsToolService({
       orgId: production.orgId,
       blockName: production.data?.name || '',
       themeName,
+      isOverrideBlock: production.data?.isOverrideBlock === true,
     })
     const checkedOutAt = new Date().toISOString()
     const manifest = {
@@ -390,6 +394,7 @@ export function createCmsToolService({
       orgId,
       blockName: block?.name || '',
       themeName,
+      isOverrideBlock: block?.isOverrideBlock === true,
     })
     const validation = await validateBlockWithRender(block, { override })
 
@@ -525,7 +530,9 @@ export async function validateBlockWithRender(block, { override = null, renderTe
   return toMcpValidation(block, mergeValidationResults(shared, render), { override })
 }
 
-export async function resolveVueOverride({ rendererRepoPath, orgId, blockName, themeName = '' }) {
+// The renderer checkout's answer, with the deployed renderer's rule
+// (resolveOverrideFromComponents). themeName is the site's theme id.
+export async function resolveVueOverride({ rendererRepoPath, orgId, blockName, themeName = '', isOverrideBlock = null }) {
   const blocksRoot = path.join(rendererRepoPath, 'app/blocks')
   let files
   try {
@@ -542,48 +549,10 @@ export async function resolveVueOverride({ rendererRepoPath, orgId, blockName, t
     }
     throw error
   }
-
-  const candidateNames = componentCandidateNames(blockName)
-  const candidateTokens = [...new Set(candidateNames.map(normalizeComponentLookup).filter(Boolean))]
-  const orgToken = normalizeComponentLookup(orgId)
-  const themeToken = normalizeComponentLookup(themeName)
-  const orgMatches = []
-  const globalMatches = []
-
-  for (const absolutePath of files) {
-    const relativePath = path.relative(blocksRoot, absolutePath)
-    const relativeWithoutExtension = relativePath.replace(/\.vue$/i, '')
-    const lookupKey = normalizeComponentLookup(relativeWithoutExtension)
-    const basenameToken = normalizeComponentLookup(path.basename(relativeWithoutExtension))
-    const orgIndex = orgToken ? lookupKey.indexOf(orgToken) : -1
-
-    if (orgIndex >= 0) {
-      const scopedName = lookupKey.slice(orgIndex + orgToken.length)
-      const matchesScopedName = candidateTokens.some((candidateToken) => {
-        return scopedName === candidateToken
-          || (themeToken && scopedName === `${themeToken}${candidateToken}`)
-      })
-      if (matchesScopedName) {
-        orgMatches.push({ absolutePath, relativePath, scope: 'organization' })
-      }
-      continue
-    }
-
-    if (!relativePath.includes(path.sep) && candidateTokens.includes(basenameToken))
-      globalMatches.push({ absolutePath, relativePath, scope: 'global' })
-  }
-
-  const matches = orgMatches.length ? orgMatches : globalMatches
-  const status = matches.length === 0
-    ? 'cms-html'
-    : (matches.length === 1 ? 'vue-override' : 'ambiguous-vue-override')
-
-  return {
-    status,
-    candidateNames,
-    selectedMatch: matches.length === 1 ? matches[0] : null,
-    matches,
-  }
+  const relative = files.map(file => path.relative(blocksRoot, file).split(path.sep).join('/'))
+  const resolution = resolveOverrideFromComponents(relative, { orgId, blockName, themeId: themeName, isOverrideBlock })
+  const withPath = match => (match ? { ...match, absolutePath: path.join(blocksRoot, match.relativePath) } : null)
+  return { ...resolution, selectedMatch: withPath(resolution.selectedMatch), matches: resolution.matches.map(withPath) }
 }
 
 function resolveLocalPath(value, repoRoot) {
@@ -776,47 +745,10 @@ function truncateText(value, maxLength) {
   return `${text.slice(0, maxLength)}\n...[truncated ${text.length - maxLength} characters]`
 }
 
-function componentCandidateNames(label) {
-  const camel = toCamelFromLabel(label)
-  if (!camel)
-    return []
-  const pascal = toPascalCase(camel)
-  const kebab = toKebabCase(pascal)
-  return [...new Set([pascal, camel, kebab].filter(Boolean))]
-}
 
-function toCamelFromLabel(label) {
-  const tokens = String(label || '')
-    .trim()
-    .replace(/[^A-Z0-9]+/gi, ' ')
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-  if (!tokens.length)
-    return ''
-  return tokens[0].toLowerCase() + tokens
-    .slice(1)
-    .map(token => token.charAt(0).toUpperCase() + token.slice(1).toLowerCase())
-    .join('')
-}
 
-function toPascalCase(value) {
-  return String(value || '')
-    .replace(/(^|[^A-Z0-9]+)([A-Z0-9])/gi, (_, __, character) => character.toUpperCase())
-    .replace(/[^A-Z0-9]/gi, '')
-}
 
-function toKebabCase(value) {
-  return String(value || '')
-    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
-    .replace(/[^A-Z0-9]+/gi, '-')
-    .replace(/^-+|-+$/g, '')
-    .toLowerCase()
-}
 
-function normalizeComponentLookup(value) {
-  return String(value || '').replace(/[^a-z0-9]/gi, '').toLowerCase()
-}
 
 async function listFilesRecursively(directory, predicate) {
   const entries = await readdir(directory, { withFileTypes: true })

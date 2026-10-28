@@ -260,6 +260,8 @@ const handlers = {
   cms_resolve_override: async input => jsonResult(await cmsTools.resolveOverride(input)),
   cms_find_usage: async input => jsonResult(await cmsTools.findUsage(input)),
   cms_validate: async input => jsonResult(await cmsTools.validate(input)),
+  // Rendered by the Hub, which has the KV mirror's credentials.
+  cms_render_block: async ({ orgId, sessionId, ...input }) => jsonResult(await agentOperations.render(resolveOrgId(orgId), input, sessionId)),
   cms_find_theme: async input => jsonResult(await cmsTools.findTheme(input)),
   cms_get_theme: async input => jsonResult(await cmsTools.getTheme(input)),
   cms_contract: async ({ kind, section }) => jsonResult(await readContract({ kind, section, repoRoot, rendererRoot: path.resolve(repoRoot, config.cmsRendererRepoPath), notes: await readContractNotes() })),

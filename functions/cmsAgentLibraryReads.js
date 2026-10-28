@@ -1,6 +1,6 @@
 // Library reads for agents (blocks, block bases, themes, sites, usage, audit,
-// validation) run as the operator: the Hub endpoint has already verified the
-// credential and its organization session, and each read checks the
+// validation, rendering) run as the operator: the Hub endpoint has already
+// verified the credential and its organization session, and each read checks the
 // operator's current Hub read rights before reading. The reads are the local
 // MCP's, shared through helpers/cmsAgentReads.mjs, with the same scan limits.
 // Each read is recorded in organizations/{orgId}/cmsAgentReads: what was
@@ -8,8 +8,9 @@
 // expired entries). Keep identical in functions/.
 const { Timestamp } = require('firebase-admin/firestore')
 const { db, HttpsError, logger, permissionCheck } = require('./config.js')
+const { renderBlock } = require('./cmsAgentRender.js')
 
-const LIBRARY_READ_ACTIONS = ['blocks', 'block', 'themes', 'theme', 'sites', 'usage', 'audit', 'validate', 'schema']
+const LIBRARY_READ_ACTIONS = ['blocks', 'block', 'themes', 'theme', 'sites', 'usage', 'audit', 'validate', 'schema', 'render']
 // What each action reads, for the permission check.
 const READ_TARGETS = {
   blocks: ['blocks'],
@@ -20,6 +21,8 @@ const READ_TARGETS = {
   usage: ['blocks', 'sites'],
   audit: ['blocks', 'themes'],
   validate: ['blocks'],
+  // render: also sites, themes and each live source, checked in renderBlock.
+  render: ['blocks'],
   // schema: checked per collection in read().
   schema: [],
 }
@@ -34,13 +37,65 @@ const MAX_LISTED_FINDINGS = 20
 // An inline definition to validate, as JSON.
 const MAX_DEFINITION_BYTES = 1024 * 1024
 
+const text = value => (typeof value === 'string' ? value.trim() : '')
+const listLimit = value => Math.max(1, Math.min(Number.isInteger(value) ? value : 25, 100))
+
+// The deployed renderer's override manifest (emd-cms-front
+// /_edge/block-overrides.json, CMS_RENDERER_MANIFEST_URL): kept 5 minutes, a
+// failed fetch retried after 30 seconds.
+const MANIFEST_CACHE_MS = 5 * 60 * 1000
+const MANIFEST_RETRY_MS = 30 * 1000
+const MANIFEST_TIMEOUT_MS = 3000
+let manifestCache = null
+
+const readOverrideManifest = async ({ fetchImpl = globalThis.fetch, now = Date.now() } = {}) => {
+  const url = text(process.env.CMS_RENDERER_MANIFEST_URL)
+  if (!url)
+    return { ok: false, status: 'unchecked', reason: 'CMS_RENDERER_MANIFEST_URL is not set for this Hub.' }
+  if (manifestCache && manifestCache.url === url && now < manifestCache.expiresAt)
+    return manifestCache.value
+  let value
+  try {
+    const response = await fetchImpl(url, { signal: AbortSignal.timeout(MANIFEST_TIMEOUT_MS), headers: { accept: 'application/json' } })
+    if (!response.ok)
+      throw new Error(`HTTP ${response.status}`)
+    const body = await response.json()
+    if (!Array.isArray(body?.components) || !body.components.every(item => typeof item === 'string'))
+      throw new Error('no components list')
+    value = { ok: true, url, commit: text(body.commit) || null, builtAt: text(body.builtAt) || null, components: body.components }
+  }
+  catch (error) {
+    logger.warn('Override manifest unavailable', { url, error: error?.message })
+    value = { ok: false, status: 'renderer-manifest-unavailable', reason: `The override manifest (${url}) could not be read: ${error?.message || error}.` }
+  }
+  manifestCache = { url, value, expiresAt: now + (value.ok ? MANIFEST_CACHE_MS : MANIFEST_RETRY_MS) }
+  return value
+}
+
+// A block's public renderer resolution from the manifest.
+const overrideFromManifest = (reads, manifest, { orgId, block, themeId = '' }) => {
+  if (!manifest.ok)
+    return { status: manifest.status, candidateNames: [], selectedMatch: null, matches: [], reason: manifest.reason }
+  return {
+    ...reads.resolveOverrideFromComponents(manifest.components, { orgId, blockName: block?.name || '', themeId, isOverrideBlock: block?.isOverrideBlock === true }),
+    manifest: { commit: manifest.commit, builtAt: manifest.builtAt },
+  }
+}
+
+const rendererNote = manifest => (manifest.ok
+  ? `Public Vue overrides checked against the deployed emd-cms-front (${manifest.commit || 'unknown commit'}, built ${manifest.builtAt || 'unknown'}).`
+  : `${manifest.reason} Public Vue overrides are ${manifest.status === 'unchecked' ? 'not checked (renderingOwner "unchecked")' : 'unverified (renderingOwner "unverified")'}.`)
+
 let readsPromise
 const loadReads = () => {
   readsPromise = readsPromise || Promise.all([
     import('./helpers/cmsAgentReads.mjs'),
     import('./helpers/cmsBlockValidation.mjs'),
     import('./helpers/cmsBlockRevisions.mjs'),
-  ]).then(([reads, validation, revisions]) => reads.createCmsReads({
+  ]).then(([reads, validation, revisions]) => ({
+    resolveOverrideFromComponents: reads.resolveOverrideFromComponents,
+    getRenderingOwner: reads.getRenderingOwner,
+    ...reads.createCmsReads({
     db,
     sanitizeValue: reads.firestoreJson,
     validation,
@@ -53,12 +108,9 @@ const loadReads = () => {
         return null
       }
     },
-  }))
+  })}))
   return readsPromise
 }
-
-const text = value => (typeof value === 'string' ? value.trim() : '')
-const listLimit = value => Math.max(1, Math.min(Number.isInteger(value) ? value : 25, 100))
 
 const requireRead = async (uid, orgId, target) => {
   if (!await permissionCheck(uid, 'read', `organizations/${orgId}/${target}`))
@@ -120,11 +172,23 @@ const read = async (reads, orgId, body, uid) => {
       throw new HttpsError('invalid-argument', `definition is larger than ${MAX_DEFINITION_BYTES} bytes.`)
     if (definition === null && !text(body.docId))
       throw new HttpsError('invalid-argument', 'Send a definition to validate, or the docId of a library block.')
-    const result = await reads.validateDefinition({ orgId, definition, docId: text(body.docId), override: { status: 'unchecked' } })
-    return { result: { ...result, renderer: 'Public Vue overrides are not checked remotely (renderingOwner "unchecked").' }, docIds: definition ? [] : [result.docId], resultCount: 1, truncated: false }
+    const manifest = await readOverrideManifest()
+    const result = await reads.validateDefinition({ orgId, definition, docId: text(body.docId), ownershipFor: block => overrideFromManifest(reads, manifest, { orgId, block }) })
+    return { result: { ...result, renderer: rendererNote(manifest) }, docIds: definition ? [] : [result.docId], resultCount: 1, truncated: false }
+  }
+  if (body.action === 'render') {
+    const manifest = await readOverrideManifest()
+    return renderBlock({
+      reads,
+      orgId,
+      body,
+      requireRead: target => requireRead(uid, orgId, target),
+      overrideFor: (block, themeId) => overrideFromManifest(reads, manifest, { orgId, block, themeId }),
+    })
   }
   // audit: the summary and the blocks with errors, with their findings.
-  const { summary, results } = await reads.auditBlocks({ orgId, includeRender: body.includeRender !== false })
+  const manifest = await readOverrideManifest()
+  const { summary, results } = await reads.auditBlocks({ orgId, includeRender: body.includeRender !== false, ownershipFor: block => overrideFromManifest(reads, manifest, { orgId, block }) })
   const limit = listLimit(body.listLimit)
   const blocksWithErrors = results.filter(item => item.errors.length)
   const finding = issue => ({ code: issue.code, severity: issue.severity, path: issue.path, message: issue.message })
@@ -132,7 +196,7 @@ const read = async (reads, orgId, body, uid) => {
     orgId,
     auditedAt: new Date().toISOString(),
     semantics: 'hub-import',
-    renderer: 'Public Vue overrides are not checked remotely (renderingOwner "unchecked").',
+    renderer: rendererNote(manifest),
     summary,
     blocksWithErrors: blocksWithErrors.slice(0, limit).map(item => ({
       docId: item.docId,
@@ -179,5 +243,44 @@ const runLibraryRead = async ({ uid, orgId, body, keyId = null, connectionId = n
   return result
 }
 
+// Adds the deployed renderer's answer (the override manifest) to each
+// block.override item of a site readiness report, with the site's theme.
+const withDeployedOverrides = async ({ orgId, siteId, report }) => {
+  const items = Array.isArray(report?.items) ? report.items : []
+  if (!items.some(item => item.code === 'block.override' && item.blockId))
+    return report
+  const [reads, manifest, siteSnap] = await Promise.all([
+    loadReads(),
+    readOverrideManifest(),
+    db.collection('organizations').doc(orgId).collection('sites').doc(siteId).get(),
+  ])
+  const themeId = text(siteSnap.data()?.theme)
+  const decorated = await Promise.all(items.map(async (item) => {
+    if (item.code !== 'block.override' || !item.blockId)
+      return item
+    const blockSnap = await db.collection('organizations').doc(orgId).collection('blocks').doc(String(item.blockId)).get()
+    const resolution = overrideFromManifest(reads, manifest, { orgId, block: blockSnap.data() || {}, themeId })
+    const found = resolution.status === 'vue-override'
+    return {
+      ...item,
+      deployedRenderer: {
+        status: resolution.status,
+        renderingOwner: reads.getRenderingOwner(resolution.status),
+        file: resolution.selectedMatch?.relativePath || null,
+        commit: resolution.manifest?.commit || null,
+        note: !manifest.ok
+          ? manifest.reason
+          : found
+            ? 'The deployed public site has this component.'
+            : resolution.status === 'ambiguous-vue-override'
+              ? `Several deployed components match: ${resolution.matches.map(match => match.relativePath).join(', ')}.`
+              : 'The deployed public site has no matching component, so it shows the block\'s CMS HTML.',
+      },
+    }
+  }))
+  return { ...report, items: decorated }
+}
+
 exports.LIBRARY_READ_ACTIONS = LIBRARY_READ_ACTIONS
+exports.withDeployedOverrides = withDeployedOverrides
 exports.runLibraryRead = runLibraryRead

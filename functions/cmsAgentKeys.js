@@ -21,7 +21,7 @@ const {
 } = require('./config.js')
 const { authorizeOperation, gatherPageOutline, gatherPostOutline, gatherSitePages, gatherSitePosts, gatherSiteReadiness, performCheck, performRun } = require('./cmsOperations.js')
 const { verifyAgentSession } = require('./cmsAgentConnections.js')
-const { LIBRARY_READ_ACTIONS, runLibraryRead } = require('./cmsAgentLibraryReads.js')
+const { LIBRARY_READ_ACTIONS, runLibraryRead, withDeployedOverrides } = require('./cmsAgentLibraryReads.js')
 const { buildPreviewUrl, issuePreviewToken, previewBaseUrl, previewTokensEnabled } = require('./cmsPreviewTokens.js')
 
 const DOC_ID_PATTERN = /^[^/]{1,1500}$/
@@ -221,7 +221,8 @@ const handleAgentRequest = async ({ header, body }) => {
   }
   else if (body.action === 'readiness') {
     await requireSiteRead(uid, orgId)
-    result = await gatherSiteReadiness({ orgId, siteId: requireDocId(body.siteId, 'site id') })
+    const siteId = requireDocId(body.siteId, 'site id')
+    result = await withDeployedOverrides({ orgId, siteId, report: await gatherSiteReadiness({ orgId, siteId }) })
   }
   else if (body.action === 'pages') {
     await requireSiteRead(uid, orgId)

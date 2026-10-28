@@ -14,6 +14,7 @@ export const CMS_AGENT_REMOTE_TOOL_NAMES = Object.freeze([
   'cms_audit_blocks',
   'cms_find_usage',
   'cms_validate',
+  'cms_render_block',
   'cms_find_theme',
   'cms_get_theme',
   'cms_contract',
@@ -191,7 +192,7 @@ export function cmsAgentToolDefinitions({ z, operationTypes, contractKinds = [],
       name: 'cms_audit_blocks',
       title: 'Audit Production CMS Blocks',
       description: remote
-        ? 'Validate every CMS library block in an organization with the Hub\'s shared block validator, using Hub import settings (required keys, organization themes, the organization\'s block tag list, render checks with empty and sample Data Source records). Returns a summary by rule and the blocks with errors, with their findings (up to listLimit blocks). Public Vue overrides are not checked remotely. Reads only.'
+        ? 'Validate every CMS library block in an organization with the Hub\'s shared block validator, using Hub import settings (required keys, organization themes, the organization\'s block tag list, render checks with empty and sample Data Source records). Returns a summary by rule and the blocks with errors, with their findings (up to listLimit blocks). Public Vue overrides are checked against the deployed public site\'s override manifest. Reads only.'
         : 'Validate every production CMS library block in an organization with the Hub\'s shared block validator, using Hub import settings (required keys, organization themes, the organization\'s block tag list, render checks with empty and sample Data Source records, renderer ownership). Reads production only; writes the full per-block report to a local file and returns a summary by rule.',
       inputSchema: {
         orgId: orgIdSchema(),
@@ -263,7 +264,7 @@ export function cmsAgentToolDefinitions({ z, operationTypes, contractKinds = [],
       name: 'cms_validate',
       title: 'Validate CMS Block',
       description: remote
-        ? 'Validate one CMS block definition with the Hub\'s shared block validator: Template v2 structure, schema and grammar, and render checks with empty and sample Data Source records. Send the definition inline (definition: the block object, as you would send it in block.create or block.draft), or a library block\'s docId to validate its current definition (its open draft, else the released one). Returns string errors/warnings/info plus structured issues. Public Vue overrides are not checked remotely. Writes nothing.'
+        ? 'Validate one CMS block definition with the Hub\'s shared block validator: Template v2 structure, schema and grammar, and render checks with empty and sample Data Source records. Send the definition inline (definition: the block object, as you would send it in block.create or block.draft), or a library block\'s docId to validate its current definition (its open draft, else the released one). Returns string errors/warnings/info plus structured issues, and renderingOwner: whether the deployed public site replaces the block with a Vue override (from its override manifest). Writes nothing.'
         : 'Validate a checked-out local or current production CMS block with the Hub\'s shared block validator: Template v2 structure, schema and grammar, render checks with empty and sample Data Source records, and public renderer ownership. Returns string errors/warnings/info plus structured issues.',
       inputSchema: remote
         ? {
@@ -277,6 +278,24 @@ export function cmsAgentToolDefinitions({ z, operationTypes, contractKinds = [],
             source: z.enum(['local', 'production']).optional().default('local'),
             themeName: OptionalCmsSearchSchema.describe('Optional public renderer theme name.'),
           },
+      annotations: READ,
+    },
+    {
+      name: 'cms_render_block',
+      title: 'Render a CMS Block',
+      description: 'Render one block definition to HTML the way the public site renders it: the site\'s theme and real Data Source records from the KV mirror the public site reads (or sample records, or none). Send the definition inline, or a library block\'s docId to render its current definition (its open draft, else the released one), with optional instance values and Data Source settings. Returns the block\'s html, a standalone document (save it as .html and open it in a browser to screenshot it), where each source\'s records came from (sources), problems, and whether the deployed public site replaces the block with a Vue override. At most 50 records per source; API sources are not fetched. Use it to check one block, and cms_preview_url to check a whole page. Reads only, through the Hub.',
+      inputSchema: {
+        sessionId: SessionIdSchema,
+        orgId: orgIdSchema(),
+        docId: OptionalCmsSearchSchema.describe('Library block document id: renders its current definition, or names an inline definition.'),
+        definition: z.record(z.any()).optional().describe('The block definition to render (content, template, templateVersion, schema, dataSources, values, meta, name, ...), as in block.create or block.draft. Up to 1 MB.'),
+        values: z.record(z.any()).optional().describe('Field values over the schema defaults, as a page instance stores them.'),
+        meta: z.record(z.any()).optional().describe('Data Source settings per source name, as a page instance stores them: { "<source>": { "queryItems": { ... }, "limit": 6 } }.'),
+        siteId: OptionalCmsSearchSchema.describe('Site document id: its theme, {siteId} in Data Sources, and posts. Without it the block renders unthemed and site-scoped sources stay empty.'),
+        themeId: OptionalCmsSearchSchema.describe('Theme document id, instead of the site\'s theme.'),
+        routeLastSegment: OptionalCmsSearchSchema.describe('The last URL segment, for detail blocks whose Data Source uses {routeLastSegment}.'),
+        data: z.enum(['live', 'sample', 'empty']).optional().default('live').describe('live: real records from the KV mirror. sample: the validator\'s sample records. empty: no records (loading and empty states).'),
+      },
       annotations: READ,
     },
     {
@@ -402,8 +421,8 @@ export function cmsAgentToolDefinitions({ z, operationTypes, contractKinds = [],
       name: 'cms_site_readiness',
       title: 'Check a Site Is Ready',
       description: remote
-        ? 'List what stops a site from being finished: failed block checks, invalid or empty required block content, blocks missing from the library, override blocks that need a Vue component, unreleased block drafts, pages behind the released block, empty pages, and pages never published or with unpublished changes. Reads only.'
-        : 'List what stops a site from being finished: failed block checks, invalid or empty required block content, blocks missing from the library, override blocks that need a Vue component (with whether the local emd-cms-front checkout has it), unreleased block drafts, pages behind the released block, empty pages, and pages never published or with unpublished changes. Reads only. Needs an agent key.',
+        ? 'List what stops a site from being finished: failed block checks, invalid or empty required block content, blocks missing from the library, override blocks that need a Vue component (deployedRenderer: whether the deployed public site has it), unreleased block drafts, pages behind the released block, empty pages, and pages never published or with unpublished changes. Reads only.'
+        : 'List what stops a site from being finished: failed block checks, invalid or empty required block content, blocks missing from the library, override blocks that need a Vue component (deployedRenderer: whether the deployed public site has it; localRenderer: whether the local emd-cms-front checkout has it), unreleased block drafts, pages behind the released block, empty pages, and pages never published or with unpublished changes. Reads only. Needs an agent key.',
       inputSchema: {
         sessionId: SessionIdSchema,
         orgId: orgIdSchema(),
