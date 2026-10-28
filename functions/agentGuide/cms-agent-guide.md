@@ -77,8 +77,9 @@ Shared Edge source: `edge/functions/agentGuide/cms-agent-guide.md`.
   Extra CSS, fonts and default templates.
 - `theme.create` and `theme.update` change themes no live site uses.
 - A theme a published site uses only takes `theme.propose`: it records a
-  proposal that a person reviews and applies in the Hub (Themes, the theme's
-  proposals).
+  proposal that a person reviews in the Hub's theme editor (the proposals
+  button in its header) and applies or rejects. `cms_get_theme` shows the
+  theme as it is; a proposal changes nothing until it is applied.
 
 ## Check your work
 
