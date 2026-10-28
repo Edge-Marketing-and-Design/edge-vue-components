@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describeContract } from '../../../../lib/cmsAgentMcpTools.js'
+import { withGeneratedOperations } from '../../../../lib/cmsOperations.js'
 
 // The data contracts an agent writes against, read from the Hub checkout the
 // server runs in (the same root that resolves the renderer path). Nothing is
@@ -53,5 +54,6 @@ export async function readContract({ kind, repoRoot, readFileImpl = readFile }) 
     }
     throw error
   }
-  return describeContract(key, relativePath, markdown)
+  // The operations section is generated from the operation specs.
+  return describeContract(key, relativePath, withGeneratedOperations(markdown))
 }

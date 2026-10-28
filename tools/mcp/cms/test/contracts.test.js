@@ -3,6 +3,7 @@ import { access, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { withGeneratedOperations } from '../../../../lib/cmsOperations.js'
 import { CONTRACT_KINDS, contractKinds, contractPath, readContract } from '../src/contracts.js'
 
 // The server resolves the Hub root the same way (src/server.js repoRoot).
@@ -24,7 +25,8 @@ test('the returned text starts with the contract title and carries the path', as
     assert.equal(result.kind, kind)
     assert.equal(result.path, relativePath)
     const file = await readFile(path.resolve(repoRoot, relativePath), 'utf8')
-    assert.equal(result.markdown, file)
+    // The operations contract's marker is replaced by the generated section.
+    assert.equal(result.markdown, withGeneratedOperations(file))
     assert.ok(result.title.length > 0, `${kind} has a title`)
     assert.ok(file.startsWith(`# ${result.title}`), `${kind} starts with its title`)
   }

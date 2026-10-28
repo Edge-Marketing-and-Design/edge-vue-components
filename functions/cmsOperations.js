@@ -76,7 +76,15 @@ const checksumOf = (operation, reads) => createHash('sha256')
 
 // A plan: `problems` stop the run; `writes` are applied in order; `summary`
 // and `changes` describe them for the caller.
-const createPlan = () => ({ problems: [], writes: [], changes: [], summary: [], result: {} })
+const createPlan = () => ({ problems: [], problemCodes: [], writes: [], changes: [], summary: [], result: {} })
+// Adds refusals: `problems` keeps each message as the Hub shows it,
+// `problemCodes` the matching code from CMS_OPERATION_PROBLEMS.
+const problem = (plan, code, ...messages) => {
+  for (const message of messages) {
+    plan.problems.push(message)
+    plan.problemCodes.push(code)
+  }
+}
 const addWrite = (plan, ref, data, mode, description) => {
   plan.writes.push({ ref, data, mode })
   plan.changes.push({ path: ref.path, action: mode === 'set' ? 'create' : 'update' })
@@ -93,7 +101,7 @@ const addStructuredDataFindings = (core, plan, fields) => {
     if (typeof fields?.[key] !== 'string')
       continue
     const findings = core.structuredDataFindings(fields[key], { label: key, post: key === 'postStructuredData' })
-    plan.problems.push(...findings.errors)
+    problem(plan, 'structured-data', ...findings.errors)
     if (findings.warnings.length)
       plan.notices = [...(plan.notices || []), ...findings.warnings]
   }
@@ -170,7 +178,7 @@ const addTypeRoleFindings = (validation, plan, content, blockThemes, themeDocs) 
 const addThemeNameFindings = (plan, findings, strict) => {
   const messages = findings.map(issue => `${issue.code}: ${issue.message}`)
   if (strict)
-    plan.problems.push(...messages)
+    problem(plan, 'theme.token-names', ...messages)
   else if (messages.length)
     plan.notices = [...(plan.notices || []), ...messages]
 }
@@ -190,16 +198,16 @@ const planTheme = async (core, reader, { orgId, uid, now, operation }) => {
     const themeId = optionalDocId(operation.themeId, 'theme id')
     const ref = themeId ? themes.doc(themeId) : themes.doc()
     if (themeId && (await reader.doc(ref)).exists)
-      plan.problems.push(`Theme "${themeId}" already exists.`)
-    plan.problems.push(...core.themeFieldProblems(fields))
+      problem(plan, 'theme.exists', `Theme "${themeId}" already exists.`)
+    problem(plan, 'theme.fields', ...core.themeFieldProblems(fields))
     // New themes must use the standard names.
     const parsedTheme = typeof fields.theme === 'string' ? parseThemeJson(fields.theme) : null
     if (parsedTheme)
       addThemeNameFindings(plan, validation.themeTokenProblems(parsedTheme), true)
     if (typeof fields.name !== 'string' || !fields.name.trim())
-      plan.problems.push('A theme needs a name.')
+      problem(plan, 'theme.name-required', 'A theme needs a name.')
     if (fields.theme === undefined)
-      plan.problems.push('A theme needs its Theme JSON (`theme`).')
+      problem(plan, 'theme.json-required', 'A theme needs its Theme JSON (`theme`).')
     const doc = {
       docId: ref.id,
       name: '',
@@ -221,12 +229,12 @@ const planTheme = async (core, reader, { orgId, uid, now, operation }) => {
   const ref = themes.doc(themeId)
   const snap = await reader.doc(ref)
   if (!snap.exists) {
-    plan.problems.push(`Theme "${themeId}" does not exist.`)
+    problem(plan, 'theme.not-found', `Theme "${themeId}" does not exist.`)
     return plan
   }
-  plan.problems.push(...core.themeFieldProblems(fields))
+  problem(plan, 'theme.fields', ...core.themeFieldProblems(fields))
   if (!Object.keys(fields).length)
-    plan.problems.push('No theme fields to change.')
+    problem(plan, 'theme.no-fields', 'No theme fields to change.')
   // A standard theme must stay standard; an older theme gets notices.
   const parsedTheme = typeof fields.theme === 'string' ? parseThemeJson(fields.theme) : null
   if (parsedTheme)
@@ -235,7 +243,7 @@ const planTheme = async (core, reader, { orgId, uid, now, operation }) => {
   if (operation.type === 'theme.update') {
     const live = await liveSitesForTheme(reader, orgId, themeId)
     if (live.length)
-      plan.problems.push(`Theme "${themeId}" is used by ${live.length} published site(s) (${live.join(', ')}); edits would go live at once. Use theme.propose.`)
+      problem(plan, 'theme.live', `Theme "${themeId}" is used by ${live.length} published site(s) (${live.join(', ')}); edits would go live at once. Use theme.propose.`)
     addWrite(plan, ref, { ...fields, ...stamp(uid, now) }, 'update', `Update theme ${themeId}: ${Object.keys(fields).join(', ')}.`)
     plan.result = { themeId }
     return plan
@@ -264,7 +272,7 @@ const loadSiteAndPage = async (reader, plan, { orgId, siteId, pageId }) => {
   const siteRef = orgRefOf(orgId).collection('sites').doc(siteId)
   const siteSnap = await reader.doc(siteRef)
   if (!siteSnap.exists) {
-    plan.problems.push(`Site "${siteId}" does not exist.`)
+    problem(plan, 'site.not-found', `Site "${siteId}" does not exist.`)
     return {}
   }
   if (!pageId)
@@ -272,7 +280,7 @@ const loadSiteAndPage = async (reader, plan, { orgId, siteId, pageId }) => {
   const pageRef = siteRef.collection('pages').doc(pageId)
   const pageSnap = await reader.doc(pageRef)
   if (!pageSnap.exists) {
-    plan.problems.push(`Draft page "${pageId}" does not exist on site "${siteId}".`)
+    problem(plan, 'page.not-found', `Draft page "${pageId}" does not exist on site "${siteId}".`)
     return { siteRef, site: siteSnap.data() || {} }
   }
   return { siteRef, site: siteSnap.data() || {}, pageRef, page: pageSnap.data() || {} }
@@ -312,9 +320,9 @@ const pageFieldUpdate = (core, plan, fields, type) => {
   const update = {}
   for (const [key, value] of Object.entries(fields)) {
     if (!core.PAGE_UPDATE_FIELDS.includes(key))
-      plan.problems.push(`"${key}" can't be set by ${type} (allowed: ${core.PAGE_UPDATE_FIELDS.join(', ')}).`)
+      problem(plan, 'fields.not-allowed', `"${key}" can't be set by ${type} (allowed: ${core.PAGE_UPDATE_FIELDS.join(', ')}).`)
     else if (typeof value !== 'string')
-      plan.problems.push(`${key} must be a string.`)
+      problem(plan, 'fields.type', `${key} must be a string.`)
     else
       update[key] = value
   }
@@ -360,13 +368,13 @@ const planPlaceBlock = async (core, reader, plan, { orgId, uid, now, operation, 
   const blockId = requireDocId(operation.blockId, 'block id')
   const blockSnap = await reader.doc(orgRefOf(orgId).collection('blocks').doc(blockId))
   if (!blockSnap.exists) {
-    plan.problems.push(`Library block "${blockId}" does not exist.`)
+    problem(plan, 'block.not-found', `Library block "${blockId}" does not exist.`)
     return plan
   }
   const block = blockSnap.data() || {}
   const refused = body.refuseBlock({ ...block, docId: blockId })
   if (refused) {
-    plan.problems.push(refused)
+    problem(plan, 'block.not-allowed-here', refused)
     return plan
   }
   // A synced block (site chrome) shares one instance's values across the
@@ -375,9 +383,14 @@ const planPlaceBlock = async (core, reader, plan, { orgId, uid, now, operation, 
   // placed in the Hub, and its values are edited in the Hub.
   const syncedSource = block.synced ? await findSyncedInstance(reader, siteRef, blockId) : null
   if (block.synced && !syncedSource)
-    plan.problems.push(`"${block.name || blockId}" is a synced block and this site has no instance of it yet; place the first one in the Hub.`)
+    problem(plan, 'block.synced-first', `"${block.name || blockId}" is a synced block and this site has no instance of it yet; place the first one in the Hub.`)
   if (block.synced && operation.values !== undefined)
-    plan.problems.push(`"${block.name || blockId}" is a synced block; its values are shared across the site and edited in the Hub.`)
+    problem(plan, 'block.synced-values', `"${block.name || blockId}" is a synced block; its values are shared across the site and edited in the Hub.`)
+  // An unknown area is refused rather than read as main, as page.moveBlock does.
+  if (operation.area !== undefined && !Object.keys(body.areas).includes(operation.area)) {
+    problem(plan, 'area.invalid', `area must be ${Object.keys(body.areas).map(name => `"${name}"`).join(' or ')}.`)
+    return plan
+  }
   const [contentKey, structureKey] = body.areas[operation.area === 'post' ? 'post' : 'main']
   const taken = core.pageIds(next)
   const instance = core.buildInstanceFromLibraryBlock(block, { id: core.generateShortId(taken), blockId })
@@ -392,14 +405,14 @@ const planPlaceBlock = async (core, reader, plan, { orgId, uid, now, operation, 
   }
   else if (operation.values !== undefined) {
     if (Number(instance.templateVersion) !== 2)
-      plan.problems.push('Values can only be set on Template v2 blocks.')
+      problem(plan, 'values.template-v1', 'Values can only be set on Template v2 blocks.')
     else if (!isPlainObject(operation.values) || valuesTooLarge(operation.values))
-      plan.problems.push('values must be an object under 200 KB.')
+      problem(plan, 'values.invalid', 'values must be an object under 200 KB.')
     else
       instance.values = clone(operation.values)
   }
   if (Number(instance.templateVersion) === 2 && !instance.synced)
-    plan.problems.push(...core.validateInstanceValues(instance.schema, instance.values))
+    problem(plan, 'values.schema', ...core.validateInstanceValues(instance.schema, instance.values))
   const rows = Array.isArray(next[structureKey]) ? next[structureKey] : []
   const index = Number.isInteger(operation.index) ? Math.min(Math.max(operation.index, 0), rows.length) : rows.length
   const row = body.createRow({ rowId: core.generateShortId(taken), columnId: core.generateShortId(taken), instanceIds: [instance.id] })
@@ -420,17 +433,17 @@ const planPlaceBlock = async (core, reader, plan, { orgId, uid, now, operation, 
 const planSetValues = (core, plan, { uid, now, operation, next, body, found }) => {
   const { instance, key, index } = found
   if (Number(instance.templateVersion) !== 2)
-    plan.problems.push('Values can only be set on Template v2 blocks.')
+    problem(plan, 'values.template-v1', 'Values can only be set on Template v2 blocks.')
   if (instance.synced)
-    plan.problems.push('This is a synced block; edit its values in the Hub.')
+    problem(plan, 'block.synced-values', 'This is a synced block; edit its values in the Hub.')
   if (!isPlainObject(operation.values) || valuesTooLarge(operation.values)) {
-    plan.problems.push('values must be an object under 200 KB.')
+    problem(plan, 'values.invalid', 'values must be an object under 200 KB.')
     return plan
   }
   const values = operation.replace === true
     ? clone(operation.values)
     : { ...(isPlainObject(instance.values) ? instance.values : {}), ...clone(operation.values) }
-  plan.problems.push(...core.validateInstanceValues(instance.schema, values))
+  problem(plan, 'values.schema', ...core.validateInstanceValues(instance.schema, values))
   next[key][index] = { ...instance, values, blockUpdatedAt: new Date(now).toISOString() }
   addWrite(plan, body.ref, body.versioned({ [key]: next[key], ...stamp(uid, now) }), 'update', `Set ${Object.keys(operation.values).join(', ')} on "${instanceLabel(instance)}" (${instance.id}) on ${body.label}.`)
   plan.result = { ...body.ids, instanceId: instance.id }
@@ -468,15 +481,15 @@ const planMoveBlock = (core, plan, { now, uid, operation, next, body, found }) =
   const label = instanceLabel(instance)
   const areas = Object.keys(body.areas)
   if (operation.area !== undefined && !areas.includes(operation.area)) {
-    plan.problems.push(`area must be ${areas.map(name => `"${name}"`).join(' or ')}.`)
+    problem(plan, 'area.invalid', `area must be ${areas.map(name => `"${name}"`).join(' or ')}.`)
     return plan
   }
   if (operation.area !== undefined && operation.area !== area) {
-    plan.problems.push(`"${label}" (${instanceId}) is in the ${area} area; blocks can't move between the main and post areas. Remove it and place the block in the other area.`)
+    problem(plan, 'move.cross-area', `"${label}" (${instanceId}) is in the ${area} area; blocks can't move between the main and post areas. Remove it and place the block in the other area.`)
     return plan
   }
   if (!Number.isInteger(operation.index)) {
-    plan.problems.push('index must be a whole number: the row position to move to (0 is the first row).')
+    problem(plan, 'move.index', 'index must be a whole number: the row position to move to (0 is the first row).')
     return plan
   }
   const structureKey = body.areas[area][1]
@@ -484,7 +497,7 @@ const planMoveBlock = (core, plan, { now, uid, operation, next, body, found }) =
   const holds = column => (Array.isArray(column?.blocks) ? column.blocks : []).includes(instanceId)
   const from = rows.findIndex(row => (row?.columns || []).some(holds))
   if (from < 0) {
-    plan.problems.push(`"${label}" (${instanceId}) isn't in any row of ${body.label}; remove it and place the block again.`)
+    problem(plan, 'move.no-row', `"${label}" (${instanceId}) isn't in any row of ${body.label}; remove it and place the block again.`)
     return plan
   }
   const row = rows[from]
@@ -502,7 +515,7 @@ const planMoveBlock = (core, plan, { now, uid, operation, next, body, found }) =
   const index = Math.min(Math.max(operation.index, 0), remaining.length)
   const structure = [...remaining.slice(0, index), moved, ...remaining.slice(index)]
   if (stableStringify(structure) === stableStringify(rows)) {
-    plan.problems.push(`"${label}" (${instanceId}) is already row ${from + 1}; nothing to move.`)
+    problem(plan, 'move.no-change', `"${label}" (${instanceId}) is already row ${from + 1}; nothing to move.`)
     return plan
   }
   next[structureKey] = structure
@@ -522,7 +535,7 @@ const planInstanceOperation = (core, plan, { now, uid, operation, next, body }) 
   const instanceId = requireDocId(operation.instanceId, 'instance id')
   const found = findInstance(next, instanceId)
   if (!found) {
-    plan.problems.push(`${body.label[0].toUpperCase()}${body.label.slice(1)} has no block instance "${instanceId}".`)
+    problem(plan, 'instance.not-found', `${body.label[0].toUpperCase()}${body.label.slice(1)} has no block instance "${instanceId}".`)
     return plan
   }
   const verb = operation.type.split('.')[1]
@@ -539,16 +552,16 @@ const planPage = async (core, reader, { orgId, uid, now, operation }) => {
 
   if (operation.type === 'page.create') {
     if (siteId === 'templates')
-      plan.problems.push('Pages on the templates site are created in the Hub.')
+      problem(plan, 'page.templates-site', 'Pages on the templates site are created in the Hub.')
     const { siteRef, site } = await loadSiteAndPage(reader, plan, { orgId, siteId })
     if (!siteRef)
       return plan
     const menuName = operation.menu || 'Site Root'
     if (!core.ROOT_MENUS.includes(menuName))
-      plan.problems.push(`menu must be one of: ${core.ROOT_MENUS.join(', ')}.`)
+      problem(plan, 'page.menu', `menu must be one of: ${core.ROOT_MENUS.join(', ')}.`)
     const title = typeof operation.name === 'string' ? operation.name.trim() : ''
     if (!title)
-      plan.problems.push('A page needs a name.')
+      problem(plan, 'page.name-required', 'A page needs a name.')
     const menus = core.withRootMenus(site.menus)
     const slug = core.uniqueRootSlug(menus, title)
     let fields = {}
@@ -556,7 +569,7 @@ const planPage = async (core, reader, { orgId, uid, now, operation }) => {
       if (isPlainObject(operation.fields))
         fields = pageFieldUpdate(core, plan, operation.fields, 'page.create')
       else
-        plan.problems.push('fields must be an object of page fields.')
+        problem(plan, 'fields.type', 'fields must be an object of page fields.')
     }
     const pageId = randomUUID()
     const pageRef = siteRef.collection('pages').doc(pageId)
@@ -582,9 +595,9 @@ const planPage = async (core, reader, { orgId, uid, now, operation }) => {
     // As the Hub's AI SEO leaves it alone: a page copied from a template with
     // custom structured data keeps it until someone edits it in the Hub.
     if (page.structuredDataAiLocked === true && update.structuredData !== undefined)
-      plan.problems.push(`Draft page ${pageId} has custom structured data from its template (structuredDataAiLocked), which AI edits leave alone; change it in the Hub's page settings.`)
+      problem(plan, 'page.structured-data-locked', `Draft page ${pageId} has custom structured data from its template (structuredDataAiLocked), which AI edits leave alone; change it in the Hub's page settings.`)
     if (!Object.keys(fields).length)
-      plan.problems.push('No page fields to change.')
+      problem(plan, 'page.no-fields', 'No page fields to change.')
     addWrite(plan, pageRef, { ...update, version: core.getNextVersion(page.version), ...stamp(uid, now) }, 'update', `Update draft page ${pageId}: ${Object.keys(update).join(', ')}.`)
     return plan
   }
@@ -600,8 +613,6 @@ const planPage = async (core, reader, { orgId, uid, now, operation }) => {
 // writes published_posts or a post's publication fields (publishAt,
 // publishAtTimezone, publishedAt, doc_created_at of an existing post,
 // hidePublishedDate) or an imported post's legacyBlog.
-
-const POST_CREATE_KEYS = ['type', 'siteId', 'title', 'blurb', 'name', 'tags', 'featuredImage', 'postType', 'event', 'templateId']
 
 // The site's restricted-content rule ids, as the post editor lists them.
 const restrictionRuleIds = site => (Array.isArray(site?.restrictedContent?.rules) ? site.restrictedContent.rules : [])
@@ -620,27 +631,27 @@ const postFieldValues = (core, plan, fields) => {
   const values = {}
   if (fields.title !== undefined) {
     if (typeof fields.title !== 'string' || !fields.title.trim())
-      plan.problems.push('A post needs a title.')
+      problem(plan, 'post.title-required', 'A post needs a title.')
     else
       values.title = fields.title
   }
   if (fields.blurb !== undefined) {
     if (typeof fields.blurb !== 'string' || !fields.blurb.trim())
-      plan.problems.push('A post needs a blurb (its preview text).')
+      problem(plan, 'post.blurb-required', 'A post needs a blurb (its preview text).')
     else if (fields.blurb.length > core.POST_BLURB_MAX)
-      plan.problems.push(`The blurb must be at most ${core.POST_BLURB_MAX} characters (it has ${fields.blurb.length}).`)
+      problem(plan, 'post.blurb-too-long', `The blurb must be at most ${core.POST_BLURB_MAX} characters (it has ${fields.blurb.length}).`)
     else
       values.blurb = fields.blurb
   }
   if (fields.tags !== undefined) {
     if (!Array.isArray(fields.tags) || fields.tags.some(tag => typeof tag !== 'string'))
-      plan.problems.push('tags must be a list of strings.')
+      problem(plan, 'post.tags', 'tags must be a list of strings.')
     else
       values.tags = [...fields.tags]
   }
   if (fields.featuredImage !== undefined) {
     if (typeof fields.featuredImage !== 'string')
-      plan.problems.push('featuredImage must be a string: one image URL or storage path.')
+      problem(plan, 'post.featured-image', 'featuredImage must be a string: one image URL or storage path.')
     else
       values.featuredImage = fields.featuredImage.trim()
   }
@@ -653,7 +664,7 @@ const planPost = async (core, reader, { orgId, uid, now, operation }) => {
   const siteRef = orgRefOf(orgId).collection('sites').doc(siteId)
   const siteSnap = await reader.doc(siteRef)
   if (!siteSnap.exists) {
-    plan.problems.push(`Site "${siteId}" does not exist.`)
+    problem(plan, 'site.not-found', `Site "${siteId}" does not exist.`)
     return plan
   }
   const site = siteSnap.data() || {}
@@ -661,23 +672,23 @@ const planPost = async (core, reader, { orgId, uid, now, operation }) => {
 
   if (operation.type === 'post.create') {
     for (const key of Object.keys(operation)) {
-      if (!POST_CREATE_KEYS.includes(key))
-        plan.problems.push(`"${key}" can't be set by post.create (allowed: ${POST_CREATE_KEYS.filter(name => name !== 'type').join(', ')}). Publication is done in the Hub.`)
+      if (!core.POST_CREATE_KEYS.includes(key))
+        problem(plan, 'fields.not-allowed', `"${key}" can't be set by post.create (allowed: ${core.POST_CREATE_KEYS.filter(name => name !== 'type').join(', ')}). Publication is done in the Hub.`)
     }
     if (operation.title === undefined)
-      plan.problems.push('A post needs a title.')
+      problem(plan, 'post.title-required', 'A post needs a title.')
     if (operation.blurb === undefined)
-      plan.problems.push('A post needs a blurb (its preview text).')
+      problem(plan, 'post.blurb-required', 'A post needs a blurb (its preview text).')
     const values = postFieldValues(core, plan, operation)
     if (operation.postType !== undefined && !['post', 'event'].includes(operation.postType))
-      plan.problems.push('postType must be "post" or "event".')
+      problem(plan, 'post.type', 'postType must be "post" or "event".')
     const postType = core.normalizePostType(operation.postType)
     let event = core.savedPostEvent(isPlainObject(operation.event) ? operation.event : {})
-    plan.problems.push(...core.postEventProblems(operation.event, { type: postType, merged: event }))
+    problem(plan, 'post.event', ...core.postEventProblems(operation.event, { type: postType, merged: event }))
     if (postType === 'event')
       event = core.computePostEvent(event, now)
     if (operation.name !== undefined && (typeof operation.name !== 'string' || !core.slugify(operation.name)))
-      plan.problems.push('name must be a slug, like "spring-open-house".')
+      problem(plan, 'post.slug', 'name must be a slug, like "spring-open-house".')
     const slug = core.uniquePostSlug((typeof operation.name === 'string' && operation.name.trim()) ? operation.name : (values.title || ''), await takenPostSlugs(reader, postsRef))
     if (typeof operation.name === 'string' && core.slugify(operation.name) && slug !== core.slugify(operation.name))
       plan.notices = [...(plan.notices || []), `The slug "${core.slugify(operation.name)}" is taken on this site; the post gets "${slug}".`]
@@ -690,9 +701,9 @@ const planPost = async (core, reader, { orgId, uid, now, operation }) => {
       const templateSnap = await reader.doc(orgRefOf(orgId).collection('sites').doc('templates').collection('pages').doc(templateId))
       const template = templateSnap.exists ? (templateSnap.data() || {}) : null
       if (!template)
-        plan.problems.push(`Template page "${templateId}" does not exist on the templates site.`)
+        problem(plan, 'post.template-not-found', `Template page "${templateId}" does not exist on the templates site.`)
       else if (!core.isPostTemplatePage(template))
-        plan.problems.push(`Template page "${templateId}" is not a Post template (the new-post dialog offers templates-site pages whose type includes Post and that are not post template pages).`)
+        problem(plan, 'post.template-type', `Template page "${templateId}" is not a Post template (the new-post dialog offers templates-site pages whose type includes Post and that are not post template pages).`)
       else
         body = core.postTemplateBody(template)
       templateLabel = template ? ` from template "${template.name || templateId}"` : ''
@@ -726,7 +737,7 @@ const planPost = async (core, reader, { orgId, uid, now, operation }) => {
   const postRef = postsRef.doc(postId)
   const postSnap = await reader.doc(postRef)
   if (!postSnap.exists) {
-    plan.problems.push(`Draft post "${postId}" does not exist on site "${siteId}".`)
+    problem(plan, 'post.not-found', `Draft post "${postId}" does not exist on site "${siteId}".`)
     return plan
   }
   const post = postSnap.data() || {}
@@ -735,16 +746,16 @@ const planPost = async (core, reader, { orgId, uid, now, operation }) => {
   if (operation.type === 'post.update') {
     const fields = isPlainObject(operation.fields) ? operation.fields : {}
     if (!Object.keys(fields).length)
-      plan.problems.push('No post fields to change.')
+      problem(plan, 'post.no-fields', 'No post fields to change.')
     for (const key of Object.keys(fields)) {
       if (!core.POST_UPDATE_FIELDS.includes(key))
-        plan.problems.push(`"${key}" can't be set by post.update (allowed: ${core.POST_UPDATE_FIELDS.join(', ')}). Publication, scheduling and dates are set in the Hub.`)
+        problem(plan, 'fields.not-allowed', `"${key}" can't be set by post.update (allowed: ${core.POST_UPDATE_FIELDS.join(', ')}). Publication, scheduling and dates are set in the Hub.`)
     }
     const update = postFieldValues(core, plan, fields)
     if (fields.name !== undefined) {
       const wanted = typeof fields.name === 'string' ? core.slugify(fields.name) : ''
       if (!wanted) {
-        plan.problems.push('name must be a slug, like "spring-open-house".')
+        problem(plan, 'post.slug', 'name must be a slug, like "spring-open-house".')
       }
       else {
         update.name = core.uniquePostSlug(wanted, await takenPostSlugs(reader, postsRef, postId))
@@ -755,13 +766,13 @@ const planPost = async (core, reader, { orgId, uid, now, operation }) => {
     if (fields.event !== undefined) {
       const postType = core.normalizePostType(post.type)
       const merged = core.savedPostEvent({ ...(isPlainObject(post.event) ? post.event : {}), ...(isPlainObject(fields.event) ? fields.event : {}) })
-      plan.problems.push(...core.postEventProblems(fields.event, { type: postType, merged, timezoneKnown: typeof post.event?.timezone === 'string' && !!post.event.timezone }))
+      problem(plan, 'post.event', ...core.postEventProblems(fields.event, { type: postType, merged, timezoneKnown: typeof post.event?.timezone === 'string' && !!post.event.timezone }))
       update.event = postType === 'event' ? core.computePostEvent(merged, now) : merged
     }
     if (fields.restrictionRuleId !== undefined) {
       const rules = restrictionRuleIds(site)
       if (typeof fields.restrictionRuleId !== 'string' || (fields.restrictionRuleId && !rules.includes(fields.restrictionRuleId)))
-        plan.problems.push(`restrictionRuleId must be empty (public) or one of the site's restricted-content rules: ${rules.join(', ') || 'none'}.`)
+        problem(plan, 'post.restriction-rule', `restrictionRuleId must be empty (public) or one of the site's restricted-content rules: ${rules.join(', ') || 'none'}.`)
       else
         update.restrictionRuleId = fields.restrictionRuleId
     }
@@ -773,11 +784,11 @@ const planPost = async (core, reader, { orgId, uid, now, operation }) => {
   // opening (normalizePostBuilderDoc). A legacy HTML body is migrated by
   // opening the post in the Hub.
   if (operation.area !== undefined && operation.area !== 'main') {
-    plan.problems.push('Posts have one body; area is for pages.')
+    problem(plan, 'post.area', 'Posts have one body; area is for pages.')
     return plan
   }
   if (post.content !== undefined && !Array.isArray(post.content)) {
-    plan.problems.push(`Draft post ${postId} still has a legacy HTML body; open it in the Hub's post editor once to turn it into blocks.`)
+    problem(plan, 'post.legacy-body', `Draft post ${postId} still has a legacy HTML body; open it in the Hub's post editor once to turn it into blocks.`)
     return plan
   }
   const taken = core.pageIds(post)
@@ -801,7 +812,7 @@ const readBlockTagList = async (validation, reader, orgId) => {
 // Tag rule findings: notices while they are warnings, problems once they
 // are errors (BLOCK_TAG_RULE_SEVERITY).
 const addBlockTagFindings = (plan, findings) => {
-  plan.problems.push(...findings.filter(issue => issue.severity === 'error').map(issue => `${issue.code}: ${issue.message}`))
+  problem(plan, 'block.tags', ...findings.filter(issue => issue.severity === 'error').map(issue => `${issue.code}: ${issue.message}`))
   const notices = findings.filter(issue => issue.severity !== 'error').map(issue => `${issue.code}: ${issue.message}`)
   if (notices.length)
     plan.notices = [...(plan.notices || []), ...notices]
@@ -814,22 +825,22 @@ const planBlock = async (core, reader, { orgId, uid, now, operation }) => {
   if (operation.type === 'block.create') {
     const block = isPlainObject(operation.block) ? JSON.parse(JSON.stringify(operation.block)) : null
     if (!block) {
-      plan.problems.push('block must be a block document.')
+      problem(plan, 'block.document', 'block must be a block document.')
       return plan
     }
     const blockId = requireDocId(block.docId, 'block docId')
     const ref = blocks.doc(blockId)
     if ((await reader.doc(ref)).exists)
-      plan.problems.push(`Block "${blockId}" already exists. Use block.draft to change it.`)
-    plan.problems.push(...core.designReferenceProblems(block.meta?.design, 'block.meta.design'))
+      problem(plan, 'block.exists', `Block "${blockId}" already exists. Use block.draft to change it.`)
+    problem(plan, 'block.design-reference', ...core.designReferenceProblems(block.meta?.design, 'block.meta.design'))
     const themes = await reader.query(orgRefOf(orgId).collection('themes'), `organizations/${orgId}/themes`)
     const validation = await validationPromise
     const blockTagList = await readBlockTagList(validation, reader, orgId)
     const [{ checkImportedBlock }, engine] = await loadImportCheck()
     const findings = await checkImportedBlock(block, { knownThemeIds: themes.docs.map(doc => doc.id), blockTagList, renderTemplate: engine.renderTemplateAsync })
     if (findings.hardError)
-      plan.problems.push(findings.hardError)
-    plan.problems.push(...findings.blocking.map(issue => `${issue.code}: ${issue.message}`))
+      problem(plan, 'block.validation', findings.hardError)
+    problem(plan, 'block.validation', ...findings.blocking.map(issue => `${issue.code}: ${issue.message}`))
     const isThemeName = issue => String(issue.code || '').startsWith('theme.')
     plan.notices = findings.notices.filter(issue => !isThemeName(issue)).map(issue => `${issue.code}: ${issue.message}`)
     const themeDocs = Object.fromEntries(themes.docs.map(doc => [doc.id, doc.data()]))
@@ -849,15 +860,15 @@ const planBlock = async (core, reader, { orgId, uid, now, operation }) => {
   const ref = blocks.doc(blockId)
   const snap = await reader.doc(ref)
   if (!snap.exists) {
-    plan.problems.push(`Block "${blockId}" does not exist. Use block.create.`)
+    problem(plan, 'block.not-found', `Block "${blockId}" does not exist. Use block.create.`)
     return plan
   }
   if (!isPlainObject(operation.definition) || typeof operation.definition.content !== 'string')
-    plan.problems.push('definition must be a block definition with string content.')
+    problem(plan, 'block.definition', 'definition must be a block definition with string content.')
   if (typeof operation.baseHash !== 'string')
-    plan.problems.push('baseHash is required: the fingerprint of the definition you started from.')
+    problem(plan, 'block.base-hash-required', 'baseHash is required: the fingerprint of the definition you started from.')
   if (isPlainObject(operation.definition) && isPlainObject(operation.definition.meta))
-    plan.problems.push(...core.designReferenceProblems(operation.definition.meta.design, 'definition.meta.design'))
+    problem(plan, 'block.design-reference', ...core.designReferenceProblems(operation.definition.meta.design, 'definition.meta.design'))
   const revisionsCore = await revisionsCorePromise
   const block = snap.data() || {}
   let current = block
@@ -867,7 +878,7 @@ const planBlock = async (core, reader, { orgId, uid, now, operation }) => {
       current = draftSnap.data().definition || block
   }
   if (typeof operation.baseHash === 'string' && operation.baseHash !== revisionsCore.blockDefinitionHash(current)) {
-    plan.problems.push(`Block "${blockId}" changed since you loaded it (its ${current === block ? 'released definition' : `unreleased draft, revision ${block.draftRevision}`} is different). Load it again before drafting.`)
+    problem(plan, 'block.changed', `Block "${blockId}" changed since you loaded it (its ${current === block ? 'released definition' : `unreleased draft, revision ${block.draftRevision}`} is different). Load it again before drafting.`)
     plan.currentHash = revisionsCore.blockDefinitionHash(current)
   }
   // Tags are library metadata, not part of the definition: a draft neither
@@ -911,21 +922,21 @@ const planSiteUpdate = async (core, reader, { orgId, uid, now, operation }) => {
   const siteRef = orgRefOf(orgId).collection('sites').doc(siteId)
   const siteSnap = await reader.doc(siteRef)
   if (!siteSnap.exists) {
-    plan.problems.push(`Site "${siteId}" does not exist.`)
+    problem(plan, 'site.not-found', `Site "${siteId}" does not exist.`)
     return plan
   }
   const fields = isPlainObject(operation.fields) ? operation.fields : {}
   const update = {}
   for (const [key, value] of Object.entries(fields)) {
     if (!core.SITE_UPDATE_FIELDS.includes(key))
-      plan.problems.push(`"${key}" can't be set by site.update (allowed: ${core.SITE_UPDATE_FIELDS.join(', ')}). Set it in the Hub's site settings.`)
+      problem(plan, 'fields.not-allowed', `"${key}" can't be set by site.update (allowed: ${core.SITE_UPDATE_FIELDS.join(', ')}). Set it in the Hub's site settings.`)
     else if (typeof value !== 'string')
-      plan.problems.push(`${key} must be a string.`)
+      problem(plan, 'fields.type', `${key} must be a string.`)
     else
       update[key] = value
   }
   if (!Object.keys(fields).length)
-    plan.problems.push('No site fields to change.')
+    problem(plan, 'site.no-fields', 'No site fields to change.')
   addStructuredDataFindings(core, plan, update)
   addWrite(plan, siteRef, { ...update, ...stamp(uid, now) }, 'update', `Update site ${siteId}: ${Object.keys(update).join(', ')}. Published site settings are unchanged.`)
   plan.result = { siteId }
@@ -940,27 +951,27 @@ const planSite = async (core, reader, context) => {
   const org = orgRefOf(orgId)
   const name = typeof operation.name === 'string' ? operation.name.trim() : ''
   if (!name)
-    plan.problems.push('A site needs a name.')
+    problem(plan, 'site.name-required', 'A site needs a name.')
   const themeId = optionalDocId(operation.theme, 'theme id')
   let themeDoc = null
   if (!themeId) {
-    plan.problems.push('A site needs a theme.')
+    problem(plan, 'site.theme-required', 'A site needs a theme.')
   }
   else {
     const themeSnap = await reader.doc(org.collection('themes').doc(themeId))
     if (themeSnap.exists)
       themeDoc = themeSnap.data() || {}
     else
-      plan.problems.push(`Theme "${themeId}" does not exist.`)
+      problem(plan, 'theme.not-found', `Theme "${themeId}" does not exist.`)
   }
   // Like the Hub form: at least one domain, each 45 characters or fewer.
   // Domains reach the public renderer only when the site settings are
   // published.
   const domains = Array.isArray(operation.domains) ? operation.domains.map(domain => (typeof domain === 'string' ? domain.trim() : domain)) : []
   if (!domains.length || domains.some(domain => typeof domain !== 'string' || !domain))
-    plan.problems.push('A site needs at least one domain (domains: ["example.com"]).')
+    problem(plan, 'site.domains', 'A site needs at least one domain (domains: ["example.com"]).')
   else if (domains.some(domain => domain.length > 45))
-    plan.problems.push('Each domain must be 45 characters or fewer.')
+    problem(plan, 'site.domains', 'Each domain must be 45 characters or fewer.')
   const settings = isPlainObject(operation.settings) ? operation.settings : {}
   const defaults = core.siteSettingsDefaults()
   const chosen = {}
@@ -971,14 +982,14 @@ const planSite = async (core, reader, context) => {
       ? (Array.isArray(value) && value.every(item => typeof item === 'string'))
       : (kind === 'true or false' ? typeof value === 'boolean' : typeof value === 'string')
     if (!core.SITE_CREATE_FIELDS.includes(key))
-      plan.problems.push(`"${key}" can't be set by site.create (allowed: ${core.SITE_CREATE_FIELDS.join(', ')}). Set it in the Hub's site settings.`)
+      problem(plan, 'fields.not-allowed', `"${key}" can't be set by site.create (allowed: ${core.SITE_CREATE_FIELDS.join(', ')}). Set it in the Hub's site settings.`)
     else if (!valid)
-      plan.problems.push(`${key} must be ${kind}.`)
+      problem(plan, 'fields.type', `${key} must be ${kind}.`)
     else
       chosen[key] = value
   }
   if (chosen.allowedThemes?.length && themeId && !chosen.allowedThemes.includes(themeId))
-    plan.problems.push('allowedThemes must include the site\'s theme.')
+    problem(plan, 'site.allowed-themes', 'allowedThemes must include the site\'s theme.')
   addStructuredDataFindings(core, plan, chosen)
 
   const isAdmin = await permissionCheck(uid, 'assign', `organizations/${orgId}`)
@@ -1061,6 +1072,7 @@ const describePlan = (plan, checksum) => ({
   summary: plan.summary,
   changes: plan.changes,
   problems: plan.problems,
+  problemCodes: plan.problemCodes,
   notices: plan.notices || [],
   blocked: plan.problems.length > 0,
   result: plan.result,
