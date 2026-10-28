@@ -1217,3 +1217,43 @@ export const BLOCK_VALIDATION_CODES_MARKER = '<!-- validation codes: generated f
 export const withGeneratedValidationCodes = markdown => (String(markdown).includes(BLOCK_VALIDATION_CODES_MARKER)
   ? String(markdown).replace(BLOCK_VALIDATION_CODES_MARKER, renderBlockValidationCodes().trimEnd())
   : String(markdown))
+
+// ---- Standard theme names ----
+//
+// What each baseline theme name is for, for the themes contract. `tokens`
+// says which list the validator checks the names against; tests check that
+// the groups cover each list exactly. cms_contract serves the table in place
+// of its marker (withGeneratedThemeNames).
+export const THEME_NAME_GROUPS = Object.freeze([
+  { group: 'Brand', tokens: 'color', names: ['primary', 'secondary', 'tertiary', 'accent'], meaning: 'The brand colors, most used first; `accent` is the call-to-action color.' },
+  { group: 'Text on brand', tokens: 'color', names: ['onPrimary', 'onSecondary', 'onTertiary', 'onAccent'], meaning: 'Readable text and icons on that color (at least 4.5:1 for body text).' },
+  { group: 'Page', tokens: 'color', names: ['canvas', 'surface', 'surfaceAlt'], meaning: 'Page background, cards and panels, alternate bands.' },
+  { group: 'Text', tokens: 'color', names: ['text', 'textMuted', 'heading', 'link', 'linkHover', 'border'], meaning: 'Body text, secondary text, headings, links, rules and outlines.' },
+  { group: 'Status (optional)', tokens: 'optional-color', names: ['success', 'warning', 'danger'], meaning: 'Status only (errors, confirmations, alerts), and only when the design has them. Never a spare brand color: another theme\'s status green or red would change it.' },
+  { group: 'Fonts (`extend.fontFamily`)', tokens: 'font', names: ['display', 'sans', 'accent'], meaning: 'Headings, body, and eyebrows, quotes or a script or serif voice. Themes with fewer faces repeat a stack; every name must exist.' },
+  { group: 'Radius (`extend.borderRadius`)', tokens: 'radius', names: ['card', 'panel', 'button'], meaning: 'Corner radius of cards, panels and buttons.' },
+])
+
+export const THEME_NAME_TOKEN_LISTS = Object.freeze({
+  'color': THEME_COLOR_TOKENS,
+  'optional-color': THEME_OPTIONAL_COLOR_TOKENS,
+  'font': THEME_FONT_TOKENS,
+  'radius': THEME_RADIUS_TOKENS,
+})
+
+export const renderThemeNames = (groups = THEME_NAME_GROUPS) => {
+  const cell = value => String(value).replace(/\|/g, '\\|')
+  const lines = ['| Group | Names | Meaning |', '| --- | --- | --- |']
+  for (const entry of groups)
+    lines.push(`| ${cell(entry.group)} | ${entry.names.map(name => `\`${name}\``).join(', ')} | ${cell(entry.meaning)} |`)
+  lines.push('', 'Generated from `THEME_NAME_GROUPS` in `edge/lib/cmsBlockValidation.js`; the checks use the lists in `edge/lib/cmsThemeDefaults.mjs`.')
+  return `${lines.join('\n')}\n`
+}
+
+export const THEME_NAMES_MARKER = '<!-- theme names: generated from THEME_NAME_GROUPS -->'
+export const withGeneratedThemeNames = markdown => (String(markdown).includes(THEME_NAMES_MARKER)
+  ? String(markdown).replace(THEME_NAMES_MARKER, renderThemeNames().trimEnd())
+  : String(markdown))
+
+// Every generated section this module owns: validation codes and theme names.
+export const withGeneratedValidation = markdown => withGeneratedThemeNames(withGeneratedValidationCodes(markdown))

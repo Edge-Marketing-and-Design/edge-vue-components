@@ -126,8 +126,8 @@ const createRemoteCms = ({ now = Date.now, issueSession = issueAgentSession, han
         return { ok: false, code: 'unknown-kind', message: kinds.length ? `Unknown contract kind "${kind}". Known kinds: ${kinds.join(', ')}.` : 'This Hub has not bundled its data contracts (scripts/cms/sync-agent-contracts.mjs).', kinds }
       // Generated sections (operations with their explanation overrides,
       // block validation codes) replace their markers.
-      const { withGeneratedValidationCodes } = await import('./helpers/cmsBlockValidation.mjs')
-      return describeContract(key, contracts[key], withGeneratedContract(withGeneratedValidationCodes(readFileSync(path.join(contractsDir, `${key}.md`), 'utf8')), await readNotes()))
+      const { withGeneratedValidation } = await import('./helpers/cmsBlockValidation.mjs')
+      return describeContract(key, contracts[key], withGeneratedContract(withGeneratedValidation(readFileSync(path.join(contractsDir, `${key}.md`), 'utf8')), await readNotes()))
     }),
     cms_schema: tool(({ collection, siteId, limit, ...input }) => call(connection, input, { action: 'schema', collection, ...(siteId ? { siteId } : {}), ...(limit ? { limit } : {}) })),
     cms_guide: tool(async ({ section }) => {

@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describeContract } from '../../../../lib/cmsAgentMcpTools.js'
-import { withGeneratedValidationCodes } from '../../../../lib/cmsBlockValidation.js'
+import { withGeneratedValidation } from '../../../../lib/cmsBlockValidation.js'
 import { withGeneratedContract } from '../../../../lib/cmsOperations.js'
 
 // The data contracts an agent writes against, read from the Hub checkout the
@@ -57,5 +57,5 @@ export async function readContract({ kind, repoRoot, readFileImpl = readFile, no
   }
   // Generated sections: document fields and operations from the shared CMS
   // code, block validation codes from the validator.
-  return describeContract(key, relativePath, withGeneratedContract(withGeneratedValidationCodes(markdown), notes))
+  return describeContract(key, relativePath, withGeneratedContract(withGeneratedValidation(markdown), notes))
 }

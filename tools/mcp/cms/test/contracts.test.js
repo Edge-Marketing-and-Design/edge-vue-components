@@ -3,7 +3,7 @@ import { access, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { withGeneratedValidationCodes } from '../../../../lib/cmsBlockValidation.js'
+import { withGeneratedValidation } from '../../../../lib/cmsBlockValidation.js'
 import { withGeneratedContract } from '../../../../lib/cmsOperations.js'
 import { CONTRACT_KINDS, contractKinds, contractPath, readContract } from '../src/contracts.js'
 
@@ -27,7 +27,7 @@ test('the returned text starts with the contract title and carries the path', as
     assert.equal(result.path, relativePath)
     const file = await readFile(path.resolve(repoRoot, relativePath), 'utf8')
     // Markers are replaced by the generated sections.
-    assert.equal(result.markdown, withGeneratedContract(withGeneratedValidationCodes(file)))
+    assert.equal(result.markdown, withGeneratedContract(withGeneratedValidation(file)))
     assert.ok(!/<!-- (operations|fields|validation codes):/.test(result.markdown), `${kind} has no marker left`)
     assert.ok(result.title.length > 0, `${kind} has a title`)
     assert.ok(file.startsWith(`# ${result.title}`), `${kind} starts with its title`)

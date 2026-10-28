@@ -2071,6 +2071,144 @@ export const CMS_DOCUMENT_FIELDS = Object.freeze({
       { names: ['protection'], meaning: 'Instance setting.', writtenBy: 'the page editor (copied from the site\'s existing instance when placing a synced block)' },
     ],
   },
+  'library-block': {
+    writer: 'the `block.create` operation (the Hub\'s block import writes the same document)',
+    columns: ['Field', 'Type', 'Meaning'],
+    fields: [
+      { names: ['name'], type: 'string, required', meaning: 'Display name. The public renderer resolves Vue overrides from the name copied into each instance, so renaming an override block affects only new placements. The Hub asks for confirmation first.' },
+      { names: ['content'], type: 'string, required', meaning: 'Template markup. For Template v2 it must equal `template`.' },
+      { names: ['templateVersion'], type: '`1` or `2`', meaning: 'Missing or any value other than `2` means Template v1.' },
+      { names: ['template'], type: 'string', meaning: 'Template v2 markup.' },
+      { names: ['schema'], type: 'object', meaning: 'Editable inputs keyed by field name (Schema inputs, below). Defaults live in `schema[field].value`.' },
+      { names: ['dataSources'], type: 'object', meaning: 'Data Sources keyed by the name the template passes to `source("name")`. A declared source is fetched only when the template calls it.' },
+      { names: ['values'], type: 'object, required', meaning: 'Library-level values. Normally `{}`; each instance owns its values.' },
+      { names: ['meta'], type: 'object', meaning: 'Legacy Template v1 field metadata, including `queryItems`.', writtenBy: 'the Block Editor and imports, when the block has any' },
+      { names: ['meta.design'], type: 'object', meaning: 'Library only. The design node the block was built from: `{ source: "figma", file, node, name? }` or `{ source: "handoff", path, section?, name? }`, the same object as the block package manifest\'s `design` entry. It is part of the definition (a draft carries it and a release writes it to the library block) and is never copied to instances: the Block Editor keeps it when saving a Template v2 block (`CMS_LIBRARY_META_KEYS` in `edge/composables/useCmsTemplateRuntimeMeta.js`), and the block picker drops it with the rest of the library `meta`. `block.create` and `block.draft` refuse any other shape (operations contract, `block.design-reference`).' },
+      { names: ['tags', 'themes'], type: 'string arrays, required', meaning: 'Library filters. `themes` holds theme document ids from the same organization.' },
+      { names: ['type'], type: '`["Page"]`, `["Post"]` or both', meaning: 'Where authors may place the block. A missing value becomes `["Page"]` on import.' },
+      { names: ['previewType'], type: '`light` or `dark`', meaning: 'Hub preview surface.' },
+      { names: ['isOverrideBlock'], type: 'boolean', meaning: 'Marks a block the public renderer replaces with a Vue component. Its CMS HTML is the fallback.' },
+      { names: ['synced'], type: 'boolean, required', meaning: 'Synced blocks share one instance\'s values across pages.' },
+      { names: ['version'], type: 'number, required', meaning: 'Hub document version counter.' },
+      { names: ['blockUpdatedAt'], type: 'ISO string', meaning: 'Set when the definition changes. It is copied to instances.', writtenBy: 'the release worker and the Block Editor' },
+      { names: ['releasedRevision'], type: 'integer or missing', meaning: 'The revision number of the definition on this document. Missing means revision 0, which is created lazily on the first edit.', writtenBy: 'the revision callables only' },
+      { names: ['draftRevision'], type: 'integer, `null` or missing', meaning: 'The open draft revision, if any.', writtenBy: 'the revision callables and the release worker only' },
+      { names: ['lastRevisionNumber'], type: 'integer or missing', meaning: 'The highest revision number used.', writtenBy: 'the revision callables and the release worker only' },
+      { names: ['activeReleaseId'], type: 'string, `null` or missing', meaning: 'The release that owns the block while it runs. A newer release taking it over stops the older one.', writtenBy: 'the release callables and worker' },
+      { names: ['lastReleaseId'], type: 'string or missing', meaning: 'The release that last wrote the definition. `blockUpdated` ignores a write that changes it.', writtenBy: 'the release worker' },
+      { names: ['canary'], type: 'object, `null` or missing', meaning: '`{ revisionNumber, siteIds, releaseId, updatedAt }` while a revision is live only on some sites. Cleared when it is promoted, rolled back from every site, or replaced by any release to all sites.', writtenBy: 'the release worker' },
+      { names: ['templateConversion'], type: 'object or `null`', meaning: 'Notes from converting a Template v1 block. Cleared to `null` after the Block Editor saves.', writtenBy: 'the Template v1 converter' },
+      { names: ['docId', 'doc_created_at', 'last_updated', 'uid'], type: 'string, numbers, uid', meaning: 'Bookkeeping the Hub\'s document wrapper and the operations add: the document id, creation and last save times in milliseconds, and who saved last.' },
+    ],
+  },
+  'revision': {
+    writer: '`cms-saveBlockDraft` and the `block.draft` operation (a draft), and the first draft save of a block (revision 0)',
+    columns: ['Field', 'Type', 'Meaning'],
+    fields: [
+      { names: ['number'], type: 'integer', meaning: 'The revision number, starting at 0.' },
+      { names: ['status'], type: '`draft`, `releasing`, `canary`, `released`, `superseded` or `discarded`', meaning: 'Revision 0 starts as `released`; edited revisions start as `draft`. A block has at most one `draft`. A release marks its revision `releasing` (the definition is then frozen), then `released`; the revision it replaces becomes `superseded`.' },
+      { names: ['definition'], type: 'object', meaning: '`content`, `template`, `templateVersion`, `schema`, `dataSources`, `isOverrideBlock`, `meta` and `values`, as present. `values` isn\'t propagated, but new placements copy it, so it waits for a release too.' },
+      { names: ['baseNumber'], type: 'integer or `null`', meaning: 'The released revision the draft was edited from; `null` for revision 0.' },
+      { names: ['source'], type: '`baseline`, `editor`, `import`, `page-editor`, `agent` or `implicit`', meaning: 'Where the latest save came from. `baseline` marks revision 0; `implicit` marks a definition written directly to the library block; `agent` marks a `block.draft` operation run with an agent key.' },
+      { names: ['checks'], type: 'object', meaning: 'The release checks summary of the release that took it.', writtenBy: 'the release callables' },
+      { names: ['releaseId', 'releasedBy', 'supersededBy'], type: 'string, uid, integer', meaning: 'The release that last took it, who started that release, and the revision that replaced it.', writtenBy: 'the release callables and worker' },
+      { names: ['createdBy', 'updatedBy'], type: 'uid or `null`', meaning: 'Who created it and who last saved it.' },
+      { names: ['createdAt', 'updatedAt', 'releasedAt'], type: 'ISO strings', meaning: 'When it was created, last saved and last released.' },
+      { names: ['discardedBy', 'discardedAt'], type: 'uid, ISO string', meaning: 'Who discarded the draft, and when.', writtenBy: '`cms-discardBlockDraft`, and a draft save equal to the released definition' },
+    ],
+  },
+  'release': {
+    writer: '`cms-executeBlockRelease`, and the release worker as it runs',
+    columns: ['Field', 'Meaning'],
+    fields: [
+      { names: ['blockId', 'revisionNumber', 'previousRevisionNumber'], meaning: 'What is released and what it replaces.' },
+      { names: ['kind'], meaning: '`release` (a draft, or extending a canary), `promote` (a canary to all sites), `rollback` (an older revision) or `reapply` (the released one again).' },
+      { names: ['scope'], meaning: '`all`, or `{ siteIds }` for a canary. A site-scoped release never changes the library block\'s definition. When it finishes it records itself as the block\'s `lastReleaseId`, so a partial canary or scoped rollback can be retried until a newer release takes the block.' },
+      { names: ['implicit'], meaning: '`true` when started by a direct definition write. These releases skip the dry run and its checks.' },
+      { names: ['status'], meaning: '`planned`, `running`, `completed`, `partial` (some targets failed; retryable), `failed` or `superseded` (a newer release took the block).' },
+      { names: ['definition', 'beforeDefinition'], meaning: 'The frozen definition being released, and the one it replaces.' },
+      { names: ['blockUpdatedAt'], meaning: 'The `blockUpdatedAt` written to instances and the library block.' },
+      { names: ['revisionStatusBefore'], meaning: 'The revision\'s status when the release took it. A revision that was already live (`released` or `canary`, as in a reapply) returns to that status when the release finishes or is superseded; any other becomes `superseded`.' },
+      { names: ['counts'], meaning: '`{ planned, done, skipped, failed }`. The final counts are recomputed from the targets.' },
+      { names: ['checksum'], meaning: 'The dry run\'s checksum of the block, the revision\'s definition and the library definition it replaces, the released revision, scope and target paths.' },
+      { names: ['checks', 'confirmedBreaking'], meaning: 'The release checks summary (also stored on the revision), and whether an admin confirmed breaking schema changes.' },
+      { names: ['startedBy'], meaning: 'The admin who started the release.' },
+      { names: ['retriedBy'], meaning: 'The admin who last retried it.', writtenBy: '`cms-retryBlockRelease`' },
+      { names: ['createdAt', 'startedAt', 'updatedAt', 'completedAt'], meaning: 'ISO strings: created, started by the worker, last changed, finished.' },
+      { names: ['chunkAttempts', 'error'], meaning: 'Worker health. The release fails after 5 consecutive failed worker runs.', writtenBy: 'the release worker' },
+    ],
+  },
+  'site': {
+    writer: 'the `site.create` operation, from `siteSettingsDefaults` (the Hub\'s new-site form writes the same document)',
+    columns: ['Field', 'Type', 'Meaning'],
+    fields: [
+      { names: ['name'], type: 'string', meaning: 'Display name.' },
+      { names: ['theme'], type: 'string', meaning: 'The theme document id the site renders with (themes contract).' },
+      { names: ['allowedThemes'], type: 'string array', meaning: 'Themes the site may switch to; includes `theme`.' },
+      { names: ['menus'], type: 'object', meaning: 'The site\'s menus (Menus, below). Seeded from the theme\'s `defaultMenus`.' },
+      { names: ['domains'], type: 'string array', meaning: 'Public domains, each 45 characters or fewer, normalized and unique across the organization\'s sites.' },
+      { names: ['forwardApex'], type: 'boolean', meaning: 'Redirect the apex domain to `www`.' },
+      { names: ['canonicalDomain'], type: 'string', meaning: '"Forward All Sites To": the domain every other domain redirects to.', writtenBy: 'the Hub\'s site settings' },
+      { names: ['logo', 'logoLight', 'logoText', 'logoType'], type: 'strings', meaning: 'Logo image, light-surface logo, text logo, and `image` or `text`.' },
+      { names: ['brandLogoDark', 'brandLogoLight', 'favicon'], type: 'strings', meaning: 'Brand marks and favicon URLs.' },
+      { names: ['menuPosition'], type: 'string', meaning: 'Navigation alignment (`right` by default).' },
+      { names: ['contactEmail', 'contactPhone'], type: 'strings', meaning: 'Contact details blocks read from the site record and contact forms send to.' },
+      { names: ['metaTitle', 'metaDescription', 'structuredData'], type: 'strings', meaning: 'Site SEO. `structuredData` is a JSON-LD string; the default is a `WebSite` with a publisher `Organization` and the `{{cms-site}}` and `{{cms-logo}}` tokens (`buildSiteStructuredData`).' },
+      { names: ['trackingFacebookPixel', 'trackingGoogleAnalytics', 'trackingAdroll', 'trackingAdrollPixelId'], type: 'strings', meaning: 'Tracking ids.' },
+      { names: ['trackingConsentEnabled', 'trackingConsentMessage'], type: 'boolean, string', meaning: 'The consent banner and its text (`DEFAULT_TRACKING_CONSENT_MESSAGE`).' },
+      { names: ['analyticsEvents'], type: 'object', meaning: '`{ enabled, forms, contactClicks, accountSignUps }`, all booleans, `false` by default (`normalizeAnalyticsEvents`): which events the public site sends to analytics.' },
+      { names: ['sureFeedURL'], type: 'string', meaning: 'External feed URL.' },
+      { names: ['socialFacebook', 'socialInstagram', 'socialTwitter', 'socialLinkedIn', 'socialYouTube', 'socialTikTok'], type: 'strings', meaning: 'Social profile URLs.' },
+      { names: ['users'], type: 'string array', meaning: 'Site users; `users[0]` is the primary user whose profile fields sync with the site (Invariants). `[]` when an organization admin creates the site, else `[creator]`.' },
+      { names: ['showMembersTab'], type: 'boolean', meaning: 'Members tab in the Hub.' },
+      { names: ['restrictedContent'], type: 'object', meaning: '`{ enabled, allowSelfRegistration, registrationPricing, provider, defaultCurrency, registrationTermsUrl, loginHelpText, registrationSuccessMessage, rules }` (`restrictedContentDefaults`). New sites don\'t have it.', writtenBy: 'the Hub\'s members-only content settings' },
+      { names: ['contactSpam'], type: 'object', meaning: '`{ enabled, mode, blockThreshold, allowedInquiryContext, blockedInquiryContext }` (`contactSpamDefaults`).' },
+      { names: ['aiAgentUserId', 'aiInstructions'], type: 'strings', meaning: 'The AI agent user and its instructions; when either is set on creation, `aiBootstrapStatus` is written and the bootstrap worker runs.' },
+      { names: ['aiBootstrapStatus'], type: 'string', meaning: '`queued`, then the worker\'s status.', writtenBy: 'the site creation trigger and the AI bootstrap worker' },
+      { names: ['version'], type: 'number', meaning: 'Site version; incremented when the site settings are published and when a theme the published site uses changes.', writtenBy: 'site publishing and the theme trigger' },
+      { names: ['pageVersions'], type: 'object', meaning: '`{ [pageId]: version }` of the published pages.', writtenBy: 'page publishing and the release worker' },
+      { names: ['pageLastModified'], type: 'object', meaning: '`{ [pageId]: timestamp }` for the Sites page list; removed with the page.', writtenBy: '`onPageUpdated`' },
+      { names: ['domainError', 'domainSyncRetriedAt'], type: 'string, timestamp', meaning: 'Domain sync state (Invariants).', writtenBy: 'the domain sync Functions' },
+      { names: ['docId', 'doc_created_at', 'last_updated', 'uid'], type: 'string, numbers, uid', meaning: 'Bookkeeping the Hub\'s document wrapper and the operations add: the document id, creation and last save times in milliseconds, and who saved last.' },
+    ],
+  },
+  'post': {
+    writer: 'the `post.create` operation (the Hub\'s new-post dialog writes the same document)',
+    columns: ['Field', 'Type', 'Meaning'],
+    fields: [
+      { names: ['name'], type: 'string, required', meaning: 'The post\'s slug, generated from the title and editable; unique within the site\'s posts (`ensureUniqueSlug`). It is the last route segment under the post template page.' },
+      { names: ['title'], type: 'string, required', meaning: 'Title.' },
+      { names: ['blurb'], type: 'string, required', meaning: 'Preview text, at most 500 characters (`POST_BLURB_MAX`).' },
+      { names: ['tags'], type: 'string array', meaning: 'Free tags; a post with the `Field Notes` tag is an editorial post.' },
+      { names: ['featuredImage'], type: 'string', meaning: 'One image URL or storage path. Older posts may carry `featuredImages` (an array); the first entry is used when `featuredImage` is empty.' },
+      { names: ['content', 'structure'], type: 'arrays', meaning: 'The body: block instances and rows, as a page\'s (blocks contract, Block instance; sites and pages contract, Page). Copied from a Post template page when one is given.' },
+      { names: ['blockIds'], type: 'string array', meaning: 'Derived: the library block ids of the instances; the propagation trigger queries it.' },
+      { names: ['type'], type: '`post` or `event`', meaning: 'Missing means `post`.' },
+      { names: ['event'], type: 'object', meaning: 'For events: `{ startAt, endAt, timezone, startAtUtc, endAtUtc, isPast, unpublishPastEvent, locationName, locationAddress, isVirtual, meetingUrl, registrationUrl, capacity, status }`. `startAtUtc`, `endAtUtc` and `isPast` are computed from the local times and the timezone; `unpublishPastEvent` defaults to `true`; `status` is `scheduled`, `cancelled` or `completed`.' },
+      { names: ['restrictionRuleId'], type: 'string', meaning: 'The site\'s restricted-content rule the post is limited to; empty for public posts.' },
+      { names: ['publishAt', 'publishAtTimezone'], type: 'strings', meaning: 'A scheduled publication time and its timezone, on drafts only.', writtenBy: 'the Hub\'s post editor' },
+      { names: ['publishAtError'], type: 'string', meaning: 'Why a scheduled publication was refused; cleared on the next successful publish.', writtenBy: 'the scheduled publisher' },
+      { names: ['publishedAt'], type: 'ISO string', meaning: 'When the post was last published; on the draft and the snapshot.', writtenBy: 'post publishing' },
+      { names: ['legacyBlog'], type: 'object', meaning: 'On posts imported from the legacy Clearwater blog: `{ sourceId, sourceUuid, sourceUrl, sourceSha256, sourcePublishedAt, conversionWarnings, importPublication }`. Audit metadata only; `sourcePublishedAt` is not the public date, and `importPublication: \'published\'` stops a re-run of the import from republishing a post that was unpublished by hand.', writtenBy: 'the Clearwater blog importer' },
+      { names: ['docId', 'doc_created_at', 'last_updated', 'uid'], type: 'string, numbers, uid', meaning: 'Bookkeeping the Hub\'s document wrapper and the operations add. On a published post, `doc_created_at` is the publication time in milliseconds; the renderer orders by it.' },
+    ],
+  },
+  'theme': {
+    writer: 'the `theme.create` operation, from `createCmsThemeDefaults` and `createCmsThemeHeadDefaults` (the Hub\'s New Theme form writes the same document)',
+    columns: ['Field', 'Type', 'Meaning'],
+    fields: [
+      { names: ['name'], type: 'string, required', meaning: 'Display name. The KV mirror does not publish it.' },
+      { names: ['theme'], type: 'JSON object string', meaning: 'Theme JSON: Tailwind `extend` groups (`colors`, `fontFamily`, `borderRadius` and others), `apply`, `slots` and `variants` (`light`, `dark`). The public renderer and the Hub parse it.' },
+      { names: ['headJSON'], type: 'JSON object string', meaning: 'Head markup as a Nuxt-style head object (`link`, `script`, `meta`, `style`). Font stylesheets go in `link`.' },
+      { names: ['extraCSS'], type: 'string', meaning: 'CSS appended after the generated utilities: `@font-face` rules, decorative classes, patterns. `\'\'` when empty.' },
+      { names: ['typeRoles'], type: 'object', meaning: '`{ sectionTitle?, sectionIntro? }`: the one class name the theme\'s Extra CSS defines for each section type role, or empty. The block checks read it (`sectionTypeRoleFindings`).', writtenBy: 'the theme operations and the theme editor, when set' },
+      { names: ['defaultPages'], type: 'array', meaning: 'Legacy list of template pages `{ pageId, name, menuTitle?, disableRename?, disableDelete? }`; used to seed a site only when `defaultMenus` is empty. `[]` on new themes.' },
+      { names: ['defaultMenus'], type: 'object', meaning: 'The menus a new site starts with: `{ \'Site Root\': [entry], \'Not In Menu\': [entry] }`, shaped as a site\'s menus with template page ids. Each page entry becomes a page copied from the templates site.' },
+      { names: ['defaultSiteSettings'], type: 'object', meaning: 'Site settings a new site takes for every setting still at its default (`buildThemeSettingsPayload`): the keys of `siteSettingsDefaults`.', writtenBy: 'the theme operations and the theme editor, when set' },
+      { names: ['version'], type: 'number', meaning: 'Hub document version counter; `1` on creation.' },
+      { names: ['docId', 'doc_created_at', 'last_updated', 'uid'], type: 'string, numbers, uid', meaning: 'Bookkeeping the Hub\'s document wrapper and the operations add: the document id, creation and last save times in milliseconds, and who saved last.' },
+    ],
+  },
 })
 
 // One kind's field table as Markdown.
@@ -2085,8 +2223,23 @@ export const renderDocumentFields = (kind, registry = CMS_DOCUMENT_FIELDS) => {
     const meaning = cell(field.meaning + (field.writtenBy ? ` Written by ${field.writtenBy}.` : ''))
     lines.push(entry.columns.length === 3 ? `| ${names} | ${field.type || ''} | ${meaning} |` : `| ${names} | ${meaning} |`)
   }
-  lines.push('', `Generated from \`CMS_DOCUMENT_FIELDS\` (\`${kind}\`) in \`edge/lib/cmsOperations.js\`; new documents are built by \`${entry.builder}\`.`)
+  const origin = entry.builder ? `new documents are built by \`${entry.builder}\`` : `new documents are written by ${entry.writer}`
+  lines.push('', `Generated from \`CMS_DOCUMENT_FIELDS\` (\`${kind}\`) in \`edge/lib/cmsOperations.js\`; ${origin}. A field with "Written by" is added later, not on creation.`)
   return `${lines.join('\n')}\n`
+}
+
+// For tests: how a stored document of `kind` differs from its table. `undescribed`
+// are keys the document has and the table lacks; `unwritten` are top-level
+// fields the table describes, the document lacks, and no `writtenBy` explains.
+export const documentFieldGaps = (kind, doc = {}, registry = CMS_DOCUMENT_FIELDS) => {
+  const fields = registry[kind]?.fields || []
+  const described = fields.flatMap(field => field.names)
+  const keys = Object.keys(doc || {})
+  return {
+    undescribed: keys.filter(key => !described.includes(key)),
+    unwritten: fields.filter(field => !field.writtenBy).flatMap(field => field.names).filter(name => !name.includes('.') && !keys.includes(name)),
+    duplicates: described.filter((name, index) => described.indexOf(name) !== index),
+  }
 }
 
 // Markers `<!-- fields: <kind> generated from CMS_DOCUMENT_FIELDS -->` in a
