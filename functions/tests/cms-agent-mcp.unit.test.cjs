@@ -18,7 +18,7 @@ class HttpsError extends Error {
   }
 }
 
-const REMOTE_TOOLS = ['cms_agent_organizations', 'cms_open_session', 'cms_check_operation', 'cms_run_operation', 'cms_preview_url', 'cms_site_readiness', 'cms_list_pages', 'cms_get_page', 'cms_list_posts', 'cms_get_post']
+const REMOTE_TOOLS = ['cms_find_block', 'cms_audit_blocks', 'cms_find_usage', 'cms_find_theme', 'cms_get_theme', 'cms_agent_organizations', 'cms_open_session', 'cms_check_operation', 'cms_run_operation', 'cms_preview_url', 'cms_site_readiness', 'cms_list_pages', 'cms_get_page', 'cms_list_posts', 'cms_get_post', 'cms_block_base']
 
 const setup = async (t) => {
   const fake = createFakeDb({
@@ -30,11 +30,17 @@ const setup = async (t) => {
     'organizations/a/sites/s/pages/home': { name: 'Home', content: [], structure: [], version: 1 },
     'organizations/a/sites/t/pages/home': { name: 'Home', content: [], structure: [], version: 1 },
     'organizations/b/sites/s/pages/home': { name: 'Home', content: [], structure: [], version: 1 },
+    'organizations/a/blocks/hero': { name: 'Hero', content: '<section>{{{#text {"field":"headline","value":"Welcome"}}}}</section>', values: { headline: 'Welcome' }, tags: ['Hero'], themes: ['main'], synced: false, version: 1, templateVersion: 1 },
+    'organizations/a/blocks/footer': { name: 'Footer', content: '<footer>Footer</footer>', values: {}, tags: ['Footer'], themes: ['main'], synced: false, version: 1 },
+    'organizations/a/themes/main': { name: 'Main theme', theme: '{"colors":{"primary":"#123456"}}', headJSON: '{}', extraCSS: '.x{}' },
+    'organizations/a/sites/s/pages/about': { name: 'About', content: { main: [{ id: 'instance-1', blockId: 'hero', name: 'Hero' }] }, structure: [], version: 1 },
   })
   const allowed = new Set(['a'])
+  // Rights withheld from the owner, as "action:path".
+  const denied = new Set()
   const configPath = require.resolve(path.join(functionRoot, 'config.js'))
   const original = require.cache[configPath]
-  const modulePaths = ['cmsAgentMcp.js', 'cmsAgentConnections.js', 'cmsAgentKeys.js', 'cmsOperations.js', 'cmsBlockRevisions.js'].map(file => require.resolve(path.join(functionRoot, file)))
+  const modulePaths = ['cmsAgentMcp.js', 'cmsAgentConnections.js', 'cmsAgentKeys.js', 'cmsAgentLibraryReads.js', 'cmsOperations.js', 'cmsBlockRevisions.js'].map(file => require.resolve(path.join(functionRoot, file)))
   require.cache[configPath] = {
     id: configPath,
     loaded: true,
@@ -45,7 +51,7 @@ const setup = async (t) => {
       logger: { log() {}, error() {}, warn() {} },
       onCall: (_, handler) => handler,
       onRequest: (_, handler) => handler,
-      permissionCheck: async (uid, action, path) => uid === 'admin' || (uid === 'owner' && action !== 'assign' && allowed.has(path.split('/')[1])),
+      permissionCheck: async (uid, action, path) => !denied.has(`${action}:${path}`) && (uid === 'admin' || (uid === 'owner' && action !== 'assign' && allowed.has(path.split('/')[1]))),
     },
   }
   modulePaths.forEach(file => delete require.cache[file])
@@ -92,7 +98,7 @@ const setup = async (t) => {
   t.after(() => new Promise(resolve => server.close(resolve)))
   const url = `http://127.0.0.1:${server.address().port}/`
   const created = await connections.createAgentConnection({ auth: { uid: 'owner' }, data: { uid: 'owner', orgId: 'a', name: 'Remote laptop' } })
-  return { ...fake, allowed, connections, keys, mcp, remote, clock, url, created }
+  return { ...fake, allowed, denied, connections, keys, mcp, remote, clock, url, created }
 }
 
 const connect = async (t, env, token = env.created.token) => {
@@ -234,4 +240,81 @@ test('the endpoint deploys in the cms group as cms-agentMcp', () => {
   assert.match(cms, /^exports\.agentMcp = cmsAgentMcp\.agentMcp$/m)
   assert.match(readFileSync(path.join(functionRoot, 'index.js'), 'utf8'), /^exports\.cms = require\('\.\/cms'\)$/m)
   assert.doesNotMatch(readFileSync(path.join(functionRoot, 'index.js'), 'utf8'), /cmsAgentMcp/, 'exported once, from cms.js')
+})
+
+const readAudits = env => [...env.docs.entries()].filter(([key]) => /^organizations\/a\/cmsAgentReads\//.test(key)).map(([, value]) => value)
+
+test('library reads run as the operator through an organization session and are audited without content', async (t) => {
+  const env = await setup(t)
+  const added = []
+  env.hooks.beforeAdd = (path, data) => added.push({ path, data })
+  const client = await connect(t, env)
+
+  const blocks = await callTool(client, 'cms_find_block', { orgId: 'a', query: 'hero' })
+  assert.equal(blocks.ok, true, blocks.message)
+  assert.deepEqual(blocks.matches.map(match => match.docId), ['hero'])
+  const base = await callTool(client, 'cms_block_base', { orgId: 'a', docId: 'hero' })
+  assert.equal(base.startsFrom, 'released')
+  assert.match(base.baseHash, /^[0-9a-f]+$/)
+  assert.match(base.definition.content, /headline/)
+  assert.equal((await callTool(client, 'cms_block_base', { orgId: 'a', docId: 'missing' })).code, 'not-found')
+  const themes = await callTool(client, 'cms_find_theme', { orgId: 'a' })
+  assert.deepEqual(themes.matches.map(match => match.themeId), ['main'])
+  const theme = await callTool(client, 'cms_get_theme', { orgId: 'a', themeId: 'main' })
+  assert.equal(theme.themeJSON.parsed.colors.primary, '#123456')
+  assert.equal(theme.extraCSS, '.x{}')
+  assert.equal((await callTool(client, 'cms_get_theme', { orgId: 'a', themeId: 'missing' })).code, 'not-found')
+  const usage = await callTool(client, 'cms_find_usage', { orgId: 'a', docId: 'hero' })
+  assert.deepEqual(usage.usages.map(item => [item.siteId, item.pageId, item.instanceId]), [['s', 'about', 'instance-1']])
+  const audit = await callTool(client, 'cms_audit_blocks', { orgId: 'a', includeRender: false })
+  assert.equal(audit.ok, true, audit.message)
+  assert.equal(audit.summary.blocks, 2)
+  assert.equal(audit.reportPath, undefined, 'no local report file remotely')
+  assert.ok(Array.isArray(audit.blocksWithErrors))
+  assert.equal(sessionCount(env), 1, 'one organization session serves every library read')
+
+  const records = added.filter(entry => entry.path === 'organizations/a/cmsAgentReads')
+  assert.deepEqual(records.map(entry => entry.data.tool), ['blocks', 'block', 'themes', 'theme', 'usage', 'audit'], 'refused reads are not recorded')
+  for (const { data } of records) {
+    assert.equal(data.runBy, 'owner')
+    assert.equal(data.connectionId, env.created.connectionId)
+    assert.ok(data.expiresAt instanceof Timestamp)
+    assert.ok(Math.abs(data.expiresAt.toMillis() - Date.parse(data.at) - 90 * 86400000) < 1000)
+    assert.ok(!/headline|Welcome|#123456|<section>/.test(JSON.stringify(data)), 'no content or values in the audit')
+  }
+  assert.deepEqual(records[0].data.docIds, ['hero'])
+  assert.equal(records[4].data.resultCount, 1)
+})
+
+test('library reads need current read rights and an organization session', async (t) => {
+  const env = await setup(t)
+  const client = await connect(t, env)
+  env.denied.add('read:organizations/a/themes')
+  const theme = await callTool(client, 'cms_get_theme', { orgId: 'a', themeId: 'main' })
+  assert.equal(theme.code, 'permission-denied')
+  assert.equal((await callTool(client, 'cms_audit_blocks', { orgId: 'a', includeRender: false })).code, 'permission-denied', 'the audit reads themes too')
+  assert.equal((await callTool(client, 'cms_find_block', { orgId: 'a' })).ok, true, 'block reads are a separate right')
+  env.denied.add('read:organizations/a/sites')
+  assert.equal((await callTool(client, 'cms_find_usage', { orgId: 'a', docId: 'hero' })).code, 'permission-denied', 'usage scans pages')
+  assert.equal(readAudits(env).length, 1, 'only the allowed read was recorded')
+
+  // The Hub refuses library reads on a site session, whoever sends it.
+  const connection = await env.connections.verifyConnection(`Bearer ${env.created.token}`)
+  const site = await env.connections.issueAgentSession(connection, { orgId: 'a', scope: 'site', siteId: 's' })
+  await assert.rejects(env.keys.handleAgentRequest({ header: `Bearer ${site.token}`, body: { orgId: 'a', action: 'blocks' } }), { code: 'permission-denied' })
+  const org = await env.connections.issueAgentSession(connection, { orgId: 'a', scope: 'organization' })
+  assert.equal((await env.keys.handleAgentRequest({ header: `Bearer ${org.token}`, body: { orgId: 'a', action: 'blocks' } })).returnedDocuments, 2)
+  assert.equal((await callTool(client, 'cms_find_block', { orgId: 'b' })).code, 'permission-denied', 'no rights in another organization')
+})
+
+test('a failed audit write never fails the read', async (t) => {
+  const env = await setup(t)
+  env.hooks.beforeAdd = () => {
+    throw new Error('audit write failed')
+  }
+  const client = await connect(t, env)
+  const blocks = await callTool(client, 'cms_find_block', { orgId: 'a' })
+  assert.equal(blocks.ok, true)
+  assert.equal(blocks.returnedDocuments, 2)
+  assert.equal(readAudits(env).length, 0)
 })

@@ -17,10 +17,13 @@ const LOCAL_TOOLS = [
 // Remote-only wording: orgId comes from the call (no defaultOrgId), sessions
 // are optional, and readiness has no local emd-cms-front check.
 const REMOTE_FIELDS = ['orgId', 'sessionId']
-const REMOTE_DESCRIPTIONS = ['cms_open_session', 'cms_site_readiness']
+const REMOTE_DESCRIPTIONS = ['cms_open_session', 'cms_site_readiness', 'cms_audit_blocks']
 // Local only: operationFile reads a file on the editor's machine, so the
-// remote check/run require the inline operation.
-const LOCAL_ONLY_FIELDS = ['operationFile']
+// remote check/run require the inline operation; themeName feeds override
+// checks against the emd-cms-front checkout.
+const LOCAL_ONLY_FIELDS = ['operationFile', 'themeName']
+// The remote audit only reads and has no report file.
+const REMOTE_AUDIT = { annotations: true, fields: ['listLimit'] }
 
 const listTools = async (remote) => {
   const server = new McpServer({ name: 'definitions-test', version: '1.0.0' })
@@ -34,13 +37,15 @@ const listTools = async (remote) => {
   return tools
 }
 
-test('the three copies of the shared tool definitions are byte-identical', () => {
-  const source = readFileSync(new URL('lib/cmsAgentMcpTools.js', edgeRoot), 'utf8')
-  assert.equal(readFileSync(new URL('functions/helpers/cmsAgentMcpTools.mjs', edgeRoot), 'utf8'), source)
-  const hubCopy = new URL('../functions/helpers/cmsAgentMcpTools.mjs', edgeRoot)
-  if (existsSync(hubCopy))
-    assert.equal(readFileSync(hubCopy, 'utf8'), source)
-  for (const file of ['cms.js', 'cmsAgentMcp.js', 'cmsAgentConnections.js', 'cmsAgentKeys.js']) {
+test('the three copies of the shared tool definitions and library reads are byte-identical', () => {
+  for (const name of ['cmsAgentMcpTools', 'cmsAgentReads']) {
+    const source = readFileSync(new URL(`lib/${name}.js`, edgeRoot), 'utf8')
+    assert.equal(readFileSync(new URL(`functions/helpers/${name}.mjs`, edgeRoot), 'utf8'), source, name)
+    const hubCopy = new URL(`../functions/helpers/${name}.mjs`, edgeRoot)
+    if (existsSync(hubCopy))
+      assert.equal(readFileSync(hubCopy, 'utf8'), source, name)
+  }
+  for (const file of ['cms.js', 'cmsAgentMcp.js', 'cmsAgentConnections.js', 'cmsAgentKeys.js', 'cmsAgentLibraryReads.js', 'tests/support/fakeFirestore.cjs']) {
     const deployed = new URL(`../functions/${file}`, edgeRoot)
     if (existsSync(deployed))
       assert.equal(readFileSync(deployed, 'utf8'), readFileSync(new URL(`functions/${file}`, edgeRoot), 'utf8'), file)
@@ -51,7 +56,7 @@ test('the local server keeps every tool in its order; the remote list is the Hub
   assert.deepEqual((await listTools(false)).map(tool => tool.name), LOCAL_TOOLS)
   assert.deepEqual((await listTools(true)).map(tool => tool.name), [...CMS_AGENT_REMOTE_TOOL_NAMES])
   assert.ok(CMS_AGENT_REMOTE_TOOL_NAMES.every(name => LOCAL_TOOLS.includes(name)))
-  assert.ok(!CMS_AGENT_REMOTE_TOOL_NAMES.some(name => /^firestore_|checkout|_status$|_diff$/.test(name)), 'no raw Firestore or workspace tools remotely')
+  assert.ok(!CMS_AGENT_REMOTE_TOOL_NAMES.some(name => /^firestore_|checkout|_status$|_diff$|_validate$|_contract$|_resolve_override$/.test(name)), 'no raw Firestore, workspace or checkout-file tools remotely')
 })
 
 test('local and remote definitions match for the shared subset', async () => {
@@ -59,11 +64,16 @@ test('local and remote definitions match for the shared subset', async () => {
   for (const remote of await listTools(true)) {
     const own = local[remote.name]
     assert.equal(remote.title, own.title, remote.name)
-    assert.deepEqual(remote.annotations, own.annotations, remote.name)
+    if (remote.name === 'cms_audit_blocks' && REMOTE_AUDIT.annotations)
+      assert.equal(remote.annotations.readOnlyHint, true)
+    else
+      assert.deepEqual(remote.annotations, own.annotations, remote.name)
     if (!REMOTE_DESCRIPTIONS.includes(remote.name))
       assert.equal(remote.description, own.description, remote.name)
     assert.deepEqual(Object.keys(remote.inputSchema.properties).sort(), Object.keys(own.inputSchema.properties).filter(field => !LOCAL_ONLY_FIELDS.includes(field)).sort(), remote.name)
     for (const [field, schema] of Object.entries(remote.inputSchema.properties)) {
+      if (remote.name === 'cms_audit_blocks' && REMOTE_AUDIT.fields.includes(field))
+        continue
       if (!REMOTE_FIELDS.includes(field) || remote.name === 'cms_open_session')
         assert.deepEqual(schema, own.inputSchema.properties[field], `${remote.name}.${field}`)
     }

@@ -2,6 +2,7 @@
 const { createHash, randomBytes, timingSafeEqual } = require('node:crypto')
 const { Timestamp } = require('firebase-admin/firestore')
 const { db, onCall, onRequest, HttpsError, permissionCheck, logger } = require('./config.js')
+const { LIBRARY_READ_ACTIONS } = require('./cmsAgentLibraryReads.js')
 
 const DAY_MS = 86400000
 const SESSION_MS = 15 * 60 * 1000
@@ -233,8 +234,10 @@ exports.verifyAgentSession = async (orgId, header, body) => {
       throw new HttpsError('permission-denied', 'Site sessions only allow page and post operations and updates to this site.')
   }
   else if (session.data.scope === 'organization') {
-    if (!['check', 'run'].includes(body.action) || (!type.startsWith('block.') && !type.startsWith('theme.') && type !== 'site.create'))
-      throw new HttpsError('permission-denied', 'Organization sessions only allow library/theme work and site creation. Open a site session for page and post work.')
+    // Library reads (blocks, themes, usage, audit) belong to the organization.
+    const libraryRead = LIBRARY_READ_ACTIONS.includes(body.action)
+    if (!libraryRead && (!['check', 'run'].includes(body.action) || (!type.startsWith('block.') && !type.startsWith('theme.') && type !== 'site.create')))
+      throw new HttpsError('permission-denied', 'Organization sessions only allow library/theme reads and work, and site creation. Open a site session for page and post work.')
   }
   else {
     throw new HttpsError('permission-denied', 'Invalid session scope.')

@@ -21,6 +21,12 @@ Hub-endpoint tools to editors without a checkout. Change a tool there, not in
 `src/server.js`, and keep its two copies under `edge/functions/helpers/` and
 `functions/helpers/` identical (`test/tool-definitions.test.js` checks).
 
+The block, theme, usage and audit reads (`cms_find_block`, `cms_block_base`,
+`cms_find_theme`, `cms_get_theme`, `cms_find_usage`, `cms_audit_blocks`) live
+in `edge/lib/cmsAgentReads.js`. This server runs them on its read-only service
+account; the remote endpoint runs the same code as the operator. Keep its two
+copies under `edge/functions/helpers/` and `functions/helpers/` identical.
+
 ## Generic Firestore Tools
 
 - `firestore_list_collections`: list child collections at the root or below a document path.

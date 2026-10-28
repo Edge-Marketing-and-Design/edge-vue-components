@@ -10,7 +10,6 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod'
 import { cmsAgentToolDefinitions } from '../../../../lib/cmsAgentMcpTools.js'
-import { blockDefinitionHash } from '../../../../lib/cmsBlockRevisions.js'
 import { CMS_OPERATION_TYPES } from '../../../../lib/cmsOperations.js'
 import { createConnectionClient, resolveConnectionKey } from './agent-connections.js'
 import { agentEndpoint, createAgentOperationClient, loadOperationFile, resolveAgentKey } from './agent-operations.js'
@@ -280,30 +279,7 @@ const handlers = {
   cms_get_page: async ({ orgId, siteId, pageId, source, includeValues, includeSchema, sessionId }) => jsonResult(await agentOperations.page(resolveOrgId(orgId), siteId, pageId, { source, includeValues, includeSchema, sessionId })),
   cms_list_posts: async ({ orgId, siteId, type, tag, limit, startAfter, sessionId }) => jsonResult(await agentOperations.posts(resolveOrgId(orgId), siteId, { type, tag, limit, startAfter, sessionId })),
   cms_get_post: async ({ orgId, siteId, postId, source, includeValues, includeSchema, sessionId }) => jsonResult(await agentOperations.post(resolveOrgId(orgId), siteId, postId, { source, includeValues, includeSchema, sessionId })),
-  async cms_block_base({ orgId, docId }) {
-    const org = resolveOrgId(orgId)
-    const blockRef = db.collection('organizations').doc(org).collection('blocks').doc(docId)
-    const blockSnap = await blockRef.get()
-    if (!blockSnap.exists)
-      return jsonResult({ ok: false, message: `Block "${docId}" does not exist in ${org}.` })
-    const block = blockSnap.data() || {}
-    let draft = null
-    if (Number.isInteger(block.draftRevision)) {
-      const draftSnap = await blockRef.collection('revisions').doc(String(block.draftRevision)).get()
-      if (draftSnap.exists && draftSnap.data()?.status === 'draft')
-        draft = draftSnap.data()
-    }
-    const definition = draft ? draft.definition : block
-    return jsonResult({
-      ok: true,
-      docId,
-      releasedRevision: Number.isInteger(block.releasedRevision) ? block.releasedRevision : 0,
-      draftRevision: draft ? block.draftRevision : null,
-      startsFrom: draft ? 'draft' : 'released',
-      baseHash: blockDefinitionHash(definition),
-      definition: sanitizeValue(Object.fromEntries(['content', 'template', 'templateVersion', 'schema', 'dataSources', 'isOverrideBlock', 'meta', 'values'].filter(key => definition?.[key] !== undefined).map(key => [key, definition[key]]))),
-    })
-  },
+  cms_block_base: async input => jsonResult(await cmsTools.blockBase(input)),
 }
 
 // Names, schemas and descriptions come from the shared definitions, which the

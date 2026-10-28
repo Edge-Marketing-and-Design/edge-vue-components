@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import {
@@ -9,14 +9,23 @@ import {
   validateBlockRender,
   validateBlockDocument as validateSharedBlockDocument,
 } from '../../../../lib/cmsBlockValidation.js'
+import {
+  DEFAULT_RESULT_LIMIT,
+  assertFirestoreSegment,
+  boundedNumber,
+  containsRedactedValue,
+  createCmsReads,
+  getRenderingOwner,
+  hashDocument,
+  isPlainObject,
+  stableStringify,
+} from '../../../../lib/cmsAgentReads.js'
+import { blockDefinitionHash } from '../../../../lib/cmsBlockRevisions.js'
+
+// Shared with the Hub's agent endpoint; re-exported for existing callers.
+export { collectBlockReferences, hashDocument, stableStringify, summarizeBlockAudit, summarizeBlockTagRules } from '../../../../lib/cmsAgentReads.js'
 
 const CHECKOUT_SCHEMA_VERSION = 1
-const DEFAULT_RESULT_LIMIT = 25
-const DEFAULT_SCAN_LIMIT = 1000
-const DEFAULT_PAGE_LIMIT = 500
-const DEFAULT_SITE_LIMIT = 100
-const DEFAULT_THEME_SCAN_LIMIT = 250
-const DEFAULT_THEME_FONT_LIMIT = 100
 const MAX_DIFF_CHANGES = 500
 const MAX_DIFF_TEXT = 50000
 
@@ -72,287 +81,21 @@ export function createCmsToolService({
 
   const resolveOrgId = requestedOrgId => resolveCmsOrganization(requestedOrgId, config)
 
-  const readProductionBlock = async ({ orgId: requestedOrgId, docId: requestedDocId }) => {
-    const orgId = resolveOrgId(requestedOrgId)
-    const docId = assertFirestoreSegment(requestedDocId, 'docId')
-    const documentPath = `organizations/${orgId}/blocks/${docId}`
-    const snapshot = await db.doc(documentPath).get()
+  const reads = createCmsReads({
+    db,
+    limits: config,
+    sanitizeValue,
+    validation: { validateBlock, commonTypeRoles, normalizeBlockTagList },
+    blockDefinitionHash,
+    loadRenderTemplate,
+  })
 
-    if (!snapshot.exists) {
-      return {
-        orgId,
-        docId,
-        documentPath,
-        exists: false,
-        data: null,
-        hash: null,
-        updateTime: null,
-        createTime: null,
-      }
-    }
-
-    const data = normalizeBlockDocument(sanitizeValue(snapshot.data()), docId)
-    return {
-      orgId,
-      docId,
-      documentPath,
-      exists: true,
-      data,
-      hash: hashDocument(data),
-      updateTime: timestampToIso(snapshot.updateTime),
-      createTime: timestampToIso(snapshot.createTime),
-    }
-  }
-
-  const readProductionTheme = async ({ orgId: requestedOrgId, themeId: requestedThemeId }) => {
-    const orgId = resolveOrgId(requestedOrgId)
-    const themeId = assertFirestoreSegment(requestedThemeId, 'themeId')
-    const documentPath = `organizations/${orgId}/themes/${themeId}`
-    const snapshot = await db.doc(documentPath).get()
-
-    if (!snapshot.exists) {
-      return {
-        orgId,
-        themeId,
-        documentPath,
-        exists: false,
-        data: null,
-        updateTime: null,
-        createTime: null,
-      }
-    }
-
-    return {
-      orgId,
-      themeId,
-      documentPath,
-      exists: true,
-      data: normalizeThemeDocument(sanitizeValue(snapshot.data()), themeId),
-      updateTime: timestampToIso(snapshot.updateTime),
-      createTime: timestampToIso(snapshot.createTime),
-    }
-  }
-
-  const findTheme = async ({
-    orgId: requestedOrgId = '',
-    docId: requestedDocId = '',
-    query = '',
-    exactName = '',
-    limit,
-  } = {}) => {
-    const orgId = resolveOrgId(requestedOrgId)
-    const filters = normalizeThemeFilters({ query, exactName })
-    const requestedLimit = boundedNumber(
-      limit,
-      config.maxCmsThemeResultLimit || config.maxCmsResultLimit || 100,
-      DEFAULT_RESULT_LIMIT,
-    )
-
-    if (requestedDocId) {
-      const theme = await readProductionTheme({ orgId, themeId: requestedDocId })
-      const matches = (theme.exists && themeMatchesFilters(theme.data, theme.themeId, filters))
-        ? [summarizeProductionTheme(theme)]
-        : []
-      return {
-        ...environmentSummary(),
-        orgId,
-        filters: { docId: requestedDocId, ...filters },
-        scannedDocuments: theme.exists ? 1 : 0,
-        scanTruncated: false,
-        matchedDocuments: matches.length,
-        returnedDocuments: matches.length,
-        resultTruncated: false,
-        matches,
-      }
-    }
-
-    const scanLimit = boundedNumber(
-      config.maxCmsThemeScanDocuments,
-      config.maxCmsThemeScanDocuments || DEFAULT_THEME_SCAN_LIMIT,
-      DEFAULT_THEME_SCAN_LIMIT,
-    )
-    const collectionPath = `organizations/${orgId}/themes`
-    const snapshot = await db.collection(collectionPath).limit(scanLimit + 1).get()
-    const scanTruncated = snapshot.size > scanLimit
-    const matchingThemes = snapshot.docs.slice(0, scanLimit)
-      .map((snapshotDoc) => {
-        return {
-          orgId,
-          themeId: snapshotDoc.id,
-          documentPath: snapshotDoc.ref?.path || `${collectionPath}/${snapshotDoc.id}`,
-          exists: true,
-          data: normalizeThemeDocument(sanitizeValue(snapshotDoc.data()), snapshotDoc.id),
-          updateTime: timestampToIso(snapshotDoc.updateTime),
-          createTime: timestampToIso(snapshotDoc.createTime),
-        }
-      })
-      .filter(theme => themeMatchesFilters(theme.data, theme.themeId, filters))
-      .map(summarizeProductionTheme)
-    const matches = matchingThemes.slice(0, requestedLimit)
-
-    return {
-      ...environmentSummary(),
-      orgId,
-      filters,
-      collectionPath,
-      scannedDocuments: Math.min(snapshot.size, scanLimit),
-      scanTruncated,
-      matchedDocuments: matchingThemes.length,
-      returnedDocuments: matches.length,
-      resultTruncated: matchingThemes.length > matches.length,
-      resultLimit: requestedLimit,
-      matches,
-    }
-  }
-
-  const getTheme = async ({
-    orgId: requestedOrgId = '',
-    themeId: requestedThemeId,
-    includeCustomFonts = true,
-  }) => {
-    const production = await readProductionTheme({
-      orgId: requestedOrgId,
-      themeId: requestedThemeId,
-    })
-    if (!production.exists)
-      throw new Error(`Production CMS theme does not exist: ${production.documentPath}`)
-
-    const themeJSON = parseStoredJsonField(production.data?.theme, 'theme')
-    const headJSON = parseStoredJsonField(production.data?.headJSON, 'headJSON')
-    const customFonts = includeCustomFonts
-      ? await readThemeCustomFonts({
-        db,
-        orgId: production.orgId,
-        themeId: production.themeId,
-        headRaw: headJSON.raw,
-        headDocument: headJSON.parsed,
-        sanitizeValue,
-        limit: config.maxCmsThemeFontDocuments || DEFAULT_THEME_FONT_LIMIT,
-      })
-      : {
-          included: false,
-          collectionPath: `organizations/${production.orgId}/files`,
-          queryField: 'meta.themeId',
-          scannedDocuments: 0,
-          scanTruncated: false,
-          fontCount: 0,
-          fonts: [],
-        }
-
-    return {
-      ...environmentSummary(),
-      orgId: production.orgId,
-      themeId: production.themeId,
-      documentPath: production.documentPath,
-      name: String(production.data?.name || ''),
-      version: production.data?.version ?? null,
-      firestoreCreateTime: production.createTime,
-      firestoreUpdateTime: production.updateTime,
-      documentCreatedAt: production.data?.doc_created_at ?? null,
-      documentLastUpdated: production.data?.last_updated ?? null,
-      sourceFields: {
-        themeJSON: 'theme',
-        headJSON: 'headJSON',
-        customFonts: 'files where meta.themeId matches and meta.cmsFont is true',
-        extraCSS: 'extraCSS',
-        defaultTemplates: ['defaultMenus', 'defaultPages', 'defaultSiteSettings'],
-      },
-      themeJSON,
-      headJSON,
-      customFonts,
-      extraCSS: typeof production.data?.extraCSS === 'string' ? production.data.extraCSS : '',
-      defaultTemplates: {
-        defaultMenus: cloneJsonValue(production.data?.defaultMenus, {}),
-        defaultPages: cloneJsonValue(production.data?.defaultPages, []),
-        defaultSiteSettings: cloneJsonValue(production.data?.defaultSiteSettings, {}),
-        referencedTemplatePageIds: collectDefaultTemplatePageIds(production.data),
-      },
-    }
-  }
-
-  const findBlock = async ({
-    orgId: requestedOrgId = '',
-    docId: requestedDocId = '',
-    query = '',
-    exactName = '',
-    tag = '',
-    type = '',
-    theme = '',
-    limit,
-    startAfter = '',
-  } = {}) => {
-    const orgId = resolveOrgId(requestedOrgId)
-    const requestedLimit = boundedNumber(limit, config.maxCmsResultLimit || 100, DEFAULT_RESULT_LIMIT)
-    const cursor = String(startAfter || '').trim()
-    const filters = normalizeBlockFilters({ query, exactName, tag, type, theme })
-
-    if (requestedDocId) {
-      const block = await readProductionBlock({ orgId, docId: requestedDocId })
-      const matches = (block.exists && blockMatchesFilters(block.data, block.docId, filters))
-        ? [summarizeProductionBlock(block)]
-        : []
-      return {
-        ...environmentSummary(),
-        orgId,
-        filters: { docId: requestedDocId, ...filters },
-        scannedDocuments: block.exists ? 1 : 0,
-        scanTruncated: false,
-        matchedDocuments: matches.length,
-        returnedDocuments: matches.length,
-        resultTruncated: false,
-        matches,
-      }
-    }
-
-    const scanLimit = boundedNumber(
-      config.maxCmsBlockScanDocuments,
-      config.maxCmsBlockScanDocuments || DEFAULT_SCAN_LIMIT,
-      DEFAULT_SCAN_LIMIT,
-    )
-    const collectionPath = `organizations/${orgId}/blocks`
-    const snapshot = await db.collection(collectionPath).limit(scanLimit + 1).get()
-    const scanTruncated = snapshot.size > scanLimit
-    // Firestore returns documents by id; sort explicitly so pages are stable.
-    const scannedDocs = snapshot.docs.slice(0, scanLimit).sort((a, b) => compareDocIds(a.id, b.id))
-    const matchingBlocks = []
-
-    for (const snapshotDoc of scannedDocs) {
-      const block = {
-        orgId,
-        docId: snapshotDoc.id,
-        documentPath: snapshotDoc.ref?.path || `${collectionPath}/${snapshotDoc.id}`,
-        exists: true,
-        data: normalizeBlockDocument(sanitizeValue(snapshotDoc.data()), snapshotDoc.id),
-        updateTime: timestampToIso(snapshotDoc.updateTime),
-        createTime: timestampToIso(snapshotDoc.createTime),
-      }
-      block.hash = hashDocument(block.data)
-      if (!blockMatchesFilters(block.data, block.docId, filters))
-        continue
-      matchingBlocks.push(summarizeProductionBlock(block))
-    }
-    const remaining = cursor
-      ? matchingBlocks.filter(block => compareDocIds(block.docId, cursor) > 0)
-      : matchingBlocks
-    const matches = remaining.slice(0, requestedLimit)
-    const resultTruncated = remaining.length > matches.length
-
-    return {
-      ...environmentSummary(),
-      orgId,
-      filters,
-      collectionPath,
-      scannedDocuments: scannedDocs.length,
-      scanTruncated,
-      matchedDocuments: matchingBlocks.length,
-      startAfter: cursor,
-      returnedDocuments: matches.length,
-      resultTruncated,
-      nextStartAfter: resultTruncated ? matches[matches.length - 1].docId : '',
-      resultLimit: requestedLimit,
-      matches,
-    }
-  }
+  const readProductionBlock = async ({ orgId: requestedOrgId, docId }) => reads.readBlock({ orgId: resolveOrgId(requestedOrgId), docId })
+  const readProductionTheme = async ({ orgId: requestedOrgId, themeId }) => reads.readTheme({ orgId: resolveOrgId(requestedOrgId), themeId })
+  const findTheme = async ({ orgId: requestedOrgId = '', ...input } = {}) => ({ ...environmentSummary(), ...await reads.findTheme({ ...input, orgId: resolveOrgId(requestedOrgId) }) })
+  const getTheme = async ({ orgId: requestedOrgId = '', ...input }) => ({ ...environmentSummary(), ...await reads.getTheme({ ...input, orgId: resolveOrgId(requestedOrgId) }) })
+  const blockBase = async ({ orgId: requestedOrgId = '', docId }) => reads.blockBase({ orgId: resolveOrgId(requestedOrgId), docId })
+  const findBlock = async ({ orgId: requestedOrgId = '', ...input } = {}) => ({ ...environmentSummary(), ...await reads.findBlock({ ...input, orgId: resolveOrgId(requestedOrgId) }) })
 
   // Validates every library block in an organization with the Hub's import
   // settings, reading production once. The full per-block report is written to
@@ -364,74 +107,11 @@ export function createCmsToolService({
     listLimit,
   } = {}) => {
     const orgId = resolveOrgId(requestedOrgId)
-    const scanLimit = boundedNumber(
-      config.maxCmsBlockScanDocuments,
-      config.maxCmsBlockScanDocuments || DEFAULT_SCAN_LIMIT,
-      DEFAULT_SCAN_LIMIT,
-    )
-    const themeScanLimit = boundedNumber(
-      config.maxCmsThemeScanDocuments,
-      config.maxCmsThemeScanDocuments || DEFAULT_THEME_SCAN_LIMIT,
-      DEFAULT_THEME_SCAN_LIMIT,
-    )
     const listedLimit = boundedNumber(listLimit, config.maxCmsResultLimit || 100, DEFAULT_RESULT_LIMIT)
-    const collectionPath = `organizations/${orgId}/blocks`
-    const [blocksSnapshot, themesSnapshot, orgSnapshot] = await Promise.all([
-      db.collection(collectionPath).limit(scanLimit + 1).get(),
-      db.collection(`organizations/${orgId}/themes`).limit(themeScanLimit + 1).get(),
-      db.doc(`organizations/${orgId}`).get(),
-    ])
-    const knownThemeIds = themesSnapshot.docs.slice(0, themeScanLimit).map(doc => doc.id)
-    const themeDocs = Object.fromEntries(themesSnapshot.docs.slice(0, themeScanLimit).map(doc => [doc.id, doc.data()]))
-    // The organization's block tag list; empty means unrestricted, so the tag
-    // rules report nothing.
-    const blockTagList = normalizeBlockTagList(orgSnapshot.exists ? orgSnapshot.data()?.cmsBlockTags : null)
-    const renderTemplate = includeRender ? await loadRenderTemplate() : null
-    const blockDocs = blocksSnapshot.docs.slice(0, scanLimit).sort((a, b) => compareDocIds(a.id, b.id))
-
-    const results = []
-    for (const snapshotDoc of blockDocs) {
-      const block = normalizeBlockDocument(sanitizeValue(snapshotDoc.data()), snapshotDoc.id)
-      const override = await resolveVueOverride({
-        rendererRepoPath,
-        orgId,
-        blockName: block?.name || '',
-        themeName,
-      })
-      let validation
-      try {
-        // Type roles from the block's allowed themes (none: not checked).
-        const typeRoles = commonTypeRoles((Array.isArray(block?.themes) ? block.themes : []).map(id => themeDocs[id]).filter(Boolean))
-        validation = await validateBlock(block, { knownThemeIds, blockTagList, renderTemplate, ownership: override, typeRoles })
-      }
-      catch (error) {
-        validation = {
-          errors: [{ code: 'audit.validator-threw', severity: 'error', path: '', message: String(error?.message || error) }],
-          warnings: [],
-          info: [],
-        }
-      }
-      results.push({
-        docId: snapshotDoc.id,
-        name: String(block?.name || ''),
-        templateVersion: Number(block?.templateVersion) === 2 ? 2 : 1,
-        isOverrideBlock: block?.isOverrideBlock === true,
-        renderingOwner: getRenderingOwner(override?.status),
-        containsRedactedValues: containsRedactedValue(block),
-        firestoreUpdateTime: timestampToIso(snapshotDoc.updateTime),
-        tags: Array.isArray(block?.tags) ? block.tags : [],
-        errors: validation.errors,
-        warnings: validation.warnings,
-        info: validation.info,
-      })
-    }
-
-    const summary = summarizeBlockAudit(results, {
-      scanTruncated: blocksSnapshot.size > scanLimit,
-      themeScanTruncated: themesSnapshot.size > themeScanLimit,
-      knownThemeCount: knownThemeIds.length,
-      blockTags: summarizeBlockTagRules(results, blockTagList),
-      renderChecks: renderTemplate ? 'ran' : (includeRender ? 'skipped-engine-unavailable' : 'skipped-by-request'),
+    const { summary, results } = await reads.auditBlocks({
+      orgId,
+      includeRender,
+      ownershipFor: block => resolveVueOverride({ rendererRepoPath, orgId, blockName: block?.name || '', themeName }),
     })
     const auditedAt = new Date().toISOString()
     const reportPath = path.join(auditRoot, orgId, `${auditedAt.replace(/[:.]/g, '-')}.json`)
@@ -671,136 +351,7 @@ export function createCmsToolService({
     }
   }
 
-  const findUsage = async ({
-    orgId: requestedOrgId = '',
-    docId: requestedDocId,
-    siteId: requestedSiteId = '',
-    limit,
-  }) => {
-    const orgId = resolveOrgId(requestedOrgId)
-    const docId = assertFirestoreSegment(requestedDocId, 'docId')
-    const resultLimit = boundedNumber(limit, config.maxCmsUsageResults || 500, 100)
-    const maxSites = boundedNumber(
-      config.maxCmsSiteScanDocuments,
-      config.maxCmsSiteScanDocuments || DEFAULT_SITE_LIMIT,
-      DEFAULT_SITE_LIMIT,
-    )
-    const maxPagesPerSite = boundedNumber(
-      config.maxCmsPageScanDocuments,
-      config.maxCmsPageScanDocuments || DEFAULT_PAGE_LIMIT,
-      DEFAULT_PAGE_LIMIT,
-    )
-    // Posts per collection (each site's draft posts and published snapshots).
-    const maxPostsPerSite = boundedNumber(
-      config.maxCmsPostScanDocuments,
-      config.maxCmsPostScanDocuments || DEFAULT_PAGE_LIMIT,
-      DEFAULT_PAGE_LIMIT,
-    )
-    let siteIds = []
-    let siteScanTruncated = false
-
-    if (requestedSiteId) {
-      siteIds = [assertFirestoreSegment(requestedSiteId, 'siteId')]
-    }
-    else {
-      const sitesPath = `organizations/${orgId}/sites`
-      const sitesSnapshot = await db.collection(sitesPath).limit(maxSites + 1).get()
-      siteScanTruncated = sitesSnapshot.size > maxSites
-      siteIds = sitesSnapshot.docs.slice(0, maxSites).map(siteDoc => siteDoc.id)
-      if (!siteIds.includes('templates'))
-        siteIds.push('templates')
-    }
-
-    const usages = []
-    const scanned = []
-    let resultTruncated = false
-
-    for (const siteId of [...new Set(siteIds)]) {
-      const pagesPath = `organizations/${orgId}/sites/${siteId}/pages`
-      const pagesSnapshot = await db.collection(pagesPath).limit(maxPagesPerSite + 1).get()
-      const pageScanTruncated = pagesSnapshot.size > maxPagesPerSite
-      const pages = pagesSnapshot.docs.slice(0, maxPagesPerSite)
-      scanned.push({
-        siteId,
-        collectionPath: pagesPath,
-        scannedDocuments: pages.length,
-        scanTruncated: pageScanTruncated,
-      })
-
-      for (const pageSnapshot of pages) {
-        const pageData = sanitizeValue(pageSnapshot.data())
-        const references = collectBlockReferences(pageData, docId)
-        for (const reference of references) {
-          usages.push({
-            kind: 'page',
-            siteId,
-            pageId: pageSnapshot.id,
-            pageName: firstNonEmptyString(pageData?.name, pageData?.title, pageData?.menuTitle),
-            pageType: siteId === 'templates' ? 'template' : (pageData?.post ? 'post' : 'page'),
-            ...reference,
-          })
-          if (usages.length >= resultLimit) {
-            resultTruncated = true
-            break
-          }
-        }
-        if (resultTruncated)
-          break
-      }
-      if (resultTruncated)
-        break
-
-      // Post bodies: drafts and the published snapshots the public site reads.
-      for (const [collection, source] of [['posts', 'draft'], ['published_posts', 'published']]) {
-        const postsPath = `organizations/${orgId}/sites/${siteId}/${collection}`
-        const postsSnapshot = await db.collection(postsPath).limit(maxPostsPerSite + 1).get()
-        const posts = postsSnapshot.docs.slice(0, maxPostsPerSite)
-        scanned.push({
-          siteId,
-          collectionPath: postsPath,
-          scannedDocuments: posts.length,
-          scanTruncated: postsSnapshot.size > maxPostsPerSite,
-        })
-        for (const postSnapshot of posts) {
-          const postData = sanitizeValue(postSnapshot.data())
-          for (const reference of collectBlockReferences(postData, docId)) {
-            usages.push({
-              kind: 'post',
-              siteId,
-              postId: postSnapshot.id,
-              source,
-              title: firstNonEmptyString(postData?.title),
-              slug: firstNonEmptyString(postData?.name),
-              ...reference,
-            })
-            if (usages.length >= resultLimit) {
-              resultTruncated = true
-              break
-            }
-          }
-          if (resultTruncated)
-            break
-        }
-        if (resultTruncated)
-          break
-      }
-      if (resultTruncated)
-        break
-    }
-
-    return {
-      ...environmentSummary(),
-      orgId,
-      docId,
-      requestedSiteId: requestedSiteId || null,
-      siteScanTruncated,
-      resultTruncated,
-      resultLimit,
-      scanned,
-      usageCount: usages.length,
-      usages,
-    }
-  }
+  const findUsage = async ({ orgId: requestedOrgId = '', ...input }) => ({ ...environmentSummary(), ...await reads.findUsage({ ...input, orgId: resolveOrgId(requestedOrgId) }) })
 
   const validate = async ({
     orgId: requestedOrgId = '',
@@ -855,6 +406,7 @@ export function createCmsToolService({
 
   return {
     auditBlocks,
+    blockBase,
     checkoutBlock,
     diff,
     findBlock,
@@ -870,14 +422,6 @@ export function createCmsToolService({
     workspaceRoot,
     auditRoot,
   }
-}
-
-export function hashDocument(value) {
-  return createHash('sha256').update(stableStringify(value) ?? 'undefined').digest('hex')
-}
-
-export function stableStringify(value) {
-  return JSON.stringify(sortJsonValue(value))
 }
 
 export function buildWorkspaceStatus({ manifest, base, local, production }) {
@@ -1002,36 +546,6 @@ export async function validateBlockWithRender(block, { override = null, renderTe
   return toMcpValidation(block, mergeValidationResults(shared, render), { override })
 }
 
-export function collectBlockReferences(value, targetBlockId) {
-  const target = String(targetBlockId || '').trim()
-  const references = []
-
-  const visit = (current, fieldPath) => {
-    if (Array.isArray(current)) {
-      current.forEach((item, index) => visit(item, `${fieldPath}[${index}]`))
-      return
-    }
-    if (!isPlainObject(current))
-      return
-
-    if (String(current.blockId || '').trim() === target) {
-      references.push({
-        fieldPath: fieldPath || '$',
-        instanceId: firstNonEmptyString(current.id, current.docId),
-        instanceName: firstNonEmptyString(current.name, current.title),
-      })
-    }
-
-    for (const [key, child] of Object.entries(current)) {
-      const childPath = fieldPath ? `${fieldPath}.${key}` : key
-      visit(child, childPath)
-    }
-  }
-
-  visit(value, '')
-  return references
-}
-
 export async function resolveVueOverride({ rendererRepoPath, orgId, blockName, themeName = '' }) {
   const blocksRoot = path.join(rendererRepoPath, 'app/blocks')
   let files
@@ -1093,288 +607,6 @@ export async function resolveVueOverride({ rendererRepoPath, orgId, blockName, t
   }
 }
 
-function normalizeBlockFilters({ query, exactName, tag, type, theme }) {
-  return {
-    query: String(query || '').trim(),
-    exactName: String(exactName || '').trim(),
-    tag: String(tag || '').trim(),
-    type: String(type || '').trim(),
-    theme: String(theme || '').trim(),
-  }
-}
-
-function blockMatchesFilters(block, docId, filters) {
-  const query = filters.query.toLowerCase()
-  const name = String(block?.name || '')
-  const tags = stringArray(block?.tags)
-  const types = stringArray(Array.isArray(block?.type) ? block.type : [block?.type])
-  const themes = stringArray(block?.themes)
-
-  if (query) {
-    const haystack = [docId, name, ...tags, ...types, ...themes].join('\n').toLowerCase()
-    if (!haystack.includes(query))
-      return false
-  }
-  if (filters.exactName && name !== filters.exactName)
-    return false
-  if (filters.tag && !tags.includes(filters.tag))
-    return false
-  if (filters.type && !types.includes(filters.type))
-    return false
-  if (filters.theme && !themes.includes(filters.theme))
-    return false
-  return true
-}
-
-function summarizeProductionBlock(block) {
-  return {
-    docId: block.docId,
-    documentPath: block.documentPath,
-    name: String(block.data?.name || ''),
-    templateVersion: Number(block.data?.templateVersion) === 2 ? 2 : 1,
-    type: stringArray(Array.isArray(block.data?.type) ? block.data.type : [block.data?.type]),
-    tags: stringArray(block.data?.tags),
-    themes: stringArray(block.data?.themes),
-    synced: block.data?.synced === true,
-    firestoreUpdateTime: block.updateTime,
-    hash: block.hash,
-  }
-}
-
-function summarizeProductionTheme(theme) {
-  const themeJSON = parseStoredJsonField(theme.data?.theme, 'theme')
-  const headJSON = parseStoredJsonField(theme.data?.headJSON, 'headJSON')
-  const referencedTemplatePageIds = collectDefaultTemplatePageIds(theme.data)
-  return {
-    themeId: theme.themeId,
-    docId: theme.themeId,
-    documentPath: theme.documentPath,
-    name: String(theme.data?.name || ''),
-    version: theme.data?.version ?? null,
-    themeJSONValid: themeJSON.valid,
-    headJSONValid: headJSON.valid,
-    extraCssLength: typeof theme.data?.extraCSS === 'string' ? theme.data.extraCSS.length : 0,
-    defaultTemplatePageCount: referencedTemplatePageIds.length,
-    referencedTemplatePageIds,
-    firestoreUpdateTime: theme.updateTime,
-    hash: hashDocument(theme.data),
-  }
-}
-
-function normalizeThemeFilters({ query = '', exactName = '' } = {}) {
-  return {
-    query: String(query || '').trim(),
-    exactName: String(exactName || '').trim(),
-  }
-}
-
-function themeMatchesFilters(theme, themeId, filters) {
-  const name = String(theme?.name || '')
-  if (filters.exactName && name !== filters.exactName)
-    return false
-  if (filters.query) {
-    const needle = filters.query.toLowerCase()
-    const haystack = `${themeId}\n${name}`.toLowerCase()
-    if (!haystack.includes(needle))
-      return false
-  }
-  return true
-}
-
-function normalizeThemeDocument(value, themeId) {
-  const theme = isPlainObject(value) ? { ...value } : {}
-  theme.docId = themeId
-  return theme
-}
-
-function parseStoredJsonField(value, field) {
-  if (isPlainObject(value) || Array.isArray(value)) {
-    return {
-      field,
-      storedType: Array.isArray(value) ? 'array' : 'object',
-      raw: JSON.stringify(value, null, 2),
-      parsed: cloneJsonValue(value, {}),
-      valid: true,
-      error: null,
-    }
-  }
-
-  const raw = value == null ? '' : String(value)
-  if (!raw.trim()) {
-    return {
-      field,
-      storedType: typeof value,
-      raw,
-      parsed: {},
-      valid: true,
-      error: null,
-    }
-  }
-
-  try {
-    return {
-      field,
-      storedType: typeof value,
-      raw,
-      parsed: JSON.parse(raw),
-      valid: true,
-      error: null,
-    }
-  }
-  catch (error) {
-    return {
-      field,
-      storedType: typeof value,
-      raw,
-      parsed: null,
-      valid: false,
-      error: `${field} is not valid JSON: ${error.message}`,
-    }
-  }
-}
-
-async function readThemeCustomFonts({
-  db,
-  orgId,
-  themeId,
-  headRaw,
-  headDocument,
-  sanitizeValue,
-  limit,
-}) {
-  const collectionPath = `organizations/${orgId}/files`
-  const resultLimit = boundedNumber(limit, limit, DEFAULT_THEME_FONT_LIMIT)
-  const snapshot = await db.collection(collectionPath)
-    .where('meta.themeId', '==', themeId)
-    .limit(resultLimit + 1)
-    .get()
-  const scanTruncated = snapshot.size > resultLimit
-  const scannedDocs = snapshot.docs.slice(0, resultLimit)
-  const fonts = scannedDocs
-    .map((snapshotDoc) => {
-      const data = sanitizeValue(snapshotDoc.data())
-      return { snapshotDoc, data }
-    })
-    .filter(({ data }) => data?.meta?.cmsFont === true)
-    .map(({ snapshotDoc, data }) => projectCustomFont(
-      snapshotDoc.id,
-      data,
-      headRaw,
-      headDocument,
-    ))
-
-  return {
-    included: true,
-    collectionPath,
-    queryField: 'meta.themeId',
-    queryValue: themeId,
-    scannedDocuments: scannedDocs.length,
-    scanTruncated,
-    resultLimit,
-    fontCount: fonts.length,
-    fonts,
-  }
-}
-
-function projectCustomFont(docId, data, headRaw, headDocument) {
-  const r2URL = String(data?.r2URL || '')
-  const fontFace = findFontFaceForUrl(headDocument, r2URL)
-  return {
-    docId,
-    name: String(data?.name || ''),
-    fileName: String(data?.fileName || ''),
-    contentType: String(data?.contentType || ''),
-    size: Number.isFinite(Number(data?.size)) ? Number(data.size) : null,
-    r2URL: r2URL || null,
-    uploadTime: data?.uploadTime ?? null,
-    uploadCompletedToR2: data?.uploadCompletedToR2 === true,
-    fontGroupId: String(data?.meta?.fontGroupId || '') || null,
-    autoLink: data?.meta?.autoLink !== false,
-    linkedInHeadJSON: !!r2URL && String(headRaw || '').includes(r2URL),
-    headFontFace: fontFace,
-  }
-}
-
-function findFontFaceForUrl(headDocument, url) {
-  if (!url)
-    return null
-  const styles = Array.isArray(headDocument?.style) ? headDocument.style : []
-  const cssText = styles
-    .map(entry => String(entry?.children || entry?.innerHTML || ''))
-    .join('\n')
-  const cssBlocks = cssText.match(/@font-face\s*\{[\s\S]*?\}/gi) || []
-  const variants = urlVariants(url)
-  const css = cssBlocks.find(block => variants.some(variant => block.includes(variant)))
-  if (!css)
-    return null
-  return {
-    fontFamily: extractCssDeclaration(css, 'font-family'),
-    fontWeight: extractCssDeclaration(css, 'font-weight'),
-    fontStyle: extractCssDeclaration(css, 'font-style'),
-    fontDisplay: extractCssDeclaration(css, 'font-display'),
-  }
-}
-
-function urlVariants(url) {
-  const variants = new Set([String(url || '')])
-  try {
-    variants.add(encodeURI(url))
-  }
-  catch {}
-  try {
-    variants.add(decodeURI(url))
-  }
-  catch {}
-  return [...variants].filter(Boolean)
-}
-
-function extractCssDeclaration(css, property) {
-  const escapedProperty = property.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const match = String(css || '').match(new RegExp(`${escapedProperty}\\s*:\\s*([^;}]*)`, 'i'))
-  return String(match?.[1] || '').trim().replace(/^['"]|['"]$/g, '') || null
-}
-
-function collectDefaultTemplatePageIds(theme) {
-  const ids = new Set()
-  for (const entry of Array.isArray(theme?.defaultPages) ? theme.defaultPages : []) {
-    const pageId = String(entry?.pageId || '').trim()
-    if (pageId)
-      ids.add(pageId)
-  }
-
-  const visitMenuEntries = (entries) => {
-    for (const entry of Array.isArray(entries) ? entries : []) {
-      if (typeof entry?.item === 'string') {
-        const pageId = entry.item.trim()
-        if (pageId)
-          ids.add(pageId)
-        continue
-      }
-      if (!isPlainObject(entry?.item) || entry.item.type === 'external')
-        continue
-      for (const nestedEntries of Object.values(entry.item))
-        visitMenuEntries(nestedEntries)
-    }
-  }
-
-  if (isPlainObject(theme?.defaultMenus)) {
-    for (const entries of Object.values(theme.defaultMenus))
-      visitMenuEntries(entries)
-  }
-  return [...ids].sort()
-}
-
-function cloneJsonValue(value, fallback) {
-  const selected = value === undefined ? fallback : value
-  return structuredClone(selected)
-}
-
-function normalizeBlockDocument(value, docId) {
-  const block = isPlainObject(value) ? { ...value } : {}
-  block.docId = docId
-  return block
-}
-
 function resolveLocalPath(value, repoRoot) {
   const configuredPath = String(value || '').trim()
   if (!configuredPath)
@@ -1382,15 +614,6 @@ function resolveLocalPath(value, repoRoot) {
   return path.isAbsolute(configuredPath)
     ? path.normalize(configuredPath)
     : path.resolve(repoRoot, configuredPath)
-}
-
-function assertFirestoreSegment(value, label) {
-  const segment = String(value || '').trim()
-  if (!segment)
-    throw new Error(`${label} is required.`)
-  if (segment === '.' || segment === '..' || segment.includes('/') || segment.includes('\\'))
-    throw new Error(`${label} must be one Firestore path segment.`)
-  return segment
 }
 
 function getCheckoutPaths(workspaceRoot, orgId, docId) {
@@ -1460,36 +683,6 @@ async function writeJsonAtomically(filePath, value) {
   const tempPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`
   await writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
   await rename(tempPath, filePath)
-}
-
-function timestampToIso(value) {
-  if (!value)
-    return null
-  if (typeof value.toDate === 'function')
-    return value.toDate().toISOString()
-  if (typeof value.toMillis === 'function')
-    return new Date(value.toMillis()).toISOString()
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? null : date.toISOString()
-}
-
-function boundedNumber(value, maximum, fallback) {
-  const parsed = Number(value)
-  const safeFallback = Math.max(1, Number(fallback) || 1)
-  const requested = (Number.isFinite(parsed) && parsed > 0) ? Math.trunc(parsed) : safeFallback
-  return Math.max(1, Math.min(requested, Math.max(1, Number(maximum) || safeFallback)))
-}
-
-function sortJsonValue(value) {
-  if (Array.isArray(value))
-    return value.map(sortJsonValue)
-  if (!isPlainObject(value))
-    return value
-  return Object.fromEntries(
-    Object.keys(value)
-      .sort()
-      .map(key => [key, sortJsonValue(value[key])]),
-  )
 }
 
 function changedTopLevelFields(left, right) {
@@ -1671,92 +864,4 @@ async function listFilesRecursively(directory, predicate) {
       files.push(entryPath)
   }
   return files.sort()
-}
-
-function stringArray(value) {
-  if (!Array.isArray(value))
-    return []
-  return value.map(item => String(item || '').trim()).filter(Boolean)
-}
-
-function firstNonEmptyString(...values) {
-  for (const value of values) {
-    const normalized = String(value || '').trim()
-    if (normalized)
-      return normalized
-  }
-  return ''
-}
-
-function getRenderingOwner(overrideStatus) {
-  if (overrideStatus === 'vue-override')
-    return 'public-frontend-vue-override'
-  if (overrideStatus === 'ambiguous-vue-override')
-    return 'ambiguous'
-  if (overrideStatus === 'renderer-repo-unavailable')
-    return 'unverified'
-  return 'cms'
-}
-
-function isPlainObject(value) {
-  return !!value && typeof value === 'object' && !Array.isArray(value)
-}
-
-function compareDocIds(a, b) {
-  return a < b ? -1 : a > b ? 1 : 0
-}
-
-// The tag rules' share of an audit: the organization list, and the blocks
-// with a tag outside it or a content tag count other than one or two.
-export function summarizeBlockTagRules(results, blockTagList) {
-  const isTagFinding = issue => String(issue.code || '').startsWith('tags.')
-  const flagged = results.filter(item => [...item.errors, ...item.warnings].some(isTagFinding))
-  return {
-    list: blockTagList,
-    restricted: blockTagList.length > 0,
-    blocksWithTagFindings: flagged.length,
-    offListTags: [...new Set(results.flatMap(item => (item.tags || []).filter(tag => blockTagList.length && !blockTagList.includes(tag))))].sort(),
-  }
-}
-
-export function summarizeBlockAudit(results, extra = {}) {
-  const byRule = new Map()
-  for (const item of results) {
-    for (const issue of [...item.errors, ...item.warnings]) {
-      const key = `${issue.severity}:${issue.code}`
-      const entry = byRule.get(key) || { severity: issue.severity, code: issue.code, findings: 0, blocks: new Set() }
-      entry.findings++
-      entry.blocks.add(item.docId)
-      byRule.set(key, entry)
-    }
-  }
-  const count = predicate => results.filter(predicate).length
-  return {
-    blocks: results.length,
-    templateV2: count(item => item.templateVersion === 2),
-    templateV1: count(item => item.templateVersion === 1),
-    blocksWithErrors: count(item => item.errors.length),
-    blocksWithWarningsOnly: count(item => !item.errors.length && item.warnings.length),
-    cleanBlocks: count(item => !item.errors.length && !item.warnings.length),
-    vueOverrideBlocks: count(item => item.renderingOwner === 'public-frontend-vue-override'),
-    blocksWithRedactedValues: count(item => item.containsRedactedValues),
-    ...extra,
-    byRule: [...byRule.values()]
-      .map(entry => ({ ...entry, blocks: entry.blocks.size }))
-      .sort((a, b) => {
-        if (a.severity !== b.severity)
-          return a.severity === 'error' ? -1 : 1
-        return (b.blocks - a.blocks) || a.code.localeCompare(b.code)
-      }),
-  }
-}
-
-function containsRedactedValue(value) {
-  if (value === '[REDACTED]')
-    return true
-  if (Array.isArray(value))
-    return value.some(containsRedactedValue)
-  if (isPlainObject(value))
-    return Object.values(value).some(containsRedactedValue)
-  return false
 }

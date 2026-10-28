@@ -59,7 +59,8 @@ const createRemoteCms = ({ now = Date.now, issueSession = issueAgentSession, han
     return { orgId: session.orgId, scope: session.scope, ...(session.siteId ? { siteId: session.siteId } : {}) }
   }
 
-  // One cms-agentOperation action as a site or organization session.
+  // One cms-agentOperation action as a site or organization session. Library
+  // reads and block/theme operations use the organization's session.
   const call = async (connection, input, body) => {
     const type = body.operation?.type || ''
     const siteScoped = SITE_READS.includes(body.action) || type.startsWith('page.') || type.startsWith('post.') || type === 'site.update'
@@ -89,6 +90,13 @@ const createRemoteCms = ({ now = Date.now, issueSession = issueAgentSession, han
   }
 
   const handlers = connection => ({
+    // Library reads: organization sessions, checked against the operator's read rights.
+    cms_find_block: tool(({ docId, query, exactName, tag, type, theme, limit, startAfter, ...input }) => call(connection, input, { action: 'blocks', docId, query, exactName, tag, type, theme, limit, startAfter })),
+    cms_audit_blocks: tool(({ includeRender, listLimit, ...input }) => call(connection, input, { action: 'audit', includeRender, listLimit })),
+    cms_find_usage: tool(({ docId, siteId, limit, ...input }) => call(connection, input, { action: 'usage', docId, siteId, limit })),
+    cms_find_theme: tool(({ docId, query, exactName, limit, ...input }) => call(connection, input, { action: 'themes', docId, query, exactName, limit })),
+    cms_get_theme: tool(({ themeId, includeCustomFonts, ...input }) => call(connection, input, { action: 'theme', themeId, includeCustomFonts })),
+    cms_block_base: tool(({ docId, ...input }) => call(connection, input, { action: 'block', docId })),
     cms_agent_organizations: tool(input => listOrganizations(connection.data.createdBy, input)),
     cms_open_session: tool(async ({ orgId, scope, siteId }) => {
       const { session } = await sessionFor(connection, { orgId, scope, ...(siteId ? { siteId } : {}) })
