@@ -13,6 +13,7 @@ export const CMS_AGENT_REMOTE_TOOL_NAMES = Object.freeze([
   'cms_find_block',
   'cms_audit_blocks',
   'cms_find_usage',
+  'cms_validate',
   'cms_find_theme',
   'cms_get_theme',
   'cms_agent_organizations',
@@ -209,13 +210,21 @@ export function cmsAgentToolDefinitions({ z, operationTypes, contractKinds = [],
     {
       name: 'cms_validate',
       title: 'Validate CMS Block',
-      description: 'Validate a checked-out local or current production CMS block with the Hub\'s shared block validator: Template v2 structure, schema and grammar, render checks with empty and sample Data Source records, and public renderer ownership. Returns string errors/warnings/info plus structured issues.',
-      inputSchema: {
-        orgId: orgIdSchema(),
-        docId: CmsDocIdSchema,
-        source: z.enum(['local', 'production']).optional().default('local'),
-        themeName: OptionalCmsSearchSchema.describe('Optional public renderer theme name.'),
-      },
+      description: remote
+        ? 'Validate one CMS block definition with the Hub\'s shared block validator: Template v2 structure, schema and grammar, and render checks with empty and sample Data Source records. Send the definition inline (definition: the block object, as you would send it in block.create or block.draft), or a library block\'s docId to validate its current definition (its open draft, else the released one). Returns string errors/warnings/info plus structured issues. Public Vue overrides are not checked remotely. Writes nothing.'
+        : 'Validate a checked-out local or current production CMS block with the Hub\'s shared block validator: Template v2 structure, schema and grammar, render checks with empty and sample Data Source records, and public renderer ownership. Returns string errors/warnings/info plus structured issues.',
+      inputSchema: remote
+        ? {
+            orgId: orgIdSchema(),
+            docId: OptionalCmsSearchSchema.describe('Library block document id: validates its current definition, or names an inline definition.'),
+            definition: z.record(z.any()).optional().describe('The block definition to validate (content, template, templateVersion, schema, dataSources, values, name, ...). Up to 1 MB.'),
+          }
+        : {
+            orgId: orgIdSchema(),
+            docId: CmsDocIdSchema,
+            source: z.enum(['local', 'production']).optional().default('local'),
+            themeName: OptionalCmsSearchSchema.describe('Optional public renderer theme name.'),
+          },
       annotations: READ,
     },
     {

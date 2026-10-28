@@ -94,6 +94,7 @@ const createRemoteCms = ({ now = Date.now, issueSession = issueAgentSession, han
     cms_find_block: tool(({ docId, query, exactName, tag, type, theme, limit, startAfter, ...input }) => call(connection, input, { action: 'blocks', docId, query, exactName, tag, type, theme, limit, startAfter })),
     cms_audit_blocks: tool(({ includeRender, listLimit, ...input }) => call(connection, input, { action: 'audit', includeRender, listLimit })),
     cms_find_usage: tool(({ docId, siteId, limit, ...input }) => call(connection, input, { action: 'usage', docId, siteId, limit })),
+    cms_validate: tool(({ docId, definition, ...input }) => call(connection, input, { action: 'validate', docId, ...(definition ? { definition } : {}) })),
     cms_find_theme: tool(({ docId, query, exactName, limit, ...input }) => call(connection, input, { action: 'themes', docId, query, exactName, limit })),
     cms_get_theme: tool(({ themeId, includeCustomFonts, ...input }) => call(connection, input, { action: 'theme', themeId, includeCustomFonts })),
     cms_block_base: tool(({ docId, ...input }) => call(connection, input, { action: 'block', docId })),

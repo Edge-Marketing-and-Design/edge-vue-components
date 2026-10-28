@@ -18,7 +18,7 @@ class HttpsError extends Error {
   }
 }
 
-const REMOTE_TOOLS = ['cms_find_block', 'cms_audit_blocks', 'cms_find_usage', 'cms_find_theme', 'cms_get_theme', 'cms_agent_organizations', 'cms_open_session', 'cms_check_operation', 'cms_run_operation', 'cms_preview_url', 'cms_site_readiness', 'cms_list_pages', 'cms_get_page', 'cms_list_posts', 'cms_get_post', 'cms_block_base']
+const REMOTE_TOOLS = ['cms_find_block', 'cms_audit_blocks', 'cms_find_usage', 'cms_validate', 'cms_find_theme', 'cms_get_theme', 'cms_agent_organizations', 'cms_open_session', 'cms_check_operation', 'cms_run_operation', 'cms_preview_url', 'cms_site_readiness', 'cms_list_pages', 'cms_get_page', 'cms_list_posts', 'cms_get_post', 'cms_block_base']
 
 const setup = async (t) => {
   const fake = createFakeDb({
@@ -317,4 +317,45 @@ test('a failed audit write never fails the read', async (t) => {
   assert.equal(blocks.ok, true)
   assert.equal(blocks.returnedDocuments, 2)
   assert.equal(readAudits(env).length, 0)
+})
+
+test('cms_validate checks an inline definition or a library block\'s current definition', async (t) => {
+  const env = await setup(t)
+  const added = []
+  env.hooks.beforeAdd = (path, data) => added.push({ path, data })
+  const client = await connect(t, env)
+
+  const inline = await callTool(client, 'cms_validate', { orgId: 'a', definition: { name: 'Card', content: '<div>{{{#text {"field":"title","value":"Hi"}}}}</div>', values: {} } })
+  assert.equal(inline.ok, true, inline.message)
+  assert.equal(inline.source, 'definition')
+  assert.equal(inline.valid, true, JSON.stringify(inline.errors))
+  assert.equal(inline.renderingOwner, 'unchecked')
+  assert.ok(!inline.info.some(line => /falls back to CMS HTML/.test(line)), 'no renderer claim it cannot check')
+
+  const broken = await callTool(client, 'cms_validate', { orgId: 'a', definition: { name: 'Broken', templateVersion: 2, content: '<div><span>a</div>', template: '<div><span>a</div>' } })
+  assert.equal(broken.ok, true)
+  assert.equal(broken.valid, false)
+  assert.ok(broken.errors.length > 0)
+  assert.ok(broken.issues.some(issue => issue.code === 'grammar.unbalanced-html'))
+
+  const released = await callTool(client, 'cms_validate', { orgId: 'a', docId: 'hero' })
+  assert.equal(released.source, 'released')
+  assert.equal(released.docId, 'hero')
+  env.docs.set('organizations/a/blocks/hero', { ...env.docs.get('organizations/a/blocks/hero'), draftRevision: 2 })
+  env.docs.set('organizations/a/blocks/hero/revisions/2', { status: 'draft', definition: { templateVersion: 2, content: '<section><div>x</section>', template: '<section><div>x</section>' } })
+  const draft = await callTool(client, 'cms_validate', { orgId: 'a', docId: 'hero' })
+  assert.equal(draft.source, 'draft')
+  assert.equal(draft.valid, false, 'the open draft is what gets validated')
+
+  assert.equal((await callTool(client, 'cms_validate', { orgId: 'a', docId: 'missing' })).code, 'not-found')
+  assert.equal((await callTool(client, 'cms_validate', { orgId: 'a' })).code, 'invalid-argument')
+  const oversized = await callTool(client, 'cms_validate', { orgId: 'a', definition: { name: 'Big', content: 'x'.repeat(1024 * 1024 + 1) } })
+  assert.equal(oversized.code, 'invalid-argument')
+
+  const records = added.filter(entry => entry.path === 'organizations/a/cmsAgentReads').map(entry => entry.data)
+  assert.deepEqual(records.map(entry => entry.tool), ['validate', 'validate', 'validate', 'validate'])
+  assert.deepEqual(records.map(entry => entry.docIds), [[], [], ['hero'], ['hero']], 'inline definitions are not named in the audit')
+  assert.ok(!JSON.stringify(records).includes('Card'), 'no content in the audit')
+  env.denied.add('read:organizations/a/blocks')
+  assert.equal((await callTool(client, 'cms_validate', { orgId: 'a', docId: 'hero' })).code, 'permission-denied')
 })

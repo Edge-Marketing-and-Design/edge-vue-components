@@ -16,6 +16,8 @@ export const DEFAULT_PAGE_LIMIT = 500
 export const DEFAULT_SITE_LIMIT = 100
 export const DEFAULT_THEME_SCAN_LIMIT = 250
 export const DEFAULT_THEME_FONT_LIMIT = 100
+// Keys cms_validate requires; Hub import settings require more (the audit).
+export const MCP_REQUIRED_BLOCK_KEYS = ['name', 'content']
 
 // Firestore values as plain JSON: Timestamps as ISO strings, GeoPoints as
 // { latitude, longitude }, references as { __type, path }. The local MCP
@@ -519,7 +521,52 @@ export function createCmsReads({ db, limits = {}, sanitizeValue = value => value
     return { orgId, summary, results }
   }
 
-  return { readBlock, readTheme, findTheme, getTheme, findBlock, blockBase, findUsage, auditBlocks }
+  // Validates one definition with the MCP's validator settings (name and
+  // content required, structure, schema, grammar and render checks with empty
+  // and sample Data Source records): the inline `definition`, or the library
+  // block `docId`'s current definition (its open draft, else the released
+  // one). `override` is the public renderer resolution, when known.
+  const validateDefinition = async ({ orgId, definition = null, docId: requestedDocId = '', override = null }) => {
+    const { validateBlockDocument, validateBlockRender, mergeValidationResults } = validation
+    let block
+    let source = 'definition'
+    if (definition) {
+      if (!isPlainObject(definition))
+        throw refusal('invalid-argument', 'definition must be one block object.')
+      block = normalizeBlockDocument(definition, requestedDocId ? assertFirestoreSegment(requestedDocId, 'docId') : 'inline-definition')
+    }
+    else {
+      const docId = assertFirestoreSegment(requestedDocId, 'docId')
+      const blockRef = db.collection('organizations').doc(orgId).collection('blocks').doc(docId)
+      const blockSnap = await blockRef.get()
+      if (!blockSnap.exists)
+        throw refusal('not-found', `Block "${docId}" does not exist in ${orgId}.`)
+      const stored = blockSnap.data() || {}
+      let draft = null
+      if (Number.isInteger(stored.draftRevision)) {
+        const draftSnap = await blockRef.collection('revisions').doc(String(stored.draftRevision)).get()
+        if (draftSnap.exists && draftSnap.data()?.status === 'draft')
+          draft = draftSnap.data()
+      }
+      // A draft revision holds the editable definition; the rest (name, tags,
+      // themes) stays on the library block.
+      block = normalizeBlockDocument(sanitizeValue(draft ? { ...stored, ...draft.definition } : stored), docId)
+      source = draft ? 'draft' : 'released'
+    }
+    const shared = validateBlockDocument(block, { requiredKeys: MCP_REQUIRED_BLOCK_KEYS, requireDocId: true, ownership: override })
+    const render = await validateBlockRender(block, { renderTemplate: await loadRenderTemplate() })
+    const result = toMcpValidation(block, mergeValidationResults(shared, render), { override })
+    return {
+      orgId,
+      docId: block.docId,
+      source,
+      valid: result.errors.length === 0,
+      ...result,
+      hash: hashDocument(block),
+    }
+  }
+
+  return { readBlock, readTheme, findTheme, getTheme, findBlock, blockBase, findUsage, auditBlocks, validateDefinition }
 }
 
 export function hashDocument(value) {
@@ -903,6 +950,9 @@ export function getRenderingOwner(overrideStatus) {
     return 'ambiguous'
   if (overrideStatus === 'renderer-repo-unavailable')
     return 'unverified'
+  // Remote reads cannot see the public renderer's overrides.
+  if (overrideStatus === 'unchecked')
+    return 'unchecked'
   return 'cms'
 }
 
@@ -967,4 +1017,41 @@ export function containsRedactedValue(value) {
   if (isPlainObject(value))
     return Object.values(value).some(containsRedactedValue)
   return false
+}
+
+// The Hub's shared validator owns the block rules. This adapter keeps the MCP's
+// original response: string errors, warnings and info, plus templateVersion,
+// renderingOwner, declaredSources and sourceCalls. Structured findings are
+// added as `issues`.
+
+export function toMcpValidation(block, shared, { override = null } = {}) {
+  const doc = isPlainObject(block) ? block : {}
+  const info = shared.info.map(issue => issue.message)
+  if (override?.status === 'vue-override')
+    info.push(`Public rendering resolves to Vue override ${override.selectedMatch?.relativePath || ''}.`.trim())
+  else if (!['ambiguous-vue-override', 'renderer-repo-unavailable', 'unchecked'].includes(override?.status))
+    info.push('Public rendering falls back to CMS HTML when no deployed override matches.')
+
+  return {
+    templateVersion: Number(doc.templateVersion) === 2 ? 2 : 1,
+    renderingOwner: getRenderingOwner(override?.status),
+    declaredSources: isPlainObject(doc.dataSources) ? Object.keys(doc.dataSources) : [],
+    sourceCalls: [...new Set(extractSourceCalls(doc.template || doc.content || ''))],
+    errors: shared.errors.map(issue => issue.message),
+    warnings: shared.warnings.map(issue => issue.message),
+    info,
+    issues: [...shared.errors, ...shared.warnings, ...shared.info],
+  }
+}
+
+export function extractSourceCalls(template) {
+  const calls = []
+  const matcher = /source\(\s*["']([^"']+)["']/g
+  for (;;) {
+    const match = matcher.exec(String(template || ''))
+    if (!match)
+      break
+    calls.push(match[1])
+  }
+  return calls
 }

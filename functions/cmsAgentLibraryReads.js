@@ -1,15 +1,15 @@
-// Library reads for agents (blocks, block bases, themes, usage, audit) run as
-// the operator: the Hub endpoint has already verified the credential and its
-// organization session, and each read checks the operator's current Hub read
-// rights before reading. The reads are the local MCP's, shared through
-// helpers/cmsAgentReads.mjs, with the same scan limits. Each read is recorded
-// in organizations/{orgId}/cmsAgentReads: what was asked for, never content,
-// kept 90 days (enable a TTL policy on expiresAt to delete expired entries).
-// Keep identical in functions/.
+// Library reads for agents (blocks, block bases, themes, usage, audit,
+// validation) run as the operator: the Hub endpoint has already verified the
+// credential and its organization session, and each read checks the
+// operator's current Hub read rights before reading. The reads are the local
+// MCP's, shared through helpers/cmsAgentReads.mjs, with the same scan limits.
+// Each read is recorded in organizations/{orgId}/cmsAgentReads: what was
+// asked for, never content, kept 90 days (a TTL policy on expiresAt deletes
+// expired entries). Keep identical in functions/.
 const { Timestamp } = require('firebase-admin/firestore')
 const { db, HttpsError, logger, permissionCheck } = require('./config.js')
 
-const LIBRARY_READ_ACTIONS = ['blocks', 'block', 'themes', 'theme', 'usage', 'audit']
+const LIBRARY_READ_ACTIONS = ['blocks', 'block', 'themes', 'theme', 'usage', 'audit', 'validate']
 // What each action reads, for the permission check.
 const READ_TARGETS = {
   blocks: ['blocks'],
@@ -18,11 +18,14 @@ const READ_TARGETS = {
   theme: ['themes'],
   usage: ['blocks', 'sites'],
   audit: ['blocks', 'themes'],
+  validate: ['blocks'],
 }
 const AUDIT_DAYS = 90
 const AUDIT_DOC_IDS = 20
 // Findings listed per block in a remote audit.
 const MAX_LISTED_FINDINGS = 20
+// An inline definition to validate, as JSON.
+const MAX_DEFINITION_BYTES = 1024 * 1024
 
 let readsPromise
 const loadReads = () => {
@@ -73,6 +76,15 @@ const read = async (reads, orgId, body) => {
   if (body.action === 'usage') {
     const result = await reads.findUsage({ orgId, docId: body.docId, siteId: text(body.siteId), limit: body.limit })
     return { result, docIds: [result.docId], resultCount: result.usageCount, truncated: result.resultTruncated || result.siteScanTruncated || result.scanned.some(scan => scan.scanTruncated) }
+  }
+  if (body.action === 'validate') {
+    const definition = body.definition ?? null
+    if (definition !== null && Buffer.byteLength(JSON.stringify(definition)) > MAX_DEFINITION_BYTES)
+      throw new HttpsError('invalid-argument', `definition is larger than ${MAX_DEFINITION_BYTES} bytes.`)
+    if (definition === null && !text(body.docId))
+      throw new HttpsError('invalid-argument', 'Send a definition to validate, or the docId of a library block.')
+    const result = await reads.validateDefinition({ orgId, definition, docId: text(body.docId), override: { status: 'unchecked' } })
+    return { result: { ...result, renderer: 'Public Vue overrides are not checked remotely (renderingOwner "unchecked").' }, docIds: definition ? [] : [result.docId], resultCount: 1, truncated: false }
   }
   // audit: the summary and the blocks with errors, with their findings.
   const { summary, results } = await reads.auditBlocks({ orgId, includeRender: body.includeRender !== false })

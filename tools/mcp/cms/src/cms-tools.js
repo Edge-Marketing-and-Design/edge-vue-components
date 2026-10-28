@@ -11,19 +11,20 @@ import {
 } from '../../../../lib/cmsBlockValidation.js'
 import {
   DEFAULT_RESULT_LIMIT,
+  MCP_REQUIRED_BLOCK_KEYS,
   assertFirestoreSegment,
   boundedNumber,
   containsRedactedValue,
   createCmsReads,
-  getRenderingOwner,
   hashDocument,
   isPlainObject,
   stableStringify,
+  toMcpValidation,
 } from '../../../../lib/cmsAgentReads.js'
 import { blockDefinitionHash } from '../../../../lib/cmsBlockRevisions.js'
 
 // Shared with the Hub's agent endpoint; re-exported for existing callers.
-export { collectBlockReferences, hashDocument, stableStringify, summarizeBlockAudit, summarizeBlockTagRules } from '../../../../lib/cmsAgentReads.js'
+export { collectBlockReferences, hashDocument, stableStringify, summarizeBlockAudit, summarizeBlockTagRules, toMcpValidation } from '../../../../lib/cmsAgentReads.js'
 
 const CHECKOUT_SCHEMA_VERSION = 1
 const MAX_DIFF_CHANGES = 500
@@ -484,32 +485,6 @@ export function buildDocumentDiff(fromValue, toValue) {
   }
 }
 
-// The Hub's shared validator owns the block rules. This adapter keeps the MCP's
-// original response: string errors, warnings and info, plus templateVersion,
-// renderingOwner, declaredSources and sourceCalls. Structured findings are
-// added as `issues`.
-const MCP_REQUIRED_BLOCK_KEYS = ['name', 'content']
-
-export function toMcpValidation(block, shared, { override = null } = {}) {
-  const doc = isPlainObject(block) ? block : {}
-  const info = shared.info.map(issue => issue.message)
-  if (override?.status === 'vue-override')
-    info.push(`Public rendering resolves to Vue override ${override.selectedMatch?.relativePath || ''}.`.trim())
-  else if (!['ambiguous-vue-override', 'renderer-repo-unavailable'].includes(override?.status))
-    info.push('Public rendering falls back to CMS HTML when no deployed override matches.')
-
-  return {
-    templateVersion: Number(doc.templateVersion) === 2 ? 2 : 1,
-    renderingOwner: getRenderingOwner(override?.status),
-    declaredSources: isPlainObject(doc.dataSources) ? Object.keys(doc.dataSources) : [],
-    sourceCalls: [...new Set(extractSourceCalls(doc.template || doc.content || ''))],
-    errors: shared.errors.map(issue => issue.message),
-    warnings: shared.warnings.map(issue => issue.message),
-    info,
-    issues: [...shared.errors, ...shared.warnings, ...shared.info],
-  }
-}
-
 export function validateBlockDocument(block, { override = null } = {}) {
   const shared = validateSharedBlockDocument(block, {
     requiredKeys: MCP_REQUIRED_BLOCK_KEYS,
@@ -795,18 +770,6 @@ function truncateText(value, maxLength) {
   if (text.length <= maxLength)
     return text
   return `${text.slice(0, maxLength)}\n...[truncated ${text.length - maxLength} characters]`
-}
-
-function extractSourceCalls(template) {
-  const calls = []
-  const matcher = /source\(\s*["']([^"']+)["']/g
-  for (;;) {
-    const match = matcher.exec(String(template || ''))
-    if (!match)
-      break
-    calls.push(match[1])
-  }
-  return calls
 }
 
 function componentCandidateNames(label) {
