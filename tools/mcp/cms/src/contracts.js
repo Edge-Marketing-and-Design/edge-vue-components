@@ -1,6 +1,8 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { describeContract } from '../../../../lib/cmsAgentMcpTools.js'
+import { withGeneratedValidation } from '../../../../lib/cmsBlockValidation.js'
+import { withGeneratedContract } from '../../../../lib/cmsOperations.js'
 
 // The data contracts an agent writes against, read from the Hub checkout the
 // server runs in (the same root that resolves the renderer path). Nothing is
@@ -30,7 +32,7 @@ export const contractPath = (kind) => {
 // Returns the contract's Markdown with its title, its `Last verified` line
 // and the path it was read from. An unknown kind lists the known ones instead
 // of throwing, so the caller sees what it can ask for.
-export async function readContract({ kind, section = '', repoRoot, rendererRoot, readFileImpl = readFile }) {
+export async function readContract({ kind, section = '', repoRoot, rendererRoot, readFileImpl = readFile, notes = {} }) {
   const key = String(kind || '').trim().toLowerCase()
   if (key === RENDERER_KIND)
     return readRendererGuide({ section, rendererRoot, readFileImpl })
@@ -60,7 +62,9 @@ export async function readContract({ kind, section = '', repoRoot, rendererRoot,
     }
     throw error
   }
-  return describeContract(key, relativePath, markdown, section)
+  // Generated sections: document fields and operations from the shared CMS
+  // code, block validation codes from the validator.
+  return describeContract(key, relativePath, withGeneratedContract(withGeneratedValidation(markdown), notes), section)
 }
 
 async function readRendererGuide({ section, rendererRoot, readFileImpl }) {

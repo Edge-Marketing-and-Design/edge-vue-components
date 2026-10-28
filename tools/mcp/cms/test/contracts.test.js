@@ -3,6 +3,8 @@ import { access, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { withGeneratedValidation } from '../../../../lib/cmsBlockValidation.js'
+import { withGeneratedContract } from '../../../../lib/cmsOperations.js'
 import { CONTRACT_KINDS, RENDERER_GUIDE, contractKinds, contractPath, readContract } from '../src/contracts.js'
 
 // The server resolves the Hub root the same way (src/server.js repoRoot).
@@ -24,7 +26,9 @@ test('the returned text starts with the contract title and carries the path', as
     assert.equal(result.kind, kind)
     assert.equal(result.path, relativePath)
     const file = await readFile(path.resolve(repoRoot, relativePath), 'utf8')
-    assert.equal(result.markdown, file)
+    // Markers are replaced by the generated sections.
+    assert.equal(result.markdown, withGeneratedContract(withGeneratedValidation(file)))
+    assert.ok(!/<!-- (operations|fields|validation codes):/.test(result.markdown), `${kind} has no marker left`)
     assert.ok(result.title.length > 0, `${kind} has a title`)
     assert.ok(file.startsWith(`# ${result.title}`), `${kind} starts with its title`)
   }
@@ -96,4 +100,10 @@ test('an unknown kind lists the known ones instead of throwing', async () => {
   assert.equal(result.code, 'unknown-kind')
   assert.deepEqual(result.kinds, contractKinds())
   assert.match(result.message, /blocks, operations, themes, sites-and-pages, posts/)
+})
+
+test('explanation overrides replace the default text in the generated operations section', async () => {
+  const result = await readContract({ kind: 'operations', repoRoot, notes: { 'problem:move.no-change': 'Already in place; nothing to do.' } })
+  assert.equal(result.ok, true)
+  assert.ok(result.markdown.includes('| `move.no-change` | Already in place; nothing to do. |'))
 })

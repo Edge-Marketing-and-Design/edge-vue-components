@@ -11,7 +11,7 @@ import { CMS_OPERATION_TYPES } from '../../../../lib/cmsOperations.js'
 const edgeRoot = new URL('../../../../', import.meta.url)
 const LOCAL_TOOLS = [
   'firestore_list_collections', 'firestore_get_document', 'firestore_sample_collection', 'firestore_infer_schema', 'firestore_compare_schema', 'firestore_find_field',
-  'cms_find_block', 'cms_audit_blocks', 'cms_checkout_block', 'cms_status', 'cms_diff', 'cms_resolve_override', 'cms_find_usage', 'cms_validate', 'cms_find_theme', 'cms_get_theme', 'cms_contract', 'cms_guide',
+  'cms_find_block', 'cms_audit_blocks', 'cms_checkout_block', 'cms_status', 'cms_diff', 'cms_resolve_override', 'cms_find_usage', 'cms_validate', 'cms_find_theme', 'cms_get_theme', 'cms_contract', 'cms_schema', 'cms_guide',
   'cms_agent_organizations', 'cms_open_session', 'cms_check_operation', 'cms_run_operation', 'cms_preview_url', 'cms_site_readiness', 'cms_list_pages', 'cms_get_page', 'cms_list_posts', 'cms_get_post', 'cms_block_base',
 ]
 // Remote-only wording: orgId comes from the call (no defaultOrgId), sessions

@@ -1,5 +1,5 @@
 <script setup>
-import { Copy, KeyRound, Loader2, RefreshCw } from 'lucide-vue-next'
+import { Copy, FileText, KeyRound, Loader2, RefreshCw } from 'lucide-vue-next'
 import {
   AGENT_KEY_LIFETIMES,
   agentKeyStatus,
@@ -132,11 +132,18 @@ watch(orgId, (value) => {
           Agent Keys
         </h2>
       </div>
-      <edge-shad-button variant="outline" class="gap-2" :disabled="state.loading" @click="load">
-        <Loader2 v-if="state.loading" class="h-4 w-4 animate-spin" />
-        <RefreshCw v-else class="h-4 w-4" />
-        Refresh
-      </edge-shad-button>
+      <div class="flex items-center gap-2">
+        <!-- What agents read about each operation, and its explanations. -->
+        <edge-shad-button variant="outline" class="gap-2" @click="navigateTo('/app/dashboard/agent-contracts')">
+          <FileText class="h-4 w-4" />
+          Agent contract
+        </edge-shad-button>
+        <edge-shad-button variant="outline" class="gap-2" :disabled="state.loading" @click="load">
+          <Loader2 v-if="state.loading" class="h-4 w-4 animate-spin" />
+          <RefreshCw v-else class="h-4 w-4" />
+          Refresh
+        </edge-shad-button>
+      </div>
     </div>
 
     <edge-cms-agent-connections />

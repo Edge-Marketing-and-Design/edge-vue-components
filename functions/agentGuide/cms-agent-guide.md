@@ -70,6 +70,10 @@ Shared Edge source: `edge/functions/agentGuide/cms-agent-guide.md`.
    released block; `cms_preview_url` with `blockDrafts: true` shows the draft.
 - `cms_audit_blocks` validates the whole library with the Hub's import
   settings and lists the blocks with errors and their findings.
+- Building a block that reads a Data Source? `cms_schema` with the
+  collection's name shows the fields its documents actually have, their types
+  and how many documents have each, without values. It also describes blocks,
+  themes, sites, and a site's pages and posts against their published copies.
 
 ## Change a theme
 
@@ -94,7 +98,11 @@ Shared Edge source: `edge/functions/agentGuide/cms-agent-guide.md`.
 
 ## When something is refused
 
-Refusals are `{ ok: false, code, message }`:
+A check that finds problems returns them in `problems`, with a code for each
+in `problemCodes` (same order). `cms_contract` kind `operations` explains
+every code and how to fix it, under Problem codes.
+
+Requests that fail outright are `{ ok: false, code, message }`:
 
 - `unauthenticated` (HTTP 401): the connection is missing, revoked or expired.
   Renew or recreate it in the Hub (Dev Mode, Agent Keys, Hub connections).

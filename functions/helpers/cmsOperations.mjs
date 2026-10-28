@@ -1200,6 +1200,8 @@ export const SITE_CREATE_FIELDS = Object.freeze([
 // publishAtTimezone, publishedAt, doc_created_at, hidePublishedDate) and the
 // importer's legacyBlog stay with the Hub and the importer.
 export const POST_UPDATE_FIELDS = Object.freeze(['title', 'blurb', 'name', 'tags', 'featuredImage', 'event', 'restrictionRuleId'])
+// Every key post.create accepts, `type` included.
+export const POST_CREATE_KEYS = Object.freeze(['type', 'siteId', 'title', 'blurb', 'name', 'tags', 'featuredImage', 'postType', 'event', 'templateId'])
 export const POST_BLURB_MAX = 500
 export const POST_EVENT_STATUSES = Object.freeze(['scheduled', 'cancelled', 'completed'])
 
@@ -1628,3 +1630,623 @@ export const buildPostOutline = ({ postId, post = {}, source = 'draft', status =
   body: outlineBody({ content: post.content, structure: post.structure, blocks, includeValues, includeSchema }),
   blockIds: Array.isArray(post.blockIds) ? [...post.blockIds] : derivePostBlockIds(post),
 })
+
+// ---- Operation specs ----
+//
+// What every operation accepts, declared once: the checks in
+// functions/cmsOperations.js enforce it (tests prove each declared rule is
+// refused when broken), and cms_contract serves the operations contract
+// generated from it (renderOperationsContract). Explanations here are the
+// defaults; docs/features/cms/agent-contracts-design.md has the plan for
+// editable overrides.
+//
+// Field types: docId (a Firestore document id), string, text (a non-empty
+// string), boolean, integer, object, list, json (a JSON object as a string).
+// `required` fields are refused when missing; `values` lists the allowed
+// values; `fields` lists the keys an object may hold.
+
+const docIdField = (note, extra = {}) => ({ type: 'docId', required: true, note, ...extra })
+const siteIdField = docIdField('Site document id (cms_list_pages, the Hub URL).')
+const pageIdField = docIdField('Draft page id (cms_list_pages).')
+const postIdField = docIdField('Draft post id (cms_list_posts).')
+const instanceIdField = docIdField('Block instance id (cms_get_page or cms_get_post).')
+const indexField = { type: 'integer', note: 'Row position; 0 is the first row. Out-of-range values are clamped.' }
+const valuesField = { type: 'object', note: 'Field values for the block, validated against its schema. Under 200 KB.' }
+
+export const CMS_OPERATION_SPECS = Object.freeze({
+  'theme.create': {
+    scope: 'organization',
+    writes: 'themes',
+    summary: 'Create a theme. Theme and Head JSON default to the standard new-theme values when omitted.',
+    effect: '`themes/{id}` with the shared new-theme Theme and Head JSON defaults when omitted, `extraCSS: \'\'`, `version: 1`, `defaultPages: []`, empty root menus',
+    input: {
+      themeId: { type: 'docId', note: 'Optional id; generated when omitted.' },
+      fields: { type: 'object', required: true, fields: ['name', 'theme', 'headJSON', 'extraCSS', 'typeRoles', 'defaultPages', 'defaultMenus', 'defaultSiteSettings'], note: '`name` is required; `theme` and `headJSON` are JSON object strings; new themes must use the standard token names.' },
+    },
+    result: '{ themeId }',
+    problems: ['theme.exists', 'theme.fields', 'theme.name-required', 'theme.json-required', 'theme.token-names'],
+  },
+  'theme.update': {
+    scope: 'organization',
+    writes: 'themes',
+    summary: 'Change fields of a theme no published site uses.',
+    effect: 'The listed fields. Refused when the theme is live (Invariants)',
+    input: {
+      themeId: docIdField('Theme id (cms_find_theme).'),
+      fields: { type: 'object', required: true, fields: ['name', 'theme', 'headJSON', 'extraCSS', 'typeRoles', 'defaultPages', 'defaultMenus', 'defaultSiteSettings'], note: 'Only the listed fields change.' },
+    },
+    result: '{ themeId }',
+    problems: ['theme.not-found', 'theme.fields', 'theme.no-fields', 'theme.token-names', 'theme.live'],
+  },
+  'theme.propose': {
+    scope: 'organization',
+    writes: 'themes',
+    summary: 'Propose a change to a theme, for a person to review and apply in the Hub\'s theme editor. The theme is unchanged.',
+    effect: '`themeProposals/{id}`: `{ themeId, fields, note, status: \'open\', createdBy, createdAt }`; the theme is unchanged. A person reviews it in the Hub\'s theme editor (Theme Proposals): applying saves `fields` over the theme and sets `status: \'applied\'`, `appliedBy`, `appliedAt`; rejecting sets `status: \'rejected\'`, `rejectedBy`, `rejectedAt`',
+    input: {
+      themeId: docIdField('Theme id (cms_find_theme).'),
+      fields: { type: 'object', required: true, fields: ['name', 'theme', 'headJSON', 'extraCSS', 'typeRoles', 'defaultPages', 'defaultMenus', 'defaultSiteSettings'], note: 'The proposed values.' },
+      note: { type: 'string', note: 'What the change is for, shown to the reviewer. Up to 2000 characters.' },
+    },
+    result: '{ themeId, proposalId }',
+    problems: ['theme.not-found', 'theme.fields', 'theme.no-fields', 'theme.token-names'],
+  },
+  'site.create': {
+    scope: 'organization',
+    writes: 'sites',
+    summary: 'Create a site as the Hub\'s new-site form does, with a draft page for each entry of the theme\'s default menus.',
+    effect: '`sites/{auto id}` as the Hub\'s new-site form saves it (Document shapes), and one draft page per theme default-menu entry. Users, members-only content and the AI agent are left to the Hub\'s site settings.',
+    input: {
+      name: { type: 'text', required: true },
+      theme: { type: 'docId', required: true, note: 'An existing theme id.' },
+      domains: { type: 'list', required: true, note: 'At least one domain, each 45 characters or fewer.' },
+      settings: { type: 'object', fields: SITE_CREATE_FIELDS, note: '`forwardApex` is true or false, `allowedThemes` a list that includes `theme`, the rest strings.' },
+    },
+    result: '{ siteId, pageIds }',
+    problems: ['site.name-required', 'site.theme-required', 'theme.not-found', 'site.domains', 'fields.not-allowed', 'fields.type', 'site.allowed-themes', 'structured-data'],
+  },
+  'site.update': {
+    scope: 'site',
+    writes: 'sites',
+    summary: 'Change the draft site\'s SEO fields. Published site settings change when the site is published from the Hub.',
+    effect: 'Those fields on the draft site document (`sites/{siteId}`); published site settings are unchanged until the site is published from the Hub. Other settings stay with the Hub\'s site settings',
+    input: {
+      siteId: siteIdField,
+      fields: { type: 'object', required: true, fields: SITE_UPDATE_FIELDS, note: 'Strings.' },
+    },
+    result: '{ siteId }',
+    problems: ['site.not-found', 'fields.not-allowed', 'fields.type', 'site.no-fields', 'structured-data'],
+  },
+  'page.create': {
+    scope: 'site',
+    writes: 'sites',
+    summary: 'Create a blank draft page and add it to a root menu.',
+    effect: '`sites/{siteId}/pages/{uuid}`: the menu editor\'s blank page (`name` = unique root slug) with `fields` applied in the same write, and the site\'s `menus` with `{ name: slug, menuTitle: name, item: pageId }` added',
+    input: {
+      siteId: siteIdField,
+      name: { type: 'text', required: true, note: 'The page title; its slug is made unique among root pages.' },
+      menu: { type: 'string', values: ROOT_MENUS, default: 'Site Root' },
+      fields: { type: 'object', fields: PAGE_UPDATE_FIELDS, note: 'SEO fields, as page.update.' },
+    },
+    result: '{ siteId, pageId, slug }',
+    problems: ['site.not-found', 'page.templates-site', 'page.menu', 'page.name-required', 'fields.type', 'fields.not-allowed', 'structured-data'],
+  },
+  'page.update': {
+    scope: 'site',
+    writes: 'sites',
+    summary: 'Change a draft page\'s SEO fields.',
+    effect: 'Those fields; `version` + 1. Structured data rules in Invariants. Refused when it sets `structuredData` on a page with `structuredDataAiLocked: true` (custom structured data copied from its template), which the Hub\'s AI SEO also leaves alone; it is edited in the Hub\'s page settings. The other fields, `postStructuredData` included, stay open, as they do for the Hub\'s AI',
+    input: {
+      siteId: siteIdField,
+      pageId: pageIdField,
+      fields: { type: 'object', required: true, fields: PAGE_UPDATE_FIELDS, note: 'Strings. `structuredData` is refused on a page whose structured data is AI-locked.' },
+    },
+    result: '{ siteId, pageId }',
+    problems: ['site.not-found', 'page.not-found', 'fields.not-allowed', 'fields.type', 'page.no-fields', 'page.structured-data-locked', 'structured-data'],
+  },
+  'page.placeBlock': {
+    scope: 'site',
+    writes: 'sites',
+    summary: 'Place a library block in a new full-width row of a draft page.',
+    effect: 'A new instance and a new full-width row (Document shapes); `blockIds`; `version` + 1. A synced block (site chrome) copies the site\'s existing synced instance (`values`, `meta`, `protection`, `blockUpdatedAt`; its own instance id) and refuses `values`; refused when the site has no instance of it yet (the first one is placed in the Hub)',
+    input: {
+      siteId: siteIdField,
+      pageId: pageIdField,
+      blockId: docIdField('Library block id (cms_find_block).'),
+      values: valuesField,
+      index: indexField,
+      area: { type: 'string', values: ['main', 'post'], default: 'main', note: '`post` places it in the page\'s post area.' },
+    },
+    result: '{ siteId, pageId, instanceId, rowId }',
+    problems: ['site.not-found', 'page.not-found', 'area.invalid', 'block.not-found', 'block.synced-first', 'block.synced-values', 'values.template-v1', 'values.invalid', 'values.schema'],
+  },
+  'page.setValues': {
+    scope: 'site',
+    writes: 'sites',
+    summary: 'Set field values on a placed block instance (Template v2, not synced).',
+    effect: 'The instance\'s `values` (merged unless `replace`), `blockUpdatedAt`; `version` + 1. Template v2, non-synced instances only',
+    input: {
+      siteId: siteIdField,
+      pageId: pageIdField,
+      instanceId: instanceIdField,
+      values: { ...valuesField, required: true },
+      replace: { type: 'boolean', default: false, note: 'Replace all values instead of merging.' },
+    },
+    result: '{ siteId, pageId, instanceId }',
+    problems: ['site.not-found', 'page.not-found', 'instance.not-found', 'values.template-v1', 'block.synced-values', 'values.invalid', 'values.schema'],
+  },
+  'page.removeBlock': {
+    scope: 'site',
+    writes: 'sites',
+    summary: 'Remove a block instance; rows left empty are removed.',
+    effect: 'The instance, its column reference, rows left empty; `blockIds`; `version` + 1',
+    input: { siteId: siteIdField, pageId: pageIdField, instanceId: instanceIdField },
+    result: '{ siteId, pageId }',
+    problems: ['site.not-found', 'page.not-found', 'instance.not-found'],
+  },
+  'page.moveBlock': {
+    scope: 'site',
+    writes: 'sites',
+    summary: 'Move a block instance to another row position in its area.',
+    effect: 'The area\'s rows (`structure` or `postStructure`); `version` + 1. An instance alone in its row moves with the row (layout and settings unchanged); one sharing a row leaves its column for a new full-width row (Document shapes). Rows left empty are removed, as `page.removeBlock` removes them. The instance, its values, meta and synced state, and `blockIds` are unchanged. Refused for moves between the main and post areas, an instance in no row, and a move that changes nothing',
+    input: {
+      siteId: siteIdField,
+      pageId: pageIdField,
+      instanceId: instanceIdField,
+      index: { ...indexField, required: true },
+      area: { type: 'string', values: ['main', 'post'], note: 'Must be the instance\'s own area.' },
+    },
+    result: '{ siteId, pageId, instanceId, rowId, index, area }',
+    problems: ['site.not-found', 'page.not-found', 'instance.not-found', 'area.invalid', 'move.cross-area', 'move.index', 'move.no-row', 'move.no-change'],
+  },
+  'block.create': {
+    scope: 'organization',
+    writes: 'blocks',
+    summary: 'Create a library block after the Hub\'s import check.',
+    effect: '`blocks/{docId}` after the Hub import check (`checkImportedBlock`), filled with the new-block defaults. Refused if the block exists',
+    input: {
+      block: { type: 'object', required: true, note: 'A block document with its `docId` (blocks contract). Check it with cms_validate first.' },
+    },
+    result: '{ blockId }',
+    problems: ['block.document', 'block.exists', 'block.design-reference', 'block.validation', 'block.tags'],
+  },
+  'block.draft': {
+    scope: 'organization',
+    writes: 'blocks',
+    summary: 'Save an unreleased draft of a library block; a developer releases it in the Hub.',
+    effect: 'A draft revision through the same save as `cms-saveBlockDraft`, with `source: \'agent\'` and its base check (`docs/data-contracts/cms-blocks/README.md`, Revisions). Fields `definition` leaves out keep the current definition\'s; a Template v2 `template` follows `content`; `null` removes a field',
+    input: {
+      blockId: docIdField('Library block id (cms_find_block).'),
+      definition: { type: 'object', required: true, note: 'The block definition; `content` is required. Fields left out keep their current values; `null` removes one.' },
+      baseHash: { type: 'string', required: true, note: 'cms_block_base\'s baseHash for the definition you started from.' },
+      baseRevision: { type: 'integer', note: 'The revision you started from, when known.' },
+    },
+    result: '{ blockId, status, releasedRevision, draftRevision } (status saved, unchanged or discarded)',
+    problems: ['block.not-found', 'block.definition', 'block.base-hash-required', 'block.changed', 'block.design-reference', 'block.validation', 'block.tags'],
+  },
+  'post.create': {
+    scope: 'site',
+    writes: 'sites',
+    summary: 'Create a draft post as the post editor does. Nothing is published.',
+    effect: '`sites/{siteId}/posts/{auto id}` as the post editor saves a new post (Document shapes, Post), with the slug made unique among the site\'s draft posts (`-1`, `-2`…; a notice says so). With `templateId`, the template\'s body is copied as the new-post dialog copies it. Nothing is published.',
+    input: {
+      siteId: siteIdField,
+      title: { type: 'text', required: true },
+      blurb: { type: 'text', required: true, max: POST_BLURB_MAX, note: 'Preview text.' },
+      name: { type: 'string', note: 'Slug; made from the title when omitted, and made unique.' },
+      tags: { type: 'list', note: 'Strings.' },
+      featuredImage: { type: 'string', note: 'One image URL or storage path.' },
+      postType: { type: 'string', values: ['post', 'event'], default: 'post', note: 'The post\'s kind; `type` is the operation.' },
+      event: { type: 'object', note: 'For events (posts contract, Events).' },
+      templateId: { type: 'docId', note: 'A Post template page on the templates site; its body is copied.' },
+    },
+    closed: true,
+    result: '{ siteId, postId, name }',
+    problems: ['site.not-found', 'fields.not-allowed', 'post.title-required', 'post.blurb-required', 'post.blurb-too-long', 'post.tags', 'post.featured-image', 'post.type', 'post.event', 'post.slug', 'post.template-not-found', 'post.template-type'],
+  },
+  'post.update': {
+    scope: 'site',
+    writes: 'sites',
+    summary: 'Change a draft post\'s fields with the post editor\'s rules.',
+    effect: 'Those fields and `last_updated`/`uid`, with the editor\'s rules: title and blurb required, blurb at most 500 characters, `name` slugified and made unique (a title change keeps the slug, as for a saved post in the editor), `event` merged into the post\'s event and recomputed for events, `restrictionRuleId` empty or one of the site\'s `restrictedContent.rules` ids. Other fields are refused',
+    input: {
+      siteId: siteIdField,
+      postId: postIdField,
+      fields: { type: 'object', required: true, fields: POST_UPDATE_FIELDS, note: 'Publication, scheduling and dates are set in the Hub.' },
+    },
+    result: '{ siteId, postId }',
+    problems: ['site.not-found', 'post.not-found', 'post.no-fields', 'fields.not-allowed', 'post.title-required', 'post.blurb-required', 'post.blurb-too-long', 'post.tags', 'post.featured-image', 'post.slug', 'post.event', 'post.restriction-rule'],
+  },
+  'post.placeBlock': {
+    scope: 'site',
+    writes: 'sites',
+    summary: 'Place a library block (one whose types include Post) in a new row of a draft post.',
+    effect: 'As `page.placeBlock`, in the post\'s `content`/`structure`, with a post row (Document shapes, Post) and post `blockIds`. Refused for blocks the post editor\'s picker doesn\'t offer: a block\'s types must include `Post` (no type counts as `Page`). Posts have one body: `area` is refused',
+    input: { siteId: siteIdField, postId: postIdField, blockId: docIdField('Library block id (cms_find_block).'), values: valuesField, index: indexField },
+    result: '{ siteId, postId, instanceId, rowId }',
+    problems: ['site.not-found', 'post.not-found', 'post.area', 'post.legacy-body', 'block.not-found', 'block.not-allowed-here', 'block.synced-first', 'block.synced-values', 'values.template-v1', 'values.invalid', 'values.schema'],
+  },
+  'post.setValues': {
+    scope: 'site',
+    writes: 'sites',
+    summary: 'Set field values on a block instance in a draft post, as page.setValues.',
+    effect: 'As `page.setValues`',
+    input: { siteId: siteIdField, postId: postIdField, instanceId: instanceIdField, values: { ...valuesField, required: true }, replace: { type: 'boolean', default: false } },
+    result: '{ siteId, postId, instanceId }',
+    problems: ['site.not-found', 'post.not-found', 'post.legacy-body', 'instance.not-found', 'values.template-v1', 'block.synced-values', 'values.invalid', 'values.schema'],
+  },
+  'post.moveBlock': {
+    scope: 'site',
+    writes: 'sites',
+    summary: 'Move a block instance to another row of a draft post, as page.moveBlock.',
+    effect: 'As `page.moveBlock`; an instance leaving a shared row gets a post row',
+    input: { siteId: siteIdField, postId: postIdField, instanceId: instanceIdField, index: { ...indexField, required: true } },
+    result: '{ siteId, postId, instanceId, rowId, index, area }',
+    problems: ['site.not-found', 'post.not-found', 'post.area', 'post.legacy-body', 'instance.not-found', 'move.index', 'move.no-row', 'move.no-change'],
+  },
+  'post.removeBlock': {
+    scope: 'site',
+    writes: 'sites',
+    summary: 'Remove a block instance from a draft post, as page.removeBlock.',
+    effect: 'As `page.removeBlock`',
+    input: { siteId: siteIdField, postId: postIdField, instanceId: instanceIdField },
+    result: '{ siteId, postId }',
+    problems: ['site.not-found', 'post.not-found', 'post.legacy-body', 'instance.not-found'],
+  },
+})
+
+// What each problem code means and how to fix it. Every code a check
+// reports is listed here (tests enforce both directions).
+export const CMS_OPERATION_PROBLEMS = Object.freeze({
+  'theme.exists': 'A theme with that id exists. Leave themeId out, or change it with theme.update or theme.propose.',
+  'theme.fields': 'A theme field has the wrong form: theme and headJSON must be JSON object strings, extraCSS a string, typeRoles an object of class names.',
+  'theme.name-required': 'New themes need fields.name.',
+  'theme.json-required': 'New themes need their Theme JSON (fields.theme).',
+  'theme.not-found': 'No theme with that id in this organization (cms_find_theme).',
+  'theme.no-fields': 'fields has nothing to change.',
+  'theme.live': 'A published site uses this theme, so changes would go live at once. Use theme.propose; a person applies it in the theme editor.',
+  'theme.token-names': 'The Theme JSON uses non-standard token names. New and standard themes must keep the standard names (themes contract).',
+  'structured-data': 'Structured data must be valid JSON-LD. Read the message for the exact error.',
+  'site.not-found': 'No site with that id in this organization (cms_list_pages lists a site\'s pages; the Hub shows site ids).',
+  'site.name-required': 'New sites need a name.',
+  'site.theme-required': 'New sites need a theme (an existing theme id).',
+  'site.domains': 'Sites need at least one domain, each 45 characters or fewer.',
+  'site.allowed-themes': 'settings.allowedThemes must include the site\'s theme.',
+  'site.no-fields': 'fields has nothing to change.',
+  'fields.not-allowed': 'The operation can\'t set that field; the message lists the ones it can. The rest are set in the Hub.',
+  'fields.type': 'A field has the wrong type; the message says which type it needs.',
+  'page.not-found': 'No draft page with that id on the site (cms_list_pages).',
+  'page.templates-site': 'Pages on the templates site are created in the Hub.',
+  'page.menu': 'menu must be one of the root menus.',
+  'page.name-required': 'New pages need a name.',
+  'page.no-fields': 'fields has nothing to change.',
+  'page.structured-data-locked': 'The page\'s structured data came from its template and is AI-locked; change it in the Hub\'s page settings. The other fields can still change.',
+  'block.not-found': 'No library block with that id (cms_find_block). New blocks use block.create.',
+  'block.not-allowed-here': 'This block can\'t go here; for posts, the block\'s types must include Post.',
+  'block.synced-first': 'A synced block (site chrome) is placed first in the Hub; after that, operations can place copies.',
+  'block.synced-values': 'A synced block\'s values are shared across the site and edited in the Hub.',
+  'block.document': 'block must be a block document object.',
+  'block.exists': 'A block with that docId exists. Change it with block.draft.',
+  'block.design-reference': 'meta.design has the wrong form (blocks contract, design references).',
+  'block.validation': 'The block fails the Hub\'s import check; the message starts with the validator\'s code. Check it with cms_validate and fix every error.',
+  'block.tags': 'The block\'s tags break the organization\'s tag list or tag count rules.',
+  'block.definition': 'definition must be a block definition object with string content.',
+  'block.base-hash-required': 'baseHash is required: send cms_block_base\'s baseHash for the definition you started from.',
+  'block.changed': 'The block changed in the Hub since you read it. Read cms_block_base again, reapply your change, and send the new baseHash.',
+  'values.template-v1': 'Values can only be set on Template v2 blocks; Template v1 blocks are edited in the Hub.',
+  'values.invalid': 'values must be an object under 200 KB.',
+  'values.schema': 'A value doesn\'t match the block\'s schema (unknown field, wrong type, missing required value, or out of bounds).',
+  'instance.not-found': 'No block instance with that id (cms_get_page or cms_get_post).',
+  'area.invalid': 'area must be one of the page\'s areas: "main" or "post" (when the page has a post area). Leave it out for main.',
+  'move.cross-area': 'Blocks can\'t move between the main and post areas; remove it and place the block in the other area.',
+  'move.index': 'index must be a whole number: the row position (0 is the first row).',
+  'move.no-row': 'The instance isn\'t in any row; remove it and place the block again.',
+  'move.no-change': 'The instance is already at that position.',
+  'post.not-found': 'No draft post with that id on the site (cms_list_posts).',
+  'post.no-fields': 'fields has nothing to change.',
+  'post.title-required': 'Posts need a non-empty title.',
+  'post.blurb-required': 'Posts need a non-empty blurb (preview text).',
+  'post.blurb-too-long': 'The blurb is too long; the message gives the limit.',
+  'post.tags': 'tags must be a list of strings.',
+  'post.featured-image': 'featuredImage must be one image URL or storage path.',
+  'post.type': 'postType must be "post" or "event".',
+  'post.event': 'The event fields are invalid; the message says which (posts contract, Events).',
+  'post.slug': 'name must be a slug, like "spring-open-house".',
+  'post.template-not-found': 'No page with that id on the templates site.',
+  'post.template-type': 'The template page isn\'t a Post template.',
+  'post.restriction-rule': 'restrictionRuleId must be empty or one of the site\'s restricted-content rules.',
+  'post.area': 'Posts have one body; leave area out.',
+  'post.legacy-body': 'The post still has a legacy HTML body; open it once in the Hub\'s post editor to turn it into blocks.',
+})
+
+const markdownCell = value => String(value ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ')
+
+// Explanation overrides (agent-contract-notes): the key of each piece of
+// default text an override can replace, and the text it replaces. Keys:
+// `operation:<type>` (the summary), `field:<type>.<input>` (the input's note)
+// and `problem:<code>` (the code's explanation).
+export const CONTRACT_NOTE_MAX = 2000
+export const contractNoteDefaults = (specs = CMS_OPERATION_SPECS, problems = CMS_OPERATION_PROBLEMS) => {
+  const defaults = {}
+  for (const [type, spec] of Object.entries(specs)) {
+    defaults[`operation:${type}`] = spec.summary
+    for (const [name, field] of Object.entries(spec.input))
+      defaults[`field:${type}.${name}`] = field.note || ''
+  }
+  for (const [code, text] of Object.entries(problems))
+    defaults[`problem:${code}`] = text
+  return defaults
+}
+
+// Problems with a note before it is stored: an unknown key or bad text.
+export const contractNoteProblems = (key, text) => {
+  const problems = []
+  if (!Object.prototype.hasOwnProperty.call(contractNoteDefaults(), key))
+    problems.push(`Unknown note key "${key}". Keys are operation:<type>, field:<type>.<input> or problem:<code>.`)
+  if (typeof text !== 'string' || !text.trim())
+    problems.push('A note needs text.')
+  else if (text.length > CONTRACT_NOTE_MAX)
+    problems.push(`A note is at most ${CONTRACT_NOTE_MAX} characters.`)
+  return problems
+}
+
+// The operations section of the operations contract, as Markdown. `notes`
+// ({ key: text }) replaces the default text it names.
+export const renderOperationsContract = (specs = CMS_OPERATION_SPECS, problems = CMS_OPERATION_PROBLEMS, notes = {}) => {
+  const note = (key, fallback) => ((typeof notes?.[key] === 'string' && notes[key].trim()) ? notes[key].trim() : fallback)
+  const lines = [
+    '## Operations',
+    '',
+    'Generated from `CMS_OPERATION_SPECS` in `edge/lib/cmsOperations.js`, the definitions the checks enforce. Every operation is `{ type, ...input }`. Send it to `cms_check_operation`, then to `cms_run_operation` with the returned checksum. A refusal lists its messages in `problems` and their codes in `problemCodes` (Problem codes, below). Not supported: synced block values (edited in the Hub), Template v1 values, multi-column rows, and moving a block into another column or a whole multi-instance row.',
+    '',
+  ]
+  const order = type => (CMS_OPERATION_TYPES.includes(type) ? CMS_OPERATION_TYPES.indexOf(type) : CMS_OPERATION_TYPES.length)
+  for (const [type, spec] of Object.entries(specs).sort(([a], [b]) => order(a) - order(b))) {
+    lines.push(`### \`${type}\``, '', note(`operation:${type}`, spec.summary), '', ...(spec.effect ? [`Writes: ${spec.effect}`, ''] : []), `Session: ${spec.scope}. Needs write access to ${spec.writes}. Result: \`${spec.result}\`.${spec.closed ? ' No other keys are accepted.' : ''}`, '', '| Input | Type | Required | Notes |', '| --- | --- | --- | --- |')
+    for (const [name, field] of Object.entries(spec.input)) {
+      const details = [
+        field.values ? `One of ${field.values.map(value => `\`${value}\``).join(', ')}.` : '',
+        field.default !== undefined ? `Default \`${field.default}\`.` : '',
+        field.max ? `At most ${field.max} characters.` : '',
+        field.fields ? `Keys: ${field.fields.map(key => `\`${key}\``).join(', ')}.` : '',
+        note(`field:${type}.${name}`, field.note || ''),
+      ].filter(Boolean).join(' ')
+      lines.push(`| \`${name}\` | ${field.type} | ${field.required ? 'yes' : 'no'} | ${markdownCell(details)} |`)
+    }
+    lines.push('', `Refusals: ${spec.problems.map(code => `\`${code}\``).join(', ')}.`, '')
+  }
+  lines.push('### Problem codes', '', '| Code | Meaning and fix |', '| --- | --- |')
+  for (const [code, text] of Object.entries(problems))
+    lines.push(`| \`${code}\` | ${markdownCell(note(`problem:${code}`, text))} |`)
+  return `${lines.join('\n')}\n`
+}
+
+// The marker in the operations contract that the generated section replaces
+// when cms_contract serves it, with any explanation overrides applied.
+export const OPERATIONS_CONTRACT_MARKER = '<!-- operations: generated from CMS_OPERATION_SPECS -->'
+export const withGeneratedOperations = (markdown, notes = {}) => (String(markdown).includes(OPERATIONS_CONTRACT_MARKER)
+  ? String(markdown).replace(OPERATIONS_CONTRACT_MARKER, renderOperationsContract(CMS_OPERATION_SPECS, CMS_OPERATION_PROBLEMS, notes).trimEnd())
+  : String(markdown))
+
+// ---- Document fields ----
+//
+// What each field of a CMS document means, for the contracts. Each kind
+// names the builder that writes a new document; a field the builder doesn't
+// write says who does (`writtenBy`). Tests check both directions: every key
+// the builder writes is described here, and every described field is either
+// written by the builder or says who writes it. cms_contract serves the
+// tables in place of their markers (withGeneratedFields).
+export const CMS_DOCUMENT_FIELDS = Object.freeze({
+  'page': {
+    builder: 'blankPagePayload',
+    columns: ['Field', 'Type', 'Meaning'],
+    fields: [
+      { names: ['name'], type: 'string', meaning: 'The page\'s slug, unique across both root menus (`uniqueRootSlug`).' },
+      { names: ['post'], type: 'boolean', meaning: '"Is a Post Template": the page renders posts under its route; its `postContent` is the post view.', writtenBy: 'the Hub\'s page settings' },
+      { names: ['type'], type: 'string array', meaning: 'Template pages only (`templates` site): `["Page"]`, `["Post"]` or both, where the template may be used.', writtenBy: 'the Hub\'s template editor' },
+      { names: ['content'], type: 'array', meaning: 'Block instances of the page view (blocks contract, Block instance).' },
+      { names: ['structure'], type: 'array', meaning: 'Rows of the page view: `[{ id, width, gap, background, verticalAlign, mobileOrder, marginXMode, paddingTop, paddingRight, paddingBottom, paddingLeft, marginTop, marginRight, marginBottom, marginLeft, tailwindClasses, columns: [{ id, span, blocks: [instanceId], tailwindClasses }] }]` (`createFullWidthRow`, `rowTailwindClasses`, `columnTailwindClasses`).', writtenBy: 'the page editor and the block operations' },
+      { names: ['postContent'], type: 'array', meaning: 'Block instances of the post view of a post template page.' },
+      { names: ['postStructure'], type: 'array', meaning: 'Rows of the post view, shaped as `structure`.', writtenBy: 'the page editor and the block operations' },
+      { names: ['blockIds'], type: 'string array', meaning: 'Derived: the library block ids of every instance and column reference (`derivePageBlockIds`); the propagation and sync triggers query it.' },
+      { names: ['metaTitle', 'metaDescription', 'structuredData'], type: 'strings', meaning: 'Page SEO. The default structured data is a `WebPage` with `isPartOf` the site and the `{{cms-url}}`, `{{cms-site}}` and `{{cms-logo}}` tokens (`buildPageStructuredData`).' },
+      { names: ['structuredDataAiLocked'], type: 'boolean', meaning: 'True when the template\'s structured data is custom, so AI SEO edits leave it alone (`isCustomStructuredDataTemplate`): the Hub\'s AI SEO skips `structuredData`, and `page.update` refuses it. Set when a page is created from a template; nothing clears it.' },
+      { names: ['postMetaTitle', 'postMetaDescription', 'postStructuredData'], type: 'strings', meaning: 'SEO of the post view, with each post\'s own tokens.' },
+      { names: ['version'], type: 'number', meaning: 'Incremented on every save in the editor and every page operation (`getNextVersion`); the published copy carries the version it was published at.', writtenBy: 'the page editor and the page operations' },
+      { names: ['doc_created_at', 'last_updated'], type: 'numbers', meaning: 'Timestamps.' },
+    ],
+  },
+  'block-instance': {
+    builder: 'buildInstanceFromLibraryBlock',
+    columns: ['Field', 'Owner'],
+    fields: [
+      { names: ['id'], meaning: 'Instance, unique within the document.' },
+      { names: ['blockId'], meaning: 'The library block\'s document id.' },
+      { names: ['name'], meaning: 'Copied from the library at placement. The picker refreshes it when cloning a synced instance. It is **not** propagated when the library block is renamed.' },
+      { names: ['content', 'template', 'templateVersion', 'schema', 'dataSources', 'isOverrideBlock', 'blockUpdatedAt'], meaning: 'Copied from the library block; see Propagation.' },
+      { names: ['blockRevision'], meaning: 'The library revision this instance holds. Written by the release worker, and by `page.placeBlock` operations when placing a block.' },
+      { names: ['values'], meaning: 'Instance-owned content. A Template v2 instance starts with each schema field\'s default `value`. The public renderer fills a field the instance has never saved from the schema default; saved values, including an empty string, are never replaced, and block releases never change instance `values`.' },
+      { names: ['meta'], meaning: 'Instance-owned. Library `meta` keys are merged in, with `limit` excluded and `queryItems` reconciled; the library-only `meta.design` is never merged.' },
+      { names: ['synced'], meaning: 'Instance setting: the instance shares one set of values across the site (site chrome).' },
+      { names: ['protection'], meaning: 'Instance setting.', writtenBy: 'the page editor (copied from the site\'s existing instance when placing a synced block)' },
+    ],
+  },
+  'library-block': {
+    writer: 'the `block.create` operation (the Hub\'s block import writes the same document)',
+    columns: ['Field', 'Type', 'Meaning'],
+    fields: [
+      { names: ['name'], type: 'string, required', meaning: 'Display name. The public renderer resolves Vue overrides from the name copied into each instance, so renaming an override block affects only new placements. The Hub asks for confirmation first.' },
+      { names: ['content'], type: 'string, required', meaning: 'Template markup. For Template v2 it must equal `template`.' },
+      { names: ['templateVersion'], type: '`1` or `2`', meaning: 'Missing or any value other than `2` means Template v1.' },
+      { names: ['template'], type: 'string', meaning: 'Template v2 markup.' },
+      { names: ['schema'], type: 'object', meaning: 'Editable inputs keyed by field name (Schema inputs, below). Defaults live in `schema[field].value`.' },
+      { names: ['dataSources'], type: 'object', meaning: 'Data Sources keyed by the name the template passes to `source("name")`. A declared source is fetched only when the template calls it.' },
+      { names: ['values'], type: 'object, required', meaning: 'Library-level values. Normally `{}`; each instance owns its values.' },
+      { names: ['meta'], type: 'object', meaning: 'Legacy Template v1 field metadata, including `queryItems`.', writtenBy: 'the Block Editor and imports, when the block has any' },
+      { names: ['meta.design'], type: 'object', meaning: 'Library only. The design node the block was built from: `{ source: "figma", file, node, name? }` or `{ source: "handoff", path, section?, name? }`, the same object as the block package manifest\'s `design` entry. It is part of the definition (a draft carries it and a release writes it to the library block) and is never copied to instances: the Block Editor keeps it when saving a Template v2 block (`CMS_LIBRARY_META_KEYS` in `edge/composables/useCmsTemplateRuntimeMeta.js`), and the block picker drops it with the rest of the library `meta`. `block.create` and `block.draft` refuse any other shape (operations contract, `block.design-reference`).' },
+      { names: ['tags', 'themes'], type: 'string arrays, required', meaning: 'Library filters. `themes` holds theme document ids from the same organization.' },
+      { names: ['type'], type: '`["Page"]`, `["Post"]` or both', meaning: 'Where authors may place the block. A missing value becomes `["Page"]` on import.' },
+      { names: ['previewType'], type: '`light` or `dark`', meaning: 'Hub preview surface.' },
+      { names: ['isOverrideBlock'], type: 'boolean', meaning: 'Marks a block the public renderer replaces with a Vue component. Its CMS HTML is the fallback.' },
+      { names: ['synced'], type: 'boolean, required', meaning: 'Synced blocks share one instance\'s values across pages.' },
+      { names: ['version'], type: 'number, required', meaning: 'Hub document version counter.' },
+      { names: ['blockUpdatedAt'], type: 'ISO string', meaning: 'Set when the definition changes. It is copied to instances.', writtenBy: 'the release worker and the Block Editor' },
+      { names: ['releasedRevision'], type: 'integer or missing', meaning: 'The revision number of the definition on this document. Missing means revision 0, which is created lazily on the first edit.', writtenBy: 'the revision callables only' },
+      { names: ['draftRevision'], type: 'integer, `null` or missing', meaning: 'The open draft revision, if any.', writtenBy: 'the revision callables and the release worker only' },
+      { names: ['lastRevisionNumber'], type: 'integer or missing', meaning: 'The highest revision number used.', writtenBy: 'the revision callables and the release worker only' },
+      { names: ['activeReleaseId'], type: 'string, `null` or missing', meaning: 'The release that owns the block while it runs. A newer release taking it over stops the older one.', writtenBy: 'the release callables and worker' },
+      { names: ['lastReleaseId'], type: 'string or missing', meaning: 'The release that last wrote the definition. `blockUpdated` ignores a write that changes it.', writtenBy: 'the release worker' },
+      { names: ['canary'], type: 'object, `null` or missing', meaning: '`{ revisionNumber, siteIds, releaseId, updatedAt }` while a revision is live only on some sites. Cleared when it is promoted, rolled back from every site, or replaced by any release to all sites.', writtenBy: 'the release worker' },
+      { names: ['templateConversion'], type: 'object or `null`', meaning: 'Notes from converting a Template v1 block. Cleared to `null` after the Block Editor saves.', writtenBy: 'the Template v1 converter' },
+      { names: ['docId', 'doc_created_at', 'last_updated', 'uid'], type: 'string, numbers, uid', meaning: 'Bookkeeping the Hub\'s document wrapper and the operations add: the document id, creation and last save times in milliseconds, and who saved last.' },
+    ],
+  },
+  'revision': {
+    writer: '`cms-saveBlockDraft` and the `block.draft` operation (a draft), and the first draft save of a block (revision 0)',
+    columns: ['Field', 'Type', 'Meaning'],
+    fields: [
+      { names: ['number'], type: 'integer', meaning: 'The revision number, starting at 0.' },
+      { names: ['status'], type: '`draft`, `releasing`, `canary`, `released`, `superseded` or `discarded`', meaning: 'Revision 0 starts as `released`; edited revisions start as `draft`. A block has at most one `draft`. A release marks its revision `releasing` (the definition is then frozen), then `released`; the revision it replaces becomes `superseded`.' },
+      { names: ['definition'], type: 'object', meaning: '`content`, `template`, `templateVersion`, `schema`, `dataSources`, `isOverrideBlock`, `meta` and `values`, as present. `values` isn\'t propagated, but new placements copy it, so it waits for a release too.' },
+      { names: ['baseNumber'], type: 'integer or `null`', meaning: 'The released revision the draft was edited from; `null` for revision 0.' },
+      { names: ['source'], type: '`baseline`, `editor`, `import`, `page-editor`, `agent` or `implicit`', meaning: 'Where the latest save came from. `baseline` marks revision 0; `implicit` marks a definition written directly to the library block; `agent` marks a `block.draft` operation run with an agent key.' },
+      { names: ['checks'], type: 'object', meaning: 'The release checks summary of the release that took it.', writtenBy: 'the release callables' },
+      { names: ['releaseId', 'releasedBy', 'supersededBy'], type: 'string, uid, integer', meaning: 'The release that last took it, who started that release, and the revision that replaced it.', writtenBy: 'the release callables and worker' },
+      { names: ['createdBy', 'updatedBy'], type: 'uid or `null`', meaning: 'Who created it and who last saved it.' },
+      { names: ['createdAt', 'updatedAt', 'releasedAt'], type: 'ISO strings', meaning: 'When it was created, last saved and last released.' },
+      { names: ['discardedBy', 'discardedAt'], type: 'uid, ISO string', meaning: 'Who discarded the draft, and when.', writtenBy: '`cms-discardBlockDraft`, and a draft save equal to the released definition' },
+    ],
+  },
+  'release': {
+    writer: '`cms-executeBlockRelease`, and the release worker as it runs',
+    columns: ['Field', 'Meaning'],
+    fields: [
+      { names: ['blockId', 'revisionNumber', 'previousRevisionNumber'], meaning: 'What is released and what it replaces.' },
+      { names: ['kind'], meaning: '`release` (a draft, or extending a canary), `promote` (a canary to all sites), `rollback` (an older revision) or `reapply` (the released one again).' },
+      { names: ['scope'], meaning: '`all`, or `{ siteIds }` for a canary. A site-scoped release never changes the library block\'s definition. When it finishes it records itself as the block\'s `lastReleaseId`, so a partial canary or scoped rollback can be retried until a newer release takes the block.' },
+      { names: ['implicit'], meaning: '`true` when started by a direct definition write. These releases skip the dry run and its checks.' },
+      { names: ['status'], meaning: '`planned`, `running`, `completed`, `partial` (some targets failed; retryable), `failed` or `superseded` (a newer release took the block).' },
+      { names: ['definition', 'beforeDefinition'], meaning: 'The frozen definition being released, and the one it replaces.' },
+      { names: ['blockUpdatedAt'], meaning: 'The `blockUpdatedAt` written to instances and the library block.' },
+      { names: ['revisionStatusBefore'], meaning: 'The revision\'s status when the release took it. A revision that was already live (`released` or `canary`, as in a reapply) returns to that status when the release finishes or is superseded; any other becomes `superseded`.' },
+      { names: ['counts'], meaning: '`{ planned, done, skipped, failed }`. The final counts are recomputed from the targets.' },
+      { names: ['checksum'], meaning: 'The dry run\'s checksum of the block, the revision\'s definition and the library definition it replaces, the released revision, scope and target paths.' },
+      { names: ['checks', 'confirmedBreaking'], meaning: 'The release checks summary (also stored on the revision), and whether an admin confirmed breaking schema changes.' },
+      { names: ['startedBy'], meaning: 'The admin who started the release.' },
+      { names: ['retriedBy'], meaning: 'The admin who last retried it.', writtenBy: '`cms-retryBlockRelease`' },
+      { names: ['createdAt', 'startedAt', 'updatedAt', 'completedAt'], meaning: 'ISO strings: created, started by the worker, last changed, finished.' },
+      { names: ['chunkAttempts', 'error'], meaning: 'Worker health. The release fails after 5 consecutive failed worker runs.', writtenBy: 'the release worker' },
+    ],
+  },
+  'site': {
+    writer: 'the `site.create` operation, from `siteSettingsDefaults` (the Hub\'s new-site form writes the same document)',
+    columns: ['Field', 'Type', 'Meaning'],
+    fields: [
+      { names: ['name'], type: 'string', meaning: 'Display name.' },
+      { names: ['theme'], type: 'string', meaning: 'The theme document id the site renders with (themes contract).' },
+      { names: ['allowedThemes'], type: 'string array', meaning: 'Themes the site may switch to; includes `theme`.' },
+      { names: ['menus'], type: 'object', meaning: 'The site\'s menus (Menus, below). Seeded from the theme\'s `defaultMenus`.' },
+      { names: ['domains'], type: 'string array', meaning: 'Public domains, each 45 characters or fewer, normalized and unique across the organization\'s sites.' },
+      { names: ['forwardApex'], type: 'boolean', meaning: 'Redirect the apex domain to `www`.' },
+      { names: ['canonicalDomain'], type: 'string', meaning: '"Forward All Sites To": the domain every other domain redirects to.', writtenBy: 'the Hub\'s site settings' },
+      { names: ['logo', 'logoLight', 'logoText', 'logoType'], type: 'strings', meaning: 'Logo image, light-surface logo, text logo, and `image` or `text`.' },
+      { names: ['brandLogoDark', 'brandLogoLight', 'favicon'], type: 'strings', meaning: 'Brand marks and favicon URLs.' },
+      { names: ['menuPosition'], type: 'string', meaning: 'Navigation alignment (`right` by default).' },
+      { names: ['contactEmail', 'contactPhone'], type: 'strings', meaning: 'Contact details blocks read from the site record and contact forms send to.' },
+      { names: ['metaTitle', 'metaDescription', 'structuredData'], type: 'strings', meaning: 'Site SEO. `structuredData` is a JSON-LD string; the default is a `WebSite` with a publisher `Organization` and the `{{cms-site}}` and `{{cms-logo}}` tokens (`buildSiteStructuredData`).' },
+      { names: ['trackingFacebookPixel', 'trackingGoogleAnalytics', 'trackingAdroll', 'trackingAdrollPixelId'], type: 'strings', meaning: 'Tracking ids.' },
+      { names: ['trackingConsentEnabled', 'trackingConsentMessage'], type: 'boolean, string', meaning: 'The consent banner and its text (`DEFAULT_TRACKING_CONSENT_MESSAGE`).' },
+      { names: ['analyticsEvents'], type: 'object', meaning: '`{ enabled, forms, contactClicks, accountSignUps }`, all booleans, `false` by default (`normalizeAnalyticsEvents`): which events the public site sends to analytics.' },
+      { names: ['sureFeedURL'], type: 'string', meaning: 'External feed URL.' },
+      { names: ['socialFacebook', 'socialInstagram', 'socialTwitter', 'socialLinkedIn', 'socialYouTube', 'socialTikTok'], type: 'strings', meaning: 'Social profile URLs.' },
+      { names: ['users'], type: 'string array', meaning: 'Site users; `users[0]` is the primary user whose profile fields sync with the site (Invariants). `[]` when an organization admin creates the site, else `[creator]`.' },
+      { names: ['showMembersTab'], type: 'boolean', meaning: 'Members tab in the Hub.' },
+      { names: ['restrictedContent'], type: 'object', meaning: '`{ enabled, allowSelfRegistration, registrationPricing, provider, defaultCurrency, registrationTermsUrl, loginHelpText, registrationSuccessMessage, rules }` (`restrictedContentDefaults`). New sites don\'t have it.', writtenBy: 'the Hub\'s members-only content settings' },
+      { names: ['contactSpam'], type: 'object', meaning: '`{ enabled, mode, blockThreshold, allowedInquiryContext, blockedInquiryContext }` (`contactSpamDefaults`).' },
+      { names: ['aiAgentUserId', 'aiInstructions'], type: 'strings', meaning: 'The AI agent user and its instructions; when either is set on creation, `aiBootstrapStatus` is written and the bootstrap worker runs.' },
+      { names: ['aiBootstrapStatus'], type: 'string', meaning: '`queued`, then the worker\'s status.', writtenBy: 'the site creation trigger and the AI bootstrap worker' },
+      { names: ['version'], type: 'number', meaning: 'Site version; incremented when the site settings are published and when a theme the published site uses changes.', writtenBy: 'site publishing and the theme trigger' },
+      { names: ['pageVersions'], type: 'object', meaning: '`{ [pageId]: version }` of the published pages.', writtenBy: 'page publishing and the release worker' },
+      { names: ['pageLastModified'], type: 'object', meaning: '`{ [pageId]: timestamp }` for the Sites page list; removed with the page.', writtenBy: '`onPageUpdated`' },
+      { names: ['domainError', 'domainSyncRetriedAt'], type: 'string, timestamp', meaning: 'Domain sync state (Invariants).', writtenBy: 'the domain sync Functions' },
+      { names: ['docId', 'doc_created_at', 'last_updated', 'uid'], type: 'string, numbers, uid', meaning: 'Bookkeeping the Hub\'s document wrapper and the operations add: the document id, creation and last save times in milliseconds, and who saved last.' },
+    ],
+  },
+  'post': {
+    writer: 'the `post.create` operation (the Hub\'s new-post dialog writes the same document)',
+    columns: ['Field', 'Type', 'Meaning'],
+    fields: [
+      { names: ['name'], type: 'string, required', meaning: 'The post\'s slug, generated from the title and editable; unique within the site\'s posts (`ensureUniqueSlug`). It is the last route segment under the post template page.' },
+      { names: ['title'], type: 'string, required', meaning: 'Title.' },
+      { names: ['blurb'], type: 'string, required', meaning: 'Preview text, at most 500 characters (`POST_BLURB_MAX`).' },
+      { names: ['tags'], type: 'string array', meaning: 'Free tags; a post with the `Field Notes` tag is an editorial post.' },
+      { names: ['featuredImage'], type: 'string', meaning: 'One image URL or storage path. Older posts may carry `featuredImages` (an array); the first entry is used when `featuredImage` is empty.' },
+      { names: ['content', 'structure'], type: 'arrays', meaning: 'The body: block instances and rows, as a page\'s (blocks contract, Block instance; sites and pages contract, Page). Copied from a Post template page when one is given.' },
+      { names: ['blockIds'], type: 'string array', meaning: 'Derived: the library block ids of the instances; the propagation trigger queries it.' },
+      { names: ['type'], type: '`post` or `event`', meaning: 'Missing means `post`.' },
+      { names: ['event'], type: 'object', meaning: 'For events: `{ startAt, endAt, timezone, startAtUtc, endAtUtc, isPast, unpublishPastEvent, locationName, locationAddress, isVirtual, meetingUrl, registrationUrl, capacity, status }`. `startAtUtc`, `endAtUtc` and `isPast` are computed from the local times and the timezone; `unpublishPastEvent` defaults to `true`; `status` is `scheduled`, `cancelled` or `completed`.' },
+      { names: ['restrictionRuleId'], type: 'string', meaning: 'The site\'s restricted-content rule the post is limited to; empty for public posts.' },
+      { names: ['publishAt', 'publishAtTimezone'], type: 'strings', meaning: 'A scheduled publication time and its timezone, on drafts only.', writtenBy: 'the Hub\'s post editor' },
+      { names: ['publishAtError'], type: 'string', meaning: 'Why a scheduled publication was refused; cleared on the next successful publish.', writtenBy: 'the scheduled publisher' },
+      { names: ['publishedAt'], type: 'ISO string', meaning: 'When the post was last published; on the draft and the snapshot.', writtenBy: 'post publishing' },
+      { names: ['legacyBlog'], type: 'object', meaning: 'On posts imported from the legacy Clearwater blog: `{ sourceId, sourceUuid, sourceUrl, sourceSha256, sourcePublishedAt, conversionWarnings, importPublication }`. Audit metadata only; `sourcePublishedAt` is not the public date, and `importPublication: \'published\'` stops a re-run of the import from republishing a post that was unpublished by hand.', writtenBy: 'the Clearwater blog importer' },
+      { names: ['docId', 'doc_created_at', 'last_updated', 'uid'], type: 'string, numbers, uid', meaning: 'Bookkeeping the Hub\'s document wrapper and the operations add. On a published post, `doc_created_at` is the publication time in milliseconds; the renderer orders by it.' },
+    ],
+  },
+  'theme': {
+    writer: 'the `theme.create` operation, from `createCmsThemeDefaults` and `createCmsThemeHeadDefaults` (the Hub\'s New Theme form writes the same document)',
+    columns: ['Field', 'Type', 'Meaning'],
+    fields: [
+      { names: ['name'], type: 'string, required', meaning: 'Display name. The KV mirror does not publish it.' },
+      { names: ['theme'], type: 'JSON object string', meaning: 'Theme JSON: Tailwind `extend` groups (`colors`, `fontFamily`, `borderRadius` and others), `apply`, `slots` and `variants` (`light`, `dark`). The public renderer and the Hub parse it.' },
+      { names: ['headJSON'], type: 'JSON object string', meaning: 'Head markup as a Nuxt-style head object (`link`, `script`, `meta`, `style`). Font stylesheets go in `link`.' },
+      { names: ['extraCSS'], type: 'string', meaning: 'CSS appended after the generated utilities: `@font-face` rules, decorative classes, patterns. `\'\'` when empty.' },
+      { names: ['typeRoles'], type: 'object', meaning: '`{ sectionTitle?, sectionIntro? }`: the one class name the theme\'s Extra CSS defines for each section type role, or empty. The block checks read it (`sectionTypeRoleFindings`).', writtenBy: 'the theme operations and the theme editor, when set' },
+      { names: ['defaultPages'], type: 'array', meaning: 'Legacy list of template pages `{ pageId, name, menuTitle?, disableRename?, disableDelete? }`; used to seed a site only when `defaultMenus` is empty. `[]` on new themes.' },
+      { names: ['defaultMenus'], type: 'object', meaning: 'The menus a new site starts with: `{ \'Site Root\': [entry], \'Not In Menu\': [entry] }`, shaped as a site\'s menus with template page ids. Each page entry becomes a page copied from the templates site.' },
+      { names: ['defaultSiteSettings'], type: 'object', meaning: 'Site settings a new site takes for every setting still at its default (`buildThemeSettingsPayload`): the keys of `siteSettingsDefaults`.', writtenBy: 'the theme operations and the theme editor, when set' },
+      { names: ['version'], type: 'number', meaning: 'Hub document version counter; `1` on creation.' },
+      { names: ['docId', 'doc_created_at', 'last_updated', 'uid'], type: 'string, numbers, uid', meaning: 'Bookkeeping the Hub\'s document wrapper and the operations add: the document id, creation and last save times in milliseconds, and who saved last.' },
+    ],
+  },
+})
+
+// One kind's field table as Markdown.
+export const renderDocumentFields = (kind, registry = CMS_DOCUMENT_FIELDS) => {
+  const entry = registry[kind]
+  if (!entry)
+    return ''
+  const cell = value => String(value).replace(/\|/g, '\\|').replace(/\n/g, ' ')
+  const lines = [`| ${entry.columns.join(' | ')} |`, `| ${entry.columns.map(() => '---').join(' | ')} |`]
+  for (const field of entry.fields) {
+    const names = field.names.map(name => `\`${name}\``).join(', ')
+    const meaning = cell(field.meaning + (field.writtenBy ? ` Written by ${field.writtenBy}.` : ''))
+    lines.push(entry.columns.length === 3 ? `| ${names} | ${field.type || ''} | ${meaning} |` : `| ${names} | ${meaning} |`)
+  }
+  const origin = entry.builder ? `new documents are built by \`${entry.builder}\`` : `new documents are written by ${entry.writer}`
+  lines.push('', `Generated from \`CMS_DOCUMENT_FIELDS\` (\`${kind}\`) in \`edge/lib/cmsOperations.js\`; ${origin}. A field with "Written by" is added later, not on creation.`)
+  return `${lines.join('\n')}\n`
+}
+
+// For tests: how a stored document of `kind` differs from its table. `undescribed`
+// are keys the document has and the table lacks; `unwritten` are top-level
+// fields the table describes, the document lacks, and no `writtenBy` explains.
+export const documentFieldGaps = (kind, doc = {}, registry = CMS_DOCUMENT_FIELDS) => {
+  const fields = registry[kind]?.fields || []
+  const described = fields.flatMap(field => field.names)
+  const keys = Object.keys(doc || {})
+  return {
+    undescribed: keys.filter(key => !described.includes(key)),
+    unwritten: fields.filter(field => !field.writtenBy).flatMap(field => field.names).filter(name => !name.includes('.') && !keys.includes(name)),
+    duplicates: described.filter((name, index) => described.indexOf(name) !== index),
+  }
+}
+
+// Markers `<!-- fields: <kind> generated from CMS_DOCUMENT_FIELDS -->` in a
+// contract, replaced by that kind's table.
+export const FIELDS_MARKER = /<!-- fields: ([a-z-]+) generated from CMS_DOCUMENT_FIELDS -->/g
+export const withGeneratedFields = markdown => String(markdown).replace(FIELDS_MARKER, (marker, kind) => (CMS_DOCUMENT_FIELDS[kind] ? renderDocumentFields(kind).trimEnd() : marker))
+
+// Every generated section of a contract: document fields, then operations
+// with their explanation overrides.
+export const withGeneratedContract = (markdown, notes = {}) => withGeneratedOperations(withGeneratedFields(markdown), notes)
