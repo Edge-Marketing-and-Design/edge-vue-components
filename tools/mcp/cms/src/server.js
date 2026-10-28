@@ -130,6 +130,18 @@ async function withLocalOverrideChecks(orgId, report) {
   return { ...report, items }
 }
 
+// The Hub's explanation overrides for the operations contract (top-level
+// agent-contract-notes), or none when this server can't read them.
+async function readContractNotes() {
+  try {
+    const snapshot = await db.collection('agent-contract-notes').get()
+    return Object.fromEntries(snapshot.docs.map(doc => [doc.id, doc.data()?.text]).filter(([, text]) => typeof text === 'string' && text.trim()))
+  }
+  catch {
+    return {}
+  }
+}
+
 // Readers that check a Firestore path against the config before reading.
 const collectionPathFor = (input) => {
   const normalizedPath = resolveConfiguredPath(input)
@@ -250,7 +262,7 @@ const handlers = {
   cms_validate: async input => jsonResult(await cmsTools.validate(input)),
   cms_find_theme: async input => jsonResult(await cmsTools.findTheme(input)),
   cms_get_theme: async input => jsonResult(await cmsTools.getTheme(input)),
-  cms_contract: async ({ kind }) => jsonResult(await readContract({ kind, repoRoot })),
+  cms_contract: async ({ kind }) => jsonResult(await readContract({ kind, repoRoot, notes: await readContractNotes() })),
   cms_schema: async input => jsonResult(await cmsTools.schema(input)),
   // The guide the remote server serves, from this checkout's Edge copy.
   cms_guide: async ({ section }) => jsonResult(selectGuideSection(await readFile(path.resolve(__dirname, '../../../../functions/agentGuide/cms-agent-guide.md'), 'utf8'), section)),

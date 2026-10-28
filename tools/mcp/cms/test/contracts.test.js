@@ -68,3 +68,9 @@ test('an unknown kind lists the known ones instead of throwing', async () => {
   assert.deepEqual(result.kinds, contractKinds())
   assert.match(result.message, /blocks, operations, themes, sites-and-pages, posts/)
 })
+
+test('explanation overrides replace the default text in the generated operations section', async () => {
+  const result = await readContract({ kind: 'operations', repoRoot, notes: { 'problem:move.no-change': 'Already in place; nothing to do.' } })
+  assert.equal(result.ok, true)
+  assert.ok(result.markdown.includes('| `move.no-change` | Already in place; nothing to do. |'))
+})

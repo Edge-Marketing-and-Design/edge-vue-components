@@ -26,7 +26,7 @@ export const contractPath = (kind) => {
 // Returns the contract's Markdown with its title, its `Last verified` line
 // and the path it was read from. An unknown kind lists the known ones instead
 // of throwing, so the caller sees what it can ask for.
-export async function readContract({ kind, repoRoot, readFileImpl = readFile }) {
+export async function readContract({ kind, repoRoot, readFileImpl = readFile, notes = {} }) {
   const key = String(kind || '').trim().toLowerCase()
   const relativePath = contractPath(key)
   if (!relativePath) {
@@ -55,5 +55,5 @@ export async function readContract({ kind, repoRoot, readFileImpl = readFile }) 
     throw error
   }
   // The operations section is generated from the operation specs.
-  return describeContract(key, relativePath, withGeneratedOperations(markdown))
+  return describeContract(key, relativePath, withGeneratedOperations(markdown, notes))
 }

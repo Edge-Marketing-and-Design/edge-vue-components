@@ -40,7 +40,7 @@ const setup = async (t) => {
   const denied = new Set()
   const configPath = require.resolve(path.join(functionRoot, 'config.js'))
   const original = require.cache[configPath]
-  const modulePaths = ['cmsAgentMcp.js', 'cmsAgentConnections.js', 'cmsAgentKeys.js', 'cmsAgentLibraryReads.js', 'cmsOperations.js', 'cmsBlockRevisions.js'].map(file => require.resolve(path.join(functionRoot, file)))
+  const modulePaths = ['cmsAgentMcp.js', 'cmsAgentConnections.js', 'cmsAgentKeys.js', 'cmsAgentLibraryReads.js', 'cmsAgentContractNotes.js', 'cmsOperations.js', 'cmsBlockRevisions.js'].map(file => require.resolve(path.join(functionRoot, file)))
   require.cache[configPath] = {
     id: configPath,
     loaded: true,
@@ -376,12 +376,15 @@ test('the remote server sends its rules on initialize and serves the guide and t
 
   const { readFileSync } = require('node:fs')
   const index = JSON.parse(readFileSync(path.join(functionRoot, 'agent-contracts/index.json'), 'utf8')).contracts
+  const note = { 'problem:theme.live': 'Propose it; a person applies it in the theme editor.' }
+  env.docs.set('agent-contract-notes/problem:theme.live', { text: note['problem:theme.live'] })
   const contract = await callTool(client, 'cms_contract', { kind: ' Operations ' })
   assert.equal(contract.ok, true, contract.message)
   assert.equal(contract.kind, 'operations')
   assert.equal(contract.path, index.operations)
   const { withGeneratedOperations, OPERATIONS_CONTRACT_MARKER } = await import(path.join(functionRoot, 'helpers/cmsOperations.mjs'))
-  assert.equal(contract.markdown, withGeneratedOperations(readFileSync(path.join(functionRoot, 'agent-contracts/operations.md'), 'utf8')))
+  assert.equal(contract.markdown, withGeneratedOperations(readFileSync(path.join(functionRoot, 'agent-contracts/operations.md'), 'utf8'), note))
+  assert.ok(contract.markdown.includes('| `theme.live` | Propose it; a person applies it in the theme editor. |'), 'explanation overrides are served')
   assert.ok(!contract.markdown.includes(OPERATIONS_CONTRACT_MARKER), 'the operations section is generated')
   assert.match(contract.markdown, /### `page\.setValues`/)
   const unknown = await callTool(client, 'cms_contract', { kind: 'nope' })

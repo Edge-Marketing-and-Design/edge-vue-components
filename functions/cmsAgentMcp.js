@@ -16,6 +16,7 @@ const path = require('node:path')
 const { db, onRequest, HttpsError, logger } = require('./config.js')
 const { issueAgentSession, organizationPage, verifyConnection } = require('./cmsAgentConnections.js')
 const { agentErrorResponse, handleAgentRequest } = require('./cmsAgentKeys.js')
+const { readContractNotes } = require('./cmsAgentContractNotes.js')
 
 const CLIENT = 'edge-cms-remote-mcp'
 const SERVER_INFO = { name: 'edge-cms', version: '0.1.0' }
@@ -47,7 +48,7 @@ const refusal = (error) => {
 // The tool handlers for one verified connection. Sessions are cached per
 // instance by connection and target; the cache only saves session writes,
 // since every call is checked again by the Hub code.
-const createRemoteCms = ({ now = Date.now, issueSession = issueAgentSession, handle = handleAgentRequest, listOrganizations = organizationPage, guideFile = GUIDE_FILE, contractsDir = CONTRACTS_DIR } = {}) => {
+const createRemoteCms = ({ now = Date.now, issueSession = issueAgentSession, handle = handleAgentRequest, listOrganizations = organizationPage, guideFile = GUIDE_FILE, contractsDir = CONTRACTS_DIR, readNotes = readContractNotes } = {}) => {
   const contracts = readContractIndex(contractsDir)
   const sessions = new Map()
   const sessionFor = async (connection, target, { fresh = false } = {}) => {
@@ -123,7 +124,8 @@ const createRemoteCms = ({ now = Date.now, issueSession = issueAgentSession, han
       const kinds = Object.keys(contracts)
       if (!contracts[key])
         return { ok: false, code: 'unknown-kind', message: kinds.length ? `Unknown contract kind "${kind}". Known kinds: ${kinds.join(', ')}.` : 'This Hub has not bundled its data contracts (scripts/cms/sync-agent-contracts.mjs).', kinds }
-      return describeContract(key, contracts[key], withGeneratedOperations(readFileSync(path.join(contractsDir, `${key}.md`), 'utf8')))
+      // Explanation overrides apply to the generated operations section.
+      return describeContract(key, contracts[key], withGeneratedOperations(readFileSync(path.join(contractsDir, `${key}.md`), 'utf8'), await readNotes()))
     }),
     cms_schema: tool(({ collection, siteId, limit, ...input }) => call(connection, input, { action: 'schema', collection, ...(siteId ? { siteId } : {}), ...(limit ? { limit } : {}) })),
     cms_guide: tool(async ({ section }) => {
