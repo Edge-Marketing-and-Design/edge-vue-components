@@ -27,7 +27,7 @@ if (!jsonMatch) {
   process.exit(2)
 }
 const project = JSON.parse(jsonMatch[1])
-for (const key of ['project', 'organizationId', 'siteId', 'themeId', 'themeName', 'blockPrefix', 'namePrefix', 'tags', 'validatorPath']) {
+for (const key of ['project', 'organizationId', 'siteId', 'themeId', 'themeName', 'blockPrefix', 'namePrefix', 'tags']) {
   if (project[key] === undefined || project[key] === '' || /^<.*>$/.test(String(project[key]))) {
     console.error(`PROJECT.md: fill in "${key}"`)
     process.exit(2)
@@ -36,7 +36,10 @@ for (const key of ['project', 'organizationId', 'siteId', 'themeId', 'themeName'
 
 // A relative validatorPath is relative to the Hub checkout (hubPath), for
 // example the Hub's shared import check, scripts/cms/validate-import.mjs.
-const validatorPath = isAbsolute(project.validatorPath) ? project.validatorPath : resolve(project.hubPath || projectDir, project.validatorPath)
+// Empty without a checkout: the Hub check runs remotely through cms_validate.
+const hasValidator = Boolean(project.validatorPath) && !/^<.*>$/.test(String(project.validatorPath))
+const validatorPath = !hasValidator ? '' : isAbsolute(project.validatorPath) ? project.validatorPath : resolve(project.hubPath || projectDir, project.validatorPath)
+const hubCheck = hasValidator ? `node ${validatorPath} .` : '# Hub import check: cms_validate on each block definition (no Hub checkout)'
 
 const target = resolve(projectDir, packageName)
 if (existsSync(target)) {
@@ -59,7 +62,7 @@ const replacements = {
   __NAME_PREFIX__: project.namePrefix,
   __TAGS__: JSON.stringify(project.tags),
   __BANNED__: JSON.stringify(project.bannedPhrases || []),
-  __VALIDATOR__: validatorPath,
+  __HUB_CHECK__: hubCheck,
   __THEME_SETUP__: themeSetup ? relativeFrom(target, themeSetup) : '',
   __DESIGN_SOURCE__: project.design?.source || 'figma',
   __DESIGN_FILE__: project.design?.file || '',
@@ -83,4 +86,6 @@ for (const [source, destination] of files)
 copyFileSync(resolve(skillRoot, 'scripts/validate-common.mjs'), resolve(target, 'validate-common.mjs'))
 console.log(`Scaffolded ${target}`)
 console.log('Next: replace the example block in generate-package.mjs, update expectedIds in validate-package.mjs, then run')
-console.log(`  cd ${target} && node generate-package.mjs && node validate-package.mjs && node ${validatorPath} . && node preview.mjs`)
+console.log(`  cd ${target} && node generate-package.mjs && node validate-package.mjs${hasValidator ? ` && node ${validatorPath} .` : ''} && node preview.mjs`)
+if (!hasValidator)
+  console.log('No validatorPath: run the Hub import check with cms_validate on each block definition.')

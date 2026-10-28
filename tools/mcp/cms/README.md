@@ -14,6 +14,24 @@ here can publish a page, release a block, or touch Cloudflare KV.
 `cms_checkout_block` only writes local files beneath the configured
 workspace.
 
+Tool names, descriptions and input schemas live in
+`edge/lib/cmsAgentMcpTools.js`, shared with the Hub's remote MCP endpoint
+(`cms-agentMcp`, `edge/functions/cmsAgentMcp.js`), which serves the
+Hub-endpoint tools to editors without a checkout. Change a tool there, not in
+`src/server.js`, and keep its two copies under `edge/functions/helpers/` and
+`functions/helpers/` identical (`test/tool-definitions.test.js` checks).
+
+The block, theme, usage and audit reads (`cms_find_block`, `cms_block_base`,
+`cms_find_theme`, `cms_get_theme`, `cms_find_usage`, `cms_audit_blocks`) live
+in `edge/lib/cmsAgentReads.js`. This server runs them on its read-only service
+account; the remote endpoint runs the same code as the operator. Keep its two
+copies under `edge/functions/helpers/` and `functions/helpers/` identical.
+
+`cms_guide` serves `edge/functions/agentGuide/cms-agent-guide.md`, the same
+workflow guide the remote endpoint serves. The remote `cms_contract` reads the
+Hub's contracts from `functions/agent-contracts/`; after editing a contract,
+run `node scripts/cms/sync-agent-contracts.mjs` in the Hub.
+
 ## Generic Firestore Tools
 
 - `firestore_list_collections`: list child collections at the root or below a document path.
@@ -135,6 +153,13 @@ name cannot silently select the wrong theme. Its response includes:
   refuses it if anything the check read changed since, or if it has
   problems. Results are drafts, recorded in the Hub's `cms-operations`
   audit log with the organization and the key.
+- Both take the operation inline (`operation`) or as `operationFile`: a
+  path to a `.json` file holding the whole operation, read by the server and
+  sent exactly as written. Use a file for large operations such as a
+  `block.draft` from a generator, so nothing is retyped. Relative paths start
+  at the Hub checkout; the file must be inside the checkout, the block
+  workspace or the temp directory, and at most 2 MB. Results then include
+  `operationFile` (path, bytes, sha256); send the same file to the run.
 - `cms_block_base`: a block's current definition (open draft, else released)
   and its fingerprint, which `block.draft` must send as `baseHash`.
 - `cms_preview_url`: a 15-minute link to the Hub's preview of one draft page

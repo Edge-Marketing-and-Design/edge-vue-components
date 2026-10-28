@@ -41,7 +41,7 @@ const L = await eval('(' + figma.root.getSharedPluginData(cfg.ns, 'core') + ')')
 const B = await eval('(' + figma.root.getSharedPluginData(cfg.ns, 'blocks') + ')')(figma, L)
 ```
 
-When you change a library file in the repo, re-install it; don't patch the stored copy by string replacement. When the site is finished and reviewed, the developer may ask you to clear the keys (set each to `''`).
+When you change a library file in the repo, re-install it; don't patch the stored copy by string replacement. Installed from the plugin (no Hub checkout), copy `scripts/figma/` into your workspace folder first and change that copy: the plugin's own files are replaced on every update. When the site is finished and reviewed, the developer may ask you to clear the keys (set each to `''`).
 
 ## Tokens and text styles (`setup.js`)
 

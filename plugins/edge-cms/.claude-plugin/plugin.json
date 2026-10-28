@@ -1,0 +1,14 @@
+{
+  "name": "edge-cms",
+  "description": "Build and update Edge CMS sites in a Hub without a Hub checkout: the edge-block-package, edge-design-to-site, edge-figma-design and vue-to-block-migrator skills, and the Hub's remote CMS tools (draft-only).",
+  "author": {
+    "name": "Edge Marketing Design"
+  },
+  "keywords": [
+    "edge",
+    "cms",
+    "hub",
+    "blocks",
+    "figma"
+  ]
+}

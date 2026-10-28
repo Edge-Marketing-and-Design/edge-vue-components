@@ -14,7 +14,10 @@ Use this reference for any task that creates, validates, imports, repairs, or pa
 
 ## Source-of-truth files
 
-Resolve the active Hub and public frontend first. Then inspect:
+Resolve the active Hub and public frontend first. Then inspect (without
+checkouts, read the guide as `cms_contract` kind `renderer` and let the
+contracts and `cms_validate` stand in for the Hub files; see the skill's
+"Without a Hub checkout"):
 
 - `${FRONT_ROOT}/docs/cms-template-v2-blocks.md`: authoritative Template v2 authoring/runtime guide.
 - `${HUB_ROOT}/edge/composables/useCmsNewDocs.js`: library block defaults.

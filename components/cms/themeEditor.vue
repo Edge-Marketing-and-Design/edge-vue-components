@@ -1,6 +1,6 @@
 <script setup>
 import { toTypedSchema } from '@vee-validate/zod'
-import { Download, FolderCog, History, Loader2, RotateCcw } from 'lucide-vue-next'
+import { Check, Download, FileDiff, FolderCog, History, Loader2, RotateCcw, X } from 'lucide-vue-next'
 import * as z from 'zod'
 const props = defineProps({
   themeId: {
@@ -35,6 +35,10 @@ const state = reactive({
   showHistoryDiffDialog: false,
   contactSpamContextPushLoading: false,
   contactSpamContextPushMessage: '',
+  proposalsDialogOpen: false,
+  proposalSelectedId: '',
+  proposalSaving: false,
+  proposalError: '',
 })
 
 const editorViewportHeight = 'calc(100vh - 420px)'
@@ -1098,6 +1102,139 @@ watch(selectedHistoryEntry, (entry) => {
   syncHistoryPreviewDoc(entry)
 }, { immediate: false })
 
+// Theme proposals: changes agents propose for a theme a published site uses
+// (theme.propose). A person reviews the diff here, then applies it (the same
+// save as Restore) or rejects it.
+const formatThemeProposalDate = (value) => {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? 'Unknown date' : date.toLocaleString()
+}
+
+const themeProposalsPath = computed(() => `${edgeGlobal.edgeState.organizationDocPath}/themeProposals`)
+const openThemeProposals = computed(() => Object.values(edgeFirebase.data?.[themeProposalsPath.value] || {})
+  .filter(proposal => proposal?.themeId === props.themeId && proposal?.status === 'open' && isPlainObject(proposal?.fields))
+  .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))))
+const selectedThemeProposal = computed(() => openThemeProposals.value.find(proposal => proposal.docId === state.proposalSelectedId) || null)
+const themeProposalItems = computed(() => openThemeProposals.value.map(proposal => ({
+  name: proposal.docId,
+  title: `${formatThemeProposalDate(proposal.createdAt)}: ${Object.keys(proposal.fields).join(', ')}`,
+})))
+
+const THEME_PROPOSAL_DIFF_KEYS = ['name', 'theme', 'headJSON', 'extraCSS', 'typeRoles', 'defaultMenus', 'defaultSiteSettings']
+
+// Proposed against current, field by field: the history diff for the theme's
+// usual fields, and a plain one for any other proposed field.
+const themeProposalDiffDetails = computed(() => {
+  const proposal = selectedThemeProposal.value
+  if (!proposal || !currentTheme.value)
+    return []
+  // Compare JSON fields as formatted JSON, so a reformatted string only
+  // highlights what changed.
+  const formatJsonFields = (doc) => {
+    const formatted = { ...doc }
+    for (const key of ['theme', 'headJSON']) {
+      if (typeof formatted[key] === 'string' && formatted[key].trim()) {
+        try {
+          formatted[key] = JSON.stringify(JSON.parse(formatted[key]), null, 2)
+        }
+        catch {}
+      }
+    }
+    return formatted
+  }
+  const current = formatJsonFields(currentTheme.value)
+  const proposed = formatJsonFields({ ...currentTheme.value, ...proposal.fields })
+  const labels = { baseLabel: 'Proposed', compareLabel: 'Current' }
+  const details = buildThemeHistoryChangeDetails({ beforeData: current, afterData: proposed }, current, labels)
+  for (const key of Object.keys(proposal.fields)) {
+    if (THEME_PROPOSAL_DIFF_KEYS.includes(key) || areEqualNormalized(proposed[key], current[key]))
+      continue
+    const base = summarizeThemeChangeValue(proposed[key])
+    const compare = summarizeThemeChangeValue(current[key])
+    details.push({ key, label: key, ...labels, base, compare, baseHtml: buildHighlightedDiffHtml(base, compare), compareHtml: buildHighlightedDiffHtml(compare, base), monospace: true })
+  }
+  return details
+})
+
+// The theme was saved after the proposal was made: applying keeps those
+// changes except in the proposed fields.
+const selectedThemeProposalIsStale = computed(() => {
+  const proposal = selectedThemeProposal.value
+  const updated = Number(currentTheme.value?.last_updated)
+  return Boolean(proposal) && Number.isFinite(updated) && updated > Number(proposal.doc_created_at || Date.parse(proposal.createdAt) || 0)
+})
+
+watch(openThemeProposals, (proposals) => {
+  if (!proposals.some(proposal => proposal.docId === state.proposalSelectedId))
+    state.proposalSelectedId = proposals[0]?.docId || ''
+}, { immediate: true })
+
+const openThemeProposalsDialog = () => {
+  state.proposalError = ''
+  state.proposalsDialogOpen = true
+}
+
+const closeThemeProposal = async (proposal, status) => {
+  const at = new Date().toISOString()
+  const field = status === 'applied' ? 'applied' : 'rejected'
+  await edgeFirebase.changeDoc(themeProposalsPath.value, proposal.docId, { status, [`${field}By`]: edgeFirebase.user.uid, [`${field}At`]: at })
+}
+
+const applyThemeProposal = async () => {
+  const proposal = selectedThemeProposal.value
+  if (!proposal || !currentTheme.value)
+    return
+  if (state.editorHasUnsavedChanges) {
+    state.proposalError = 'Save or discard your changes to this theme before applying a proposal.'
+    return
+  }
+  state.proposalSaving = true
+  state.proposalError = ''
+  try {
+    const nextDoc = cloneThemeDocWithDefaults({ ...currentTheme.value, ...edgeGlobal.dupObject(proposal.fields) })
+    await edgeFirebase.storeDoc(themesCollectionPath.value, nextDoc, props.themeId)
+    themesCollection.value[props.themeId] = edgeGlobal.dupObject(nextDoc)
+    state.workingDoc = nextDoc
+    state.editorHasUnsavedChanges = false
+    lastValidHead.value = parseJsonSafe(nextDoc?.headJSON, {})
+    lastValidTheme.value = parseJsonSafe(nextDoc?.theme, {})
+    await closeThemeProposal(proposal, 'applied')
+    state.editorKey += 1
+    notifySuccess('Applied the theme proposal.')
+    if (!openThemeProposals.value.length)
+      state.proposalsDialogOpen = false
+  }
+  catch (error) {
+    console.error('Failed to apply theme proposal', error)
+    state.proposalError = 'Failed to apply this proposal.'
+    notifyError('Failed to apply the theme proposal.')
+  }
+  finally {
+    state.proposalSaving = false
+  }
+}
+
+const rejectThemeProposal = async () => {
+  const proposal = selectedThemeProposal.value
+  if (!proposal)
+    return
+  state.proposalSaving = true
+  state.proposalError = ''
+  try {
+    await closeThemeProposal(proposal, 'rejected')
+    notifySuccess('Rejected the theme proposal.')
+    if (!openThemeProposals.value.length)
+      state.proposalsDialogOpen = false
+  }
+  catch (error) {
+    console.error('Failed to reject theme proposal', error)
+    state.proposalError = 'Failed to reject this proposal.'
+  }
+  finally {
+    state.proposalSaving = false
+  }
+}
+
 watch(hasHistoryDiff, (nextValue) => {
   if (!nextValue)
     state.showHistoryDiffDialog = false
@@ -1246,7 +1383,13 @@ onBeforeMount(async () => {
   if (!edgeFirebase.data?.[`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/templates/pages`]) {
     await edgeFirebase.startSnapshot(`organizations/${edgeGlobal.edgeState.currentOrganization}/sites/templates/pages`)
   }
+  if (props.themeId && props.themeId !== 'new')
+    await edgeFirebase.startSnapshot(themeProposalsPath.value, [{ field: 'themeId', operator: '==', value: props.themeId }])
   state.mounted = true
+})
+
+onBeforeUnmount(() => {
+  edgeFirebase.stopSnapshot(themeProposalsPath.value)
 })
 </script>
 
@@ -1297,6 +1440,17 @@ onBeforeMount(async () => {
               @click="openHistoryDialog"
             >
               <History class="h-4 w-4" />
+            </edge-shad-button>
+            <edge-shad-button
+              v-if="openThemeProposals.length"
+              type="button"
+              variant="outline"
+              class="h-9 gap-2 border-amber-400 px-3 text-amber-800 dark:border-amber-700 dark:text-amber-200"
+              title="Review Theme Proposals"
+              @click="openThemeProposalsDialog"
+            >
+              <FileDiff class="h-4 w-4" />
+              {{ openThemeProposals.length === 1 ? '1 proposal' : `${openThemeProposals.length} proposals` }}
             </edge-shad-button>
             <edge-shad-button
               type="button"
@@ -1596,6 +1750,92 @@ onBeforeMount(async () => {
           <edge-shad-button class="w-full" variant="outline" @click="state.showHistoryDiffDialog = false">
             Close
           </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
+    <edge-shad-dialog v-model="state.proposalsDialogOpen">
+      <DialogContent class="max-w-[96vw] max-h-[97vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle class="text-left">
+            Theme Proposals
+          </DialogTitle>
+          <DialogDescription class="text-left">
+            Changes proposed for this theme while a published site uses it. Applying saves them to the theme, so they go live on every site that uses it.
+          </DialogDescription>
+        </DialogHeader>
+        <div class="min-w-0 flex-1 space-y-4 overflow-y-auto pr-1">
+          <edge-shad-combobox
+            v-model="state.proposalSelectedId"
+            name="themeProposal"
+            label="Proposal"
+            :items="themeProposalItems"
+            placeholder="Select a proposal"
+            class="w-full md:max-w-xl"
+            :disabled="state.proposalSaving"
+          />
+          <div v-if="state.proposalError" class="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300">
+            {{ state.proposalError }}
+          </div>
+          <template v-if="selectedThemeProposal">
+            <div v-if="selectedThemeProposal.note" class="rounded-md border border-slate-300 bg-slate-100 px-3 py-2 text-sm text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+              {{ selectedThemeProposal.note }}
+            </div>
+            <div v-if="selectedThemeProposalIsStale" class="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
+              This theme was saved after the proposal was made. Applying replaces only the proposed fields; check the diff against the current theme.
+            </div>
+            <div v-if="themeProposalDiffDetails.length" class="space-y-3">
+              <div
+                v-for="change in themeProposalDiffDetails"
+                :key="change.key"
+                class="rounded-md border border-slate-300 dark:border-slate-700 bg-slate-200 dark:bg-slate-800 p-3 text-left"
+              >
+                <div class="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-2">
+                  {{ change.label }}
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                  <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
+                    <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
+                      {{ change.baseLabel }}
+                    </div>
+                    <div
+                      class="whitespace-pre-wrap break-words text-gray-900 dark:text-gray-100"
+                      :class="change.monospace ? 'font-mono text-xs leading-5' : ''"
+                      v-html="change.baseHtml || change.base"
+                    />
+                  </div>
+                  <div class="rounded border border-gray-200 dark:border-white/15 bg-white/80 dark:bg-gray-800 p-2">
+                    <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
+                      {{ change.compareLabel }}
+                    </div>
+                    <div
+                      class="whitespace-pre-wrap break-words text-gray-900 dark:text-gray-100"
+                      :class="change.monospace ? 'font-mono text-xs leading-5' : ''"
+                      v-html="change.compareHtml || change.compare"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-else class="rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-600 dark:border-slate-700 dark:text-slate-300">
+              The proposed fields already match the current theme.
+            </div>
+          </template>
+        </div>
+        <DialogFooter class="pt-2 flex justify-between">
+          <edge-shad-button variant="outline" :disabled="state.proposalSaving" @click="state.proposalsDialogOpen = false">
+            Close
+          </edge-shad-button>
+          <div class="flex gap-2">
+            <edge-shad-button variant="outline" :disabled="state.proposalSaving || !selectedThemeProposal" @click="rejectThemeProposal">
+              <X class="mr-2 h-4 w-4" />
+              Reject
+            </edge-shad-button>
+            <edge-shad-button :disabled="state.proposalSaving || !selectedThemeProposal" @click="applyThemeProposal">
+              <Loader2 v-if="state.proposalSaving" class="mr-2 h-4 w-4 animate-spin" />
+              <Check v-else class="mr-2 h-4 w-4" />
+              Apply
+            </edge-shad-button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </edge-shad-dialog>

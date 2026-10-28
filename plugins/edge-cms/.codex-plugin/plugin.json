@@ -1,0 +1,32 @@
+{
+  "name": "edge-cms",
+  "version": "0.1.0",
+  "description": "Build and update Edge CMS sites in a Hub without a Hub checkout: the edge-block-package, edge-design-to-site, edge-figma-design and vue-to-block-migrator skills, and the Hub's remote CMS tools (draft-only).",
+  "author": {
+    "name": "Edge Marketing Design"
+  },
+  "keywords": [
+    "edge",
+    "cms",
+    "hub",
+    "blocks",
+    "figma"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.codex-mcp.json",
+  "interface": {
+    "displayName": "Edge CMS",
+    "shortDescription": "Build and edit Edge CMS sites as drafts in a Hub",
+    "longDescription": "The Edge CMS skills (block packages, design to site, Figma design, Vue/HTML to block migration) and the Hub's remote CMS tools. Everything the tools change is a draft: people publish pages and release blocks in the Hub. Sign in with your Hub account the first time the tools are used.",
+    "developerName": "Edge Marketing Design",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "List the sites in my Hub organization",
+      "Build this design handoff as blocks and pages in the Hub"
+    ]
+  }
+}

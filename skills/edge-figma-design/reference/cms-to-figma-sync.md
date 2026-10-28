@@ -14,12 +14,14 @@ The direction matters: this procedure only edits Figma. It never changes a block
 
 `cms_diff` compares a local checkout of a block with production. So whenever Figma and the CMS are known to match (after the first build is released, and after every sync in either direction), take a baseline: `cms_checkout_block` for every block in the design map. Each checkout writes `base.json` under the Hub checkout's `.tmp/cms-block-workspace/<orgId>/<blockId>/` (git-ignored), so the baseline belongs to that machine: record the date and the machine in §10 ("baseline"), and on another machine take a fresh baseline or fall back to the visual comparison below. Later, `cms_diff` with `comparison: "base-production"` shows exactly what changed in the Hub since Figma last matched.
 
+Without a Hub checkout (the remote CMS tools have no `cms_checkout_block` or `cms_diff`), the baseline is a file you keep: save each block's `cms_block_base` result as `baselines/<blockId>.json` in your workspace folder, next to the site content plan, and record the date in §10. Later, compare a fresh `cms_block_base` with that file (template, schema and data sources) to get the same list of changes.
+
 ## 1. Find what changed
 
 For each block:
 
 1. `cms_block_base` for the current definition (template, CSS classes, schema, `meta.design`).
-2. `cms_diff` (`comparison: "base-production"`) against the baseline. With no baseline (the first sync of an older site), compare the current block with the Figma frame directly: render it with `cms_preview_url` (about 1440 wide and `viewport: "mobile"`) and screenshot the frame (`get_screenshot`) side by side.
+2. `cms_diff` (`comparison: "base-production"`) against the baseline, or remotely the comparison with the saved baseline file. With no baseline (the first sync of an older site), compare the current block with the Figma frame directly: render it with `cms_preview_url` (about 1440 wide and `viewport: "mobile"`) and screenshot the frame (`get_screenshot`) side by side.
 3. Write each change down in one line: what changed, in which element, old → new.
 
 ### What the comparison looks like in practice
@@ -69,7 +71,7 @@ The anchor frame is protected while the full site is being drafted. During a syn
 ## 6. Log and hand off
 
 - Update the plan's §10 rows: status and "last synced" with the date and a one-line change note.
-- Refresh the baseline: `cms_checkout_block` again for each synced block, so the next diff starts from here.
+- Refresh the baseline: `cms_checkout_block` again for each synced block (remotely, save a fresh `cms_block_base` over each baseline file), so the next diff starts from here.
 - Report: changes applied (with before/after screenshots), changes left for the designer, blocks without a frame, and anything that still differs between Figma and the CMS.
 
 ## Drift check

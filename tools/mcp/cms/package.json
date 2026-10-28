@@ -13,7 +13,7 @@
   "scripts": {
     "start": "node src/server.js",
     "check": "node --check src/server.js && node --check src/cms-tools.js && node --check src/credentials.js && node --check src/agent-connections.js && node --check src/agent-operations.js",
-    "test": "node --test test/*.test.js ../../../functions/tests/cms-agent-connections.unit.test.cjs"
+    "test": "node --test test/*.test.js ../../../functions/tests/cms-agent-connections.unit.test.cjs ../../../functions/tests/cms-agent-mcp.unit.test.cjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

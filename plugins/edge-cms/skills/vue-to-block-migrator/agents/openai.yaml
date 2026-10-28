@@ -1,0 +1,4 @@
+interface:
+  display_name: "Vue to Block Migrator"
+  short_description: "Build Template v2 CMS import artifacts"
+  default_prompt: "Use $vue-to-block-migrator to convert this source into validated Edge CMS Template v2 blocks and, when requested, assemble CMS page documents and a safe import package."

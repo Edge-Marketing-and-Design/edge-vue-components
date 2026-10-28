@@ -2,6 +2,7 @@
 const { createHash, randomBytes, timingSafeEqual } = require('node:crypto')
 const { Timestamp } = require('firebase-admin/firestore')
 const { db, onCall, onRequest, HttpsError, permissionCheck, logger } = require('./config.js')
+const { LIBRARY_READ_ACTIONS } = require('./cmsAgentLibraryReads.js')
 
 const DAY_MS = 86400000
 const SESSION_MS = 15 * 60 * 1000
@@ -36,6 +37,9 @@ const describe = (connectionId, data) => ({
   revokedAt: data.revokedAt || null,
   lastUsedAt: data.lastUsedAt || null,
   hint: data.hint,
+  // OAuth sign-ins (cmsAgentOAuth.js) are connections too.
+  kind: data.kind || 'connection',
+  client: data.client || null,
 })
 const requireActive = (data, label) => {
   if (data.revokedAt)
@@ -125,6 +129,8 @@ exports.renewAgentConnection = onCall({ timeoutSeconds: 60 }, async (request) =>
       throw new HttpsError('permission-denied', 'Only the creator can renew this connection.')
     if (data.revokedAt)
       throw new HttpsError('failed-precondition', 'A revoked connection cannot be renewed. Create a new one.')
+    if (data.kind === 'oauth')
+      throw new HttpsError('failed-precondition', 'A sign-in renews itself while it is used. Sign in again from the app after it expires.')
     const renewed = { expiresAt: new Date(Math.max(requestedExpiry, Date.parse(data.expiresAt) || 0)).toISOString(), renewedAt: new Date().toISOString() }
     transaction.update(ref, renewed)
     return describe(ref.id, { ...data, ...renewed })
@@ -148,9 +154,36 @@ exports.revokeAgentConnection = onCall({ timeoutSeconds: 60 }, async (request) =
 })
 const verifyConnection = async (header) => {
   const connection = await authenticate(connections(), 'cmsac', header)
+  if (connection.data.kind === 'oauth')
+    throw new HttpsError('unauthenticated', 'Invalid Hub-issued credential.')
   if (connection.data.scope !== 'cms-drafts')
     throw new HttpsError('permission-denied', 'Connection is not authorized for CMS drafts.')
   return connection
+}
+// A 15-minute cmsas.… session for one explicit target, checked against the
+// creator's current Hub rights. Used by cms-agentConnection and cms-agentMcp.
+const issueAgentSession = async (connection, body = {}) => {
+  const orgId = docId(body.orgId, 'organization id')
+  const scope = body.scope
+  if (scope !== 'organization' && scope !== 'site')
+    throw new HttpsError('invalid-argument', 'Choose organization or site scope explicitly.')
+  const siteId = scope === 'site' ? docId(body.siteId, 'site id') : null
+  if (scope === 'organization' && body.siteId)
+    throw new HttpsError('invalid-argument', 'Organization sessions cannot select a site.')
+  if (!await canBuild(connection.data.createdBy, orgId))
+    throw new HttpsError('permission-denied', 'No current CMS edit access to this organization.')
+  const org = db.collection('organizations').doc(orgId)
+  const orgSnap = await org.get()
+  if (!orgSnap.exists)
+    throw new HttpsError('not-found', 'Organization does not exist.')
+  const siteSnap = siteId ? await org.collection('sites').doc(siteId).get() : null
+  if (siteSnap && !siteSnap.exists)
+    throw new HttpsError('not-found', 'Site does not exist in the selected organization.')
+  const expiresAt = new Date(Math.min(Date.now() + SESSION_MS, Date.parse(connection.data.expiresAt))).toISOString()
+  const data = { connectionId: connection.id, createdBy: connection.data.createdBy, orgId, siteId, scope, createdAt: new Date().toISOString(), expiresAt, expiresAtTimestamp: Timestamp.fromMillis(Date.parse(expiresAt)), revokedAt: null }
+  const session = await issue(sessions(), 'cmsas', data)
+  await connection.ref.update({ lastUsedAt: new Date().toISOString() })
+  return { sessionId: session.id, token: session.token, expiresAt, orgId, organizationName: String(orgSnap.data()?.name || orgId), siteId, siteName: siteSnap ? String(siteSnap.data()?.name || siteId) : null, scope }
 }
 exports.agentConnection = onRequest({ timeoutSeconds: 60 }, async (req, res) => {
   if (req.method !== 'POST') {
@@ -166,27 +199,7 @@ exports.agentConnection = onRequest({ timeoutSeconds: 60 }, async (req, res) => 
     }
     if (body.action !== 'session')
       throw new HttpsError('invalid-argument', 'action must be organizations or session.')
-    const orgId = docId(body.orgId, 'organization id')
-    const scope = body.scope
-    if (scope !== 'organization' && scope !== 'site')
-      throw new HttpsError('invalid-argument', 'Choose organization or site scope explicitly.')
-    const siteId = scope === 'site' ? docId(body.siteId, 'site id') : null
-    if (scope === 'organization' && body.siteId)
-      throw new HttpsError('invalid-argument', 'Organization sessions cannot select a site.')
-    if (!await canBuild(connection.data.createdBy, orgId))
-      throw new HttpsError('permission-denied', 'No current CMS edit access to this organization.')
-    const org = db.collection('organizations').doc(orgId)
-    const orgSnap = await org.get()
-    if (!orgSnap.exists)
-      throw new HttpsError('not-found', 'Organization does not exist.')
-    const siteSnap = siteId ? await org.collection('sites').doc(siteId).get() : null
-    if (siteSnap && !siteSnap.exists)
-      throw new HttpsError('not-found', 'Site does not exist in the selected organization.')
-    const expiresAt = new Date(Math.min(Date.now() + SESSION_MS, Date.parse(connection.data.expiresAt))).toISOString()
-    const data = { connectionId: connection.id, createdBy: connection.data.createdBy, orgId, siteId, scope, createdAt: new Date().toISOString(), expiresAt, expiresAtTimestamp: Timestamp.fromMillis(Date.parse(expiresAt)), revokedAt: null }
-    const session = await issue(sessions(), 'cmsas', data)
-    await connection.ref.update({ lastUsedAt: new Date().toISOString() })
-    res.json({ ok: true, sessionId: session.id, token: session.token, expiresAt, orgId, organizationName: String(orgSnap.data()?.name || orgId), siteId, siteName: siteSnap ? String(siteSnap.data()?.name || siteId) : null, scope })
+    res.json({ ok: true, ...await issueAgentSession(connection, body) })
   }
   catch (error) {
     const statuses = { 'invalid-argument': 400, 'unauthenticated': 401, 'permission-denied': 403, 'not-found': 404, 'failed-precondition': 409 }
@@ -196,6 +209,9 @@ exports.agentConnection = onRequest({ timeoutSeconds: 60 }, async (req, res) => 
     res.status(status).json({ ok: false, code: status === 500 ? 'internal' : error.code, message: status === 500 ? 'Connection request failed.' : error.message })
   }
 })
+exports.verifyConnection = verifyConnection
+exports.organizationPage = organizationPage
+exports.issueAgentSession = issueAgentSession
 
 // What a site session may ask of cms-agentOperation: page and post
 // operations and site.update on its site, and reads of that site (preview,
@@ -225,8 +241,10 @@ exports.verifyAgentSession = async (orgId, header, body) => {
       throw new HttpsError('permission-denied', 'Site sessions only allow page and post operations and updates to this site.')
   }
   else if (session.data.scope === 'organization') {
-    if (!['check', 'run'].includes(body.action) || (!type.startsWith('block.') && !type.startsWith('theme.') && type !== 'site.create'))
-      throw new HttpsError('permission-denied', 'Organization sessions only allow library/theme work and site creation. Open a site session for page and post work.')
+    // Library reads (blocks, themes, usage, audit) belong to the organization.
+    const libraryRead = LIBRARY_READ_ACTIONS.includes(body.action)
+    if (!libraryRead && (!['check', 'run'].includes(body.action) || (!type.startsWith('block.') && !type.startsWith('theme.') && type !== 'site.create')))
+      throw new HttpsError('permission-denied', 'Organization sessions only allow library/theme reads and work, and site creation. Open a site session for page and post work.')
   }
   else {
     throw new HttpsError('permission-denied', 'Invalid session scope.')

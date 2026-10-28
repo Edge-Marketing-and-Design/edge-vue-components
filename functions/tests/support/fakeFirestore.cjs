@@ -18,7 +18,7 @@ const deepMerge = (target, source) => {
 const createFakeDb = (seed = {}) => {
   const docs = new Map(Object.entries(seed).map(([path, data]) => [path, clone(data)]))
   const writes = []
-  const hooks = { beforeTransactionGet: null }
+  const hooks = { beforeTransactionGet: null, beforeAdd: null }
 
   // Refs, snapshots and queries refer to each other, so declare them first.
   let snapshot
@@ -88,6 +88,13 @@ const createFakeDb = (seed = {}) => {
   collectionRef = path => ({
     ...query(path),
     doc: id => docRef(`${path}/${id === undefined ? `generated-${++generatedIds}` : id}`),
+    async add(data) {
+      if (hooks.beforeAdd)
+        hooks.beforeAdd(path, data)
+      const ref = docRef(`${path}/generated-${++generatedIds}`)
+      applySet(ref.path, data)
+      return ref
+    },
   })
 
   const bufferedWriter = () => {
@@ -102,6 +109,7 @@ const createFakeDb = (seed = {}) => {
 
   const db = {
     collection: name => collectionRef(name),
+    doc: path => docRef(path),
     async runTransaction(callback) {
       const writer = bufferedWriter()
       const transaction = {

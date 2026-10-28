@@ -1,5 +1,8 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
+import { describeContract } from '../../../../lib/cmsAgentMcpTools.js'
+import { withGeneratedValidation } from '../../../../lib/cmsBlockValidation.js'
+import { withGeneratedContract } from '../../../../lib/cmsOperations.js'
 
 // The data contracts an agent writes against, read from the Hub checkout the
 // server runs in (the same root that resolves the renderer path). Nothing is
@@ -14,10 +17,12 @@ export const CONTRACT_KINDS = Object.freeze({
   'webcams': 'docs/data-contracts/webcams/README.md',
 })
 
-export const contractKinds = () => Object.keys(CONTRACT_KINDS)
+// The public renderer's Template v2 guide, read from the emd-cms-front
+// checkout (cmsRendererRepoPath) rather than the Hub.
+export const RENDERER_KIND = 'renderer'
+export const RENDERER_GUIDE = 'docs/cms-template-v2-blocks.md'
 
-const LAST_VERIFIED = /^Last verified:\s*(.+?)\s*$/m
-const TITLE = /^#\s+(.+?)\s*$/m
+export const contractKinds = () => [...Object.keys(CONTRACT_KINDS), RENDERER_KIND]
 
 export const contractPath = (kind) => {
   const key = String(kind || '').trim().toLowerCase()
@@ -27,8 +32,10 @@ export const contractPath = (kind) => {
 // Returns the contract's Markdown with its title, its `Last verified` line
 // and the path it was read from. An unknown kind lists the known ones instead
 // of throwing, so the caller sees what it can ask for.
-export async function readContract({ kind, repoRoot, readFileImpl = readFile }) {
+export async function readContract({ kind, section = '', repoRoot, rendererRoot, readFileImpl = readFile, notes = {} }) {
   const key = String(kind || '').trim().toLowerCase()
+  if (key === RENDERER_KIND)
+    return readRendererGuide({ section, rendererRoot, readFileImpl })
   const relativePath = contractPath(key)
   if (!relativePath) {
     return {
@@ -55,12 +62,28 @@ export async function readContract({ kind, repoRoot, readFileImpl = readFile }) 
     }
     throw error
   }
-  return {
-    ok: true,
-    kind: key,
-    path: relativePath,
-    title: markdown.match(TITLE)?.[1] || '',
-    lastVerified: markdown.match(LAST_VERIFIED)?.[1] || null,
-    markdown,
+  // Generated sections: document fields and operations from the shared CMS
+  // code, block validation codes from the validator.
+  return describeContract(key, relativePath, withGeneratedContract(withGeneratedValidation(markdown), notes), section)
+}
+
+async function readRendererGuide({ section, rendererRoot, readFileImpl }) {
+  const relativePath = `emd-cms-front:${RENDERER_GUIDE}`
+  let markdown
+  try {
+    markdown = await readFileImpl(path.resolve(rendererRoot || '', RENDERER_GUIDE), 'utf8')
   }
+  catch (error) {
+    if (error?.code === 'ENOENT') {
+      return {
+        ok: false,
+        code: 'missing',
+        message: `The renderer guide is not in the emd-cms-front checkout this server uses (${rendererRoot || 'not configured'}). Set cmsRendererRepoPath or EDGE_CMS_RENDERER_REPO.`,
+        kind: RENDERER_KIND,
+        path: relativePath,
+      }
+    }
+    throw error
+  }
+  return describeContract(RENDERER_KIND, relativePath, markdown, section)
 }

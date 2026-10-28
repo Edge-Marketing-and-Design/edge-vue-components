@@ -14,6 +14,14 @@ Each skill opens with the block vocabulary and a step 0 that receives the data
 contracts through the CMS MCP tool `cms_contract` (`edge/tools/mcp/cms`), so a
 session in any repository writes against the contract text, not a path.
 
+## The edge-cms plugin
+
+`edge-block-package`, `edge-design-to-site`, `edge-figma-design` and
+`vue-to-block-migrator` also ship in the `edge-cms` plugin (`edge/plugins/edge-cms`) with the Hub's remote CMS
+tools, for people without a Hub checkout. Each of them says what changes
+without a checkout. After changing one, run `node edge/plugins/sync-skills.mjs`;
+`edge/tests/pluginSkills.test.mjs` fails while the plugin's copy is stale.
+
 ## Personal copies
 
 Claude Code and Codex load skills from `~/.claude/skills` and
