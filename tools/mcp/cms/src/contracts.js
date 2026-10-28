@@ -15,7 +15,12 @@ export const CONTRACT_KINDS = Object.freeze({
   'webcams': 'docs/data-contracts/webcams/README.md',
 })
 
-export const contractKinds = () => Object.keys(CONTRACT_KINDS)
+// The public renderer's Template v2 guide, read from the emd-cms-front
+// checkout (cmsRendererRepoPath) rather than the Hub.
+export const RENDERER_KIND = 'renderer'
+export const RENDERER_GUIDE = 'docs/cms-template-v2-blocks.md'
+
+export const contractKinds = () => [...Object.keys(CONTRACT_KINDS), RENDERER_KIND]
 
 export const contractPath = (kind) => {
   const key = String(kind || '').trim().toLowerCase()
@@ -25,8 +30,10 @@ export const contractPath = (kind) => {
 // Returns the contract's Markdown with its title, its `Last verified` line
 // and the path it was read from. An unknown kind lists the known ones instead
 // of throwing, so the caller sees what it can ask for.
-export async function readContract({ kind, repoRoot, readFileImpl = readFile }) {
+export async function readContract({ kind, section = '', repoRoot, rendererRoot, readFileImpl = readFile }) {
   const key = String(kind || '').trim().toLowerCase()
+  if (key === RENDERER_KIND)
+    return readRendererGuide({ section, rendererRoot, readFileImpl })
   const relativePath = contractPath(key)
   if (!relativePath) {
     return {
@@ -53,5 +60,26 @@ export async function readContract({ kind, repoRoot, readFileImpl = readFile }) 
     }
     throw error
   }
-  return describeContract(key, relativePath, markdown)
+  return describeContract(key, relativePath, markdown, section)
+}
+
+async function readRendererGuide({ section, rendererRoot, readFileImpl }) {
+  const relativePath = `emd-cms-front:${RENDERER_GUIDE}`
+  let markdown
+  try {
+    markdown = await readFileImpl(path.resolve(rendererRoot || '', RENDERER_GUIDE), 'utf8')
+  }
+  catch (error) {
+    if (error?.code === 'ENOENT') {
+      return {
+        ok: false,
+        code: 'missing',
+        message: `The renderer guide is not in the emd-cms-front checkout this server uses (${rendererRoot || 'not configured'}). Set cmsRendererRepoPath or EDGE_CMS_RENDERER_REPO.`,
+        kind: RENDERER_KIND,
+        path: relativePath,
+      }
+    }
+    throw error
+  }
+  return describeContract(RENDERER_KIND, relativePath, markdown, section)
 }

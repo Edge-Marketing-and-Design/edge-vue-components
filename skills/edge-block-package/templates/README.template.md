@@ -24,7 +24,7 @@ Tags used: `Content`.
 ```bash
 node generate-package.mjs
 node validate-package.mjs
-node __VALIDATOR__ .
+__HUB_CHECK__
 node preview.mjs   # writes preview/index.html; not an upload input
 ```
 

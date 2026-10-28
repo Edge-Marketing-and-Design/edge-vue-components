@@ -1,0 +1,22 @@
+{
+  "name": "edge-cms",
+  "description": "Build and update Edge CMS sites in a Hub without a Hub checkout: the edge-block-package, edge-design-to-site, edge-figma-design and vue-to-block-migrator skills, and the Hub's remote CMS tools (draft-only).",
+  "author": { "name": "Edge Marketing Design" },
+  "keywords": ["edge", "cms", "hub", "blocks", "figma"],
+  "userConfig": {
+    "hub_url": {
+      "type": "string",
+      "title": "Hub MCP URL",
+      "description": "The Hub's cms-agentMcp endpoint. The default is emd-cms; another Hub has its own URL.",
+      "default": "https://us-west1-emd-cms.cloudfunctions.net/cms-agentMcp",
+      "required": true
+    },
+    "connection": {
+      "type": "string",
+      "title": "Hub connection credential",
+      "description": "Your own cmsac.… credential: in the Hub, Dev Mode, Agent Keys, Hub connections, Create. The agent acts with your Hub rights.",
+      "sensitive": true,
+      "required": true
+    }
+  }
+}

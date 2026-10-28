@@ -3,14 +3,14 @@ import { access, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { CONTRACT_KINDS, contractKinds, contractPath, readContract } from '../src/contracts.js'
+import { CONTRACT_KINDS, RENDERER_GUIDE, contractKinds, contractPath, readContract } from '../src/contracts.js'
 
 // The server resolves the Hub root the same way (src/server.js repoRoot).
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..')
 
 test('every contract kind resolves to a file in this checkout', async () => {
   assert.ok(contractKinds().length >= 4)
-  for (const kind of contractKinds()) {
+  for (const kind of Object.keys(CONTRACT_KINDS)) {
     const relativePath = contractPath(kind)
     assert.match(relativePath, /^docs\/data-contracts\/[a-z-]+\/README\.md$/)
     await access(path.resolve(repoRoot, relativePath))
@@ -57,6 +57,37 @@ test('the Last verified line is returned when the contract has one', async () =>
   assert.equal(missing.ok, false)
   assert.equal(missing.code, 'missing')
   assert.equal(missing.path, CONTRACT_KINDS.posts)
+})
+
+test('a section narrows the contract to one heading', async () => {
+  const markdown = '# Guide\n\nIntro.\n\n## Agent quick contract\n\nRules.\n\n## Data Sources\n\nSources.\n'
+  const readFileImpl = async () => markdown
+  const whole = await readContract({ kind: 'blocks', repoRoot: '/hub', readFileImpl })
+  assert.deepEqual(whole.sections, ['Agent quick contract', 'Data Sources'])
+  assert.equal(whole.markdown, markdown)
+  const part = await readContract({ kind: 'blocks', section: 'data sources', repoRoot: '/hub', readFileImpl })
+  assert.equal(part.section, 'Data Sources')
+  assert.equal(part.markdown, '## Data Sources\n\nSources.')
+  assert.equal(part.title, 'Guide')
+  const unknown = await readContract({ kind: 'blocks', section: 'nope', repoRoot: '/hub', readFileImpl })
+  assert.equal(unknown.code, 'unknown-section')
+})
+
+test('the renderer kind reads the guide from the emd-cms-front checkout', async () => {
+  assert.ok(contractKinds().includes('renderer'))
+  const readFileImpl = async (file) => {
+    if (file === path.resolve('/front', RENDERER_GUIDE))
+      return '# CMS Template v2 Blocks\n\n## Agent quick contract\n\nRead first.\n'
+    const error = new Error(`ENOENT: ${file}`)
+    error.code = 'ENOENT'
+    throw error
+  }
+  const guide = await readContract({ kind: 'Renderer', section: 'Agent quick contract', repoRoot: '/hub', rendererRoot: '/front', readFileImpl })
+  assert.equal(guide.ok, true)
+  assert.equal(guide.path, `emd-cms-front:${RENDERER_GUIDE}`)
+  assert.equal(guide.markdown, '## Agent quick contract\n\nRead first.')
+  const missing = await readContract({ kind: 'renderer', repoRoot: '/hub', rendererRoot: '/elsewhere', readFileImpl })
+  assert.equal(missing.code, 'missing')
 })
 
 test('an unknown kind lists the known ones instead of throwing', async () => {

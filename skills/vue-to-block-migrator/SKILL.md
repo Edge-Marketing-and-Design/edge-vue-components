@@ -41,6 +41,26 @@ Produce supported Template v2 artifacts, not raw Vue parity:
 
 Never treat block creation, page assembly, importing, and publishing as the same operation.
 
+## Without a Hub checkout
+
+With the edge-cms plugin or the Hub's remote CMS MCP and no checkout, the
+workflow is the same; only the sources move:
+
+| With checkouts | Without |
+| --- | --- |
+| `${FRONT_ROOT}/docs/cms-template-v2-blocks.md` | `cms_contract` kind `renderer`: the same guide, bundled with the deployed Hub. Pass `section` to read one heading |
+| Hub source (`blockEditor.vue`, `page.vue`, ...) as the final word | The contracts (`cms_contract`) and the Hub's own checks (`cms_validate`, `cms_check_operation`). When they and this skill disagree, the Hub wins; report the mismatch |
+| The Hub import check inside the skill validator | The skill validator still runs this skill's package conventions (it warns that the Hub check didn't run); then `cms_validate` on each block definition |
+| Firebase MCP reads | `cms_find_block`, `cms_block_base`, `cms_list_pages`, `cms_get_page`, `cms_audit_blocks` (`summary.blockTags.list` for the tag list) |
+| Vue override lookup in emd-cms-front | Not available remotely: name the override blocks and leave the component check to a developer |
+
+Skip "Resolve the Active Repositories" and work in your own workspace folder.
+Page JSON is still uploaded by a person in the Hub's Pages editor, which runs
+the full import check; with the agent tools, pages can instead be built with
+`page.create` and `page.placeBlock`. Steps that need a Hub or emd-cms-front
+change (KV mirror configuration, Firestore indexes, Vue overrides) are
+reported as developer tasks.
+
 ## Resolve the Active Repositories
 
 Do not assume Clearwater Hub, IAFSC Hub, or any fixed path is the active checkout. Resolve paths for every task.
@@ -76,6 +96,9 @@ Read the public renderer's `AGENTS.md` first, then follow its routing for the au
 ```text
 ${FRONT_ROOT}/docs/cms-template-v2-blocks.md
 ```
+
+The same guide is `cms_contract` kind `renderer` (from the checkout locally,
+from the deployed Hub remotely); use that when there is no `FRONT_ROOT`.
 
 At minimum, read the guide's Agent quick contract, system boundaries, and end-to-end rendering flow before authoring or repairing Template v2 artifacts. Load only the task-relevant reference sections unless the live renderer instructions require the complete guide.
 
@@ -207,7 +230,7 @@ Rules:
 - Keep instance Data Source overrides in page-instance `meta`, not in library definitions.
 - Use `label`, not legacy `title`, for new Input labels.
 - Choose `previewType`, `type`, `themes`, and `synced` intentionally.
-- Tag every block: one or two tags for the generic kind of content it shows, from the organization's block tag list (`cmsBlockTags` on `organizations/{orgId}`; read it with the Firebase MCP, or from the project's `importfiles/PROJECT.md`), plus `Quick Picks` only if it belongs in the block picker's first view (not counted). Never `[]`, and never feature, collection, theme or version tags; what the block shows stays in its name. With no list in the Hub, ask the operator. The edge-block-package skill has the full rule.
+- Tag every block: one or two tags for the generic kind of content it shows, from the organization's block tag list (`cmsBlockTags` on `organizations/{orgId}`; read it with `cms_audit_blocks` (`summary.blockTags.list`) or the Firebase MCP, or from the project's `importfiles/PROJECT.md`), plus `Quick Picks` only if it belongs in the block picker's first view (not counted). Never `[]`, and never feature, collection, theme or version tags; what the block shows stays in its name. With no list in the Hub, ask the operator. The edge-block-package skill has the full rule.
 - Include useful `Instructions` and restrictive, context-aware `aiInstructions`.
 
 ### 6. Use supported Template v2 grammar
@@ -345,7 +368,7 @@ remote state accurately.
 Run the package's own validator when present, then run the skill validator:
 
 ```bash
-SKILL_DIR="${CODEX_HOME:-$HOME/.codex}/skills/vue-to-block-migrator"
+SKILL_DIR="<the folder this SKILL.md is in, e.g. ${CODEX_HOME:-$HOME/.codex}/skills/vue-to-block-migrator>"
 node "$SKILL_DIR/scripts/validate-cms-import.mjs" --tags="<the organization's block tag list, comma-separated>" /absolute/path/to/package-or-json
 ```
 
@@ -358,6 +381,10 @@ its own:
 ```bash
 node /absolute/path/to/hub/scripts/cms/validate-import.mjs [--themes id1,id2] /absolute/path/to/package-or-json
 ```
+
+Without a Hub checkout, the skill validator skips the Hub check with a
+warning. Run the Hub check remotely instead: `cms_validate` with each block's
+definition, and treat its errors and warnings like the import check's.
 
 Also run:
 
@@ -402,7 +429,7 @@ If a block references unavailable theme IDs, the current importer may clear thos
 
 ## Failure Handling
 
-- **Wrong checkout:** stop and resolve the active Hub/frontend; do not edit a stale clone.
+- **Wrong checkout:** stop and resolve the active Hub/frontend; do not edit a stale clone. Without checkouts, use the remote sources ("Without a Hub checkout") instead of searching for one.
 - **Invalid JSON:** report the file and parser error; fix locally and rerun all validators.
 - **Missing `docId`:** add a stable ID before batch import.
 - **Collision:** do not choose overwrite or import-as-new implicitly when identity matters.

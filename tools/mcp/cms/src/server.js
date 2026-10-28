@@ -250,7 +250,7 @@ const handlers = {
   cms_validate: async input => jsonResult(await cmsTools.validate(input)),
   cms_find_theme: async input => jsonResult(await cmsTools.findTheme(input)),
   cms_get_theme: async input => jsonResult(await cmsTools.getTheme(input)),
-  cms_contract: async ({ kind }) => jsonResult(await readContract({ kind, repoRoot })),
+  cms_contract: async ({ kind, section }) => jsonResult(await readContract({ kind, section, repoRoot, rendererRoot: path.resolve(repoRoot, config.cmsRendererRepoPath) })),
   // The guide the remote server serves, from this checkout's Edge copy.
   cms_guide: async ({ section }) => jsonResult(selectGuideSection(await readFile(path.resolve(__dirname, '../../../../functions/agentGuide/cms-agent-guide.md'), 'utf8'), section)),
   cms_agent_organizations: async input => jsonResult(connections ? await connections.organizations(input) : { ok: false, code: 'connection-required', message: 'Configure a Hub-issued agent connection to discover its organizations.' }),

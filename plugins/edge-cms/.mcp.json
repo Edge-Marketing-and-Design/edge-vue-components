@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "edge-cms": {
+      "type": "http",
+      "url": "${user_config.hub_url}",
+      "headers": { "Authorization": "Bearer ${user_config.connection}" }
+    }
+  }
+}

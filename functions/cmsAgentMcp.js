@@ -117,13 +117,13 @@ const createRemoteCms = ({ now = Date.now, issueSession = issueAgentSession, han
     cms_find_theme: tool(({ docId, query, exactName, limit, ...input }) => call(connection, input, { action: 'themes', docId, query, exactName, limit })),
     cms_get_theme: tool(({ themeId, includeCustomFonts, ...input }) => call(connection, input, { action: 'theme', themeId, includeCustomFonts })),
     cms_block_base: tool(({ docId, ...input }) => call(connection, input, { action: 'block', docId })),
-    cms_contract: tool(async ({ kind }) => {
+    cms_contract: tool(async ({ kind, section }) => {
       const { describeContract } = (await definitionsPromise)[0]
       const key = String(kind || '').trim().toLowerCase()
       const kinds = Object.keys(contracts)
       if (!contracts[key])
         return { ok: false, code: 'unknown-kind', message: kinds.length ? `Unknown contract kind "${kind}". Known kinds: ${kinds.join(', ')}.` : 'This Hub has not bundled its data contracts (scripts/cms/sync-agent-contracts.mjs).', kinds }
-      return describeContract(key, contracts[key], readFileSync(path.join(contractsDir, `${key}.md`), 'utf8'))
+      return describeContract(key, contracts[key], readFileSync(path.join(contractsDir, `${key}.md`), 'utf8'), section)
     }),
     cms_guide: tool(async ({ section }) => {
       const { selectGuideSection } = (await definitionsPromise)[0]

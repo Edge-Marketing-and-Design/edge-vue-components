@@ -86,7 +86,7 @@ Hand over to `edge-design-to-site` with the plan, the design map and the Figma f
 
 ## 6. CMS → Figma sync
 
-When a block changes in the Hub for a reason that did not start in Figma (an accessibility audit, a bug fix, a content-model change, a hand fix), apply it to Figma so the design stays the source of truth. The full procedure is `reference/cms-to-figma-sync.md`: find the change (`cms_diff`, `cms_block_base`), find the frames (`meta.design` and §10's "used on" column), classify it, stop at one checkpoint, apply targeted edits (never redraw a frame the designer touched), annotate every edited node, screenshot before and after, and log the sync in §10.
+When a block changes in the Hub for a reason that did not start in Figma (an accessibility audit, a bug fix, a content-model change, a hand fix), apply it to Figma so the design stays the source of truth. The full procedure is `reference/cms-to-figma-sync.md`: find the change (`cms_diff` with a Hub checkout, else a saved baseline; `cms_block_base`), find the frames (`meta.design` and §10's "used on" column), classify it, stop at one checkpoint, apply targeted edits (never redraw a frame the designer touched), annotate every edited node, screenshot before and after, and log the sync in §10.
 
 ## When to stop early
 

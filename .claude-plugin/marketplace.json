@@ -1,0 +1,11 @@
+{
+  "name": "edge",
+  "owner": { "name": "Edge Marketing Design" },
+  "plugins": [
+    {
+      "name": "edge-cms",
+      "source": "./plugins/edge-cms",
+      "description": "Edge CMS skills (block packages, design to site, Figma design, Vue/HTML to block migration) and the Hub's remote CMS tools."
+    }
+  ]
+}

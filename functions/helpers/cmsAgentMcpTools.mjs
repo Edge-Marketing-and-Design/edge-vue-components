@@ -60,17 +60,26 @@ export function selectGuideSection(markdown, section = '') {
   return { ok: true, section: sections[index], sections, markdown: text.slice(start, next).trimEnd() }
 }
 
-// A data contract's Markdown with its title and `Last verified` line.
-export function describeContract(kind, contractPath, markdown) {
+// A data contract's Markdown with its title, `Last verified` line and
+// section headings. `section` narrows the Markdown to one `##` section.
+export function describeContract(kind, contractPath, markdown, section = '') {
+  const part = selectGuideSection(markdown, section)
+  if (!part.ok)
+    return { ...part, kind }
   return {
     ok: true,
     kind,
     path: contractPath,
     title: markdown.match(/^#\s+(.+?)\s*$/m)?.[1] || '',
     lastVerified: markdown.match(/^Last verified:\s*(.+?)\s*$/m)?.[1] || null,
-    markdown,
+    ...(part.section ? { section: part.section } : {}),
+    sections: part.sections,
+    markdown: part.markdown,
   }
 }
+
+// The renderer kind is long and read by section.
+const RENDERER_CONTRACT_NOTE = 'Kind "renderer" is the public renderer\'s Template v2 guide (emd-cms-front): how blocks render in Hub preview and on the public site, template syntax, Data Sources and KV queryability, client helpers. Read its "Agent quick contract", "System boundaries" and "End-to-end rendering flow" sections, then only the section the task needs.'
 
 // Every tool, in registration order. `remote: true` returns only the remote
 // subset, with the remote server's orgId, sessionId and readiness wording.
@@ -296,10 +305,11 @@ export function cmsAgentToolDefinitions({ z, operationTypes, contractKinds = [],
       name: 'cms_contract',
       title: 'Read a CMS Data Contract',
       description: remote
-        ? `Read one of the Hub's data contracts as Markdown, as deployed with the Hub: the fields, storage paths, public projection, consumers and invariants an agent writes against. Call it for every kind the task will write before building (${contractKinds.join(', ')}), and name the contract lines each field follows in the handoff. An unknown kind lists the known ones.`
-        : `Read one of the Hub's data contracts as Markdown, from the checkout this server runs in: the fields, storage paths, public projection, consumers and invariants an agent writes against. Call it for every kind the task will write before building (${contractKinds.join(', ')}), and name the contract lines each field follows in the handoff. Reads a file only: no network, no Firestore. An unknown kind lists the known ones.`,
+        ? `Read one of the Hub's data contracts as Markdown, as deployed with the Hub: the fields, storage paths, public projection, consumers and invariants an agent writes against. Call it for every kind the task will write before building (${contractKinds.join(', ')}), and name the contract lines each field follows in the handoff. ${RENDERER_CONTRACT_NOTE} An unknown kind lists the known ones.`
+        : `Read one of the Hub's data contracts as Markdown, from the checkout this server runs in: the fields, storage paths, public projection, consumers and invariants an agent writes against. Call it for every kind the task will write before building (${contractKinds.join(', ')}), and name the contract lines each field follows in the handoff. ${RENDERER_CONTRACT_NOTE} Reads a file only: no network, no Firestore. An unknown kind lists the known ones.`,
       inputSchema: {
         kind: z.string().trim().min(1).describe(`Which contract: ${contractKinds.join(', ')}.`),
+        section: z.string().trim().optional().describe('One section heading (a "## " heading, for example "Agent quick contract"). Omit for the whole contract; every answer lists its sections.'),
       },
       annotations: READ,
     },

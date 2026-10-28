@@ -16,10 +16,12 @@ Do not replace an existing theme merely to support one block.
 ## Standard names (required for new themes)
 
 Start new themes from the Hub's `edge/lib/cmsThemeDefaults.mjs`, the source
-of truth for both the New Theme UI and agent defaults. Keep the baseline
+of truth for both the New Theme UI and agent defaults. Without a Hub checkout,
+`theme.create` with only a `name` saves those defaults; read them with
+`cms_get_theme` and adapt them with `theme.update`. Keep the baseline
 present; custom additions are allowed. Baseline-only blocks are portable;
 extensions require every selected theme to declare them. Existing themes and
-duplicates retain their JSON. Contract: `docs/data-contracts/cms-themes/README.md`.
+duplicates retain their JSON. Contract: `cms_contract` kind `themes` (`docs/data-contracts/cms-themes/README.md` in the Hub).
 
 - **Colors** (`extend.colors`), baseline required, extensions allowed:
   - brand: `primary`, `secondary`, `tertiary`, `accent` (the call-to-action
@@ -65,6 +67,9 @@ Check with `node <hub>/scripts/cms/validate-import.mjs --standard-theme
 <theme.json> <blocks/>` for baseline-only portability. Deliberate custom tokens
 may warn without selected-theme context: use normal import validation and
 `cms_check_operation` to verify those extensions against the selected themes.
+Without a Hub checkout there is no `--standard-theme` run: `cms_check_operation`
+on `block.create` or `block.draft` checks every name against the selected
+themes.
 
 ## When a site has no theme
 
