@@ -143,14 +143,14 @@ watch(uid, (value) => {
             {{ connection.name }} · {{ labels[agentKeyStatus(connection)] }}
           </p>
           <p class="text-xs text-muted-foreground">
-            Expires {{ formatDate(connection.expiresAt) }} · Last used {{ formatDate(connection.lastUsedAt) }} · …{{ connection.hint }}
+            Expires {{ formatDate(connection.expiresAt) }} · Last used {{ formatDate(connection.lastUsedAt) }} · {{ connection.kind === 'oauth' ? `Signed in from ${connection.client?.host}` : `…${connection.hint}` }}
           </p>
           <p v-if="connection.createdBy !== uid" class="text-xs text-muted-foreground">
             Owner {{ connection.createdBy }}
           </p>
         </div>
         <div v-if="!connection.revokedAt" class="flex gap-2">
-          <edge-shad-button v-if="connection.createdBy === uid" variant="outline" size="sm" :disabled="state.busy" @click="state.selected = connection; state.action = 'renew'">
+          <edge-shad-button v-if="connection.createdBy === uid && connection.kind !== 'oauth'" variant="outline" size="sm" :disabled="state.busy" @click="state.selected = connection; state.action = 'renew'">
             Renew
           </edge-shad-button>
           <edge-shad-button variant="outline" size="sm" :disabled="state.busy" @click="state.selected = connection; state.action = 'revoke'">

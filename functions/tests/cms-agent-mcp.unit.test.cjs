@@ -18,7 +18,7 @@ class HttpsError extends Error {
   }
 }
 
-const REMOTE_TOOLS = ['cms_find_block', 'cms_audit_blocks', 'cms_find_usage', 'cms_validate', 'cms_find_theme', 'cms_get_theme', 'cms_contract', 'cms_schema', 'cms_guide', 'cms_agent_organizations', 'cms_open_session', 'cms_check_operation', 'cms_run_operation', 'cms_preview_url', 'cms_site_readiness', 'cms_list_pages', 'cms_get_page', 'cms_list_posts', 'cms_get_post', 'cms_block_base']
+const REMOTE_TOOLS = ['cms_find_block', 'cms_audit_blocks', 'cms_find_usage', 'cms_validate', 'cms_find_theme', 'cms_get_theme', 'cms_contract', 'cms_schema', 'cms_guide', 'cms_agent_organizations', 'cms_list_sites', 'cms_open_session', 'cms_check_operation', 'cms_run_operation', 'cms_preview_url', 'cms_site_readiness', 'cms_list_pages', 'cms_get_page', 'cms_list_posts', 'cms_get_post', 'cms_block_base']
 
 const setup = async (t) => {
   const fake = createFakeDb({
@@ -307,6 +307,25 @@ test('library reads need current read rights and an organization session', async
   assert.equal((await callTool(client, 'cms_find_block', { orgId: 'b' })).code, 'permission-denied', 'no rights in another organization')
 })
 
+test('cms_list_sites lists the organization\'s sites without the templates site, with read rights', async (t) => {
+  const env = await setup(t)
+  env.docs.set('organizations/a/sites/templates', { name: 'Templates' })
+  env.docs.get('organizations/a/sites/s').domains = ['a.example.com']
+  env.docs.get('organizations/a/sites/s').theme = 'main'
+  const client = await connect(t, env)
+  const listed = await callTool(client, 'cms_list_sites', { orgId: 'a' })
+  assert.equal(listed.ok, true, listed.message)
+  assert.deepEqual(listed.sites, [
+    { siteId: 's', name: 'Site A', domains: ['a.example.com'], canonicalDomain: '', theme: 'main' },
+    { siteId: 't', name: 'Other Site', domains: [], canonicalDomain: '', theme: '' },
+  ])
+  assert.equal(listed.scanTruncated, false)
+  assert.deepEqual(readAudits(env).map(record => [record.tool, record.docIds]), [['sites', ['s', 't']]])
+  env.denied.add('read:organizations/a/sites')
+  assert.equal((await callTool(client, 'cms_list_sites', { orgId: 'a' })).code, 'permission-denied')
+  assert.equal((await callTool(client, 'cms_list_sites', { orgId: 'b' })).code, 'permission-denied', 'no rights in another organization')
+})
+
 test('a failed audit write never fails the read', async (t) => {
   const env = await setup(t)
   env.hooks.beforeAdd = () => {
@@ -387,6 +406,13 @@ test('the remote server sends its rules on initialize and serves the guide and t
   assert.ok(contract.markdown.includes('| `theme.live` | Propose it; a person applies it in the theme editor. |'), 'explanation overrides are served')
   assert.ok(!contract.markdown.includes(OPERATIONS_CONTRACT_MARKER), 'the operations section is generated')
   assert.match(contract.markdown, /### `page\.setValues`/)
+  const renderer = await callTool(client, 'cms_contract', { kind: 'renderer', section: 'agent quick contract' })
+  assert.equal(renderer.ok, true, renderer.message)
+  assert.equal(renderer.path, index.renderer)
+  assert.equal(renderer.section, 'Agent quick contract')
+  assert.match(renderer.markdown, /^## Agent quick contract/)
+  assert.ok(renderer.sections.includes('Data Sources'))
+  assert.equal((await callTool(client, 'cms_contract', { kind: 'renderer', section: 'nope' })).code, 'unknown-section')
   const unknown = await callTool(client, 'cms_contract', { kind: 'nope' })
   assert.equal(unknown.code, 'unknown-kind')
   assert.deepEqual(unknown.kinds, Object.keys(index))
