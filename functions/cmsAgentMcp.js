@@ -135,6 +135,7 @@ const createRemoteCms = ({ now = Date.now, issueSession = issueAgentSession, han
       return selectGuideSection(readFileSync(guideFile, 'utf8'), section)
     }),
     cms_agent_organizations: tool(input => listOrganizations(connection.data.createdBy, input)),
+    cms_list_sites: tool(input => call(connection, input, { action: 'sites' })),
     cms_open_session: tool(async ({ orgId, scope, siteId }) => {
       const { session } = await sessionFor(connection, { orgId, scope, ...(siteId ? { siteId } : {}) })
       const { token: _token, ...safe } = session

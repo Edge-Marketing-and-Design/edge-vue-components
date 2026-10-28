@@ -27,7 +27,7 @@ Shared Edge source: `edge/functions/agentGuide/cms-agent-guide.md`.
 1. `cms_agent_organizations` lists the organizations you can edit. Page through
    with `nextStartAfter` until it is null.
 2. Pass that `orgId` to every other tool. For page and post work also pass the
-   `siteId` (inside the operation for check and run). The server opens and
+   `siteId` (from `cms_list_sites`; inside the operation for check and run). The server opens and
    renews the right session for each call: a site session for page, post and
    `site.update` work, an organization session for library reads, blocks,
    themes and `site.create`. `cms_open_session` is optional; it only names a

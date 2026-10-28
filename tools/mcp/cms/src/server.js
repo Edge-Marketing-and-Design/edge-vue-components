@@ -267,6 +267,7 @@ const handlers = {
   // The guide the remote server serves, from this checkout's Edge copy.
   cms_guide: async ({ section }) => jsonResult(selectGuideSection(await readFile(path.resolve(__dirname, '../../../../functions/agentGuide/cms-agent-guide.md'), 'utf8'), section)),
   cms_agent_organizations: async input => jsonResult(connections ? await connections.organizations(input) : { ok: false, code: 'connection-required', message: 'Configure a Hub-issued agent connection to discover its organizations.' }),
+  cms_list_sites: async input => jsonResult(await cmsTools.listSites(input)),
   async cms_open_session(input) {
     const orgId = resolveOrgId(input.orgId)
     return jsonResult(connections ? await connections.open({ ...input, orgId }) : { ok: false, code: 'connection-required', message: 'Configure a Hub-issued agent connection to open sessions.' })

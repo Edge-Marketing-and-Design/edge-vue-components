@@ -1,4 +1,4 @@
-// Library reads for agents (blocks, block bases, themes, usage, audit,
+// Library reads for agents (blocks, block bases, themes, sites, usage, audit,
 // validation) run as the operator: the Hub endpoint has already verified the
 // credential and its organization session, and each read checks the
 // operator's current Hub read rights before reading. The reads are the local
@@ -9,13 +9,14 @@
 const { Timestamp } = require('firebase-admin/firestore')
 const { db, HttpsError, logger, permissionCheck } = require('./config.js')
 
-const LIBRARY_READ_ACTIONS = ['blocks', 'block', 'themes', 'theme', 'usage', 'audit', 'validate', 'schema']
+const LIBRARY_READ_ACTIONS = ['blocks', 'block', 'themes', 'theme', 'sites', 'usage', 'audit', 'validate', 'schema']
 // What each action reads, for the permission check.
 const READ_TARGETS = {
   blocks: ['blocks'],
   block: ['blocks'],
   themes: ['themes'],
   theme: ['themes'],
+  sites: ['sites'],
   usage: ['blocks', 'sites'],
   audit: ['blocks', 'themes'],
   validate: ['blocks'],
@@ -104,6 +105,10 @@ const read = async (reads, orgId, body, uid) => {
   if (body.action === 'theme') {
     const result = await reads.getTheme({ orgId, themeId: body.themeId, includeCustomFonts: body.includeCustomFonts !== false })
     return { result, docIds: [result.themeId], resultCount: 1, truncated: false }
+  }
+  if (body.action === 'sites') {
+    const result = await reads.listSites({ orgId })
+    return { result, docIds: result.sites.map(site => site.siteId), resultCount: result.siteCount, truncated: result.scanTruncated }
   }
   if (body.action === 'usage') {
     const result = await reads.findUsage({ orgId, docId: body.docId, siteId: text(body.siteId), limit: body.limit })

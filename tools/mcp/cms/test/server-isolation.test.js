@@ -40,6 +40,7 @@ test('the MCP rejects tenant escapes before database reads or agent requests', a
   for (const [name, args] of [
     ['cms_find_block', { orgId: 'other' }],
     ['cms_find_theme', { orgId: 'other' }],
+    ['cms_list_sites', { orgId: 'other' }],
     ['cms_block_base', { orgId: 'other', docId: 'hero' }],
     ['cms_find_block', {}],
     ['cms_preview_url', { orgId: 'other', siteId: 'site', pageId: 'home' }],

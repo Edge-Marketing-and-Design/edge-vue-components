@@ -96,6 +96,7 @@ export function createCmsToolService({
   const findTheme = async ({ orgId: requestedOrgId = '', ...input } = {}) => ({ ...environmentSummary(), ...await reads.findTheme({ ...input, orgId: resolveOrgId(requestedOrgId) }) })
   const getTheme = async ({ orgId: requestedOrgId = '', ...input }) => ({ ...environmentSummary(), ...await reads.getTheme({ ...input, orgId: resolveOrgId(requestedOrgId) }) })
   const schema = async ({ orgId: requestedOrgId = '', ...input }) => ({ ...environmentSummary(), ...await reads.liveShape({ ...input, orgId: resolveOrgId(requestedOrgId) }) })
+  const listSites = async ({ orgId: requestedOrgId = '' } = {}) => ({ ...environmentSummary(), ...await reads.listSites({ orgId: resolveOrgId(requestedOrgId) }) })
   const blockBase = async ({ orgId: requestedOrgId = '', docId }) => reads.blockBase({ orgId: resolveOrgId(requestedOrgId), docId })
   const findBlock = async ({ orgId: requestedOrgId = '', ...input } = {}) => ({ ...environmentSummary(), ...await reads.findBlock({ ...input, orgId: resolveOrgId(requestedOrgId) }) })
 
@@ -416,6 +417,7 @@ export function createCmsToolService({
     findTheme,
     findUsage,
     getTheme,
+    listSites,
     readProductionBlock,
     readProductionTheme,
     resolveOverride,

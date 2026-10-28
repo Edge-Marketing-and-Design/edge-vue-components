@@ -20,6 +20,7 @@ export const CMS_AGENT_REMOTE_TOOL_NAMES = Object.freeze([
   'cms_schema',
   'cms_guide',
   'cms_agent_organizations',
+  'cms_list_sites',
   'cms_open_session',
   'cms_check_operation',
   'cms_run_operation',
@@ -38,7 +39,7 @@ const READ = { readOnlyHint: true, destructiveHint: false, idempotentHint: true 
 // cms_guide serves the full workflow.
 export const CMS_AGENT_INSTRUCTIONS = [
   'Edge CMS tools for one Hub. Everything you change is a draft: no tool publishes a page or post, releases a block, or changes a live theme; people do that in the Hub.',
-  'Start with cms_agent_organizations, then pass that orgId to every tool (and siteId for page and post work). Sessions are handled for you.',
+  'Start with cms_agent_organizations, then pass that orgId to every tool (and siteId, from cms_list_sites, for page and post work). Sessions are handled for you.',
   'Read cms_guide for the workflow, and cms_contract (kind "operations", plus the kind you write) before building an operation.',
   'Change things with cms_check_operation, then cms_run_operation with the same operation and the returned checksum.',
   'For a block draft, take baseHash from cms_block_base and check the definition with cms_validate first.',
@@ -340,6 +341,13 @@ export function cmsAgentToolDefinitions({ z, operationTypes, contractKinds = [],
       title: 'Discover Agent Organizations',
       description: 'List organizations currently editable through your Hub-issued connection. Refreshes Hub permissions; no local org/key list. Paginate with nextStartAfter.',
       inputSchema: { startAfter: z.string().trim().optional(), limit: z.number().int().min(1).max(100).optional() },
+      annotations: READ,
+    },
+    {
+      name: 'cms_list_sites',
+      title: 'List an Organization\'s Sites',
+      description: 'List the organization\'s sites with each siteId, name, domains, canonical domain and theme id, to find the siteId page and post work needs. The templates site is left out. scanTruncated marks an organization with more sites than were read. Reads only.',
+      inputSchema: { orgId: orgIdSchema() },
       annotations: READ,
     },
     {

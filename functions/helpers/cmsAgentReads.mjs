@@ -347,6 +347,38 @@ export function createCmsReads({ db, limits = {}, sanitizeValue = value => value
     }
   }
 
+  // The organization's sites (not the templates site), in id order, with
+  // what an agent needs to pick one: name, domains and theme.
+  const listSites = async ({ orgId }) => {
+    const maxSites = boundedNumber(
+      limits.maxCmsSiteScanDocuments,
+      limits.maxCmsSiteScanDocuments || DEFAULT_SITE_LIMIT,
+      DEFAULT_SITE_LIMIT,
+    )
+    const collectionPath = `organizations/${orgId}/sites`
+    const snapshot = await db.collection(collectionPath).limit(maxSites + 1).get()
+    const sites = snapshot.docs.slice(0, maxSites)
+      .filter(siteDoc => siteDoc.id !== 'templates')
+      .sort((a, b) => compareDocIds(a.id, b.id))
+      .map((siteDoc) => {
+        const data = sanitizeValue(siteDoc.data()) || {}
+        return {
+          siteId: siteDoc.id,
+          name: typeof data.name === 'string' ? data.name : '',
+          domains: Array.isArray(data.domains) ? data.domains.filter(domain => typeof domain === 'string') : [],
+          canonicalDomain: typeof data.canonicalDomain === 'string' ? data.canonicalDomain : '',
+          theme: typeof data.theme === 'string' ? data.theme : '',
+        }
+      })
+    return {
+      orgId,
+      collectionPath,
+      siteCount: sites.length,
+      scanTruncated: snapshot.size > maxSites,
+      sites,
+    }
+  }
+
   const findUsage = async ({ orgId, docId: requestedDocId, siteId: requestedSiteId = '', limit }) => {
     const docId = assertFirestoreSegment(requestedDocId, 'docId')
     const resultLimit = boundedNumber(limit, limits.maxCmsUsageResults || 500, 100)
@@ -658,7 +690,7 @@ export function createCmsReads({ db, limits = {}, sanitizeValue = value => value
     }
   }
 
-  return { readBlock, readTheme, findTheme, getTheme, findBlock, blockBase, findUsage, auditBlocks, validateDefinition, dataSourceCollections, resolveShapeCollection, liveShape }
+  return { readBlock, readTheme, findTheme, getTheme, findBlock, blockBase, listSites, findUsage, auditBlocks, validateDefinition, dataSourceCollections, resolveShapeCollection, liveShape }
 }
 
 export function hashDocument(value) {
