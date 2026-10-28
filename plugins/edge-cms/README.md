@@ -21,14 +21,25 @@ claude plugin marketplace add <owner>/edge-vue-components
 claude plugin install edge-cms@edge
 ```
 
-When the plugin is enabled, it asks for:
+Before the first session, save your own Hub connection credential (Hub: Dev
+Mode, Agent Keys, Hub connections, Create; it is shown once) in a private
+file. The agent acts with your Hub rights, and the connection can be renewed
+or revoked in the Hub:
 
-- **Hub MCP URL:** defaults to emd-cms. Another Hub has its own URL
-  (`https://<region>-<project-id>.cloudfunctions.net/cms-agentMcp`).
-- **Hub connection credential:** your own `cmsac.…` credential, from the
-  Hub's Dev Mode, Agent Keys, Hub connections, Create. It is kept in the
-  system's secure credential store. The agent acts with your Hub rights, and
-  the connection can be renewed or revoked there.
+```bash
+mkdir -p ~/.config/emd-cms
+pbpaste > ~/.config/emd-cms/cms-agent-connection   # after copying the credential
+chmod 600 ~/.config/emd-cms/cms-agent-connection
+```
+
+The server's `headersHelper` (`scripts/hub-auth.sh`) reads that file on each
+connection, so the credential is never in the plugin or Claude's settings.
+Plugins installed from an organization catalog don't prompt for settings,
+which is why it isn't a plugin setting. `EDGE_CMS_CONNECTION_FILE` points at
+another file, and `EDGE_CMS_HUB_URL` at another Hub's endpoint
+(`https://<region>-<project-id>.cloudfunctions.net/cms-agentMcp`); the default
+is emd-cms. The desktop app doesn't read shell variables, so they only help
+in a terminal.
 
 If you already added the remote server by hand (for example `emd-cms-remote`
 in `~/.claude.json`), remove it after installing so the tools don't appear
