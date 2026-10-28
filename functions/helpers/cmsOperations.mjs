@@ -2027,3 +2027,73 @@ export const OPERATIONS_CONTRACT_MARKER = '<!-- operations: generated from CMS_O
 export const withGeneratedOperations = (markdown, notes = {}) => (String(markdown).includes(OPERATIONS_CONTRACT_MARKER)
   ? String(markdown).replace(OPERATIONS_CONTRACT_MARKER, renderOperationsContract(CMS_OPERATION_SPECS, CMS_OPERATION_PROBLEMS, notes).trimEnd())
   : String(markdown))
+
+// ---- Document fields ----
+//
+// What each field of a CMS document means, for the contracts. Each kind
+// names the builder that writes a new document; a field the builder doesn't
+// write says who does (`writtenBy`). Tests check both directions: every key
+// the builder writes is described here, and every described field is either
+// written by the builder or says who writes it. cms_contract serves the
+// tables in place of their markers (withGeneratedFields).
+export const CMS_DOCUMENT_FIELDS = Object.freeze({
+  'page': {
+    builder: 'blankPagePayload',
+    columns: ['Field', 'Type', 'Meaning'],
+    fields: [
+      { names: ['name'], type: 'string', meaning: 'The page\'s slug, unique across both root menus (`uniqueRootSlug`).' },
+      { names: ['post'], type: 'boolean', meaning: '"Is a Post Template": the page renders posts under its route; its `postContent` is the post view.', writtenBy: 'the Hub\'s page settings' },
+      { names: ['type'], type: 'string array', meaning: 'Template pages only (`templates` site): `["Page"]`, `["Post"]` or both, where the template may be used.', writtenBy: 'the Hub\'s template editor' },
+      { names: ['content'], type: 'array', meaning: 'Block instances of the page view (blocks contract, Block instance).' },
+      { names: ['structure'], type: 'array', meaning: 'Rows of the page view: `[{ id, width, gap, background, verticalAlign, mobileOrder, marginXMode, paddingTop, paddingRight, paddingBottom, paddingLeft, marginTop, marginRight, marginBottom, marginLeft, tailwindClasses, columns: [{ id, span, blocks: [instanceId], tailwindClasses }] }]` (`createFullWidthRow`, `rowTailwindClasses`, `columnTailwindClasses`).', writtenBy: 'the page editor and the block operations' },
+      { names: ['postContent'], type: 'array', meaning: 'Block instances of the post view of a post template page.' },
+      { names: ['postStructure'], type: 'array', meaning: 'Rows of the post view, shaped as `structure`.', writtenBy: 'the page editor and the block operations' },
+      { names: ['blockIds'], type: 'string array', meaning: 'Derived: the library block ids of every instance and column reference (`derivePageBlockIds`); the propagation and sync triggers query it.' },
+      { names: ['metaTitle', 'metaDescription', 'structuredData'], type: 'strings', meaning: 'Page SEO. The default structured data is a `WebPage` with `isPartOf` the site and the `{{cms-url}}`, `{{cms-site}}` and `{{cms-logo}}` tokens (`buildPageStructuredData`).' },
+      { names: ['structuredDataAiLocked'], type: 'boolean', meaning: 'True when the template\'s structured data is custom, so AI SEO edits leave it alone (`isCustomStructuredDataTemplate`): the Hub\'s AI SEO skips `structuredData`, and `page.update` refuses it. Set when a page is created from a template; nothing clears it.' },
+      { names: ['postMetaTitle', 'postMetaDescription', 'postStructuredData'], type: 'strings', meaning: 'SEO of the post view, with each post\'s own tokens.' },
+      { names: ['version'], type: 'number', meaning: 'Incremented on every save in the editor and every page operation (`getNextVersion`); the published copy carries the version it was published at.', writtenBy: 'the page editor and the page operations' },
+      { names: ['doc_created_at', 'last_updated'], type: 'numbers', meaning: 'Timestamps.' },
+    ],
+  },
+  'block-instance': {
+    builder: 'buildInstanceFromLibraryBlock',
+    columns: ['Field', 'Owner'],
+    fields: [
+      { names: ['id'], meaning: 'Instance, unique within the document.' },
+      { names: ['blockId'], meaning: 'The library block\'s document id.' },
+      { names: ['name'], meaning: 'Copied from the library at placement. The picker refreshes it when cloning a synced instance. It is **not** propagated when the library block is renamed.' },
+      { names: ['content', 'template', 'templateVersion', 'schema', 'dataSources', 'isOverrideBlock', 'blockUpdatedAt'], meaning: 'Copied from the library block; see Propagation.' },
+      { names: ['blockRevision'], meaning: 'The library revision this instance holds. Written by the release worker, and by `page.placeBlock` operations when placing a block.' },
+      { names: ['values'], meaning: 'Instance-owned content. A Template v2 instance starts with each schema field\'s default `value`. The public renderer fills a field the instance has never saved from the schema default; saved values, including an empty string, are never replaced, and block releases never change instance `values`.' },
+      { names: ['meta'], meaning: 'Instance-owned. Library `meta` keys are merged in, with `limit` excluded and `queryItems` reconciled; the library-only `meta.design` is never merged.' },
+      { names: ['synced'], meaning: 'Instance setting: the instance shares one set of values across the site (site chrome).' },
+      { names: ['protection'], meaning: 'Instance setting.', writtenBy: 'the page editor (copied from the site\'s existing instance when placing a synced block)' },
+    ],
+  },
+})
+
+// One kind's field table as Markdown.
+export const renderDocumentFields = (kind, registry = CMS_DOCUMENT_FIELDS) => {
+  const entry = registry[kind]
+  if (!entry)
+    return ''
+  const cell = value => String(value).replace(/\|/g, '\\|').replace(/\n/g, ' ')
+  const lines = [`| ${entry.columns.join(' | ')} |`, `| ${entry.columns.map(() => '---').join(' | ')} |`]
+  for (const field of entry.fields) {
+    const names = field.names.map(name => `\`${name}\``).join(', ')
+    const meaning = cell(field.meaning + (field.writtenBy ? ` Written by ${field.writtenBy}.` : ''))
+    lines.push(entry.columns.length === 3 ? `| ${names} | ${field.type || ''} | ${meaning} |` : `| ${names} | ${meaning} |`)
+  }
+  lines.push('', `Generated from \`CMS_DOCUMENT_FIELDS\` (\`${kind}\`) in \`edge/lib/cmsOperations.js\`; new documents are built by \`${entry.builder}\`.`)
+  return `${lines.join('\n')}\n`
+}
+
+// Markers `<!-- fields: <kind> generated from CMS_DOCUMENT_FIELDS -->` in a
+// contract, replaced by that kind's table.
+export const FIELDS_MARKER = /<!-- fields: ([a-z-]+) generated from CMS_DOCUMENT_FIELDS -->/g
+export const withGeneratedFields = markdown => String(markdown).replace(FIELDS_MARKER, (marker, kind) => (CMS_DOCUMENT_FIELDS[kind] ? renderDocumentFields(kind).trimEnd() : marker))
+
+// Every generated section of a contract: document fields, then operations
+// with their explanation overrides.
+export const withGeneratedContract = (markdown, notes = {}) => withGeneratedOperations(withGeneratedFields(markdown), notes)

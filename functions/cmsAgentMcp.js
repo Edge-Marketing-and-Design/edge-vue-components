@@ -119,13 +119,15 @@ const createRemoteCms = ({ now = Date.now, issueSession = issueAgentSession, han
     cms_get_theme: tool(({ themeId, includeCustomFonts, ...input }) => call(connection, input, { action: 'theme', themeId, includeCustomFonts })),
     cms_block_base: tool(({ docId, ...input }) => call(connection, input, { action: 'block', docId })),
     cms_contract: tool(async ({ kind }) => {
-      const [{ describeContract }, { withGeneratedOperations }] = await definitionsPromise
+      const [{ describeContract }, { withGeneratedContract }] = await definitionsPromise
       const key = String(kind || '').trim().toLowerCase()
       const kinds = Object.keys(contracts)
       if (!contracts[key])
         return { ok: false, code: 'unknown-kind', message: kinds.length ? `Unknown contract kind "${kind}". Known kinds: ${kinds.join(', ')}.` : 'This Hub has not bundled its data contracts (scripts/cms/sync-agent-contracts.mjs).', kinds }
-      // Explanation overrides apply to the generated operations section.
-      return describeContract(key, contracts[key], withGeneratedOperations(readFileSync(path.join(contractsDir, `${key}.md`), 'utf8'), await readNotes()))
+      // Generated sections (operations with their explanation overrides,
+      // block validation codes) replace their markers.
+      const { withGeneratedValidationCodes } = await import('./helpers/cmsBlockValidation.mjs')
+      return describeContract(key, contracts[key], withGeneratedContract(withGeneratedValidationCodes(readFileSync(path.join(contractsDir, `${key}.md`), 'utf8')), await readNotes()))
     }),
     cms_schema: tool(({ collection, siteId, limit, ...input }) => call(connection, input, { action: 'schema', collection, ...(siteId ? { siteId } : {}), ...(limit ? { limit } : {}) })),
     cms_guide: tool(async ({ section }) => {
