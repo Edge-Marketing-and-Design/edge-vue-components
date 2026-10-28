@@ -88,7 +88,7 @@ Set with the operations, from the handoff's approved copy only:
 2. **Checkpoint 2.** Stop and report:
    - pages built, each with a fresh preview link;
    - blocks created, and block drafts waiting for the developer to release (Block Editor, then release). Say plainly that the Hub page editor shows **released** blocks: until these drafts are released, the editor shows the older versions, while your preview links showed the drafts;
-   - override blocks that need a Vue component, with a handoff note each (block name, fields the component reads, behaviour), and whether the local `emd-cms-front` checkout already has it (the readiness report says; remotely it reports overrides as unchecked, so list each as needing the developer to confirm);
+   - override blocks that need a Vue component, with a handoff note each (block name, fields the component reads, behaviour), and whether the deployed public site already has it (readiness `deployedRenderer`; with a local `emd-cms-front` checkout, `localRenderer` also covers a branch that hasn't deployed);
    - the fields you wrote and the contract line each follows (from step 0);
    - content you couldn't fill or left at a fallback, and anything you invented and removed;
    - remaining readiness items and differences from the design you couldn't fix;

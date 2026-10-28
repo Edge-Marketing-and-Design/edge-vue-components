@@ -96,19 +96,20 @@ const loadReads = () => {
     resolveOverrideFromComponents: reads.resolveOverrideFromComponents,
     getRenderingOwner: reads.getRenderingOwner,
     ...reads.createCmsReads({
-    db,
-    sanitizeValue: reads.firestoreJson,
-    validation,
-    blockDefinitionHash: revisions.blockDefinitionHash,
-    loadRenderTemplate: async () => {
-      try {
-        return (await import('@edgedev/template-engine')).renderTemplateAsync || null
-      }
-      catch {
-        return null
-      }
-    },
-  })}))
+      db,
+      sanitizeValue: reads.firestoreJson,
+      validation,
+      blockDefinitionHash: revisions.blockDefinitionHash,
+      loadRenderTemplate: async () => {
+        try {
+          return (await import('@edgedev/template-engine')).renderTemplateAsync || null
+        }
+        catch {
+          return null
+        }
+      },
+    }),
+  }))
   return readsPromise
 }
 

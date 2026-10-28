@@ -240,7 +240,7 @@ const renderBlock = async ({ reads, orgId, body, requireRead, overrideFor }) => 
     let timer
     rendered = await Promise.race([
       engine.pageRender([prepared], theme, '', hydrate),
-      new Promise((_, reject) => {
+      new Promise((_resolve, reject) => {
         timer = setTimeout(() => reject(new Error(`Rendering took longer than ${RENDER_BUDGET_MS / 1000} seconds.`)), Math.max(1000, deadline - Date.now()))
       }),
     ]).finally(() => clearTimeout(timer))

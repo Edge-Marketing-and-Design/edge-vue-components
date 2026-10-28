@@ -61,7 +61,10 @@ Shared Edge source: `edge/functions/agentGuide/cms-agent-guide.md`.
 2. `cms_block_base` returns its current definition (its open draft, else the
    released one) and `baseHash`.
 3. Edit the definition and check it with `cms_validate` (send it inline as
-   `definition`). Fix every error.
+   `definition`). Fix every error. `cms_render_block` renders it with a site's
+   theme and its real Data Source records (`data: "sample"` or `"empty"` for
+   the other states) and returns the HTML and a standalone page to open and
+   screenshot.
 4. `block.draft` with `blockId`, the `definition` and that `baseHash`: if
    someone changed the block in the Hub since, the check refuses it instead
    of overwriting. Fields the definition leaves out keep their current
@@ -90,8 +93,16 @@ Shared Edge source: `edge/functions/agentGuide/cms-agent-guide.md`.
 - `cms_preview_url` returns a 15-minute link to the Hub's preview of a draft
   page (or its published copy), with block drafts when `blockDrafts` is true and a
   `viewport` of `mobile`, `medium` or `large`. Open it in a browser and
-  compare with the design. Vue override components only render on the public
-  site.
+  compare with the design. Lists show the records the public site shows; a
+  Data Source that didn't load is counted in the page's
+  `data-preview-collection-problems` attribute and logged to the console.
+  Vue override components only render on the public site.
+- `cms_render_block` checks one block the same way without a page: its
+  `sources` say where each list's records came from and why one is empty.
+- `cms_validate`, `cms_audit_blocks` and `cms_site_readiness` say whether the
+  deployed public site replaces a block with a Vue component
+  (`renderingOwner`, readiness `deployedRenderer`). A component only counts
+  for a block marked `isOverrideBlock`.
 - `cms_site_readiness` lists what stops a site from being finished: failed
   block checks, empty required content, missing blocks, unreleased drafts,
   pages behind the released block, and unpublished pages.

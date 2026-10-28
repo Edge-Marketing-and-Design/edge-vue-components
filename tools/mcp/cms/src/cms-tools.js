@@ -745,11 +745,6 @@ function truncateText(value, maxLength) {
   return `${text.slice(0, maxLength)}\n...[truncated ${text.length - maxLength} characters]`
 }
 
-
-
-
-
-
 async function listFilesRecursively(directory, predicate) {
   const entries = await readdir(directory, { withFileTypes: true })
   const files = []

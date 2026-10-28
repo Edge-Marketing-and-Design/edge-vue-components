@@ -52,7 +52,7 @@ workflow is the same; only the sources move:
 | Hub source (`blockEditor.vue`, `page.vue`, ...) as the final word | The contracts (`cms_contract`) and the Hub's own checks (`cms_validate`, `cms_check_operation`). When they and this skill disagree, the Hub wins; report the mismatch |
 | The Hub import check inside the skill validator | The skill validator still runs this skill's package conventions (it warns that the Hub check didn't run); then `cms_validate` on each block definition |
 | Firebase MCP reads | `cms_find_block`, `cms_block_base`, `cms_list_pages`, `cms_get_page`, `cms_audit_blocks` (`summary.blockTags.list` for the tag list) |
-| Vue override lookup in emd-cms-front | Not available remotely: name the override blocks and leave the component check to a developer |
+| Vue override lookup in emd-cms-front | `cms_validate` reports `renderingOwner` from the deployed public site's override manifest; a component on a branch that hasn't deployed is still a developer check |
 
 Skip "Resolve the Active Repositories" and work in your own workspace folder.
 Page JSON is still uploaded by a person in the Hub's Pages editor, which runs

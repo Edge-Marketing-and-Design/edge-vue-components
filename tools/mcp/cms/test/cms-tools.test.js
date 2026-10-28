@@ -14,6 +14,7 @@ import {
   validateBlockDocument,
   validateBlockWithRender,
 } from '../src/cms-tools.js'
+import { resolveOverrideFromComponents } from '../../../../lib/cmsAgentReads.js'
 
 test('organization resolution enforces configured tenants including the default', () => {
   const config = { defaultOrgId: 'allowed', allowedOrganizationIds: ['allowed'] }
@@ -142,6 +143,20 @@ test('resolveVueOverride mirrors org-scoped preference and CMS fallback', async 
   })
   assert.equal(fallback.status, 'cms-html')
   assert.equal(fallback.selectedMatch, null)
+})
+
+test('resolveOverrideFromComponents applies the public renderer\'s rule to a component list', () => {
+  const components = ['navbar.vue', 'heroBanner.vue', 'the-mule-org123/muleCalculator.vue', 'the-mule-org123/theme9MuleCalculator.vue', 'site-org123/officeMap.client.vue', 'a-org123/dupe.vue', 'b-org123/dupe.vue']
+  const resolve = (blockName, options = {}) => resolveOverrideFromComponents(components, { orgId: 'org123', blockName, isOverrideBlock: true, ...options })
+  assert.equal(resolve('Mule Calculator').selectedMatch.relativePath, 'the-mule-org123/muleCalculator.vue')
+  assert.equal(resolve('Mule Calculator', { themeId: 'theme9' }).selectedMatch.relativePath, 'the-mule-org123/theme9MuleCalculator.vue', 'the site theme\'s component first')
+  assert.equal(resolve('Office Map').selectedMatch.relativePath, 'site-org123/officeMap.client.vue', 'Nuxt drops .client')
+  assert.deepEqual([resolve('Navbar').status, resolve('Navbar').selectedMatch.scope], ['vue-override', 'global'])
+  assert.equal(resolve('Mule Calculator', { orgId: 'other' }).status, 'cms-html', 'another organization\'s folder never matches')
+  assert.equal(resolve('Dupe').status, 'ambiguous-vue-override')
+  const unflagged = resolve('Hero Banner', { isOverrideBlock: false })
+  assert.deepEqual([unflagged.status, unflagged.unflaggedMatch], ['cms-html', 'heroBanner.vue'])
+  assert.equal(resolve('Hero Banner', { isOverrideBlock: null }).status, 'vue-override', 'a lookup by name doesn\'t check the flag')
 })
 
 test('validateBlockDocument checks Template v2 mirrors and source declarations', () => {
