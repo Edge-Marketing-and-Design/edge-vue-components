@@ -52,9 +52,9 @@ test('Codex gets the same skills as the Claude plugin', async () => {
   }
 })
 
-// Codex's server config refuses the Claude-only headersHelper, so Codex has
-// its own file, and signs in with OAuth (its client id is on the Hub's
-// allowlist in cmsAgentOAuth.js) instead of reading the credential file.
+// Codex has its own server file (OAuth resource, scope and timeout in its
+// format) and signs in with OAuth; its client id is on the Hub's allowlist in
+// cmsAgentOAuth.js.
 test('the Codex MCP file declares the same Hub server with OAuth and no credential', async () => {
   const manifest = await readJson('.codex-plugin/plugin.json')
   const codex = (await readJson(manifest.mcpServers.slice(2))).mcpServers
@@ -63,7 +63,7 @@ test('the Codex MCP file declares the same Hub server with OAuth and no credenti
   const server = codex['edge-cms']
   assert.deepEqual(Object.keys(server).filter(key => !HTTP_SERVER_FIELDS.includes(key)), [])
   assert.equal(server.type, 'http')
-  assert.equal(server.url, claude['edge-cms'].url.replace(/^\$\{EDGE_CMS_HUB_URL:-(.+)\}$/, '$1'))
+  assert.equal(server.url, claude['edge-cms'].url)
   assert.equal(server.oauth_resource, server.url)
   assert.deepEqual(server.scopes, ['cms-drafts'])
   assert.equal(server.bearer_token_env_var, undefined)

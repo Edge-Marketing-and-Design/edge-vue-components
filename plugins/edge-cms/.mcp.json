@@ -2,8 +2,7 @@
   "mcpServers": {
     "edge-cms": {
       "type": "http",
-      "url": "${EDGE_CMS_HUB_URL:-https://us-west1-emd-cms.cloudfunctions.net/cms-agentMcp}",
-      "headersHelper": "sh \"${CLAUDE_PLUGIN_ROOT}/scripts/hub-auth.sh\""
+      "url": "https://us-west1-emd-cms.cloudfunctions.net/cms-agentMcp"
     }
   }
 }

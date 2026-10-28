@@ -21,28 +21,23 @@ claude plugin marketplace add <owner>/edge-vue-components
 claude plugin install edge-cms@edge
 ```
 
-Before the first session, save your own Hub connection credential (Hub: Dev
-Mode, Agent Keys, Hub connections, Create; it is shown once) in a private
-file. The agent acts with your Hub rights, and the connection can be renewed
-or revoked in the Hub:
+The first time a session uses the `edge-cms` server, sign in: in Claude
+Desktop open the plugin's Connectors and click Connect (in a terminal, `/mcp`,
+then `edge-cms`, then Authenticate). The browser opens the Hub's consent
+screen; sign in with your Hub account and click Allow. The agent then acts
+with your own Hub rights. Sign-ins last 30 days without use and 90 days at
+most, and you can revoke one in the Hub at `/app/agent-authorize`. The plugin
+holds no credential.
 
-```bash
-mkdir -p ~/.config/emd-cms
-pbpaste > ~/.config/emd-cms/cms-agent-connection   # after copying the credential
-chmod 600 ~/.config/emd-cms/cms-agent-connection
-```
+The server is emd-cms's endpoint. Each Hub signs in on its own origin, so for
+another Hub (Clearwater, IAFSC) add that Hub's endpoint as its own connector
+(`https://<region>-<project-id>.cloudfunctions.net/cms-agentMcp`) and sign in
+to it there. claude.ai and Claude Desktop chats use the same sign-in: add the
+endpoint as a custom connector and click Connect.
 
-The server's `headersHelper` (`scripts/hub-auth.sh`) reads that file on each
-connection, so the credential is never in the plugin or Claude's settings.
-Plugins installed from an organization catalog don't prompt for settings,
-which is why it isn't a plugin setting. `EDGE_CMS_CONNECTION_FILE` points at
-another file, and `EDGE_CMS_HUB_URL` at another Hub's endpoint
-(`https://<region>-<project-id>.cloudfunctions.net/cms-agentMcp`); the default
-is emd-cms. The desktop app doesn't read shell variables, so they only help
-in a terminal.
-
-claude.ai and Claude Desktop don't need the file: add the endpoint as a
-custom connector there and click Connect to sign in with your Hub account.
+A Hub connection credential (`cmsac.…`, Dev Mode, Agent Keys, Hub
+connections) still works as a bearer token for clients without OAuth, such as
+a hand-added server or a script; the plugin no longer reads one.
 
 If you already added the remote server by hand (for example `emd-cms-remote`
 in `~/.claude.json`), remove it after installing so the tools don't appear
@@ -64,8 +59,8 @@ Functions.
 ## Codex
 
 The same folder is a Codex plugin: `.codex-plugin/plugin.json` points at the
-same `skills/` and at `.codex-mcp.json`, Codex's own server file (Codex
-refuses the Claude-only `headersHelper` in `.mcp.json`). Codex signs in with
+same `skills/` and at `.codex-mcp.json`, Codex's own server file, with
+the OAuth resource, scope and tool timeout in Codex's format. Codex signs in with
 OAuth on first use; its client id (`https://chatgpt.com/oauth/codex/client.json`)
 is on the Hub's allowlist in `functions/cmsAgentOAuth.js`. Codex reads the
 marketplace from `edge/.claude-plugin/marketplace.json`. The server URL is
