@@ -75,6 +75,8 @@ const createFakeDb = (seed = {}) => {
           const fieldValue = docs.get(docPath)?.[field]
           if (op === 'array-contains')
             return Array.isArray(fieldValue) && fieldValue.includes(value)
+          if (op === 'array-contains-any')
+            return Array.isArray(fieldValue) && value.some(item => fieldValue.includes(item))
           if (op === '==')
             return fieldValue === value
           throw new Error(`Unsupported operator ${op}`)
