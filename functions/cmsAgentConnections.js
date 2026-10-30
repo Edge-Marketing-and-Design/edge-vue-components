@@ -1,11 +1,12 @@
 // Hub-managed personal/device credentials. Keep identical in functions/.
 const { createHash, randomBytes, timingSafeEqual } = require('node:crypto')
 const { Timestamp } = require('firebase-admin/firestore')
-const { db, onCall, onRequest, HttpsError, permissionCheck, logger } = require('./config.js')
+const { admin, db, onCall, onRequest, HttpsError, permissionCheck, logger } = require('./config.js')
 const { LIBRARY_READ_ACTIONS } = require('./cmsAgentLibraryReads.js')
 
 const DAY_MS = 86400000
 const SESSION_MS = 15 * 60 * 1000
+const USER_CHECK_MS = 5 * 60 * 1000
 const connections = () => db.collection('agent-connections')
 const sessions = () => db.collection('agent-sessions')
 const hash = value => createHash('sha256').update(value).digest('hex')
@@ -152,12 +153,42 @@ exports.revokeAgentConnection = onCall({ timeoutSeconds: 60 }, async (request) =
     return describe(ref.id, { ...data, ...revoked })
   })
 })
+const userChecks = new Map()
+// The Hub user still exists and the Auth account isn't disabled. Cached per
+// instance for 5 minutes unless fresh.
+const userIsActive = async (uid, { fresh = false, now = Date.now() } = {}) => {
+  const cached = userChecks.get(uid)
+  if (!fresh && cached && now - cached.at < USER_CHECK_MS)
+    return cached.active
+  let active = (await db.collection('users').doc(uid).get()).exists
+  if (active) {
+    try {
+      active = !(await admin.auth().getUser(uid)).disabled
+    }
+    catch (error) {
+      if (error?.code !== 'auth/user-not-found')
+        throw error
+      active = false
+    }
+  }
+  userChecks.set(uid, { active, at: now })
+  return active
+}
+// Records use at most every 5 minutes, so the Hub lists show it without a
+// write per request.
+const touchConnection = async (connection, now = Date.now()) => {
+  if (Date.parse(connection.data.lastUsedAt || '') > now - USER_CHECK_MS)
+    return
+  await connection.ref.update({ lastUsedAt: new Date(now).toISOString() })
+}
 const verifyConnection = async (header) => {
   const connection = await authenticate(connections(), 'cmsac', header)
   if (connection.data.kind === 'oauth')
     throw new HttpsError('unauthenticated', 'Invalid Hub-issued credential.')
   if (connection.data.scope !== 'cms-drafts')
     throw new HttpsError('permission-denied', 'Connection is not authorized for CMS drafts.')
+  if (!await userIsActive(connection.data.createdBy))
+    throw new HttpsError('unauthenticated', 'The Hub account is disabled or removed.')
   return connection
 }
 // A 15-minute cmsas.… session for one explicit target, checked against the
@@ -210,6 +241,9 @@ exports.agentConnection = onRequest({ timeoutSeconds: 60 }, async (req, res) => 
   }
 })
 exports.verifyConnection = verifyConnection
+exports.userIsActive = userIsActive
+exports.touchConnection = touchConnection
+exports.resetUserChecks = () => userChecks.clear()
 exports.organizationPage = organizationPage
 exports.issueAgentSession = issueAgentSession
 

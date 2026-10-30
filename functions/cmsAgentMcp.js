@@ -16,7 +16,7 @@
 const { readFileSync } = require('node:fs')
 const path = require('node:path')
 const { db, onRequest, HttpsError, logger } = require('./config.js')
-const { issueAgentSession, organizationPage, verifyConnection } = require('./cmsAgentConnections.js')
+const { issueAgentSession, organizationPage, touchConnection, verifyConnection } = require('./cmsAgentConnections.js')
 const { agentErrorResponse, handleAgentRequest } = require('./cmsAgentKeys.js')
 const { readContractNotes } = require('./cmsAgentContractNotes.js')
 const { bearerChallenge, oauthUrls, protectedResourceMetadata, verifyAccessToken } = require('./cmsAgentOAuth.js')
@@ -206,6 +206,7 @@ const serveMcp = async (req, res, remote) => {
     rpcError(res, status, body.message, challenge)
     return
   }
+  await touchConnection(connection).catch(error => logger.warn('Could not record connection use', { error: error?.message }))
   const { WebStandardStreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js')
   const server = await buildServer(connection, remote)
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true })

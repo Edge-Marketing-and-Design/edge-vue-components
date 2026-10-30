@@ -14,6 +14,8 @@ class HttpsError extends Error {
 }
 const setup = () => {
   const fake = createFakeDb({
+    'users/owner': { roles: [] },
+    'users/admin': { roles: [] },
     'organizations/a': { name: 'Org A' },
     'organizations/b': { name: 'Org B' },
     'organizations/a/sites/s': { name: 'Site A', menus: {} },
@@ -25,6 +27,7 @@ const setup = () => {
     'organizations/a/sites/t/posts/p1': { name: 'other', title: 'Other', blurb: 'Two', content: [], structure: [] },
   })
   const allowed = new Set(['a'])
+  const disabled = new Set()
   const configPath = require.resolve(path.join(functionRoot, 'config.js'))
   const original = require.cache[configPath]
   const modulePaths = ['cmsAgentConnections.js', 'cmsAgentKeys.js', 'cmsOperations.js', 'cmsBlockRevisions.js'].map(file => require.resolve(path.join(functionRoot, file)))
@@ -32,7 +35,16 @@ const setup = () => {
     id: configPath,
     loaded: true,
     exports: {
-      admin: { firestore: { Timestamp } },
+      admin: {
+        firestore: { Timestamp },
+        auth: () => ({
+          async getUser(uid) {
+            if (!fake.docs.has(`users/${uid}`))
+              throw Object.assign(new Error('no user'), { code: 'auth/user-not-found' })
+            return { uid, disabled: disabled.has(uid) }
+          },
+        }),
+      },
       db: fake.db,
       HttpsError,
       logger: { log() {}, error() {}, warn() {} },
@@ -49,7 +61,7 @@ const setup = () => {
     require.cache[configPath] = original
   else
     delete require.cache[configPath]
-  return { ...fake, allowed, connections, keys }
+  return { ...fake, allowed, disabled, connections, keys }
 }
 const call = (handler, data = {}, uid = 'owner') => handler({ auth: { uid }, data: { uid, orgId: 'a', ...data } })
 const post = async (handler, token, body, method = 'POST') => {

@@ -17,8 +17,8 @@
 // Keep identical in functions/.
 const { createHash, randomBytes, timingSafeEqual } = require('node:crypto')
 const { Timestamp } = require('firebase-admin/firestore')
-const { admin, db, onCall, onRequest, HttpsError, logger } = require('./config.js')
-const { organizationPage } = require('./cmsAgentConnections.js')
+const { db, onCall, onRequest, HttpsError, logger } = require('./config.js')
+const { organizationPage, resetUserChecks, userIsActive } = require('./cmsAgentConnections.js')
 
 const DAY_MS = 86400000
 const SCOPE = 'cms-drafts'
@@ -26,7 +26,6 @@ const CODE_MS = 5 * 60 * 1000
 const ACCESS_MS = 60 * 60 * 1000
 const IDLE_MS = 30 * DAY_MS
 const MAX_MS = 90 * DAY_MS
-const USER_CHECK_MS = 5 * 60 * 1000
 const RETIRED_REFRESH_KEPT = 10
 const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]']
 
@@ -191,28 +190,6 @@ const redirectWith = (request, params, urls) => {
     url.searchParams.set('state', request.state)
   url.searchParams.set('iss', urls.issuer)
   return url.toString()
-}
-
-const userChecks = new Map()
-// The Hub user still exists and the Auth account isn't disabled. Cached per
-// instance for 5 minutes unless fresh.
-const userIsActive = async (uid, { fresh = false, now = Date.now() } = {}) => {
-  const cached = userChecks.get(uid)
-  if (!fresh && cached && now - cached.at < USER_CHECK_MS)
-    return cached.active
-  let active = (await db.collection('users').doc(uid).get()).exists
-  if (active) {
-    try {
-      active = !(await admin.auth().getUser(uid)).disabled
-    }
-    catch (error) {
-      if (error?.code !== 'auth/user-not-found')
-        throw error
-      active = false
-    }
-  }
-  userChecks.set(uid, { active, at: now })
-  return active
 }
 
 // Organizations the person can build in, across pages of the org list.
@@ -585,4 +562,4 @@ exports.verifyAccessToken = verifyAccessToken
 // For tests.
 exports.serveOAuth = serveOAuth
 exports.readAuthorizeRequest = readAuthorizeRequest
-exports.resetUserChecks = () => userChecks.clear()
+exports.resetUserChecks = resetUserChecks
