@@ -266,6 +266,7 @@ const schemas = {
     brandLogoDark: z.string().optional(),
     brandLogoLight: z.string().optional(),
     favicon: z.string().optional(),
+    appIcon: z.string().optional(),
     menuPosition: z.enum(['left', 'center', 'right']).optional(),
     metaTitle: z.string().optional(),
     metaDescription: z.string().optional(),
@@ -1317,6 +1318,7 @@ const isSiteDiff = computed(() => {
       brandLogoDark: publishedSite.brandLogoDark,
       brandLogoLight: publishedSite.brandLogoLight,
       favicon: publishedSite.favicon,
+      appIcon: publishedSite.appIcon || '',
       menuPosition: publishedSite.menuPosition,
       forwardApex: publishedSite.forwardApex,
       canonicalDomain: publishedSite.canonicalDomain,
@@ -1353,6 +1355,7 @@ const isSiteDiff = computed(() => {
       brandLogoDark: siteData.value.brandLogoDark,
       brandLogoLight: siteData.value.brandLogoLight,
       favicon: siteData.value.favicon,
+      appIcon: siteData.value.appIcon || '',
       menuPosition: siteData.value.menuPosition,
       forwardApex: siteData.value.forwardApex,
       canonicalDomain: siteData.value.canonicalDomain,
@@ -1394,6 +1397,7 @@ const SITE_SETTINGS_DIFF_FIELDS = [
   { key: 'brandLogoDark', label: 'Brand Logo Dark' },
   { key: 'brandLogoLight', label: 'Brand Logo Light' },
   { key: 'favicon', label: 'Favicon' },
+  { key: 'appIcon', label: 'App Icon' },
   { key: 'menuPosition', label: 'Menu Position' },
   { key: 'forwardApex', label: 'Forward Apex', format: 'boolean' },
   { key: 'canonicalDomain', label: 'Forward All Sites To' },
@@ -1497,6 +1501,10 @@ const siteSettingsDiffDetails = computed(() => {
       baseValue = baseValue || defaultSiteSettings.trackingConsentMessage
       compareValue = compareValue || defaultSiteSettings.trackingConsentMessage
     }
+    if (field.key === 'appIcon') {
+      baseValue = baseValue || ''
+      compareValue = compareValue || ''
+    }
     if (field.key === 'analyticsEvents') {
       baseValue = normalizeAnalyticsEvents(baseValue)
       compareValue = normalizeAnalyticsEvents(compareValue)
@@ -1565,6 +1573,7 @@ const discardSiteSettings = async () => {
       brandLogoDark: publishedSite.brandLogoDark || '',
       brandLogoLight: publishedSite.brandLogoLight || '',
       favicon: publishedSite.favicon || '',
+      appIcon: publishedSite.appIcon || '',
       menuPosition: publishedSite.menuPosition || '',
       forwardApex: publishedSite.forwardApex !== false,
       canonicalDomain: Object.prototype.hasOwnProperty.call(publishedSite, 'canonicalDomain')
