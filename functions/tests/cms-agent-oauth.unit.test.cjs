@@ -189,7 +189,29 @@ test('discovery: the 401 points to the protected resource document, which points
   assert.deepEqual(metadata.code_challenge_methods_supported, ['S256'])
   assert.deepEqual(metadata.token_endpoint_auth_methods_supported, ['none'])
   assert.equal(metadata.client_id_metadata_document_supported, true)
-  assert.equal(metadata.registration_endpoint, undefined, 'no dynamic registration')
+  assert.equal(metadata.registration_endpoint, `${env.base}/oauth/register`)
+})
+
+test('register: answers with the allowlisted client whose redirect URIs match, and writes nothing', async (t) => {
+  const env = await setup(t)
+  const before = env.docs.size
+  const register = body => fetch(`${env.base}/oauth/register`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  const claude = await register({ client_name: 'Claude', redirect_uris: [CALLBACK], token_endpoint_auth_method: 'none' })
+  assert.equal(claude.status, 201)
+  const registered = await claude.json()
+  assert.equal(registered.client_id, CLAUDE)
+  assert.equal(registered.token_endpoint_auth_method, 'none')
+  assert.deepEqual(registered.redirect_uris, [CALLBACK])
+  assert.equal((await (await register({ client_name: 'Claude Code (edge-cms)', redirect_uris: ['http://localhost:51234/callback'] })).json()).client_id, CLAUDE_CODE)
+  assert.equal((await (await register({ client_name: 'Codex', redirect_uris: ['http://127.0.0.1:1455/callback'] })).json()).client_id, 'https://chatgpt.com/oauth/codex/client.json')
+
+  for (const body of [{ redirect_uris: ['https://evil.example/callback'] }, { redirect_uris: [CALLBACK, 'https://evil.example/callback'] }, { redirect_uris: [] }, {}, { redirect_uris: 'nope' }])
+    assert.equal((await register(body)).status, 400, JSON.stringify(body))
+  assert.equal((await fetch(`${env.base}/oauth/register`)).status, 405)
+  assert.equal(env.docs.size, before)
+
+  // The returned id signs in like any allowlisted client.
+  assert.ok((await signIn(env, { clientId: registered.client_id })).access_token)
 })
 
 test('without CMS_AGENT_HUB_URL sign-in is off and the MCP answers as before', async (t) => {

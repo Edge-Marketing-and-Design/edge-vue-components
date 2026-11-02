@@ -2,7 +2,7 @@
 
 Status: in use for every site the CMS publishes.
 
-Last verified: 2026-10-13, 40d130f (page.moveBlock, structuredDataAiLocked)
+Last verified: 2026-11-02, 878f63dc (branding icon preview, appIcon)
 
 A site is an organization's website: its settings, menus and domains, and
 the draft pages assembled from block instances. Publishing copies a page or
@@ -41,6 +41,41 @@ which the Hub's new-site form (`siteSettingsTemplate.js`) and `site.create`
 share.
 
 <!-- fields: site generated from CMS_DOCUMENT_FIELDS -->
+
+### Branding artwork and icon preview
+
+`appIcon` is an optional Site string URL for installed-app artwork, separate
+from `logo` and `favicon`. It defaults to an empty string; missing and empty
+values compare equally for legacy sites. The Branding tab provides selection,
+removal and a URL-input alternative. Changing it participates in site settings
+publication, change summaries and Discard changes. The normal whole-document
+publisher and `sites:` KV serialization retain the field without a new index.
+
+Preview icons opens a full-screen, local-only dialog using the current settings,
+including unsaved selections. It never saves or publishes. It shows original
+artwork, labeled sizes, actual-size/enlarged views, source/transform information,
+image errors and browser-reported returned dimensions. High-resolution sources
+are recommended, ideally at least 512px on the longest side; square is preferred
+but not required. Rectangular app artwork is padded into a square.
+
+Browser favicon previews request 16, 32, 48 and 96px from favicon then logo.
+Apple touch requests 180px from appIcon then favicon then logo. Selected
+Cloudflare app artwork uses padded square path variants on white: Apple touch
+180px JPEG and installed-app 192/512px JPEG at quality 90. Unsupported/external
+app images keep their original any-size source. Default renderer artwork is
+resolved on the configured CMS frontend URL, never the Hub origin.
+
+The installed-app preview requires an explicit appIcon selection. Missing or
+cleared artwork shows Choose an app icon with a picker action, without
+previewing logo fallback. Public fallback orders remain appIcon then logo then
+default artwork for manifest icons, appIcon then favicon then logo then default
+for Apple touch, and favicon then logo then default for browser icons.
+
+`edge/lib/cmsBrandingIconPreview.js` owns preview URL construction. Favicon
+requests preserve the renderer's existing query transformations; returned file
+dimensions are shown because they may differ from the requested sizes. No
+existing-site backfill, new endpoint, index or Firestore rule is required.
+
 
 ### Audience registration response
 

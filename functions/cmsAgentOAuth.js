@@ -5,7 +5,9 @@
 // - Issuer: the Hub's own origin (CMS_AGENT_HUB_URL); a Hosting rewrite sends
 //   /.well-known/oauth-authorization-server here.
 // - Clients: a pinned allowlist of Client ID Metadata Documents; nothing is
-//   fetched and there is no dynamic registration.
+//   fetched. Dynamic registration only hands back the allowlisted client id
+//   whose redirect URIs match, and writes nothing (Claude falls back to it
+//   when it reconnects after a revoked sign-in).
 // - The consent screen is the Hub page /app/agent-authorize, which calls
 //   describeAgentAuthorization and decideAgentAuthorization. Nothing is
 //   written before a signed-in person allows the request.
@@ -17,8 +19,8 @@
 // Keep identical in functions/.
 const { createHash, randomBytes, timingSafeEqual } = require('node:crypto')
 const { Timestamp } = require('firebase-admin/firestore')
-const { admin, db, onCall, onRequest, HttpsError, logger } = require('./config.js')
-const { organizationPage } = require('./cmsAgentConnections.js')
+const { db, onCall, onRequest, HttpsError, logger } = require('./config.js')
+const { organizationPage, resetUserChecks, userIsActive } = require('./cmsAgentConnections.js')
 
 const DAY_MS = 86400000
 const SCOPE = 'cms-drafts'
@@ -26,7 +28,6 @@ const CODE_MS = 5 * 60 * 1000
 const ACCESS_MS = 60 * 60 * 1000
 const IDLE_MS = 30 * DAY_MS
 const MAX_MS = 90 * DAY_MS
-const USER_CHECK_MS = 5 * 60 * 1000
 const RETIRED_REFRESH_KEPT = 10
 const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]']
 
@@ -104,6 +105,7 @@ const authorizationServerMetadata = urls => ({
   issuer: urls.issuer,
   authorization_endpoint: `${urls.oauth}/authorize`,
   token_endpoint: `${urls.oauth}/token`,
+  registration_endpoint: `${urls.oauth}/register`,
   response_types_supported: ['code'],
   grant_types_supported: ['authorization_code', 'refresh_token'],
   code_challenge_methods_supported: ['S256'],
@@ -191,28 +193,6 @@ const redirectWith = (request, params, urls) => {
     url.searchParams.set('state', request.state)
   url.searchParams.set('iss', urls.issuer)
   return url.toString()
-}
-
-const userChecks = new Map()
-// The Hub user still exists and the Auth account isn't disabled. Cached per
-// instance for 5 minutes unless fresh.
-const userIsActive = async (uid, { fresh = false, now = Date.now() } = {}) => {
-  const cached = userChecks.get(uid)
-  if (!fresh && cached && now - cached.at < USER_CHECK_MS)
-    return cached.active
-  let active = (await db.collection('users').doc(uid).get()).exists
-  if (active) {
-    try {
-      active = !(await admin.auth().getUser(uid)).disabled
-    }
-    catch (error) {
-      if (error?.code !== 'auth/user-not-found')
-        throw error
-      active = false
-    }
-  }
-  userChecks.set(uid, { active, at: now })
-  return active
 }
 
 // Organizations the person can build in, across pages of the org list.
@@ -489,6 +469,42 @@ const authorize = (req, res, urls) => {
   }
 }
 
+// RFC 7591 registration that registers nothing: the answer is the allowlisted
+// client whose pinned redirect URIs accept every requested one (Codex only
+// when it names itself, since it shares Claude Code's loopback callbacks).
+// Any other redirect URI is refused, so this opens no new client.
+const register = (req, res) => {
+  if (req.method !== 'POST') {
+    res.set('Allow', 'POST')
+    sendJson(res, 405, { error: 'invalid_request', error_description: 'Use POST.' })
+    return
+  }
+  const body = (req.body && typeof req.body === 'object') ? req.body : {}
+  const redirectUris = Array.isArray(body.redirect_uris) ? body.redirect_uris.map(str).filter(Boolean) : []
+  if (!redirectUris.length || redirectUris.length > 10 || redirectUris.length !== body.redirect_uris.length) {
+    sendJson(res, 400, { error: 'invalid_redirect_uri', error_description: 'redirect_uris must list the client\'s redirect URIs.' })
+    return
+  }
+  const wantsCodex = /codex/i.test(str(body.client_name))
+  const matches = Object.entries(CLIENTS).filter(([, client]) => redirectUris.every(uri => redirectAllowed(client, uri)))
+  const match = matches.find(([, client]) => (client.name === 'Codex') === wantsCodex) || matches[0]
+  if (!match) {
+    sendJson(res, 400, { error: 'invalid_redirect_uri', error_description: 'This Hub only signs in Claude and Codex; the redirect URIs belong to neither.' })
+    return
+  }
+  const [clientId, client] = match
+  sendJson(res, 201, {
+    client_id: clientId,
+    client_id_issued_at: Math.floor(Date.now() / 1000),
+    client_name: client.name,
+    redirect_uris: redirectUris,
+    grant_types: ['authorization_code', 'refresh_token'],
+    response_types: ['code'],
+    token_endpoint_auth_method: 'none',
+    scope: SCOPE,
+  })
+}
+
 const token = async (req, res, urls) => {
   if (req.method !== 'POST') {
     res.set('Allow', 'POST')
@@ -531,6 +547,9 @@ const serveOAuth = async (req, res, urls = oauthUrls()) => {
   }
   else if (route.endsWith('/token')) {
     await token(req, res, urls)
+  }
+  else if (route.endsWith('/register')) {
+    register(req, res)
   }
   else {
     sendJson(res, 404, { error: 'not_found' })
@@ -585,4 +604,4 @@ exports.verifyAccessToken = verifyAccessToken
 // For tests.
 exports.serveOAuth = serveOAuth
 exports.readAuthorizeRequest = readAuthorizeRequest
-exports.resetUserChecks = () => userChecks.clear()
+exports.resetUserChecks = resetUserChecks

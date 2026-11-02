@@ -22,6 +22,8 @@ const REMOTE_TOOLS = ['cms_find_block', 'cms_audit_blocks', 'cms_find_usage', 'c
 
 const setup = async (t) => {
   const fake = createFakeDb({
+    'users/owner': { roles: [] },
+    'users/admin': { roles: [] },
     'organizations/a': { name: 'Org A' },
     'organizations/b': { name: 'Org B' },
     'organizations/a/sites/s': { name: 'Site A', menus: {} },
@@ -36,6 +38,7 @@ const setup = async (t) => {
     'organizations/a/sites/s/pages/about': { name: 'About', content: { main: [{ id: 'instance-1', blockId: 'hero', name: 'Hero' }] }, structure: [], version: 1 },
   })
   const allowed = new Set(['a'])
+  const disabled = new Set()
   // Rights withheld from the owner, as "action:path".
   const denied = new Set()
   const configPath = require.resolve(path.join(functionRoot, 'config.js'))
@@ -45,7 +48,16 @@ const setup = async (t) => {
     id: configPath,
     loaded: true,
     exports: {
-      admin: { firestore: { Timestamp } },
+      admin: {
+        firestore: { Timestamp },
+        auth: () => ({
+          async getUser(uid) {
+            if (!fake.docs.has(`users/${uid}`))
+              throw Object.assign(new Error('no user'), { code: 'auth/user-not-found' })
+            return { uid, disabled: disabled.has(uid) }
+          },
+        }),
+      },
       db: fake.db,
       HttpsError,
       logger: { log() {}, error() {}, warn() {} },
@@ -98,7 +110,7 @@ const setup = async (t) => {
   t.after(() => new Promise(resolve => server.close(resolve)))
   const url = `http://127.0.0.1:${server.address().port}/`
   const created = await connections.createAgentConnection({ auth: { uid: 'owner' }, data: { uid: 'owner', orgId: 'a', name: 'Remote laptop' } })
-  return { ...fake, allowed, denied, connections, keys, mcp, remote, clock, url, created }
+  return { ...fake, allowed, denied, disabled, connections, keys, mcp, remote, clock, url, created }
 }
 
 const connect = async (t, env, token = env.created.token) => {
@@ -613,6 +625,35 @@ test('an unreadable manifest reports overrides as unverified', async (t) => {
   const result = await callTool(client, 'cms_validate', { orgId: 'a', docId: 'calc' })
   assert.equal(result.renderingOwner, 'unverified')
   assert.match(result.renderer, /could not be read: HTTP 404/)
+})
+
+test('a connection stops when its Hub account is disabled or removed, within the 5-minute check', async (t) => {
+  const env = await setup(t)
+  assert.equal((await initialize(env, { authorization: `Bearer ${env.created.token}` })).status, 200)
+  env.disabled.add('owner')
+  assert.equal((await initialize(env, { authorization: `Bearer ${env.created.token}` })).status, 200, 'cached for 5 minutes')
+  env.connections.resetUserChecks()
+  const disabled = await initialize(env, { authorization: `Bearer ${env.created.token}` })
+  assert.equal(disabled.status, 401)
+  assert.match((await disabled.json()).error.message, /disabled or removed/)
+  env.disabled.delete('owner')
+  env.docs.delete('users/owner')
+  env.connections.resetUserChecks()
+  assert.equal((await initialize(env, { authorization: `Bearer ${env.created.token}` })).status, 401, 'a removed Hub user')
+})
+
+test('MCP requests record the connection\'s last use at most every 5 minutes', async (t) => {
+  const env = await setup(t)
+  const docPath = `agent-connections/${env.created.connectionId}`
+  assert.ok(!env.docs.get(docPath).lastUsedAt)
+  await initialize(env, { authorization: `Bearer ${env.created.token}` })
+  const first = env.docs.get(docPath).lastUsedAt
+  assert.ok(Date.parse(first) > Date.now() - 60000)
+  await initialize(env, { authorization: `Bearer ${env.created.token}` })
+  assert.equal(env.docs.get(docPath).lastUsedAt, first, 'no second write within 5 minutes')
+  env.docs.set(docPath, { ...env.docs.get(docPath), lastUsedAt: '2000-01-01T00:00:00.000Z' })
+  await initialize(env, { authorization: `Bearer ${env.created.token}` })
+  assert.notEqual(env.docs.get(docPath).lastUsedAt, '2000-01-01T00:00:00.000Z')
 })
 
 test('cms_contract kind renderer serves the guide the deployed front publishes, checked against the manifest', async (t) => {
