@@ -19,6 +19,7 @@ const { db, onRequest, HttpsError, logger } = require('./config.js')
 const { issueAgentSession, organizationPage, verifyConnection } = require('./cmsAgentConnections.js')
 const { agentErrorResponse, handleAgentRequest } = require('./cmsAgentKeys.js')
 const { readContractNotes } = require('./cmsAgentContractNotes.js')
+const { readRendererGuide } = require('./cmsAgentLibraryReads.js')
 const { bearerChallenge, oauthUrls, protectedResourceMetadata, verifyAccessToken } = require('./cmsAgentOAuth.js')
 
 const CLIENT = 'edge-cms-remote-mcp'
@@ -51,7 +52,7 @@ const refusal = (error) => {
 // The tool handlers for one verified connection. Sessions are cached per
 // instance by connection and target; the cache only saves session writes,
 // since every call is checked again by the Hub code.
-const createRemoteCms = ({ now = Date.now, issueSession = issueAgentSession, handle = handleAgentRequest, listOrganizations = organizationPage, guideFile = GUIDE_FILE, contractsDir = CONTRACTS_DIR, readNotes = readContractNotes } = {}) => {
+const createRemoteCms = ({ now = Date.now, issueSession = issueAgentSession, handle = handleAgentRequest, listOrganizations = organizationPage, guideFile = GUIDE_FILE, contractsDir = CONTRACTS_DIR, readNotes = readContractNotes, readGuide = readRendererGuide } = {}) => {
   const contracts = readContractIndex(contractsDir)
   const sessions = new Map()
   const sessionFor = async (connection, target, { fresh = false } = {}) => {
@@ -125,9 +126,17 @@ const createRemoteCms = ({ now = Date.now, issueSession = issueAgentSession, han
     cms_contract: tool(async ({ kind, section }) => {
       const [{ describeContract }, { withGeneratedContract }] = await definitionsPromise
       const key = String(kind || '').trim().toLowerCase()
-      const kinds = Object.keys(contracts)
+      // The renderer guide comes from the deployed public renderer.
+      if (key === 'renderer') {
+        const guide = await readGuide()
+        if (!guide.ok)
+          return guide
+        return { ...describeContract(key, guide.url, guide.markdown, section), rendererCommit: guide.commit, builtAt: guide.builtAt }
+      }
+      const bundled = Object.keys(contracts).filter(name => name !== 'renderer')
+      const kinds = [...bundled, 'renderer']
       if (!contracts[key])
-        return { ok: false, code: 'unknown-kind', message: kinds.length ? `Unknown contract kind "${kind}". Known kinds: ${kinds.join(', ')}.` : 'This Hub has not bundled its data contracts (scripts/cms/sync-agent-contracts.mjs).', kinds }
+        return { ok: false, code: 'unknown-kind', message: bundled.length ? `Unknown contract kind "${kind}". Known kinds: ${kinds.join(', ')}.` : 'This Hub has not bundled its data contracts (scripts/cms/sync-agent-contracts.mjs).', kinds }
       // Generated sections (operations with their explanation overrides,
       // block validation codes) replace their markers.
       const { withGeneratedValidation } = await import('./helpers/cmsBlockValidation.mjs')
@@ -155,7 +164,8 @@ const createRemoteCms = ({ now = Date.now, issueSession = issueAgentSession, han
     cms_get_post: tool(({ siteId, postId, source, includeValues, includeSchema, ...input }) => call(connection, input, { action: 'post', siteId, postId, source, includeValues, includeSchema })),
   })
 
-  return { handlers, sessions, contractKinds: Object.keys(contracts) }
+  // The renderer guide comes from the deployed front, not the bundle.
+  return { handlers, sessions, contractKinds: [...Object.keys(contracts).filter(name => name !== 'renderer'), 'renderer'] }
 }
 
 // The MCP server for one request: the remote subset of the shared tools.

@@ -6,6 +6,7 @@
 // Each read is recorded in organizations/{orgId}/cmsAgentReads: what was
 // asked for, never content, kept 90 days (a TTL policy on expiresAt deletes
 // expired entries). Keep identical in functions/.
+const { createHash } = require('node:crypto')
 const { Timestamp } = require('firebase-admin/firestore')
 const { db, HttpsError, logger, permissionCheck } = require('./config.js')
 const { renderBlock } = require('./cmsAgentRender.js')
@@ -62,7 +63,15 @@ const readOverrideManifest = async ({ fetchImpl = globalThis.fetch, now = Date.n
     const body = await response.json()
     if (!Array.isArray(body?.components) || !body.components.every(item => typeof item === 'string'))
       throw new Error('no components list')
-    value = { ok: true, url, commit: text(body.commit) || null, builtAt: text(body.builtAt) || null, components: body.components }
+    const guide = body.rendererGuide
+    value = {
+      ok: true,
+      url,
+      commit: text(body.commit) || null,
+      builtAt: text(body.builtAt) || null,
+      components: body.components,
+      rendererGuide: (guide && typeof guide.path === 'string' && /^[0-9a-f]{64}$/.test(String(guide.sha256))) ? { path: guide.path, sha256: guide.sha256 } : null,
+    }
   }
   catch (error) {
     logger.warn('Override manifest unavailable', { url, error: error?.message })
@@ -70,6 +79,38 @@ const readOverrideManifest = async ({ fetchImpl = globalThis.fetch, now = Date.n
   }
   manifestCache = { url, value, expiresAt: now + (value.ok ? MANIFEST_CACHE_MS : MANIFEST_RETRY_MS) }
   return value
+}
+
+// The deployed Template v2 renderer guide the manifest names (emd-cms-front
+// /_edge/cms-template-v2-blocks.md): { ok, markdown, url, commit, builtAt },
+// or { ok: false, code, message }. Kept while the manifest names the same
+// hash, so it follows the manifest's 5-minute cache; a copy whose hash
+// doesn't match (a deploy in progress) is refused.
+let guideCache = null
+const readRendererGuide = async ({ fetchImpl = globalThis.fetch, now = Date.now() } = {}) => {
+  const manifest = await readOverrideManifest({ fetchImpl, now })
+  if (!manifest.ok)
+    return { ok: false, code: 'renderer-unavailable', message: manifest.reason }
+  if (!manifest.rendererGuide)
+    return { ok: false, code: 'renderer-unavailable', message: `The deployed emd-cms-front (${manifest.commit || 'unknown commit'}) does not publish the renderer guide.` }
+  if (guideCache && guideCache.sha256 === manifest.rendererGuide.sha256)
+    return guideCache.value
+  const url = new URL(manifest.rendererGuide.path, manifest.url).toString()
+  try {
+    const response = await fetchImpl(url, { signal: AbortSignal.timeout(MANIFEST_TIMEOUT_MS), headers: { accept: 'text/markdown, text/plain' } })
+    if (!response.ok)
+      throw new Error(`HTTP ${response.status}`)
+    const markdown = await response.text()
+    if (createHash('sha256').update(markdown).digest('hex') !== manifest.rendererGuide.sha256)
+      throw new Error('its hash does not match the manifest (a deploy may be in progress)')
+    const value = { ok: true, markdown, url, commit: manifest.commit, builtAt: manifest.builtAt }
+    guideCache = { sha256: manifest.rendererGuide.sha256, value }
+    return value
+  }
+  catch (error) {
+    logger.warn('Renderer guide unavailable', { url, error: error?.message })
+    return { ok: false, code: 'renderer-unavailable', message: `The renderer guide (${url}) could not be read: ${error?.message || error}.` }
+  }
 }
 
 // A block's public renderer resolution from the manifest.
@@ -284,4 +325,5 @@ const withDeployedOverrides = async ({ orgId, siteId, report }) => {
 
 exports.LIBRARY_READ_ACTIONS = LIBRARY_READ_ACTIONS
 exports.withDeployedOverrides = withDeployedOverrides
+exports.readRendererGuide = readRendererGuide
 exports.runLibraryRead = runLibraryRead

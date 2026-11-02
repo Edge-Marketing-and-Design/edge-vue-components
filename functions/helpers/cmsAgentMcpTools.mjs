@@ -82,7 +82,7 @@ export function describeContract(kind, contractPath, markdown, section = '') {
 }
 
 // The renderer kind is long and read by section.
-const RENDERER_CONTRACT_NOTE = 'Kind "renderer" is the public renderer\'s Template v2 guide (emd-cms-front): how blocks render in Hub preview and on the public site, template syntax, Data Sources and KV queryability, client helpers. Read its "Agent quick contract", "System boundaries" and "End-to-end rendering flow" sections, then only the section the task needs.'
+const RENDERER_CONTRACT_NOTE = 'Kind "renderer" is the public renderer\'s Template v2 guide (emd-cms-front; the remote server reads the copy the public site has deployed): how blocks render in Hub preview and on the public site, template syntax, Data Sources and KV queryability, client helpers. Read its "Agent quick contract", "System boundaries" and "End-to-end rendering flow" sections, then only the section the task needs.'
 
 // Every tool, in registration order. `remote: true` returns only the remote
 // subset, with the remote server's orgId, sessionId and readiness wording.
