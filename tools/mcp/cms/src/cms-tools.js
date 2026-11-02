@@ -14,23 +14,22 @@ import {
   MCP_REQUIRED_BLOCK_KEYS,
   assertFirestoreSegment,
   boundedNumber,
+  buildDocumentDiff,
+  changedTopLevelFields,
   componentCandidateNames,
   containsRedactedValue,
   createCmsReads,
   hashDocument,
   isPlainObject,
   resolveOverrideFromComponents,
-  stableStringify,
   toMcpValidation,
 } from '../../../../lib/cmsAgentReads.js'
 import { blockDefinitionHash } from '../../../../lib/cmsBlockRevisions.js'
 
 // Shared with the Hub's agent endpoint; re-exported for existing callers.
-export { collectBlockReferences, hashDocument, stableStringify, summarizeBlockAudit, summarizeBlockTagRules, toMcpValidation } from '../../../../lib/cmsAgentReads.js'
+export { buildDocumentDiff, collectBlockReferences, hashDocument, stableStringify, summarizeBlockAudit, summarizeBlockTagRules, toMcpValidation } from '../../../../lib/cmsAgentReads.js'
 
 const CHECKOUT_SCHEMA_VERSION = 1
-const MAX_DIFF_CHANGES = 500
-const MAX_DIFF_TEXT = 50000
 
 export function resolveCmsOrganization(requestedOrgId, config) {
   const orgId = String(requestedOrgId || config.defaultOrgId || '').trim()
@@ -480,20 +479,6 @@ export function buildWorkspaceStatus({ manifest, base, local, production }) {
   }
 }
 
-export function buildDocumentDiff(fromValue, toValue) {
-  const changes = []
-  collectValueChanges(fromValue, toValue, '', changes)
-  const truncated = changes.length > MAX_DIFF_CHANGES
-  const selectedChanges = changes.slice(0, MAX_DIFF_CHANGES)
-  return {
-    equal: changes.length === 0,
-    changeCount: changes.length,
-    changesTruncated: truncated,
-    changedTopLevelFields: changedTopLevelFields(fromValue, toValue),
-    changes: selectedChanges,
-  }
-}
-
 export function validateBlockDocument(block, { override = null } = {}) {
   const shared = validateSharedBlockDocument(block, {
     requiredKeys: MCP_REQUIRED_BLOCK_KEYS,
@@ -631,118 +616,6 @@ async function writeJsonAtomically(filePath, value) {
   const tempPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`
   await writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
   await rename(tempPath, filePath)
-}
-
-function changedTopLevelFields(left, right) {
-  const keys = new Set([
-    ...Object.keys(isPlainObject(left) ? left : {}),
-    ...Object.keys(isPlainObject(right) ? right : {}),
-  ])
-  return [...keys]
-    .filter(key => stableStringify(left?.[key]) !== stableStringify(right?.[key]))
-    .sort()
-}
-
-function collectValueChanges(fromValue, toValue, fieldPath, changes) {
-  if (stableStringify(fromValue) === stableStringify(toValue))
-    return
-
-  if (changes.length > MAX_DIFF_CHANGES)
-    return
-
-  if (isPlainObject(fromValue) && isPlainObject(toValue)) {
-    const keys = [...new Set([...Object.keys(fromValue), ...Object.keys(toValue)])].sort()
-    for (const key of keys) {
-      const childPath = fieldPath ? `${fieldPath}.${key}` : key
-      collectValueChanges(fromValue[key], toValue[key], childPath, changes)
-    }
-    return
-  }
-
-  changes.push({
-    path: fieldPath || '$',
-    kind: fromValue === undefined ? 'added' : (toValue === undefined ? 'removed' : 'changed'),
-    before: summarizeDiffValue(fromValue),
-    after: summarizeDiffValue(toValue),
-    textDiff: (typeof fromValue === 'string' && typeof toValue === 'string')
-      ? buildTextDiff(fromValue, toValue)
-      : null,
-  })
-}
-
-function summarizeDiffValue(value) {
-  if (value === undefined)
-    return { type: 'undefined' }
-  if (typeof value === 'string') {
-    return {
-      type: 'string',
-      length: value.length,
-      hash: hashDocument(value),
-      preview: truncateText(value, 4000),
-    }
-  }
-  if (Array.isArray(value)) {
-    return {
-      type: 'array',
-      length: value.length,
-      hash: hashDocument(value),
-      preview: value.length <= 20 ? value : value.slice(0, 20),
-    }
-  }
-  if (isPlainObject(value)) {
-    return {
-      type: 'object',
-      keys: Object.keys(value).sort(),
-      hash: hashDocument(value),
-    }
-  }
-  return { type: value === null ? 'null' : typeof value, value }
-}
-
-function buildTextDiff(before, after) {
-  const beforeLines = String(before).split('\n')
-  const afterLines = String(after).split('\n')
-  let prefix = 0
-  while (
-    prefix < beforeLines.length
-    && prefix < afterLines.length
-    && beforeLines[prefix] === afterLines[prefix]
-  ) {
-    prefix += 1
-  }
-
-  let suffix = 0
-  while (
-    suffix < beforeLines.length - prefix
-    && suffix < afterLines.length - prefix
-    && beforeLines[beforeLines.length - 1 - suffix] === afterLines[afterLines.length - 1 - suffix]
-  ) {
-    suffix += 1
-  }
-
-  const contextStart = Math.max(0, prefix - 3)
-  const beforeChangeEnd = beforeLines.length - suffix
-  const afterChangeEnd = afterLines.length - suffix
-  const suffixContextEnd = Math.min(beforeLines.length, beforeChangeEnd + 3)
-  const lines = []
-
-  for (let index = contextStart; index < prefix; index++)
-    lines.push(` ${beforeLines[index]}`)
-  for (let index = prefix; index < beforeChangeEnd; index++)
-    lines.push(`-${beforeLines[index]}`)
-  for (let index = prefix; index < afterChangeEnd; index++)
-    lines.push(`+${afterLines[index]}`)
-  for (let index = beforeChangeEnd; index < suffixContextEnd; index++)
-    lines.push(` ${beforeLines[index]}`)
-
-  return truncateText(lines.join('\n'), MAX_DIFF_TEXT)
-}
-
-function truncateText(value, maxLength) {
-  const text = String(value || '')
-  if (text.length <= maxLength)
-    return text
-  return `${text.slice(0, maxLength)}\n...[truncated ${text.length - maxLength} characters]`
 }
 
 async function listFilesRecursively(directory, predicate) {

@@ -405,6 +405,8 @@ MCP (1000 blocks, 250 themes, 100 sites, 500 pages and 500 posts per site).
 | `usage` | `docId, siteId?, limit?` | blocks and sites |
 | `audit` | `includeRender?, listLimit?` | blocks and themes |
 | `validate` | `definition` (inline block object, up to 1 MB) or `docId` (the block's open draft, else released definition) | blocks |
+| `diff` | `docId`, `definition?` (inline, up to 1 MB), `against?` (`current`, default, or `released`). Without a definition: the open draft against the release. Added 2026-11-02 | blocks |
+| `override` | `docId` (uses its name and `isOverrideBlock`) or `blockName` (flag not checked), `themeName?` (theme id), against the deployed override manifest. Added 2026-11-02 | blocks |
 | `schema` | `collection`, `siteId?`, `limit?` (the live shape) | the collection's own rights (blocks, themes or sites; a Data Source collection by name, plus blocks) |
 
 Results match the local MCP's, without its environment and credential summary.
@@ -415,7 +417,13 @@ overrides (`renderingOwner: 'unchecked'`). `validate` returns `{ docId, source
 ('definition', 'draft' or 'released'), valid, templateVersion, renderingOwner,
 declaredSources, sourceCalls, errors, warnings, info, issues, hash }` with the
 local MCP's `cms_validate` settings; an inline definition is not named in the
-audit (`docIds` empty). A missing block or theme is 404.
+audit (`docIds` empty). `diff` returns `{ docId, comparison
+('<from>-<to>' with 'released', 'draft' or 'definition'), releasedRevision,
+draftRevision, baseHash, from, to (label, revision, hash), sameDefinition,
+ignoredFields, equal, changeCount, changedTopLevelFields, changes }` over the
+definition fields only. `override` returns the resolution (`status`,
+`selectedMatch`, `matches`, `unflaggedMatch?`), `renderingOwner` and the
+manifest's commit. A missing block or theme is 404.
 
 Each successful library read adds an audit record: `{ tool, siteId, docIds
 (first 20), resultCount, truncated, connectionId, agentKeyId, runBy, at,

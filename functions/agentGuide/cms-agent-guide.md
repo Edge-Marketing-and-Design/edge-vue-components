@@ -64,7 +64,11 @@ Shared Edge source: `edge/functions/agentGuide/cms-agent-guide.md`.
    `definition`). Fix every error. `cms_render_block` renders it with a site's
    theme and its real Data Source records (`data: "sample"` or `"empty"` for
    the other states) and returns the HTML and a standalone page to open and
-   screenshot.
+   screenshot. `cms_diff` with the `docId` and your `definition` lists exactly
+   what the draft will change (field paths and a line diff of changed
+   markup); `sameDefinition: true` means there is nothing to draft. Without a
+   definition it shows what the block's open draft changes in the release.
+   (The local server's `cms_diff` compares checkout files instead.)
 4. `block.draft` with `blockId`, the `definition` and that `baseHash`: if
    someone changed the block in the Hub since, the check refuses it instead
    of overwriting. Fields the definition leaves out keep their current
@@ -102,7 +106,10 @@ Shared Edge source: `edge/functions/agentGuide/cms-agent-guide.md`.
 - `cms_validate`, `cms_audit_blocks` and `cms_site_readiness` say whether the
   deployed public site replaces a block with a Vue component
   (`renderingOwner`, readiness `deployedRenderer`). A component only counts
-  for a block marked `isOverrideBlock`.
+  for a block marked `isOverrideBlock`. `cms_resolve_override` answers that for
+  one block (`docId`) or a name you plan to use (`blockName`), with the
+  matching component file; pass the site's theme id as `themeName` for
+  theme-specific components.
 - `cms_site_readiness` lists what stops a site from being finished: failed
   block checks, empty required content, missing blocks, unreleased drafts,
   pages behind the released block, and unpublished pages.

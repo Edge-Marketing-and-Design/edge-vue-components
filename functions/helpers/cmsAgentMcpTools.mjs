@@ -12,6 +12,8 @@
 export const CMS_AGENT_REMOTE_TOOL_NAMES = Object.freeze([
   'cms_find_block',
   'cms_audit_blocks',
+  'cms_diff',
+  'cms_resolve_override',
   'cms_find_usage',
   'cms_validate',
   'cms_render_block',
@@ -227,24 +229,35 @@ export function cmsAgentToolDefinitions({ z, operationTypes, contractKinds = [],
     },
     {
       name: 'cms_diff',
-      title: 'Diff CMS Block Workspace States',
-      description: 'Return structured differences between local, checkout-base, and current production CMS block documents.',
-      inputSchema: {
-        orgId: orgIdSchema(),
-        docId: CmsDocIdSchema,
-        comparison: z.enum(['base-local', 'base-production', 'local-production']).optional().default('local-production'),
-      },
+      title: remote ? 'Diff a CMS Block Definition' : 'Diff CMS Block Workspace States',
+      description: remote
+        ? 'Show what a block definition changes in a library block before you save it as a draft. Send the definition inline (as for block.draft): it is compared with the block\'s current definition (its open draft, else the released one), or with the released one when against is "released". Leave the definition out to see what the open draft changes in the release. Compares the definition fields only (content, template, templateVersion, schema, dataSources, isOverrideBlock, meta, values) and lists other keys you sent as ignoredFields. Returns field-path changes with a line diff for changed text, sameDefinition (true when a draft would change nothing), and the baseHash block.draft needs. Reads only.'
+        : 'Return structured differences between local, checkout-base, and current production CMS block documents.',
+      inputSchema: remote
+        ? {
+            orgId: orgIdSchema(),
+            docId: CmsDocIdSchema,
+            definition: z.record(z.any()).optional().describe('Your version of the block definition (content, template, templateVersion, schema, dataSources, meta, values, ...). Up to 1 MB. Leave it out to compare the open draft with the release.'),
+            against: z.enum(['current', 'released']).optional().default('current').describe('current: the open draft, else the released definition (what block.draft would replace). released: what the public site uses now.'),
+          }
+        : {
+            orgId: orgIdSchema(),
+            docId: CmsDocIdSchema,
+            comparison: z.enum(['base-local', 'base-production', 'local-production']).optional().default('local-production'),
+          },
       annotations: READ,
     },
     {
       name: 'cms_resolve_override',
       title: 'Resolve CMS Public Frontend Override',
-      description: 'Mirror the current renderer name-resolution rules and report the exact local emd-cms-front Vue override candidate, ambiguity, or CMS HTML fallback.',
+      description: remote
+        ? 'Report whether the deployed public site (emd-cms-front) replaces a block with a Vue override component, using the renderer\'s name-resolution rules against its deployed override manifest: the matching component file, several ambiguous matches, or the block\'s CMS HTML. Pass a library block\'s docId (uses its name and isOverrideBlock flag) or a blockName to check a name before creating the block. Overrides that are not deployed yet are not seen. Reads only.'
+        : 'Mirror the current renderer name-resolution rules and report the exact local emd-cms-front Vue override candidate, ambiguity, or CMS HTML fallback.',
       inputSchema: {
         orgId: orgIdSchema(),
-        docId: OptionalCmsSearchSchema.describe('Optional exact production CMS block id used to load its current name.'),
+        docId: OptionalCmsSearchSchema.describe(remote ? 'Library block document id: uses its current name and isOverrideBlock flag.' : 'Optional exact production CMS block id used to load its current name.'),
         blockName: OptionalCmsSearchSchema.describe('Block name to resolve when docId is omitted.'),
-        themeName: OptionalCmsSearchSchema.describe('Optional public renderer theme name.'),
+        themeName: OptionalCmsSearchSchema.describe(remote ? 'Optional theme document id (the site\'s theme from cms_list_sites), for theme-specific components.' : 'Optional public renderer theme name.'),
       },
       annotations: READ,
     },

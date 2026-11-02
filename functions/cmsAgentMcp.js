@@ -118,6 +118,8 @@ const createRemoteCms = ({ now = Date.now, issueSession = issueAgentSession, han
     // Library reads: organization sessions, checked against the operator's read rights.
     cms_find_block: tool(({ docId, query, exactName, tag, type, theme, limit, startAfter, ...input }) => call(connection, input, { action: 'blocks', docId, query, exactName, tag, type, theme, limit, startAfter })),
     cms_audit_blocks: tool(({ includeRender, listLimit, ...input }) => call(connection, input, { action: 'audit', includeRender, listLimit })),
+    cms_diff: tool(({ docId, definition, against, ...input }) => call(connection, input, { action: 'diff', docId, ...(definition ? { definition } : {}), ...(against ? { against } : {}) })),
+    cms_resolve_override: tool(({ docId, blockName, themeName, ...input }) => call(connection, input, { action: 'override', docId, blockName, themeName })),
     cms_find_usage: tool(({ docId, siteId, limit, ...input }) => call(connection, input, { action: 'usage', docId, siteId, limit })),
     cms_validate: tool(({ docId, definition, ...input }) => call(connection, input, { action: 'validate', docId, ...(definition ? { definition } : {}) })),
     cms_render_block: tool(({ orgId, sessionId, ...args }) => call(connection, { orgId, sessionId }, { action: 'render', ...args })),
