@@ -5,7 +5,7 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { withGeneratedValidation } from '../../../../lib/cmsBlockValidation.js'
 import { withGeneratedContract } from '../../../../lib/cmsOperations.js'
-import { CONTRACT_KINDS, RENDERER_GUIDE, contractKinds, contractPath, readContract } from '../src/contracts.js'
+import { CONTRACT_KINDS, HUB_SECTION, RENDERER_GUIDE, composeContract, contractKinds, contractPath, hubAdditionPath, readContract } from '../src/contracts.js'
 
 // The server resolves the Hub root the same way (src/server.js repoRoot).
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..')
@@ -14,7 +14,7 @@ test('every contract kind resolves to a file in this checkout', async () => {
   assert.ok(contractKinds().length >= 4)
   for (const kind of Object.keys(CONTRACT_KINDS)) {
     const relativePath = contractPath(kind)
-    assert.match(relativePath, /^docs\/data-contracts\/[a-z-]+\/README\.md$/)
+    assert.match(relativePath, /^(edge\/)?docs\/data-contracts\/[a-z-]+\/README\.md$/)
     await access(path.resolve(repoRoot, relativePath))
   }
 })
@@ -24,14 +24,43 @@ test('the returned text starts with the contract title and carries the path', as
     const result = await readContract({ kind, repoRoot })
     assert.equal(result.ok, true, `${kind}: ${result.message || ''}`)
     assert.equal(result.kind, kind)
-    assert.equal(result.path, relativePath)
+    assert.ok(result.path.startsWith(relativePath))
     const file = await readFile(path.resolve(repoRoot, relativePath), 'utf8')
+    const { markdown } = await composeContract({ kind, repoRoot })
+    assert.ok(markdown.startsWith(file.trimEnd()))
     // Markers are replaced by the generated sections.
-    assert.equal(result.markdown, withGeneratedContract(withGeneratedValidation(file)))
+    assert.equal(result.markdown, withGeneratedContract(withGeneratedValidation(markdown)))
     assert.ok(!/<!-- (operations|fields|validation codes):/.test(result.markdown), `${kind} has no marker left`)
     assert.ok(result.title.length > 0, `${kind} has a title`)
     assert.ok(file.startsWith(`# ${result.title}`), `${kind} starts with its title`)
   }
+})
+
+test('shared contracts live in Edge; a Hub\'s additions follow as "This Hub"', async () => {
+  assert.equal(hubAdditionPath(CONTRACT_KINDS.blocks), 'docs/data-contracts/cms-blocks/hub.md')
+  assert.equal(hubAdditionPath(CONTRACT_KINDS.webcams), null)
+  const files = {
+    [path.resolve('/hub', CONTRACT_KINDS.blocks)]: '# CMS blocks\n\n## Storage\n\nShared.\n',
+    [path.resolve('/hub', 'docs/data-contracts/cms-blocks/hub.md')]: 'Hub notes.\n\n### Tests in this Hub\n\n- one\n',
+    [path.resolve('/hub', CONTRACT_KINDS.themes)]: '# CMS themes\n',
+    [path.resolve('/hub', 'docs/data-contracts/cms-themes/hub.md')]: '\n',
+  }
+  const readFileImpl = async (file) => {
+    if (file in files)
+      return files[file]
+    const error = new Error(`ENOENT: ${file}`)
+    error.code = 'ENOENT'
+    throw error
+  }
+  const blocks = await readContract({ kind: 'blocks', section: HUB_SECTION, repoRoot: '/hub', readFileImpl })
+  assert.equal(blocks.path, `${CONTRACT_KINDS.blocks} + docs/data-contracts/cms-blocks/hub.md`)
+  assert.deepEqual(blocks.sections, ['Storage', HUB_SECTION])
+  assert.equal(blocks.markdown, `## ${HUB_SECTION}\n\nHub notes.\n\n### Tests in this Hub\n\n- one`)
+  // An empty or missing addition leaves the shared text alone.
+  const themes = await composeContract({ kind: 'themes', repoRoot: '/hub', readFileImpl })
+  assert.deepEqual(themes, { ok: true, kind: 'themes', path: CONTRACT_KINDS.themes, markdown: '# CMS themes\n' })
+  const posts = await composeContract({ kind: 'posts', repoRoot: '/hub', readFileImpl })
+  assert.equal(posts.code, 'missing')
 })
 
 test('kinds are case-insensitive and trimmed', async () => {
@@ -65,7 +94,13 @@ test('the Last verified line is returned when the contract has one', async () =>
 
 test('a section narrows the contract to one heading', async () => {
   const markdown = '# Guide\n\nIntro.\n\n## Agent quick contract\n\nRules.\n\n## Data Sources\n\nSources.\n'
-  const readFileImpl = async () => markdown
+  const readFileImpl = async (file) => {
+    if (file === path.resolve('/hub', CONTRACT_KINDS.blocks))
+      return markdown
+    const error = new Error(`ENOENT: ${file}`)
+    error.code = 'ENOENT'
+    throw error
+  }
   const whole = await readContract({ kind: 'blocks', repoRoot: '/hub', readFileImpl })
   assert.deepEqual(whole.sections, ['Agent quick contract', 'Data Sources'])
   assert.equal(whole.markdown, markdown)

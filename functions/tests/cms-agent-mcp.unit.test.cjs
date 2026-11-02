@@ -418,16 +418,10 @@ test('the remote server sends its rules on initialize and serves the guide and t
   assert.ok(contract.markdown.includes('| `theme.live` | Propose it; a person applies it in the theme editor. |'), 'explanation overrides are served')
   assert.ok(!contract.markdown.includes(OPERATIONS_CONTRACT_MARKER), 'the operations section is generated')
   assert.match(contract.markdown, /### `page\.setValues`/)
-  const renderer = await callTool(client, 'cms_contract', { kind: 'renderer', section: 'agent quick contract' })
-  assert.equal(renderer.ok, true, renderer.message)
-  assert.equal(renderer.path, index.renderer)
-  assert.equal(renderer.section, 'Agent quick contract')
-  assert.match(renderer.markdown, /^## Agent quick contract/)
-  assert.ok(renderer.sections.includes('Data Sources'))
-  assert.equal((await callTool(client, 'cms_contract', { kind: 'renderer', section: 'nope' })).code, 'unknown-section')
   const unknown = await callTool(client, 'cms_contract', { kind: 'nope' })
   assert.equal(unknown.code, 'unknown-kind')
-  assert.deepEqual(unknown.kinds, Object.keys(index))
+  assert.deepEqual(unknown.kinds, [...Object.keys(index), 'renderer'])
+  assert.ok(!('renderer' in index), 'the renderer guide is not bundled')
   const description = (await client.listTools()).tools.find(tool => tool.name === 'cms_contract').description
   assert.ok(Object.keys(index).every(kind => description.includes(kind)), 'the tool lists the bundled kinds')
 
@@ -489,7 +483,7 @@ test('cms_schema describes what a collection stores, without values, for the ope
 
 // Serves the KV REST API and the override manifest in place of Cloudflare;
 // everything else (the MCP client's own requests) goes to the real fetch.
-const stubNetwork = (t, { kvKeys = [], manifest = null } = {}) => {
+const stubNetwork = (t, { kvKeys = [], manifest = null, files = {} } = {}) => {
   const realFetch = globalThis.fetch
   const saved = { ...process.env }
   Object.assign(process.env, { CF_ACCOUNT_ID: 'acct', CLOUDFLARE_NAMESPACE_ID: 'ns', CLOUDFLARE_API_KEY: 'kv-token', CMS_RENDERER_MANIFEST_URL: 'https://front.example/_edge/block-overrides.json' })
@@ -498,7 +492,10 @@ const stubNetwork = (t, { kvKeys = [], manifest = null } = {}) => {
     const url = String(input)
     if (url.startsWith('https://front.example/')) {
       calls.push(url)
-      return manifest ? new Response(JSON.stringify(manifest), { status: 200 }) : new Response('missing', { status: 404 })
+      const file = files[new URL(url).pathname]
+      if (file !== undefined)
+        return new Response(file, { status: 200 })
+      return (manifest && url.endsWith('/block-overrides.json')) ? new Response(JSON.stringify(manifest), { status: 200 }) : new Response('missing', { status: 404 })
     }
     if (!url.startsWith('https://api.cloudflare.com/'))
       return realFetch(input, init)
@@ -657,4 +654,44 @@ test('MCP requests record the connection\'s last use at most every 5 minutes', a
   env.docs.set(docPath, { ...env.docs.get(docPath), lastUsedAt: '2000-01-01T00:00:00.000Z' })
   await initialize(env, { authorization: `Bearer ${env.created.token}` })
   assert.notEqual(env.docs.get(docPath).lastUsedAt, '2000-01-01T00:00:00.000Z')
+})
+
+test('cms_contract kind renderer serves the guide the deployed front publishes, checked against the manifest', async (t) => {
+  const env = await setup(t)
+  const { createHash } = require('node:crypto')
+  const guide = '# Template v2\n\n## Agent quick contract\n\nRead this first.\n\n## Data Sources\n\nKV.\n'
+  const files = { '/_edge/cms-template-v2-blocks.md': guide }
+  const manifest = { version: 1, commit: 'front789', builtAt: '2026-11-02T00:00:00Z', components: [], rendererGuide: { path: '/_edge/cms-template-v2-blocks.md', sha256: createHash('sha256').update(guide).digest('hex') } }
+  const calls = stubNetwork(t, { manifest, files })
+  const client = await connect(t, env)
+  const renderer = await callTool(client, 'cms_contract', { kind: 'renderer', section: 'agent quick contract' })
+  assert.equal(renderer.ok, true, renderer.message)
+  assert.equal(renderer.path, 'https://front.example/_edge/cms-template-v2-blocks.md')
+  assert.equal(renderer.rendererCommit, 'front789')
+  assert.match(renderer.markdown, /^## Agent quick contract/)
+  assert.deepEqual(renderer.sections, ['Agent quick contract', 'Data Sources'])
+  assert.equal((await callTool(client, 'cms_contract', { kind: 'renderer', section: 'nope' })).code, 'unknown-section')
+  assert.equal(calls.filter(url => url.endsWith('.md')).length, 1, 'the guide is cached while the manifest names the same hash')
+
+  files['/_edge/cms-template-v2-blocks.md'] = `${guide}changed\n`
+  const stale = env.mcp.createRemoteCms({ readGuide: () => ({ ok: false, code: 'renderer-unavailable', message: 'down' }) })
+  const refused = JSON.parse((await stale.handlers({ id: 'c', data: {} }).cms_contract({ kind: 'renderer' })).content[0].text)
+  assert.deepEqual([refused.ok, refused.code], [false, 'renderer-unavailable'])
+})
+
+test('a renderer guide whose hash does not match the manifest is refused', async (t) => {
+  const env = await setup(t)
+  stubNetwork(t, { manifest: { version: 1, commit: 'f', components: [], rendererGuide: { path: '/_edge/cms-template-v2-blocks.md', sha256: '0'.repeat(64) } }, files: { '/_edge/cms-template-v2-blocks.md': '# Other\n' } })
+  const client = await connect(t, env)
+  const result = await callTool(client, 'cms_contract', { kind: 'renderer' })
+  assert.equal(result.code, 'renderer-unavailable')
+  assert.match(result.message, /hash does not match/)
+})
+
+test('a front deploy without the guide says so', async (t) => {
+  const env = await setup(t)
+  stubNetwork(t, { manifest: { version: 1, commit: 'old', components: [] } })
+  const client = await connect(t, env)
+  const result = await callTool(client, 'cms_contract', { kind: 'renderer' })
+  assert.match(result.message, /does not publish the renderer guide/)
 })
