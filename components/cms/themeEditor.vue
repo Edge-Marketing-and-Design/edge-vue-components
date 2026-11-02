@@ -88,7 +88,7 @@ const parseJsonSafe = (value, fallback) => {
 }
 
 // Theme `apply` rules have no effect: published sites ignore them and the Hub
-// no longer applies them (docs/data-contracts/cms-themes/README.md). Lists the
+// no longer applies them (edge/docs/data-contracts/cms-themes/README.md). Lists the
 // non-empty ones so the editor can say so.
 const themeApplyRuleNames = (themeValue) => {
   const theme = typeof themeValue === 'string' ? parseJsonSafe(themeValue, null) : themeValue
@@ -206,7 +206,7 @@ const ensureDefaultMenusObject = (doc = state.workingDoc) => {
 }
 
 // Section type classes the block validator checks against
-// (docs/data-contracts/cms-themes/README.md). Empty means not checked.
+// (edge/docs/data-contracts/cms-themes/README.md). Empty means not checked.
 const ensureTypeRoles = (doc = state.workingDoc) => {
   if (!doc)
     return

@@ -5,17 +5,28 @@ import { withGeneratedValidation } from '../../../../lib/cmsBlockValidation.js'
 import { withGeneratedContract } from '../../../../lib/cmsOperations.js'
 
 // The data contracts an agent writes against, read from the Hub checkout the
-// server runs in (the same root that resolves the renderer path). Nothing is
-// copied anywhere else: the file under docs/data-contracts is the contract.
-// Add a kind here when a new agent-facing contract lands.
+// server runs in (the same root that resolves the renderer path). The CMS
+// contracts are shared Edge documents under edge/docs/data-contracts; a Hub
+// may add its own notes in docs/data-contracts/<folder>/hub.md, served after
+// the shared text as a "This Hub" section. Hub-only kinds (webcams) live in
+// the Hub's docs/data-contracts. Add a kind here when a new agent-facing
+// contract lands.
 export const CONTRACT_KINDS = Object.freeze({
-  'blocks': 'docs/data-contracts/cms-blocks/README.md',
-  'operations': 'docs/data-contracts/cms-operations/README.md',
-  'themes': 'docs/data-contracts/cms-themes/README.md',
-  'sites-and-pages': 'docs/data-contracts/cms-sites-and-pages/README.md',
-  'posts': 'docs/data-contracts/cms-posts/README.md',
+  'blocks': 'edge/docs/data-contracts/cms-blocks/README.md',
+  'operations': 'edge/docs/data-contracts/cms-operations/README.md',
+  'themes': 'edge/docs/data-contracts/cms-themes/README.md',
+  'sites-and-pages': 'edge/docs/data-contracts/cms-sites-and-pages/README.md',
+  'posts': 'edge/docs/data-contracts/cms-posts/README.md',
   'webcams': 'docs/data-contracts/webcams/README.md',
 })
+
+export const HUB_SECTION = 'This Hub'
+
+// The Hub's additions to a shared contract, or null for a Hub-only kind.
+export const hubAdditionPath = (relativePath) => {
+  const match = String(relativePath || '').match(/^edge\/docs\/data-contracts\/([a-z-]+)\/README\.md$/)
+  return match ? `docs/data-contracts/${match[1]}/hub.md` : null
+}
 
 // The public renderer's Template v2 guide, read from the emd-cms-front
 // checkout (cmsRendererRepoPath) rather than the Hub.
@@ -45,26 +56,52 @@ export async function readContract({ kind, section = '', repoRoot, rendererRoot,
       kinds: contractKinds(),
     }
   }
-  const absolutePath = path.resolve(repoRoot, relativePath)
-  let markdown
-  try {
-    markdown = await readFileImpl(absolutePath, 'utf8')
-  }
-  catch (error) {
-    if (error?.code === 'ENOENT') {
-      return {
-        ok: false,
-        code: 'missing',
-        message: `The ${key} contract is not in this checkout (${relativePath}). Pull the Hub branch that carries it.`,
-        kind: key,
-        path: relativePath,
-      }
-    }
-    throw error
-  }
+  const composed = await composeContract({ kind: key, repoRoot, readFileImpl })
+  if (!composed.ok)
+    return composed
   // Generated sections: document fields and operations from the shared CMS
   // code, block validation codes from the validator.
-  return describeContract(key, relativePath, withGeneratedContract(withGeneratedValidation(markdown), notes), section)
+  return describeContract(key, composed.path, withGeneratedContract(withGeneratedValidation(composed.markdown), notes), section)
+}
+
+// The contract's Markdown as this Hub serves it: the shared text, then the
+// Hub's additions under "## This Hub" when it has them. `path` names every
+// file read. The sync script bundles this same text for the remote MCP.
+export async function composeContract({ kind, repoRoot, readFileImpl = readFile }) {
+  const key = String(kind || '').trim().toLowerCase()
+  const relativePath = contractPath(key)
+  if (!relativePath)
+    return { ok: false, code: 'unknown-kind', message: `Unknown contract kind "${kind}".`, kind: key }
+  const read = async (file) => {
+    try {
+      return await readFileImpl(path.resolve(repoRoot, file), 'utf8')
+    }
+    catch (error) {
+      if (error?.code === 'ENOENT')
+        return null
+      throw error
+    }
+  }
+  const markdown = await read(relativePath)
+  if (markdown === null) {
+    return {
+      ok: false,
+      code: 'missing',
+      message: `The ${key} contract is not in this checkout (${relativePath}). Pull the Hub branch that carries it.`,
+      kind: key,
+      path: relativePath,
+    }
+  }
+  const additionPath = hubAdditionPath(relativePath)
+  const addition = additionPath ? await read(additionPath) : null
+  if (!addition?.trim())
+    return { ok: true, kind: key, path: relativePath, markdown }
+  return {
+    ok: true,
+    kind: key,
+    path: `${relativePath} + ${additionPath}`,
+    markdown: `${markdown.trimEnd()}\n\n## ${HUB_SECTION}\n\n${addition.trim()}\n`,
+  }
 }
 
 async function readRendererGuide({ section, rendererRoot, readFileImpl }) {

@@ -21,7 +21,7 @@ of truth for both the New Theme UI and agent defaults. Without a Hub checkout,
 `cms_get_theme` and adapt them with `theme.update`. Keep the baseline
 present; custom additions are allowed. Baseline-only blocks are portable;
 extensions require every selected theme to declare them. Existing themes and
-duplicates retain their JSON. Contract: `cms_contract` kind `themes` (`docs/data-contracts/cms-themes/README.md` in the Hub).
+duplicates retain their JSON. Contract: `cms_contract` kind `themes` (`edge/docs/data-contracts/cms-themes/README.md` in the Hub).
 
 - **Colors** (`extend.colors`), baseline required, extensions allowed:
   - brand: `primary`, `secondary`, `tertiary`, `accent` (the call-to-action

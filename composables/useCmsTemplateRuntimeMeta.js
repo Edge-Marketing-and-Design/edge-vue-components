@@ -14,7 +14,7 @@ export const getCmsTemplateRuntimeMeta = (templateVersion, dataSources = {}, met
 }
 
 // Library-only `meta` entries a Template v2 block keeps: `design` is the
-// design-to-block map (docs/data-contracts/cms-blocks, Library block). The
+// design-to-block map (edge/docs/data-contracts/cms-blocks, Library block). The
 // Block Editor keeps them (`keepLibraryMeta`); a picked instance never gets
 // them.
 export const CMS_LIBRARY_META_KEYS = Object.freeze(['design'])
