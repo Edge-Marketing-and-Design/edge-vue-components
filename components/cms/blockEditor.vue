@@ -1851,10 +1851,10 @@ const BLOCK_CONTENT_SNIPPETS = [
   },
   {
     label: 'Array (API)',
-    snippet: `{{{#array {"field":"List","schema":{"listing_price":"money","square_feet":"number","acres":"number"},"api":"https://api.clearwaterproperties.com/api/front/properties","apiField":"data","apiQuery":"?limit=20&filter_scope[agent][]=mt_nmar-mt.545000478","queryOptions":[{"field":"sort","optionsKey":"label","optionsValue":"value","options":[{"label":"Highest Price","value":"listing_price"},{"label":"Lowest Price","value":"-listing_price"},{"label":"Newest","value":"-list_date"}]},{"field":"filter_scope[agent][]","title":"Agent","optionsKey":"name","optionsValue":"mls.primary","options":"users"}],"limit":10,"value":[]}}}}
+    snippet: `{{{#array {"field":"items","api":"https://example.com/api/items","apiField":"data","limit":10,"value":[]}}}}
   <!-- iterate with {{item}} -->
 {{{/array}}}`,
-    description: 'Array pulling data from an API',
+    description: 'Example API array; replace the placeholder endpoint with your data source',
   },
   {
     label: 'Array (Collection)',

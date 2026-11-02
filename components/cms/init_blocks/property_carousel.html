@@ -8,7 +8,7 @@
   data-carousel-slides-to-scroll-lg="4"
 >
   <div data-carousel-track class="flex">
-    {{{#array {"field":"List","schema":{"listing_price":"money","square_feet":"number","acres":"number"},"api":"https://api.clearwaterproperties.com/api/front/properties","apiField":"data","apiQuery":"?limit=20&filter_scope[agent][]=mt_nmar-mt.545000478","queryOptions":[{"field":"sort","optionsKey":"label","optionsValue":"value","options":[{"label":"Highest Price","value":"listing_price"},{"label":"Lowest Price","value":"-listing_price"},{"label":"Newest","value":"-list_date"}]},{"field":"filter_scope[agent][]","title":"Agent","optionsKey":"name","optionsValue":"mls.primary","options":"users"}],"limit":10,"value":[]}}}}
+    {{{#array {"field":"List","schema":{"listing_price":"money","square_feet":"number","acres":"number"},"limit":10,"value":[]}}}}
       <div class="shrink-0 min-w-0 flex-[0_0_100%] p-4 lg:flex-[0_0_25%]">
         <div class="{{loading}}">
           <div class="block overflow-hidden rounded-lg bg-white shadow-md animate-pulse">

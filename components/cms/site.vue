@@ -2,7 +2,8 @@
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { BarChart3, Check, CircleAlert, ClipboardCheck, Copy, Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePenLine, FileStack, FileUp, FileX, FolderCog, FolderDown, FolderUp, FolderX, ImagePlus, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload, Users, X } from 'lucide-vue-next'
-import { buildPagePayloadFromTemplateDoc, buildThemeSettingsPayload, deriveThemeMenus, ensureMenuBuckets, ensureUniqueSlug, normalizeAnalyticsEvents, titleFromSlug } from '../../lib/cmsOperations'
+import { buildPagePayloadFromTemplateDoc, buildThemeSettingsPayload, deriveThemeMenus, ensureMenuBuckets, ensureUniqueSlug, normalizeAnalyticsEvents, normalizeSiteDomainSettings, titleFromSlug } from '../../lib/cmsOperations'
+import { getCmsDomainConnectionStatus } from '../../lib/cmsDomainConnectionStatus'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
 import { buildCmsSitePreviewUrl, buildPublishedSitePreviewUrl, getCmsPublishedSiteOrigin } from '../../lib/cmsPublishedSitePreview'
 
@@ -23,6 +24,7 @@ const props = defineProps({
   },
 })
 const edgeFirebase = inject('edgeFirebase')
+const organizationId = computed(() => String(edgeGlobal.edgeState.currentOrganization || '').trim())
 const {
   effectiveUserId,
 } = useDelegatedUserContext(edgeFirebase)
@@ -144,6 +146,13 @@ const state = reactive({
   submissionFilter: '',
   selectedSubmissionId: '',
   publishSiteLoading: false,
+  unpublishDialogOpen: false,
+  unpublishConfirmation: '',
+  unpublishSiteId: '',
+  unpublishOrgId: '',
+  unpublishing: false,
+  unpublishError: '',
+
   importingPages: false,
   exportingPages: false,
   exportDialogOpen: false,
@@ -468,14 +477,14 @@ const domainError = computed(() => {
 })
 const domainRegistryHeaderError = ref('')
 const headerDomainRegistry = ref({})
+const checkingHeaderDomains = ref(false)
+let headerDomainPollTimer = null
+let headerDomainPollCount = 0
+const headerDomainInFlight = new Set()
 const headerDomainRegistryKey = ref('')
 let headerDomainRequest = 0
-const activeDomainError = computed(() => {
-  const persisted = String(domainError.value || '').trim()
-  if (persisted)
-    return persisted
-  return String(domainRegistryHeaderError.value || '').trim()
-})
+const activeDomainError = computed(() => headerDomainSummary.value.error || domainRegistryHeaderError.value)
+
 const normalizeHeaderDomain = (value) => {
   if (!value)
     return ''
@@ -500,19 +509,26 @@ const publishedSiteOrigin = computed(() => {
 })
 provide('cmsPublishedSiteOrigin', publishedSiteOrigin)
 const fetchHeaderDomainRegistryError = async () => {
-  const requestId = ++headerDomainRequest
   const lookupKey = headerDomainLookupKey.value
-  headerDomainRegistry.value = {}
-  headerDomainRegistryKey.value = ''
-  domainRegistryHeaderError.value = ''
+  if (headerDomainInFlight.has(lookupKey))
+    return
+  headerDomainInFlight.add(lookupKey)
+  const requestId = ++headerDomainRequest
+  if (headerDomainRegistryKey.value !== lookupKey) {
+    headerDomainRegistry.value = {}
+    headerDomainRegistryKey.value = ''
+    domainRegistryHeaderError.value = ''
+  }
   if (!edgeFirebase?.runFunction) {
     domainRegistryHeaderError.value = ''
+    headerDomainInFlight.delete(lookupKey)
     return
   }
   const orgId = String(edgeGlobal?.edgeState?.currentOrganization || '').trim()
   const siteId = String(props.site || '').trim()
   if (!orgId || !siteId || !requestedHeaderDomains.value.length) {
     domainRegistryHeaderError.value = ''
+    headerDomainInFlight.delete(lookupKey)
     return
   }
   try {
@@ -525,27 +541,63 @@ const fetchHeaderDomainRegistryError = async () => {
       return
     const registry = response?.data?.domainRegistry
     if (!registry || typeof registry !== 'object') {
-      domainRegistryHeaderError.value = ''
+      headerDomainRegistryKey.value = ''
+      domainRegistryHeaderError.value = 'Domain status was unavailable. Check again.'
       return
     }
     headerDomainRegistry.value = registry
     headerDomainRegistryKey.value = lookupKey
-    const errors = headerDomains.value
-      .map(domain => String(registry?.[domain]?.dnsSyncError || '').trim())
-      .filter(Boolean)
-    domainRegistryHeaderError.value = errors[0] || ''
+    domainRegistryHeaderError.value = ''
   }
   catch {
     if (requestId !== headerDomainRequest)
       return
-    domainRegistryHeaderError.value = ''
+    headerDomainRegistryKey.value = ''
+    domainRegistryHeaderError.value = 'Unable to check the domain connection. Open Settings or check again.'
+  }
+  finally {
+    headerDomainInFlight.delete(lookupKey)
   }
 }
+const headerDomainSummary = computed(() => getCmsDomainConnectionStatus(
+  (publishedSiteSettings.value?.domains || []).map(normalizeHeaderDomain).filter(Boolean),
+  headerDomainRegistryKey.value === headerDomainLookupKey.value ? headerDomainRegistry.value : {},
+))
+const headerDomainState = computed(() => headerDomainSummary.value.status)
+const headerDomainLastChecked = computed(() => headerDomainSummary.value.checkedAt)
 
+function startHeaderDomainPolling() {
+  clearInterval(headerDomainPollTimer)
+  headerDomainPollCount = 0
+  if (!requestedHeaderDomains.value.length)
+    return
+  headerDomainPollTimer = setInterval(async () => {
+    await fetchHeaderDomainRegistryError()
+    headerDomainPollCount++
+    if (headerDomainPollCount >= 10 || (headerDomainPollCount >= 2 && headerDomainState.value === 'active'))
+      clearInterval(headerDomainPollTimer)
+  }, 15000)
+}
+const checkHeaderDomains = async () => {
+  if (checkingHeaderDomains.value)
+    return
+  checkingHeaderDomains.value = true
+  try {
+    await edgeFirebase.runFunction('cms-retrySiteDomainSync', {
+      uid: edgeFirebase.user.uid, orgId: organizationId.value, siteId: props.site,
+      domains: publishedSiteSettings.value?.domains || [],
+    }, { timeout: 180000 })
+    await fetchHeaderDomainRegistryError()
+    startHeaderDomainPolling()
+  }
+  catch (error) { domainRegistryHeaderError.value = error?.message || 'Unable to retry the domain connection.' }
+  finally { checkingHeaderDomains.value = false }
+}
 watch(
-  [headerDomainLookupKey, domainError],
+  [headerDomainLookupKey, domainError, () => publishedSiteSettings.value?.version],
   async () => {
     await fetchHeaderDomainRegistryError()
+    startHeaderDomainPolling()
   },
   { immediate: true },
 )
@@ -1462,12 +1514,24 @@ const siteSettingsDiffDetails = computed(() => {
   return details
 })
 
+const setSiteDomains = (document, domains) => {
+  Object.assign(document, normalizeSiteDomainSettings({ ...document, domains }))
+}
+const saveSiteSettingsDocument = async (document) => {
+  const normalized = { ...document, ...normalizeSiteDomainSettings(document) }
+  const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, normalized)
+  if (result?.success === false)
+    throw new Error(result.message || 'Unable to save site settings.')
+  return { ...result, data: { ...normalized, docId: result?.docId || result?.meta?.docId || normalized.docId } }
+}
+
 const publishSiteSettings = async ({ siteVersion = null, bumpVersion = true } = {}) => {
   console.log('Publishing site settings for site:', props.site)
   const nextVersion = siteVersion || (bumpVersion ? getNextVersion(siteData.value?.version) : siteData.value?.version)
   const defaultSiteSettings = createSiteSettingsDefaults()
   const payload = {
     ...siteData.value,
+    ...normalizeSiteDomainSettings(siteData.value),
     trackingConsentEnabled: siteData.value?.trackingConsentEnabled !== false,
     trackingConsentMessage: siteData.value?.trackingConsentMessage || defaultSiteSettings.trackingConsentMessage,
     analyticsEvents: normalizeAnalyticsEvents(siteData.value?.analyticsEvents),
@@ -1531,13 +1595,49 @@ const discardSiteSettings = async () => {
   }
 }
 
+const unpublishSiteName = computed(() => String(siteData.value?.name || '').trim())
+const canConfirmUnpublish = computed(() => canEditSiteSettings.value
+  && !state.unpublishing && Boolean(unpublishSiteName.value)
+  && state.unpublishConfirmation === unpublishSiteName.value
+  && state.unpublishSiteId === props.site
+  && state.unpublishOrgId === organizationId.value)
+const openUnpublishDialog = () => {
+  state.unpublishConfirmation = ''
+  state.unpublishError = ''
+  state.unpublishSiteId = props.site
+  state.unpublishOrgId = organizationId.value
+  state.unpublishDialogOpen = true
+}
 const unPublishSite = async () => {
-  console.log('Unpublishing site:', props.site)
-  const pages = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`] || {}
-  for (const pageId of Object.keys(pages)) {
-    await edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`, pageId)
+  if (!canConfirmUnpublish.value)
+    return
+  const path = edgeGlobal.edgeState.organizationDocPath
+  const siteId = props.site
+  state.unpublishing = true
+  state.unpublishError = ''
+  const check = (result) => {
+    if (result?.success === false)
+      throw new Error(result.message || 'Unable to unpublish this site.')
   }
-  await edgeFirebase.removeDoc(`${edgeGlobal.edgeState.organizationDocPath}/published-site-settings`, props.site)
+  try {
+    const pages = edgeFirebase.data?.[`${path}/sites/${siteId}/pages`] || {}
+    for (const pageId of Object.keys(pages)) {
+      if (path !== edgeGlobal.edgeState.organizationDocPath || props.site !== siteId)
+        throw new Error('The selected site changed. Reopen the confirmation before continuing.')
+      check(await edgeFirebase.removeDoc(`${path}/sites/${siteId}/published`, pageId))
+    }
+    if (path !== edgeGlobal.edgeState.organizationDocPath || props.site !== siteId)
+      throw new Error('The selected site changed. Reopen the confirmation before continuing.')
+    check(await edgeFirebase.removeDoc(`${path}/published-site-settings`, siteId))
+    state.unpublishDialogOpen = false
+    edgeFirebase?.toast?.success?.('Site unpublished. Its domain connections have been retained.')
+  }
+  catch (error) {
+    state.unpublishError = `${error?.message || 'Unpublishing failed.'} Some pages may already be offline; review the site before retrying.`
+  }
+  finally {
+    state.unpublishing = false
+  }
 }
 
 const publishSite = async ({ siteVersion = null, bumpSiteVersion = true } = {}) => {
@@ -3740,6 +3840,8 @@ const isSiteSettingPublished = computed(() => {
 })
 
 onBeforeUnmount(() => {
+  clearInterval(headerDomainPollTimer)
+  headerDomainRequest++
   if (publishedSitePreviewCopyTimer)
     clearTimeout(publishedSitePreviewCopyTimer)
   sitePagePreviewVisibilityObservers.forEach(observer => observer.disconnect())
@@ -3865,6 +3967,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
     <edge-editor
       v-if="!props.page && props.site === 'new' && canCreateSite"
       collection="sites"
+      :save-handler="saveSiteSettingsDocument"
       :doc-id="props.site"
       :schema="schemas.sites"
       :new-doc-schema="state.newDocs.sites"
@@ -3908,10 +4011,11 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
             class="w-full"
           />
           <edge-shad-tags
-            v-model="slotProps.workingDoc.domains"
+            :model-value="slotProps.workingDoc.domains"
+            @update:model-value="domains => setSiteDomains(slotProps.workingDoc, domains)"
             name="domains"
             label="Domains"
-            placeholder="Add or remove domains"
+            placeholder="example.com (www is managed automatically)"
             class="w-full"
           />
           <edge-shad-select-tags
@@ -4273,14 +4377,27 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
     </edge-dashboard>
     <div v-else class="flex flex-col h-[calc(100vh-78px)] overflow-visible">
       <div
-        class="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-2 border border-slate-300 bg-slate-100 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+        class="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 px-4 py-2 border border-slate-300 bg-slate-100 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
         :class="isTemplateSite ? 'min-h-[68px]' : ''"
       >
         <div class="flex min-w-0 items-center gap-3">
           <FileStack class="w-5 h-5 shrink-0" />
           <div class="min-w-0">
-            <div class="truncate text-lg font-normal" :title="siteData.name || 'Templates'">
-              {{ siteData.name || 'Templates' }}
+            <div class="flex min-w-0 items-center gap-2">
+              <div class="min-w-0 truncate text-lg font-normal" :title="siteData.name || 'Templates'">
+                {{ siteData.name || 'Templates' }}
+              </div>
+              <edge-cms-domain-status
+                v-if="!isTemplateSite && isSiteSettingPublished && requestedHeaderDomains.length"
+                :status="headerDomainState"
+                :error="activeDomainError"
+                :checked-at="headerDomainLastChecked"
+                :checking="checkingHeaderDomains"
+                :can-edit="canEditSiteSettings"
+                @open="open => open && fetchHeaderDomainRegistryError()"
+                @check="checkHeaderDomains"
+                @settings="state.siteSettings = true"
+              />
             </div>
             <a
               v-if="!isTemplateSite && publishedSiteOrigin"
@@ -4308,12 +4425,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
               </edge-shad-button>
             </span>
           </div>
-          <div
-            v-if="!isTemplateSite && activeDomainError"
-            class="rounded bg-red-100 px-3 py-1 text-[10px] font-medium text-red-700 whitespace-nowrap shadow-sm"
-          >
-            Domain Error - See Settings
-          </div>
+
         </div>
         <div class="flex justify-center">
           <div v-if="!isTemplateSite && (canViewPagesTab || canViewPostsTab || canViewInboxTab || canViewAnalyticsTab || canViewRestrictedTab || canViewMediaTab)" class="flex max-w-[62vw] items-center overflow-x-auto rounded-full border border-slate-300 bg-white p-1 shadow-sm dark:border-slate-600 dark:bg-slate-950">
@@ -4468,7 +4580,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger as-child>
-                <edge-shad-button variant="outline" size="icon" class="h-9 w-9">
+                <edge-shad-button variant="outline" size="icon" class="h-9 w-9" aria-label="Site actions">
                   <MoreHorizontal />
                 </edge-shad-button>
               </DropdownMenuTrigger>
@@ -4495,7 +4607,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                   <FolderUp />
                   Publish All Pages
                 </DropdownMenuItem>
-                <DropdownMenuItem v-if="isSiteSettingPublished || isAnyPagesPublished" @click="unPublishSite">
+                <DropdownMenuItem v-if="canEditSiteSettings && (isSiteSettingPublished || isAnyPagesPublished)" class="text-red-700" :disabled="state.unpublishing" @click="openUnpublishDialog">
                   <FolderDown />
                   Unpublish Site
                 </DropdownMenuItem>
@@ -5079,6 +5191,25 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
         </Transition>
       </div>
     </div>
+    <edge-shad-dialog :model-value="state.unpublishDialogOpen" @update:model-value="value => { if (!state.unpublishing) state.unpublishDialogOpen = value }">
+      <DialogContent @escape-key-down="event => { if (state.unpublishing) event.preventDefault() }" @interact-outside="event => { if (state.unpublishing) event.preventDefault() }">
+        <DialogHeader>
+          <DialogTitle>Take this entire site offline?</DialogTitle>
+          <DialogDescription>Unpublishing {{ unpublishSiteName }} removes its published pages and settings. Visitors will no longer be able to use the site. Drafts and domain connections are retained so it can be republished.</DialogDescription>
+        </DialogHeader>
+        <p class="break-words text-sm font-medium">{{ (publishedSiteSettings.domains || []).join(', ') || 'No custom domains' }}</p>
+        <label for="cms-unpublish-site-name" class="text-sm">Type <strong>{{ unpublishSiteName }}</strong> to confirm.</label>
+        <Input id="cms-unpublish-site-name" v-model="state.unpublishConfirmation" autocomplete="off" :disabled="state.unpublishing" @keydown.enter.prevent="unPublishSite" />
+        <p v-if="state.unpublishError" class="text-sm text-red-700" role="alert">{{ state.unpublishError }}</p>
+        <DialogFooter>
+          <edge-shad-button type="button" variant="outline" :disabled="state.unpublishing" @click="state.unpublishDialogOpen = false">Keep site online</edge-shad-button>
+          <edge-shad-button type="button" variant="destructive" :disabled="!canConfirmUnpublish" @click="unPublishSite">
+            <Loader2 v-if="state.unpublishing" class="h-4 w-4 animate-spin" />
+            {{ state.unpublishing ? 'Unpublishing…' : 'Unpublish entire site' }}
+          </edge-shad-button>
+        </DialogFooter>
+      </DialogContent>
+    </edge-shad-dialog>
     <edge-cms-site-readiness-dialog
       v-if="!isTemplateSite"
       v-model="state.siteReadiness"
@@ -5240,6 +5371,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
         </SheetHeader>
         <edge-editor
           collection="sites"
+          :save-handler="saveSiteSettingsDocument"
           :doc-id="props.site"
           :schema="schemas.sites"
           :new-doc-schema="state.newDocs.sites"

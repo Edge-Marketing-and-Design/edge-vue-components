@@ -1001,7 +1001,7 @@ const planSite = async (core, reader, context) => {
     ...chosen,
     name,
     theme: themeId || '',
-    domains,
+    ...core.normalizeSiteDomainSettings({ domains, ...(Object.hasOwn(chosen, 'canonicalDomain') ? { canonicalDomain: chosen.canonicalDomain } : {}) }),
     users: isAdmin ? [] : [uid],
     docId: siteRef.id,
     doc_created_at: now,

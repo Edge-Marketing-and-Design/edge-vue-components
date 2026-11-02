@@ -8,6 +8,17 @@
 // functions/helpers/cmsOperations.mjs). Keep the three copies byte-identical;
 // tests/cmsOperations.test.mjs enforces it.
 
+// Stored site domains name the base hostname; www is managed automatically.
+// Keep other subdomains and an explicit blank canonical (no forwarding).
+export const normalizeSiteDomainSettings = (settings = {}) => {
+  const clean = value => String(value || '').trim().toLowerCase().replace(/\.+$/g, '').replace(/^www\./, '')
+  const domains = [...new Set((Array.isArray(settings.domains) ? settings.domains : []).map(clean).filter(Boolean))]
+  return {
+    domains,
+    ...(Object.prototype.hasOwnProperty.call(settings, 'canonicalDomain') ? { canonicalDomain: clean(settings.canonicalDomain) } : {}),
+  }
+}
+
 export const CMS_OPERATION_TYPES = Object.freeze([
   'theme.create',
   'theme.update',
