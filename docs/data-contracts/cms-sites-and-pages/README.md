@@ -1,0 +1,287 @@
+# CMS sites and pages data contract
+
+Status: in use for every site the CMS publishes.
+
+Last verified: 2026-10-13, 40d130f (page.moveBlock, structuredDataAiLocked)
+
+A site is an organization's website: its settings, menus and domains, and
+the draft pages assembled from block instances. Publishing copies a page or
+the site settings into a published collection that the public renderer reads
+from KV. This contract covers the site document, its menus, the page
+document, the published copies, the version fields and the datasets the
+renderer reads. Block instances are in `edge/docs/data-contracts/cms-blocks/`;
+posts in `edge/docs/data-contracts/cms-posts/`; the workflow rules in
+`docs/engineering/cms-publication.md`.
+
+## Storage
+
+| Documents | Path |
+| --- | --- |
+| Draft site settings | `organizations/{orgId}/sites/{siteId}` |
+| Draft pages | `organizations/{orgId}/sites/{siteId}/pages/{pageId}` |
+| Published pages | `organizations/{orgId}/sites/{siteId}/published/{pageId}` (the same id as the draft) |
+| Published site settings | `organizations/{orgId}/published-site-settings/{siteId}` (the same id as the site) |
+| Template pages | `organizations/{orgId}/sites/templates/pages/{pageId}`: the `templates` site is not a public site; its pages are copied when a theme seeds a site or a page is created from a template |
+| Legacy published site | `organizations/{orgId}/sites-published/{siteId}`: only the registrar's attach and detach callables keep its `domains` in step; nothing else reads or writes it |
+
+The Hub writes sites and pages from the browser through
+`edgeFirebase.storeDoc` (full replace) and `changeDoc`; the wrapper adds
+`last_updated`, `uid` and `doc_created_at`. The operations `site.create`,
+`site.update`, `page.create`, `page.update`, `page.placeBlock`,
+`page.setValues`, `page.removeBlock` and `page.moveBlock` write the draft
+documents from the
+Functions with the same builders (`edge/docs/data-contracts/cms-operations/`).
+
+## Fields
+
+### Site
+
+Defaults come from `siteSettingsDefaults` in `edge/lib/cmsOperations.js`,
+which the Hub's new-site form (`siteSettingsTemplate.js`) and `site.create`
+share.
+
+<!-- fields: site generated from CMS_DOCUMENT_FIELDS -->
+
+### Audience registration response
+
+For an unauthenticated successful `cms-restrictedContentBeginRegistration`,
+`registrationCode` is the ID of the global `staged-users/{stagedUserDocId}`
+record used by the registration client. `audienceUserId` and `memberId` remain
+the site-specific `audience-users/{audienceUserId}` ID. These IDs can differ.
+This response correction does not change staged-record selection or grants:
+the function adds `user` at the audience document path and `editor` at its
+`data` path, preserving existing permissions on the selected staged record.
+
+### Menus
+
+`menus` is `{ 'Site Root': [entry], 'Not In Menu': [entry], ...otherMenus }`.
+Both root menus always exist (`withRootMenus`); `Site Root` is the
+navigation, `Not In Menu` holds routable pages the navigation hides.
+
+| Entry | Shape |
+| --- | --- |
+| Page | `{ name: slug, menuTitle, item: pageId, disableRename?, disableDelete? }` |
+| Folder | `{ name, menuTitle?, folderTitle?, item: { [folderSlug]: [entry] } }` |
+| External link | `{ name, item: { type: 'external', url } }` |
+
+`name` is the page's route slug; `menuTitle` is what the navigation shows.
+A theme's `defaultMenus` has the same shape with template page ids, which
+seeding replaces with the new pages' ids.
+
+### Page
+
+Defaults come from `blankPagePayload` (a blank page) and
+`buildPagePayloadFromTemplateDoc` (a page copied from a template page) in
+`edge/lib/cmsOperations.js`, the same builders as `menu.vue`.
+
+<!-- fields: page generated from CMS_DOCUMENT_FIELDS -->
+
+## Public projection
+
+### Publishing
+
+- **A page** (`page.vue` `publishPage`): the draft document is stored as
+  `published/{pageId}`, a full copy; `pageVersions.{pageId}` is set to the
+  page's `version` on the site and on `published-site-settings` (created
+  with `docId` when the site settings are not published yet).
+- **The site settings** (`site.vue` `publishSiteSettings`): the site
+  document is stored as `published-site-settings/{siteId}`, a full copy with
+  the consent fields defaulted and the next `version`, which is also written
+  to the site.
+- **The whole site** (`publishSite`): every draft page is copied to
+  `published` with its version, and `pageVersions` and the next site
+  `version` are written to both the site and the published settings.
+- **Unpublish** removes every published page and the published site
+  settings. **Discard** copies the published settings' fields back onto the
+  site document without republishing.
+- The published copy's existence is the publication state; a draft that
+  differs from its copy is "published with unpublished changes"
+  (`page.unpublished-changes` in the readiness report).
+
+### KV datasets
+
+| Key | Value | Indexes and metadata |
+| --- | --- | --- |
+| `sites:{orgId}:{siteId}` | The `published-site-settings` document without `cacheVerification` (`onSiteWritten`) | `idx:sites:docId:{orgId}:{slug(siteId)}:{siteId}`, `idx:sites:domains:{slug(domain)}` per domain |
+| `pages:{orgId}:{siteId}:{pageId}` | The published page document (`onPublishedPageWritten`) | none |
+
+Every mirror writes `{ canonical }` metadata on its index keys and keeps an
+`idx:manifest:` entry per canonical key (`functions/kv/kvMirror.js`).
+
+### What the renderer reads
+
+The Hub's Published Site Preview copy action builds the configured public
+renderer URL with `?siteId=<orgId>-<siteId>`, using the active organization
+and the site document id. Both ids are required; the query value is URL-encoded.
+It is available only for published site settings, not template sites. This
+client link format does not change stored documents or KV keys.
+
+When a published domain has matching registry org/site ownership, successful
+recorded DNS sync (`dnsSyncSucceeded`) and a connected, error-free www/apex
+variant (`wwwAdded`/`apexAdded`), the header instead links to View Published
+Site. Published page actions, labeled View Published Page, use that origin and
+the saved published route. Selection uses published `domains`, `canonicalDomain`
+and `forwardApex`, never draft domain edits. Missing/failed readiness keeps the
+renderer fallback; an unready canonical domain cannot fall back to another
+domain that redirects to it. This reuses `cms-getCloudflarePagesProject` and its
+existing registry payload, not new fields or a live uptime check. Page/sidebar
+components share the site's reactive origin rather than issuing extra lookups.
+
+Hub draft preview links use that same selector plus `preview=true`. Page links
+also carry `route=<menu-path>` (root `/` or nested slugs), derived independently
+from the saved draft or published menus. Published page actions require a
+published copy; draft actions do not require publication. Unroutable/orphaned
+pages and templates have no external route. Unsaved editor state is not sent.
+These are client URLs only: no new stored fields, public projections or reads
+authorized by the URL. The authenticated frontend reads permitted saved draft
+site/page/theme snapshots; collection/API delivery remains published.
+
+`emd-cms-front` resolves the request's host through `idx:sites:domains` to
+the site, reads `sites:` for `menus`, `theme`, `pageVersions`, the logos,
+contact and social fields, SEO and tracking settings, then `pages:` for the
+page the route's slug names in `menus`, `themes:` for the theme and
+`posts:` for post routes. A post template page (`post: true`, with a block
+that calls `#renderBlocks` over a `posts` collection) serves
+`/{page-slug}/{post-name}` from its `postContent`
+(`edge/lib/cmsPostRoutes.js`). `version` and `pageVersions` key the
+renderer's caches: a theme change or a block release that touches a
+published page raises them.
+
+### SEO fields the renderer resolves
+
+- **Title and description** resolve independently: the post view's
+  `postMetaTitle` / `postMetaDescription` (only on a matched post route),
+  then the page's `metaTitle` / `metaDescription`, then the site's, then
+  empty. Whitespace is not empty.
+- **Structured data:** a post route uses `postStructuredData`, otherwise the
+  page's `structuredData`. Site and page objects combine as one `@graph`;
+  missing `WebSite` and `WebPage` names and descriptions are filled from the
+  site and the final title and description.
+- **Tokens** in these strings are `{{ path }}` only: letters, digits,
+  underscore, dot, `$` and hyphen. On a post route a path reads the
+  hydrated record (`{{ meta_title }}`, `{{ item.meta_title }}`); a missing
+  value becomes an empty string. Template v2 helpers such as
+  `{{ money(price) }}` are not evaluated and stay literal. `{{cms-url}}` is
+  the canonical URL of the route, `{{cms-site}}` the canonical origin
+  (`canonicalDomain` and `domains`, else the request's host) and
+  `{{cms-logo}}` the site logo on that origin.
+- Record collections a Hub publishes may carry `meta_title` and
+  `meta_description` that their post template pages reference this way. A
+  template page's copied SEO values do not show what a site's own page has.
+
+The renderer side of this resolution (hydration order, client and server
+precedence, overrides with their own head) is in
+`docs/engineering/cms-publication.md`.
+
+## Contact form history and recipient routing
+
+CMS forms submit through the public renderer's shared helper and `/api/history`
+proxy to Hub `POST /api/history/{orgId}` (`cms-trackHistory`), with
+`action: "Contact Form"`. `data` carries form fields plus the page, block and
+site context. The Hub records the history/action and sends the form email; a
+Hub may add its own consumers of the same submitted data (its "This Hub"
+section names them).
+
+- Envelope `userId` is only a claimed visitor identity. Identified requests must
+  include `firebaseIdToken` at the envelope level. The Hub verifies it with this
+  project's Firebase Auth, checks any claimed UID against the decoded UID, and
+  requires an account email. Missing, invalid, revoked, or mismatched tokens
+  return 401 before history, audience linkage, lead processing, or email writes.
+  Fully anonymous requests omit both fields. Tokens are never persisted or
+  included in form email. Legacy `data.userId` is not used for this linkage.
+  Visitor identity is never a recipient override. In particular, signing in as
+  an organization member must not direct a generic inquiry to that member.
+- `data.recipientUserId` explicitly selects a registered recipient (for
+  example on an agent-profile form). The helper accepts case-insensitive field
+  names (the frontend normalizes names to lowercase), including the existing
+  `fields`, `formFields` and `formData` form containers. Bare/legacy `userId`
+  is not a recipient fallback. The selected ID must match a user in this
+  organization and a root user with `meta.contactEmail` or `meta.email`.
+- A valid explicit recipient overrides email delivery. Otherwise email uses the
+  published block instance's `values.emailTo`, then the site's `contactEmail`
+  (published first, draft fallback). Client-submitted email addresses do not
+  select the destination.
+
+## Consumers
+
+- **Hub:** `edge/components/cms/site.vue` (sites, settings, publish,
+  unpublish, discard, seeding from a theme), `siteSettingsForm.vue`,
+  `menu.vue` (menus, page creation and deletion), `page.vue` (the editor
+  and page publish), `posts.vue` (post routes), the site readiness dialog.
+- **Functions** (`functions/cms.js` and its `edge/functions/` copy):
+  `onSiteWritten`, `onPublishedPageWritten`, `onPageUpdated`,
+  `syncPublishedSyncedBlocks`, `onPageDeleted`, `onSiteDeleted`,
+  `populateSiteContactFromPrimaryUserOnCreate`,
+  `syncUserMetaFromPublishedSiteSettings`, `syncSiteSettingsFromUserMeta`,
+  `syncPublishedRestrictedContentFromSite`, `ensurePublishedSiteDomains`,
+  `siteAiBootstrapEnqueue` and `siteAiBootstrapWorker`, the registrar and
+  domain callables, the release worker
+  (`functions/helpers/cmsBlockPropagation.js`), the theme mirror's version
+  follow-up, `cms-getPreviewRenderPayload`, the contact form email, and the
+  operations and readiness (`functions/cmsOperations.js`).
+- **Public renderer:** `emd-cms-front` reads the `sites:` and `pages:`
+  datasets.
+- **Agents and tooling:** the operations (`site.create`, `site.update`,
+  `page.*`), `cms-siteReadiness`, the CMS MCP (`cms_find_usage`,
+  `cms_preview_url`, `cms_site_readiness`, `cms_list_pages`,
+  `cms_get_page`), the `edge-design-to-site` skill.
+
+## Invariants and validation codes
+
+- **Slugs:** a page's `name` is unique across both root menus; `page.create`
+  and seeding make it unique (`ensureUniqueSlug`, `uniqueRootSlug`).
+- **The templates site** is never published; `page.create` refuses it, and
+  a release never updates its published copies.
+- **Versions:** every save and every page operation increments the page's
+  `version`; publishing never changes a draft's version. A published page
+  updated by a release takes the next version and writes `pageVersions` on
+  both the site and the published settings.
+- **Synced instances** (`edge/docs/data-contracts/cms-blocks/`, synced): when a
+  page is saved, `onPageUpdated` copies each synced instance to the other
+  draft pages holding the block if its `blockUpdatedAt` is newer; when a
+  page is published, `syncPublishedSyncedBlocks` does the same for the other
+  published pages and the draft pages.
+- **Deleting a page** removes its published copy, removes it from the
+  published settings' menus (keeping both root menus) and drops its
+  `pageLastModified` entry. **Deleting a site** removes its draft pages and
+  its published settings.
+- **Domains** are unique across the organization's sites. When the published
+  settings are written, `ensurePublishedSiteDomains` claims each domain in
+  the top-level `domain-registry`, drops a domain another site owns and
+  records why in `domainError`, and connects the rest to the Cloudflare
+  Pages project; a sync failure is also recorded in `domainError` and
+  cleared when the domains connect. Domains reach the renderer only through
+  the published settings.
+- **The primary user:** on creation, blank `contactEmail`, `contactPhone`
+  and the six social fields are filled from `users[0]`'s profile; after
+  publishing, those fields are copied to that user's profile, and a profile
+  change is copied back to the user's sites.
+- **Restricted content** on the site is copied to the published settings
+  whenever it changes, without a publish.
+- **Structured data** on a page or the site is empty or a JSON-LD object or
+  list; the operations refuse anything else and warn about tokens the
+  renderer will not replace (`edge/docs/data-contracts/cms-operations/`).
+- **Page structure** is validated by `validatePageDocument`
+  (`edge/lib/cmsBlockValidation.js`): the `page.*` codes cover ids,
+  placement and post template scaffolds. The readiness report's `site.*`,
+  `page.*` and `seo.*` codes are in the operations contract.
+- **Site record lookups** from blocks use `path: "sites"` with
+  `canonicalLookup: { key: "{orgId}:{siteId}" }`, never a literal site id
+  (`sources.site-id`).
+
+### Checks that enforce this contract
+
+Each Hub lists the tests in its own checkout under "This Hub". Shared:
+
+- `node --test edge/tools/mcp/cms/test/*.test.js`
+
+## Related contracts
+
+- `edge/docs/data-contracts/cms-blocks/README.md`: the instances pages hold,
+  propagation and releases.
+- `edge/docs/data-contracts/cms-operations/README.md`: the site and page
+  operations, document shapes and the readiness codes.
+- `edge/docs/data-contracts/cms-themes/README.md`: the theme a site renders with
+  and the menus it seeds.
+- `edge/docs/data-contracts/cms-posts/README.md`: the posts a post template page
+  renders.

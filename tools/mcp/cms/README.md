@@ -142,7 +142,10 @@ name cannot silently select the wrong theme. Its response includes:
   contract line each written field follows. It reads a file only: no key, no
   network, no Firestore. An unknown kind answers with the known ones, and a
   kind whose file is not in the checkout says which branch to pull. The
-  contracts are the files under `docs/data-contracts/`; nothing is copied.
+  CMS contracts are the shared files under `edge/docs/data-contracts/`, each
+  followed by the Hub's own `docs/data-contracts/<folder>/hub.md` as a "This
+  Hub" section when the Hub has one; Hub-only kinds (webcams) are under the
+  Hub's `docs/data-contracts/`.
 
 ## Draft-only CMS operations (agent key)
 
@@ -382,7 +385,7 @@ cms_contract kind=blocks
 - No tool calls `set`, `create`, `update`, `delete` or `storeDoc`. The only writes go through `cms-agentOperation` with an agent key, which authorizes as the key's creator and can only create drafts; the Hub records every run.
 - An emulator config (`requireEmulator: true`) never talks to a real project.
 - `cms_checkout_block` is the only tool that changes local state, and it refuses to overwrite a locally changed checkout.
-- `cms_contract` reads only files under the Hub's `docs/data-contracts/`.
+- `cms_contract` reads only files under `edge/docs/data-contracts/` and the Hub's `docs/data-contracts/`.
 - Keep service account JSON files out of git.
 - Keep `allowedPathPrefixes` narrow when production data access is enabled.
 - CMS block/page/site scans are bounded. Treat `scanTruncated`, `siteScanTruncated`, or `resultTruncated` as an incomplete result, not proof of absence.

@@ -10,8 +10,9 @@
 // like a Hub connection, so the same checks apply. Tool names and schemas come from the shared definitions in
 // helpers/cmsAgentMcpTools.mjs, which the local MCP also uses.
 // The workflow guide (agentGuide/, shared Edge) and this Hub's data contracts
-// (agent-contracts/, copied from docs/data-contracts by the Hub's
-// scripts/cms/sync-agent-contracts.mjs) are read from the deployed bundle.
+// (agent-contracts/: the shared edge/docs/data-contracts with the Hub's
+// additions, bundled by the Hub's scripts/cms/sync-agent-contracts.mjs) are
+// read from the deployed bundle.
 // Keep identical in functions/.
 const { readFileSync } = require('node:fs')
 const path = require('node:path')
