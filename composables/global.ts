@@ -503,152 +503,38 @@ const prepareCmsMetaForRuntime = (meta: any, currentSite: any = '', tokenContext
   return cloned
 }
 
-const getValueAtPath = (source: any, path: string) => {
-  if (!path || typeof path !== 'string')
-    return source
-  return path.split('.').reduce((acc, key) => {
-    if (acc == null || typeof acc !== 'object')
-      return undefined
-    return acc[key]
-  }, source)
-}
-
-const compareCollectionOrderValues = (aValue: any, bValue: any) => {
-  if (aValue == null && bValue == null)
-    return 0
-  if (aValue == null)
-    return 1
-  if (bValue == null)
-    return -1
-
-  if (typeof aValue === 'boolean' || typeof bValue === 'boolean') {
-    const aBool = aValue ? 1 : 0
-    const bBool = bValue ? 1 : 0
-    if (aBool === bBool)
-      return 0
-    return aBool > bBool ? 1 : -1
-  }
-
-  const aNum = Number(aValue)
-  const bNum = Number(bValue)
-  const aNumValid = Number.isFinite(aNum)
-  const bNumValid = Number.isFinite(bNum)
-  if (aNumValid && bNumValid) {
-    if (aNum === bNum)
-      return 0
-    return aNum > bNum ? 1 : -1
-  }
-
-  const aDate = Date.parse(String(aValue))
-  const bDate = Date.parse(String(bValue))
-  const aDateValid = Number.isFinite(aDate)
-  const bDateValid = Number.isFinite(bDate)
-  if (aDateValid && bDateValid) {
-    if (aDate === bDate)
-      return 0
-    return aDate > bDate ? 1 : -1
-  }
-
-  return String(aValue).localeCompare(String(bValue), undefined, { numeric: true, sensitivity: 'base' })
-}
-
-const applyCmsCollectionOrder = (records: any[], orderList: any[] = []) => {
-  if (!Array.isArray(records))
-    return []
-  if (!Array.isArray(orderList) || orderList.length === 0)
-    return records
-
-  const validOrders = orderList.filter(order => order && typeof order.field === 'string' && order.field.trim())
-  if (!validOrders.length)
-    return records
-
-  return [...records].sort((a, b) => {
-    for (const order of validOrders) {
-      const direction = String(order.direction || 'asc').toLowerCase() === 'desc' ? -1 : 1
-      const compared = compareCollectionOrderValues(
-        getValueAtPath(a, order.field),
-        getValueAtPath(b, order.field),
-      )
-      if (compared !== 0)
-        return compared * direction
-    }
-    return 0
-  })
-}
-
+// Loads each collection-backed field in `meta` into `value` through the
+// cms-collectionData callable, which reads the records the public site shows
+// (the KV mirror, with its query rules) under the editor's read rights.
 const cmsCollectionData = async (edgeFirebase: any, value: any, meta: any, currentSite: any = '') => {
+  const sources: Record<string, any> = {}
   for (const key in meta) {
-    if (meta[key]?.collection) {
-      const staticSearch = new edgeFirebase.SearchStaticData()
-      const canonicalLookupKey = String(meta[key]?.collection?.canonicalLookup?.key || '').trim()
-
-      const currentQuery = Array.isArray(meta[key].collection.query)
-        ? resolveCmsCollectionTokens(dupObject(meta[key].collection.query), currentSite)
-        : []
-      const missingBooleanDefaults: string[] = []
-      for (const queryKey in meta[key].queryItems || {}) {
-        const rawValue = meta[key].queryItems[queryKey]
-        const hasValue = rawValue !== undefined && rawValue !== null && rawValue !== ''
-        if (hasValue) {
-          const findIndex = currentQuery.findIndex((q: any) => q.field === queryKey)
-          const queryOption = meta[key]?.queryOptions?.find((o: any) => o.field === queryKey)
-          const operator = queryOption?.operator || '=='
-          let queryValue = resolveCmsCollectionTokens(rawValue, currentSite)
-          if (queryValue === 'true')
-            queryValue = true
-          else if (queryValue === 'false')
-            queryValue = false
-          if (operator === '==' && queryValue === false) {
-            missingBooleanDefaults.push(queryKey)
-            if (findIndex > -1)
-              currentQuery.splice(findIndex, 1)
-            continue
-          }
-          if (operator === 'array-contains-any' && !Array.isArray(queryValue))
-            queryValue = [queryValue]
-          const newQuery = { field: queryKey, operator, value: queryValue }
-          if (findIndex > -1) {
-            currentQuery[findIndex] = newQuery
-          }
-          else {
-            currentQuery.push(newQuery)
-          }
-        }
-        else {
-          const findIndex = currentQuery.findIndex((q: any) => q.field === queryKey)
-          if (findIndex > -1) {
-            currentQuery.splice(findIndex, 1)
-          }
-        }
-      }
-      let collectionPath = `${edgeState.organizationDocPath}/${meta[key].collection.path}`
-      if (meta[key].collection.path === 'posts' || meta[key].collection.path === 'post') {
-        collectionPath = `${edgeState.organizationDocPath}/sites/${currentSite}/published_posts`
-      }
-
-      if (canonicalLookupKey) {
-        const canonicalSegments = canonicalLookupKey.split(':').filter(Boolean)
-        const docId = canonicalSegments[canonicalSegments.length - 1]
-        if (docId) {
-          const record = await edgeFirebase.getDocData(collectionPath, docId)
-          const records = record ? [record] : []
-          value[key] = applyCmsCollectionOrder(records, meta[key].collection.order)
-          continue
-        }
-      }
-
-      const fetchLimit = missingBooleanDefaults.length ? 0 : meta[key].limit
-      await staticSearch.getData(collectionPath, currentQuery, meta[key].collection.order, fetchLimit)
-
-      let records = Object.values(staticSearch.results.data || {})
-      if (missingBooleanDefaults.length)
-        records = records.filter(record => missingBooleanDefaults.every(field => record?.[field] !== true))
-      const orderedRecords = applyCmsCollectionOrder(records, meta[key].collection.order)
-      const limit = Number(meta[key].limit)
-      value[key] = (Number.isFinite(limit) && limit > 0)
-        ? orderedRecords.slice(0, Math.floor(limit))
-        : orderedRecords
-    }
+    if (!meta[key]?.collection)
+      continue
+    const cfg = dupObject(meta[key])
+    if (Array.isArray(cfg.collection.query))
+      cfg.collection.query = resolveCmsCollectionTokens(cfg.collection.query, currentSite)
+    if (typeof cfg.collection.uniqueKey === 'string')
+      cfg.collection.uniqueKey = resolveCmsCollectionTokens(cfg.collection.uniqueKey, currentSite)
+    if (cfg.collection.canonicalLookup?.key)
+      cfg.collection.canonicalLookup.key = resolveCmsCollectionTokens(cfg.collection.canonicalLookup.key, currentSite)
+    if (cfg.queryItems)
+      cfg.queryItems = resolveCmsCollectionTokens(cfg.queryItems, currentSite)
+    sources[key] = cfg
+  }
+  if (!Object.keys(sources).length)
+    return value
+  const response: any = await edgeFirebase.runFunction('cms-collectionData', {
+    orgId: String(edgeState.currentOrganization || ''),
+    siteId: String(currentSite || ''),
+    sources,
+  })
+  const result = response?.data || response || {}
+  for (const key of Object.keys(sources))
+    value[key] = Array.isArray(result.values?.[key]) ? result.values[key] : []
+  for (const source of result.sources || []) {
+    if (source?.problem)
+      console.warn('[cms] Data Source not loaded:', source.name, source.problem)
   }
   return value
 }

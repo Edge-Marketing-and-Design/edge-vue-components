@@ -1962,6 +1962,8 @@ exports.agentMcp = cmsAgentMcp.agentMcp
 exports.agentOAuth = cmsAgentOAuth.agentOAuth
 exports.describeAgentAuthorization = cmsAgentOAuth.describeAgentAuthorization
 exports.decideAgentAuthorization = cmsAgentOAuth.decideAgentAuthorization
+// The Hub editor canvas's collection data, loaded as the public site loads it.
+exports.collectionData = require('./cmsCollectionData').collectionData
 
 exports.fontFileUpdated = onDocumentUpdated({ document: 'organizations/{orgId}/files/{fileId}', timeoutSeconds: 180 }, async (event) => {
   const before = event.data.before.data() || {}
