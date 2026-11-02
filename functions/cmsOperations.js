@@ -132,7 +132,7 @@ const liveSitesForTheme = async (reader, orgId, themeId) => {
   return [...live].sort()
 }
 
-// ---- Standard theme names (docs/data-contracts/cms-themes/README.md) ----
+// ---- Standard theme names (edge/docs/data-contracts/cms-themes/README.md) ----
 
 const parseThemeJson = (value) => {
   try {

@@ -411,7 +411,7 @@ const hasAltPair = (schema, name) => owns(schema, `${name}Alt`) || owns(schema, 
 // Every theme defines the same color, font and radius names, and blocks use
 // only those, so a block works with any theme in the organization: swapping
 // themes never leaves a block pointing at a color (river, timber) the new
-// theme doesn't have. Contract: docs/data-contracts/cms-themes/README.md.
+// theme doesn't have. Contract: edge/docs/data-contracts/cms-themes/README.md.
 const STANDARD_COLORS = new Set([...THEME_COLOR_TOKENS, ...THEME_OPTIONAL_COLOR_TOKENS, 'white', 'black', 'transparent', 'current', 'inherit'])
 const STANDARD_FONTS = new Set([...THEME_FONT_TOKENS, 'mono'])
 const STANDARD_RADII = new Set([...THEME_RADIUS_TOKENS, 'none', 'sm', 'md', 'lg', 'xl', 'full'])
@@ -519,7 +519,7 @@ export const themeNameFindings = (classStrings, themeTokens = {}) => {
   return findings
 }
 
-// ---- Type roles (docs/data-contracts/cms-themes/README.md) ----
+// ---- Type roles (edge/docs/data-contracts/cms-themes/README.md) ----
 // A theme may name the classes that style its section headings and intros
 // (`typeRoles`). Blocks for that theme use them instead of their own sizes,
 // so the theme's Extra CSS sets the style once. Themes without type roles are
