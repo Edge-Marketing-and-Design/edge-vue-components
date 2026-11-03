@@ -184,6 +184,12 @@ shared video media picker.
 - They do **not** support `&&`, `||` or a leading `!`. The engine takes the
   `else` branch for those regardless of data. Nest positive conditions and
   put the content in `{{{#else}}}` instead.
+- A condition tests `item` or the alias of a `{{#for}}` that encloses it.
+  Outside every loop the engine does not evaluate the conditional: the tags
+  are dropped and both branches render. On any other name inside a loop it
+  takes the `else` branch. For a top-level field, put the value in a class
+  (`class="x-{{ style }}"`) and style it in the theme, or loop over a data
+  source. The validator reports both as `grammar.condition-scope`.
 - A missing `{{{/if}}}` silently drops the rest of the enclosing content.
 
 ### Block instance

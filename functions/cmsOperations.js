@@ -379,11 +379,9 @@ const planPlaceBlock = async (core, reader, plan, { orgId, uid, now, operation, 
   }
   // A synced block (site chrome) shares one instance's values across the
   // site's pages. As the Hub's picker does, copy the instance the site
-  // already has; the first one comes with the theme's seeded pages or is
-  // placed in the Hub, and its values are edited in the Hub.
+  // already has. The site's first instance starts from the schema defaults,
+  // since there are no shared values yet; its values are edited in the Hub.
   const syncedSource = block.synced ? await findSyncedInstance(reader, siteRef, blockId) : null
-  if (block.synced && !syncedSource)
-    problem(plan, 'block.synced-first', `"${block.name || blockId}" is a synced block and this site has no instance of it yet; place the first one in the Hub.`)
   if (block.synced && operation.values !== undefined)
     problem(plan, 'block.synced-values', `"${block.name || blockId}" is a synced block; its values are shared across the site and edited in the Hub.`)
   // An unknown area is refused rather than read as main, as page.moveBlock does.
@@ -402,6 +400,13 @@ const planPlaceBlock = async (core, reader, plan, { orgId, uid, now, operation, 
       instance.protection = clone(syncedSource.protection)
     if (syncedSource.blockUpdatedAt !== undefined)
       instance.blockUpdatedAt = syncedSource.blockUpdatedAt
+  }
+  else if (block.synced) {
+    instance.synced = true
+    if (Number(instance.templateVersion) === 2) {
+      instance.values = core.getTemplateV2SchemaDefaults(block.schema)
+      instance.meta = {}
+    }
   }
   else if (operation.values !== undefined) {
     if (Number(instance.templateVersion) !== 2)
@@ -423,7 +428,7 @@ const planPlaceBlock = async (core, reader, plan, { orgId, uid, now, operation, 
     [structureKey]: next[structureKey],
     blockIds: body.blockIds(next),
     ...stamp(uid, now),
-  }), 'update', `Place "${block.name || blockId}" on ${body.label} as row ${index + 1}${syncedSource ? ' (synced; values shared with the site)' : ''}.`)
+  }), 'update', `Place "${block.name || blockId}" on ${body.label} as row ${index + 1}${syncedSource ? ' (synced; values shared with the site)' : block.synced ? ' (synced; the site\'s first instance, schema defaults)' : ''}.`)
   plan.result = { ...body.ids, instanceId: instance.id, rowId: row.id }
   return plan
 }
