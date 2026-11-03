@@ -251,6 +251,7 @@ exports.issueAgentSession = issueAgentSession
 // operations and site.update on its site, and reads of that site (preview,
 // readiness, the page and post lists and outlines).
 const SITE_SESSION_ACTIONS = ['check', 'run', 'preview', 'readiness', 'pages', 'page', 'posts', 'post']
+const MEDIA_ACTIONS = ['media-upload', 'media-find']
 
 // Parent revocation/expiry and current creator permissions are authoritative.
 exports.verifyAgentSession = async (orgId, header, body) => {
@@ -276,9 +277,10 @@ exports.verifyAgentSession = async (orgId, header, body) => {
   }
   else if (session.data.scope === 'organization') {
     // Library reads (blocks, themes, usage, audit) belong to the organization.
-    const libraryRead = LIBRARY_READ_ACTIONS.includes(body.action)
+    // Media uploads and finds belong to the organization too.
+    const libraryRead = LIBRARY_READ_ACTIONS.includes(body.action) || MEDIA_ACTIONS.includes(body.action)
     if (!libraryRead && (!['check', 'run'].includes(body.action) || (!type.startsWith('block.') && !type.startsWith('theme.') && type !== 'site.create')))
-      throw new HttpsError('permission-denied', 'Organization sessions only allow library/theme reads and work, and site creation. Open a site session for page and post work.')
+      throw new HttpsError('permission-denied', 'Organization sessions only allow library/theme reads and work, media, and site creation. Open a site session for page and post work.')
   }
   else {
     throw new HttpsError('permission-denied', 'Invalid session scope.')

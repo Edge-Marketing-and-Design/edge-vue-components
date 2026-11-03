@@ -118,6 +118,8 @@ const createRemoteCms = ({ now = Date.now, issueSession = issueAgentSession, han
     // Library reads: organization sessions, checked against the operator's read rights.
     cms_find_block: tool(({ docId, query, exactName, tag, type, theme, limit, startAfter, ...input }) => call(connection, input, { action: 'blocks', docId, query, exactName, tag, type, theme, limit, startAfter })),
     cms_audit_blocks: tool(({ includeRender, listLimit, ...input }) => call(connection, input, { action: 'audit', includeRender, listLimit })),
+    cms_diff: tool(({ docId, definition, against, ...input }) => call(connection, input, { action: 'diff', docId, ...(definition ? { definition } : {}), ...(against ? { against } : {}) })),
+    cms_resolve_override: tool(({ docId, blockName, themeName, ...input }) => call(connection, input, { action: 'override', docId, blockName, themeName })),
     cms_find_usage: tool(({ docId, siteId, limit, ...input }) => call(connection, input, { action: 'usage', docId, siteId, limit })),
     cms_validate: tool(({ docId, definition, ...input }) => call(connection, input, { action: 'validate', docId, ...(definition ? { definition } : {}) })),
     cms_render_block: tool(({ orgId, sessionId, ...args }) => call(connection, { orgId, sessionId }, { action: 'render', ...args })),
@@ -157,6 +159,8 @@ const createRemoteCms = ({ now = Date.now, issueSession = issueAgentSession, han
     }),
     cms_check_operation: tool(input => call(connection, input, { action: 'check', operation: input.operation })),
     cms_run_operation: tool(input => call(connection, input, { action: 'run', operation: input.operation, checksum: input.checksum })),
+    cms_upload_media: tool(({ siteId, tags, sources, waitSeconds, ...input }) => call(connection, input, { action: 'media-upload', ...(siteId ? { siteId } : {}), tags, sources, ...(waitSeconds !== undefined ? { waitSeconds } : {}) })),
+    cms_find_media: tool(({ fileIds, sourceUrl, query, tags, siteId, limit, startAfter, ...input }) => call(connection, input, { action: 'media-find', ...(fileIds ? { fileIds } : {}), ...(sourceUrl ? { sourceUrl } : {}), ...(query ? { query } : {}), ...(tags ? { tags } : {}), ...(siteId ? { siteId } : {}), ...(limit ? { limit } : {}), ...(startAfter ? { startAfter } : {}) })),
     cms_preview_url: tool(({ siteId, pageId, source, blockDrafts, viewport, width, ...input }) => call(connection, input, { action: 'preview', siteId, pageId, source, blockDrafts, ...(viewport ? { viewport } : {}), ...(width ? { width } : {}) })),
     cms_site_readiness: tool(({ siteId, ...input }) => call(connection, input, { action: 'readiness', siteId })),
     cms_list_pages: tool(({ siteId, ...input }) => call(connection, input, { action: 'pages', siteId })),

@@ -163,6 +163,15 @@ name cannot silently select the wrong theme. Its response includes:
   at the Hub checkout; the file must be inside the checkout, the block
   workspace or the temp directory, and at most 2 MB. Results then include
   `operationFile` (path, bytes, sha256); send the same file to the run.
+- `cms_upload_media`: add images to the organization's media library through
+  the Hub's own upload (same file document, R2 copy, Cloudflare variants and
+  tags as a Hub upload): public `url` sources the server fetches, or
+  `localFile` sources that return a one-time upload link to PUT the file to.
+  JPEG, PNG, GIF and WebP up to 10 MB; SVG is refused. Deduplicates by source
+  URL and content, waits for Cloudflare, and records the call in
+  `cms-operations` as `media.upload`.
+- `cms_find_media`: find image media by file ids, source URL, name, tags or
+  site, with each image's status and Hub URL.
 - `cms_block_base`: a block's current definition (open draft, else released)
   and its fingerprint, which `block.draft` must send as `baseHash`.
 - `cms_preview_url`: a 15-minute link to the Hub's preview of one draft page

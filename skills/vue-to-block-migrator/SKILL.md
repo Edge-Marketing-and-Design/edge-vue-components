@@ -160,7 +160,9 @@ For generated mockups or uncertain sources, present this table before final JSON
 
 Use these classifications: `static`, `editable`, `manual array`, `collection/API dynamic`, `site/theme controlled`, `system/helper controlled`, and `remove`.
 
-Do not silently hard-code fake listings, agents, offices, testimonials, prices, dates, claims, credentials, contact details, counts, locations, or stock images. If a source-of-truth decision is unresolved, pause final import JSON unless the user explicitly approves an assumption.
+Do not silently hard-code fake listings, agents, offices, testimonials, prices, dates, claims, credentials, contact details, counts, locations, or stock images.
+
+Images the source shows (an `<img src>`, a CSS `url()`, an imported asset) become `image` fields, never URLs baked into markup. Each real image goes into the Hub's media with `cms_upload_media` (the source site's public URL, or a local asset file through the one-time upload link it returns); check `cms_find_media` first and reuse what exists. The field's default or page value is the returned Hub `url` once its status is `ready`. Never keep a link to the old site, a CDN or a stock photo, even as a placeholder; SVG artwork is rendered to PNG before upload. If a source-of-truth decision is unresolved, pause final import JSON unless the user explicitly approves an assumption.
 
 ### 3. Load the theme contract
 
@@ -187,6 +189,7 @@ For Vue/JSX/HTML:
 - replace repeated mock markup with manual arrays or runtime sources;
 - add skeleton markup for asynchronous data;
 - add accessible alt text or an equivalent for meaningful images;
+- turn every image into an `image` field whose value is a Hub media URL (`cms_upload_media`), with `tags` when its picker should be scoped;
 - document behavior that cannot carry over.
 
 ### 5. Normalize the block contract
@@ -333,7 +336,7 @@ The README must state:
 - manual verification and publish steps;
 - that generation/import does not itself publish.
 
-The manifest should list stable block/page IDs and source provenance. Generation must be deterministic except for an explicitly documented timestamp field. Do not use broad regenerated mtimes as proof that every artifact changed intentionally.
+The manifest should list stable block/page IDs and source provenance, and under `media` every image uploaded with `cms_upload_media`: its source (URL or local file), tags, `fileId` and Hub `url`. Generation must be deterministic except for an explicitly documented timestamp field. Do not use broad regenerated mtimes as proof that every artifact changed intentionally.
 
 ### Required upload/deployment handoff
 
@@ -342,7 +345,7 @@ In both the package README and the final completion summary, include a `Files to
 Group the list by destination and action:
 
 1. Runtime code to copy/deploy: give the exact source file and exact destination path in the renderer repository.
-2. Theme, Head, or Extra CSS artifacts: list each upload filename, or state explicitly that none are required.
+2. Theme, Head, or Extra CSS artifacts: list each upload filename, or state explicitly that none are required. Images are not hand uploads: they are already in the Hub's media through `cms_upload_media` (list them from the manifest's `media`).
 3. Hub Blocks manager: list every block JSON filename separately and state whether to overwrite or import as new.
 4. Hub Pages editor: list every page JSON filename separately and state whether to overwrite or import as new.
 5. Hub Templates manager: list every template JSON filename separately when applicable.
@@ -449,7 +452,8 @@ Before completion:
 3. Verify representative static, manual-array, collection/API, helper-driven, and nested-source blocks as applicable.
 4. Verify page content/structure and postContent/postStructure independently.
 5. Verify Hub preview and public frontend independently when a live flow is available.
-6. Report what was automated, manually verified, not verified, and why.
+6. Run `cms_site_readiness` on the site the blocks are placed on: no `media.external-image` items may remain (images still linked from the source site).
+7. Report what was automated, manually verified, not verified, and why.
 
 Completion summary must include:
 

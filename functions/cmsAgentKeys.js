@@ -22,6 +22,7 @@ const {
 const { authorizeOperation, gatherPageOutline, gatherPostOutline, gatherSitePages, gatherSitePosts, gatherSiteReadiness, performCheck, performRun } = require('./cmsOperations.js')
 const { verifyAgentSession } = require('./cmsAgentConnections.js')
 const { LIBRARY_READ_ACTIONS, runLibraryRead, withDeployedOverrides } = require('./cmsAgentLibraryReads.js')
+const { agentMedia } = require('./cmsAgentMedia.js')
 const { buildPreviewUrl, issuePreviewToken, previewBaseUrl, previewTokensEnabled } = require('./cmsPreviewTokens.js')
 
 const DOC_ID_PATTERN = /^[^/]{1,1500}$/
@@ -264,6 +265,12 @@ const handleAgentRequest = async ({ header, body }) => {
   else if (LIBRARY_READ_ACTIONS.includes(body.action)) {
     result = await runLibraryRead({ uid, orgId, body, keyId, connectionId })
   }
+  else if (body.action === 'media-upload') {
+    result = await agentMedia.upload({ uid, orgId, body, caller: { keyId, connectionId, client: body.client } })
+  }
+  else if (body.action === 'media-find') {
+    result = await agentMedia.find({ uid, orgId, body })
+  }
   else if (body.action === 'check' || body.action === 'run') {
     const caller = await authorizeOperation({ uid, orgId, operation: body.operation })
     result = body.action === 'check'
@@ -271,7 +278,7 @@ const handleAgentRequest = async ({ header, body }) => {
       : await performRun({ ...caller, checksum: body.checksum, client: body.client, via: 'agent', agentKeyId: keyId, agentConnectionId: connectionId })
   }
   else {
-    throw new HttpsError('invalid-argument', `action must be "check", "run", "preview", "readiness", "pages", "page", "posts", "post" or a library read (${LIBRARY_READ_ACTIONS.join(', ')}).`)
+    throw new HttpsError('invalid-argument', `action must be "check", "run", "preview", "readiness", "pages", "page", "posts", "post", "media-upload", "media-find" or a library read (${LIBRARY_READ_ACTIONS.join(', ')}).`)
   }
   const used = await ref.get()
   await ref.update({ lastUsedAt: new Date().toISOString(), useCount: (used.data()?.useCount || 0) + 1 })

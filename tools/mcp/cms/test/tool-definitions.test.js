@@ -12,22 +12,26 @@ const edgeRoot = new URL('../../../../', import.meta.url)
 const LOCAL_TOOLS = [
   'firestore_list_collections', 'firestore_get_document', 'firestore_sample_collection', 'firestore_infer_schema', 'firestore_compare_schema', 'firestore_find_field',
   'cms_find_block', 'cms_audit_blocks', 'cms_checkout_block', 'cms_status', 'cms_diff', 'cms_resolve_override', 'cms_find_usage', 'cms_validate', 'cms_render_block', 'cms_find_theme', 'cms_get_theme', 'cms_contract', 'cms_schema', 'cms_guide',
-  'cms_agent_organizations', 'cms_list_sites', 'cms_open_session', 'cms_check_operation', 'cms_run_operation', 'cms_preview_url', 'cms_site_readiness', 'cms_list_pages', 'cms_get_page', 'cms_list_posts', 'cms_get_post', 'cms_block_base',
+  'cms_agent_organizations', 'cms_list_sites', 'cms_open_session', 'cms_check_operation', 'cms_run_operation', 'cms_upload_media', 'cms_find_media', 'cms_preview_url', 'cms_site_readiness', 'cms_list_pages', 'cms_get_page', 'cms_list_posts', 'cms_get_post', 'cms_block_base',
 ]
 // Remote-only wording: orgId comes from the call (no defaultOrgId), sessions
 // are optional, and readiness has no local emd-cms-front check.
 const REMOTE_FIELDS = ['orgId', 'sessionId']
-const REMOTE_DESCRIPTIONS = ['cms_open_session', 'cms_site_readiness', 'cms_audit_blocks', 'cms_validate', 'cms_contract']
+const REMOTE_DESCRIPTIONS = ['cms_open_session', 'cms_site_readiness', 'cms_audit_blocks', 'cms_validate', 'cms_contract', 'cms_diff', 'cms_resolve_override']
 // Local only: operationFile reads a file on the editor's machine, so the
 // remote check/run require the inline operation; themeName feeds override
 // checks against the emd-cms-front checkout.
 const LOCAL_ONLY_FIELDS = ['operationFile', 'themeName']
 // Intended per-tool differences. The remote audit only reads and has no
 // report file; the remote validate takes an inline definition instead of a
-// local checkout.
+// local checkout; the remote diff compares an inline definition with the Hub
+// instead of workspace files; the remote override check reads the deployed
+// manifest, where themeName is a theme document id.
 const TOOL_DIFFERENCES = {
   cms_audit_blocks: { annotations: true, fields: ['listLimit'] },
   cms_validate: { localOnly: ['source'], remoteOnly: ['definition'], fields: ['docId'], required: ['docId'] },
+  cms_diff: { title: true, localOnly: ['comparison'], remoteOnly: ['definition', 'against'] },
+  cms_resolve_override: { remoteOnly: ['themeName'], fields: ['docId'] },
 }
 
 const listTools = async (remote) => {
@@ -61,7 +65,7 @@ test('the local server keeps every tool in its order; the remote list is the Hub
   assert.deepEqual((await listTools(false)).map(tool => tool.name), LOCAL_TOOLS)
   assert.deepEqual((await listTools(true)).map(tool => tool.name), [...CMS_AGENT_REMOTE_TOOL_NAMES])
   assert.ok(CMS_AGENT_REMOTE_TOOL_NAMES.every(name => LOCAL_TOOLS.includes(name)))
-  assert.ok(!CMS_AGENT_REMOTE_TOOL_NAMES.some(name => /^firestore_|checkout|_status$|_diff$|_resolve_override$/.test(name)), 'no raw Firestore, workspace or renderer-checkout tools remotely')
+  assert.ok(!CMS_AGENT_REMOTE_TOOL_NAMES.some(name => /^firestore_|checkout|_status$/.test(name)), 'no raw Firestore or workspace tools remotely')
 })
 
 test('local and remote definitions match for the shared subset', async () => {
@@ -69,7 +73,8 @@ test('local and remote definitions match for the shared subset', async () => {
   for (const remote of await listTools(true)) {
     const own = local[remote.name]
     const differs = TOOL_DIFFERENCES[remote.name] || {}
-    assert.equal(remote.title, own.title, remote.name)
+    if (!differs.title)
+      assert.equal(remote.title, own.title, remote.name)
     if (differs.annotations)
       assert.equal(remote.annotations.readOnlyHint, true, remote.name)
     else

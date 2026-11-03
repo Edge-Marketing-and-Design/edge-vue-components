@@ -897,13 +897,21 @@ function startCanvasWhenVisible() {
   canvasCleanups.push(() => observer.disconnect())
 }
 
+let inlineRun = 0
 async function initInlineCanvas() {
+  const run = ++inlineRun
   const root = hostEl.value
   helperRoot = root
   syncCmsPreviewAuthState(root, props.previewAuthLoggedIn)
-  initEmblaCarousels(root)
   initCmsNavHelpers(root)
   pageCanvas?.contentChanged?.()
+  // The page canvas builds its CSS after this content mounts. Embla measures
+  // slide positions once, so it starts only when that CSS is in place.
+  if (root?.querySelector?.('[data-carousel]'))
+    await pageCanvas?.whenStyled?.(root)
+  if (run !== inlineRun || helperRoot !== root)
+    return
+  initEmblaCarousels(root)
   await nextTick()
   hasMounted = true
   notifyLoaded()

@@ -55,18 +55,21 @@ Required rules:
 {{ richtext(body) }}
 {{#for card in cards}}
   {{ card.title }}
+  {{{#if {"cond":"card.link"} }}}
+    <a href="{{ card.link }}">{{ card.linkLabel }}</a>
+  {{{#else}}}
+    <span>{{ card.linkLabel }}</span>
+  {{{/if}}}
 {{/for}}
-{{{#if {"cond":"card.link"} }}}
-  <a href="{{ card.link }}">{{ card.linkLabel }}</a>
-{{{#else}}}
-  <span>{{ card.linkLabel }}</span>
-{{{/if}}}
 ```
 
 - Plain placeholders are escaped.
 - Use `richtext(value)` only for trusted CMS rich-text Inputs.
 - Use plain `#for` loops for manual Input arrays.
 - Template v2 conditions use triple braces and a JSON object.
+- A condition tests `item` or the alias of an enclosing `{{#for}}` loop
+  (`card.link` above). A top-level `#if` is not evaluated: both branches
+  render. Drive top-level options with a class from the value instead.
 - Do not use JavaScript operators such as `&&` or `||` in conditions.
 
 Dynamic sources, when a later workflow explicitly adds them, must be declared

@@ -1,5 +1,5 @@
 // Library reads for agents (blocks, block bases, themes, sites, usage, audit,
-// validation, rendering) run as the operator: the Hub endpoint has already
+// validation, rendering, definition diffs, override resolution) run as the operator: the Hub endpoint has already
 // verified the credential and its organization session, and each read checks the
 // operator's current Hub read rights before reading. The reads are the local
 // MCP's, shared through helpers/cmsAgentReads.mjs, with the same scan limits.
@@ -11,7 +11,7 @@ const { Timestamp } = require('firebase-admin/firestore')
 const { db, HttpsError, logger, permissionCheck } = require('./config.js')
 const { renderBlock } = require('./cmsAgentRender.js')
 
-const LIBRARY_READ_ACTIONS = ['blocks', 'block', 'themes', 'theme', 'sites', 'usage', 'audit', 'validate', 'schema', 'render']
+const LIBRARY_READ_ACTIONS = ['blocks', 'block', 'themes', 'theme', 'sites', 'usage', 'audit', 'validate', 'schema', 'render', 'diff', 'override']
 // What each action reads, for the permission check.
 const READ_TARGETS = {
   blocks: ['blocks'],
@@ -22,6 +22,8 @@ const READ_TARGETS = {
   usage: ['blocks', 'sites'],
   audit: ['blocks', 'themes'],
   validate: ['blocks'],
+  diff: ['blocks'],
+  override: ['blocks'],
   // render: also sites, themes and each live source, checked in renderBlock.
   render: ['blocks'],
   // schema: checked per collection in read().
@@ -35,7 +37,7 @@ const AUDIT_DAYS = 90
 const AUDIT_DOC_IDS = 20
 // Findings listed per block in a remote audit.
 const MAX_LISTED_FINDINGS = 20
-// An inline definition to validate, as JSON.
+// An inline definition to validate or diff, as JSON.
 const MAX_DEFINITION_BYTES = 1024 * 1024
 
 const text = value => (typeof value === 'string' ? value.trim() : '')
@@ -114,11 +116,12 @@ const readRendererGuide = async ({ fetchImpl = globalThis.fetch, now = Date.now(
 }
 
 // A block's public renderer resolution from the manifest.
-const overrideFromManifest = (reads, manifest, { orgId, block, themeId = '' }) => {
+// isOverrideBlock null (a lookup by name) skips the block's flag.
+const overrideFromManifest = (reads, manifest, { orgId, block, themeId = '', isOverrideBlock = block?.isOverrideBlock === true }) => {
   if (!manifest.ok)
     return { status: manifest.status, candidateNames: [], selectedMatch: null, matches: [], reason: manifest.reason }
   return {
-    ...reads.resolveOverrideFromComponents(manifest.components, { orgId, blockName: block?.name || '', themeId, isOverrideBlock: block?.isOverrideBlock === true }),
+    ...reads.resolveOverrideFromComponents(manifest.components, { orgId, blockName: block?.name || '', themeId, isOverrideBlock }),
     manifest: { commit: manifest.commit, builtAt: manifest.builtAt },
   }
 }
@@ -217,6 +220,41 @@ const read = async (reads, orgId, body, uid) => {
     const manifest = await readOverrideManifest()
     const result = await reads.validateDefinition({ orgId, definition, docId: text(body.docId), ownershipFor: block => overrideFromManifest(reads, manifest, { orgId, block }) })
     return { result: { ...result, renderer: rendererNote(manifest) }, docIds: definition ? [] : [result.docId], resultCount: 1, truncated: false }
+  }
+  if (body.action === 'diff') {
+    const definition = body.definition ?? null
+    if (definition !== null && Buffer.byteLength(JSON.stringify(definition)) > MAX_DEFINITION_BYTES)
+      throw new HttpsError('invalid-argument', `definition is larger than ${MAX_DEFINITION_BYTES} bytes.`)
+    const result = await reads.diffDefinition({ orgId, docId: body.docId, definition, against: text(body.against) || 'current' })
+    return { result, docIds: [result.docId], resultCount: result.changeCount, truncated: result.changesTruncated }
+  }
+  if (body.action === 'override') {
+    const docId = text(body.docId)
+    let block = { name: text(body.blockName) }
+    let isOverrideBlock = null
+    if (docId) {
+      const stored = await reads.readBlock({ orgId, docId })
+      if (!stored.exists)
+        throw new HttpsError('not-found', `Block "${docId}" does not exist in ${orgId}.`)
+      block = stored.data
+      isOverrideBlock = block.isOverrideBlock === true
+    }
+    if (!text(block.name))
+      throw new HttpsError('invalid-argument', 'Send blockName, or the docId of a library block.')
+    const themeId = text(body.themeName)
+    const manifest = await readOverrideManifest()
+    const resolution = overrideFromManifest(reads, manifest, { orgId, block, themeId, isOverrideBlock })
+    const result = {
+      orgId,
+      docId: docId || null,
+      blockName: text(block.name),
+      themeName: themeId || null,
+      isOverrideBlock,
+      ...resolution,
+      renderingOwner: reads.getRenderingOwner(resolution.status),
+      renderer: rendererNote(manifest),
+    }
+    return { result, docIds: docId ? [docId] : [], resultCount: resolution.matches.length, truncated: false }
   }
   if (body.action === 'render') {
     const manifest = await readOverrideManifest()

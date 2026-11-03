@@ -68,6 +68,7 @@ The words below mean exactly this, here and in the contracts:
 - Balanced HTML; no `<script>`; no Vue directives or inline handlers; conditionals as `{{{#if {"cond":"..."} }}}`; every declared data source called with `source("name")` and vice versa; literal utility classes only; no JSON-LD in blocks.
 - Rendered defaults contain no unresolved `{{ }}`, no exclamation points, none of the project's banned phrases, and no claim the project has ruled out.
 - Every image input has a paired alt input; renders and compositions are called illustrations, never screenshots.
+- Images come from the Hub's media. An image default is empty or a Hub URL (`imagedelivery.net`, or the Hub's R2 host passed as `mediaHosts`); never the old site, the handoff's host, a CDN or a stock photo URL, not even as a placeholder. Upload what the package needs with `cms_upload_media` (a public URL, or a local file through its one-time upload link), wait for `status: "ready"`, and use its `url`. An image input that limits its picker with `tags` uses the same tags as the upload. The validator fails on any image URL outside the media hosts in rendered defaults.
 - Numbers come from a source the validator can recompute (a shared model, a fixture); hand-typed figures fail.
 - Override blocks: name normalizes (camelCase) to an existing Vue file; schema carries every value the Vue component reads; `isOverrideBlock: true`; manifest `rendererChanges: true`. The block is the design source of truth and the override matches it (`reference/override-blocks.md`).
 - Design map: every manifest block entry carries `design` (`{ "source": "figma", "file": "<fileKey>", "node": "<nodeId>", "name": "<layer name>" }`, or `{ "source": "handoff", "path": "...", "section": "..." }`), and the block carries the same object as `meta.design`: a library-only field that `block.create` and `block.draft` accept and a release never copies to instances (cms-blocks contract). `PROJECT.md` keeps the file-level reference and the design revision date. The validator warns when an entry has no `design`; a later design change is traced through this map (`reference/block-updates.md`).
@@ -91,7 +92,7 @@ importfiles/<project>/<NN-package-name>/
   README.md                block table, upload order, import modes, page assembly, manual checks
   manifest.json            generated; each block entry's design maps it to the design node it was built from
   blocks/<id>.json         generated, one file per block, descriptive kebab-case ids with the project prefix
-  media/                   files the operator uploads to CMS Media, listed in the manifest
+  media/                   local image files, uploaded with cms_upload_media; the manifest's media lists each source, tags, fileId and Hub url
   values/                  instance values for existing blocks placed on a page (not uploads)
 ```
 

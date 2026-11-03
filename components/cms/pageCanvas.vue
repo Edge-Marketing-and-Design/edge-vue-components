@@ -41,6 +41,8 @@ let cssAgain = false
 let knownTokens = new Set()
 let headSignature = ''
 let firstRevealAt = 0
+// Callers waiting for the site CSS to cover an element (whenStyled).
+let styleWaiters = []
 
 const viewportWidth = computed(() => VIEWPORT_WIDTHS[props.viewportMode] || 0)
 const scale = computed(() => {
@@ -126,6 +128,7 @@ async function writeSiteCss() {
   upsertCanvasStyle(doc, 'cms-page-canvas-site-css', css)
   knownTokens = tokens
   releasePending(doc)
+  releaseStyleWaiters()
   if (props.fit === 'content')
     contentHeight.value = canvasContentHeight(doc)
   const current = collectCanvasClassTokens(mount.value)
@@ -134,6 +137,32 @@ async function writeSiteCss() {
     return
   }
   scheduleReveal()
+}
+
+function releaseStyleWaiters(all = false) {
+  styleWaiters = styleWaiters.filter((waiter) => {
+    if (!all && waiter.el.isConnected && isUnstyled(waiter.el))
+      return true
+    clearTimeout(waiter.timer)
+    waiter.resolve()
+    return false
+  })
+}
+
+// Resolves once the written site CSS covers an element and its descendants, so
+// helpers that measure layout (carousels) don't run against unstyled markup.
+// Gives up after MAX_FIRST_REVEAL_MS rather than leave a helper uninitialized.
+function whenStyled(el) {
+  if (!el || !mount.value || !isUnstyled(el))
+    return Promise.resolve()
+  return new Promise((resolve) => {
+    const waiter = { el, resolve }
+    waiter.timer = setTimeout(() => {
+      styleWaiters = styleWaiters.filter(w => w !== waiter)
+      resolve()
+    }, MAX_FIRST_REVEAL_MS)
+    styleWaiters.push(waiter)
+  })
 }
 
 function scheduleSiteCss() {
@@ -265,11 +294,13 @@ watch(() => props.enabled, (on) => {
 provide('edgeCmsPageCanvas', reactive({
   active: computed(() => props.enabled),
   contentChanged: () => scheduleSiteCss(),
+  whenStyled,
 }))
 
 onBeforeUnmount(() => {
   clearTimeout(cssTimer)
   clearTimeout(settleTimer)
+  releaseStyleWaiters(true)
   cleanups.forEach(fn => fn())
 })
 </script>

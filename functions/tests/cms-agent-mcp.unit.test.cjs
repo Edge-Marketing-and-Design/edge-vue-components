@@ -18,7 +18,7 @@ class HttpsError extends Error {
   }
 }
 
-const REMOTE_TOOLS = ['cms_find_block', 'cms_audit_blocks', 'cms_find_usage', 'cms_validate', 'cms_render_block', 'cms_find_theme', 'cms_get_theme', 'cms_contract', 'cms_schema', 'cms_guide', 'cms_agent_organizations', 'cms_list_sites', 'cms_open_session', 'cms_check_operation', 'cms_run_operation', 'cms_preview_url', 'cms_site_readiness', 'cms_list_pages', 'cms_get_page', 'cms_list_posts', 'cms_get_post', 'cms_block_base']
+const REMOTE_TOOLS = ['cms_find_block', 'cms_audit_blocks', 'cms_diff', 'cms_resolve_override', 'cms_find_usage', 'cms_validate', 'cms_render_block', 'cms_find_theme', 'cms_get_theme', 'cms_contract', 'cms_schema', 'cms_guide', 'cms_agent_organizations', 'cms_list_sites', 'cms_open_session', 'cms_check_operation', 'cms_run_operation', 'cms_upload_media', 'cms_find_media', 'cms_preview_url', 'cms_site_readiness', 'cms_list_pages', 'cms_get_page', 'cms_list_posts', 'cms_get_post', 'cms_block_base']
 
 const setup = async (t) => {
   const fake = createFakeDb({
@@ -35,6 +35,7 @@ const setup = async (t) => {
     'organizations/a/blocks/hero': { name: 'Hero', content: '<section>{{{#text {"field":"headline","value":"Welcome"}}}}</section>', values: { headline: 'Welcome' }, tags: ['Hero'], themes: ['main'], synced: false, version: 1, templateVersion: 1 },
     'organizations/a/blocks/footer': { name: 'Footer', content: '<footer>Footer</footer>', values: {}, tags: ['Footer'], themes: ['main'], synced: false, version: 1 },
     'organizations/a/themes/main': { name: 'Main theme', theme: '{"colors":{"primary":"#123456"}}', headJSON: '{}', extraCSS: '.x{}' },
+    'organizations/a/files/logo': { name: 'logo.png', fileName: 'logo.png', contentType: 'image/png', uploadTime: 1, meta: { tags: ['LOGO'], cmssite: ['all'] }, cloudflareImageVariants: ['https://imagedelivery.net/h/logo/public'] },
     'organizations/a/sites/s/pages/about': { name: 'About', content: { main: [{ id: 'instance-1', blockId: 'hero', name: 'Hero' }] }, structure: [], version: 1 },
   })
   const allowed = new Set(['a'])
@@ -43,7 +44,7 @@ const setup = async (t) => {
   const denied = new Set()
   const configPath = require.resolve(path.join(functionRoot, 'config.js'))
   const original = require.cache[configPath]
-  const modulePaths = ['cmsAgentMcp.js', 'cmsAgentConnections.js', 'cmsAgentKeys.js', 'cmsAgentLibraryReads.js', 'cmsAgentRender.js', 'cmsAgentContractNotes.js', 'cmsOperations.js', 'cmsBlockRevisions.js'].map(file => require.resolve(path.join(functionRoot, file)))
+  const modulePaths = ['cmsAgentMcp.js', 'cmsAgentConnections.js', 'cmsAgentKeys.js', 'cmsAgentLibraryReads.js', 'cmsAgentRender.js', 'cmsAgentContractNotes.js', 'cmsOperations.js', 'cmsBlockRevisions.js', 'cmsAgentMedia.js'].map(file => require.resolve(path.join(functionRoot, file)))
   require.cache[configPath] = {
     id: configPath,
     loaded: true,
@@ -617,6 +618,72 @@ test('validate, the audit and readiness check overrides against the deployed man
   assert.equal(calls.filter(url => url.startsWith('https://front.example/')).length, 1, 'the manifest is cached')
 })
 
+test('cms_diff compares a definition with the current or released definition, and the open draft with the release', async (t) => {
+  const env = await setup(t)
+  const client = await connect(t, env)
+  const base = await callTool(client, 'cms_block_base', { orgId: 'a', docId: 'hero' })
+
+  const same = await callTool(client, 'cms_diff', { orgId: 'a', docId: 'hero', definition: base.definition })
+  assert.equal(same.ok, true, same.message)
+  assert.deepEqual([same.comparison, same.sameDefinition, same.equal, same.baseHash], ['released-definition', true, true, base.baseHash])
+  assert.equal(same.to.hash, same.from.hash)
+
+  const edited = { ...base.definition, content: base.definition.content.replace('Welcome', 'Hello'), name: 'Hero', tags: ['Hero'] }
+  const changed = await callTool(client, 'cms_diff', { orgId: 'a', docId: 'hero', definition: edited })
+  assert.equal(changed.sameDefinition, false)
+  assert.deepEqual(changed.changedTopLevelFields, ['content'])
+  assert.deepEqual(changed.ignoredFields, ['name', 'tags'])
+  assert.equal(changed.changes[0].path, 'content')
+  assert.match(changed.changes[0].textDiff, /^\+.*Hello/m)
+
+  const noDraft = await callTool(client, 'cms_diff', { orgId: 'a', docId: 'hero' })
+  assert.deepEqual([noDraft.comparison, noDraft.sameDefinition, noDraft.draftRevision], ['released-released', true, null])
+  assert.match(noDraft.note, /no open draft/)
+
+  const draft = { templateVersion: 2, content: '<section>Draft</section>', template: '<section>Draft</section>' }
+  env.docs.set('organizations/a/blocks/hero', { ...env.docs.get('organizations/a/blocks/hero'), draftRevision: 2 })
+  env.docs.set('organizations/a/blocks/hero/revisions/2', { status: 'draft', definition: draft })
+  const pending = await callTool(client, 'cms_diff', { orgId: 'a', docId: 'hero' })
+  assert.deepEqual([pending.comparison, pending.draftRevision, pending.sameDefinition], ['released-draft', 2, false])
+  assert.ok(pending.changedTopLevelFields.includes('template'))
+  const againstDraft = await callTool(client, 'cms_diff', { orgId: 'a', docId: 'hero', definition: draft })
+  assert.deepEqual([againstDraft.comparison, againstDraft.sameDefinition], ['draft-definition', true])
+  assert.equal(againstDraft.baseHash, (await callTool(client, 'cms_block_base', { orgId: 'a', docId: 'hero' })).baseHash)
+  const againstRelease = await callTool(client, 'cms_diff', { orgId: 'a', docId: 'hero', definition: draft, against: 'released' })
+  assert.deepEqual([againstRelease.comparison, againstRelease.sameDefinition], ['released-definition', false])
+
+  assert.equal((await callTool(client, 'cms_diff', { orgId: 'a', docId: 'missing', definition: draft })).code, 'not-found')
+  assert.equal((await callTool(client, 'cms_diff', { orgId: 'b', docId: 'hero' })).code, 'permission-denied')
+  env.denied.add('read:organizations/a/blocks')
+  assert.equal((await callTool(client, 'cms_diff', { orgId: 'a', docId: 'hero' })).code, 'permission-denied')
+  const reads = [...env.docs.entries()].filter(([key, value]) => key.startsWith('organizations/a/cmsAgentReads/') && value.tool === 'diff')
+  assert.ok(reads.length >= 1 && reads.every(([, value]) => !JSON.stringify(value).includes('Hello')), 'diffs are recorded without content')
+})
+
+test('cms_resolve_override resolves a block or a name against the deployed manifest', async (t) => {
+  const env = await setup(t)
+  stubNetwork(t, { manifest: { version: 1, commit: 'front456', builtAt: '2026-11-02T00:00:00Z', components: ['auth.vue', 'project-a/muleCalculator.vue', 'project-a/mainHeroBanner.vue', 'heroBanner.vue'] } })
+  env.docs.set('organizations/a/blocks/calc', { name: 'Mule Calculator', content: '<div>Calculator</div>', values: {}, tags: [], themes: [], synced: false, version: 1, isOverrideBlock: true })
+  env.docs.set('organizations/a/blocks/banner', { name: 'Hero Banner', content: '<div>Banner</div>', values: {}, tags: [], themes: [], synced: false, version: 1 })
+  const client = await connect(t, env)
+
+  const calc = await callTool(client, 'cms_resolve_override', { orgId: 'a', docId: 'calc' })
+  assert.equal(calc.ok, true, calc.message)
+  assert.deepEqual([calc.status, calc.selectedMatch.relativePath, calc.renderingOwner, calc.isOverrideBlock], ['vue-override', 'project-a/muleCalculator.vue', 'public-frontend-vue-override', true])
+  assert.match(calc.renderer, /front456/)
+
+  const byName = await callTool(client, 'cms_resolve_override', { orgId: 'a', blockName: 'Hero Banner' })
+  assert.deepEqual([byName.status, byName.selectedMatch.relativePath, byName.isOverrideBlock], ['vue-override', 'heroBanner.vue', null])
+  const themed = await callTool(client, 'cms_resolve_override', { orgId: 'a', blockName: 'Hero Banner', themeName: 'main' })
+  assert.deepEqual([themed.selectedMatch.relativePath, themed.selectedMatch.scope], ['project-a/mainHeroBanner.vue', 'organization'])
+  const unflagged = await callTool(client, 'cms_resolve_override', { orgId: 'a', docId: 'banner' })
+  assert.deepEqual([unflagged.status, unflagged.unflaggedMatch, unflagged.renderingOwner], ['cms-html', 'heroBanner.vue', 'cms'])
+  assert.equal((await callTool(client, 'cms_resolve_override', { orgId: 'a', docId: 'hero' })).status, 'cms-html')
+
+  assert.equal((await callTool(client, 'cms_resolve_override', { orgId: 'a' })).code, 'invalid-argument')
+  assert.equal((await callTool(client, 'cms_resolve_override', { orgId: 'a', docId: 'missing' })).code, 'not-found')
+})
+
 test('an unreadable manifest reports overrides as unverified', async (t) => {
   const env = await setup(t)
   stubNetwork(t, { manifest: null })
@@ -694,4 +761,19 @@ test('a front deploy without the guide says so', async (t) => {
   const client = await connect(t, env)
   const result = await callTool(client, 'cms_contract', { kind: 'renderer' })
   assert.match(result.message, /does not publish the renderer guide/)
+})
+
+test('media: finds run in an organization session; uploads need the creator\'s rights', async (t) => {
+  const env = await setup(t)
+  const client = await connect(t, env)
+  const found = await callTool(client, 'cms_find_media', { orgId: 'a', tags: ['logo'] })
+  assert.equal(found.ok, true)
+  assert.deepEqual(found.files.map(file => [file.fileId, file.status, file.url]), [['logo', 'ready', 'https://imagedelivery.net/h/logo/public']])
+  env.denied.add('write:organizations/a/images')
+  const refused = await callTool(client, 'cms_upload_media', { orgId: 'a', tags: ['HERO'], sources: [{ url: 'https://example.com/a.png' }] })
+  assert.equal(refused.ok, false)
+  assert.equal(refused.code, 'permission-denied')
+  const site = await env.connections.issueAgentSession(await env.connections.verifyConnection(`Bearer ${env.created.token}`), { orgId: 'a', scope: 'site', siteId: 's' })
+  const inSite = await callTool(client, 'cms_find_media', { sessionId: site.sessionId })
+  assert.equal(inSite.ok, false, 'site sessions are for page and post work')
 })

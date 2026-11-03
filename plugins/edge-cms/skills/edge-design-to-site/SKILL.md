@@ -19,7 +19,7 @@ The words below mean exactly this, here and in the contracts:
 
 - **Library block**: the document at `organizations/{orgId}/blocks/{blockId}`. It holds the released definition (template, schema with defaults, data sources) that pages copy from.
 - **Instance**: a copy of a library block placed in a page's or post's `content`, with its own `values`. Published pages carry the definition inline; the public renderer reads instances from KV and never reads the library.
-- **Synced**: a synced block shares one instance's values across a site's pages. It is placed without values; the first instance on a site is placed in the Hub, and later placements copy it.
+- **Synced**: a synced block shares one instance's values across a site's pages. It is placed without values; the first instance on a site starts from the schema defaults, and later placements copy it.
 - **Override**: an override block is one the public renderer replaces with a Vue component resolved from the block name. The CMS HTML is the editor preview and the fallback, and the block is the design source of truth for the component.
 - **Draft and release**: an edit to an existing library block is a draft revision; library changes reach pages only through a release, which a developer runs in the Hub. Nothing here releases.
 - **Site chrome**: the synced navigation and footer blocks every page of a site shares.
@@ -35,7 +35,8 @@ You work through the Hub's CMS MCP. Everything you write is a draft:
 | `cms_check_operation` then `cms_run_operation` | Every write. The check returns problems and a checksum; the run is refused if anything changed since the check |
 | `cms_block_base` | The current definition of an existing block (its open draft, else released) and the fingerprint a `block.draft` must send |
 | `cms_preview_url` | A 15-minute link to the Hub's render of one draft page, with your unreleased block drafts by default |
-| `cms_site_readiness` | What stops the site from being finished |
+| `cms_find_media`, `cms_upload_media` | Find the organization's images, and add new ones (a public URL, or a local file PUT to a one-time link) through the Hub's own upload |
+| `cms_site_readiness` | What stops the site from being finished, including image links outside the Hub's media |
 
 Operations (fields from `cms_contract`, kind `operations`): `theme.create`, `theme.update` (only themes no published site uses), `theme.propose` (for a live theme), `site.create`, `site.update` (the site's SEO only), `page.create`, `page.update`, `page.placeBlock`, `page.setValues`, `page.moveBlock`, `page.removeBlock`, `block.create`, `block.draft`, and for posts (when the handoff covers them) `post.create`, `post.update`, `post.placeBlock`, `post.setValues`, `post.moveBlock`, `post.removeBlock`.
 
@@ -48,8 +49,18 @@ You never publish a page, release a block, change a live theme, or edit `emd-cms
 2. **Project facts.** Read `<importfiles>/PROJECT.md` (the edge-block-package skill's template; without a Hub checkout it lives in your workspace folder, with `hubPath` and `validatorPath` empty). Besides its usual facts you need the site's name and at least one domain for `site.create`. Ask for anything missing now, in one message: this is the only handover.
 3. **The design.** Read the whole handoff before writing anything. Design files are annotations, not authority; the edge-block-package rules on invented content apply.
    When the design was drafted with the edge-figma-design skill, the handoff includes a site content plan (`docs/<site>/site-content-plan.md`): its §5 is the approved copy per page, its §9 the decisions, and its §10 design map gives each block's Figma node for `meta.design`. Read the designer's reviewed frames, not the plan's descriptions, where the two differ.
-4. **What exists.** List the organization's themes and blocks. Reuse the site chrome (navigation, footer) and shared sections instead of rebuilding them; note which existing blocks the design changes.
+4. **What exists.** List the organization's themes, blocks and media (`cms_find_media`). Reuse the site chrome (navigation, footer) and shared sections instead of rebuilding them; note which existing blocks the design changes.
 5. **Start a log** for the report: start time, each checkpoint, each page finished, end time. The release is measured on the developer's hands-on time.
+
+## Images
+
+Every image a block or value shows comes from the Hub's media: never a link to the old site, the handoff's host, a CDN or a stock photo URL.
+
+1. **Collect** the images the handoff uses: its asset files (local files) and, for a migration, the old site's image URLs. Logos and icons delivered as SVG: render them to PNG first (headless Chrome with a transparent background); SVG is refused.
+2. **Reuse** what the organization has: `cms_find_media` by name, tags or `sourceUrl`.
+3. **Upload** the rest with `cms_upload_media`, up to 10 per call, `siteId` set, and `tags` from the image field's `tags` option (else one or two content tags such as the page or section). A local file comes back with a one-time `upload` link: PUT it with `upload.curl` (in a shell; a chat client without one can only send URLs, so ask the developer for hosted copies). Keep a table of source → `fileId` → `url` in the log.
+4. **Wait** for `status: "ready"` (`cms_find_media` with the `fileIds`), then set image values to `url`, or `variants[variant]` when the field sets a `variant`. Never the R2 original, never a placeholder link.
+5. A block's own image defaults follow the same rule: empty, or a Hub URL.
 
 ## 1. Theme, then checkpoint 1
 
@@ -66,7 +77,7 @@ Work through the pages in the handoff's order. For each page:
 2. **Author new blocks** with the edge-block-package workflow: generate, validate three ways, local preview at desktop and phone widths, fix. Without a Hub checkout, the Hub check is `cms_validate` on each definition and the local scripts are optional (edge-block-package, "With or without a Hub checkout"); step 6's preview then is the first look. Prefer baseline theme names; extensions must exist in every selected theme. Use `--standard-theme` for baseline-only portability, not to reject intentional declared extensions. Get them right locally first: once a block is on a page, later fixes are drafts the developer must release.
 3. **Create them**: `block.create` per block. The check runs the Hub's import check; fix every problem it reports and check again. Tag each block with one or two content tags from the organization's block tag list (`cmsBlockTags`; edge-block-package "Block tags"), plus `Quick Picks` only for blocks that belong in the picker's first view. Never `[]`, never a site, theme or feature name. Treat `tags.not-in-list` and `tags.content-count` notices as problems to fix, even while the Hub still reports them as warnings.
 4. **Change existing blocks** only from the Hub's copy: `cms_block_base`, edit that definition, `block.draft` with its `baseHash`. Never from a local file: the Hub may hold hand fixes you don't have. A "changed since you loaded it" refusal means someone edited it; load it again and reapply your change.
-5. **Build the page**: `page.create` (or use the page the theme seeded), `page.placeBlock` for each block in order with its content as `values`, `page.update` for the page's SEO (see "SEO" below). Content is the handoff's approved copy; anything invented stays empty or uses the block's intentional fallback, and goes in the report. Site chrome (navigation, footer) is synced: place it without `values`, and the operation copies the instance the site already has (the theme's seeded pages carry it). If the check says the site has no instance of it yet, the developer places the first one in the Hub: note the page in the report and go on.
+5. **Build the page**: `page.create` (or use the page the theme seeded), `page.placeBlock` for each block in order with its content as `values` (images as Hub URLs, see "Images"), `page.update` for the page's SEO (see "SEO" below). Content is the handoff's approved copy; anything invented stays empty or uses the block's intentional fallback, and goes in the report. Site chrome (navigation, footer) is synced: place it without `values`, and the operation copies the instance the site already has (the theme's seeded pages carry it). When the site has no instance yet, the first placement starts from the block's schema defaults; the developer edits the shared values in the Hub, so list the chrome values the design needs in the report.
 6. **Look at it.** `cms_preview_url`, open the link in a browser and screenshot it at about 1440 pixels wide, then get a second link with `viewport: "mobile"` for the phone layout (it renders a 420px page and simulates its breakpoints in any window), and compare both with the design. Fix what doesn't match: content with `page.setValues`, a block's markup with `block.draft` (the preview shows your drafts). Up to three passes per page; record what still differs.
 7. Log the page as done and go straight to the next one.
 
@@ -84,13 +95,14 @@ Set with the operations, from the handoff's approved copy only:
 
 ## 3. Readiness report, then checkpoint 2
 
-1. `cms_site_readiness` for the site. Fix what you can (errors first), then run it again. `truncated: true` (error `site.check-incomplete`) means the report is incomplete and the site can't be called ready; say so at checkpoint 2.
+1. `cms_site_readiness` for the site. Fix what you can (errors first), then run it again. Every `media.external-image` item is an image still linked from outside the Hub: upload it and `page.setValues` (or `block.draft` for markup) with the Hub URL. The site isn't ready for checkpoint 2 while any remain. `truncated: true` (error `site.check-incomplete`) means the report is incomplete and the site can't be called ready; say so at checkpoint 2.
 2. **Checkpoint 2.** Stop and report:
    - pages built, each with a fresh preview link;
    - blocks created, and block drafts waiting for the developer to release (Block Editor, then release). Say plainly that the Hub page editor shows **released** blocks: until these drafts are released, the editor shows the older versions, while your preview links showed the drafts;
    - override blocks that need a Vue component, with a handoff note each (block name, fields the component reads, behaviour), and whether the deployed public site already has it (readiness `deployedRenderer`; with a local `emd-cms-front` checkout, `localRenderer` also covers a branch that hasn't deployed);
    - the fields you wrote and the contract line each follows (from step 0);
    - content you couldn't fill or left at a fallback, and anything you invented and removed;
+   - images uploaded (source → media `fileId`), reused, and any that couldn't be uploaded, with the reason;
    - remaining readiness items and differences from the design you couldn't fix;
    - the time log.
 3. The developer reviews the site in the Hub, asks for changes, releases the drafts and publishes. For each requested change, re-read the Hub's current state first (`cms_block_base`, the page) because they may have fixed things by hand, then change it through the operations as above.
@@ -102,16 +114,16 @@ The job that follows every launch: the design changed and the blocks already in 
 1. **Inputs.** The organization and site; the design reference (the Figma file and the changed node ids, or "compare the whole frame" when the designer did not record them; or a handoff export); and the map (the package manifest's `design` entries, or each block's `meta.design` from `cms_block_base`). Call `cms_contract` for `blocks` and `operations` first, and `sites-and-pages` when values change. Without the Figma MCP, a handoff export or screenshots work with your own comparison; say so in the report.
 2. **Identify the affected blocks** from the map (`block-updates.md`, "Finding the block a node became"). "Compare the whole frame" means `get_metadata` on the frame, then each mapped section against its block. Nodes with no map entry, by id or by name, are listed for the developer, never guessed; blocks with no `meta.design` are listed with the draft that would add it.
 3. **For each affected block:** `cms_block_base` (the current definition and its `baseHash`), the design node (`get_design_context`, `get_screenshot`), and the current preview (`cms_preview_url` for a page that holds it). Classify every change by the table in `block-updates.md`; a section can carry several classes. Count the instances with `cms_find_usage`.
-4. **Checkpoint.** Stop and report, in one table, one row per block: the node, the change classes, whether anything is breaking (a removed or renamed field), what needs the developer (media, synced values, a renderer task), and the instance count. Add the nodes with no map entry and the estimated work. Wait for the developer. Two-step is the default for a removed or renamed field (add now, remove in a later draft); a one-step removal happens only when the developer asks for it here.
-5. **Apply.** Per block, one `block.draft` carrying every definition change (markup, new fields, the first step of a rename, and `meta.design` when it was missing), validated with the checker before it is saved; `page.setValues` per instance for value changes; nothing for media and synced values beyond the list. Then preview each touched page beside the design at about 1440 pixels and with `viewport: "mobile"`, and fix what differs: up to three passes per block, as in section 2.
-6. **Hand off.** Drafts awaiting release, each with its classes and a release recommendation (all sites for a handful of documents; canary to one site first when `cms_find_usage` counts more; confirmation when breaking; two-step changes in order); value changes applied and the synced ones left for the developer; renderer tasks for override blocks; media for the developer; fresh preview links; what still differs; the design revision written to `PROJECT.md` (`design.revision`); the time log. If the site has a content plan, update its §10 rows and take a new sync baseline (edge-figma-design `reference/cms-to-figma-sync.md`), so CMS changes made later can be synced back to Figma. Say plainly that the Hub page editor shows released blocks until the drafts are released.
+4. **Checkpoint.** Stop and report, in one table, one row per block: the node, the change classes, whether anything is breaking (a removed or renamed field), what needs the developer (synced values, a renderer task), the images to upload, and the instance count. Add the nodes with no map entry and the estimated work. Wait for the developer. Two-step is the default for a removed or renamed field (add now, remove in a later draft); a one-step removal happens only when the developer asks for it here.
+5. **Apply.** Per block, one `block.draft` carrying every definition change (markup, new fields, the first step of a rename, and `meta.design` when it was missing), validated with the checker before it is saved; `page.setValues` per instance for value changes, with new images uploaded first (see "Images"); nothing for synced values beyond the list. Then preview each touched page beside the design at about 1440 pixels and with `viewport: "mobile"`, and fix what differs: up to three passes per block, as in section 2.
+6. **Hand off.** Drafts awaiting release, each with its classes and a release recommendation (all sites for a handful of documents; canary to one site first when `cms_find_usage` counts more; confirmation when breaking; two-step changes in order); value changes applied and the synced ones left for the developer; renderer tasks for override blocks; images uploaded; fresh preview links; what still differs; the design revision written to `PROJECT.md` (`design.revision`); the time log. If the site has a content plan, update its §10 rows and take a new sync baseline (edge-figma-design `reference/cms-to-figma-sync.md`), so CMS changes made later can be synced back to Figma. Say plainly that the Hub page editor shows released blocks until the drafts are released.
 
 The developer releases from the Block Editor. Asked afterwards, confirm with `cms_site_readiness` that no instance is behind (`instance.behind`).
 
 ## When to stop early
 
 Only when you can't go on without the developer:
-- a fact only they have (domain, which copy is approved, a missing asset, which design node a block with no map entry belongs to);
+- a fact only they have (domain, which copy is approved, an asset that is neither a public URL nor a local file you can read, which design node a block with no map entry belongs to);
 - a refusal you can't fix (permission, an expired or revoked key, a live theme that needs their decision on a proposal);
 - the same check failing after three honest attempts.
 
@@ -123,4 +135,5 @@ Say exactly what you need, and keep going on anything that doesn't depend on it.
 - Regenerate an existing Hub block from a local file, or re-import a package over Hub edits.
 - Remove or rename a schema field in one step unless the developer asked for exactly that at the checkpoint.
 - Rebuild the chrome, theme or head for one page.
+- Leave a link to an image on another site in a block, a value or the site settings, even as a placeholder.
 - Edit `emd-cms-front`, commit, push, or deploy.

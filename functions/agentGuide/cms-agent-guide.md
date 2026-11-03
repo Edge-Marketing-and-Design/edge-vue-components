@@ -19,8 +19,11 @@ Shared Edge source: `edge/functions/agentGuide/cms-agent-guide.md`.
   organization you name, and is recorded: runs in the operation audit, library
   reads in the read audit. Lose access in the Hub and the tools stop too.
 - **Some things stay in the Hub:** menus and site settings other than
-  `metaTitle`, `metaDescription` and `structuredData`; media uploads;
+  `metaTitle`, `metaDescription` and `structuredData`; videos and files;
   publishing; releasing blocks; applying theme proposals.
+- **Images come from the Hub's media.** Upload them with `cms_upload_media`
+  and place the Hub URL it returns. Never leave a link to another site (an
+  old site, a CDN, a stock photo URL) in a block or a value.
 
 ## Start
 
@@ -54,6 +57,35 @@ Shared Edge source: `edge/functions/agentGuide/cms-agent-guide.md`.
 - **Posts** work the same way with `post.create`, `post.update` and
   `post.placeBlock` / `setValues` / `moveBlock` / `removeBlock` with `postId`.
 
+## Add images
+
+1. **Look first.** `cms_find_media` finds what the organization already has,
+   by name `query`, `tags`, `siteId`, or the `sourceUrl` an agent uploaded it
+   from. Reuse a match.
+2. **Upload.** `cms_upload_media` with `tags` (at least one; use the image
+   field's `tags` option when it has one, so its picker shows the image), the
+   `siteId` the images are for, and up to 10 `sources`:
+   - `{ "url": "https://…" }`: a public image the server fetches (an old
+     site's image). Private and internal addresses are refused.
+   - `{ "localFile": { "name": "team.jpg", "size": 182044 } }`: a file on
+     your machine. The answer has a one-time `upload` link (15 minutes); PUT
+     the file to it with `upload.curl`. The bytes never go through the tool
+     call, so don't paste base64 (it's refused).
+
+   JPEG, PNG, GIF and WebP, up to 10 MB and 12,000 px a side. SVG is refused:
+   convert it to PNG first. An image already uploaded (same URL or same
+   bytes) comes back with `deduplicated: true`.
+3. **Wait for "ready".** Cloudflare makes the image's variants in a few
+   seconds; the upload waits up to `waitSeconds` (30). Anything still
+   `processing`: call `cms_find_media` with its `fileIds` until it is
+   `ready`. Place only a ready image.
+4. **Place it.** Set the image field to `url` (the `public` variant), or
+   `variants[variant]` when the field sets a `variant`. Never use the R2
+   original.
+
+`cms_site_readiness` reports `media.external-image` for every image URL left
+on another host, with the page, instance and field.
+
 ## Change a library block
 
 1. `cms_find_block` to find it, `cms_find_usage` to see which pages and posts
@@ -64,7 +96,11 @@ Shared Edge source: `edge/functions/agentGuide/cms-agent-guide.md`.
    `definition`). Fix every error. `cms_render_block` renders it with a site's
    theme and its real Data Source records (`data: "sample"` or `"empty"` for
    the other states) and returns the HTML and a standalone page to open and
-   screenshot.
+   screenshot. `cms_diff` with the `docId` and your `definition` lists exactly
+   what the draft will change (field paths and a line diff of changed
+   markup); `sameDefinition: true` means there is nothing to draft. Without a
+   definition it shows what the block's open draft changes in the release.
+   (The local server's `cms_diff` compares checkout files instead.)
 4. `block.draft` with `blockId`, the `definition` and that `baseHash`: if
    someone changed the block in the Hub since, the check refuses it instead
    of overwriting. Fields the definition leaves out keep their current
@@ -102,10 +138,14 @@ Shared Edge source: `edge/functions/agentGuide/cms-agent-guide.md`.
 - `cms_validate`, `cms_audit_blocks` and `cms_site_readiness` say whether the
   deployed public site replaces a block with a Vue component
   (`renderingOwner`, readiness `deployedRenderer`). A component only counts
-  for a block marked `isOverrideBlock`.
+  for a block marked `isOverrideBlock`. `cms_resolve_override` answers that for
+  one block (`docId`) or a name you plan to use (`blockName`), with the
+  matching component file; pass the site's theme id as `themeName` for
+  theme-specific components.
 - `cms_site_readiness` lists what stops a site from being finished: failed
   block checks, empty required content, missing blocks, unreleased drafts,
-  pages behind the released block, and unpublished pages.
+  pages behind the released block, unpublished pages, and images linked from
+  outside the Hub's media (`media.external-image`).
 
 ## When something is refused
 
