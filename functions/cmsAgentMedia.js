@@ -396,6 +396,10 @@ const sourceKey = (value) => {
   }
 }
 
+// The upload Function deploys to the shared Functions region (config.js).
+const defaultUploadUrl = (env = process.env) => text(env.CMS_AGENT_MEDIA_UPLOAD_URL)
+  || `https://${text(env.FIREBASE_STORE_REGION) || text(env.FUNCTIONS_REGION) || 'us-west1'}-${env.GCLOUD_PROJECT || env.GCP_PROJECT}.cloudfunctions.net/cmsAgentMediaUpload`
+
 // ---- The service ----
 
 const createAgentMedia = ({
@@ -404,7 +408,7 @@ const createAgentMedia = ({
   canDo = permissionCheck,
   now = Date.now,
   sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
-  uploadUrl = () => text(process.env.CMS_AGENT_MEDIA_UPLOAD_URL) || `https://${text(process.env.FUNCTIONS_REGION) || 'us-west1'}-${process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT}.cloudfunctions.net/cmsAgentMediaUpload`,
+  uploadUrl = () => defaultUploadUrl(),
 } = {}) => {
   const requireUpload = async (uid, orgId) => {
     if (!await canDo(uid, 'write', `organizations/${orgId}/images`))
@@ -825,4 +829,5 @@ exports.isBlockedAddress = isBlockedAddress
 exports.checkUrl = checkUrl
 exports.inspectImage = inspectImage
 exports.describeFile = describeFile
+exports.defaultUploadUrl = defaultUploadUrl
 exports.MEDIA_LIMITS = { MAX_BYTES, MAX_SOURCES, DAILY_LIMIT, MAX_SIDE, MAX_PIXELS }
