@@ -12,7 +12,7 @@ const deepMerge = (target, source) => {
 }
 
 // It covers nested collection/doc refs (with generated ids), array-contains
-// and equality queries, batches, and transactions. Transaction and batch
+// and equality queries (on dotted field paths too), batches, and transactions. Transaction and batch
 // writes are buffered and applied only when the callback or commit succeeds,
 // as Firestore does.
 const createFakeDb = (seed = {}) => {
@@ -72,7 +72,7 @@ const createFakeDb = (seed = {}) => {
         .filter(docPath => !cursor || docPath.split('/').pop() > cursor)
         .filter(docPath => docPath.startsWith(`${path}/`) && !docPath.slice(path.length + 1).includes('/'))
         .filter(docPath => filters.every(({ field, op, value }) => {
-          const fieldValue = docs.get(docPath)?.[field]
+          const fieldValue = String(field).split('.').reduce((value, key) => value?.[key], docs.get(docPath))
           if (op === 'array-contains')
             return Array.isArray(fieldValue) && fieldValue.includes(value)
           if (op === 'array-contains-any')

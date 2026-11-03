@@ -1161,6 +1161,15 @@ exports.runOperation = onCall({ timeoutSeconds: 120 }, async (request) => {
 
 const READINESS_MAX_PAGES = 500
 const READINESS_MAX_BLOCK_CHECKS = 100
+// Where the Hub's media lives: Cloudflare Images and the R2 public host.
+const mediaHosts = () => {
+  const hosts = ['imagedelivery.net']
+  try {
+    hosts.push(new URL(process.env.CLOUDFLARE_R2_PUBLIC_URL).hostname)
+  }
+  catch {}
+  return hosts
+}
 const loadValidation = () => Promise.all([import('./helpers/cmsBlockValidation.mjs'), import('@edgedev/template-engine')])
 
 // What stops a site from being finished: see buildSiteReadiness in
@@ -1206,7 +1215,7 @@ const gatherSiteReadiness = async ({ orgId, siteId }) => {
   for (const blockId of checked)
     blockChecks[blockId] = await validation.validateBlock({ ...blocks[blockId] }, { knownThemeIds, renderTemplate: engine.renderTemplateAsync })
 
-  const report = core.buildSiteReadiness({ site, theme: themeSnap?.exists ? themeSnap.data() : null, pages, published, blocks, drafts, blockChecks })
+  const report = core.buildSiteReadiness({ site, theme: themeSnap?.exists ? themeSnap.data() : null, pages, published, blocks, drafts, blockChecks, mediaHosts: mediaHosts() })
   const blockCount = Object.keys(blocks).length
   const morePages = pagesSnap.size > READINESS_MAX_PAGES || publishedSnap.size > READINESS_MAX_PAGES
   const truncated = morePages || blockCount > READINESS_MAX_BLOCK_CHECKS

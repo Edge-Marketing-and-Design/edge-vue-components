@@ -159,6 +159,8 @@ const createRemoteCms = ({ now = Date.now, issueSession = issueAgentSession, han
     }),
     cms_check_operation: tool(input => call(connection, input, { action: 'check', operation: input.operation })),
     cms_run_operation: tool(input => call(connection, input, { action: 'run', operation: input.operation, checksum: input.checksum })),
+    cms_upload_media: tool(({ siteId, tags, sources, waitSeconds, ...input }) => call(connection, input, { action: 'media-upload', ...(siteId ? { siteId } : {}), tags, sources, ...(waitSeconds !== undefined ? { waitSeconds } : {}) })),
+    cms_find_media: tool(({ fileIds, sourceUrl, query, tags, siteId, limit, startAfter, ...input }) => call(connection, input, { action: 'media-find', ...(fileIds ? { fileIds } : {}), ...(sourceUrl ? { sourceUrl } : {}), ...(query ? { query } : {}), ...(tags ? { tags } : {}), ...(siteId ? { siteId } : {}), ...(limit ? { limit } : {}), ...(startAfter ? { startAfter } : {}) })),
     cms_preview_url: tool(({ siteId, pageId, source, blockDrafts, viewport, width, ...input }) => call(connection, input, { action: 'preview', siteId, pageId, source, blockDrafts, ...(viewport ? { viewport } : {}), ...(width ? { width } : {}) })),
     cms_site_readiness: tool(({ siteId, ...input }) => call(connection, input, { action: 'readiness', siteId })),
     cms_list_pages: tool(({ siteId, ...input }) => call(connection, input, { action: 'pages', siteId })),
