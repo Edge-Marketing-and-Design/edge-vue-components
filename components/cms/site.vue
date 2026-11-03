@@ -4,6 +4,7 @@ import * as z from 'zod'
 import { BarChart3, Check, CircleAlert, ClipboardCheck, Copy, Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePenLine, FileStack, FileUp, FileX, FolderCog, FolderDown, FolderUp, FolderX, ImagePlus, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload, Users, X } from 'lucide-vue-next'
 import { buildPagePayloadFromTemplateDoc, buildThemeSettingsPayload, deriveThemeMenus, ensureMenuBuckets, ensureUniqueSlug, normalizeAnalyticsEvents, normalizeSiteDomainSettings, titleFromSlug } from '../../lib/cmsOperations'
 import { getCmsDomainConnectionStatus } from '../../lib/cmsDomainConnectionStatus'
+import { prepareSitemapSettings } from '../../lib/cmsSitemapSettings'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
 import { buildCmsSitePreviewUrl, buildPublishedSitePreviewUrl, getCmsPublishedSiteOrigin } from '../../lib/cmsPublishedSitePreview'
 
@@ -277,6 +278,7 @@ const schemas = {
     trackingAdrollPixelId: z.string().optional(),
     trackingConsentEnabled: z.boolean().optional(),
     trackingConsentMessage: z.string().optional(),
+    sitemap: z.any().nullable().optional(),
     analyticsEvents: z.object({
       enabled: z.boolean().optional(),
       forms: z.boolean().optional(),
@@ -1319,6 +1321,7 @@ const isSiteDiff = computed(() => {
       brandLogoLight: publishedSite.brandLogoLight,
       favicon: publishedSite.favicon,
       appIcon: publishedSite.appIcon || '',
+      sitemap: publishedSite.sitemap || null,
       menuPosition: publishedSite.menuPosition,
       forwardApex: publishedSite.forwardApex,
       canonicalDomain: publishedSite.canonicalDomain,
@@ -1356,6 +1359,7 @@ const isSiteDiff = computed(() => {
       brandLogoLight: siteData.value.brandLogoLight,
       favicon: siteData.value.favicon,
       appIcon: siteData.value.appIcon || '',
+      sitemap: siteData.value.sitemap || null,
       menuPosition: siteData.value.menuPosition,
       forwardApex: siteData.value.forwardApex,
       canonicalDomain: siteData.value.canonicalDomain,
@@ -1406,6 +1410,7 @@ const SITE_SETTINGS_DIFF_FIELDS = [
   { key: 'metaTitle', label: 'Meta Title' },
   { key: 'metaDescription', label: 'Meta Description' },
   { key: 'structuredData', label: 'Structured Data', format: 'json' },
+  { key: 'sitemap', label: 'Sitemaps', format: 'json' },
   { key: 'trackingFacebookPixel', label: 'Facebook Pixel' },
   { key: 'trackingGoogleAnalytics', label: 'Google Analytics' },
   { key: 'trackingAdroll', label: 'AdRoll Advertiser ID' },
@@ -1509,6 +1514,10 @@ const siteSettingsDiffDetails = computed(() => {
       baseValue = normalizeAnalyticsEvents(baseValue)
       compareValue = normalizeAnalyticsEvents(compareValue)
     }
+    if (field.key === 'sitemap') {
+      baseValue = baseValue || null
+      compareValue = compareValue || null
+    }
     if (areEqualNormalized(baseValue, compareValue))
       return
     details.push({
@@ -1527,6 +1536,8 @@ const setSiteDomains = (document, domains) => {
 }
 const saveSiteSettingsDocument = async (document) => {
   const normalized = { ...document, ...normalizeSiteDomainSettings(document) }
+  if (normalized.sitemap != null)
+    normalized.sitemap = prepareSitemapSettings(normalized.sitemap)
   const result = await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, normalized)
   if (result?.success === false)
     throw new Error(result.message || 'Unable to save site settings.')
@@ -1545,6 +1556,8 @@ const publishSiteSettings = async ({ siteVersion = null, bumpVersion = true } = 
     analyticsEvents: normalizeAnalyticsEvents(siteData.value?.analyticsEvents),
     version: nextVersion,
   }
+  if (payload.sitemap != null)
+    payload.sitemap = prepareSitemapSettings(payload.sitemap)
   if (bumpVersion) {
     await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, {
       version: nextVersion,
@@ -1574,6 +1587,7 @@ const discardSiteSettings = async () => {
       brandLogoLight: publishedSite.brandLogoLight || '',
       favicon: publishedSite.favicon || '',
       appIcon: publishedSite.appIcon || '',
+      sitemap: publishedSite.sitemap || null,
       menuPosition: publishedSite.menuPosition || '',
       forwardApex: publishedSite.forwardApex !== false,
       canonicalDomain: Object.prototype.hasOwnProperty.call(publishedSite, 'canonicalDomain')
@@ -5407,6 +5421,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                 :site-id="props.site"
                 :domain-error="domainError"
                 :settings-open="state.siteSettings"
+                :show-sitemaps="isPersistedSiteRoute"
                 :theme-contact-spam-defaults="getThemeContactSpamDefaults(slotProps.workingDoc?.theme)"
                 :contact-spam-has-persisted-value="siteHasPersistedContactSpam"
                 contact-spam-target-type="site"

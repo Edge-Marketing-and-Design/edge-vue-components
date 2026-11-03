@@ -320,3 +320,83 @@ Each Hub lists the tests in its own checkout under "This Hub". Shared:
   and the menus it seeds.
 - `edge/docs/data-contracts/cms-posts/README.md`: the posts a post template page
   renders.
+
+### Per-site sitemap configuration (Hub editor)
+
+The optional `sitemap` object belongs to one `sites/{siteId}` document, not to
+an organization or theme. Only actual saved sites expose the Sitemaps tab in
+Site Settings, and only while `edgeGlobal.edgeState.devOverride === true`.
+This is UI visibility within existing site-edit permissions, not a new
+Firestore authorization boundary. Turning dev mode off hides the editor and
+preserves the saved configuration.
+
+Saving writes only the site's draft. The field participates in unpublished
+settings detection and the settings comparison dialog. Publishing settings
+copies it to `published-site-settings/{siteId}` and the existing full-document
+site mirror carries it in `sites:{orgId}:{siteId}`; discard restores its
+published value (or null for an older site). No new Function or index is needed.
+Missing/null means unconfigured. An explicit empty configuration means no
+additional collection/API maps; ordinary page maps remain renderer-owned.
+Opening the UI does not initialize the field, inherit a theme/org configuration,
+or migrate the existing renderer files.
+
+```json
+{
+  "sitemap": {
+    "collections": [
+      {
+        "collection": "posts",
+        "fileName": "posts_sitemap.xml",
+        "routePrefix": "blog",
+        "pathField": "name",
+        "scope": "site",
+        "indexField": "type",
+        "indexValue": "post"
+      }
+    ],
+    "apis": [
+      {
+        "fileName": "products_sitemap.xml",
+        "sourceUrl": "https://api.example.com/sitemap?category=products&page=1"
+      }
+    ]
+  }
+}
+```
+
+Collection fields retain the renderer definition semantics: `routePrefix` is a
+relative public route; omitted/empty `pathField` uses the record name as a slug.
+A stored relative path is joined beneath the prefix; a leading slash is rooted
+at the site. `scope` selects **data** indexes (`org`, the default, or `site` for
+published posts); configuration ownership always remains per site. There is no
+`siteIds` array. `indexField` defaults to `name`; omitted `indexValue` queries
+all indexed values, otherwise it is a string, boolean, or finite number. The
+editor preserves types, including false and zero.
+
+Collection and API filenames share a unique, case-insensitive namespace and
+must be plain XML filenames. `sitemap.xml` and `pages_sitemap.xml` are reserved.
+Collections, paths, indexes, scope and filter values are validated before draft
+saves and settings publication.
+
+`apis` is a list of independent external sources, each with required `fileName`
+and `sourceUrl`. Each URL must use HTTPS without embedded credentials or a
+fragment. Query strings, including repeated parameters and encoded values, are
+preserved as entered (apart from surrounding whitespace). The UI has no fixed
+States field, state-code validation, parameter builder, or property-specific
+API toggle. Remove an entry to remove that source from the configuration.
+Both lists default to empty; an entry is never silently dropped for being
+incomplete. This supersedes the unshipped `property` prototype; no production
+migration or compatibility reader for that prototype is introduced.
+
+Each entry names a source, not an individual pagination page. For example,
+Clearwater can configure a URL with `?state=MT&page=1` and another with
+`?state=ID&page=1`. The separate frontend integration owns the supported API
+response contract, pagination discovery, generated filenames and URL mapping.
+Saving an arbitrary API URL here does not make an unsupported response format
+renderable. The Hub neither fetches the URLs nor checks API responses.
+
+The renderer **does not yet consume this field**. A separate frontend task must
+resolve the published site's configuration, retain the existing query/path and
+cache-version semantics, and decide the transition away from bundled
+`site_maps/` files. This Hub change does not fetch any source URL or render XML,
+and has no remote/static XML map editor. No production backfill is performed.

@@ -3,6 +3,10 @@ import { CheckCircle2, CircleAlert, Eye, Loader2, RefreshCw } from 'lucide-vue-n
 import { normalizeAnalyticsEvents, normalizeSiteDomainSettings } from '../../lib/cmsOperations'
 
 const props = defineProps({
+  showSitemaps: {
+    type: Boolean,
+    default: false,
+  },
   settings: {
     type: Object,
     required: true,
@@ -147,7 +151,17 @@ const brandFields = [
 ]
 
 const showAppearanceTab = computed(() => props.showThemeFields)
-const tabListClass = computed(() => showAppearanceTab.value ? 'xl:grid-cols-8' : 'xl:grid-cols-7')
+const activeSettingsTab = ref('general')
+const showSitemapsTab = computed(() => props.showSitemaps && edgeGlobal.edgeState.devOverride === true)
+watch(showSitemapsTab, (visible) => {
+  if (!visible && activeSettingsTab.value === 'sitemaps')
+    activeSettingsTab.value = 'seo'
+})
+const tabListClass = computed(() => {
+  if (showSitemapsTab.value)
+    return 'xl:grid-cols-5'
+  return showAppearanceTab.value ? 'xl:grid-cols-8' : 'xl:grid-cols-7'
+})
 
 const normalizeContactSpamSettings = (value, fallback = createContactSpamDefaults()) => {
   const source = (value && typeof value === 'object' && !Array.isArray(value)) ? value : {}
@@ -845,7 +859,7 @@ watch(() => [
       />
     </div>
   </div>
-  <Tabs v-else class="w-full" default-value="general">
+  <Tabs v-else v-model="activeSettingsTab" class="w-full" default-value="general">
     <TabsList class="w-full mt-3 rounded-sm grid grid-cols-2 md:grid-cols-4 gap-1 border border-slate-300 bg-slate-200 dark:border-slate-700 dark:bg-slate-800" :class="tabListClass">
       <TabsTrigger value="general" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
         General
@@ -861,6 +875,9 @@ watch(() => [
       </TabsTrigger>
       <TabsTrigger value="seo" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
         SEO
+      </TabsTrigger>
+      <TabsTrigger v-if="showSitemapsTab" value="sitemaps" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+        Sitemaps
       </TabsTrigger>
       <TabsTrigger value="tracking" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
         Tracking
@@ -1583,6 +1600,9 @@ watch(() => [
           class="mb-4 w-full"
         />
       </div>
+    </TabsContent>
+    <TabsContent v-if="showSitemapsTab" value="sitemaps" class="pt-4">
+      <edge-cms-sitemap-settings v-model="props.settings.sitemap" />
     </TabsContent>
     <TabsContent value="tracking" class="pt-4">
       <div class="space-y-4">
