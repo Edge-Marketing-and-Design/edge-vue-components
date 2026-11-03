@@ -21,6 +21,7 @@ export const useSiteSettingsTemplate = () => {
       logoType: { bindings: { 'field-type': 'select', 'label': 'Logo Type', 'items': ['image', 'text'] }, cols: '12', value: defaults.logoType },
       brandLogoDark: { bindings: { 'field-type': 'text', 'label': 'Brand Logo Dark' }, cols: '12', value: defaults.brandLogoDark },
       brandLogoLight: { bindings: { 'field-type': 'text', 'label': 'Brand Logo Light' }, cols: '12', value: defaults.brandLogoLight },
+      appIcon: { bindings: { 'field-type': 'text', 'label': 'App icon' }, cols: '12', value: defaults.appIcon },
       favicon: { bindings: { 'field-type': 'text', 'label': 'Favicon' }, cols: '12', value: defaults.favicon },
       menuPosition: { bindings: { 'field-type': 'select', 'label': 'Menu Position', 'items': ['left', 'center', 'right'] }, cols: '12', value: defaults.menuPosition },
       domains: { bindings: { 'field-type': 'tags', 'label': 'Domains', 'helper': 'Add or remove domains' }, cols: '12', value: defaults.domains },

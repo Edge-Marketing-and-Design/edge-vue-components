@@ -1,5 +1,5 @@
 <script setup lang="js">
-import { CheckCircle2, CircleAlert, Loader2, RefreshCw } from 'lucide-vue-next'
+import { CheckCircle2, CircleAlert, Eye, Loader2, RefreshCw } from 'lucide-vue-next'
 import { normalizeAnalyticsEvents, normalizeSiteDomainSettings } from '../../lib/cmsOperations'
 
 const props = defineProps({
@@ -99,6 +99,8 @@ const state = reactive({
   brandLogoDarkPickerOpen: false,
   brandLogoLightPickerOpen: false,
   faviconPickerOpen: false,
+  appIconPickerOpen: false,
+  iconPreviewOpen: false,
   contactSpamInstruction: '',
   contactSpamGenerating: false,
   contactSpamError: '',
@@ -106,6 +108,12 @@ const state = reactive({
   contactSpamUserEdited: false,
   contactSpamHydrationKey: '',
 })
+
+const chooseAppIconFromPreview = async () => {
+  state.iconPreviewOpen = false
+  await nextTick()
+  state.appIconPickerOpen = true
+}
 
 const CONTACT_SPAM_THRESHOLD_BY_LABEL = {
   lenient: 0.9,
@@ -130,6 +138,7 @@ const brandingFields = [
   { key: 'logo', label: 'Dark logo URL', placeholder: 'https://...' },
   { key: 'logoLight', label: 'Light logo URL', placeholder: 'https://...' },
   { key: 'favicon', label: 'Favicon URL', placeholder: 'https://...' },
+  { key: 'appIcon', label: 'App icon URL', placeholder: 'https://...' },
 ]
 
 const brandFields = [
@@ -1140,6 +1149,25 @@ watch(() => [
       /> -->
     </TabsContent>
     <TabsContent value="branding" class="pt-4 space-y-4">
+      <div class="flex items-center justify-between gap-3">
+        <p class="text-xs text-muted-foreground">Site logos, favicon and installed-app artwork.</p>
+        <edge-shad-button type="button" variant="outline" size="sm" class="shrink-0 gap-1.5" @click="state.iconPreviewOpen = true">
+          <Eye class="h-3.5 w-3.5" />
+          Preview icons
+        </edge-shad-button>
+      </div>
+      <p class="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+        For favicons and app icons, upload a high-resolution original, ideally at least 512 pixels on its longest side. This provides detail for the smaller generated sizes. Square artwork works best, but is not required. Avoid tiny, pre-sized favicons.
+      </p>
+      <Dialog v-model:open="state.iconPreviewOpen">
+        <edge-cms-branding-icon-preview
+          v-if="state.iconPreviewOpen"
+          :settings="props.settings"
+          :can-choose-app-icon="props.enableMediaPicker && Boolean(props.siteId) && !props.plainBrandingFields"
+          @choose-app-icon="chooseAppIconFromPreview"
+        />
+      </Dialog>
+
       <template v-if="props.plainBrandingFields">
         <div
           v-for="field in brandingFields"
@@ -1443,7 +1471,7 @@ watch(() => [
             <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
               <DialogHeader>
                 <DialogTitle>Select Favicon</DialogTitle>
-                <DialogDescription />
+                <DialogDescription>Choose a high-resolution original rather than a tiny favicon. It will be used for the browser and Apple icon sizes.</DialogDescription>
               </DialogHeader>
               <edge-cms-media-manager
                 :site="props.siteId"
@@ -1465,6 +1493,63 @@ watch(() => [
           placeholder="https://..."
           class="w-full"
         />
+        <div v-if="props.enableMediaPicker && props.siteId" class="space-y-2">
+          <label class="text-sm font-medium text-foreground flex items-center justify-between">
+            App icon
+            <edge-shad-button
+              type="button"
+              variant="link"
+              class="px-0 h-auto text-sm"
+              @click="state.appIconPickerOpen = true"
+            >
+              Select app icon
+            </edge-shad-button>
+          </label>
+          <div class="flex items-center gap-4">
+            <div v-if="props.settings.appIcon" class="flex items-center gap-3">
+              <img
+                :src="props.settings.appIcon"
+                alt="App icon preview"
+                class="max-h-12 max-w-12 h-auto w-auto rounded-md border border-border object-contain" :class="[previewBackgroundClass(props.settings.appIcon)]"
+              >
+              <edge-shad-button
+                type="button"
+                variant="ghost"
+                class="h-8"
+                @click="props.settings.appIcon = ''"
+              >
+                Remove
+              </edge-shad-button>
+            </div>
+            <span v-else class="text-sm text-muted-foreground italic">No app icon selected. Choose one to preview installed-app sizes.</span>
+          </div>
+          <Dialog v-model:open="state.appIconPickerOpen">
+            <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
+              <DialogHeader>
+                <DialogTitle>Select App Icon</DialogTitle>
+                <DialogDescription>Choose high-resolution artwork, ideally at least 512 pixels on its longest side. Rectangular artwork is padded to fit the square app icons.</DialogDescription>
+              </DialogHeader>
+              <edge-cms-media-manager
+                :site="props.siteId"
+                :select-mode="true"
+                :default-tags="['Logos']"
+                @select="(url) => {
+                  props.settings.appIcon = url
+                  state.appIconPickerOpen = false
+                }"
+              />
+            </DialogContent>
+          </Dialog>
+        </div>
+        <edge-shad-input
+          v-else
+          v-model="props.settings.appIcon"
+          name="appIcon"
+          label="App icon URL"
+          placeholder="https://..."
+          class="w-full"
+        />
+        <p class="text-xs text-muted-foreground">App icon: separate artwork for installed apps. If left empty, the dark logo is used. The favicon stays separate.</p>
       </template>
     </TabsContent>
     <TabsContent value="seo" class="pt-4">
