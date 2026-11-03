@@ -320,6 +320,14 @@ const put = async (env, token, bytes) => {
   return res
 }
 
+test('upload links point at the shared Functions region unless a URL is set', () => {
+  const { media } = setup()
+  assert.equal(media.defaultUploadUrl({ GCLOUD_PROJECT: 'hub', FIREBASE_STORE_REGION: 'us-central1' }), 'https://us-central1-hub.cloudfunctions.net/cmsAgentMediaUpload')
+  assert.equal(media.defaultUploadUrl({ GCLOUD_PROJECT: 'hub', FUNCTIONS_REGION: 'us-east1' }), 'https://us-east1-hub.cloudfunctions.net/cmsAgentMediaUpload')
+  assert.equal(media.defaultUploadUrl({ GCLOUD_PROJECT: 'hub' }), 'https://us-west1-hub.cloudfunctions.net/cmsAgentMediaUpload')
+  assert.equal(media.defaultUploadUrl({ GCLOUD_PROJECT: 'hub', FIREBASE_STORE_REGION: 'us-central1', CMS_AGENT_MEDIA_UPLOAD_URL: 'https://media.example/up' }), 'https://media.example/up')
+})
+
 test('a local file gets a one-time upload link that goes through the same path', async () => {
   const env = setup()
   const { files, uploadNext } = await env.service.upload({ uid: 'owner', orgId: 'a', body: { siteId: 's', tags: ['TEAM'], sources: [{ localFile: { name: 'headshot.jpeg', size: 22 } }, { localFile: { name: 'logo.svg' } }, { localFile: { name: 'huge.png', size: 11 * 1024 * 1024 } }] }, caller })
