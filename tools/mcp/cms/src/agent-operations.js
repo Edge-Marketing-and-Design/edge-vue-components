@@ -87,8 +87,8 @@ export function agentEndpoint({ env = process.env, config = {} } = {}) {
 
 const NO_KEY_MESSAGE = 'No agent key is configured. Create one in the Hub (Dev Mode > Agent Keys), then set EDGE_CMS_AGENT_KEY for the MCP or save it to the file named by agentKeyFile in the MCP config.'
 
-// check(orgId, operation) and run(orgId, operation, checksum), and the
-// reads preview, readiness, render, pages, page, posts and post. Each result is
+// check(orgId, operation) and run(orgId, operation, checksum), media
+// uploads, and the reads media, preview, readiness, render, pages, page, posts and post. Each result is
 // the Hub's JSON answer plus `httpStatus`; refusals come back as
 // { ok: false, httpStatus, code, message, details } so the agent can see why
 // and fix the operation.
@@ -131,6 +131,8 @@ export function createAgentOperationClient({ endpoint, getKey, connections, fetc
     check: (orgId, operation, sessionId) => post({ orgId, action: 'check', operation }, sessionId),
     run: (orgId, operation, checksum, sessionId) => post({ orgId, action: 'run', operation, checksum }, sessionId),
     preview: (orgId, siteId, pageId, source = 'draft', blockDrafts = true, { viewport, width, sessionId } = {}) => post({ orgId, action: 'preview', siteId, pageId, source, blockDrafts, ...(viewport ? { viewport } : {}), ...(width ? { width } : {}) }, sessionId),
+    uploadMedia: (orgId, input, sessionId) => post({ orgId, action: 'media-upload', ...input }, sessionId),
+    findMedia: (orgId, input, sessionId) => post({ orgId, action: 'media-find', ...input }, sessionId),
     readiness: (orgId, siteId, sessionId) => post({ orgId, action: 'readiness', siteId }, sessionId),
     render: (orgId, input, sessionId) => post({ orgId, action: 'render', ...input }, sessionId),
     pages: (orgId, siteId, sessionId) => post({ orgId, action: 'pages', siteId }, sessionId),

@@ -36,7 +36,7 @@ None. `rendererChanges: false`.
 
 ### 2. Theme, Head, Extra CSS, and media
 
-None.
+None. (Images were uploaded with `cms_upload_media` and are listed in `manifest.json` `media` with their Hub URLs; nothing to upload by hand.)
 
 ### 3. Hub Blocks manager
 

@@ -27,7 +27,7 @@ Each change in the design is one of these. A section can carry several; list eac
 | New field | The design shows content the schema has no input for | `block.draft` adding the input with a default and the markup that reads it; instances pick up the default on release | None |
 | Removed or renamed field | An input the design no longer uses, or one whose meaning moved | Two steps: add the new field first and keep the old one; removal is a later draft. Say "breaking" in the handoff | Breaking on the removal step: the developer confirms |
 | Content values | Same fields, different copy | `page.setValues` per instance (`cms_find_usage` lists them); synced values go to the developer | None (page drafts) |
-| Media | A changed or new image | Listed for the developer with the Figma layer and the block field; the block keeps its fallback. Only markup around the image is drafted | None |
+| Media | A changed or new image | Exported from the design, uploaded with `cms_upload_media`, and set with `page.setValues` (or as the field default in the draft) once `ready` | None (page drafts) |
 | Override behavior | The change is in what the Vue component does, not in what the block shows | The CMS block first (the fidelity rule in `override-blocks.md`), then a renderer task for `emd-cms-front` | Renderer deploy |
 
 ### Markup only
@@ -61,7 +61,7 @@ Measure it: a block placed on many pages is many calls. Record the count and the
 
 ### Media
 
-Images are not uploaded by agents (no media upload in the operations). For each changed image: the Figma layer (id and name), the block and the field it belongs to, and whether the field is empty (fallback shown) or holds an older image. If the markup around the image changed, that part is a Markup only draft; the image itself waits for the developer.
+For each changed image: export it from the Figma layer (PNG or JPEG; SVG is refused), upload it with `cms_upload_media` (a local file goes through the one-time upload link it returns) with the field's `tags`, wait for `status: "ready"`, then `page.setValues` per instance with its `url` (or `variants[variant]`). A new default goes in the block draft. If the markup around the image changed, that part is a Markup only draft. Record the Figma layer (id and name), the block field and the media `fileId` in the handoff. Only an image you can't export or read (a missing asset) is listed for the developer.
 
 ### Override behavior
 
@@ -75,7 +75,7 @@ Before anything is applied, one report, one table, one row per affected block:
 | --- | --- | --- | --- | --- | --- |
 | `moe2-hero` | `5:830` Hero | markup, content values | no | 1 on 1 site | image 5:832 |
 
-Plus: nodes with no map entry; blocks with no `meta.design`; synced values; media; renderer tasks; and the estimated work (drafts, value calls). The developer answers before step 5 of the skill runs.
+Plus: nodes with no map entry; blocks with no `meta.design`; synced values; images to upload; renderer tasks; and the estimated work (drafts, value calls). The developer answers before step 5 of the skill runs.
 
 ## The handoff
 
@@ -84,7 +84,7 @@ After applying:
 - **Drafts awaiting release,** one line per block: revision number, the classes it carries, and a release recommendation: release to all sites when the block is on a handful of documents; canary to one site first when `cms_find_usage` counts more than that; confirmation needed when the step is breaking. Two-step changes name their order.
 - **Value changes applied,** per page, and the synced values left for the developer.
 - **Renderer tasks** for override blocks.
-- **Media** for the developer.
+- **Images uploaded:** Figma layer → media `fileId` → instances set, and any image left for the developer with the reason.
 - **Previews:** a fresh desktop and mobile link per page touched, and what still differs from the design.
 - **The design revision** recorded in `PROJECT.md` (`design.revision`), and the time taken.
 

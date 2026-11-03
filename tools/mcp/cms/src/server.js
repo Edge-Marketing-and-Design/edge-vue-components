@@ -288,6 +288,8 @@ const handlers = {
       return jsonResult(input.refusal)
     return jsonResult(withOperationSource(await agentOperations.run(org, input.operation, checksum, sessionId), input.source))
   },
+  cms_upload_media: async ({ orgId, sessionId, ...input }) => jsonResult(await agentOperations.uploadMedia(resolveOrgId(orgId), input, sessionId)),
+  cms_find_media: async ({ orgId, sessionId, ...input }) => jsonResult(await agentOperations.findMedia(resolveOrgId(orgId), input, sessionId)),
   cms_preview_url: async ({ orgId, siteId, pageId, source, blockDrafts, viewport, width, sessionId }) => jsonResult(await agentOperations.preview(resolveOrgId(orgId), siteId, pageId, source, blockDrafts, { viewport, width, sessionId })),
   async cms_site_readiness({ orgId, siteId, sessionId }) {
     const org = resolveOrgId(orgId)

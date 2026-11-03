@@ -18,7 +18,7 @@ class HttpsError extends Error {
   }
 }
 
-const REMOTE_TOOLS = ['cms_find_block', 'cms_audit_blocks', 'cms_diff', 'cms_resolve_override', 'cms_find_usage', 'cms_validate', 'cms_render_block', 'cms_find_theme', 'cms_get_theme', 'cms_contract', 'cms_schema', 'cms_guide', 'cms_agent_organizations', 'cms_list_sites', 'cms_open_session', 'cms_check_operation', 'cms_run_operation', 'cms_preview_url', 'cms_site_readiness', 'cms_list_pages', 'cms_get_page', 'cms_list_posts', 'cms_get_post', 'cms_block_base']
+const REMOTE_TOOLS = ['cms_find_block', 'cms_audit_blocks', 'cms_diff', 'cms_resolve_override', 'cms_find_usage', 'cms_validate', 'cms_render_block', 'cms_find_theme', 'cms_get_theme', 'cms_contract', 'cms_schema', 'cms_guide', 'cms_agent_organizations', 'cms_list_sites', 'cms_open_session', 'cms_check_operation', 'cms_run_operation', 'cms_upload_media', 'cms_find_media', 'cms_preview_url', 'cms_site_readiness', 'cms_list_pages', 'cms_get_page', 'cms_list_posts', 'cms_get_post', 'cms_block_base']
 
 const setup = async (t) => {
   const fake = createFakeDb({
@@ -35,6 +35,7 @@ const setup = async (t) => {
     'organizations/a/blocks/hero': { name: 'Hero', content: '<section>{{{#text {"field":"headline","value":"Welcome"}}}}</section>', values: { headline: 'Welcome' }, tags: ['Hero'], themes: ['main'], synced: false, version: 1, templateVersion: 1 },
     'organizations/a/blocks/footer': { name: 'Footer', content: '<footer>Footer</footer>', values: {}, tags: ['Footer'], themes: ['main'], synced: false, version: 1 },
     'organizations/a/themes/main': { name: 'Main theme', theme: '{"colors":{"primary":"#123456"}}', headJSON: '{}', extraCSS: '.x{}' },
+    'organizations/a/files/logo': { name: 'logo.png', fileName: 'logo.png', contentType: 'image/png', uploadTime: 1, meta: { tags: ['LOGO'], cmssite: ['all'] }, cloudflareImageVariants: ['https://imagedelivery.net/h/logo/public'] },
     'organizations/a/sites/s/pages/about': { name: 'About', content: { main: [{ id: 'instance-1', blockId: 'hero', name: 'Hero' }] }, structure: [], version: 1 },
   })
   const allowed = new Set(['a'])
@@ -43,7 +44,7 @@ const setup = async (t) => {
   const denied = new Set()
   const configPath = require.resolve(path.join(functionRoot, 'config.js'))
   const original = require.cache[configPath]
-  const modulePaths = ['cmsAgentMcp.js', 'cmsAgentConnections.js', 'cmsAgentKeys.js', 'cmsAgentLibraryReads.js', 'cmsAgentRender.js', 'cmsAgentContractNotes.js', 'cmsOperations.js', 'cmsBlockRevisions.js'].map(file => require.resolve(path.join(functionRoot, file)))
+  const modulePaths = ['cmsAgentMcp.js', 'cmsAgentConnections.js', 'cmsAgentKeys.js', 'cmsAgentLibraryReads.js', 'cmsAgentRender.js', 'cmsAgentContractNotes.js', 'cmsOperations.js', 'cmsBlockRevisions.js', 'cmsAgentMedia.js'].map(file => require.resolve(path.join(functionRoot, file)))
   require.cache[configPath] = {
     id: configPath,
     loaded: true,
@@ -760,4 +761,19 @@ test('a front deploy without the guide says so', async (t) => {
   const client = await connect(t, env)
   const result = await callTool(client, 'cms_contract', { kind: 'renderer' })
   assert.match(result.message, /does not publish the renderer guide/)
+})
+
+test('media: finds run in an organization session; uploads need the creator\'s rights', async (t) => {
+  const env = await setup(t)
+  const client = await connect(t, env)
+  const found = await callTool(client, 'cms_find_media', { orgId: 'a', tags: ['logo'] })
+  assert.equal(found.ok, true)
+  assert.deepEqual(found.files.map(file => [file.fileId, file.status, file.url]), [['logo', 'ready', 'https://imagedelivery.net/h/logo/public']])
+  env.denied.add('write:organizations/a/images')
+  const refused = await callTool(client, 'cms_upload_media', { orgId: 'a', tags: ['HERO'], sources: [{ url: 'https://example.com/a.png' }] })
+  assert.equal(refused.ok, false)
+  assert.equal(refused.code, 'permission-denied')
+  const site = await env.connections.issueAgentSession(await env.connections.verifyConnection(`Bearer ${env.created.token}`), { orgId: 'a', scope: 'site', siteId: 's' })
+  const inSite = await callTool(client, 'cms_find_media', { sessionId: site.sessionId })
+  assert.equal(inSite.ok, false, 'site sessions are for page and post work')
 })

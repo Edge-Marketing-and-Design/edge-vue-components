@@ -121,6 +121,7 @@ const manifest = {
   })),
   pages: [],
   templates: [],
+  // { source: 'https://old.example/hero.jpg' | 'media/hero.jpg', tags: ['HERO'], fileId, url } per image, uploaded with cms_upload_media.
   media: [],
   dataSources: [],
   firebaseChanges: false,

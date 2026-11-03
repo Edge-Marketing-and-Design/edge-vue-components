@@ -105,9 +105,26 @@ export const assertBlockBasics = (block, file, { themeId, allowedTags = null, de
   }
 }
 
-/** Voice and content checks on rendered output. */
-export const assertRenderedCopy = (rendered, file, { bannedPhrases = [] } = {}) => {
+/** Image URLs in `html` on hosts other than the Hub's media (Cloudflare Images, plus `mediaHosts` such as the Hub's R2 host). */
+export const externalImageUrls = (html, mediaHosts = []) => {
+  const hosts = ['imagedelivery.net', ...mediaHosts].map(host => String(host).toLowerCase())
+  return [...String(html).matchAll(/https?:\/\/[^\s"'()<>\\]+/gi)].map(([raw]) => raw).filter((raw) => {
+    try {
+      const url = new URL(raw)
+      const host = url.hostname.toLowerCase()
+      return /\.(?:jpe?g|png|gif|webp|svg|avif|bmp|tiff?)$/i.test(url.pathname) && !hosts.some(allowed => host === allowed || host.endsWith(`.${allowed}`))
+    }
+    catch {
+      return false
+    }
+  })
+}
+
+/** Voice and content checks on rendered output. Images must come from the Hub's media: upload them with cms_upload_media. */
+export const assertRenderedCopy = (rendered, file, { bannedPhrases = [], mediaHosts = [] } = {}) => {
   assert.doesNotMatch(rendered, /\{\{/, `${file}: unresolved placeholder`)
+  const external = externalImageUrls(rendered, mediaHosts)
+  assert.deepEqual(external, [], `${file}: images outside the Hub's media (upload them with cms_upload_media and use the Hub URL): ${external.join(', ')}`)
   assert.doesNotMatch(rendered, /!(?=\s|<|$)/, `${file}: exclamation point in copy`)
   assert.doesNotMatch(rendered, /screenshot/i, `${file}: call renders and compositions illustrations, not screenshots`)
   for (const phrase of bannedPhrases)

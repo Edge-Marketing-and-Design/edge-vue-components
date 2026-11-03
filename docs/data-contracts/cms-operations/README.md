@@ -136,6 +136,7 @@ from being finished:
 | `instance.behind` | An instance holds an older revision than the released one |
 | `block.override` | The public site needs a Vue component for this block |
 | `block.unreleased` | The block has an open draft |
+| `media.external-image` | An image URL outside the Hub's media (Cloudflare Images, the R2 host) in instance values, block markup or site settings: upload it with `cms_upload_media` (warning; `url` and `field` name it) |
 | `seo.meta-title`, `seo.meta-description` | Missing on a draft page or the site |
 | `seo.structured-data` | Missing (warning) or not a JSON-LD object (error) |
 | `seo.structured-data-empty` | An empty `name` or `description` on the first item |
