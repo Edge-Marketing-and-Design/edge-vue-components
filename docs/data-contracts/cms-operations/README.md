@@ -2,7 +2,7 @@
 
 Status: in use through the Hub callables and the agent endpoint; every write is a draft.
 
-Last verified: 2026-11-04, developer skills (template, site settings and menus operations; setup readiness codes)
+Last verified: 2026-11-04, e9af426e
 
 Server-side, draft-only writes for building sites, used by agents through the
 CMS MCP and available to any signed-in caller with write permission. Source:

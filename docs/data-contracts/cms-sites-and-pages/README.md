@@ -2,7 +2,7 @@
 
 Status: in use for every site the CMS publishes.
 
-Last verified: 2026-11-04, developer skills (templates, site settings and menus operations, form tests)
+Last verified: 2026-11-04, e9af426e
 
 A site is an organization's website: its settings, menus and domains, and
 the draft pages assembled from block instances. Publishing copies a page or
