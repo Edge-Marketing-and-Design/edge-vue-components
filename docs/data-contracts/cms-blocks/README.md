@@ -155,8 +155,26 @@ shared video media picker.
 - **Stored value:** after Cloudflare Stream processing completes, selection
   stores a Stream `iframe` string in the block value. The iframe uses a
   trusted `cloudflarestream.com` or `videodelivery.net` HTTPS URL and
-  carries `title`, `width`, `height`, `allow`, `allowfullscreen` and
-  `loading` attributes. The raw R2 video URL is never stored in the value.
+  carries `data-cms-video` (`player` or `background`), `title`, `allow` and
+  `loading` attributes; a player also has `width`, `height` and
+  `allowfullscreen`. The raw R2 video URL is never stored in the value.
+  Values saved before playback options are a bare iframe and still render.
+- **Playback options:** the picker stores the editor's choices in the iframe
+  URL as Stream player parameters, so no other field changes: `autoplay`
+  (with `preload=auto`), `muted` (Sound off), `loop`, `controls=false`,
+  `startTime` and `poster` (a Stream thumbnail at a chosen second). The
+  `background` layout forces autoplay, muted, loop and no controls, and wraps
+  the iframe in an `aria-hidden` `div[data-cms-video-background]` that covers
+  its nearest positioned ancestor, so the template must render it inside an
+  element with `position: relative` (or another positioned element). A schema
+  may set starting options for a new selection with `videoOptions`, for
+  example `"videoOptions": { "layout": "background" }`.
+- **Hidden-video guard:** each value ends with one inline
+  `script[data-cms-video-guard]`. The public renderer runs block scripts, and
+  the guard installs once per page: it reloads a player that becomes hidden
+  (a pop-up closed without pausing), and drops autoplay from background
+  videos for visitors who prefer reduced motion. The Hub preview does not run
+  it.
 - **Rendering:** templates render video values through the `richtext()`
   formatter, at the block root and inside manual array items:
   `{{ richtext(promoVideo) }}`, `{{ richtext(video.embed) }}`. A bare
