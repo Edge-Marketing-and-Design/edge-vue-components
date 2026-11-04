@@ -324,11 +324,13 @@ Each Hub lists the tests in its own checkout under "This Hub". Shared:
 ### Per-site sitemap configuration (Hub editor)
 
 The optional `sitemap` object belongs to one `sites/{siteId}` document, not to
-an organization or theme. Only actual saved sites expose the Sitemaps tab in
-Site Settings, and only while `edgeGlobal.edgeState.devOverride === true`.
-This is UI visibility within existing site-edit permissions, not a new
-Firestore authorization boundary. Turning dev mode off hides the editor and
-preserves the saved configuration.
+an organization or theme. Actual saved sites expose the Sitemaps tab in
+Site Settings under the existing site-edit permissions. Post sitemap choices
+are available without Dev Mode. Collection and API sitemap sections appear
+only while `edgeGlobal.edgeState.devOverride === true`; hiding those controls
+preserves their saved configuration. These are UI visibility controls, not a
+new Firestore authorization boundary. Settings navigation wraps into as many
+rows as its actual container width needs, keeping section labels readable.
 
 Saving writes only the site's draft. The field participates in unpublished
 settings detection and the settings comparison dialog. Publishing settings
@@ -400,3 +402,56 @@ resolve the published site's configuration, retain the existing query/path and
 cache-version semantics, and decide the transition away from bundled
 `site_maps/` files. This Hub change does not fetch any source URL or render XML,
 and has no remote/static XML map editor. No production backfill is performed.
+
+### Post-type sitemap controls
+
+Site Settings → Sitemaps has a Posts section with Enable Sitemap controls for
+Default (`post`), Event (`event`) and this site's page-defined custom types.
+The index/detail page has no sitemap toggle. Its optional
+`postType: { enabled, icon, event }` defines a custom content type, its icon,
+and optional event-entry behavior. `event: true` enables the standard event
+details envelope while retaining the custom type identity.
+
+Saved preferences live under `site.sitemap.posts`, a boolean map:
+
+```json
+{
+  "post": true,
+  "event": false,
+  "page:custom-page-id": true
+}
+```
+
+Without an explicit choice, existing compatible site-level post sitemaps show
+their corresponding Default/Event/custom checkbox as checked. Recognition
+requires the posts collection, site scope, a type index filter and an empty or
+`name` path field. Explicit boolean choices always win, including `false`.
+Opening the editor never writes inferred preferences. Changing a post choice
+preserves the other inferred selections; saving changes only draft Site Settings.
+With no saved `posts` preferences, publication preserves the legacy configuration.
+New types without an existing sitemap are not automatically enabled.
+When Site Settings is published, reconciliation uses those saved preferences
+and the site's published page snapshots. It resolves the first matching
+published Default/Event index/detail page in menu order; a custom type uses
+its defining page. Missing/disabled types or absent routes are simply omitted.
+A subsequent settings publication removes their previous managed entries.
+No guessed paths or missing-route warnings are generated.
+
+Generated `sitemap.collections` entries use the existing posts dataset, `scope:
+"site"`, `pathField: "name"`, a published `routePrefix`, and `indexField:
+"type"` with the stored kind/custom-type value. Each includes `managedPostType`
+(`post`, `event`, or `page:<pageId>`) so reconciliation can update/remove only
+its own entries. These generated rows are completely hidden from the manual
+Collections editor, as are recognized legacy post entries. Unrelated manual
+collection/API entries remain unchanged (visible only in Dev Mode). A recognized
+legacy entry is adopted when preferences are saved and settings published:
+its filename stays intact, its route follows the published detail page, and no
+duplicate entry is created. Explicitly disabling the type removes its recognized
+legacy entry when Site Settings is published.
+Generated XML filenames avoid manual/API/reserved filename collisions.
+
+Reconciliation updates the saved baseline as well as the published snapshot,
+so generated rows do not immediately appear as unpublished changes. It affects
+only this site. It is not triggered by post or page publication and requires no
+changes to the existing sitemap reader. Page/route/type changes reach sitemap
+configuration on the next Site Settings publication.

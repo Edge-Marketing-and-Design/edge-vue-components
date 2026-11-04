@@ -2,6 +2,8 @@
 import { ArrowDown, ArrowLeft, ArrowUp, Download, ExternalLink, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FileUp, FileWarning, FileX, History, Loader2, Maximize2, Monitor, MoreHorizontal, PanelTop, RotateCcw, Smartphone, Sparkles, Tablet, UploadCloud } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
+import { buildPostEntryPreviewBlock } from '../../lib/cmsPostEntryPreview'
+import { preparePostTypePage } from '../../lib/cmsPostTypes'
 import { buildCmsPublishedPageUrl, buildCmsSitePreviewUrl, findCmsPageRoute } from '../../lib/cmsPublishedSitePreview'
 
 const runtimeConfig = useRuntimeConfig()
@@ -818,6 +820,14 @@ const editorDocUpdates = (workingDoc) => {
 }
 
 const previewRouteLastSegment = computed(() => String(state.routeLastSegment || '').trim())
+
+const customTypeDetailPreview = (doc, blockId) => {
+  if (doc?.postType?.enabled !== true) return null
+  const base = `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}`
+  const entries = Object.values(edgeFirebase.data?.[`${base}/posts`] || {}).filter(post => post.postTypeId === props.page)
+  const selected = previewRouteLastSegment.value ? entries.find(post => post.name === previewRouteLastSegment.value) : entries.find(post => post.publishedAt) || entries[0]
+  return buildPostEntryPreviewBlock(preparePostTypePage(doc, props.page), blockId, selected || {})
+}
 
 const openRouteLastSegmentDialog = () => {
   state.routeLastSegmentDraft = previewRouteLastSegment.value
@@ -1925,7 +1935,7 @@ function resolveSyncedPageDoc(doc) {
     ...(Array.isArray(nextDoc.postContent) ? nextDoc.postContent.map(block => block?.blockId).filter(Boolean) : []),
   ]
   nextDoc.blockIds = [...new Set(blockIds)]
-  return nextDoc
+  return preparePostTypePage(nextDoc, props.page)
 }
 
 function buildComparablePageBlock(block) {
@@ -1961,6 +1971,7 @@ const buildComparablePageDiffDoc = (doc) => {
 
   return {
     content: Array.isArray(doc.content) ? doc.content.map(buildComparablePageBlock) : [],
+    postType: doc.postType || null,
     postContent: Array.isArray(doc.postContent) ? doc.postContent.map(buildComparablePageBlock) : [],
     structure: Array.isArray(doc.structure) ? doc.structure : [],
     postStructure: Array.isArray(doc.postStructure) ? doc.postStructure : [],
@@ -2851,6 +2862,13 @@ const handlePageSettingsUpdate = async (submit) => {
   }
 }
 
+const savePageWithPostType = async (doc) => {
+  doc = preparePostTypePage(doc, props.page)
+  const result = await edgeFirebase.storeDoc(pagesCollectionPath.value, doc, props.page)
+  if (result?.success === false) throw new Error(result.message || 'Could not save page.')
+  return { ...result, docId: props.page, data: { ...doc, docId: props.page } }
+}
+
 const handlePageSaved = async ({ docId }) => {
   try {
     await persistPageRestrictionAssignments(docId || props.page)
@@ -3471,6 +3489,7 @@ const hasUnsavedChanges = (changes) => {
     :collection="`sites/${site}/pages`"
     :doc-id="page"
     :schema="schemas.pages"
+    :save-handler="savePageWithPostType"
     :new-doc-schema="state.newDocs.pages"
     class="w-full mx-auto flex-1 bg-transparent flex flex-col border-none shadow-none pt-0 px-0" :class="[!state.editMode ? 'cms-page-preview-mode' : '']"
     :show-footer="false"
@@ -3841,6 +3860,7 @@ const hasUnsavedChanges = (changes) => {
               Creates both an Index Page and a Detail Page for this section.
               The Index Page lists all items (e.g., /{{ slotProps.workingDoc.name }}), while the Detail Page displays a single item (e.g., /{{ slotProps.workingDoc.name }}/:slug).
             </edge-shad-checkbox>
+            <edge-cms-post-type-settings v-model="slotProps.workingDoc.postType" :page="slotProps.workingDoc" />
             <edge-shad-select-tags
               :model-value="normalizeTemplatePageTypeSelections(slotProps.workingDoc.type, { fallback: ['Page'], excludePost: Boolean(slotProps.workingDoc.post) })"
               name="type"
@@ -3882,6 +3902,7 @@ const hasUnsavedChanges = (changes) => {
                   Creates both an Index Page and a Detail Page for this section.
                   The Index Page lists all items (e.g., /{{ slotProps.workingDoc.name }}), while the Detail Page displays a single item (e.g., /{{ slotProps.workingDoc.name }}/:slug).
                 </edge-shad-checkbox>
+                <edge-cms-post-type-settings v-model="slotProps.workingDoc.postType" :page="slotProps.workingDoc" />
                 <edge-shad-select-tags
                   v-if="props.isTemplateSite"
                   :model-value="normalizeTemplatePageTypeSelections(slotProps.workingDoc.type, { fallback: ['Page'], excludePost: Boolean(slotProps.workingDoc.post) })"
@@ -4453,6 +4474,7 @@ const hasUnsavedChanges = (changes) => {
                                         v-if="blockIndex(slotProps.workingDoc, blockId, true) !== -1"
                                         :key="`${pagePreviewRenderKey}:${blockId}:${effectiveThemeId}:post:${previewRouteLastSegment || 'auto'}`"
                                         v-model="slotProps.workingDoc.postContent[blockIndex(slotProps.workingDoc, blockId, true)]"
+                                        :preview-block="customTypeDetailPreview(slotProps.workingDoc, blockId)"
                                         :render-context="pagePreviewRenderContext"
                                         :edit-mode="state.editMode"
                                         :override-clicks-in-edit-mode="state.editMode"

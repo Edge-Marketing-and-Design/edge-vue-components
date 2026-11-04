@@ -3,6 +3,7 @@ import { CheckCircle2, CircleAlert, Eye, Loader2, RefreshCw } from 'lucide-vue-n
 import { normalizeAnalyticsEvents, normalizeSiteDomainSettings } from '../../lib/cmsOperations'
 
 const props = defineProps({
+  sitemapPages: { type: Object, default: () => ({}) },
   showSitemaps: {
     type: Boolean,
     default: false,
@@ -152,15 +153,10 @@ const brandFields = [
 
 const showAppearanceTab = computed(() => props.showThemeFields)
 const activeSettingsTab = ref('general')
-const showSitemapsTab = computed(() => props.showSitemaps && edgeGlobal.edgeState.devOverride === true)
+const showSitemapsTab = computed(() => props.showSitemaps)
 watch(showSitemapsTab, (visible) => {
   if (!visible && activeSettingsTab.value === 'sitemaps')
     activeSettingsTab.value = 'seo'
-})
-const tabListClass = computed(() => {
-  if (showSitemapsTab.value)
-    return 'xl:grid-cols-5'
-  return showAppearanceTab.value ? 'xl:grid-cols-8' : 'xl:grid-cols-7'
 })
 
 const normalizeContactSpamSettings = (value, fallback = createContactSpamDefaults()) => {
@@ -860,32 +856,32 @@ watch(() => [
     </div>
   </div>
   <Tabs v-else v-model="activeSettingsTab" class="w-full" default-value="general">
-    <TabsList class="w-full mt-3 rounded-sm grid grid-cols-2 md:grid-cols-4 gap-1 border border-slate-300 bg-slate-200 dark:border-slate-700 dark:bg-slate-800" :class="tabListClass">
-      <TabsTrigger value="general" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+    <TabsList aria-label="Site settings sections" class="cms-site-settings-tabs mt-3 grid h-auto w-full gap-1 rounded-md border border-border bg-slate-100 p-1 dark:bg-slate-900" style="grid-template-columns: repeat(auto-fit, minmax(min(100%, 7rem), 1fr))">
+      <TabsTrigger value="general" class="min-h-9 w-full min-w-0 whitespace-normal rounded-sm px-3 py-2 text-sm leading-snug text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground data-[state=active]:bg-slate-800 data-[state=active]:text-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-slate-100 dark:data-[state=active]:text-slate-900">
         General
       </TabsTrigger>
-      <TabsTrigger value="domains" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+      <TabsTrigger value="domains" class="min-h-9 w-full min-w-0 whitespace-normal rounded-sm px-3 py-2 text-sm leading-snug text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground data-[state=active]:bg-slate-800 data-[state=active]:text-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-slate-100 dark:data-[state=active]:text-slate-900">
         Domains
       </TabsTrigger>
-      <TabsTrigger v-if="showAppearanceTab" value="appearance" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+      <TabsTrigger v-if="showAppearanceTab" value="appearance" class="min-h-9 w-full min-w-0 whitespace-normal rounded-sm px-3 py-2 text-sm leading-snug text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground data-[state=active]:bg-slate-800 data-[state=active]:text-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-slate-100 dark:data-[state=active]:text-slate-900">
         Appearance
       </TabsTrigger>
-      <TabsTrigger value="branding" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+      <TabsTrigger value="branding" class="min-h-9 w-full min-w-0 whitespace-normal rounded-sm px-3 py-2 text-sm leading-snug text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground data-[state=active]:bg-slate-800 data-[state=active]:text-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-slate-100 dark:data-[state=active]:text-slate-900">
         Branding
       </TabsTrigger>
-      <TabsTrigger value="seo" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+      <TabsTrigger value="seo" class="min-h-9 w-full min-w-0 whitespace-normal rounded-sm px-3 py-2 text-sm leading-snug text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground data-[state=active]:bg-slate-800 data-[state=active]:text-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-slate-100 dark:data-[state=active]:text-slate-900">
         SEO
       </TabsTrigger>
-      <TabsTrigger v-if="showSitemapsTab" value="sitemaps" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+      <TabsTrigger v-if="showSitemapsTab" value="sitemaps" class="min-h-9 w-full min-w-0 whitespace-normal rounded-sm px-3 py-2 text-sm leading-snug text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground data-[state=active]:bg-slate-800 data-[state=active]:text-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-slate-100 dark:data-[state=active]:text-slate-900">
         Sitemaps
       </TabsTrigger>
-      <TabsTrigger value="tracking" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+      <TabsTrigger value="tracking" class="min-h-9 w-full min-w-0 whitespace-normal rounded-sm px-3 py-2 text-sm leading-snug text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground data-[state=active]:bg-slate-800 data-[state=active]:text-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-slate-100 dark:data-[state=active]:text-slate-900">
         Tracking
       </TabsTrigger>
-      <TabsTrigger value="contact-spam" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+      <TabsTrigger value="contact-spam" class="min-h-9 w-full min-w-0 whitespace-normal rounded-sm px-3 py-2 text-sm leading-snug text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground data-[state=active]:bg-slate-800 data-[state=active]:text-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-slate-100 dark:data-[state=active]:text-slate-900">
         Spam
       </TabsTrigger>
-      <TabsTrigger value="social" class="w-full text-black data-[state=active]:bg-black data-[state=active]:text-white">
+      <TabsTrigger value="social" class="min-h-9 w-full min-w-0 whitespace-normal rounded-sm px-3 py-2 text-sm leading-snug text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground data-[state=active]:bg-slate-800 data-[state=active]:text-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-slate-100 dark:data-[state=active]:text-slate-900">
         Socials
       </TabsTrigger>
     </TabsList>
@@ -1602,7 +1598,7 @@ watch(() => [
       </div>
     </TabsContent>
     <TabsContent v-if="showSitemapsTab" value="sitemaps" class="pt-4">
-      <edge-cms-sitemap-settings v-model="props.settings.sitemap" />
+      <edge-cms-sitemap-settings v-model="props.settings.sitemap" :pages="sitemapPages" />
     </TabsContent>
     <TabsContent value="tracking" class="pt-4">
       <div class="space-y-4">
@@ -1850,3 +1846,13 @@ watch(() => [
     </TabsContent>
   </Tabs>
 </template>
+
+
+<style scoped>
+.cms-site-settings-tabs :deep([role='tab'][data-state='active']) {
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  font-weight: 700;
+  box-shadow: 0 2px 4px rgb(0 0 0 / 15%);
+}
+</style>

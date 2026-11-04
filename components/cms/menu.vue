@@ -1,4 +1,5 @@
 <script setup lang="js">
+import { preparePostTypePage } from '../../lib/cmsPostTypes'
 import { useVModel } from '@vueuse/core'
 import { Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePlus2, FileUp, FileWarning, FileX, Folder, FolderMinus, FolderOpen, FolderPen, FolderPlus, History, Link, Loader2 } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
@@ -1351,7 +1352,7 @@ const publishPage = async (pageId) => {
   const normalizedVersion = Number(pageDoc?.version)
   const pageVersion = Number.isFinite(normalizedVersion) ? Math.max(0, Math.trunc(normalizedVersion)) : 1
   await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`, {
-    ...pageDoc,
+    ...preparePostTypePage(pageDoc, pageId),
     version: pageVersion,
   })
 

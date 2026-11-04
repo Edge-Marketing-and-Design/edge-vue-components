@@ -60,7 +60,23 @@ const buildPostKvMetadata = (data, params) => {
   // Lists hide the date of a post whose publication date is not public.
   if (data?.hidePublishedDate === true)
     metadataBase.hidePublishedDate = true
+  if (data?.postTypeId) {
+    // Only dependencies compiled from the published index are added. The complete
+    // canonical post stays available through the existing canonical lookup.
+    for (const path of data.postTypeProjection?.fields || []) {
+      const parts = String(path).split('.')
+      if (!/^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$/.test(path) || parts.some(key => ['__proto__', 'prototype', 'constructor', 'uid', 'users', 'roles', 'permissions', 'restrictionRuleId', 'postTypeSchema'].includes(key)))
+        throw new Error('Invalid public post metadata field.')
+      const value = parts.reduce((item, key) => item?.[key], data)
+      if (value === undefined) continue
+      let target = metadataBase
+      for (const key of parts.slice(0, -1)) { if (!target[key] || typeof target[key] !== 'object') target[key] = {}; target = target[key] }
+      target[parts.at(-1)] = value
+    }
+  }
   const canonicalKey = postCanonicalKey(params || {})
+  if (data?.postTypeId && metadataSizeBytes({ ...metadataBase, canonical: canonicalKey }) > MAX_KV_METADATA_BYTES)
+    throw new Error('Post index metadata exceeds 1,024 bytes. Reduce the fields used by the index or use canonical post lookups.')
   const fittedTags = fitPostTagsToMetadataBudget({
     metadataBase,
     tags: data?.tags,

@@ -586,3 +586,19 @@ change.
 - `edge/docs/data-contracts/cms-posts/README.md`: the post documents the
   `post` area of a page template renders, and that the `post.*` operations
   write as drafts.
+
+### Values-only custom posts
+
+`post.create` additionally accepts `postTypeId` (the defining page in this site)
+and `values` (an object mapping editable semantic field paths to content).
+The page must be an enabled custom post type. The operation writes a normal
+draft post containing those values and its stable type association, with no
+copied body/layout. `templateId` and an Event kind cannot be combined with this
+mode. Unknown fields and schema/required/type problems reject the operation.
+
+For an existing custom post, `post.update` accepts `fields.values` with the
+same path/value map, validated against its defining detail page. Other standard
+post metadata edits retain their existing behavior. Post block-placement,
+movement/removal and instance-value operations are refused for values-only
+posts; edit their shared layout on the defining page instead. Nothing in these
+operations publishes posts or changes sitemap settings.
