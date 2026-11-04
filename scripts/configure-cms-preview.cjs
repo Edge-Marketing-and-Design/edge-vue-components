@@ -73,9 +73,13 @@ async function configureCmsPreview(projectRoot, { prompt = promptHubUrl, env = p
     || await prompt()
   const secret = existingSecret || env[SECRET_KEY] || randomBytes(32).toString('hex')
   checkSettings(setValue(setValue('', SECRET_KEY, secret), URL_KEY, baseUrl))
+  // Shared deployment already owns its guard. Only migrate legacy Hub launchers.
+  const sharedDeploy = readText(path.join(projectRoot, 'edge/deploy.sh'))
+  if (sharedDeploy && !sharedDeploy.includes(CHECK_MARKER))
+    throw new Error('edge/deploy.sh is missing the CMS preview configuration check')
   const deployPath = path.join(projectRoot, 'deploy.sh')
   const deploy = readText(deployPath)
-  const nextDeploy = deploy ? addDeployCheck(deploy) : ''
+  const nextDeploy = !sharedDeploy && deploy ? addDeployCheck(deploy) : deploy
   let next = original
   if (!existingSecret)
     next = setValue(next, SECRET_KEY, secret)

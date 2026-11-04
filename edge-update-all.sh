@@ -17,6 +17,9 @@ Updates:
    and configure production signed previews (generate a missing secret)
 4) install packages listed in edge/root/edge.packages.json
 5) install function packages listed in edge/functions/edge.packages.json
+
+Deploy afterward with: sh edge/deploy.sh
+Preview Function selection: sh edge/deploy.sh --plan-functions
 EOF
 }
 
