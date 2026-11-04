@@ -208,7 +208,8 @@ const issueAgentSession = async (connection, body = {}) => {
   if (!orgSnap.exists)
     throw new HttpsError('not-found', 'Organization does not exist.')
   const siteSnap = siteId ? await org.collection('sites').doc(siteId).get() : null
-  if (siteSnap && !siteSnap.exists)
+  // The templates site needs no site document: its pages are the templates.
+  if (siteSnap && !siteSnap.exists && siteId !== 'templates')
     throw new HttpsError('not-found', 'Site does not exist in the selected organization.')
   const expiresAt = new Date(Math.min(Date.now() + SESSION_MS, Date.parse(connection.data.expiresAt))).toISOString()
   const data = { connectionId: connection.id, createdBy: connection.data.createdBy, orgId, siteId, scope, createdAt: new Date().toISOString(), expiresAt, expiresAtTimestamp: Timestamp.fromMillis(Date.parse(expiresAt)), revokedAt: null }
@@ -272,15 +273,15 @@ exports.verifyAgentSession = async (orgId, header, body) => {
     const target = (body.action === 'check' || body.action === 'run') ? body.operation?.siteId : body.siteId
     if (target !== session.data.siteId)
       throw new HttpsError('permission-denied', 'Session belongs to a different site.')
-    if ((body.action === 'check' || body.action === 'run') && !type.startsWith('page.') && !type.startsWith('post.') && type !== 'site.update')
-      throw new HttpsError('permission-denied', 'Site sessions only allow page and post operations and updates to this site.')
+    if ((body.action === 'check' || body.action === 'run') && !type.startsWith('page.') && !type.startsWith('post.') && !['site.update', 'site.settings', 'site.menus'].includes(type))
+      throw new HttpsError('permission-denied', 'Site sessions only allow page and post operations and updates, settings and menus of this site.')
   }
   else if (session.data.scope === 'organization') {
     // Library reads (blocks, themes, usage, audit) belong to the organization.
     // Media uploads and finds belong to the organization too.
     const libraryRead = LIBRARY_READ_ACTIONS.includes(body.action) || MEDIA_ACTIONS.includes(body.action)
-    if (!libraryRead && (!['check', 'run'].includes(body.action) || (!type.startsWith('block.') && !type.startsWith('theme.') && type !== 'site.create')))
-      throw new HttpsError('permission-denied', 'Organization sessions only allow library/theme reads and work, media, and site creation. Open a site session for page and post work.')
+    if (!libraryRead && (!['check', 'run'].includes(body.action) || (!type.startsWith('block.') && !type.startsWith('theme.') && !type.startsWith('template.') && type !== 'site.create')))
+      throw new HttpsError('permission-denied', 'Organization sessions only allow library/theme reads and work, templates, media, and site creation. Open a site session for page and post work (siteId "templates" for a template\'s blocks).')
   }
   else {
     throw new HttpsError('permission-denied', 'Invalid session scope.')

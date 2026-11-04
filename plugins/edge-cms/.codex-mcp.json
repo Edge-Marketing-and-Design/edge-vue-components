@@ -8,6 +8,13 @@
         "cms-drafts"
       ],
       "tool_timeout_sec": 540
+    },
+    "chrome-devtools": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "chrome-devtools-mcp@1.12.0"
+      ]
     }
   }
 }

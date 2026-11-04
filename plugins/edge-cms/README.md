@@ -5,12 +5,21 @@ use both, without a Hub checkout. Edge developers use the skills with the
 Hub's local CMS tools and keep the remote server off (Developer setup, below).
 
 - **Skills:** `edge-block-package`, `edge-design-to-site`, `edge-figma-design`,
-  `vue-to-block-migrator`. Copies of `edge/skills/`; don't edit them here.
+  `vue-to-block-migrator`, `edge-site-setup` (a new site to the standard in
+  its `site-standards.json`), `edge-site-launch` (pre-launch, the person's
+  launch steps, post-launch checks) and `edge-skill-impact` (keeps the
+  skills, contracts and agent guide in step with code changes; needs a Hub
+  checkout). Copies of `edge/skills/`; don't edit them here.
   Each says what changes without a Hub checkout. The migrator reads the public
   renderer's Template v2 guide as `cms_contract` kind `renderer`, which the
   Hub bundles from emd-cms-front.
 - **MCP server `edge-cms`:** the Hub's `cms-agentMcp` endpoint (draft-only:
   nothing it does publishes a page, releases a block or changes a live theme).
+- **MCP server `chrome-devtools`:** Google's `chrome-devtools-mcp`, pinned
+  (`npx -y chrome-devtools-mcp@1.12.0`), for `edge-site-launch`: it drives a
+  local Chrome for Lighthouse (accessibility, best practices, SEO; its
+  performance trace tools for performance), phone-width checks, console and
+  network. No key. Needs Node 22 and a current Chrome.
 
 ## Install
 
@@ -44,6 +53,23 @@ If you already added the remote server by hand (for example `emd-cms-remote`
 in `~/.claude.json`), remove it after installing so the tools don't appear
 twice.
 
+## Updating (Seth, Deanna)
+
+After a change to the skills or servers is promoted to `edge-vue-components`
+(`edge-push.sh`), update the marketplace and the plugin, then start a new
+session:
+
+```bash
+claude plugin marketplace update edge
+claude plugin update edge-cms@edge
+```
+
+Check it took: `/skills` lists the seven skills (`edge-site-setup`,
+`edge-site-launch` and `edge-skill-impact` among them) and `/mcp` lists
+`chrome-devtools`. The first `chrome-devtools` call downloads the pinned
+package through `npx`. In Claude Desktop, update the plugin from its page
+in the plugin catalog.
+
 ## Developer setup
 
 Edge developers (with the Hub repositories) work from a Hub checkout: the
@@ -74,8 +100,8 @@ block), and scripts against the Hub's own validator, converter and engine
 (edge-block-package `reference/scripting-against-a-hub.md`).
 
 Check a session: `/mcp` lists one CMS server (the Hub's local one, for
-example `clearwater-firebase-readonly`), `edge-cms` is disabled, and
-`/skills` lists the four skills.
+example `clearwater-firebase-readonly`) and `chrome-devtools`, `edge-cms`
+is disabled, and `/skills` lists the seven skills.
 
 ## Maintaining
 

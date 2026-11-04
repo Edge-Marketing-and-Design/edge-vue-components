@@ -6,7 +6,7 @@
     {
       "name": "edge-cms",
       "source": "./plugins/edge-cms",
-      "description": "Edge CMS skills (block packages, design to site, Figma design, Vue/HTML to block migration) and the Hub's remote CMS tools."
+      "description": "Edge CMS skills (block packages, design to site, Figma design, Vue/HTML to block migration, site setup, site launch, skill impact), the Hub's remote CMS tools and Chrome DevTools for launch checks."
     }
   ]
 }

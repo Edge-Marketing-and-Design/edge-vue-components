@@ -2,7 +2,7 @@
 
 Status: in use through the Hub callables and the agent endpoint; every write is a draft.
 
-Last verified: 2026-10-28, remote MCP port (emd-cms handoff)
+Last verified: 2026-11-04, developer skills (template, site settings and menus operations; setup readiness codes)
 
 Server-side, draft-only writes for building sites, used by agents through the
 CMS MCP and available to any signed-in caller with write permission. Source:
@@ -30,7 +30,7 @@ operation there, not here. The rest of this file is hand-written.
 | Agent read audit | `organizations/{orgId}/cmsAgentReads/{autoId}` |
 | Operations contract explanation overrides | `agent-contract-notes/{key}` (top level; edited on the Agent Contract page, root admins) |
 | Sign-in tokens and codes for the remote MCP | `agent-oauth-tokens/{id}`, `agent-oauth-codes/{id}` (top level; Functions only) |
-| What operations write | `organizations/{orgId}/themes/{id}`, `sites/{siteId}`, `sites/{siteId}/pages/{pageId}`, `sites/{siteId}/posts/{postId}` (drafts), `blocks/{docId}` and `blocks/{blockId}/revisions/{number}` |
+| What operations write | `organizations/{orgId}/themes/{id}`, `sites/{siteId}`, `sites/{siteId}/pages/{pageId}`, `sites/{siteId}/posts/{postId}` (drafts), `sites/templates/pages/{templateId}` (templates), `blocks/{docId}` and `blocks/{blockId}/revisions/{number}` |
 
 Both top-level collections sit outside the organization on purpose: the Hub's
 generic Firestore rules (owned by `@edgedev/firebase`) let organization
@@ -123,6 +123,14 @@ from being finished:
   ready. Up to 500 draft pages, 500 published pages and 100 blocks are
   checked; `truncated` says when a site has more, and the report then
   carries the error `site.check-incomplete`.
+- **Templates readiness:** the same report for `siteId: "templates"` (no
+  site document needed) checks the templates' blocks and values and their
+  structured data only: no site, publication or SEO completeness items, and
+  the note `template.copies`.
+- **The site setup standard** (`edge/skills/edge-site-setup/site-standards.json`)
+  is checked by the `site.*`, `page.unlisted`, `page.chrome-missing` and
+  `form.no-recipient` codes below, so every site is held to it however it
+  was set up.
 
 | Readiness code | Meaning |
 | --- | --- |
@@ -141,6 +149,13 @@ from being finished:
 | `seo.structured-data` | Missing (warning) or not a JSON-LD object (error) |
 | `seo.structured-data-empty` | An empty `name` or `description` on the first item |
 | `seo.structured-data-tokens` | A token the public site won't replace, or a hard-coded site URL |
+| `site.favicon`, `site.logo` | No favicon; no logo (or, with `logoType: 'text'`, no logo text) (warnings) |
+| `site.contact-email` | No site contact email: forms without their own `emailTo` send nowhere (warning) |
+| `site.placeholder-domain` | A domain ending in `.test` (the placeholder `site.create` takes until launch) (warning) |
+| `page.unlisted` | A draft page in no menu, so it has no route (warning) |
+| `page.chrome-missing` | A page lacks a synced block that more than half of the pages (at least two) carry as site chrome (warning; `blockId` names it) |
+| `form.no-recipient` | A form instance (its schema has `emailTo`) with no `emailTo` value on a site with no contact email (error) |
+| `template.copies` | Templates readiness only: changes reach new pages and sites, not pages already copied (info) |
 
 ## Consumers
 
@@ -231,6 +246,32 @@ from editor output:
   'normal', columns: [{ id, span: 12, mobileOrder: 0, blocks }] }`, no
   `tailwindClasses`; the post editor's grid shows span 12 at full width. A
   template body keeps its own rows (a page template's `span: 6` included).
+- **Template page** (`template.create`, `blankTemplatePayload`): the
+  template editor's new page (`page.vue` `newDocs.pages` with
+  `templatesManager.vue`'s tags and allowed themes): `{ name, type,
+  content: [], postContent: [], structure: [], postStructure: [],
+  metaTitle: '', metaDescription: '', structuredData: <default page
+  structured data>, postMetaTitle: '', postMetaDescription: '',
+  postStructuredData: '', post, tags, allowedThemes, blockIds: [], version:
+  1, docId, doc_created_at, last_updated, uid }`. `type` is
+  `templateType`: `Page` and/or `Post`, Page only when `post` is true
+  (`normalizeTemplateTypes`). The page block operations work on templates
+  with `siteId: "templates"` and the template id as `pageId`; on a template
+  they refuse blocks whose types share none with the template's
+  (`block.not-allowed-here`, as the template editor's picker), and every
+  template change carries a notice that pages already copied keep their
+  copy.
+- **Site settings** (`site.settings`): the allow-list `SITE_SETTINGS_FIELDS`
+  written to the draft site document as given. Image settings
+  (`SITE_SETTINGS_IMAGE_FIELDS`) are empty or an http(s) URL on the Hub's
+  media hosts (Cloudflare Images and the R2 public host).
+- **Menus** (`site.menus`, `menuProblems`): the whole `menus` object, both
+  root menus kept (`withRootMenus`). Every draft page is listed exactly
+  once; page entries' `name` is the page's `name` (its slug); folder slugs
+  are lowercase words joined by dashes; slugs are unique among siblings and
+  across both root menus; external links are site paths (`/…`, `#…`, as
+  the menu editor stores `/#about`) or start with `https://`, `http://`,
+  `mailto:` or `tel:`.
 - **Post template:** a templates-site page whose types include `Post` and
   that is not a post template page (`post: true`), as the new-post dialog
   lists them; its body is its `postContent`/`postStructure`, else its

@@ -13,3 +13,14 @@ test('the plugin MCP server is the emd-cms endpoint with OAuth sign-in only', as
   const mcp = JSON.parse(await readFile(new URL('../plugins/edge-cms/.mcp.json', import.meta.url), 'utf8'))
   assert.deepEqual(mcp.mcpServers['edge-cms'], { type: 'http', url: 'https://us-west1-emd-cms.cloudfunctions.net/cms-agentMcp' })
 })
+
+// Bundled for the edge-site-launch skill: Google's Chrome DevTools server
+// (Lighthouse, performance traces, mobile emulation), stdio through npx, at
+// an exact version so every machine runs the same tools.
+test('the plugin bundles chrome-devtools-mcp at a pinned version', async () => {
+  for (const file of ['.mcp.json', '.codex-mcp.json']) {
+    const server = JSON.parse(await readFile(new URL(`../plugins/edge-cms/${file}`, import.meta.url), 'utf8')).mcpServers['chrome-devtools']
+    assert.equal(server.command, 'npx', file)
+    assert.match(server.args.at(-1), /^chrome-devtools-mcp@\d+\.\d+\.\d+$/, file)
+  }
+})

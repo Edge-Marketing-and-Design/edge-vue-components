@@ -139,3 +139,10 @@ diff -q functions/<shared-file>.js edge/functions/<shared-file>.js
 `edge/edge-update-all.sh` is the preferred way to pull and apply Edge updates. It syncs Edge functions/config, merges index/config files, runs the app shell migration, and installs packages listed by Edge.
 
 Do not run full builds unless the user explicitly permits it.
+
+## Completion
+
+When a change alters shared CMS behavior (code listed in
+`edge/skills/knowledge-map.json`), run the `edge-skill-impact` skill before
+handing back, so the skills, contracts and agent guide change with it;
+`edge/tests/skillImpact.test.mjs` fails otherwise.

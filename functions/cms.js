@@ -1612,6 +1612,57 @@ exports.trackHistory = onRequest(async (req, res) => {
     return
   }
 
+  // A form test (`data.formTest: true`, edge-site-launch): a signed-in
+  // developer who can change the organization's sites submits a real form.
+  // Nothing is recorded (no history, audience link or lead action) and the
+  // email goes to the developer's account email, naming the recipients the
+  // submission would have reached.
+  if (data && typeof data === 'object' && data.formTest === true) {
+    if (action !== 'Contact Form') {
+      res.status(400).json({ error: 'formTest is only for Contact Form submissions' })
+      return
+    }
+    if (!identity?.uid || !identity.email) {
+      res.status(401).json({ error: 'A form test needs a signed-in developer (firebaseIdToken)' })
+      return
+    }
+    if (!await permissionCheck(identity.uid, 'write', `organizations/${orgId}/sites`)) {
+      res.status(403).json({ error: 'A form test needs permission to change this organization\'s sites' })
+      return
+    }
+    const siteId = typeof data.siteId === 'string' ? data.siteId.trim() : ''
+    const pageId = typeof data.pageId === 'string' ? data.pageId.trim() : ''
+    const blockId = typeof data.blockId === 'string' ? data.blockId.trim() : ''
+    try {
+      const entries = collectFormEntries(data)
+      const submittedUserRouting = await resolveSubmittedUserRouting({ db, orgId, data })
+      let routedTo = submittedUserRouting?.email ? [submittedUserRouting.email] : []
+      if (!routedTo.length && siteId) {
+        const blockEmails = await getPublishedEmailTo(orgId, siteId, pageId, blockId)
+        const fallbackEmail = await getSiteSettingsEmail(orgId, siteId)
+        routedTo = blockEmails.length ? blockEmails : (fallbackEmail ? [fallbackEmail] : [])
+      }
+      const subject = `[Form test] ${getContactFormSubject(data, entries)}`
+      const sendgrid = await sendContactFormEmail({
+        to: [identity.email],
+        replyTo: identity.email,
+        subject,
+        data: { ...data, formTestRoutedTo: routedTo.join(', ') || '(no recipient configured)' },
+        entries: [...entries, { key: 'Form test: would route to', value: routedTo.join(', ') || '(no recipient configured)' }],
+        orgId,
+        siteId,
+        pageId,
+        blockId,
+      })
+      res.json({ test: true, routedTo, sentTo: identity.email, sendgrid: { ok: sendgrid?.ok === true, status: sendgrid?.status ?? null, message: sendgrid?.message || '' } })
+    }
+    catch (err) {
+      logger.error('Contact form test failed', err)
+      res.status(500).json({ error: 'Form test failed' })
+    }
+    return
+  }
+
   const historyRef = db.collection('organizations').doc(orgId).collection('lead-history')
   const oldUuid = typeof data?.oldUuid === 'string' ? data.oldUuid.trim() : ''
   const now = Firestore.FieldValue.serverTimestamp()

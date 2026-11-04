@@ -91,7 +91,12 @@ const setup = async () => {
   const placePost = async () => (await runChecked({ type: 'post.placeBlock', siteId: 'site1', postId: post, blockId: 'hero', values: { headline: 'One' } })).result.instanceId
   const postInstance = await placePost()
   await placePost()
+  const template = (await runChecked({ type: 'template.create', name: 'Landing', templateType: ['Page'] })).result.templateId
   const examples = {
+    'site.settings': { siteId: 'site1', settings: { contactEmail: 'hello@example.com', logoType: 'text', logoText: 'Site' } },
+    'site.menus': { siteId: 'site1', menus: { 'Site Root': [{ name: 'about', menuTitle: 'About', item: 'about' }], 'Not In Menu': [] } },
+    'template.create': { name: 'Article', templateType: ['Post'] },
+    'template.update': { templateId: template, fields: { name: 'Landing page', metaTitle: 'Landing' } },
     'theme.create': { fields: { name: 'New theme' } },
     'theme.update': { themeId: 'theme1', fields: { extraCSS: '.a{}' } },
     'theme.propose': { themeId: 'theme1', fields: { extraCSS: '.a{}' }, note: 'Spacing' },
@@ -129,7 +134,10 @@ test('every operation type has a spec, and every spec field has a known type', a
 test('every problem code a check reports is registered and explained, and every registered code is reported', async () => {
   const core = await import(path.join(functionRoot, 'helpers/cmsOperations.mjs'))
   const source = readFileSync(path.join(functionRoot, 'cmsOperations.js'), 'utf8')
-  const used = new Set([...source.matchAll(/problem\(plan, '([a-z0-9.-]+)'/g)].map(match => match[1]))
+  // Codes from the shared checks the operations report through problem()
+  // (menuProblems, siteSettingsProblems) are collected with add('code', ...).
+  const shared = readFileSync(path.join(functionRoot, 'helpers/cmsOperations.mjs'), 'utf8')
+  const used = new Set([...source.matchAll(/problem\(plan, '([a-z0-9.-]+)'/g), ...shared.matchAll(/add\('([a-z]+\.[a-z0-9.-]+)'/g)].map(match => match[1]))
   const registered = Object.keys(core.CMS_OPERATION_PROBLEMS)
   assert.deepEqual([...used].filter(code => !registered.includes(code)), [], 'codes used but not registered')
   assert.deepEqual(registered.filter(code => !used.has(code)), [], 'codes registered but never reported')

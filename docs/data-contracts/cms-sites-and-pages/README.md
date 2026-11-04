@@ -2,7 +2,7 @@
 
 Status: in use for every site the CMS publishes.
 
-Last verified: 2026-11-02, 878f63dc (branding icon preview, appIcon)
+Last verified: 2026-11-04, developer skills (templates, site settings and menus operations, form tests)
 
 A site is an organization's website: its settings, menus and domains, and
 the draft pages assembled from block instances. Publishing copies a page or
@@ -236,6 +236,15 @@ section names them).
   published block instance's `values.emailTo`, then the site's `contactEmail`
   (published first, draft fallback). Client-submitted email addresses do not
   select the destination.
+- **Form tests** (`data.formTest: true`, used by the `edge-site-launch`
+  skill): only for `Contact Form`, and only from an identified request
+  (`firebaseIdToken`) whose user can write the organization's sites; 401 or
+  403 otherwise, before anything is written. A test records no history,
+  audience link or lead action, and sends the email to the tester's account
+  email with the subject prefixed `[Form test]` and the recipients the
+  submission would have reached. The response is `{ test: true, routedTo,
+  sentTo, sendgrid: { ok, status, message } }`. The public renderer's form
+  helper must forward the flag (an `emd-cms-front` change, handed off).
 
 ## Consumers
 
@@ -257,7 +266,7 @@ section names them).
 - **Public renderer:** `emd-cms-front` reads the `sites:` and `pages:`
   datasets.
 - **Agents and tooling:** the operations (`site.create`, `site.update`,
-  `page.*`), `cms-siteReadiness`, the CMS MCP (`cms_find_usage`,
+  `site.settings`, `site.menus`, `template.*`, `page.*`), `cms-siteReadiness`, the CMS MCP (`cms_find_usage`,
   `cms_preview_url`, `cms_site_readiness`, `cms_list_pages`,
   `cms_get_page`), the `edge-design-to-site` skill.
 
@@ -265,8 +274,16 @@ section names them).
 
 - **Slugs:** a page's `name` is unique across both root menus; `page.create`
   and seeding make it unique (`ensureUniqueSlug`, `uniqueRootSlug`).
-- **The templates site** is never published; `page.create` refuses it, and
-  a release never updates its published copies.
+- **The templates site** is never published, and a release never updates
+  its published copies. It needs no site document. Templates are created
+  and changed with `template.create`, `template.update` and the page block
+  operations (`siteId: "templates"`); `page.create`, `site.settings` and
+  `site.menus` refuse it. Pages and sites copy a template when they are
+  created, so a template change reaches new copies only.
+- **Site settings and menus by operation:** `site.settings` writes the
+  allow-listed branding, contact, social and tracking settings, never
+  `domains` or `forwardApex`; `site.menus` replaces the menus with every
+  draft page listed once. Both write the draft site only.
 - **Versions:** every save and every page operation increments the page's
   `version`; publishing never changes a draft's version. A published page
   updated by a release takes the next version and writes `pageVersions` on

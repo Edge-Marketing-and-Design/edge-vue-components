@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import { readFile, readdir } from 'node:fs/promises'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
+import { PLUGIN_SKILLS } from '../plugins/sync-skills.mjs'
 
 // The Codex package of edge-cms, checked against the rules Codex applies when
 // it loads a plugin (openai/codex codex-rs: core-plugins/src/manifest.rs,
@@ -40,7 +41,7 @@ test('the Codex manifest uses only fields Codex reads, with valid paths and prom
 test('Codex gets the same skills as the Claude plugin', async () => {
   const manifest = await readJson('.codex-plugin/plugin.json')
   const skills = (await readdir(pluginPath(manifest.skills), { withFileTypes: true })).filter(entry => entry.isDirectory()).map(entry => entry.name).sort()
-  assert.deepEqual(skills, ['edge-block-package', 'edge-design-to-site', 'edge-figma-design', 'vue-to-block-migrator'])
+  assert.deepEqual(skills, [...PLUGIN_SKILLS].sort())
   for (const skill of skills) {
     const text = await readFile(`${pluginPath(manifest.skills)}${skill}/SKILL.md`, 'utf8')
     const frontmatter = /^---\n([\s\S]*?)\n---\n/.exec(text)?.[1] || ''

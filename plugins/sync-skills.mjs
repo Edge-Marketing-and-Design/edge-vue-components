@@ -8,7 +8,7 @@ import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 
-export const PLUGIN_SKILLS = ['edge-block-package', 'edge-design-to-site', 'edge-figma-design', 'vue-to-block-migrator']
+export const PLUGIN_SKILLS = ['edge-block-package', 'edge-design-to-site', 'edge-figma-design', 'vue-to-block-migrator', 'edge-skill-impact', 'edge-site-setup', 'edge-site-launch']
 
 const edgeRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const source = path.join(edgeRoot, 'skills')

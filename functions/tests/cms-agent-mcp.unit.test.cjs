@@ -223,6 +223,24 @@ test('organization and site scope are enforced on every call', async (t) => {
   assert.equal(lost.code, 'permission-denied', 'lost Hub access stops a cached session')
 })
 
+test('templates, site settings and menus run in the right sessions without a templates site document', async (t) => {
+  const env = await setup(t)
+  const client = await connect(t, env)
+  // Organization session: template.create; no sites/templates document exists here.
+  const created = await callTool(client, 'cms_check_operation', { orgId: 'a', operation: { type: 'template.create', name: 'Landing' } })
+  assert.equal(created.blocked, false, JSON.stringify(created))
+  // Site sessions: settings and menus of one site, and a template's blocks on the templates site.
+  const settings = await callTool(client, 'cms_check_operation', { orgId: 'a', operation: { type: 'site.settings', siteId: 's', settings: { logoText: 'A' } } })
+  assert.equal(settings.blocked, false, JSON.stringify(settings))
+  const menus = await callTool(client, 'cms_check_operation', { orgId: 'a', operation: { type: 'site.menus', siteId: 's', menus: { 'Site Root': [], 'Not In Menu': [] } } })
+  assert.deepEqual(menus.problemCodes, ['menus.page-missing', 'menus.page-missing'], 'checked against the site\'s pages')
+  const templateBlocks = await callTool(client, 'cms_check_operation', { orgId: 'a', operation: { type: 'page.placeBlock', siteId: 'templates', pageId: 'missing', blockId: 'hero' } })
+  assert.deepEqual(templateBlocks.problemCodes, ['page.not-found'], 'a templates-site session opens without a site document')
+  const opened = await callTool(client, 'cms_open_session', { orgId: 'a', scope: 'site', siteId: 's' })
+  const wrong = await callTool(client, 'cms_check_operation', { sessionId: opened.sessionId, orgId: 'a', operation: { type: 'template.create', name: 'X' } })
+  assert.equal(wrong.code, 'permission-denied', 'a site session cannot create templates')
+})
+
 test('sessions are reused, renewed before expiry and reissued when the Hub stops accepting them', async (t) => {
   const env = await setup(t)
   const client = await connect(t, env)

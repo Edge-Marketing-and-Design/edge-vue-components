@@ -3,6 +3,13 @@
     "edge-cms": {
       "type": "http",
       "url": "https://us-west1-emd-cms.cloudfunctions.net/cms-agentMcp"
+    },
+    "chrome-devtools": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "chrome-devtools-mcp@1.12.0"
+      ]
     }
   }
 }

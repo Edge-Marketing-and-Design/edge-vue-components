@@ -30,7 +30,7 @@ const loadImportCheck = () => Promise.all([
 ])
 
 const DOC_ID_PATTERN = /^[^/]{1,1500}$/
-const PERMISSION_TARGETS = { theme: 'themes', page: 'sites', block: 'blocks', site: 'sites', post: 'sites' }
+const PERMISSION_TARGETS = { theme: 'themes', page: 'sites', block: 'blocks', site: 'sites', post: 'sites', template: 'sites' }
 const MAX_VALUE_BYTES = 200000
 
 const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -271,19 +271,20 @@ const planTheme = async (core, reader, { orgId, uid, now, operation }) => {
 const loadSiteAndPage = async (reader, plan, { orgId, siteId, pageId }) => {
   const siteRef = orgRefOf(orgId).collection('sites').doc(siteId)
   const siteSnap = await reader.doc(siteRef)
-  if (!siteSnap.exists) {
+  // The templates site needs no site document: its pages are the templates.
+  if (!siteSnap.exists && siteId !== 'templates') {
     problem(plan, 'site.not-found', `Site "${siteId}" does not exist.`)
     return {}
   }
   if (!pageId)
-    return { siteRef, site: siteSnap.data() || {} }
+    return { siteRef, site: (siteSnap.exists && siteSnap.data()) || {} }
   const pageRef = siteRef.collection('pages').doc(pageId)
   const pageSnap = await reader.doc(pageRef)
   if (!pageSnap.exists) {
     problem(plan, 'page.not-found', `Draft page "${pageId}" does not exist on site "${siteId}".`)
-    return { siteRef, site: siteSnap.data() || {} }
+    return { siteRef, site: (siteSnap.exists && siteSnap.data()) || {} }
   }
-  return { siteRef, site: siteSnap.data() || {}, pageRef, page: pageSnap.data() || {} }
+  return { siteRef, site: (siteSnap.exists && siteSnap.data()) || {}, pageRef, page: pageSnap.data() || {} }
 }
 
 // The site's existing synced instance of a block, from the draft pages that
@@ -339,12 +340,13 @@ const instanceLabel = instance => instance?.name || instance?.blockId
 
 const pageBody = (core, { pageRef, page, siteId, pageId }) => ({
   ref: pageRef,
-  label: `draft page ${pageId}`,
+  label: siteId === 'templates' ? `template ${pageId}` : `draft page ${pageId}`,
   ids: { siteId, pageId },
   areas: { main: ['content', 'structure'], post: ['postContent', 'postStructure'] },
   createRow: core.createFullWidthRow,
   blockIds: core.derivePageBlockIds,
-  refuseBlock: () => null,
+  // The template editor's picker offers blocks of the template's types.
+  refuseBlock: block => ((siteId !== 'templates' || core.templateAllowsBlock(page, block)) ? null : `"${block.name || block.docId}" is not offered on this template: its types (${core.normalizeBlockTypes(block.type).join(', ') || 'none'}) share none with the template's (${core.normalizeTemplateTypes(page.type, { post: page.post === true }).join(', ')}).`),
   versioned: fields => ({ ...fields, version: core.getNextVersion(page.version) }),
 })
 
@@ -557,7 +559,7 @@ const planPage = async (core, reader, { orgId, uid, now, operation }) => {
 
   if (operation.type === 'page.create') {
     if (siteId === 'templates')
-      problem(plan, 'page.templates-site', 'Pages on the templates site are created in the Hub.')
+      problem(plan, 'page.templates-site', 'Template pages are created with template.create.')
     const { siteRef, site } = await loadSiteAndPage(reader, plan, { orgId, siteId })
     if (!siteRef)
       return plan
@@ -608,9 +610,122 @@ const planPage = async (core, reader, { orgId, uid, now, operation }) => {
   }
 
   const body = pageBody(core, { pageRef, page, siteId, pageId })
+  if (siteId === 'templates')
+    plan.notices = [...(plan.notices || []), core.TEMPLATE_COPY_NOTICE]
   if (operation.type === 'page.placeBlock')
     return planPlaceBlock(core, reader, plan, { orgId, uid, now, operation, siteRef, body, next })
   return planInstanceOperation(core, plan, { now, uid, operation, next, body })
+}
+
+// ---- Templates ----
+// Template pages on the templates site, shaped as the Hub's template editor
+// (page.vue, templatesManager.vue) saves them. Their blocks change through
+// the page block operations with siteId "templates".
+
+const templateTypesFrom = (core, plan, value, post) => {
+  if (value === undefined)
+    return core.normalizeTemplateTypes(['Page'], { post })
+  if (!Array.isArray(value) || !value.length || value.some(type => !core.TEMPLATE_TYPES.includes(type))) {
+    problem(plan, 'template.type', `templateType must be a list of ${core.TEMPLATE_TYPES.join(' and/or ')}.`)
+    return null
+  }
+  if (post && value.includes('Post')) {
+    problem(plan, 'template.type', 'A post template (post: true) is a Page template only; leave Post out of templateType.')
+    return null
+  }
+  return core.normalizeTemplateTypes(value, { post })
+}
+
+const stringList = (plan, value, label) => {
+  if (value === undefined)
+    return []
+  if (!Array.isArray(value) || value.some(item => typeof item !== 'string')) {
+    problem(plan, 'fields.type', `${label} must be a list of strings.`)
+    return []
+  }
+  return [...new Set(value.map(item => item.trim()).filter(Boolean))]
+}
+
+const checkTemplateThemes = async (reader, plan, orgId, themeIds) => {
+  for (const themeId of themeIds) {
+    if (!DOC_ID_PATTERN.test(themeId) || !(await reader.doc(orgRefOf(orgId).collection('themes').doc(themeId))).exists)
+      problem(plan, 'theme.not-found', `allowedThemes names theme "${themeId}", which does not exist.`)
+  }
+}
+
+const planTemplate = async (core, reader, { orgId, uid, now, operation }) => {
+  const plan = createPlan()
+  const pagesRef = orgRefOf(orgId).collection('sites').doc('templates').collection('pages')
+
+  if (operation.type === 'template.create') {
+    const allowedKeys = ['type', 'name', 'templateType', 'post', 'tags', 'allowedThemes', 'fields']
+    for (const key of Object.keys(operation).filter(key => !allowedKeys.includes(key)))
+      problem(plan, 'fields.not-allowed', `"${key}" isn't a template.create input (allowed: ${allowedKeys.slice(1).join(', ')}).`)
+    const name = typeof operation.name === 'string' ? operation.name.trim() : ''
+    if (!name)
+      problem(plan, 'template.name-required', 'A template needs a name.')
+    if (operation.post !== undefined && typeof operation.post !== 'boolean')
+      problem(plan, 'fields.type', 'post must be true or false.')
+    const post = operation.post === true
+    const types = templateTypesFrom(core, plan, operation.templateType, post)
+    const tags = stringList(plan, operation.tags, 'tags')
+    const allowedThemes = stringList(plan, operation.allowedThemes, 'allowedThemes')
+    await checkTemplateThemes(reader, plan, orgId, allowedThemes)
+    let fields = {}
+    if (operation.fields !== undefined) {
+      if (isPlainObject(operation.fields))
+        fields = pageFieldUpdate(core, plan, operation.fields, 'template.create')
+      else
+        problem(plan, 'fields.type', 'fields must be an object of page fields.')
+    }
+    const templateId = randomUUID()
+    const ref = pagesRef.doc(templateId)
+    addWrite(plan, ref, { ...core.blankTemplatePayload({ name, types: types || ['Page'], post, tags, allowedThemes }, now), ...fields, docId: templateId, uid }, 'set', `Create ${post ? 'post template' : 'template'} "${name}" (${(types || ['Page']).join(', ')}) on the templates site.`)
+    plan.result = { siteId: 'templates', templateId }
+    return plan
+  }
+
+  const templateId = requireDocId(operation.templateId, 'template id')
+  const ref = pagesRef.doc(templateId)
+  const snap = await reader.doc(ref)
+  if (!snap.exists) {
+    problem(plan, 'template.not-found', `Template "${templateId}" does not exist on the templates site.`)
+    return plan
+  }
+  const template = snap.data() || {}
+  const fields = isPlainObject(operation.fields) ? operation.fields : {}
+  if (!Object.keys(fields).length)
+    problem(plan, 'template.no-fields', 'No template fields to change.')
+  const update = {}
+  const seo = {}
+  for (const [key, value] of Object.entries(fields)) {
+    if (!core.TEMPLATE_UPDATE_FIELDS.includes(key))
+      problem(plan, 'fields.not-allowed', `"${key}" can't be set by template.update (allowed: ${core.TEMPLATE_UPDATE_FIELDS.join(', ')}).`)
+    else if (key === 'name') {
+      if (typeof value !== 'string' || !value.trim())
+        problem(plan, 'template.name-required', 'A template needs a name.')
+      else
+        update.name = value.trim()
+    }
+    else if (key === 'templateType') {
+      const types = templateTypesFrom(core, plan, value, template.post === true)
+      if (types)
+        update.type = types
+    }
+    else if (key === 'tags' || key === 'allowedThemes') {
+      update[key] = stringList(plan, value, key)
+    }
+    else {
+      seo[key] = value
+    }
+  }
+  if (update.allowedThemes)
+    await checkTemplateThemes(reader, plan, orgId, update.allowedThemes)
+  Object.assign(update, pageFieldUpdate(core, plan, seo, 'template.update'))
+  plan.notices = [...(plan.notices || []), core.TEMPLATE_COPY_NOTICE]
+  addWrite(plan, ref, { ...update, version: core.getNextVersion(template.version), ...stamp(uid, now) }, 'update', `Update template ${templateId}: ${Object.keys(update).map(key => (key === 'type' ? 'templateType' : key)).join(', ')}.`)
+  plan.result = { siteId: 'templates', templateId }
+  return plan
 }
 
 // ---- Posts ----
@@ -948,9 +1063,63 @@ const planSiteUpdate = async (core, reader, { orgId, uid, now, operation }) => {
   return plan
 }
 
+// site.settings { siteId, settings }: branding, contact, social, menu
+// position and tracking on the draft site document, from an allow-list.
+const planSiteSettings = async (core, reader, { orgId, uid, now, operation }) => {
+  const plan = createPlan()
+  const siteId = requireDocId(operation.siteId, 'site id')
+  if (siteId === 'templates') {
+    problem(plan, 'site.templates-site', 'The templates site has no settings of its own.')
+    return plan
+  }
+  const siteRef = orgRefOf(orgId).collection('sites').doc(siteId)
+  if (!(await reader.doc(siteRef)).exists) {
+    problem(plan, 'site.not-found', `Site "${siteId}" does not exist.`)
+    return plan
+  }
+  const settings = isPlainObject(operation.settings) ? operation.settings : {}
+  if (!Object.keys(settings).length)
+    problem(plan, 'site.no-fields', 'No site settings to change.')
+  const found = core.siteSettingsProblems(settings, { mediaHosts: mediaHosts() })
+  for (const { code, message } of found)
+    problem(plan, code, message)
+  const update = Object.fromEntries(Object.entries(settings).filter(([key]) => core.SITE_SETTINGS_FIELDS.includes(key)))
+  addWrite(plan, siteRef, { ...update, ...stamp(uid, now) }, 'update', `Update site ${siteId} settings: ${Object.keys(update).join(', ')}. Published site settings are unchanged.`)
+  plan.result = { siteId }
+  return plan
+}
+
+// site.menus { siteId, menus }: the site's whole menus, checked against its
+// draft pages as the menu editor keeps them.
+const planSiteMenus = async (core, reader, { orgId, uid, now, operation }) => {
+  const plan = createPlan()
+  const siteId = requireDocId(operation.siteId, 'site id')
+  if (siteId === 'templates') {
+    problem(plan, 'site.templates-site', 'The templates site has no menus of its own.')
+    return plan
+  }
+  const siteRef = orgRefOf(orgId).collection('sites').doc(siteId)
+  if (!(await reader.doc(siteRef)).exists) {
+    problem(plan, 'site.not-found', `Site "${siteId}" does not exist.`)
+    return plan
+  }
+  const pagesSnap = await reader.query(siteRef.collection('pages'), `${siteRef.path}/pages`)
+  const pages = Object.fromEntries(pagesSnap.docs.map(doc => [doc.id, doc.data() || {}]))
+  for (const { code, message } of core.menuProblems(operation.menus, pages))
+    problem(plan, code, message)
+  const menus = isPlainObject(operation.menus) ? core.withRootMenus(operation.menus) : {}
+  addWrite(plan, siteRef, { menus, ...stamp(uid, now) }, 'update', `Replace the menus of site ${siteId} (${Object.keys(menus).join(', ')}). Published menus are unchanged until the site is published.`)
+  plan.result = { siteId }
+  return plan
+}
+
 const planSite = async (core, reader, context) => {
   if (context.operation.type === 'site.update')
     return planSiteUpdate(core, reader, context)
+  if (context.operation.type === 'site.settings')
+    return planSiteSettings(core, reader, context)
+  if (context.operation.type === 'site.menus')
+    return planSiteMenus(core, reader, context)
   const { orgId, uid, now, operation } = context
   const plan = createPlan()
   const org = orgRefOf(orgId)
@@ -1047,6 +1216,8 @@ const planOperation = async (reader, context) => {
     return planSite(core, reader, context)
   if (area === 'post')
     return planPost(core, reader, context)
+  if (area === 'template')
+    return planTemplate(core, reader, context)
   return planBlock(core, reader, context)
 }
 
@@ -1184,9 +1355,12 @@ const gatherSiteReadiness = async ({ orgId, siteId }) => {
   const org = orgRefOf(orgId)
   const siteRef = org.collection('sites').doc(siteId)
   const siteSnap = await siteRef.get()
-  if (!siteSnap.exists)
+  // The templates site needs no site document; its report checks the
+  // templates' blocks (buildSiteReadiness, templates).
+  const templates = siteId === 'templates'
+  if (!siteSnap.exists && !templates)
     throw new HttpsError('not-found', `Site "${siteId}" does not exist.`)
-  const site = siteSnap.data() || {}
+  const site = (siteSnap.exists && siteSnap.data()) || {}
   const themeSnap = site.theme ? await org.collection('themes').doc(String(site.theme)).get() : null
   const pagesSnap = await siteRef.collection('pages').limit(READINESS_MAX_PAGES + 1).get()
   const publishedSnap = await siteRef.collection('published').limit(READINESS_MAX_PAGES + 1).get()
@@ -1220,7 +1394,7 @@ const gatherSiteReadiness = async ({ orgId, siteId }) => {
   for (const blockId of checked)
     blockChecks[blockId] = await validation.validateBlock({ ...blocks[blockId] }, { knownThemeIds, renderTemplate: engine.renderTemplateAsync })
 
-  const report = core.buildSiteReadiness({ site, theme: themeSnap?.exists ? themeSnap.data() : null, pages, published, blocks, drafts, blockChecks, mediaHosts: mediaHosts() })
+  const report = core.buildSiteReadiness({ site, theme: themeSnap?.exists ? themeSnap.data() : null, pages, published, blocks, drafts, blockChecks, mediaHosts: mediaHosts(), templates })
   const blockCount = Object.keys(blocks).length
   const morePages = pagesSnap.size > READINESS_MAX_PAGES || publishedSnap.size > READINESS_MAX_PAGES
   const truncated = morePages || blockCount > READINESS_MAX_BLOCK_CHECKS
@@ -1267,9 +1441,10 @@ const PAGE_OUTLINE_MAX_BLOCKS = 200
 const loadSite = async (orgId, siteId) => {
   const siteRef = orgRefOf(orgId).collection('sites').doc(siteId)
   const siteSnap = await siteRef.get()
-  if (!siteSnap.exists)
+  // The templates site needs no site document (its templates are its pages).
+  if (!siteSnap.exists && siteId !== 'templates')
     throw new HttpsError('not-found', `Site "${siteId}" does not exist.`)
-  return { siteRef, site: siteSnap.data() || {} }
+  return { siteRef, site: (siteSnap.exists && siteSnap.data()) || {} }
 }
 
 // The site's menus and pages with their publication state (buildSitePages

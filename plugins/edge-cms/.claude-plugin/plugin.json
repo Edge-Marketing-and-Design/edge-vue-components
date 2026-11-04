@@ -1,6 +1,6 @@
 {
   "name": "edge-cms",
-  "description": "Build and update Edge CMS sites in a Hub without a Hub checkout: the edge-block-package, edge-design-to-site, edge-figma-design and vue-to-block-migrator skills, and the Hub's remote CMS tools (draft-only).",
+  "description": "Build, set up, launch and update Edge CMS sites in a Hub: the edge-block-package, edge-design-to-site, edge-figma-design, vue-to-block-migrator, edge-site-setup, edge-site-launch and edge-skill-impact skills, the Hub's remote CMS tools (draft-only), and Chrome DevTools for launch checks.",
   "author": {
     "name": "Edge Marketing Design"
   },

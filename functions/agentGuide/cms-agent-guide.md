@@ -18,9 +18,9 @@ Shared Edge source: `edge/functions/agentGuide/cms-agent-guide.md`.
 - **You act as yourself.** Every call runs with your current Hub rights in the
   organization you name, and is recorded: runs in the operation audit, library
   reads in the read audit. Lose access in the Hub and the tools stop too.
-- **Some things stay in the Hub:** menus and site settings other than
-  `metaTitle`, `metaDescription` and `structuredData`; videos and files;
-  publishing; releasing blocks; applying theme proposals.
+- **Some things stay in the Hub:** domains and apex forwarding; renaming and
+  deleting pages; members-only content, users and the site AI; videos and
+  files; publishing; releasing blocks; applying theme proposals.
 - **Images come from the Hub's media.** Upload them with `cms_upload_media`
   and place the Hub URL it returns. Never leave a link to another site (an
   old site, a CDN, a stock photo URL) in a block or a value.
@@ -31,9 +31,9 @@ Shared Edge source: `edge/functions/agentGuide/cms-agent-guide.md`.
    with `nextStartAfter` until it is null.
 2. Pass that `orgId` to every other tool. For page and post work also pass the
    `siteId` (from `cms_list_sites`; inside the operation for check and run). The server opens and
-   renews the right session for each call: a site session for page, post and
-   `site.update` work, an organization session for library reads, blocks,
-   themes and `site.create`. `cms_open_session` is optional; it only names a
+   renews the right session for each call: a site session for page, post,
+   `site.update`, `site.settings` and `site.menus` work, an organization
+   session for library reads, blocks, themes, templates and `site.create`. `cms_open_session` is optional; it only names a
    target up front.
 3. `cms_list_pages` and `cms_list_posts` show a site's pages (menus, status)
    and posts; `cms_get_page` and `cms_get_post` outline one, with the
@@ -56,6 +56,41 @@ Shared Edge source: `edge/functions/agentGuide/cms-agent-guide.md`.
   `structuredData`.
 - **Posts** work the same way with `post.create`, `post.update` and
   `post.placeBlock` / `setValues` / `moveBlock` / `removeBlock` with `postId`.
+
+## Set up a site
+
+- **Settings:** `site.settings` sets branding (logo, light logo, text logo,
+  brand logos, favicon, app icon), contact email and phone, social links,
+  menu position and tracking ids on the draft site. Images must be Hub media
+  URLs (`cms_upload_media`). The SEO fields stay with `site.update`.
+- **Menus:** `site.menus` replaces the whole `menus` object. Read the current
+  menus with `cms_list_pages`, change them and send them back: every draft
+  page listed once (`Not In Menu` for routable pages the navigation hides),
+  page entries keep the page's slug, folders are `{ name, menuTitle, item: {
+  folderSlug: [entries] } }`, links `{ name, item: { type: 'external', url }
+  }`.
+- **Domains:** `site.create` needs a domain; a new site takes a placeholder
+  `<site-slug>.test`. A person sets the real domain at launch, and readiness
+  warns while it is on `.test` (`site.placeholder-domain`).
+
+## Templates
+
+Templates are pages on the `templates` site, copied when a theme seeds a new
+site (its default pages and menus) or a page or post is created from one.
+
+- `cms_list_pages` and `cms_get_page` with `siteId: "templates"` read them.
+- `template.create` makes one (`name`, `templateType` `["Page"]`, `["Post"]`
+  or both, `post: true` for a post template with an index and a detail
+  page); `template.update` changes its name, types, tags, themes and SEO.
+- Its blocks change with the page block operations: `page.placeBlock`,
+  `page.setValues`, `page.moveBlock`, `page.removeBlock` with `siteId:
+  "templates"` and the template id as `pageId`. A template only takes blocks
+  whose types share one with its own.
+- A theme's `defaultPages` and `defaultMenus` name templates; set them with
+  `theme.update` (or `theme.propose` for a live theme).
+- Changing a template never changes pages already made from it: only new
+  pages and sites get the change. `cms_site_readiness` with `siteId:
+  "templates"` checks the templates' blocks.
 
 ## Add images
 
@@ -144,8 +179,10 @@ on another host, with the page, instance and field.
   theme-specific components.
 - `cms_site_readiness` lists what stops a site from being finished: failed
   block checks, empty required content, missing blocks, unreleased drafts,
-  pages behind the released block, unpublished pages, and images linked from
-  outside the Hub's media (`media.external-image`).
+  pages behind the released block, unpublished pages, images linked from
+  outside the Hub's media (`media.external-image`), and the site setup
+  standard: favicon, logo, contact email, a placeholder domain, pages in no
+  menu, pages missing the site chrome, and forms with no recipient.
 
 ## When something is refused
 

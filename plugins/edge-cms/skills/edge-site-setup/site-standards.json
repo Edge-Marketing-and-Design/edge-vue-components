@@ -1,0 +1,105 @@
+{
+  "about": "How every Edge CMS site is set up. A person reads it as a checklist; the edge-site-setup skill works from it as its plan. Each item: the rule, how it is set (`set`), how it is checked (`check`: readiness codes that must be absent, or `answers` fields the site must match), and whether a person must do it. scripts/standards-report.mjs evaluates it against a readiness report, the draft site and the answers.",
+  "version": 1,
+  "items": [
+    {
+      "id": "theme",
+      "rule": "The site has an existing theme (or a new one made for it).",
+      "set": "theme.create or an existing theme id; site.create theme",
+      "check": { "readiness": ["site.no-theme", "site.theme-missing"] }
+    },
+    {
+      "id": "placeholder-domain",
+      "rule": "A new site is created on the placeholder domain <site-slug>.test; the real domain is set by a person at launch (edge-site-launch).",
+      "set": "site.create domains: [\"<site-slug>.test\"]",
+      "check": { "answers": ["domains"] },
+      "note": "Readiness warns site.placeholder-domain until launch; that warning is expected during setup."
+    },
+    {
+      "id": "logo",
+      "rule": "The site has its logo: an image logo (and a light version when the theme has dark headers), or a text logo with its text.",
+      "set": "site.settings logo, logoLight, logoType, logoText, brandLogoDark, brandLogoLight (Hub media URLs)",
+      "check": { "readiness": ["site.logo"], "answers": ["logoType", "logoText"] }
+    },
+    {
+      "id": "favicon",
+      "rule": "The site has a favicon and an app icon.",
+      "set": "site.settings favicon, appIcon (Hub media URLs)",
+      "check": { "readiness": ["site.favicon"] }
+    },
+    {
+      "id": "contact",
+      "rule": "The site has its contact email and phone; forms without their own recipient send to the contact email.",
+      "set": "site.settings contactEmail, contactPhone",
+      "check": { "readiness": ["site.contact-email"], "answers": ["contactEmail", "contactPhone"] }
+    },
+    {
+      "id": "social",
+      "rule": "The social links the site owner has are set, as full URLs.",
+      "set": "site.settings socialFacebook, socialInstagram, socialTwitter, socialLinkedIn, socialYouTube, socialTikTok",
+      "check": { "answers": ["socialFacebook", "socialInstagram", "socialTwitter", "socialLinkedIn", "socialYouTube", "socialTikTok"] }
+    },
+    {
+      "id": "analytics",
+      "rule": "Tracking ids that exist are set; consent stays on with the standard message unless the owner says otherwise.",
+      "set": "site.settings trackingGoogleAnalytics, trackingFacebookPixel, trackingAdroll, trackingAdrollPixelId, trackingConsentEnabled, trackingConsentMessage",
+      "check": { "answers": ["trackingGoogleAnalytics", "trackingFacebookPixel", "trackingAdroll", "trackingAdrollPixelId", "trackingConsentEnabled"] },
+      "note": "A Google Analytics property that doesn't exist yet is created or linked by a person at launch."
+    },
+    {
+      "id": "site-seo",
+      "rule": "The site has a meta title, a meta description and WebSite structured data with its tokens.",
+      "set": "site.create settings or site.update metaTitle, metaDescription, structuredData",
+      "check": { "readiness": ["seo.meta-title", "seo.meta-description", "seo.structured-data", "seo.structured-data-empty", "seo.structured-data-tokens"], "scope": "site" }
+    },
+    {
+      "id": "pages",
+      "rule": "The default pages chosen at the start exist, made from the theme's templates, each with content.",
+      "set": "site.create (seeds the theme's default menus), page.create for pages the theme lacks",
+      "check": { "readiness": ["page.empty"], "answers": ["pages"] }
+    },
+    {
+      "id": "menus",
+      "rule": "Every page is in a menu, or deliberately in Not In Menu; menu titles and order are the owner's.",
+      "set": "site.menus",
+      "check": { "readiness": ["page.unlisted"] }
+    },
+    {
+      "id": "chrome",
+      "rule": "The site chrome (synced navigation and footer) is on every page.",
+      "set": "page.placeBlock with the synced block (no values)",
+      "check": { "readiness": ["page.chrome-missing"] },
+      "note": "Synced values (navigation links, footer text) are edited by a person in the Hub; list what they need in the report."
+    },
+    {
+      "id": "page-seo",
+      "rule": "Every page has a meta title, a meta description and structured data with its name and description filled.",
+      "set": "page.update metaTitle, metaDescription, structuredData",
+      "check": { "readiness": ["seo.meta-title", "seo.meta-description", "seo.structured-data", "seo.structured-data-empty", "seo.structured-data-tokens"], "scope": "pages" }
+    },
+    {
+      "id": "images",
+      "rule": "Every image is in the Hub's media; none is linked from another site.",
+      "set": "cms_upload_media, then the Hub URL in values and settings",
+      "check": { "readiness": ["media.external-image"] }
+    },
+    {
+      "id": "forms",
+      "rule": "Every form reaches a recipient: its own emailTo, or the site's contact email.",
+      "set": "page.setValues emailTo, or site.settings contactEmail",
+      "check": { "readiness": ["form.no-recipient"] }
+    },
+    {
+      "id": "blocks",
+      "rule": "Every placed block passes the Hub's checks and its required values are filled.",
+      "set": "page.setValues; block.draft for a block's own problems",
+      "check": { "readiness": ["block.missing", "block.checks", "instance.values", "site.check-incomplete"] }
+    },
+    {
+      "id": "publish",
+      "rule": "A person reviews the draft site, releases block drafts and publishes the pages and site settings in the Hub.",
+      "set": "The Hub (a person)",
+      "person": true
+    }
+  ]
+}

@@ -28,6 +28,8 @@ const SERVER_INFO = { name: 'edge-cms', version: '0.1.0' }
 // Renew a cached session this long before it expires.
 const RENEW_MS = 60 * 1000
 const SITE_READS = ['preview', 'readiness', 'pages', 'page', 'posts', 'post']
+// Site operations that work on one site's draft document (site sessions).
+const SITE_SESSION_SITE_TYPES = ['site.update', 'site.settings', 'site.menus']
 
 const definitionsPromise = Promise.all([import('./helpers/cmsAgentMcpTools.mjs'), import('./helpers/cmsOperations.mjs')])
 const GUIDE_FILE = path.join(__dirname, 'agentGuide', 'cms-agent-guide.md')
@@ -88,7 +90,7 @@ const createRemoteCms = ({ now = Date.now, issueSession = issueAgentSession, han
   // reads and block/theme operations use the organization's session.
   const call = async (connection, input, body) => {
     const type = body.operation?.type || ''
-    const siteScoped = SITE_READS.includes(body.action) || type.startsWith('page.') || type.startsWith('post.') || type === 'site.update'
+    const siteScoped = SITE_READS.includes(body.action) || type.startsWith('page.') || type.startsWith('post.') || SITE_SESSION_SITE_TYPES.includes(type)
     const siteId = (body.action === 'check' || body.action === 'run') ? body.operation?.siteId : body.siteId
     const target = await targetFor(connection, input, siteScoped ? 'site' : 'organization', siteId)
     const request = { ...body, orgId: target.orgId, client: CLIENT }

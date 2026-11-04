@@ -1,0 +1,173 @@
+{
+  "about": "Links areas of shared Edge CMS code to the documents that describe how they behave, so a change to the code is checked against what the skills, contracts and guides say (edge-skill-impact skill, edge/tests/skillImpact.test.mjs). Paths are relative to the Hub checkout; documents with a repo live in that sibling checkout (../<repo>). `code` entries are globs; `diffPattern` narrows a file to changes whose diff lines match it. `says` is what the document claims, so a reviewer knows what to test. `probe` is a script that shows the real behavior.",
+  "version": 1,
+  "areas": [
+    {
+      "id": "block-inputs",
+      "name": "Block schema inputs (image, video, publication, options...)",
+      "code": [
+        "edge/components/cms/blockEditor.vue",
+        "edge/components/cms/blockInput.vue",
+        "edge/components/cms/mediaManager.vue",
+        "edge/lib/cmsVideo.js"
+      ],
+      "documents": [
+        { "path": "edge/docs/data-contracts/cms-blocks/README.md", "section": "Schema inputs", "says": "The schema field types and options the block editor offers and the shape of each value" },
+        { "path": "edge/docs/data-contracts/cms-blocks/README.md", "section": "Input types", "says": "What each input type stores (image URLs and variants, video objects, publications) and how templates read it" },
+        { "path": "edge/skills/edge-block-package/reference/template-v2-contract.md", "section": "Input mapping", "says": "Which schema input a design element becomes, and the value shape the generator writes" },
+        { "repo": "emd-cms-front", "path": "docs/cms-template-v2-blocks.md", "section": "Inputs and schema", "says": "How the public renderer reads each input type" }
+      ]
+    },
+    {
+      "id": "template-grammar",
+      "name": "Template grammar, conditions and validation",
+      "code": [
+        "edge/lib/cmsBlockValidation.js",
+        { "path": "package.json", "diffPattern": "@edgedev/template-engine" },
+        { "path": "functions/package.json", "diffPattern": "@edgedev/template-engine" }
+      ],
+      "documents": [
+        { "path": "edge/docs/data-contracts/cms-blocks/README.md", "section": "Template v2 grammar the engine supports", "says": "The tags the engine renders, the condition scope rule (outside loops `item` is the block's values; bare names are false; inside a loop `item` is the record)" },
+        { "path": "edge/docs/data-contracts/cms-blocks/README.md", "section": "Validation", "says": "The validator's codes and severities, including grammar.condition-scope and grammar.condition-loop-item" },
+        { "path": "edge/skills/edge-block-package/reference/template-v2-contract.md", "section": "Supported starter grammar", "says": "The grammar block packages may use, with the condition rule and examples" },
+        { "repo": "emd-cms-front", "path": "docs/cms-template-v2-blocks.md", "section": "Conditionals", "says": "How the public renderer evaluates #if, else and comparisons" },
+        { "repo": "emd-cms-front", "path": "docs/cms-template-v2-blocks.md", "section": "Template syntax", "says": "Placeholders, formatters and loops the renderer supports" }
+      ],
+      "probe": "edge/skills/edge-skill-impact/scripts/probe-conditions.mjs"
+    },
+    {
+      "id": "data-sources",
+      "name": "Data Sources and per-page settings",
+      "code": [
+        "edge/components/cms/blockApi.vue",
+        "edge/components/cms/blockRender.vue",
+        "functions/cmsCollectionData.js",
+        "functions/helpers/cmsDataSourceRecords.mjs"
+      ],
+      "documents": [
+        { "repo": "emd-cms-front", "path": "docs/cms-template-v2-blocks.md", "section": "Data Sources", "says": "Collection and API sources, runtime tokens, canonical lookups, and when a source runs" },
+        { "path": "edge/skills/edge-block-package/reference/template-v2-contract.md", "section": "Supported starter grammar", "says": "A declared source runs only when the template calls source(\"name\")" },
+        { "path": "edge/skills/edge-block-package/reference/chrome-and-helpers.md", "says": "Site record lookups (path sites with canonicalLookup) for logo, social links and contact" }
+      ]
+    },
+    {
+      "id": "css-preview",
+      "name": "CSS loading and preview",
+      "code": [
+        "edge/components/cms/pageCanvas.vue",
+        "edge/components/cms/htmlContent.vue",
+        "edge/components/cms/themeEditor.vue",
+        "edge/lib/cmsThemeDefaults.mjs"
+      ],
+      "documents": [
+        { "path": "edge/docs/data-contracts/cms-themes/README.md", "section": "Public projection", "says": "How theme JSON, Head JSON and Extra CSS reach the public site and the preview" },
+        { "path": "edge/skills/edge-block-package/reference/theme-guidelines.md", "says": "Standard theme names, what belongs in Theme JSON, fonts" },
+        { "path": "edge/skills/edge-block-package/reference/head-guidelines.md", "says": "What belongs in Head JSON and how fonts load" },
+        { "repo": "emd-cms-front", "path": "docs/cms-template-v2-blocks.md", "section": "CSS and styling", "says": "How the renderer generates block CSS (utility classes, Extra CSS) and when it is applied" }
+      ]
+    },
+    {
+      "id": "collections-kv",
+      "name": "Collections and KV mirrors",
+      "code": [
+        "functions/kv/**",
+        "functions/helpers/cmsDataSourceRecords.mjs",
+        "docs/data-contracts/*/collection.json"
+      ],
+      "documents": [
+        { "repo": "emd-cms-front", "path": "docs/cms-template-v2-blocks.md", "section": "KV mirroring: Firestore is not the frontend query API", "says": "What the KV mirror stores, index and metadata keys, and what a block can query" },
+        { "path": "edge/skills/edge-block-package/SKILL.md", "section": "Rules the validator should enforce", "says": "Data Source rules block packages follow" }
+      ]
+    },
+    {
+      "id": "operations",
+      "name": "Operations, readiness and the agent tools",
+      "code": [
+        "edge/lib/cmsOperations.js",
+        "functions/cmsOperations.js",
+        "functions/cmsAgentConnections.js",
+        "functions/cmsAgentMcp.js",
+        "edge/lib/cmsAgentMcpTools.js"
+      ],
+      "documents": [
+        { "path": "edge/docs/data-contracts/cms-operations/README.md", "says": "Every operation's inputs, effect and problem codes (generated from CMS_OPERATION_SPECS), document shapes, readiness codes, sessions" },
+        { "path": "edge/functions/agentGuide/cms-agent-guide.md", "says": "What agents can do through the tools, which session each operation uses, what stays in the Hub" },
+        { "path": "edge/skills/edge-design-to-site/SKILL.md", "section": "What you can and can't do", "says": "The tools and operations the site build uses" },
+        { "path": "edge/skills/edge-site-setup/SKILL.md", "says": "The operations and readiness codes the site setup run uses" },
+        { "path": "edge/skills/edge-site-setup/site-standards.json", "says": "How each setup standard is set and checked (operation, readiness code)" }
+      ]
+    },
+    {
+      "id": "media",
+      "name": "Media and uploads",
+      "code": [
+        "functions/cmsAgentMedia.js",
+        "edge/components/cms/mediaManager.vue",
+        "edge/composables/useMediaImageReadiness.js"
+      ],
+      "documents": [
+        { "path": "edge/functions/agentGuide/cms-agent-guide.md", "section": "Add images", "says": "How agents upload and reference images (cms_upload_media, variants, ready status)" },
+        { "path": "edge/skills/edge-block-package/reference/block-updates.md", "section": "Media", "says": "How design changes to images are applied" },
+        { "path": "edge/skills/edge-design-to-site/SKILL.md", "section": "Images", "says": "Images come from the Hub's media; the upload flow" }
+      ]
+    },
+    {
+      "id": "override-blocks",
+      "name": "Override blocks",
+      "code": [
+        "edge/tools/mcp/cms/src/override-component.js",
+        "edge/components/cms/overrideBlockBadge.vue",
+        "edge/components/cms/overrideRenameDialog.vue"
+      ],
+      "documents": [
+        { "path": "edge/skills/edge-block-package/reference/override-blocks.md", "says": "When a block needs a Vue override, how it is named and resolved, and the handoff" },
+        { "repo": "emd-cms-front", "path": "docs/cms-template-v2-blocks.md", "section": "Vue override identity and social images", "says": "How the renderer resolves an override component from the block name" }
+      ]
+    },
+    {
+      "id": "contact-forms",
+      "name": "Contact form routing and form tests",
+      "code": [
+        { "path": "functions/cms.js", "diffPattern": "trackHistory|formTest|Contact Form|emailTo|contactEmail" },
+        "functions/helpers/submittedUserRouting.js",
+        "functions/helpers/historyIdentity.js"
+      ],
+      "documents": [
+        { "path": "edge/docs/data-contracts/cms-sites-and-pages/README.md", "section": "Contact form history and recipient routing", "says": "Who a form submission is sent to, identity rules, and form tests" },
+        { "path": "edge/skills/edge-site-launch/SKILL.md", "says": "How launch checks and tests every form" },
+        { "repo": "emd-cms-front", "path": "docs/cms-template-v2-blocks.md", "section": "Contact forms", "says": "The renderer's form helper and the fields it sends" }
+      ]
+    },
+    {
+      "id": "site-setup-and-launch",
+      "name": "Site settings, menus, templates and launch",
+      "code": [
+        "edge/components/cms/site.vue",
+        "edge/components/cms/siteSettingsForm.vue",
+        "edge/components/cms/menu.vue",
+        "edge/components/cms/templatesManager.vue",
+        "edge/composables/siteSettingsTemplate.js"
+      ],
+      "documents": [
+        { "path": "edge/docs/data-contracts/cms-sites-and-pages/README.md", "section": "Menus", "says": "The menu shapes site.menus writes" },
+        { "path": "edge/docs/data-contracts/cms-sites-and-pages/README.md", "section": "Invariants and validation codes", "says": "The templates site rules, domains, site settings by operation" },
+        { "path": "edge/skills/edge-site-setup/site-standards.json", "says": "The settings and menus every site is set up with" },
+        { "path": "edge/skills/edge-site-launch/launch-standards.json", "says": "The launch steps and checks" }
+      ]
+    },
+    {
+      "id": "plugin-and-launcher",
+      "name": "The plugin and the local CMS server launcher",
+      "code": [
+        "edge/plugins/edge-cms/.mcp.json",
+        "edge/plugins/edge-cms/.claude-plugin/plugin.json",
+        "edge/plugins/sync-skills.mjs",
+        "edge/tools/mcp/cms/launch.sh"
+      ],
+      "documents": [
+        { "path": "edge/plugins/edge-cms/README.md", "says": "Install, developer setup, the bundled servers and maintenance" },
+        { "path": "edge/skills/README.md", "says": "The skills the plugin ships and how copies are kept" }
+      ]
+    }
+  ]
+}
