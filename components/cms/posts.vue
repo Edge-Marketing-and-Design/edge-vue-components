@@ -76,7 +76,7 @@ const areEqualNormalized = (a, b) => stableSerialize(a) === stableSerialize(b)
 
 const normalizePostType = (value) => {
   const type = String(value || '').trim().toLowerCase()
-  return type === 'event' ? 'event' : 'post'
+  return type === 'event' || type.startsWith('custom-') ? type : 'post'
 }
 
 const normalizeTemplatePageTypes = (value) => {
@@ -544,6 +544,8 @@ const getDefaultPublishAtIso = (postId, draftPostOverride = null) => {
 const state = reactive({
   editMode: false,
   sheetOpen: false,
+  publishDialogOpen: false,
+  eventDialogOpen: false,
   activePostId: '',
   editorKey: 0,
   editorHasUnsavedChanges: false,
@@ -859,6 +861,7 @@ const selectedPostTemplate = computed(() => {
 const isPostTemplateSelected = templateId => state.selectedPostTemplateId === templateId
 const postsList = computed(() =>
   Object.entries(posts.value)
+    .filter(([, data]) => !data.postTypeId)
     .map(([id, data]) => ({ id, ...data }))
     .sort((a, b) => (b.doc_created_at ?? 0) - (a.doc_created_at ?? 0)),
 )
@@ -1488,7 +1491,7 @@ const sheetTitle = computed(() => {
     return ''
   if (isCreating.value)
     return 'New Post'
-  return activePost.value?.name || getPostSlug(activePost.value) || 'Edit Post'
+  return activePost.value?.title || activePost.value?.name || getPostSlug(activePost.value) || 'Edit Post'
 })
 
 const currentDocId = () => (state.activePostId && (state.activePostId !== 'new' ? state.activePostId : ''))
@@ -3099,9 +3102,13 @@ const reindexPublishedPostsToKv = async () => {
 <template>
   <div
     v-if="props.mode !== 'editor'"
-    :class="isFullList ? 'h-full min-h-0 flex flex-col gap-4 overflow-hidden' : 'space-y-4 h-full min-h-0 overflow-y-auto'"
+    :class="isFullList ? 'h-full min-h-0 flex flex-col overflow-hidden' : 'space-y-4 h-full min-h-0 overflow-y-auto'"
   >
-    <edge-shad-button
+    <header v-if="isFullList" class="flex flex-wrap items-center justify-between gap-4 border-b border-border px-6 py-5">
+      <div><h2 class="text-xl font-semibold">Posts</h2><p class="mt-1 text-sm text-muted-foreground">{{ postsList.length }} {{ postsList.length === 1 ? 'entry' : 'entries' }}</p></div>
+      <edge-shad-button class="gap-2" @click="openNewPost"><Plus class="h-4 w-4" />Add New</edge-shad-button>
+    </header>
+    <edge-shad-button v-else
       variant="outline"
       :class="isFullList ? 'h-8 px-3' : 'w-full mt-2 py-0 h-[28px]'"
       @click="openNewPost"
@@ -3124,17 +3131,9 @@ const reindexPublishedPostsToKv = async () => {
 
     <div
       v-if="isFullList"
-      class="rounded-lg border border-slate-300 bg-white/90 overflow-hidden flex flex-col h-[calc(100vh-220px)] dark:border-slate-700 dark:bg-slate-900/70"
+      class="flex min-h-0 flex-1 flex-col overflow-y-auto p-6"
     >
-      <div class="flex items-center justify-between border-b border-slate-300 bg-slate-100 px-4 py-3 dark:border-slate-700 dark:bg-slate-800">
-        <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">
-          Posts
-        </div>
-        <div class="text-xs text-slate-600 dark:text-slate-300">
-          {{ filteredPostsList.length }} shown / {{ postsList.length }} total
-        </div>
-      </div>
-      <div class="grid grid-cols-1 gap-2 border-b border-slate-300 bg-slate-50 px-4 py-3 sm:grid-cols-[1fr_160px] dark:border-slate-700 dark:bg-slate-900/60">
+      <div class="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_160px]">
         <edge-shad-input
           v-model="state.listSearch"
           name="post-list-search"
@@ -3152,12 +3151,14 @@ const reindexPublishedPostsToKv = async () => {
       </div>
       <div
         v-if="hasFilteredPosts"
-        class="divide-y overflow-y-auto h-[calc(100vh-260px)] max-h-[calc(100vh-260px)]"
+        class="divide-y divide-border rounded-lg border border-border"
       >
         <div
           v-for="post in filteredPostsList"
           :key="post.id"
-          class="px-4 py-3 hover:bg-muted/40 cursor-pointer"
+          class="px-4 py-4 hover:bg-muted cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+          role="button" tabindex="0"
+          @keydown.enter.self="editPost(post.id)" @keydown.space.self.prevent="editPost(post.id)"
           @click="editPost(post.id)"
         >
           <div class="flex items-start gap-4">
@@ -4098,7 +4099,7 @@ const reindexPublishedPostsToKv = async () => {
         @unsaved-changes="handleEditorUnsavedChanges"
       >
         <template #header="slotProps">
-          <div class="relative flex flex-col gap-2 p-2 sticky top-0 z-50 rounded border border-stone-300 bg-stone-100 text-stone-900 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100">
+          <div class="sticky top-0 z-40 flex flex-col gap-2 border-b border-border bg-background p-3">
             <div class="flex flex-wrap items-center justify-between gap-2">
               <div class="flex min-w-0 flex-1 items-center gap-2 pr-2">
                 <edge-shad-button
@@ -4112,7 +4113,9 @@ const reindexPublishedPostsToKv = async () => {
                 </edge-shad-button>
                 <span class="min-w-0 truncate pr-1 text-sm font-bold whitespace-nowrap sm:text-base">{{ sheetTitle }}</span>
               </div>
-              <div class="flex shrink-0 flex-wrap items-center justify-end gap-1">
+              <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                <edge-shad-button v-if="slotProps.workingDoc.type === 'event'" type="button" variant="outline" size="sm" @click="state.eventDialogOpen = true"><Clock3 class="mr-1 h-4 w-4" />Event details</edge-shad-button>
+                <edge-shad-button type="button" variant="outline" size="sm" @click="state.publishDialogOpen = true"><FileCheck class="mr-1 h-4 w-4" />Publishing</edge-shad-button>
                 <edge-shad-button
                   v-if="!slotProps.unsavedChanges"
                   variant="text"
@@ -4202,116 +4205,36 @@ const reindexPublishedPostsToKv = async () => {
           </div>
         </template>
         <template #main="slotProps">
-          <div class="p-6 h-[calc(100vh-190px)] overflow-y-auto">
-            <div class="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
-              <div class="space-y-6">
-                <div class="rounded-xl border bg-card p-4 space-y-3 shadow-sm">
+          <div class="p-5 h-[calc(100vh-190px)] overflow-y-auto">
+            <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
+              <div class="order-2 space-y-4 self-start">
+                <Dialog v-model:open="state.publishDialogOpen">
+                  <DialogContent class="max-h-[85vh] max-w-lg overflow-y-auto">
+                    <DialogHeader><DialogTitle>Publishing</DialogTitle><DialogDescription>Publish now, choose a publication date, or schedule this post.</DialogDescription></DialogHeader>
+                    <edge-cms-post-publishing :model-value="state.publishAtInput" :status="activePostPublishStatus" :last-published="lastPublishedTime(state.activePostId)" :scheduled-at="activePost?.publishAt || ''" :scheduled-label="formatTimestamp(activePost?.publishAt)" :busy="slotProps.submitting" :unsaved="slotProps.unsavedChanges" :is-new="isCreating" :schedule-blocked-reason="scheduledPublishBlockedReason" :error="activePost?.publishAtError || ''" @update:model-value="handlePublishAtInputUpdate" @publish="publishPost(state.activePostId)" @schedule="schedulePostPublish(state.activePostId)" @unpublish="unPublishPost(state.activePostId)" @clear="clearScheduledPublish(state.activePostId)" />
+                  </DialogContent>
+                </Dialog>
+                <div class="rounded-lg border border-border bg-muted/20 p-4 space-y-4">
                   <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Publish
+                    Entry details
                   </div>
-                  <div class="flex items-center gap-2 text-sm">
-                    <FileWarning v-if="activePostPublishStatus.icon === 'changes'" class="h-4 w-4 text-yellow-600" />
-                    <FileCheck v-else-if="activePostPublishStatus.icon === 'published'" class="h-4 w-4 text-green-700" />
-                    <FileX v-else class="h-4 w-4 text-slate-500 dark:text-slate-300" />
-                    <span :class="activePostPublishStatus.badgeClass">{{ activePostPublishStatus.label }}</span>
-                  </div>
-                  <div class="text-xs text-muted-foreground">
-                    Last published: {{ lastPublishedTime(state.activePostId) }}
-                  </div>
-                  <div v-if="activePost?.publishAt" class="space-y-1 text-xs text-muted-foreground">
-                    <div>Scheduled publish: {{ formatTimestamp(activePost.publishAt) }}</div>
-                    <edge-shad-button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      class="h-6 px-2 text-[10px] text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-                      :disabled="slotProps.submitting || slotProps.unsavedChanges || !state.activePostId || state.activePostId === 'new'"
-                      @click="clearScheduledPublish(state.activePostId)"
-                    >
-                      <X class="h-3 w-3" />
-                      Clear
-                    </edge-shad-button>
-                  </div>
-                  <div v-if="isCreating" class="text-xs text-amber-700 dark:text-amber-300">
-                    Save this post before <strong>Publish Now</strong> and <strong>Schedule Publish</strong> are available.
-                  </div>
-                  <div v-if="slotProps.unsavedChanges" class="text-xs text-amber-700 dark:text-amber-300">
-                    Save changes before publishing.
-                  </div>
-                  <div v-if="activePostPublishStatus.publishBlockedReason" class="text-xs text-amber-700 dark:text-amber-300">
-                    {{ activePostPublishStatus.publishBlockedReason }}
-                  </div>
-                  <edge-shad-datetime
-                    :model-value="state.publishAtInput"
-                    name="publish-at"
-                    label="Publish At"
-                    trigger-class="border-slate-300 bg-white text-slate-900 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-                    meridiem-active-class="bg-slate-700 text-slate-100 hover:bg-slate-600 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
-                    meridiem-inactive-class="border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                    now-button-class="text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
-                    done-button-class="border-slate-300 bg-slate-200 text-slate-900 hover:bg-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
-                    calendar-class="edge-cms-calendar-slate"
-                    :disabled="slotProps.submitting || slotProps.unsavedChanges || !state.activePostId || state.activePostId === 'new'"
-                    @update:model-value="handlePublishAtInputUpdate"
-                  />
-                  <div class="text-xs text-muted-foreground">
-                    Pick date/time for scheduled publish. Use Publish Now to publish immediately.
-                  </div>
-                  <div v-if="scheduledPublishBlockedReason" class="text-xs text-amber-700 dark:text-amber-300">
-                    {{ scheduledPublishBlockedReason }}
-                  </div>
-                  <div class="flex flex-wrap gap-2">
-                    <edge-shad-button
-                      v-if="activePostPublishStatus.canPublish || activePostPublishStatus.publishBlockedReason"
-                      type="button"
-                      size="sm"
-                      class="w-full bg-slate-700 text-slate-100 hover:bg-slate-600 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
-                      :disabled="slotProps.submitting || slotProps.unsavedChanges || !state.activePostId || state.activePostId === 'new' || Boolean(activePostPublishStatus.publishBlockedReason)"
-                      @click="publishPost(state.activePostId)"
-                    >
-                      <FileCheck class="h-4 w-4" />
-                      Publish Now
-                    </edge-shad-button>
-                    <edge-shad-button
-                      v-if="activePostPublishStatus.canPublish || activePostPublishStatus.publishBlockedReason"
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      class="w-full border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
-                      :disabled="slotProps.submitting || slotProps.unsavedChanges || !state.activePostId || state.activePostId === 'new' || Boolean(activePostPublishStatus.publishBlockedReason) || Boolean(scheduledPublishBlockedReason)"
-                      @click="schedulePostPublish(state.activePostId)"
-                    >
-                      <FilePen class="h-4 w-4" />
-                      Schedule Publish
-                    </edge-shad-button>
-                    <edge-shad-button
-                      v-if="activePostPublishStatus.canUnpublish"
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      class="w-full border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
-                      :disabled="slotProps.submitting || !state.activePostId || state.activePostId === 'new'"
-                      @click="unPublishPost(state.activePostId)"
-                    >
-                      <FileWarning class="h-4 w-4" />
-                      Unpublish
-                    </edge-shad-button>
-                  </div>
-                </div>
-                <div class="rounded-xl border bg-card p-4 space-y-4 shadow-sm">
-                  <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Post Details
-                  </div>
-                  <edge-shad-input
-                    v-model="slotProps.workingDoc.name"
-                    name="name"
-                    label="Name (slug used in URL)"
-                  />
                   <edge-shad-input
                     v-model="slotProps.workingDoc.title"
                     name="title"
                     label="Title"
                     :disabled="slotProps.submitting"
+                  />
+                  <edge-shad-input
+                    v-model="slotProps.workingDoc.name"
+                    name="name"
+                    label="Name (slug used in URL)"
+                  />
+                  <edge-shad-textarea
+                    v-model="slotProps.workingDoc.blurb"
+                    name="blurb"
+                    label="Preview text"
+                    :disabled="slotProps.submitting"
+                    rows="4"
                   />
                   <edge-shad-select-tags
                     v-model="slotProps.workingDoc.tags"
@@ -4333,169 +4256,26 @@ const reindexPublishedPostsToKv = async () => {
                     :disabled="slotProps.submitting"
                   />
                 </div>
-                <div
-                  v-if="slotProps.workingDoc.type === 'event'"
-                  class="rounded-xl border bg-card p-4 space-y-4 shadow-sm"
-                >
-                  <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Event Details
-                  </div>
-                  <div
-                    v-if="slotProps.workingDoc.event.isPast"
-                    class="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
-                  >
-                    This event is in the past.
-                  </div>
-                  <edge-shad-datetime
-                    v-model="slotProps.workingDoc.event.startAt"
-                    name="event.startAt"
-                    label="Start At"
-                    trigger-class="border-slate-300 bg-white text-slate-900 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-                    meridiem-active-class="bg-slate-700 text-slate-100 hover:bg-slate-600 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
-                    meridiem-inactive-class="border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                    now-button-class="text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
-                    done-button-class="border-slate-300 bg-slate-200 text-slate-900 hover:bg-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
-                    calendar-class="edge-cms-calendar-slate"
-                    :disabled="slotProps.submitting"
-                  />
-                  <edge-shad-datetime
-                    v-model="slotProps.workingDoc.event.endAt"
-                    name="event.endAt"
-                    label="End At"
-                    trigger-class="border-slate-300 bg-white text-slate-900 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
-                    meridiem-active-class="bg-slate-700 text-slate-100 hover:bg-slate-600 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300"
-                    meridiem-inactive-class="border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                    now-button-class="text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
-                    done-button-class="border-slate-300 bg-slate-200 text-slate-900 hover:bg-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
-                    calendar-class="edge-cms-calendar-slate"
-                    :disabled="slotProps.submitting"
-                  />
-                  <edge-shad-select
-                    v-model="slotProps.workingDoc.event.timezone"
-                    :items="TIMEZONE_OPTIONS"
-                    item-title="label"
-                    item-value="value"
-                    name="event-timezone"
-                    label="Timezone"
-                    placeholder="Select timezone"
-                    :disabled="slotProps.submitting"
-                  />
-                  <edge-shad-checkbox
-                    v-model="slotProps.workingDoc.event.isVirtual"
-                    name="event.isVirtual"
-                    label="Virtual Event"
-                    class="!bg-slate-200 !border-slate-400 data-[state=checked]:!bg-slate-700 data-[state=checked]:!text-slate-100 dark:!bg-slate-700 dark:!border-slate-500 dark:data-[state=checked]:!bg-slate-200 dark:data-[state=checked]:!text-slate-900"
-                    :disabled="slotProps.submitting"
-                  >
-                    This event is virtual (no physical location required).
-                  </edge-shad-checkbox>
-                  <edge-shad-checkbox
-                    v-model="slotProps.workingDoc.event.unpublishPastEvent"
-                    name="event.unpublishPastEvent"
-                    label="Unpublish Past Event"
-                    class="!bg-slate-200 !border-slate-400 data-[state=checked]:!bg-slate-700 data-[state=checked]:!text-slate-100 dark:!bg-slate-700 dark:!border-slate-500 dark:data-[state=checked]:!bg-slate-200 dark:data-[state=checked]:!text-slate-900"
-                    :disabled="slotProps.submitting"
-                  >
-                    Unpublish Past Event
-                  </edge-shad-checkbox>
-                  <edge-shad-input
-                    v-if="!slotProps.workingDoc.event.isVirtual"
-                    v-model="slotProps.workingDoc.event.locationName"
-                    name="event.locationName"
-                    label="Location Name"
-                    :disabled="slotProps.submitting"
-                  />
-                  <edge-shad-textarea
-                    v-if="!slotProps.workingDoc.event.isVirtual"
-                    v-model="slotProps.workingDoc.event.locationAddress"
-                    name="event.locationAddress"
-                    label="Location Address"
-                    :disabled="slotProps.submitting"
-                    rows="3"
-                  />
-                  <div class="grid gap-4 md:grid-cols-2">
-                    <edge-shad-input
-                      v-model="slotProps.workingDoc.event.meetingUrl"
-                      name="event-meeting-url"
-                      label="Meeting URL"
-                      type="url"
-                      :disabled="slotProps.submitting"
-                    />
-                    <edge-shad-input
-                      v-model="slotProps.workingDoc.event.registrationUrl"
-                      name="event-registration-url"
-                      label="Registration URL"
-                      type="url"
-                      :disabled="slotProps.submitting"
-                    />
-                  </div>
-                  <div class="grid gap-4 md:grid-cols-2 items-center">
-                    <edge-shad-input
-                      v-model.number="slotProps.workingDoc.event.capacity"
-                      name="event-capacity"
-                      label="Capacity"
-                      type="number"
-                      :disabled="slotProps.submitting"
-                    />
-                    <edge-shad-select
-                      v-model="slotProps.workingDoc.event.status"
-                      :items="EVENT_STATUS_OPTIONS"
-                      item-title="label"
-                      item-value="value"
-                      name="event-status"
-                      label="Event Status"
-                      :disabled="slotProps.submitting"
-                    />
-                  </div>
-                </div>
-                <div class="rounded-xl border bg-card p-4 space-y-4 shadow-sm">
-                  <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Featured Image
-                  </div>
-                  <div class="relative bg-muted/50 py-2 h-48 rounded-lg flex items-center justify-center hover:opacity-80 transition-opacity cursor-pointer">
-                    <div class="bg-black/80 absolute left-0 top-0 w-full h-full opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center z-10 cursor-pointer rounded-lg">
-                      <Dialog v-model:open="state.imageOpen">
-                        <DialogTrigger as-child>
-                          <edge-shad-button variant="outline" class="bg-white text-black hover:bg-gray-200">
-                            <ImagePlus class="h-5 w-5" />
-                            Select Image
-                          </edge-shad-button>
-                        </DialogTrigger>
-                        <DialogContent class="w-full max-w-[1200px] max-h-[80vh] overflow-hidden">
-                          <DialogHeader>
-                            <DialogTitle>Select Image</DialogTitle>
-                            <DialogDescription />
-                          </DialogHeader>
-                          <edge-cms-media-manager
-                            :site="props.site"
-                            :select-mode="true"
-                            @select="(url) => { slotProps.workingDoc.featuredImage = url; state.imageOpen = false; }"
-                          />
-                        </DialogContent>
-                      </Dialog>
-                    </div>
-                    <img v-if="slotProps.workingDoc.featuredImage" :src="slotProps.workingDoc.featuredImage" class="mb-2 max-h-40 mx-auto object-contain">
-                    <span v-else class="text-sm text-muted-foreground italic">No featured image selected</span>
-                  </div>
+                <Dialog v-model:open="state.eventDialogOpen">
+                  <DialogContent class="max-h-[85vh] max-w-xl overflow-y-auto">
+                    <DialogHeader><DialogTitle>Event details</DialogTitle><DialogDescription>Event dates, location and registration. Save the post to keep these changes.</DialogDescription></DialogHeader>
+                    <edge-cms-post-event-fields v-model="slotProps.workingDoc.event" :disabled="slotProps.submitting" />
+                    <DialogFooter><edge-shad-button type="button" variant="outline" @click="state.eventDialogOpen = false">Done</edge-shad-button></DialogFooter>
+                  </DialogContent>
+                </Dialog>
+                <div class="rounded-lg border border-border bg-muted/20 p-4">
+                  <edge-cms-block-input v-model="slotProps.workingDoc.featuredImage" field="featuredImage" type="image" label="Featured image" :site="site" />
                 </div>
               </div>
               <div class="space-y-6">
-                <div class="rounded-xl border bg-card p-4 space-y-4 shadow-sm">
-                  <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    Content
+                <div class="rounded-lg border border-border bg-muted/20 p-4 space-y-4">
+                  <div class="text-xs text-muted-foreground">
+                    Select an area below to edit its content.
                   </div>
-                  <edge-shad-textarea
-                    v-model="slotProps.workingDoc.blurb"
-                    name="blurb"
-                    label="Content Blurb / Preview"
-                    :disabled="slotProps.submitting"
-                    rows="6"
-                  />
+
                   <div class="space-y-3">
                     <div class="flex items-center justify-between">
-                      <div class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        Content
-                      </div>
+
                       <edge-shad-button
                         v-if="state.editMode"
                         type="button"

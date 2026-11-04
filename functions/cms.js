@@ -2027,7 +2027,7 @@ const eventEndAtMs = (eventData = {}) => {
 
 const canPublishEventAt = (postData = {}, publishAtMs = Date.now()) => {
   const rawType = String(postData?.type || 'post').trim().toLowerCase()
-  if (rawType !== 'event')
+  if (rawType !== 'event' && !(postData?.postTypeId && postData?.event))
     return { allowed: true, reason: '' }
 
   const eventData = (postData && typeof postData.event === 'object') ? postData.event : {}
@@ -2146,7 +2146,7 @@ exports.syncPastPublishedEvents = onSchedule(
         scanned += 1
         const data = docSnap.data() || {}
         const rawType = String(data?.type || 'post').trim().toLowerCase()
-        if (rawType !== 'event')
+        if (rawType !== 'event' && !(data?.postTypeId && data?.event))
           continue
         eventDocs += 1
         const pathParts = String(docSnap.ref.path || '').split('/').filter(Boolean)
@@ -2298,7 +2298,20 @@ exports.publishScheduledPosts = onSchedule(
 
           const publishedAtMillis = Number.isFinite(effectivePublishMs) ? effectivePublishMs : nowMs
           const publishedAtIso = new Date(publishedAtMillis).toISOString()
-          const publishPayload = { ...draftData }
+          let publishPayload = { ...draftData }
+          if (draftData.postTypeId) {
+            try {
+              const { buildTypedPost, withPostProjection } = await import('./helpers/cmsPostTypes.mjs')
+              const definition = await db.collection('organizations').doc(orgId).collection('sites').doc(siteId).collection('published').doc(draftData.postTypeId).get()
+              publishPayload = withPostProjection(buildTypedPost({ page: definition.data(), pageId: draftData.postTypeId, post: draftData }), definition.data())
+              buildPostKvMetadata(publishPayload, { orgId, siteId, postId })
+            }
+            catch (error) {
+              batch.update(draftSnap.ref, { publishAt: Firestore.FieldValue.delete(), publishAtTimezone: Firestore.FieldValue.delete(), publishAtError: error.message })
+              skipped += 1; unscheduled += 1; ops += 1
+              continue
+            }
+          }
           delete publishPayload.publishAt
           delete publishPayload.publishAtTimezone
           publishPayload.doc_created_at = Number.isFinite(publishedAtMillis) ? publishedAtMillis : nowMs
@@ -2499,6 +2512,35 @@ exports.onPublishedPageWritten = createKvMirrorHandler({
   makeCanonicalKey: ({ orgId, siteId, pageId }) =>
     `pages:${orgId}:${siteId}:${pageId}`,
   timeoutSeconds: 180,
+})
+
+// Durable Firestore retries resume by skipping snapshots already at the current
+// projection. Draft saves and cosmetic edits do not start metadata rewrites.
+exports.refreshPostTypeMetadata = onDocumentWritten({ document: 'organizations/{orgId}/sites/{siteId}/published/{pageId}', timeoutSeconds: 540, retry: true }, async (event) => {
+  const { postProjection, preparePostTypePage } = await import('./helpers/cmsPostTypes.mjs')
+  const siteRef = db.collection('organizations').doc(event.params.orgId).collection('sites').doc(event.params.siteId)
+  const pageRef = siteRef.collection('published').doc(event.params.pageId)
+  // Library releases may replace inline definitions. Reapply the existing post
+  // bindings transactionally without taking any unpublished page changes.
+  const normalized = await db.runTransaction(async transaction => {
+    const current = await transaction.get(pageRef)
+    if (!current.exists || !current.data()?.postType?.enabled) return { changed: false, page: null }
+    const prepared = preparePostTypePage(current.data(), event.params.pageId)
+    if (JSON.stringify(prepared) === JSON.stringify(current.data())) return { changed: false, page: prepared }
+    transaction.set(pageRef, prepared)
+    return { changed: true, page: prepared }
+  })
+  if (normalized.changed || !normalized.page) return
+  const before = event.data?.before?.exists ? event.data.before.data() : null
+  if (before?.postType?.enabled) {
+    try {
+      if (JSON.stringify(postProjection(before)) === JSON.stringify(postProjection(normalized.page))) return
+    }
+    catch { /* A superseded invalid event cannot block the current publication. */ }
+  }
+  const { refreshPostTypeMetadata } = require('./helpers/cmsPostTypeRefresh')
+  const result = await refreshPostTypeMetadata({ db, siteRef, pageId: event.params.pageId, documentId: admin.firestore.FieldPath.documentId(), log: progress => logger.log('Post-type metadata refresh progress', { ...event.params, ...progress }) })
+  logger.log('Post-type metadata refresh complete', { ...event.params, ...result })
 })
 
 exports.syncPublishedSyncedBlocks = onDocumentWritten({ document: 'organizations/{orgId}/sites/{siteId}/published/{pageId}', timeoutSeconds: 180 }, async (event) => {

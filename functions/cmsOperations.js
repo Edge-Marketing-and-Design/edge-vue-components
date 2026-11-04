@@ -813,6 +813,29 @@ const planPost = async (core, reader, { orgId, uid, now, operation }) => {
     if (typeof operation.name === 'string' && core.slugify(operation.name) && slug !== core.slugify(operation.name))
       plan.notices = [...(plan.notices || []), `The slug "${core.slugify(operation.name)}" is taken on this site; the post gets "${slug}".`]
 
+    const postRef = postsRef.doc()
+    if (operation.postTypeId) {
+      const pageId = requireDocId(operation.postTypeId, 'post type page id')
+      const definition = await reader.doc(siteRef.collection('pages').doc(pageId))
+      if (operation.templateId || (operation.postType && operation.postType !== 'post')) problem(plan, 'post.type', 'Custom types use their defining page and its event setting, not a copied template or separate kind.')
+      try {
+        const { buildTypedPost, buildPostTypeFields, setPostPath } = await import('./helpers/cmsPostTypes.mjs')
+        if (operation.values !== undefined && !isPlainObject(operation.values)) throw new Error('values must be an object of custom post fields.')
+        const candidate = { ...values }
+        const allowed = new Set(buildPostTypeFields(definition.data()).map(field => field.field))
+        for (const [key, value] of Object.entries(operation.values || {})) {
+          if (!allowed.has(key)) throw new Error(`Unknown custom post field: ${key}`)
+          setPostPath(candidate, key, value)
+        }
+        const saved = buildTypedPost({ page: definition.data(), pageId, post: { ...candidate, ...(definition.data()?.postType?.event === true ? { event } : {}), name: slug, tags: values.tags || [], docId: postRef.id, doc_created_at: now } })
+        addWrite(plan, postRef, { ...saved, ...stamp(uid, now) }, 'set', `Create values-only draft ${slug}. Nothing is published.`)
+      }
+      catch (error) { problem(plan, 'post.type', error.message) }
+      plan.result = { siteId, postId: postRef.id, name: slug }
+      return plan
+    }
+    if (operation.values !== undefined) problem(plan, 'post.type', 'values is supported only with a custom postTypeId.')
+
     // A Post template page's body, copied as the new-post dialog copies it.
     let body = { content: [], structure: [] }
     let templateLabel = ''
@@ -831,7 +854,6 @@ const planPost = async (core, reader, { orgId, uid, now, operation }) => {
     const taken = core.pageIds(body)
     body = core.normalizePostBody({ ...body, createId: () => core.generateShortId(taken) })
 
-    const postRef = postsRef.doc()
     const post = {
       name: slug,
       title: values.title || '',
@@ -872,6 +894,27 @@ const planPost = async (core, reader, { orgId, uid, now, operation }) => {
         problem(plan, 'fields.not-allowed', `"${key}" can't be set by post.update (allowed: ${core.POST_UPDATE_FIELDS.join(', ')}). Publication, scheduling and dates are set in the Hub.`)
     }
     const update = postFieldValues(core, plan, fields)
+    if (fields.values !== undefined) {
+      if (!post.postTypeId || !isPlainObject(fields.values)) problem(plan, 'post.type', 'Custom values must be an object on a values-only post.')
+      else {
+        try {
+          const { buildTypedPost, buildPostTypeFields, setPostPath } = await import('./helpers/cmsPostTypes.mjs')
+          const definition = await reader.doc(siteRef.collection('pages').doc(post.postTypeId))
+          const candidate = clone(post)
+          if (fields.event !== undefined) candidate.event = { ...candidate.event, ...fields.event }
+          const allowed = new Set(buildPostTypeFields(definition.data()).map(field => field.field))
+          for (const [key, value] of Object.entries(fields.values)) {
+            if (!allowed.has(key)) throw new Error(`Unknown custom post field: ${key}`)
+            setPostPath(candidate, key, value)
+          }
+          const saved = buildTypedPost({ page: definition.data(), pageId: post.postTypeId, post: { ...candidate, ...update } })
+          for (const [key, value] of Object.entries(saved)) {
+            if (!['docId', 'postTypeId', 'publishAt', 'publishAtTimezone', 'publishedAt', 'doc_created_at', 'hidePublishedDate'].includes(key)) update[key] = value
+          }
+        }
+        catch (error) { problem(plan, 'post.type', error.message) }
+      }
+    }
     if (fields.name !== undefined) {
       const wanted = typeof fields.name === 'string' ? core.slugify(fields.name) : ''
       if (!wanted) {
@@ -887,7 +930,18 @@ const planPost = async (core, reader, { orgId, uid, now, operation }) => {
       const postType = core.normalizePostType(post.type)
       const merged = core.savedPostEvent({ ...(isPlainObject(post.event) ? post.event : {}), ...(isPlainObject(fields.event) ? fields.event : {}) })
       problem(plan, 'post.event', ...core.postEventProblems(fields.event, { type: postType, merged, timezoneKnown: typeof post.event?.timezone === 'string' && !!post.event.timezone }))
-      update.event = postType === 'event' ? core.computePostEvent(merged, now) : merged
+      if (post.postTypeId) {
+        try {
+          const definition = await reader.doc(siteRef.collection('pages').doc(post.postTypeId))
+          if (definition.data()?.postType?.event !== true) throw new Error('This custom type does not enable event entries.')
+          const { buildPostEvent } = await import('./helpers/cmsPostEvents.mjs')
+          update.event = buildPostEvent(merged)
+        }
+        catch (error) { problem(plan, 'post.event', error.message) }
+      }
+      else {
+        update.event = postType === 'event' ? core.computePostEvent(merged, now) : merged
+      }
     }
     if (fields.restrictionRuleId !== undefined) {
       const rules = restrictionRuleIds(site)
@@ -897,6 +951,11 @@ const planPost = async (core, reader, { orgId, uid, now, operation }) => {
         update.restrictionRuleId = fields.restrictionRuleId
     }
     addWrite(plan, postRef, { ...update, ...stamp(uid, now) }, 'update', `Update draft post ${postId}: ${Object.keys(update).join(', ')}. Nothing is published.`)
+    return plan
+  }
+
+  if (post.postTypeId) {
+    problem(plan, 'post.area', 'This post stores values only. Use post.update fields.values; edit layout on its defining page.')
     return plan
   }
 
@@ -1591,7 +1650,7 @@ const gatherPostOutline = async ({ orgId, siteId, postId, source = 'draft', incl
       post: data,
       source: from,
       status: core.postPublicationStatus(draft, live, blocks),
-      paths: siteId === 'templates' ? [] : core.postRoutePaths(menus, pages, data.name),
+      paths: siteId === 'templates' ? [] : core.postRoutePaths(menus, data.postTypeId ? { [data.postTypeId]: pages[data.postTypeId] } : Object.fromEntries(Object.entries(pages).filter(([, page]) => !page.postType?.enabled)), data.name),
       blocks,
       includeValues: includeValues !== false,
       includeSchema: includeSchema === true,

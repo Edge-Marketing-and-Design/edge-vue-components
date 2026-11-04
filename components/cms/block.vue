@@ -5,6 +5,10 @@ import { ChevronDown, FilePen, GripVertical, ImagePlus, Loader2, LockKeyhole, Lo
 import { loadLibraryBlockForEditing, saveLibraryBlockEdit, saveWithBaseCheck } from '../../lib/cmsBlockRevisionClient'
 import { safeParseTagConfig } from '../../lib/cmsTagConfig'
 const props = defineProps({
+  previewBlock: {
+    type: Object,
+    default: null,
+  },
   modelValue: {
     type: Object,
     required: true,
@@ -1701,6 +1705,10 @@ const resolvedRenderBlock = computed(() => {
   }
 })
 
+// Display-only data for a custom type's detail preview. Field/source editing
+// always continues to use the real instance and resolved definition.
+const displayRenderBlock = computed(() => props.previewBlock || resolvedRenderBlock.value)
+
 const isOverrideBlockPreview = computed(() => {
   const instance = modelValue.value || {}
   if (props.standalonePreview && Object.prototype.hasOwnProperty.call(instance, 'isOverrideBlock'))
@@ -2930,7 +2938,7 @@ const getTagsFromPosts = computed(() => {
     >
       <!-- Content -->
       <div class="relative z-0" :class="props.editMode && props.overrideClicksInEditMode ? 'pointer-events-none' : ''">
-        <edge-cms-block-api :site-id="props.siteId" :route-last-segment="props.routeLastSegment" :theme="props.theme" :content="resolvedRenderBlock.content" :template-version="resolvedRenderBlock.templateVersion" :template="resolvedRenderBlock.template" :schema="resolvedRenderBlock.schema" :data-sources="resolvedRenderBlock.dataSources" :values="resolvedRenderBlock.values" :meta="resolvedRenderBlock.meta" :viewport-mode="props.viewportMode" :render-context="effectiveRenderContext" :standalone-preview="props.standalonePreview" :preview-auth-logged-in="props.previewAuthLoggedIn" />
+        <edge-cms-block-api :site-id="props.siteId" :route-last-segment="props.routeLastSegment" :theme="props.theme" :content="displayRenderBlock.content" :template-version="displayRenderBlock.templateVersion" :template="displayRenderBlock.template" :schema="displayRenderBlock.schema" :data-sources="displayRenderBlock.dataSources" :values="displayRenderBlock.values" :meta="displayRenderBlock.meta" :viewport-mode="props.viewportMode" :render-context="effectiveRenderContext" :standalone-preview="props.standalonePreview" :preview-auth-logged-in="props.previewAuthLoggedIn" />
       </div>
       <edge-cms-override-block-badge :is-override-block="isOverrideBlockPreview" />
       <div v-if="showProtectedEditOverlay" class="pointer-events-none absolute inset-0 z-[9998] bg-black/20">

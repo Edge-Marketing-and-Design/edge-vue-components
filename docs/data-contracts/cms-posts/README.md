@@ -187,3 +187,105 @@ Each Hub lists the tests in its own checkout under "This Hub". Shared:
   releases and the block checks.
 - `edge/docs/data-contracts/cms-operations/README.md`: the readiness report, the
   post reads and the draft-only `post.*` operations.
+
+## Page-defined custom post types
+
+An ordinary site's index/detail page (`post: true`) can opt into
+`postType: { enabled: true, icon: 'BookOpen' }`. Its stable page ID identifies
+the type; its current name is the menu label. The site-local Content sidebar
+shows its selected supported icon and a filtered list. Add New goes directly
+to a values-only editor built from that page's detail blocks/structure. The
+normal Posts editor continues handling existing copied-layout posts/events.
+
+Custom post drafts use the same `posts` collection and published snapshots use
+`published_posts`. Additive fields:
+
+- `postTypeId`: the defining page ID in this same site.
+- `type`: `custom-` followed by the defining-page ID UTF-8 bytes encoded as
+  unpadded lowercase base32. This keeps case-distinct IDs distinct through existing
+  lowercase/slug-based `idx:posts:type` readers. Labels never define identity.
+- `postTypeSchema`: a compact versioned fingerprint of the editable schema,
+  used to reject saves/publication against incompatible detail definitions.
+- Content values live at their named paths on the post itself, alongside the
+  standard title, slug, blurb, tags, image, restriction and publication fields.
+  No page `content`, `structure`, block definitions, templates or data sources
+  are copied onto a custom post.
+- `postTypeProjection` on a published snapshot: `{ fields, schema }`, the index
+  page's compiled post dependencies and detail schema signature. This allows
+  the normal post mirror to include dynamic values in index metadata without
+  changing the public renderer's post-source contract.
+
+Detail block schemas define editable text, richtext, image, number, boolean,
+option and repeated content fields. `postField` optionally binds a local schema
+field to a semantic post path; otherwise its schema key is the field identity.
+`editable: false` and `private: true` fields are not editable. Post-source field
+references in detail templates supply additional inferred fields. Page-owned
+layout/theme/source configuration, bookkeeping and permission fields cannot
+be stored as content paths. Existing values remain stored if a schema changes;
+incompatible changes block saving/publication until explicitly resolved.
+
+The Hub prepares the inline detail template using the engine's existing
+`source("posts")` loop, canonical lookup, route slug and type filter. Explicit
+record bindings avoid block defaults overriding the post's values. No frontend
+or template-engine package changes are required. Manual and scheduled
+publication validate against the published defining page; publication fails
+with a visible reason if the page/type/schema is unavailable or incompatible.
+History, compare, draft restore, discard, scheduling and unpublish remain source
+versus snapshot operations. No migration/backfill of legacy posts is performed.
+
+### Type-specific index metadata
+
+`cmsPostTypes` compiles post-source dependencies from template expressions,
+conditionals, loops, nested arrays and source sort/query field declarations.
+Computed field names fail explicitly rather than omitting data. Private detail
+fields cannot be index dependencies. The usual routing/order metadata envelope
+is retained; only referenced dynamic post values are added. Required values
+are never truncated: the exact UTF-8 envelope, including `canonical`, must fit
+KV's 1,024-byte limit. Use existing canonical post lookups for larger cards.
+
+`cms-refreshPostTypeMetadata` handles published-page writes with Firestore
+retries. It skips unchanged projections, scans only that site's published posts
+with the matching `postTypeId`, and uses paginated reads and per-post
+transactions. Each transaction rereads the current published page and snapshot;
+old events cannot restore an older projection or resurrect unpublished posts.
+Already-current projections are skipped, so retries resume safely. It writes
+only `postTypeProjection` on affected snapshots; the existing mirror provides
+stale-source guards, retries and public collection-cache invalidation. Drafts
+and unrelated types/sites are untouched. Progress/completion are recorded in
+Function logs. KV convergence remains eventual. Custom post sources use existing canonical
+reads, keeping cards usable while metadata converges; this does not add any
+request-time block-library lookups.
+
+### Sitemap controls
+
+Site Settings owns the sitemap preferences and generated entries. See the
+site/page contract's post-sitemap section. There are no sitemap hooks on post
+publication, and no automatic enabling based on whether posts exist.
+
+
+### Custom event entries and editor controls
+
+A defining index/detail page may set `postType.event: true`. Its entries retain
+`postTypeId` and their existing `custom-…` type index; they do not become the
+shared `event` type. `event` is an independent standard post envelope with the
+same dates, IANA timezone, location/virtual flag, registration/meeting URL,
+capacity, status and `unpublishPastEvent` fields as regular events. The shared
+normalizer computes UTC dates and `isPast`; custom event saves require valid
+start/end dates, an end after the start, and location details for in-person
+entries. Event fields are edited through Event Details, not inferred as text
+fields from the page template. Turning the page's event option off removes the
+event envelope on the next entry save; it does not rewrite existing records.
+
+The existing scheduled publication guard and past-event job include custom
+entries carrying event data, while preserving their custom type index. With
+`unpublishPastEvent` enabled, publication at/after the end time is refused and
+published past events are removed through the existing job. Standard posts
+and regular events retain their existing publication behavior.
+
+Both editors use the same Publishing panel in a dialog opened from the top
+bar. It includes publication status, last-published date, Publish At,
+Publish Now, Schedule Publish, clearing a schedule, and Unpublish. Event Details
+uses a separate dialog; changes remain part of the unsaved entry until Save.
+The standard editor retains its existing copied content/layout and history;
+its list and content-first/right-details layout now align with custom entries.
+No public renderer changes or content backfill are required.

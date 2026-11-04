@@ -4,7 +4,10 @@ import * as z from 'zod'
 import { BarChart3, Check, CircleAlert, ClipboardCheck, Copy, Download, ExternalLink, File, FileCheck, FileCog, FileDown, FileMinus2, FilePen, FilePenLine, FileStack, FileUp, FileX, FolderCog, FolderDown, FolderUp, FolderX, ImagePlus, Inbox, Loader2, Mail, MailOpen, MoreHorizontal, Plus, SlidersHorizontal, Trash2, Upload, Users, X } from 'lucide-vue-next'
 import { buildPagePayloadFromTemplateDoc, buildThemeSettingsPayload, deriveThemeMenus, ensureMenuBuckets, ensureUniqueSlug, normalizeAnalyticsEvents, normalizeSiteDomainSettings, titleFromSlug } from '../../lib/cmsOperations'
 import { getCmsDomainConnectionStatus } from '../../lib/cmsDomainConnectionStatus'
-import { prepareSitemapSettings } from '../../lib/cmsSitemapSettings'
+import { FileText } from 'lucide-vue-next'
+import { postTypeIcons } from '../../lib/cmsPostTypeIcons'
+import { getPostTypes, preparePostTypePage } from '../../lib/cmsPostTypes'
+import { prepareSitemapSettings, reconcilePostSitemaps } from '../../lib/cmsSitemapSettings'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
 import { buildCmsSitePreviewUrl, buildPublishedSitePreviewUrl, getCmsPublishedSiteOrigin } from '../../lib/cmsPublishedSitePreview'
 
@@ -1557,7 +1560,9 @@ const publishSiteSettings = async ({ siteVersion = null, bumpVersion = true } = 
     version: nextVersion,
   }
   if (payload.sitemap != null)
-    payload.sitemap = prepareSitemapSettings(payload.sitemap)
+    payload.sitemap = reconcilePostSitemaps({ settings: payload.sitemap, pages: publishedPages.value, menus: payload.menus || {} })
+  if (payload.sitemap != null && !areEqualNormalized(payload.sitemap, siteData.value.sitemap))
+    await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, { sitemap: payload.sitemap })
   if (bumpVersion) {
     await edgeFirebase.changeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites`, props.site, {
       version: nextVersion,
@@ -1673,7 +1678,7 @@ const publishSite = async ({ siteVersion = null, bumpSiteVersion = true } = {}) 
     const pageVersion = Number.isFinite(normalizedVersion) ? Math.max(0, Math.trunc(normalizedVersion)) : 1
     pageVersions[pageId] = pageVersion
     await edgeFirebase.storeDoc(`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/published`, {
-      ...pageData,
+      ...preparePostTypePage(pageData, pageId),
       version: pageVersion,
     })
   }
@@ -1711,8 +1716,9 @@ const publishSiteAndSettings = async () => {
     return
   state.publishSiteLoading = true
   try {
-    const siteVersion = await publishSiteSettings({ bumpVersion: true })
+    const siteVersion = getNextVersion(siteData.value?.version)
     await publishSite({ siteVersion, bumpSiteVersion: false })
+    await publishSiteSettings({ siteVersion, bumpVersion: true })
   }
   finally {
     state.publishSiteLoading = false
@@ -1722,6 +1728,18 @@ const publishSiteAndSettings = async () => {
 const pages = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`] || {}
 })
+
+const customPostTypes = computed(() => getPostTypes(pages.value))
+const selectedCustomPostType = computed(() => customPostTypes.value.find(type => type.id === String(route.query.postType || '')) || null)
+const selectCustomPostType = async (id = '') => {
+  const query = { ...route.query }
+  if (id) query.postType = id
+  else delete query.postType
+  const failure = await router.push({ path: pageRouteBase.value, query })
+  if (failure) return
+  state.selectedPostId = ''
+  state.viewMode = 'custom'
+}
 
 const openPagesExportDialog = (total) => {
   state.exportDialogOpen = true
@@ -3570,13 +3588,14 @@ const isPublishedPageDiff = (pageId) => {
 const _pageStatusLabel = pageId => (isPublishedPageDiff(pageId) ? 'Draft' : 'Published')
 const isEditingPage = computed(() => Boolean(props.page))
 const showSplitView = computed(() => !isEditingPage.value && (isTemplateSite.value || (canViewPagesTab.value && state.viewMode === 'pages')))
+watch(() => route.query.postType, value => { if (value && canViewPostsTab.value) state.viewMode = 'custom' }, { immediate: true })
 const isEditingPost = computed(() => canViewPostsTab.value && state.viewMode === 'posts' && Boolean(state.selectedPostId))
 
 const ensureValidViewMode = () => {
   let nextMode = state.viewMode
   if (nextMode === 'pages' && !canViewPagesTab.value)
     nextMode = defaultViewMode.value
-  if (nextMode === 'posts' && !canViewPostsTab.value)
+  if (['posts', 'custom'].includes(nextMode) && !canViewPostsTab.value)
     nextMode = defaultViewMode.value
   if (nextMode === 'submissions' && !canViewInboxTab.value)
     nextMode = defaultViewMode.value
@@ -3601,7 +3620,7 @@ const ensureValidViewMode = () => {
   }
 }
 
-const setViewMode = (mode) => {
+const setViewMode = async (mode) => {
   if (mode === 'pages' && !canViewPagesTab.value)
     return
   if (mode === 'posts' && !canViewPostsTab.value)
@@ -3614,6 +3633,11 @@ const setViewMode = (mode) => {
     return
   if (mode === 'media' && !canViewMediaTab.value)
     return
+  if (route.query.postType) {
+    const query = { ...route.query }; delete query.postType
+    const failure = await router.push({ path: pageRouteBase.value, query })
+    if (failure) return
+  }
   if (state.viewMode === mode)
     return
   state.viewMode = mode
@@ -4400,10 +4424,10 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
     </edge-dashboard>
     <div v-else class="flex flex-col h-[calc(100vh-78px)] overflow-visible">
       <div
-        class="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3 px-4 py-2 border border-slate-300 bg-slate-100 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+        class="flex flex-wrap items-center justify-between gap-3 px-4 py-2 border border-slate-300 bg-slate-100 text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
         :class="isTemplateSite ? 'min-h-[68px]' : ''"
       >
-        <div class="flex min-w-0 items-center gap-3">
+        <div class="flex min-w-0 flex-1 basis-48 items-center gap-3">
           <FileStack class="w-5 h-5 shrink-0" />
           <div class="min-w-0">
             <div class="flex min-w-0 items-center gap-2">
@@ -4449,94 +4473,6 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
             </span>
           </div>
 
-        </div>
-        <div class="flex justify-center">
-          <div v-if="!isTemplateSite && (canViewPagesTab || canViewPostsTab || canViewInboxTab || canViewAnalyticsTab || canViewRestrictedTab || canViewMediaTab)" class="flex max-w-[62vw] items-center overflow-x-auto rounded-full border border-slate-300 bg-white p-1 shadow-sm dark:border-slate-600 dark:bg-slate-950">
-            <edge-shad-button
-              v-if="canViewPagesTab"
-              variant="ghost"
-              size="sm"
-              class="h-8 px-4 text-xs gap-2 rounded-full"
-              :class="state.viewMode === 'pages'
-                ? 'bg-gradient-to-r from-slate-900 to-slate-700 text-white hover:text-white shadow-sm dark:bg-gradient-to-r dark:from-slate-200 dark:to-slate-400 dark:text-slate-900 dark:hover:text-slate-900'
-                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100'"
-              @click="setViewMode('pages')"
-            >
-              <FileStack class="h-4 w-4" />
-              Pages
-            </edge-shad-button>
-            <edge-shad-button
-              v-if="canViewPostsTab"
-              variant="ghost"
-              size="sm"
-              class="h-8 px-4 text-xs gap-2 rounded-full"
-              :class="state.viewMode === 'posts'
-                ? 'bg-gradient-to-r from-slate-900 to-slate-700 text-white hover:text-white shadow-sm dark:bg-gradient-to-r dark:from-slate-200 dark:to-slate-400 dark:text-slate-900 dark:hover:text-slate-900'
-                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100'"
-              @click="setViewMode('posts')"
-            >
-              <FilePenLine class="h-4 w-4" />
-              Posts
-            </edge-shad-button>
-            <edge-shad-button
-              v-if="canViewMediaTab"
-              variant="ghost"
-              size="sm"
-              class="h-8 px-4 text-xs gap-2 rounded-full"
-              :class="state.viewMode === 'media'
-                ? 'bg-gradient-to-r from-slate-900 to-slate-700 text-white hover:text-white shadow-sm dark:bg-gradient-to-r dark:from-slate-200 dark:to-slate-400 dark:text-slate-900 dark:hover:text-slate-900'
-                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100'"
-              @click="setViewMode('media')"
-            >
-              <ImagePlus class="h-4 w-4" />
-              Media
-            </edge-shad-button>
-            <edge-shad-button
-              v-if="canViewInboxTab"
-              variant="ghost"
-              size="sm"
-              class="h-8 px-4 text-xs gap-2 rounded-full"
-              :class="state.viewMode === 'submissions'
-                ? 'bg-gradient-to-r from-slate-900 to-slate-700 text-white hover:text-white shadow-sm dark:bg-gradient-to-r dark:from-slate-200 dark:to-slate-400 dark:text-slate-900 dark:hover:text-slate-900'
-                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100'"
-              @click="setViewMode('submissions')"
-            >
-              <Inbox class="h-4 w-4" />
-              Inbox
-              <span
-                v-if="unreadSubmissionsCount"
-                class="ml-1 rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-semibold text-white dark:bg-slate-100 dark:text-slate-900"
-              >
-                {{ unreadSubmissionsCount }}
-              </span>
-            </edge-shad-button>
-            <edge-shad-button
-              v-if="canViewAnalyticsTab"
-              variant="ghost"
-              size="sm"
-              class="h-8 whitespace-nowrap px-4 text-xs gap-2 rounded-full"
-              :class="state.viewMode === 'analytics'
-                ? 'bg-gradient-to-r from-slate-900 to-slate-700 text-white hover:text-white shadow-sm dark:bg-gradient-to-r dark:from-slate-200 dark:to-slate-400 dark:text-slate-900 dark:hover:text-slate-900'
-                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100'"
-              @click="setViewMode('analytics')"
-            >
-              <BarChart3 class="h-4 w-4" aria-hidden="true" />
-              Analytics
-            </edge-shad-button>
-            <edge-shad-button
-              v-if="canViewRestrictedTab"
-              variant="ghost"
-              size="sm"
-              class="h-8 px-4 text-xs gap-2 rounded-full"
-              :class="state.viewMode === 'restricted'
-                ? 'bg-gradient-to-r from-slate-900 to-slate-700 text-white hover:text-white shadow-sm dark:bg-gradient-to-r dark:from-slate-200 dark:to-slate-400 dark:text-slate-900 dark:hover:text-slate-900'
-                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-100'"
-              @click="setViewMode('restricted')"
-            >
-              <Users class="h-4 w-4" />
-              Members
-            </edge-shad-button>
-          </div>
         </div>
         <div class="relative flex items-center gap-3 justify-end">
           <input
@@ -4668,9 +4604,113 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
           </edge-shad-button>
         </div>
       </div>
-      <div class="flex-1 min-h-0">
+      <div class="flex flex-col flex-1 min-h-0">
+        <nav v-if="!isTemplateSite && (canViewPagesTab || canViewPostsTab || canViewInboxTab || canViewAnalyticsTab || canViewRestrictedTab || canViewMediaTab)" aria-label="Site navigation" class="flex h-11 shrink-0 items-center gap-1.5 overflow-x-auto border-b border-border bg-background px-4">
+          <edge-shad-button
+            v-if="canViewPagesTab"
+            variant="ghost"
+            size="sm"
+            class="h-7 shrink-0 whitespace-nowrap rounded-md px-3 text-xs gap-1.5"
+            :class="state.viewMode === 'pages'
+              ? 'bg-slate-800 text-white hover:bg-slate-700 hover:text-white dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground'"
+            :aria-current="state.viewMode === 'pages' ? 'page' : undefined"
+            @click="setViewMode('pages')"
+          >
+            <FileStack class="h-4 w-4" />
+            Pages
+          </edge-shad-button>
+          <edge-shad-button
+            v-if="canViewPostsTab"
+            variant="ghost"
+            size="sm"
+            class="h-7 shrink-0 whitespace-nowrap rounded-md px-3 text-xs gap-1.5"
+            :class="state.viewMode === 'posts'
+              ? 'bg-slate-800 text-white hover:bg-slate-700 hover:text-white dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground'"
+            :aria-current="state.viewMode === 'posts' ? 'page' : undefined"
+            @click="setViewMode('posts')"
+          >
+            <FilePenLine class="h-4 w-4" />
+            Posts
+          </edge-shad-button>
+          <edge-shad-button
+            v-if="canViewMediaTab"
+            variant="ghost"
+            size="sm"
+            class="h-7 shrink-0 whitespace-nowrap rounded-md px-3 text-xs gap-1.5"
+            :class="state.viewMode === 'media'
+              ? 'bg-slate-800 text-white hover:bg-slate-700 hover:text-white dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground'"
+            :aria-current="state.viewMode === 'media' ? 'page' : undefined"
+            @click="setViewMode('media')"
+          >
+            <ImagePlus class="h-4 w-4" />
+            Media
+          </edge-shad-button>
+          <edge-shad-button
+            v-if="canViewInboxTab"
+            variant="ghost"
+            size="sm"
+            class="h-7 shrink-0 whitespace-nowrap rounded-md px-3 text-xs gap-1.5"
+            :class="state.viewMode === 'submissions'
+              ? 'bg-slate-800 text-white hover:bg-slate-700 hover:text-white dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground'"
+            :aria-current="state.viewMode === 'submissions' ? 'page' : undefined"
+            @click="setViewMode('submissions')"
+          >
+            <Inbox class="h-4 w-4" />
+            Inbox
+            <span
+              v-if="unreadSubmissionsCount"
+              class="ml-1 rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-semibold text-white dark:bg-slate-100 dark:text-slate-900"
+            >
+              {{ unreadSubmissionsCount }}
+            </span>
+          </edge-shad-button>
+          <edge-shad-button
+            v-if="canViewAnalyticsTab"
+            variant="ghost"
+            size="sm"
+            class="h-7 shrink-0 whitespace-nowrap rounded-md px-3 text-xs gap-1.5"
+            :class="state.viewMode === 'analytics'
+              ? 'bg-slate-800 text-white hover:bg-slate-700 hover:text-white dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground'"
+            :aria-current="state.viewMode === 'analytics' ? 'page' : undefined"
+            @click="setViewMode('analytics')"
+          >
+            <BarChart3 class="h-4 w-4" aria-hidden="true" />
+            Analytics
+          </edge-shad-button>
+          <edge-shad-button
+            v-if="canViewRestrictedTab"
+            variant="ghost"
+            size="sm"
+            class="h-7 shrink-0 whitespace-nowrap rounded-md px-3 text-xs gap-1.5"
+            :class="state.viewMode === 'restricted'
+              ? 'bg-slate-800 text-white hover:bg-slate-700 hover:text-white dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground'"
+            :aria-current="state.viewMode === 'restricted' ? 'page' : undefined"
+            @click="setViewMode('restricted')"
+          >
+            <Users class="h-4 w-4" />
+            Members
+          </edge-shad-button>
+          <template v-if="canViewPostsTab && customPostTypes.length">
+            <span class="mx-2 h-5 shrink-0 border-l border-border" aria-hidden="true" />
+            <edge-shad-button v-for="type in customPostTypes" :key="type.id" variant="ghost" size="sm" class="h-7 shrink-0 gap-1.5 whitespace-nowrap rounded-md px-3 text-xs" :class="state.viewMode === 'custom' && selectedCustomPostType?.id === type.id
+              ? 'bg-slate-800 text-white hover:bg-slate-700 hover:text-white dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-slate-300'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground'" :aria-current="state.viewMode === 'custom' && selectedCustomPostType?.id === type.id ? 'page' : undefined" @click="selectCustomPostType(type.id)">
+              <component :is="postTypeIcons[type.icon] || FileText" class="h-3.5 w-3.5" />{{ type.name }}
+            </edge-shad-button>
+          </template>
+        </nav>
+
+        <div class="min-w-0 min-h-0 flex-1">
         <Transition name="fade" mode="out-in">
-          <div v-if="isViewingSubmissions" class="flex-1 overflow-y-auto p-6">
+          <edge-cms-typed-posts v-if="selectedCustomPostType && canViewPostsTab && state.viewMode === 'custom'" :key="`${site}:${selectedCustomPostType.id}`" :site="site" :definition="selectedCustomPostType" :can-manage-restrictions="canManageRestrictedContent" />
+          <div v-else-if="route.query.postType && !selectedCustomPostType && canViewPostsTab" role="alert" class="p-8 text-sm text-muted-foreground">This post type is unavailable. Restore or re-enable its defining page to edit its saved entries.</div>
+          <div v-else-if="isViewingSubmissions" class="flex-1 overflow-y-auto p-6">
             <edge-dashboard
               :collection="submissionsCollection"
               query-field="action"
@@ -5199,8 +5239,8 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
               </Transition>
             </ResizablePanel>
           </ResizablePanelGroup>
-          <div v-else class="flex-1 min-h-0 overflow-hidden p-6">
-            <div class="mx-auto w-full max-w-5xl h-full min-h-0">
+          <div v-else class="h-full min-h-0 overflow-hidden">
+            <div class="w-full h-full min-h-0">
               <edge-cms-posts
                 mode="list"
                 list-variant="full"
@@ -5212,6 +5252,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
             </div>
           </div>
         </Transition>
+        </div>
       </div>
     </div>
     <edge-shad-dialog :model-value="state.unpublishDialogOpen" @update:model-value="value => { if (!state.unpublishing) state.unpublishDialogOpen = value }">
@@ -5387,7 +5428,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
       </DialogContent>
     </edge-shad-dialog>
     <Sheet v-if="canEditSiteSettings" v-model:open="state.siteSettings">
-      <SheetContent side="left" class="w-full md:w-1/2 max-w-none sm:max-w-none max-w-2xl">
+      <SheetContent side="left" class="w-full max-w-none sm:w-[min(760px,calc(100vw-2rem))] sm:max-w-none">
         <SheetHeader>
           <SheetTitle>{{ siteData.name || 'Site' }}</SheetTitle>
           <SheetDescription />
@@ -5422,6 +5463,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                 :domain-error="domainError"
                 :settings-open="state.siteSettings"
                 :show-sitemaps="isPersistedSiteRoute"
+                :sitemap-pages="pages"
                 :theme-contact-spam-defaults="getThemeContactSpamDefaults(slotProps.workingDoc?.theme)"
                 :contact-spam-has-persisted-value="siteHasPersistedContactSpam"
                 contact-spam-target-type="site"
