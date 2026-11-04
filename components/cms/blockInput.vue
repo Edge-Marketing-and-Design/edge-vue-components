@@ -1,7 +1,13 @@
 <script setup>
 import { useVModel } from '@vueuse/core'
 import { ImagePlus, Video, X } from 'lucide-vue-next'
-import { buildCloudflareVideoIframe, getCloudflareVideoIframeSrc } from '../../lib/cmsVideo'
+import {
+  applyCloudflareVideoOptions,
+  buildCloudflareVideoIframe,
+  getCloudflareVideoIframeSrc,
+  getCloudflareVideoOptions,
+  normalizeCloudflareVideoOptions,
+} from '../../lib/cmsVideo'
 
 const props = defineProps({
   field: {
@@ -97,6 +103,26 @@ const hasImageValue = computed(() => String(resolvedImageUrl.value || '').trim()
 const isVideoPicker = computed(() => props.type === 'richtext' && props.schema?.picker === 'video')
 const selectedVideoEmbedUrl = computed(() => getCloudflareVideoIframeSrc(modelValue.value))
 const hasVideoValue = computed(() => Boolean(selectedVideoEmbedUrl.value))
+const videoOptions = computed(() => getCloudflareVideoOptions(modelValue.value))
+const isBackgroundVideo = computed(() => videoOptions.value.layout === 'background')
+// Values saved before playback options existed have no hidden-video guard.
+const videoNeedsPlayerUpdate = computed(() => hasVideoValue.value && !/data-cms-video-guard/.test(String(modelValue.value || '')))
+const videoLayoutItems = [
+  { label: 'Standard player', value: 'player' },
+  { label: 'Background (fills the block, muted, loops)', value: 'background' },
+]
+// A block author can set starting options with schema.videoOptions, such as
+// { "layout": "background" } for a hero background video.
+const schemaVideoOptions = computed(() => {
+  const options = props.schema?.videoOptions
+  return (options && typeof options === 'object' && !Array.isArray(options)) ? options : {}
+})
+const videoToggles = [
+  { key: 'autoplay', label: 'Autoplay', description: 'Starts when the page loads.' },
+  { key: 'sound', label: 'Sound', description: 'Off starts the video muted.' },
+  { key: 'loop', label: 'Loop', description: 'Starts again when it ends.' },
+  { key: 'controls', label: 'Player controls', description: 'Play, pause, volume and full screen.' },
+]
 
 const optionConfig = computed(() => {
   let option = {}
@@ -163,7 +189,10 @@ const clearImage = () => {
 }
 
 const selectVideo = async (_url, item) => {
-  const iframe = buildCloudflareVideoIframe(item)
+  const options = hasVideoValue.value
+    ? videoOptions.value
+    : normalizeCloudflareVideoOptions(schemaVideoOptions.value)
+  const iframe = buildCloudflareVideoIframe(item, options)
   if (!iframe) {
     state.videoError = 'This video is still processing in Cloudflare Stream. Wait a few minutes, then reopen the picker and select it again.'
     return
@@ -172,6 +201,17 @@ const selectVideo = async (_url, item) => {
   state.videoError = ''
   await nextTick()
   state.videoOpen = false
+}
+
+const updateVideoOptions = (patch) => {
+  if (!hasVideoValue.value)
+    return
+  modelValue.value = applyCloudflareVideoOptions(modelValue.value, { ...videoOptions.value, ...patch })
+}
+
+const updateVideoSeconds = (key, event) => {
+  const raw = String(event?.target?.value ?? '').trim()
+  updateVideoOptions({ [key]: raw === '' ? (key === 'posterTime' ? null : 0) : raw })
 }
 
 const openRichtextImagePicker = () => {
@@ -267,6 +307,82 @@ onBeforeMount(async () => {
       <p v-if="state.videoError" class="text-sm text-destructive" role="alert">
         {{ state.videoError }}
       </p>
+      <div v-if="hasVideoValue" class="space-y-3 rounded-md border border-border p-3">
+        <div v-if="videoNeedsPlayerUpdate" class="flex flex-wrap items-center justify-between gap-2 rounded-md bg-muted p-2 text-xs text-muted-foreground">
+          <span>This video was added before playback options. Update it so it stops when a pop-up closes.</span>
+          <edge-shad-button type="button" size="sm" variant="outline" class="h-7" @click="updateVideoOptions({})">
+            Update player
+          </edge-shad-button>
+        </div>
+        <div class="space-y-1">
+          <label :for="`${field}-video-layout`" class="text-sm font-medium text-foreground">Layout</label>
+          <select
+            :id="`${field}-video-layout`"
+            class="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+            :value="videoOptions.layout"
+            @change="updateVideoOptions({ layout: $event.target.value })"
+          >
+            <option v-for="item in videoLayoutItems" :key="item.value" :value="item.value">
+              {{ item.label }}
+            </option>
+          </select>
+          <p v-if="isBackgroundVideo" class="text-xs text-muted-foreground">
+            Covers the block behind its content. Always muted, looping and without controls; it stays still for visitors who turn on reduced motion. The block template must place it inside a positioned element.
+          </p>
+        </div>
+        <div class="grid gap-2 sm:grid-cols-2">
+          <div
+            v-for="toggle in videoToggles"
+            :key="toggle.key"
+            class="flex items-start justify-between gap-3 rounded-md border border-border p-2"
+          >
+            <label :for="`${field}-video-${toggle.key}`" class="min-w-0">
+              <span class="block text-sm font-medium text-foreground">{{ toggle.label }}</span>
+              <span class="block text-xs text-muted-foreground">{{ toggle.description }}</span>
+            </label>
+            <Switch
+              :id="`${field}-video-${toggle.key}`"
+              :model-value="videoOptions[toggle.key]"
+              :disabled="isBackgroundVideo"
+              @update:model-value="value => updateVideoOptions({ [toggle.key]: value })"
+            />
+          </div>
+        </div>
+        <p v-if="videoOptions.autoplay && videoOptions.sound" class="text-xs text-amber-600 dark:text-amber-400" role="status">
+          Browsers block autoplay with sound, so this video may wait for a click. Turn Sound off to make sure it starts on its own.
+        </p>
+        <div class="grid gap-2 sm:grid-cols-2">
+          <div class="space-y-1">
+            <label :for="`${field}-video-start`" class="text-sm font-medium text-foreground">Start at (seconds)</label>
+            <input
+              :id="`${field}-video-start`"
+              type="number"
+              min="0"
+              step="0.5"
+              class="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              :value="videoOptions.startTime || ''"
+              placeholder="0"
+              @change="updateVideoSeconds('startTime', $event)"
+            >
+          </div>
+          <div class="space-y-1">
+            <label :for="`${field}-video-poster`" class="text-sm font-medium text-foreground">Cover image from (seconds)</label>
+            <input
+              :id="`${field}-video-poster`"
+              type="number"
+              min="0"
+              step="0.5"
+              class="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              :value="videoOptions.posterTime ?? ''"
+              placeholder="Default frame"
+              @change="updateVideoSeconds('posterTime', $event)"
+            >
+          </div>
+        </div>
+        <p class="text-xs text-muted-foreground">
+          On the live site a video stops when it is hidden, such as when a pop-up closes.
+        </p>
+      </div>
     </div>
     <div v-else-if="props.type === 'richtext'">
       <edge-shad-html
