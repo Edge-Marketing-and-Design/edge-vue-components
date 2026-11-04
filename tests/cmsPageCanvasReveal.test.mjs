@@ -108,6 +108,7 @@ function setup() {
     let cssAgain = false
     let knownTokens = new Set()
     let firstRevealAt = 0
+    let styleWaiters = []
     ${collectLogic}
     ${revealLogic}
     globalThis.canvas = { scheduleSiteCss, onMutations }
