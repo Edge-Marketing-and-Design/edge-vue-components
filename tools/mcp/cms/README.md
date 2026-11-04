@@ -27,6 +27,19 @@ in `edge/lib/cmsAgentReads.js`. This server runs them on its read-only service
 account; the remote endpoint runs the same code as the operator. Keep its two
 copies under `edge/functions/helpers/` and `functions/helpers/` identical.
 
+Two tools are local only and stay out of the remote list
+(`CMS_AGENT_REMOTE_TOOL_NAMES`): `cms_compare_instances`
+(`src/compare-instances.js`) renders every placed instance of a block before
+and after a proposed definition, applied the way a release applies it
+(`edge/functions/helpers/cmsBlockPropagation.js`), with the same Data Source
+records on both sides, and reports the differences, drifted markup copies and
+values in fields the new schema drops; `cms_override_component`
+(`src/override-component.js`) reads the `emd-cms-front` component an override
+block renders as from `EDGE_CMS_RENDERER_REPO`, compares the fields it reads
+with the block's schema and sources, and checks the deployed override
+manifest (`cmsRendererManifestUrl` in the config, or
+`CMS_RENDERER_MANIFEST_URL`).
+
 `cms_guide` serves `edge/functions/agentGuide/cms-agent-guide.md`, the same
 workflow guide the remote endpoint serves. The remote `cms_contract` reads the
 Hub's contracts from `functions/agent-contracts/`; after editing a contract,
@@ -245,6 +258,39 @@ Install dependencies once, in the Hub's main checkout:
 npm --prefix edge/tools/mcp/cms install
 ```
 
+After that, `launch.sh` reinstalls them (`npm ci`) whenever they no longer
+match `package-lock.json`.
+
+### Launcher and freshness
+
+Every Hub's `.mcp.json` (and Clearwater's `.codex/config.toml`) starts the
+server through `edge/tools/mcp/cms/launch.sh`:
+
+```json
+"command": "sh",
+"args": ["-c", "exec sh \"$(git rev-parse --show-toplevel)/edge/tools/mcp/cms/launch.sh\""],
+"env": { "EDGE_CMS_MCP_CONFIG": "<hub config>", "EDGE_CMS_MCP_CREDENTIALS": "<read-only key>" }
+```
+
+Before starting the server it:
+
+- fetches `origin/main` (8 seconds at most; skipped offline) for the Hub
+  checkout the server runs from and for the `emd-cms-front` checkout
+  (`EDGE_CMS_RENDERER_REPO`);
+- fast-forwards a checkout that is on `main`, clean and behind; a feature
+  branch, a worktree, local changes or local commits are left alone;
+- runs `npm ci` where the server's `node_modules` live when they no longer
+  match its `package-lock.json`;
+- passes the result as `EDGE_CMS_CHECKOUT_STATUS`. When the Hub or
+  `emd-cms-front` checkout is behind, `cms_guide`, `cms_contract` and
+  `cms_agent_organizations` carry a `checkoutNotice` naming the branch and
+  commit count. Nothing is blocked: writes still go through the Hub's checks.
+
+`EDGE_CMS_FRESHNESS=off` skips the fetch, fast-forward and install;
+`EDGE_CMS_FETCH_TIMEOUT` changes the fetch limit. `test/launch.test.js`
+covers a clean `main` behind, a dirty `main`, a feature worktree, no network
+and a missing renderer checkout.
+
 ### Hub config
 
 Each Hub has its own config file, named by `EDGE_CMS_MCP_CONFIG` (relative
@@ -255,7 +301,8 @@ paths resolve from the Hub root). Clearwater's are
 points at a local emulator. Fields: `serverName`, `projectId` (required),
 `environment`, `defaultOrgId`, `allowedPathPrefixes`, `collectionAliases`,
 `agentEndpoint`, `agentKeyFile`, `credentialsFile`, `cmsWorkspaceRoot`,
-`cmsRendererRepoPath`, scan limits and redaction lists.
+`cmsRendererRepoPath`, `cmsRendererManifestUrl`, scan limits and redaction
+lists.
 
 Every `EDGE_CMS_MCP_*` setting also accepts its older
 `CLEARWATER_FIRESTORE_MCP_*` name, and `EDGE_CMS_WORKSPACE_ROOT`,
@@ -263,26 +310,26 @@ Every `EDGE_CMS_MCP_*` setting also accepts its older
 
 ### Credentials
 
-Run the MCP on the read-only service account
-`firebase-readonly-mcp@clearwater-hub.iam.gserviceaccount.com`. Its only
-role is `roles/datastore.viewer` (Cloud Datastore Viewer, read-only
-Firestore). The server looks for its key at:
+Run the MCP on the Hub's read-only service account (for Clearwater
+`firebase-readonly-mcp@clearwater-hub.iam.gserviceaccount.com`, whose only
+role is `roles/datastore.viewer`, read-only Firestore). Each Hub names its
+key in its `.mcp.json`:
 
-```text
-~/.config/clearwater/firebase-readonly-mcp.json
+```json
+"env": { "EDGE_CMS_MCP_CREDENTIALS": "~/.config/clearwater/firebase-readonly-mcp.json" }
 ```
 
-No environment setup is needed when the key is there. To use a different
-location, set `EDGE_CMS_MCP_CREDENTIALS` (preferred),
-`GOOGLE_APPLICATION_CREDENTIALS`, or `credentialsFile` in the MCP config.
-Precedence is in that order, then the default path. A path set through
-either variable that does not exist is a startup error; the server doesn't
+There is no default key path, so a server never picks up another Hub's key.
+Precedence: `EDGE_CMS_MCP_CREDENTIALS` (or `CLEARWATER_FIRESTORE_MCP_CREDENTIALS`),
+`GOOGLE_APPLICATION_CREDENTIALS`, then `credentialsFile` in the MCP config. A
+configured path that does not exist is a startup error; the server doesn't
 fall back.
 
-Without a key, the server falls back to Application Default Credentials,
-which is your own `gcloud auth application-default login`. It writes a
-warning to stderr. Those credentials are usually **not** read-only: safety
-then rests only on this server having no write tools.
+With none of them, the key is reported as not configured (`credentials.source:
+"not-configured"`, with a note) and the server runs on Application Default
+Credentials, your own `gcloud auth application-default login`, with a warning
+on stderr. Those credentials are usually **not** read-only: safety then rests
+only on this server having no write tools. The emulator configs need no key.
 
 Every tool result includes
 `credentials: { source, account, readOnlyServiceAccount }`, so you can
@@ -324,15 +371,15 @@ The server needs Node 22 or newer (`package.json` `engines`): the draft,
 preview and readiness tools use the built-in `fetch`. MCP clients start it
 without an interactive shell, so nvm's directory hooks don't run and the
 client's own `PATH` decides, which can be an old nvm default (Node 16 has no
-`fetch`: calls fail with "fetchImpl is not a function"). The `.mcp.json`
-launcher therefore runs the Node named in the Hub's `.nvmrc` when nvm has it
+`fetch`: calls fail with "fetchImpl is not a function"). `launch.sh`
+therefore runs the Node named in the Hub's `.nvmrc` when nvm has it
 installed (`~/.nvm/versions/node/v<version>/bin/node`), and plain `node`
 otherwise. `src/node-version.js` stops the server at startup, with the path of
 the Node it got, when that is older than 22.
 
 ### Git worktrees
 
-The project `.mcp.json` starts the server from the session's own checkout
+`launch.sh` starts the server from the session's own checkout
 (`git rev-parse --show-toplevel`), so the server code always matches that
 checkout's `.mcp.json`, whatever branch the main checkout has checked out.
 A git worktree, such as the ones Claude Code creates under
@@ -360,7 +407,7 @@ Hub's config:
 EDGE_CMS_MCP_CONFIG=tools/mcp/config/clearwater.production.json node /absolute/path/to/clearwater-hub/edge/tools/mcp/cms/src/server.js
 ```
 
-Credentials resolve as described under **Credentials**; no client environment is needed when the key is at the default path.
+Credentials resolve as described under **Credentials**: set `EDGE_CMS_MCP_CREDENTIALS` to the Hub's read-only key.
 
 ## Aliases
 

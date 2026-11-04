@@ -12,6 +12,7 @@ import { z } from 'zod'
 import { cmsAgentToolDefinitions, selectGuideSection } from '../../../../lib/cmsAgentMcpTools.js'
 import { CMS_OPERATION_TYPES } from '../../../../lib/cmsOperations.js'
 import { createConnectionClient, resolveConnectionKey } from './agent-connections.js'
+import { checkoutNotice, parseCheckoutStatus, withCheckoutNotice } from './checkout-status.js'
 import { agentEndpoint, createAgentOperationClient, loadOperationFile, resolveAgentKey } from './agent-operations.js'
 import { createCmsToolService, resolveCmsOrganization } from './cms-tools.js'
 import { contractKinds, readContract } from './contracts.js'
@@ -27,13 +28,17 @@ const repoRoot = process.env.EDGE_CMS_HUB_ROOT || path.resolve(__dirname, '../..
 const setting = name => process.env[`EDGE_CMS_MCP_${name}`] || process.env[`CLEARWATER_FIRESTORE_MCP_${name}`] || ''
 
 const config = await loadConfig()
+// From launch.sh: whether this checkout and emd-cms-front are behind main.
+const staleNotice = checkoutNotice(parseCheckoutStatus(process.env.EDGE_CMS_CHECKOUT_STATUS))
+if (staleNotice)
+  console.error(`[${config.serverName}] ${staleNotice.message}`)
 const redactionPatterns = (config.redactedFieldPatterns || []).map(pattern => new RegExp(pattern, 'i'))
 const redactedFieldNames = new Set((config.redactedFieldNames || []).map(name => name.toLowerCase()))
 
 const credentials = resolveCredentials({ configFile: config.credentialsFile })
 const credentialSummary = describeCredentials(credentials)
 if (!credentials.readOnlyServiceAccount) {
-  console.error(`[${config.serverName}] No read-only service account key found; using Application Default Credentials. See the README "Credentials" section.`)
+  console.error(`[${config.serverName}] No read-only key is configured (EDGE_CMS_MCP_CREDENTIALS or credentialsFile); using Application Default Credentials. See the README "Credentials" section.`)
 }
 
 const app = admin.apps.length
@@ -51,6 +56,7 @@ const cmsTools = createCmsToolService({
   sanitizeValue,
   repoRoot,
   credentials: credentialSummary,
+  rendererStatus: parseCheckoutStatus(process.env.EDGE_CMS_CHECKOUT_STATUS)?.renderer || null,
 })
 
 const connectionMode = Boolean(config.agentConnectionFile || process.env.EDGE_CMS_AGENT_CONNECTION)
@@ -264,11 +270,11 @@ const handlers = {
   cms_render_block: async ({ orgId, sessionId, ...input }) => jsonResult(await agentOperations.render(resolveOrgId(orgId), input, sessionId)),
   cms_find_theme: async input => jsonResult(await cmsTools.findTheme(input)),
   cms_get_theme: async input => jsonResult(await cmsTools.getTheme(input)),
-  cms_contract: async ({ kind, section }) => jsonResult(await readContract({ kind, section, repoRoot, rendererRoot: path.resolve(repoRoot, config.cmsRendererRepoPath), notes: await readContractNotes() })),
+  cms_contract: async ({ kind, section }) => jsonResult(withCheckoutNotice(await readContract({ kind, section, repoRoot, rendererRoot: path.resolve(repoRoot, config.cmsRendererRepoPath), notes: await readContractNotes() }), staleNotice)),
   cms_schema: async input => jsonResult(await cmsTools.schema(input)),
   // The guide the remote server serves, from this checkout's Edge copy.
-  cms_guide: async ({ section }) => jsonResult(selectGuideSection(await readFile(path.resolve(__dirname, '../../../../functions/agentGuide/cms-agent-guide.md'), 'utf8'), section)),
-  cms_agent_organizations: async input => jsonResult(connections ? await connections.organizations(input) : { ok: false, code: 'connection-required', message: 'Configure a Hub-issued agent connection to discover its organizations.' }),
+  cms_guide: async ({ section }) => jsonResult(withCheckoutNotice(selectGuideSection(await readFile(path.resolve(__dirname, '../../../../functions/agentGuide/cms-agent-guide.md'), 'utf8'), section), staleNotice)),
+  cms_agent_organizations: async input => jsonResult(withCheckoutNotice(connections ? await connections.organizations(input) : { ok: false, code: 'connection-required', message: 'Configure a Hub-issued agent connection to discover its organizations.' }, staleNotice)),
   cms_list_sites: async input => jsonResult(await cmsTools.listSites(input)),
   async cms_open_session(input) {
     const orgId = resolveOrgId(input.orgId)
@@ -300,6 +306,9 @@ const handlers = {
   cms_list_posts: async ({ orgId, siteId, type, tag, limit, startAfter, sessionId }) => jsonResult(await agentOperations.posts(resolveOrgId(orgId), siteId, { type, tag, limit, startAfter, sessionId })),
   cms_get_post: async ({ orgId, siteId, postId, source, includeValues, includeSchema, sessionId }) => jsonResult(await agentOperations.post(resolveOrgId(orgId), siteId, postId, { source, includeValues, includeSchema, sessionId })),
   cms_block_base: async input => jsonResult(await cmsTools.blockBase(input)),
+  // Local only: they read every placed instance and the emd-cms-front checkout.
+  cms_compare_instances: async input => jsonResult(await cmsTools.compareInstances(input)),
+  cms_override_component: async input => jsonResult(await cmsTools.overrideComponent(input)),
 }
 
 // Names, schemas and descriptions come from the shared definitions, which the
@@ -357,6 +366,7 @@ async function loadConfig() {
     cmsWorkspaceRoot: process.env.EDGE_CMS_WORKSPACE_ROOT || process.env.CLEARWATER_CMS_WORKSPACE_ROOT || parsed.cmsWorkspaceRoot || '.tmp/cms-block-workspace',
     cmsRendererRepoPath: process.env.EDGE_CMS_RENDERER_REPO || process.env.CLEARWATER_CMS_RENDERER_REPO || parsed.cmsRendererRepoPath || '../emd-cms-front',
     credentialsFile: parsed.credentialsFile || '',
+    cmsRendererManifestUrl: parsed.cmsRendererManifestUrl || '',
     redactedFieldNames: parsed.redactedFieldNames || [],
     redactedFieldPatterns: parsed.redactedFieldPatterns || [],
   }

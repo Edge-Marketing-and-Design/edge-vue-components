@@ -19,7 +19,6 @@ test('the MCP rejects tenant escapes before database reads or agent requests', a
     allowedOrganizationIds: ['allowed'],
     allowedPathPrefixes: ['organizations'],
     collectionAliases: { '@blocks': 'organizations/{orgId}/blocks' },
-    credentialsFile: path.join(root, 'absent-credentials.json'),
     agentEndpoint: 'http://127.0.0.1:1/never-requested',
   }))
   const env = { ...process.env }

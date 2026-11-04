@@ -12,7 +12,7 @@
   },
   "scripts": {
     "start": "node src/server.js",
-    "check": "node --check src/server.js && node --check src/cms-tools.js && node --check src/credentials.js && node --check src/agent-connections.js && node --check src/agent-operations.js",
+    "check": "node --check src/server.js && node --check src/cms-tools.js && node --check src/credentials.js && node --check src/agent-connections.js && node --check src/agent-operations.js && node --check src/checkout-status.js && node --check src/compare-instances.js && node --check src/override-component.js && sh -n launch.sh",
     "test": "node --test test/*.test.js ../../../functions/tests/cms-agent-connections.unit.test.cjs ../../../functions/tests/cms-agent-mcp.unit.test.cjs"
   },
   "dependencies": {

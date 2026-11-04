@@ -309,8 +309,11 @@ export const parseTemplateLoops = (template) => {
 }
 
 // The engine evaluates a condition only against `item` or the alias of a loop
-// that encloses it. Outside every loop it does not evaluate the conditional at
-// all: the tags are dropped and both branches render.
+// that encloses it; any other name is false, so the else branch renders.
+// Outside every loop `item` is the block's values (`item.eyebrow` tests the
+// block's field); inside a loop `item` and the alias are the current entry.
+// Checked in the public renderer's engine, the Hub preview and the page editor
+// canvas (2026-11-04, @edgedev/template-engine 26.10.4).
 export const findConditionScopeProblems = (template) => {
   const text = String(template || '')
   const loops = parseTemplateLoops(text)
@@ -330,11 +333,42 @@ export const findConditionScopeProblems = (template) => {
       .filter(loop => loop.bodyStart <= match.index && (loop.bodyEnd ?? text.length) > match.index)
       .map(loop => loop.alias)
     if (!aliases.length)
-      problems.push(`"${condition}" is outside every loop; the engine only evaluates conditions inside a {{#for}} and renders both branches here. Use a class from the value (for example "x-{{ ${scope} }}") or wrap the content in a loop.`)
+      problems.push(`"${condition}" is outside every loop, where the engine evaluates only \`item\` (the block's values): it is always false and the else branch renders. Test the block's field as "item.${condition}".`)
     else if (!aliases.includes(scope))
-      problems.push(`"${condition}" tests "${scope}", which is not an enclosing loop alias (${aliases.join(', ')}); the engine takes the else branch.`)
+      problems.push(`"${condition}" tests "${scope}", which is not \`item\` or an enclosing loop alias (${aliases.join(', ')}); it is always false and the else branch renders.`)
   }
   return problems
+}
+
+// Inside a loop `item` is the current entry, not the block's values, so
+// `item.<field>` on one of the block's own schema fields tests the entry (the
+// Agent Blog heroes' eyebrow inside a `post` loop never rendered). A warning:
+// the entry may have a field of the same name.
+export const findLoopItemFieldProblems = (template, schema) => {
+  const fields = new Set(Object.keys(isObject(schema) ? schema : {}))
+  if (!fields.size)
+    return []
+  const text = String(template || '')
+  const loops = parseTemplateLoops(text)
+  const problems = []
+  for (const match of text.matchAll(/\{\{\{\s*#if\s*(\{[\s\S]*?\})\s*\}\}\}/g)) {
+    let condition = ''
+    try {
+      condition = String(JSON.parse(match[1])?.cond || '').trim()
+    }
+    catch {
+      continue
+    }
+    const field = condition.match(/^item\.([A-Za-z_$][\w$]*)/)?.[1]
+    if (!field || !fields.has(field))
+      continue
+    const enclosing = loops.filter(loop => loop.bodyStart <= match.index && (loop.bodyEnd ?? text.length) > match.index)
+    if (!enclosing.length)
+      continue
+    const alias = enclosing[enclosing.length - 1].alias
+    problems.push(`"${condition}" is inside the "${alias}" loop, where \`item\` is the current entry, not the block's values, so it does not test the block's "${field}" field. Move the condition outside the loop, or render the field in an element with \`empty:hidden\`.`)
+  }
+  return [...new Set(problems)]
 }
 
 const schemaDefaults = schema => Object.fromEntries(
@@ -871,6 +905,8 @@ export const validateBlockDocument = (doc, options = {}) => {
     report.add('error', 'grammar.condition-negation', 'template', 'Template v2 conditions do not support ! negation; test the field and put the content in the {{{#else}}} branch.')
   for (const message of findConditionScopeProblems(template))
     report.add('error', 'grammar.condition-scope', 'template', message)
+  for (const message of findLoopItemFieldProblems(template, doc.schema))
+    report.add('warning', 'grammar.condition-loop-item', 'template', message)
   if (/ld\+json/i.test(template))
     report.add('warning', 'grammar.json-ld', 'template', 'Blocks should not contain JSON-LD; use page structured data.')
   // Warnings here: blocks for themes that predate the standard names still
@@ -1179,7 +1215,8 @@ export const BLOCK_VALIDATION_CODES = Object.freeze({
   'grammar.legacy-if': { severity: 'error', meaning: 'Unsupported conditional syntax (legacy if).' },
   'grammar.condition-operator': { severity: 'error', meaning: 'Unsupported conditional operator.' },
   'grammar.condition-negation': { severity: 'error', meaning: 'Unsupported negated condition.' },
-  'grammar.condition-scope': { severity: 'error', meaning: 'A condition outside every loop, or on a name that is not `item` or an enclosing loop alias; the engine does not evaluate it.' },
+  'grammar.condition-scope': { severity: 'error', meaning: 'A condition on a name that is not `item` or an enclosing loop alias (outside loops, a bare field name such as `eyebrow` instead of `item.eyebrow`): it is always false and the `else` branch renders.' },
+  'grammar.condition-loop-item': { severity: 'warning', meaning: 'Inside a loop, `item.<field>` names one of the block\'s own fields, but there `item` is the current entry, so it does not test the block\'s value.' },
   'grammar.vue-or-inline-handler': { severity: 'error', meaning: 'Vue directives, bindings or inline `on*` handlers.' },
   'grammar.json-ld': { severity: 'warning', meaning: 'JSON-LD belongs in page structured data, not in a block.' },
   'script.syntax': { severity: 'error', meaning: 'An inline script does not parse as JavaScript.' },

@@ -26,7 +26,10 @@ The words below mean exactly this, here and in the contracts:
 
 ## What you can and can't do
 
-You work through the Hub's CMS MCP. Everything you write is a draft:
+You work through the Hub's CMS MCP. Everything you write is a draft.
+
+With a Hub checkout (developers), use the local CMS MCP the Hub's `.mcp.json` starts (`edge/tools/mcp/cms/launch.sh` keeps the checkout current; a `checkoutNotice` in `cms_guide` says when it is behind `origin/main`), read with it and the Firebase MCP, and script bulk reads against the Hub's own validator, converter and engine (edge-block-package, "With a Hub checkout" and `reference/scripting-against-a-hub.md`). Two local-only tools matter here: `cms_compare_instances` before every `block.draft` for a block already placed on pages, and `cms_override_component` for override blocks. Without a checkout, the same tools below run remotely.
+
 
 | Tool | Use |
 | --- | --- |
@@ -35,6 +38,8 @@ You work through the Hub's CMS MCP. Everything you write is a draft:
 | `cms_check_operation` then `cms_run_operation` | Every write. The check returns problems and a checksum; the run is refused if anything changed since the check |
 | `cms_block_base` | The current definition of an existing block (its open draft, else released) and the fingerprint a `block.draft` must send |
 | `cms_preview_url` | A 15-minute link to the Hub's render of one draft page, with your unreleased block drafts by default |
+| `cms_compare_instances` (local) | Every placed instance of a block rendered before and after a proposed definition, with the differences; run it before each `block.draft` of a block already on pages |
+| `cms_override_component` (local) | The `emd-cms-front` component an override block renders as, with the fields it reads against the block's schema |
 | `cms_find_media`, `cms_upload_media` | Find the organization's images, and add new ones (a public URL, or a local file PUT to a one-time link) through the Hub's own upload |
 | `cms_site_readiness` | What stops the site from being finished, including image links outside the Hub's media |
 
@@ -113,9 +118,9 @@ The job that follows every launch: the design changed and the blocks already in 
 
 1. **Inputs.** The organization and site; the design reference (the Figma file and the changed node ids, or "compare the whole frame" when the designer did not record them; or a handoff export); and the map (the package manifest's `design` entries, or each block's `meta.design` from `cms_block_base`). Call `cms_contract` for `blocks` and `operations` first, and `sites-and-pages` when values change. Without the Figma MCP, a handoff export or screenshots work with your own comparison; say so in the report.
 2. **Identify the affected blocks** from the map (`block-updates.md`, "Finding the block a node became"). "Compare the whole frame" means `get_metadata` on the frame, then each mapped section against its block. Nodes with no map entry, by id or by name, are listed for the developer, never guessed; blocks with no `meta.design` are listed with the draft that would add it.
-3. **For each affected block:** `cms_block_base` (the current definition and its `baseHash`), the design node (`get_design_context`, `get_screenshot`), and the current preview (`cms_preview_url` for a page that holds it). Classify every change by the table in `block-updates.md`; a section can carry several classes. Count the instances with `cms_find_usage`.
+3. **For each affected block:** `cms_block_base` (the current definition and its `baseHash`), the design node (`get_design_context`, `get_screenshot`), and the current preview (`cms_preview_url` for a page that holds it). Classify every change by the table in `block-updates.md`; a section can carry several classes. Count the instances with `cms_find_usage`. With a checkout, read the block's live definition and instances through the local MCP (and a script for many blocks).
 4. **Checkpoint.** Stop and report, in one table, one row per block: the node, the change classes, whether anything is breaking (a removed or renamed field), what needs the developer (synced values, a renderer task), the images to upload, and the instance count. Add the nodes with no map entry and the estimated work. Wait for the developer. Two-step is the default for a removed or renamed field (add now, remove in a later draft); a one-step removal happens only when the developer asks for it here.
-5. **Apply.** Per block, one `block.draft` carrying every definition change (markup, new fields, the first step of a rename, and `meta.design` when it was missing), validated with the checker before it is saved; `page.setValues` per instance for value changes, with new images uploaded first (see "Images"); nothing for synced values beyond the list. Then preview each touched page beside the design at about 1440 pixels and with `viewport: "mobile"`, and fix what differs: up to three passes per block, as in section 2.
+5. **Apply.** Per block, one `block.draft` carrying every definition change (markup, new fields, the first step of a rename, and `meta.design` when it was missing), validated with the checker and, with a checkout, compared on every placed instance with `cms_compare_instances` before it is saved (every difference is the intended change or a finding to fix); `page.setValues` per instance for value changes, with new images uploaded first (see "Images"); nothing for synced values beyond the list. Then preview each touched page beside the design at about 1440 pixels and with `viewport: "mobile"`, and fix what differs: up to three passes per block, as in section 2.
 6. **Hand off.** Drafts awaiting release, each with its classes and a release recommendation (all sites for a handful of documents; canary to one site first when `cms_find_usage` counts more; confirmation when breaking; two-step changes in order); value changes applied and the synced ones left for the developer; renderer tasks for override blocks; images uploaded; fresh preview links; what still differs; the design revision written to `PROJECT.md` (`design.revision`); the time log. If the site has a content plan, update its §10 rows and take a new sync baseline (edge-figma-design `reference/cms-to-figma-sync.md`), so CMS changes made later can be synced back to Figma. Say plainly that the Hub page editor shows released blocks until the drafts are released.
 
 The developer releases from the Block Editor. Asked afterwards, confirm with `cms_site_readiness` that no instance is behind (`instance.behind`).

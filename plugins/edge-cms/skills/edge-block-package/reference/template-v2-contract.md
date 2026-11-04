@@ -52,6 +52,9 @@ Required rules:
 
 ```handlebars
 {{ heading }}
+{{{#if {"cond":"item.eyebrow"} }}}
+  <p>{{ eyebrow }}</p>
+{{{/if}}}
 {{ richtext(body) }}
 {{#for card in cards}}
   {{ card.title }}
@@ -67,9 +70,15 @@ Required rules:
 - Use `richtext(value)` only for trusted CMS rich-text Inputs.
 - Use plain `#for` loops for manual Input arrays.
 - Template v2 conditions use triple braces and a JSON object.
-- A condition tests `item` or the alias of an enclosing `{{#for}}` loop
-  (`card.link` above). A top-level `#if` is not evaluated: both branches
-  render. Drive top-level options with a class from the value instead.
+- A condition reads data only through `item` or a loop alias (the enclosing
+  loop's or an ancestor loop's, `card.link` above). Outside loops `item` is
+  the block's values, so test a field as `item.eyebrow`; a bare `eyebrow` is
+  always false and the `else` branch renders (`grammar.condition-scope`).
+  Inside a loop `item` is the current entry and the block's own fields can't
+  be tested: move the condition outside the loop, or render the field in an
+  element with `empty:hidden` (`grammar.condition-loop-item` warns). Verified
+  in the public renderer, the Hub preview and the page editor canvas
+  (2026-11-04).
 - Do not use JavaScript operators such as `&&` or `||` in conditions.
 
 Dynamic sources, when a later workflow explicitly adds them, must be declared

@@ -9,19 +9,29 @@ Repeatable process for producing Template v2 library blocks that a human uploads
 
 **With the Hub's agent tools** (the CMS MCP with an agent key), building a whole site follows the edge-design-to-site skill: author and validate blocks here (steps 0–6), then create them in the Hub with `block.create` instead of handing files over, and keep going to the next page. Its two checkpoints replace the per-package review in step 8 and the one-page limit below.
 
-## With or without a Hub checkout
+## With a Hub checkout (the developer path)
 
-Two setups, one workflow:
+Hub developers work from the Hub repository. Its `.mcp.json` starts the local CMS MCP through `edge/tools/mcp/cms/launch.sh`, which fetches `origin/main` for the Hub and the `emd-cms-front` checkout, fast-forwards a clean `main`, installs the server's dependencies when they change, and otherwise reports how far behind the checkout is. Writes still go through the Hub's agent endpoint (check, run, `baseHash`, drafts only); a stale checkout only makes reads, docs and local checks out of date.
 
-- **Hub checkout** (Hub developers): the local CMS MCP, the Firebase MCP, `importfiles/` in the Hub, and the Hub's import check at `scripts/cms/validate-import.mjs`.
-- **Remote** (editors with the plugin or the Hub's remote MCP URL, no checkout): the Hub's CMS tools run on the deployed Hub. Keep the package and its `PROJECT.md` in your own workspace folder, leave `hubPath` and `validatorPath` empty, and use the replacements below. The Hub's checks are the same; only where they run differs.
+- **Current?** When `cms_guide`, `cms_contract` or `cms_agent_organizations` returns a `checkoutNotice`, the checkout (or `emd-cms-front`) is behind `origin/main`: merge or pull, restart the server, then continue.
+- **What exists and the live definition:** `cms_find_block`, `cms_block_base` (the open draft, else the released definition, with its `baseHash`), `cms_find_usage`, `cms_list_pages`; the Firebase MCP (`firestore_get_document`, `firestore_sample_collection`) for anything the tools don't summarize, such as the organization's tag list or a page document.
+- **Scripts against the Hub's own code** for bulk reads and checks: the validator, the Template v1 → v2 converter, the revision hash and the template engine. Import paths and an example: `reference/scripting-against-a-hub.md`.
+- **Before drafting a change to a block already on pages:** `cms_compare_instances` with the proposed `definition` (or `useDraft: true` for the open draft). It renders every placed instance, draft and published, on every site, before and after with its own values, and lists each difference, instances whose markup copy has drifted, and values in fields the new schema drops. Every difference is either the change you intended or a finding to fix before the draft is saved. Then `cms_preview_url` for API sources and the Hub preview's own source loading, which the comparison doesn't cover.
+- **Override blocks:** `cms_override_component` reads the Vue component the public site renders from the local `emd-cms-front` checkout, with a field comparison (`reference/override-blocks.md`).
+- **Import check:** `node scripts/cms/validate-import.mjs .` (`validatorPath` in `PROJECT.md`).
+- **One CMS server per Hub:** keep the plugin's remote server off in a developer session (plugin README, "Developer setup"), so the local tools are the only CMS tools loaded.
+
+## Without a Hub checkout (the editor path)
+
+Editors with the plugin or the Hub's remote MCP URL: the Hub's CMS tools run on the deployed Hub. Keep the package and its `PROJECT.md` in your own workspace folder, leave `hubPath` and `validatorPath` empty, and use the replacements below. The Hub's checks are the same; only where they run differs. `cms_compare_instances`, `cms_override_component` and the Firebase reads are local only.
 
 | With a checkout | Remote |
 | --- | --- |
-| Firebase MCP reads of blocks, pages, tags | `cms_find_block`, `cms_block_base`, `cms_list_pages`, `cms_audit_blocks` (`summary.blockTags.list` for the tag list) |
+| Local MCP and Firebase MCP reads of blocks, pages, tags | `cms_find_block`, `cms_block_base`, `cms_list_pages`, `cms_audit_blocks` (`summary.blockTags.list` for the tag list) |
 | `node <validatorPath> .` (the Hub import check) | `cms_validate` with each block's definition inline, then the `cms_check_operation` of its `block.create`, which runs the Hub import check |
+| `cms_compare_instances` before a draft | `cms_render_block` with an instance's values (`cms_get_page`), one instance at a time, and `cms_preview_url` |
 | Theme defaults from `edge/lib/cmsThemeDefaults.mjs` | `theme.create` with only a `name` fills the shared defaults; read them back with `cms_get_theme` |
-| Data contracts by path | `cms_contract` (always available remotely) |
+| Data contracts (`cms_contract`, or by path) | `cms_contract` |
 
 The package scripts (generator, package validator, preview) are optional remotely. They need Node and, for the validator and preview, `npm install @edgedev/template-engine` in the workspace folder. Without them, write each block's JSON directly and validate with `cms_validate`.
 
@@ -39,7 +49,7 @@ The words below mean exactly this, here and in the contracts:
 ## Boundary
 
 - Output is an import package under the project's `importfiles/` folder: block JSON files, a manifest, a README with upload steps, and support scripts. Never Hub application code, never renderer code.
-- The Hub is the source of truth. Package files deliver **new** blocks. An existing Hub block is edited from its live document: through the agent tools, `cms_block_base`, edit that definition, and `block.draft` with its `baseHash`; without them, pull it through the Firebase MCP, edit that copy, and re-import with Overwrite. Never regenerate an existing block from a local file. A git-based flow once cost the operator about 60 hours; do not reintroduce it.
+- The Hub is the source of truth. Package files deliver **new** blocks. An existing Hub block is edited from its live document: `cms_block_base`, edit that definition, compare it on every placed instance (`cms_compare_instances` with a checkout), and `block.draft` with its `baseHash`; without the agent tools, pull it through the Firebase MCP, edit that copy, and re-import with Overwrite. Never regenerate an existing block from a local file. A git-based flow once cost the operator about 60 hours; do not reintroduce it.
 - Shared renderer changes (Vue override blocks) are a separate task in `emd-cms-front`. This skill writes the handoff note and flags `rendererChanges: true`; it never edits that repository.
 
 ## Read first
@@ -52,7 +62,7 @@ The words below mean exactly this, here and in the contracts:
 
 0. **Receive the contracts.** Call `cms_contract` (the CMS MCP) for every kind the package will write: `blocks` always, `themes` when it carries Theme or Head JSON, `posts` for post blocks, `operations` when blocks are created through the agent operations. Read the returned text before writing a block. In the handoff (the package README and the completion summary), list each field the package writes and the contract line it follows (section and field name). Without the MCP (a package-only session in a repository with no Hub), read the file by path from the Hub checkout `PROJECT.md` names (`edge/docs/data-contracts/cms-<kind>/README.md`) and say in the handoff that the contract was read by path, with the Hub commit.
 1. **Review before build.** Compare the design with the live site and any existing packages. List what to keep, what to correct, and what is invented. Invented people, quotes, headshots, job openings, statistics, promises, and stock image URLs never persist in a block; they become editable inputs that default to approved copy or stay empty with an intentional fallback.
-2. **Establish what exists.** List the Hub's current blocks and the site's pages (`cms_find_block` and `cms_list_pages`, or the Firebase MCP with a checkout). Decide per stable id: overwrite, new, or retire. Record it in the package README.
+2. **Establish what exists.** List the Hub's current blocks and the site's pages (with a checkout, the local MCP and Firebase reads, or a script for bulk reads; remotely, `cms_find_block` and `cms_list_pages`). Decide per stable id: overwrite, new, or retire. Record it in the package README.
 3. **Scaffold** one package per page with `node <skill>/scripts/scaffold.mjs <package-name> --dir <importfiles/project>`. Four blocks or fewer per package; quality drops beyond that.
 4. **Write the blocks** in `generate-package.mjs`: template markup in `String.raw`, a `schema` object with every editable value, `makeBlock` for the document shape (with each block's `design` node: the section's node id and layer name in the design), and the manifest. Follow `reference/template-v2-contract.md` and the migrator skill for grammar.
 5. **Validate three ways**: `node generate-package.mjs && node validate-package.mjs && node <validatorPath from PROJECT.md> .` The package validator renders every block through `@edgedev/template-engine` with its defaults and asserts the project's content rules. `validatorPath` should be the Hub's shared import check, `scripts/cms/validate-import.mjs` (relative to `hubPath`): it runs the exact check the Hub import runs, so a package that passes imports without rejections. Remotely, the third check is `cms_validate` on each block's definition (the same validator, run by the Hub); fix every error and warning it reports before `block.create`.
@@ -75,7 +85,7 @@ The words below mean exactly this, here and in the contracts:
 
 ## Block tags
 
-- **The list.** Each organization keeps one flat list of block tags in the Hub: `cmsBlockTags` on `organizations/{orgId}`, edited by an organization admin under Blocks → Block Actions → Block Tags. Read it before tagging (`cms_audit_blocks` → `summary.blockTags.list`, or with a checkout the Firebase MCP `firestore_get_document` on the organization). `PROJECT.md`'s `tags` mirrors it; when they differ the Hub wins, so update `PROJECT.md`. No list in the Hub means tags are unrestricted; use `PROJECT.md`'s set.
+- **The list.** Each organization keeps one flat list of block tags in the Hub: `cmsBlockTags` on `organizations/{orgId}`, edited by an organization admin under Blocks → Block Actions → Block Tags. Read it before tagging (with a checkout, the Firebase MCP `firestore_get_document` on the organization; remotely, `cms_audit_blocks` → `summary.blockTags.list`). `PROJECT.md`'s `tags` mirrors it; when they differ the Hub wins, so update `PROJECT.md`. No list in the Hub means tags are unrestricted; use `PROJECT.md`'s set.
 - **The rule.** One or two tags for the generic kind of content the block shows (Hero, Content, Cards & Grids, Form, Footer...), plus `Quick Picks` only when the block should appear in the block picker's first view; `Quick Picks` doesn't count toward the two. Never an empty array.
 - **What a tag is not.** No feature, collection, theme, site, version or page tags (`clearwater-main`, `Website v2`, `careers`, `webcams`). What the block shows stays in its name, which library search finds.
 - **Enforcement.** The package validator refuses tags outside `PROJECT.md`'s list and content tag counts other than one or two. The Hub's import, Block Editor checks and `block.create` report `tags.not-in-list` and `tags.content-count` (warnings now, errors once every block is retagged).

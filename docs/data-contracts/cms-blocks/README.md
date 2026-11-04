@@ -185,11 +185,17 @@ shared video media picker.
   `else` branch for those regardless of data. Nest positive conditions and
   put the content in `{{{#else}}}` instead.
 - A condition tests `item` or the alias of a `{{#for}}` that encloses it.
-  Outside every loop the engine does not evaluate the conditional: the tags
-  are dropped and both branches render. On any other name inside a loop it
-  takes the `else` branch. For a top-level field, put the value in a class
-  (`class="x-{{ style }}"`) and style it in the theme, or loop over a data
-  source. The validator reports both as `grammar.condition-scope`.
+  Outside every loop `item` is the block's values: test a field as
+  `item.eyebrow`. Any other name (a bare `eyebrow`, or a name that is not an
+  enclosing alias) is always false, so the `else` branch renders; the
+  validator reports it as `grammar.condition-scope`. Inside a loop `item` and
+  the alias are the current entry, so the block's own fields can't be tested
+  there: move the condition outside the loop, or render the field in an
+  element with `empty:hidden`. The validator warns with
+  `grammar.condition-loop-item` when `item.<field>` inside a loop names one of
+  the block's schema fields. Verified 2026-11-04 with
+  `@edgedev/template-engine` 26.10.4 in the public renderer's engine, the Hub
+  preview and the page editor canvas (`blockRender.vue`).
 - A missing `{{{/if}}}` silently drops the rest of the enclosing content.
 
 ### Block instance

@@ -1,7 +1,8 @@
 # edge-cms plugin
 
-The Edge CMS skills and the Hub's remote CMS tools in one install, for people
-who build or edit sites in a Hub without a Hub checkout.
+The Edge CMS skills and the Hub's remote CMS tools in one install. Editors
+use both, without a Hub checkout. Edge developers use the skills with the
+Hub's local CMS tools and keep the remote server off (Developer setup, below).
 
 - **Skills:** `edge-block-package`, `edge-design-to-site`, `edge-figma-design`,
   `vue-to-block-migrator`. Copies of `edge/skills/`; don't edit them here.
@@ -42,6 +43,39 @@ a hand-added server or a script; the plugin no longer reads one.
 If you already added the remote server by hand (for example `emd-cms-remote`
 in `~/.claude.json`), remove it after installing so the tools don't appear
 twice.
+
+## Developer setup
+
+Edge developers (with the Hub repositories) work from a Hub checkout: the
+skills come from this plugin, the CMS tools from the Hub's own local server.
+
+1. Install the plugin as above, for its skills.
+2. Turn its remote server off: in a terminal, `/mcp`, then `edge-cms`, then
+   Disable; in Claude Desktop, switch `edge-cms` off under the plugin's
+   Connectors. Don't add a Hub's remote endpoint as a connector either.
+3. Start sessions in the Hub checkout (or one of its worktrees). Its
+   `.mcp.json` starts the local CMS server through
+   `edge/tools/mcp/cms/launch.sh`, which fetches `origin/main` for the Hub
+   and the `emd-cms-front` checkout next to it, fast-forwards a clean `main`,
+   runs `npm ci` when the server's dependencies change, and otherwise reports
+   how far behind the checkout is (`checkoutNotice` in `cms_guide`,
+   `cms_contract` and `cms_agent_organizations`).
+4. Each Hub's `.mcp.json` names its own read-only key
+   (`EDGE_CMS_MCP_CREDENTIALS`); there is no default key path. Writes go
+   through the Hub's agent endpoint with your agent key or Hub connection
+   (the MCP README, `edge/tools/mcp/cms/README.md`).
+
+Why one server: the remote and local servers expose the same tool names, and
+with both loaded for different Hubs an agent can call the wrong one. The local
+server also has what the remote one can't: Firestore reads, block workspaces,
+`cms_compare_instances` (every placed instance before and after a change) and
+`cms_override_component` (the `emd-cms-front` component for an override
+block), and scripts against the Hub's own validator, converter and engine
+(edge-block-package `reference/scripting-against-a-hub.md`).
+
+Check a session: `/mcp` lists one CMS server (the Hub's local one, for
+example `clearwater-firebase-readonly`), `edge-cms` is disabled, and
+`/skills` lists the four skills.
 
 ## Maintaining
 

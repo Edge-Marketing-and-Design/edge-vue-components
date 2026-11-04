@@ -2,19 +2,20 @@ import { existsSync, readFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-// Conventional location of the read-only service account key. Keeping the
-// default here means no shell or app environment is needed for the MCP to
-// run on read-only credentials.
-export const DEFAULT_CREDENTIALS_FILE = '~/.config/clearwater/firebase-readonly-mcp.json'
+// There is no default key file: each Hub names its own read-only key in its
+// .mcp.json (EDGE_CMS_MCP_CREDENTIALS) or MCP config (credentialsFile), so a
+// server never falls back to another Hub's key.
+export const CREDENTIALS_NOT_CONFIGURED = 'not-configured'
 
 const expandHome = (filePath, homeDir) => (filePath.startsWith('~/') ? path.join(homeDir, filePath.slice(2)) : filePath)
 
 // Chooses the credentials the MCP uses, in order:
 // 1. EDGE_CMS_MCP_CREDENTIALS (or CLEARWATER_FIRESTORE_MCP_CREDENTIALS), 2. GOOGLE_APPLICATION_CREDENTIALS,
-// 3. config credentialsFile or the conventional key file,
-// 4. Application Default Credentials (the operator's gcloud login).
-// An explicitly configured path that does not exist is an error, not a
-// silent fallback to personal credentials.
+// 3. config credentialsFile.
+// Without any of them the result is `not-configured`: the server reports it
+// and runs on Application Default Credentials (the operator's gcloud login;
+// the emulators ignore credentials). A configured path that does not exist is
+// an error, not a silent fallback to personal credentials.
 export function resolveCredentials({
   env = process.env,
   configFile = '',
@@ -36,12 +37,14 @@ export function resolveCredentials({
     if (!fileExists(filePath))
       throw new Error(`${explicit[0]} points to a missing credentials file: ${filePath}`)
   }
+  else if (String(configFile || '').trim()) {
+    source = 'config:credentialsFile'
+    filePath = expandHome(String(configFile).trim(), homeDir)
+    if (!fileExists(filePath))
+      throw new Error(`The MCP config's credentialsFile points to a missing credentials file: ${filePath}`)
+  }
   else {
-    const candidate = expandHome(String(configFile || DEFAULT_CREDENTIALS_FILE).trim(), homeDir)
-    if (!fileExists(candidate))
-      return { source: 'application-default', filePath: '', account: '', readOnlyServiceAccount: false }
-    source = configFile ? 'config:credentialsFile' : 'default-credentials-file'
-    filePath = candidate
+    return { source: CREDENTIALS_NOT_CONFIGURED, filePath: '', account: '', readOnlyServiceAccount: false }
   }
 
   const key = readJson(filePath)
@@ -54,5 +57,6 @@ export function resolveCredentials({
 export const describeCredentials = credentials => ({
   source: credentials.source,
   account: credentials.account || 'application default credentials',
+  ...(credentials.source === CREDENTIALS_NOT_CONFIGURED ? { note: 'No read-only key is configured for this Hub: set EDGE_CMS_MCP_CREDENTIALS in its .mcp.json (or credentialsFile in its MCP config).' } : {}),
   readOnlyServiceAccount: credentials.readOnlyServiceAccount,
 })

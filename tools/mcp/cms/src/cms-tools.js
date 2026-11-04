@@ -25,6 +25,8 @@ import {
   toMcpValidation,
 } from '../../../../lib/cmsAgentReads.js'
 import { blockDefinitionHash } from '../../../../lib/cmsBlockRevisions.js'
+import { COMPARE_COLLECTIONS, collectInstanceDocuments, compareInstances as runCompareInstances } from './compare-instances.js'
+import { describeOverrideComponent } from './override-component.js'
 
 // Shared with the Hub's agent endpoint; re-exported for existing callers.
 export { buildDocumentDiff, collectBlockReferences, hashDocument, stableStringify, summarizeBlockAudit, summarizeBlockTagRules, toMcpValidation } from '../../../../lib/cmsAgentReads.js'
@@ -51,6 +53,8 @@ export function createCmsToolService({
   sanitizeValue = value => value,
   repoRoot,
   credentials = null,
+  rendererStatus = null,
+  fetchImpl = globalThis.fetch,
 }) {
   if (!db)
     throw new Error('CMS tools require a Firestore database client.')
@@ -411,9 +415,111 @@ export function createCmsToolService({
     }
   }
 
+  // What a proposed definition does to every placed instance (local only).
+  const compareInstances = async ({
+    orgId: requestedOrgId = '',
+    docId: requestedDocId,
+    definition = null,
+    useDraft = false,
+    siteId = '',
+    collections = null,
+    sourceRecords = null,
+    maxRenders,
+  }) => {
+    const orgId = resolveOrgId(requestedOrgId)
+    const docId = assertFirestoreSegment(requestedDocId, 'docId')
+    if (Boolean(definition) === Boolean(useDraft))
+      return { ok: false, code: 'invalid-argument', message: 'Send either a definition or useDraft: true.' }
+    const library = await readProductionBlock({ orgId, docId })
+    if (!library.exists)
+      return { ok: false, code: 'not-found', message: `Block "${docId}" does not exist in ${orgId}.` }
+    let proposed = definition
+    let proposedFrom = 'definition'
+    if (useDraft) {
+      const current = await reads.readDefinition({ orgId, docId })
+      if (current.source !== 'draft')
+        return { ok: false, code: 'no-draft', message: `Block "${docId}" has no open draft.` }
+      proposed = current.block
+      proposedFrom = `draft revision ${library.data?.draftRevision}`
+    }
+    const wanted = Array.isArray(collections) && collections.length ? collections.filter(name => COMPARE_COLLECTIONS.includes(name)) : COMPARE_COLLECTIONS
+    const found = await collectInstanceDocuments({
+      db,
+      orgId,
+      blockId: docId,
+      siteId: siteId ? assertFirestoreSegment(siteId, 'siteId') : '',
+      collections: wanted,
+      maxSites: config.maxCmsSiteScanDocuments || 100,
+      maxDocuments: config.maxCmsPageScanDocuments || 500,
+      sanitizeValue,
+    })
+    const result = await runCompareInstances({
+      orgId,
+      blockId: docId,
+      library: library.data,
+      proposed,
+      documents: found.documents,
+      sourceRecords,
+      pageRender: await loadPageRender(),
+      maxRenders: boundedNumber(maxRenders, 10000, 3000),
+    })
+    return {
+      ...environmentSummary(),
+      ...result,
+      proposed: proposedFrom,
+      releasedRevision: Number.isInteger(library.data?.releasedRevision) ? library.data.releasedRevision : 0,
+      collections: wanted,
+      scanned: found.scanned,
+      collectionsRead: found.collectionsRead,
+      siteScanTruncated: found.siteScanTruncated,
+      scanTruncated: found.scanTruncated,
+    }
+  }
+
+  // The emd-cms-front component the public site renders for an override
+  // block (local only).
+  const overrideComponent = async ({ orgId: requestedOrgId = '', docId: requestedDocId = '', blockName = '', themeName = '' }) => {
+    const orgId = resolveOrgId(requestedOrgId)
+    let block = null
+    let name = String(blockName || '').trim()
+    let definitionFrom = null
+    if (requestedDocId) {
+      const current = await reads.readDefinition({ orgId, docId: assertFirestoreSegment(requestedDocId, 'docId') })
+      block = current.block
+      definitionFrom = current.source
+      name = String(block?.name || '').trim()
+    }
+    if (!name)
+      return { ok: false, code: 'invalid-argument', message: 'Send docId (a library block) or blockName.' }
+    const result = await describeOverrideComponent({
+      rendererRepoPath,
+      orgId,
+      block,
+      blockName: name,
+      themeName: String(themeName || '').trim(),
+      listComponents: async () => {
+        try {
+          const blocksRoot = path.join(rendererRepoPath, 'app/blocks')
+          return (await listFilesRecursively(blocksRoot, filePath => filePath.endsWith('.vue'))).map(file => path.relative(blocksRoot, file).split(path.sep).join('/'))
+        }
+        catch (error) {
+          if (error?.code === 'ENOENT')
+            return null
+          throw error
+        }
+      },
+      manifestUrl: process.env.CMS_RENDERER_MANIFEST_URL || config.cmsRendererManifestUrl || '',
+      fetchImpl,
+      rendererStatus,
+    })
+    return { ...environmentSummary(), orgId, docId: requestedDocId || null, ...(definitionFrom ? { definitionFrom } : {}), ...result }
+  }
+
   return {
     auditBlocks,
     blockBase,
+    compareInstances,
+    overrideComponent,
     schema,
     checkoutBlock,
     diff,
@@ -489,6 +595,19 @@ export function validateBlockDocument(block, { override = null } = {}) {
 }
 
 let templateEngine
+let pageRenderFn
+// The engine's pageRender, as the public renderer renders a page.
+async function loadPageRender() {
+  if (pageRenderFn === undefined) {
+    try {
+      pageRenderFn = (await import('@edgedev/template-engine')).pageRender || null
+    }
+    catch {
+      pageRenderFn = null
+    }
+  }
+  return pageRenderFn
+}
 // The engine is resolved from the Hub's root node_modules. When it cannot be
 // loaded, render checks report as skipped instead of failing validation.
 async function loadRenderTemplate() {
