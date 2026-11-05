@@ -4,7 +4,7 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const { VERSION, buildInventory, makePlan } = require('../../scripts/function-deploy-plan.cjs')
-const { deployFunctions } = require('../../scripts/deploy-functions.cjs')
+const { deployFunctions, firebaseBatchArgs } = require('../../scripts/deploy-functions.cjs')
 const { DeployCloud } = require('../../scripts/function-deploy-cloud.cjs')
 
 function fixture(t) {
@@ -720,4 +720,58 @@ test('unconverted old-format summaries do not report retired keys as current inp
   const plan = f.plan({ requireSourceProof: true })
   assert.deepEqual(plan.inputChanges[key], [])
   assert.deepEqual(plan.selectionReasons[key], ['server changed outside checkpoint'])
+})
+
+
+test('batch args accept newly configured retries and leave ordinary batches unforced', () => {
+  const key = 'us-central1/alpha-one'
+  const item = { name: 'alpha-one', platform: 'gcfv2', eventTrigger: { eventType: 'google.cloud.firestore.document.v1.written', retry: true } }
+  const args = remote => firebaseBatchArgs({ batch: ['alpha-one'], inventory: { [key]: item }, remote, projectId: 'test-project' })
+  assert.ok(args({}).includes('--force'))
+  const deployed = { environment: 'GEN_2', eventTrigger: { eventType: item.eventTrigger.eventType, retryPolicy: 'RETRY_POLICY_DO_NOT_RETRY' } }
+  assert.ok(args({ [key]: deployed }).includes('--force'))
+  deployed.eventTrigger.retryPolicy = 'RETRY_POLICY_RETRY'
+  assert.ok(!args({ [key]: deployed }).includes('--force'))
+  item.eventTrigger.retry = false
+  assert.ok(!args({}).includes('--force'))
+  assert.ok(args({}).includes('--non-interactive'))
+})
+
+test('accepting retries cannot silently delete selector matches or migrate generation/trigger types', () => {
+  const item = { name: 'alpha-one', platform: 'gcfv2', eventTrigger: { eventType: 'google.cloud.firestore.document.v1.written', retry: true } }
+  const args = remote => firebaseBatchArgs({ batch: ['alpha-one'], inventory: { 'us-central1/alpha-one': item }, remote, projectId: 'test-project' })
+  assert.throws(() => args({ 'us-west1/alpha-one': { environment: 'GEN_2' } }), /removed locally/)
+  assert.throws(() => args({ 'us-central1/alpha-one-old': { environment: 'GEN_2' } }), /outside this batch/)
+  assert.throws(() => firebaseBatchArgs({ batch: ['alpha-one'], inventory: { 'us-central1/alpha-one': item, 'us-central1/alpha-one-child': { ...item, name: 'alpha-one-child' } }, remote: {}, projectId: 'test-project' }), /outside this batch/)
+  assert.throws(() => args({ 'us-central1/alpha-one': { environment: 'GEN_1', eventTrigger: { eventType: item.eventTrigger.eventType } } }), /generation or trigger type/)
+  assert.throws(() => args({ 'us-central1/alpha-one': { environment: 'GEN_2', eventTrigger: { eventType: 'google.cloud.pubsub.topic.v1.messagePublished' } } }), /generation or trigger type/)
+})
+
+test('SDK inventory carries retry metadata without changing content fingerprints', t => {
+  const f = fixture(t)
+  f.endpoints['alpha-one'].eventTrigger = { eventType: 'google.cloud.firestore.document.v1.written', retry: true }
+  delete f.endpoints['alpha-one'].callableTrigger
+  const item = f.inventory()['us-central1/alpha-one']
+  assert.equal(item.eventTrigger.retry, true)
+  assert.equal(item.eventTrigger.eventType, 'google.cloud.firestore.document.v1.written')
+  const first = item.fingerprint
+  assert.equal(f.inventory()['us-central1/alpha-one'].fingerprint, first)
+})
+
+test('a new retry function deploys noninteractively with confirmation and checkpoints only on success', async () => {
+  const item = { name: 'newRetry', region: 'us-central1', platform: 'gcfv2', fingerprint: 'new-retry-hash', eventTrigger: { eventType: 'google.cloud.firestore.document.v1.written', retry: true } }
+  const cloud = fakeCloud()
+  let deployed = false
+  cloud.listFunctions = async () => deployed ? { 'us-central1/newRetry': { state: 'ACTIVE', updateTime: 'new-version', environment: 'GEN_2', eventTrigger: { ...item.eventTrigger, retryPolicy: 'RETRY_POLICY_RETRY' } } } : {}
+  await run({ cloud, inventory: { 'us-central1/newRetry': item }, runBatch: async args => {
+    assert.ok(args.includes('--force'))
+    assert.ok(args.includes('--non-interactive'))
+    assert.equal(args[2], 'functions:newRetry')
+    deployed = true
+  } })
+  assert.equal((await cloud.readState()).state.functions['us-central1/newRetry'].remoteUpdateTime, 'new-version')
+  const failed = fakeCloud()
+  failed.listFunctions = async () => ({})
+  await assert.rejects(run({ cloud: failed, inventory: { 'us-central1/newRetry': item }, runBatch: async args => { assert.ok(args.includes('--force')); throw new Error('provider failure') } }), /provider failure/)
+  assert.equal((await failed.readState()).state, null)
 })

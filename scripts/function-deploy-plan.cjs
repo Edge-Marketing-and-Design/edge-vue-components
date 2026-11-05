@@ -224,6 +224,7 @@ function buildInventory(root, endpoints, env = process.env, { formats = SUPPORTE
       inventory[`${region}/${name}`] = {
         name, region, platform: endpoint.platform,
         callable: !!endpoint.callableTrigger,
+        eventTrigger: endpoint.eventTrigger || null,
         fingerprint: formats.includes(VERSION) ? digest(stable({ common, files: handlerFiles, endpoint })) : undefined,
         handlerV6Fingerprint: formats.includes(6) ? digest(stable({ common: { version: 6, configuration, inputs: inputSummaryV6 }, files: handlerFiles, endpoint })) : undefined,
         handlerV5Fingerprint: formats.includes(5) ? digest(stable({ common: { version: 5, configuration: v5Configuration, environment: uncertain.size ? environment : graphV5.environment }, files: uncertain.size ? hashFiles(fullFiles) : graphV5.pieces, endpoint })) : undefined,

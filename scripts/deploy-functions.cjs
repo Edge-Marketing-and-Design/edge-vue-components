@@ -50,6 +50,36 @@ function runFirebase(args, root) {
   })
 }
 
+function firebaseBatchArgs({ batch, inventory, remote, projectId }) {
+  const args = ['deploy', '--only', batch.map(name => `functions:${name}`).join(','), '--project', projectId, '--non-interactive']
+  const needsRetryConfirmation = Object.entries(inventory).some(([key, item]) => batch.includes(item.name)
+    && item.eventTrigger?.retry === true
+    && remote[key]?.eventTrigger?.retryPolicy !== 'RETRY_POLICY_RETRY')
+  if (!needsRetryConfirmation) return args
+
+  // Firebase's --force accepts retry policies, but also skips deletion and
+  // unsafe-migration prompts. Its name selectors also match hyphenated children.
+  // Verify every matched remote endpoint before enabling it for this batch.
+  const matchesSelector = name => batch.some(selected => name === selected || name.startsWith(`${selected}-`))
+  for (const item of Object.values(inventory)) {
+    if (matchesSelector(item.name) && !batch.includes(item.name))
+      throw new Error(`Cannot accept retry policy: Firebase's selector also matches ${item.name}, which is outside this batch`)
+  }
+  for (const [key, deployed] of Object.entries(remote)) {
+    const name = key.slice(key.indexOf('/') + 1)
+    if (!matchesSelector(name)) continue
+    const local = inventory[key]
+    if (!local || !batch.includes(local.name))
+      throw new Error(`Cannot accept retry policy: Firebase's selector also matches ${key}, which is outside this batch or removed locally`)
+    const environment = local.platform === 'gcfv2' ? 'GEN_2' : 'GEN_1'
+    if (deployed.environment !== environment
+      || (deployed.eventTrigger?.eventType || null) !== (local.eventTrigger?.eventType || null))
+      throw new Error(`Cannot accept retry policy while changing the generation or trigger type of ${key}; deploy that migration explicitly`)
+  }
+  args.push('--force')
+  return args
+}
+
 async function deployFunctions({ root, projectId, cloud, inventory, all = false, planOnly = false, runBatch = runFirebase, verifySource = () => {}, recoverBaseline = null, log = console.log }) {
   const bucketExists = await cloud.ensureBucket({ create: !planOnly })
   let lock = null
@@ -104,7 +134,9 @@ async function deployFunctions({ root, projectId, cloud, inventory, all = false,
     for (const [index, batch] of plan.batches.entries()) {
       log(`Deploying Functions batch ${index + 1}/${plan.batches.length}...`)
       await verifySource()
-      await runBatch(['deploy', '--only', batch.map(name => `functions:${name}`).join(','), '--project', projectId, '--non-interactive'], root)
+      const args = firebaseBatchArgs({ batch, inventory, remote, projectId })
+      if (args.includes('--force')) log('Accepting the retry policies configured in the selected Functions; deletion and trigger/generation migration guards passed.')
+      await runBatch(args, root)
       await verifySource()
       const updated = await cloud.listFunctions()
       const entries = Object.entries(inventory).filter(([, item]) => batch.includes(item.name))
@@ -168,4 +200,4 @@ if (require.main === module) main(process.argv.slice(2)).catch(error => {
   console.error(`Functions deployment aborted: ${error.message}`)
   process.exitCode = 1
 })
-module.exports = { discoverEndpoints, deployFunctions, runFirebase }
+module.exports = { discoverEndpoints, deployFunctions, runFirebase, firebaseBatchArgs }

@@ -29,7 +29,19 @@ and retire any old root launcher manually.
 Keep using `sh edge/deploy.sh`. The shared `edge/scripts/deploy-functions.cjs` runner
 selects affected Functions and runs sequential Firebase CLI batches of up to
 10 names, including all regions of each selected name. Hosting, Firestore and
-Storage stages still run normally. Frontend-only changes skip Functions and
+Storage stages still run normally.
+
+Firebase requires explicit confirmation when an event-triggered Function newly
+enables retries. For those batches, the runner accepts the retry policy declared
+in the discovered source by adding `--force` alongside `--non-interactive`.
+Ordinary batches, and Functions already deployed with retries, do not add it.
+Before adding it, the runner checks Firebase's matching name selectors against
+both local and remote inventories: no unselected child names or locally removed
+endpoints may match, and existing Functions cannot change generation or event
+trigger type in that forced batch. Such migrations require a separate explicit
+deployment. These checks retain deletion/migration protection that Firebase's
+`--force` would otherwise bypass. Fingerprints/checkpoint formats do not change;
+failed batches remain pending and only healthy successful batches checkpoint. Frontend-only changes skip Functions and
 their IAM stage once a baseline exists.
 
 ```sh
