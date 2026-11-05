@@ -37,6 +37,7 @@ const { buildPostKvMetadata, postCanonicalKey } = require('./helpers/cmsPostKvMe
 const { resolveSubmittedUserRouting } = require('./helpers/submittedUserRouting')
 const { verifyHistoryIdentity, appendIdentityHistory } = require('./helpers/historyIdentity')
 const { createDomainConnection, connectionFields, normalizeStoredSiteDomains } = require('./helpers/cmsDomainConnection')
+const { reconcileMembershipAuthDomains } = require('./helpers/cmsAuthDomains')
 
 const SITE_AI_TOPIC = 'site-ai-bootstrap'
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || ''
@@ -1048,68 +1049,16 @@ const getAdminAccessToken = async () => {
   return accessToken
 }
 
-const syncFirebaseAuthorizedDomainsForMembership = async ({
-  addDomains = [],
-  removeDomains = [],
-  context = {},
-} = {}) => {
-  const domainsToAdd = Array.from(new Set((Array.isArray(addDomains) ? addDomains : []).map(domain => normalizeDomain(domain)).filter(domain => domain && shouldSyncFirebaseAuthDomain(domain))))
-  const domainsToRemoveCandidates = Array.from(new Set((Array.isArray(removeDomains) ? removeDomains : []).map(domain => normalizeDomain(domain)).filter(domain => domain && shouldSyncFirebaseAuthDomain(domain))))
-
-  if (!domainsToAdd.length && !domainsToRemoveCandidates.length)
-    return { ok: true, added: [], removed: [], total: 0 }
-
-  const projectId = getFirebaseProjectId()
-  if (!projectId) {
-    logger.warn('Skipping Firebase Auth authorized domain membership sync: missing project id', context)
-    return { ok: false, added: [], removed: [], total: 0, error: 'Missing Firebase project id.' }
-  }
-
-  const accessToken = await getAdminAccessToken()
-  const configUrl = `https://identitytoolkit.googleapis.com/admin/v2/projects/${projectId}/config`
-  const headers = {
-    'Authorization': `Bearer ${accessToken}`,
-    'Content-Type': 'application/json',
-  }
-
-  const currentResponse = await axios.get(configUrl, { headers })
-  const currentAuthorizedDomains = Array.isArray(currentResponse?.data?.authorizedDomains)
-    ? currentResponse.data.authorizedDomains.map(value => String(value || '').trim()).filter(Boolean)
-    : []
-  const nextSet = new Set(currentAuthorizedDomains)
-
-  domainsToAdd.forEach(domain => nextSet.add(domain))
-
-  const removableDomains = domainsToRemoveCandidates
-  removableDomains.forEach(domain => nextSet.delete(domain))
-
-  const nextAuthorizedDomains = Array.from(nextSet).sort((a, b) => a.localeCompare(b))
-  const changed = nextAuthorizedDomains.length !== currentAuthorizedDomains.length
-    || nextAuthorizedDomains.some((domain, index) => domain !== currentAuthorizedDomains[index])
-
-  if (!changed)
-    return { ok: true, added: [], removed: [], total: nextAuthorizedDomains.length }
-
-  await axios.patch(`${configUrl}?updateMask=authorizedDomains`, {
-    authorizedDomains: nextAuthorizedDomains,
-  }, { headers })
-
-  const addedDomains = domainsToAdd.filter(domain => !currentAuthorizedDomains.includes(domain))
-  const removedDomains = removableDomains.filter(domain => currentAuthorizedDomains.includes(domain))
-  logger.log('Synced Firebase Auth authorized domains for memberships', {
-    ...context,
-    addedDomains,
-    removedDomains,
-    totalAuthorizedDomains: nextAuthorizedDomains.length,
-  })
-
-  return {
-    ok: true,
-    added: addedDomains,
-    removed: removedDomains,
-    total: nextAuthorizedDomains.length,
-  }
-}
+const syncFirebaseAuthorizedDomainsForMembership = ({ touchedDomains = [], context = {} } = {}) => reconcileMembershipAuthDomains({
+  db,
+  axios,
+  projectId: getFirebaseProjectId(),
+  getAccessToken: getAdminAccessToken,
+  expandDomains: extractFirebaseAuthDomainsFromRawDomains,
+  touchedDomains,
+  logger,
+  context,
+})
 
 const collectFormEntries = (data) => {
   if (!data || typeof data !== 'object')
@@ -9653,42 +9602,25 @@ exports.ensurePublishedSiteDomains = onDocumentWritten(
 )
 
 exports.syncFirebaseAuthDomainsFromDomainRegistry = onDocumentWritten(
-  { document: `${DOMAIN_REGISTRY_COLLECTION}/{domain}`, timeoutSeconds: 180 },
+  { document: `${DOMAIN_REGISTRY_COLLECTION}/{domain}`, timeoutSeconds: 180, retry: true },
   async (event) => {
-    const change = event.data
-    const beforeData = change?.before?.data?.() || {}
-    const afterData = change?.after?.data?.() || {}
-
-    const beforeDomain = normalizeDomain(beforeData.domain || event.params.domain || '')
-    const afterDomain = normalizeDomain(afterData.domain || event.params.domain || '')
-    const beforeAuthEnabled = Boolean(beforeData.authEnabled)
-    const afterAuthEnabled = Boolean(afterData.authEnabled)
-
-    const beforeAuthDomains = beforeAuthEnabled ? extractFirebaseAuthDomainsFromRawDomains([beforeDomain]) : []
-    const afterAuthDomains = afterAuthEnabled ? extractFirebaseAuthDomainsFromRawDomains([afterDomain]) : []
-    const addDomains = afterAuthDomains.filter(domain => !beforeAuthDomains.includes(domain))
-    const removeDomains = beforeAuthDomains.filter(domain => !afterAuthDomains.includes(domain))
-
-    if (!addDomains.length && !removeDomains.length)
-      return
-
+    const before = event.data?.before?.data?.() || {}
+    const after = event.data?.after?.data?.() || {}
+    const touchedDomains = [before.domain, after.domain, event.params.domain].filter(Boolean)
     try {
       await syncFirebaseAuthorizedDomainsForMembership({
-        addDomains,
-        removeDomains,
+        touchedDomains,
         context: {
           trigger: 'domain-registry-write',
           domainDoc: event.params.domain,
-          beforeAuthEnabled,
-          afterAuthEnabled,
+          beforeAuthEnabled: Boolean(before.authEnabled),
+          afterAuthEnabled: Boolean(after.authEnabled),
         },
       })
     }
     catch (error) {
       logger.error('Failed to sync Firebase Auth domains from domain registry', {
         domainDoc: event.params.domain,
-        addDomains,
-        removeDomains,
         message: error?.message || String(error),
       })
       throw error

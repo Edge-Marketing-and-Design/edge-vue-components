@@ -2,7 +2,7 @@
 
 Status: in use for every site the CMS publishes.
 
-Last verified: 2026-11-05, custom-post draft index previews, menu labels and Page Settings regression tests
+Last verified: 2026-11-05, 9fc8697b
 
 A site is an organization's website: its settings, menus and domains, and
 the draft pages assembled from block instances. Publishing copies a page or
@@ -23,6 +23,7 @@ posts in `edge/docs/data-contracts/cms-posts/`; the workflow rules in
 | Published site settings | `organizations/{orgId}/published-site-settings/{siteId}` (the same id as the site) |
 | Template pages | `organizations/{orgId}/sites/templates/pages/{pageId}`: the `templates` site is not a public site; its pages are copied when a theme seeds a site or a page is created from a template |
 | Legacy published site | `organizations/{orgId}/sites-published/{siteId}`: only the registrar's attach and detach callables keep its `domains` in step; nothing else reads or writes it |
+| Auth-domain reconciliation state | `cms-auth-domain-sync/{projectId}`: backend-only project-wide lease and successful managed-host ledger |
 
 The Hub writes sites and pages from the browser through
 `edgeFirebase.storeDoc` (full replace) and `changeDoc`; the wrapper adds
@@ -482,3 +483,55 @@ so generated rows do not immediately appear as unpublished changes. It affects
 only this site. It is not triggered by post or page publication and requires no
 changes to the existing sitemap reader. Page/route/type changes reach sitemap
 configuration on the next Site Settings publication.
+
+
+## Firebase Auth membership domains
+
+`cms-syncFirebaseAuthDomainsFromDomainRegistry` reconciles the project's Firebase
+Auth authorized domains after a `domain-registry/{domain}` write. It reads all
+current top-level registry records with `authEnabled: true` and expands their
+hostnames with the same apex/www rules used for site domains. The Auth list is
+project-wide, so this read intentionally covers every organization in the Hub.
+The self-registration toggle does not determine domain authorization.
+
+Event before/after values identify touched hosts and log context, never current
+membership requirements. Deleting the redundant www registry entry must retain
+both Auth hosts while the canonical entry still needs them. Stale create/delete
+events also reconcile current registry state. Enabled-to-enabled writes are not
+skipped: they restore a required hostname missing from Auth without toggling
+membership off and on.
+
+The reconciler adds every currently required host. It removes a touched or
+previously managed host only when no current enabled registry entry needs it.
+Other existing Auth entries, including provider/Hub domains and manually added
+unrelated hosts, are preserved. It does not infer ownership of arbitrary old
+Auth entries or backfill disabled domains that were never recorded as managed.
+
+`cms-auth-domain-sync/{projectId}` stores:
+
+- `leaseOwner`: unique invocation token, empty when released;
+- `leaseExpiresAt`: numeric epoch milliseconds, zero when released;
+- `managedDomains`: sorted host set required at the last successful sync;
+- `syncedAt`: ISO timestamp of that successful reconciliation.
+
+Firestore transactionally acquires the project-wide lease before the external
+Auth config GET/PATCH, preventing competing handlers from replacing one another's
+lists. The lease lasts four minutes, exceeding the trigger's three-minute
+execution limit. Each API call has a 20-second timeout; ownership and sufficient
+remaining lease time are checked before PATCH and before recording success.
+Release clears only the caller's lease and preserves the prior ledger on errors.
+A crashed lease expires on its next acquisition attempt, without a TTL policy.
+
+The registry read is an unfiltered top-level collection scan, like the existing
+CORS reconciliation: its size is configured project hostnames, not users/posts.
+The lease uses point reads/writes. No composite index, client rules change,
+public projection or frontend change is required. The lease lives outside the
+registry so its bookkeeping cannot retrigger the domain handlers.
+
+The trigger enables retries. Busy leases, permission/network failures, invalid
+Auth responses and lost leases throw rather than acknowledge a skipped sync.
+No PATCH is sent for an unchanged domain set, even if ordering differs. Auth
+configuration and registry writes cannot form one cross-service transaction;
+a subsequent/retried registry event converges on the latest required hosts.
+Deploying the code alone does not run a global repair: a subsequent registry
+write performs the reconciliation. Source changes do not alter production data.

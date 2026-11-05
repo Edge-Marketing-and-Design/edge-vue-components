@@ -202,6 +202,18 @@
         { "path": "edge/plugins/edge-cms/README.md", "says": "Install, developer setup, the bundled servers and maintenance" },
         { "path": "edge/skills/README.md", "says": "The skills the plugin ships and how copies are kept" }
       ]
+    },
+    {
+      "id": "membership-auth-domains",
+      "name": "Firebase Auth authorized domains for site memberships",
+      "code": [
+        { "path": "functions/cms.js", "diffPattern": "syncFirebaseAuthorizedDomainsForMembership|syncFirebaseAuthDomainsFromDomainRegistry|touchedDomains|cmsAuthDomains|beforeAuthEnabled|afterAuthEnabled" },
+        "functions/helpers/cmsAuthDomains.js",
+        "edge/functions/helpers/cmsAuthDomains.js"
+      ],
+      "documents": [
+        { "path": "edge/docs/data-contracts/cms-sites-and-pages/README.md", "section": "Firebase Auth membership domains", "says": "Current project-wide registry ownership, redundant-www/stale-event safety, restoration on unchanged membership, preservation of unrelated Auth entries, serialized updates and retry/lease state" }
+      ]
     }
   ]
 }
