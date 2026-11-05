@@ -665,9 +665,16 @@ const applyTemplateV2SourceOrder = (records, orderList) => {
   })
 }
 
-const applyTemplateV2SourceOverrides = (items, sourceConfig, overrides, scope) => {
+// A source's own queryItems and canonicalLookup choose which records are
+// fetched (the KV loader, cms-collectionData, the draft post resolver), as in
+// the template engine; they are never a filter over the records afterwards.
+// Re-filtering dropped every record when an instance kept a v1 leftover
+// (Navigation `queryItems: { docId: "templates" }`) or when the filter field
+// is indexed but not in the record body (testimonial `users`). Only a loop's
+// own overrides filter in memory, and only when no loader applied them.
+const applyTemplateV2SourceOverrides = (items, sourceConfig, overrides, scope, { filtered = false } = {}) => {
   let records = Array.isArray(items) ? [...items] : []
-  const canonicalLookup = overrides?.canonicalLookup || sourceConfig?.canonicalLookup
+  const canonicalLookup = filtered ? null : overrides?.canonicalLookup
   const canonicalDocIds = getTemplateV2CanonicalDocIds(canonicalLookup, scope)
   if (canonicalLookup && !canonicalDocIds.length)
     return []
@@ -678,13 +685,8 @@ const applyTemplateV2SourceOverrides = (items, sourceConfig, overrides, scope) =
       return canonicalSet.has(String(recordDocId ?? ''))
     })
   }
-  const mergedQueryItems = {
-    ...((sourceConfig?.queryItems && typeof sourceConfig.queryItems === 'object' && !Array.isArray(sourceConfig.queryItems)) ? sourceConfig.queryItems : {}),
-    ...((overrides?.queryItems && typeof overrides.queryItems === 'object' && !Array.isArray(overrides.queryItems)) ? overrides.queryItems : {}),
-  }
-  const hasQueryItems = Object.keys(mergedQueryItems).length > 0
-  const queryItems = hasQueryItems
-    ? mergedQueryItems
+  const queryItems = (!filtered && overrides?.queryItems && typeof overrides.queryItems === 'object' && !Array.isArray(overrides.queryItems))
+    ? overrides.queryItems
     : {}
   for (const [field, value] of Object.entries(queryItems)) {
     const resolvedValue = resolveTemplateV2ParentToken(value, scope)
@@ -768,7 +770,7 @@ const resolveTemplateV2CmsForItems = async (expression, scope, dataSources, rend
     if (isCollectionSource && props.collectionSourceResolver && hasTemplateV2ScopedCollectionOverrides(scopedOverrides)) {
       const resolvedItems = await props.collectionSourceResolver(sourceCall.name, sourceConfig, scopedOverrides)
       if (Array.isArray(resolvedItems))
-        return applyTemplateV2SourceOverrides(resolvedItems, sourceConfig, scopedOverrides, scope)
+        return applyTemplateV2SourceOverrides(resolvedItems, sourceConfig, scopedOverrides, scope, { filtered: true })
     }
     return applyTemplateV2SourceOverrides(sourceConfig.value, sourceConfig, scopedOverrides, scope)
   }
