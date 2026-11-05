@@ -20,7 +20,8 @@ session in any repository writes against the contract text, not a path.
 ## The edge-cms plugin
 
 Every skill here also ships in the `edge-cms` plugin (`edge/plugins/edge-cms`) with the Hub's remote CMS
-tools, for people without a Hub checkout. Each of them says what changes
+tools, for people without a Hub checkout (developers use the Hub's links,
+below). Each of them says what changes
 without a checkout. After changing one, run `node edge/plugins/sync-skills.mjs`;
 `edge/tests/pluginSkills.test.mjs` fails while the plugin's copy is stale.
 
@@ -31,25 +32,21 @@ describe them (skill references, contract sections, agent guide sections,
 the renderer guide in `emd-cms-front`). The `edge-skill-impact` skill reads
 it; add an entry when new code defines behavior a document describes.
 
-## Personal copies
+## In a Hub session
 
-Claude Code and Codex load skills from `~/.claude/skills` and
-`~/.codex/skills`. Those folders hold copies of these directories, not links,
-so they drift until refreshed. After a skill change lands on a branch, refresh
-every copy that exists from that branch (run from any checkout of the Hub;
-`git archive` reads the committed tree, so commit first):
+Each Hub commits relative links to these folders, so Claude Code and Codex
+load the skills of the checkout and branch the session runs in:
 
-```bash
-branch=cms-autonomy-contracts
-for name in edge-block-package edge-design-to-site vue-to-block-migrator edge-figma-design; do
-  for dir in ~/.codex/skills ~/.claude/skills; do
-    [ -d "$dir/$name" ] || continue
-    rm -rf "${dir:?}/${name:?}" && mkdir -p "$dir/$name" \
-      && git archive "$branch" "edge/skills/$name" | tar -x -C "$dir/$name" --strip-components=3
-  done
-done
-```
+- `.claude/skills/<name>` -> `../../edge/skills/<name>` (Claude Code)
+- `.agents/skills/<name>` -> `../../edge/skills/<name>` (Codex)
 
-Then compare: `diff -rq edge/skills/<name> ~/.codex/skills/<name>` prints
-nothing when the copy matches. Only the copies that already exist are
-refreshed; a skill is installed in a folder deliberately, not by this loop.
+After a subtree update adds, renames or removes a skill, run
+`node edge/skills/link-skills.mjs` in the Hub and commit the links;
+`node edge/skills/link-skills.mjs --check` reports drift and exits 1 (the
+Hub's test runs it). Other entries in those folders, such as a Hub's own
+skills, are left alone. Links need a checkout with symlinks enabled (the
+default on macOS and Linux).
+
+Developers don't keep copies in `~/.claude/skills`, `~/.codex/skills` or a
+claude.ai account, and don't install the `edge-cms` plugin: a copy there would
+load in every session next to the Hub's own, often older.

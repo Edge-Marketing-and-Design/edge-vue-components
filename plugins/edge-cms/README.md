@@ -1,8 +1,8 @@
 # edge-cms plugin
 
 The Edge CMS skills and the Hub's remote CMS tools in one install. Editors
-use both, without a Hub checkout. Edge developers use the skills with the
-Hub's local CMS tools and keep the remote server off (Developer setup, below).
+use both, without a Hub checkout. Edge developers don't install it: a Hub
+checkout supplies the same skills and its own CMS tools (Developers, below).
 
 - **Skills:** `edge-block-package`, `edge-design-to-site`, `edge-figma-design`,
   `vue-to-block-migrator`, `edge-site-setup` (a new site to the standard in
@@ -53,7 +53,7 @@ If you already added the remote server by hand (for example `emd-cms-remote`
 in `~/.claude.json`), remove it after installing so the tools don't appear
 twice.
 
-## Updating (Seth, Deanna)
+## Updating (plugin users)
 
 After a change to the skills or servers is promoted to `edge-vue-components`
 (`edge-push.sh`), update the marketplace and the plugin, then start a new
@@ -70,38 +70,37 @@ Check it took: `/skills` lists the seven skills (`edge-site-setup`,
 package through `npx`. In Claude Desktop, update the plugin from its page
 in the plugin catalog.
 
-## Developer setup
+## Developers
 
-Edge developers (with the Hub repositories) work from a Hub checkout: the
-skills come from this plugin, the CMS tools from the Hub's own local server.
+Edge developers work from a Hub checkout and don't install this plugin or add
+a Hub's remote endpoint as a claude.ai connector. Both belong to the account,
+so they load in every session: in a Hub session that means a second, often
+older copy of each skill and another Hub's remote CMS tools with the same tool
+names as the local ones, so an agent can query the wrong Hub.
 
-1. Install the plugin as above, for its skills.
-2. Turn its remote server off: in a terminal, `/mcp`, then `edge-cms`, then
-   Disable; in Claude Desktop, switch `edge-cms` off under the plugin's
-   Connectors. Don't add a Hub's remote endpoint as a connector either.
-3. Start sessions in the Hub checkout (or one of its worktrees). Its
-   `.mcp.json` starts the local CMS server through
-   `edge/tools/mcp/cms/launch.sh`, which fetches `origin/main` for the Hub
-   and the `emd-cms-front` checkout next to it, fast-forwards a clean `main`,
-   runs `npm ci` when the server's dependencies change, and otherwise reports
-   how far behind the checkout is (`checkoutNotice` in `cms_guide`,
-   `cms_contract` and `cms_agent_organizations`).
-4. Each Hub's `.mcp.json` names its own read-only key
-   (`EDGE_CMS_MCP_CREDENTIALS`); there is no default key path. Writes go
-   through the Hub's agent endpoint with your agent key or Hub connection
-   (the MCP README, `edge/tools/mcp/cms/README.md`).
+A Hub checkout supplies both instead:
 
-Why one server: the remote and local servers expose the same tool names, and
-with both loaded for different Hubs an agent can call the wrong one. The local
-server also has what the remote one can't: Firestore reads, block workspaces,
-`cms_compare_instances` (every placed instance before and after a change) and
-`cms_override_component` (the `emd-cms-front` component for an override
-block), and scripts against the Hub's own validator, converter and engine
-(edge-block-package `reference/scripting-against-a-hub.md`).
+- **Skills:** committed links from `.claude/skills/` and `.agents/skills/`
+  to `edge/skills/` (`edge/skills/README.md`), so a session loads the skills
+  of its own branch.
+- **CMS tools:** the Hub's `.mcp.json` (Claude Code) and
+  `.codex/config.toml` (Codex) start the local CMS server through
+  `edge/tools/mcp/cms/launch.sh`, which keeps the checkout and its
+  dependencies current (`edge/tools/mcp/cms/README.md`), and the pinned
+  `chrome-devtools` server.
 
-Check a session: `/mcp` lists one CMS server (the Hub's local one, for
-example `clearwater-firebase-readonly`) and `chrome-devtools`, `edge-cms`
-is disabled, and `/skills` lists the seven skills.
+If the plugin or a CMS connector is already installed, remove it: the
+plugin from Claude's plugin page and `[plugins."edge-cms@edge"]` (and the
+`edge` marketplace) from `~/.codex/config.toml`; connectors in claude.ai
+Settings, Connectors. The `claude` CLI keeps its own copies of org plugins
+and account skills under `~/.claude/plugins/synced/` and
+`~/.claude/skills/synced/`; if a removed one still loads there, delete its
+folder.
+
+Check a session: the only CMS servers are the Hub's own (for example
+`clearwater-firebase-readonly` and `clearwater-cms-emulator`) plus
+`chrome-devtools`, and each Edge skill is listed once, without an
+`edge-cms:` prefix.
 
 ## Maintaining
 
