@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { CREDENTIALS_NOT_CONFIGURED, describeCredentials, resolveCredentials } from '../src/credentials.js'
+import { CREDENTIALS_GOOGLE_SIGN_IN, describeCredentials, resolveCredentials } from '../src/credentials.js'
 
 const key = { type: 'service_account', client_email: 'firebase-readonly-mcp@clearwater-hub.iam.gserviceaccount.com', private_key: 'secret' }
 const resolveWith = ({ env = {}, files = {}, configFile = '' }) => resolveCredentials({
@@ -11,13 +11,14 @@ const resolveWith = ({ env = {}, files = {}, configFile = '' }) => resolveCreden
   readJson: filePath => files[filePath],
 })
 
-test('there is no default key file: another Hub\'s key on disk is never picked up', () => {
+test('without a named key the server reads as the developer\'s Google sign-in; another Hub\'s key on disk is never picked up', () => {
   const result = resolveWith({ files: { '/home/dev/.config/clearwater/firebase-readonly-mcp.json': key } })
-  assert.deepEqual(result, { source: CREDENTIALS_NOT_CONFIGURED, filePath: '', account: '', readOnlyServiceAccount: false })
+  assert.deepEqual(result, { source: CREDENTIALS_GOOGLE_SIGN_IN, filePath: '', account: '', readOnlyServiceAccount: false })
   const summary = describeCredentials(result)
-  assert.equal(summary.source, 'not-configured')
+  assert.equal(summary.source, 'google-sign-in')
   assert.equal(summary.readOnlyServiceAccount, false)
-  assert.match(summary.note, /EDGE_CMS_MCP_CREDENTIALS/)
+  assert.match(summary.account, /Google sign-in/)
+  assert.match(summary.note, /gcloud auth application-default login/)
 })
 
 test('EDGE_CMS_MCP_CREDENTIALS names the key', () => {

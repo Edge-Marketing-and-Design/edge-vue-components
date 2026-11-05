@@ -4,7 +4,7 @@
 // edge/tools/mcp/cms/README.md "Developer setup"). Run from a Hub checkout:
 //
 //   node edge/tools/dev-check.mjs            all checks
-//   node edge/tools/dev-check.mjs --offline  skip `claude mcp list` (claude.ai connectors)
+//   node edge/tools/dev-check.mjs --offline  skip `claude mcp list` and the database read checks
 //
 // Exits 1 when a check fails. Warnings don't fail it.
 import { execFile } from 'node:child_process'
@@ -35,7 +35,7 @@ export function tomlTables(text) {
 const CMS_HINT = /cms-agentMcp|firebase|firestore|edge-?cms|tools\/mcp\/cms/i
 
 // Every check as { ok: true|false|'warn', name, detail }.
-export async function runChecks({ hubRoot, home = homedir(), claudeMcpList = null }) {
+export async function runChecks({ hubRoot, home = homedir(), env = process.env, claudeMcpList = null, probeRead = null }) {
   const results = []
   const add = (ok, name, detail = '') => results.push({ ok, name, detail })
   const skills = await edgeSkillNames(path.join(hubRoot, 'edge', 'skills'))
@@ -87,16 +87,39 @@ export async function runChecks({ hubRoot, home = homedir(), claudeMcpList = nul
     add(remote.length === 0, 'No remote CMS connector or edge-cms plugin server', remote.length ? `remove ${remote.join(', ')} in claude.ai Settings, Connectors (or the plugin)` : '')
   }
 
-  // 6. The Hub's own CMS servers: read-only key, renderer checkout, Node.
+  // 6. The Hub's own CMS servers: the person's Hub connection and Google
+  // sign-in (edge/tools/mcp/cms/README.md, Credentials), renderer checkout, Node.
   const servers = Object.entries(readJson(path.join(hubRoot, '.mcp.json'))?.mcpServers ?? {})
     .filter(([, config]) => /tools\/mcp\/cms\/launch\.sh/.test(JSON.stringify(config.args ?? [])))
   if (!servers.length) add(false, 'The Hub starts its CMS server', '.mcp.json has no server using edge/tools/mcp/cms/launch.sh')
-  for (const [name, config] of servers) {
-    const key = config.env?.EDGE_CMS_MCP_CREDENTIALS
-    if (key) add(existsSync(expandHome(key, home)), `Read-only key for ${name}`, existsSync(expandHome(key, home)) ? '' : `missing ${key}; ask for the Hub's read-only key`)
+  const adcFile = env.GOOGLE_APPLICATION_CREDENTIALS || path.join(home, '.config/gcloud/application_default_credentials.json')
+  let signInChecked = false
+  for (const [name, server] of servers) {
+    const configFile = server.env?.EDGE_CMS_MCP_CONFIG
+    const config = configFile ? readJson(path.resolve(hubRoot, configFile)) ?? {} : {}
+    if (config.requireEmulator || server.env?.FIRESTORE_EMULATOR_HOST) continue
+    const connection = config.agentConnectionFile
+    if (connection) {
+      const found = existsSync(expandHome(connection, home))
+      add(found, `Hub connection for ${name}`, found ? '' : `missing ${connection}: in the Hub open Agent keys (/app/dashboard/agent-keys), create a Hub connection for you and this computer, and save its credential to that file (chmod 600)`)
+    }
+    const key = server.env?.EDGE_CMS_MCP_CREDENTIALS || config.credentialsFile
+    if (key) {
+      const found = existsSync(expandHome(key, home))
+      add(found, `Key file for ${name}`, found ? '' : `missing ${key}: remove it from the Hub's config to read as your Google sign-in, or install the key`)
+      continue
+    }
+    if (!signInChecked) {
+      signInChecked = true
+      add(existsSync(adcFile), 'Google sign-in for database reads', existsSync(adcFile) ? '' : 'run gcloud auth application-default login with the Google account that has access to the Hubs\' Firebase projects')
+    }
+    if (probeRead && existsSync(adcFile) && config.projectId) {
+      const error = await probeRead(config.projectId)
+      add(!error, `Your Google sign-in can read ${config.projectId}`, error ? `${error}. Ask for access to the ${config.projectId} Firebase project, or run gcloud auth application-default login with the account that has it` : '')
+    }
   }
   const main = mainCheckout(hubRoot)
-  const renderer = process.env.EDGE_CMS_RENDERER_REPO || path.join(main, '..', 'emd-cms-front')
+  const renderer = env.EDGE_CMS_RENDERER_REPO || path.join(main, '..', 'emd-cms-front')
   add(existsSync(renderer) ? true : 'warn', 'emd-cms-front checkout for the CMS server', existsSync(renderer) ? '' : `missing ${renderer}: clone emd-cms-front there, or set EDGE_CMS_RENDERER_REPO`)
   const nvmrc = read(path.join(hubRoot, '.nvmrc')).replace(/[\sv]/g, '')
   if (nvmrc) {
@@ -118,6 +141,24 @@ function mainCheckout(hubRoot) {
   return path.dirname(common)
 }
 
+// Reads the project's root collection list as the Google sign-in, with the
+// CMS server's own firebase-admin. Resolves to null, or the error message.
+const PROBE = `
+const [packageJson, projectId] = process.argv.slice(1)
+const admin = require('node:module').createRequire(packageJson)('firebase-admin')
+admin.initializeApp({ projectId })
+admin.firestore().listCollections().then(() => process.exit(0), (error) => {
+  console.error(String(error.message || error).split('\\n')[0])
+  process.exit(1)
+})`
+const probeProject = hubRoot => projectId => new Promise((resolve) => {
+  const packageJson = path.join(mainCheckout(hubRoot), 'edge/tools/mcp/cms/package.json')
+  if (!existsSync(path.join(path.dirname(packageJson), 'node_modules')))
+    return resolve(null)
+  execFile(process.execPath, ['-e', PROBE, packageJson, projectId], { timeout: 45000 },
+    (error, _stdout, stderr) => resolve(error ? (String(stderr).trim() || error.message).slice(0, 200) : null))
+})
+
 const claudeList = () => new Promise(resolve => {
   execFile('claude', ['mcp', 'list'], { timeout: 90000, maxBuffer: 4 << 20 }, (error, stdout) => resolve(error && !stdout ? null : stdout))
 })
@@ -125,7 +166,7 @@ const claudeList = () => new Promise(resolve => {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const hubRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
   const offline = process.argv.includes('--offline')
-  const results = await runChecks({ hubRoot, claudeMcpList: offline ? null : await claudeList() })
+  const results = await runChecks({ hubRoot, claudeMcpList: offline ? null : await claudeList(), probeRead: offline ? null : probeProject(hubRoot) })
   for (const r of results)
     console.log(`${r.ok === true ? 'ok  ' : r.ok === 'warn' ? 'warn' : 'FAIL'}  ${r.name}${r.detail ? ` — ${r.detail}` : ''}`)
   const failed = results.filter(r => r.ok === false).length

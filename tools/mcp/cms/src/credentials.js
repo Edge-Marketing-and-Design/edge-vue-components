@@ -2,20 +2,23 @@ import { existsSync, readFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-// There is no default key file: each Hub names its own read-only key in its
-// .mcp.json (EDGE_CMS_MCP_CREDENTIALS) or MCP config (credentialsFile), so a
-// server never falls back to another Hub's key.
-export const CREDENTIALS_NOT_CONFIGURED = 'not-configured'
+// Developers read as themselves: with no key named, the server uses the
+// person's own Google sign-in (Application Default Credentials, from
+// `gcloud auth application-default login`), limited by their access to the
+// Hub's Firebase project. A read-only service account key is optional (for
+// automation); there is no default key file, so a server never picks up
+// another Hub's key.
+export const CREDENTIALS_GOOGLE_SIGN_IN = 'google-sign-in'
 
 const expandHome = (filePath, homeDir) => (filePath.startsWith('~/') ? path.join(homeDir, filePath.slice(2)) : filePath)
 
 // Chooses the credentials the MCP uses, in order:
 // 1. EDGE_CMS_MCP_CREDENTIALS (or CLEARWATER_FIRESTORE_MCP_CREDENTIALS), 2. GOOGLE_APPLICATION_CREDENTIALS,
 // 3. config credentialsFile.
-// Without any of them the result is `not-configured`: the server reports it
-// and runs on Application Default Credentials (the operator's gcloud login;
-// the emulators ignore credentials). A configured path that does not exist is
-// an error, not a silent fallback to personal credentials.
+// Without any of them the result is `google-sign-in`: the server runs on
+// Application Default Credentials, the developer's own Google sign-in (the
+// emulators ignore credentials). A configured path that does not exist is an
+// error, not a silent fallback to the sign-in.
 export function resolveCredentials({
   env = process.env,
   configFile = '',
@@ -44,7 +47,7 @@ export function resolveCredentials({
       throw new Error(`The MCP config's credentialsFile points to a missing credentials file: ${filePath}`)
   }
   else {
-    return { source: CREDENTIALS_NOT_CONFIGURED, filePath: '', account: '', readOnlyServiceAccount: false }
+    return { source: CREDENTIALS_GOOGLE_SIGN_IN, filePath: '', account: '', readOnlyServiceAccount: false }
   }
 
   const key = readJson(filePath)
@@ -56,7 +59,7 @@ export function resolveCredentials({
 // Safe to include in tool results: no key material or file path.
 export const describeCredentials = credentials => ({
   source: credentials.source,
-  account: credentials.account || 'application default credentials',
-  ...(credentials.source === CREDENTIALS_NOT_CONFIGURED ? { note: 'No read-only key is configured for this Hub: set EDGE_CMS_MCP_CREDENTIALS in its .mcp.json (or credentialsFile in its MCP config).' } : {}),
+  account: credentials.account || 'your Google sign-in (gcloud auth application-default login)',
+  ...(credentials.source === CREDENTIALS_GOOGLE_SIGN_IN ? { note: 'Reads run as your own Google sign-in, with your access to this Hub\'s Firebase project. If reads fail with a credentials or permission error, run gcloud auth application-default login, or ask for access to the project.' } : {}),
   readOnlyServiceAccount: credentials.readOnlyServiceAccount,
 })

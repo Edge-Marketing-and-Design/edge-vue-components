@@ -4,7 +4,7 @@
 #
 #   "command": "sh",
 #   "args": ["-c", "exec sh \"$(git rev-parse --show-toplevel)/edge/tools/mcp/cms/launch.sh\""],
-#   "env": { "EDGE_CMS_MCP_CONFIG": "...", "EDGE_CMS_MCP_CREDENTIALS": "..." }
+#   "env": { "EDGE_CMS_MCP_CONFIG": "..." }
 #
 # Before starting the server it keeps the tools current:
 # - fetches origin/main for the Hub checkout and for the emd-cms-front checkout

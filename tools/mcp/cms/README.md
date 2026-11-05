@@ -272,17 +272,24 @@ sit next to the Hub's own. One-time setup, the same for everyone:
    and account skills under `~/.claude/plugins/synced/` and
    `~/.claude/skills/synced/`, so delete those folders too. Keep no Hub
    server in `~/.claude.json` or `~/.codex/config.toml`.
-4. **Keys.** Put the Hub's read-only key where its `.mcp.json` names it
-   (`EDGE_CMS_MCP_CREDENTIALS`, for example
-   `~/.config/clearwater/firebase-readonly-mcp.json`); see **Credentials**.
-   Writes use your own agent key or Hub connection (**Draft-only CMS
-   operations**).
+4. **Access: two sign-ins, both your own, no shared key files.**
+   - **Hub connection, per Hub.** In the Hub, open Agent keys
+     (`/app/dashboard/agent-keys`), create a Hub connection named for you and
+     this computer, and save the credential it shows once to the file the
+     Hub's production MCP config names in `agentConnectionFile` (for example
+     `~/.config/clearwater/cms-agent-connection`, `chmod 600`). It acts with
+     your own Hub permissions for drafts, media, previews and page and post
+     reads, and you renew or revoke it on the same page.
+   - **Google sign-in, once.** Run `gcloud auth application-default login`
+     with the Google account that has access to the Hubs' Firebase projects.
+     The server reads each Hub's database as you (**Credentials**). If a Hub
+     refuses, ask for access to its Firebase project.
 5. **Claude Code.** Open the Hub folder in the desktop app (Code tab) or run
    `claude` there; in the CLI, approve the project's servers once.
 6. **Codex.** Open the Hub folder and trust it: Codex reads a project's
    `.codex/config.toml` only in a trusted folder.
 7. **Check.** Run `node edge/tools/dev-check.mjs` in the Hub (it exits 1 on a
-   problem and names the fix), then start one new session per client: the
+   problem and names the fix, including a missing connection or sign-in), then start one new session per client: the
    only CMS servers are the Hub's own (for example
    `clearwater-firebase-readonly` and `clearwater-cms-emulator`) plus
    `chrome-devtools`, and each Edge skill is listed once, without an
@@ -313,7 +320,7 @@ server through `edge/tools/mcp/cms/launch.sh`:
 ```json
 "command": "sh",
 "args": ["-c", "exec sh \"$(git rev-parse --show-toplevel)/edge/tools/mcp/cms/launch.sh\""],
-"env": { "EDGE_CMS_MCP_CONFIG": "<hub config>", "EDGE_CMS_MCP_CREDENTIALS": "<read-only key>" }
+"env": { "EDGE_CMS_MCP_CONFIG": "<hub config>" }
 ```
 
 Before starting the server it:
@@ -354,60 +361,40 @@ Every `EDGE_CMS_MCP_*` setting also accepts its older
 
 ### Credentials
 
-Run the MCP on the Hub's read-only service account (for Clearwater
-`firebase-readonly-mcp@clearwater-hub.iam.gserviceaccount.com`, whose only
-role is `roles/datastore.viewer`, read-only Firestore). Each Hub names its
-key in its `.mcp.json`:
+The server uses two identities, both the developer's own; no key file is
+shared between people.
 
-```json
-"env": { "EDGE_CMS_MCP_CREDENTIALS": "~/.config/clearwater/firebase-readonly-mcp.json" }
-```
+- **Hub connection** (`agentConnectionFile` in the Hub's MCP config, or
+  `EDGE_CMS_AGENT_CONNECTION`): issued per person and computer on the Hub's
+  Agent keys page. Every draft operation, media call, preview and page or
+  post read goes through the Hub with that person's current Hub permissions
+  (**Draft-only CMS operations**, **Hub-managed connections**).
+- **Google sign-in** (Application Default Credentials, from
+  `gcloud auth application-default login`): the other reads (blocks, themes,
+  sites, usage, audits, instance comparison, the Firestore tools) go straight
+  to the Hub's Firestore with the `projectId` from its MCP config, as that
+  person, limited by their access to the Firebase project. Removing someone's
+  project access removes it here. This server has no tool that writes to
+  Firestore; writes only go through the Hub connection.
 
-There is no default key path, so a server never picks up another Hub's key.
-Precedence: `EDGE_CMS_MCP_CREDENTIALS` (or `CLEARWATER_FIRESTORE_MCP_CREDENTIALS`),
-`GOOGLE_APPLICATION_CREDENTIALS`, then `credentialsFile` in the MCP config. A
-configured path that does not exist is a startup error; the server doesn't
-fall back.
+Every tool result includes `credentials: { source, account,
+readOnlyServiceAccount }`; for a sign-in the source is `google-sign-in`.
 
-With none of them, the key is reported as not configured (`credentials.source:
-"not-configured"`, with a note) and the server runs on Application Default
-Credentials, your own `gcloud auth application-default login`, with a warning
-on stderr. Those credentials are usually **not** read-only: safety then rests
-only on this server having no write tools. The emulator configs need no key.
-
-Every tool result includes
-`credentials: { source, account, readOnlyServiceAccount }`, so you can
-confirm which identity served a read.
-
-To set up the key (an operator with IAM access):
-
-```bash
-gcloud iam service-accounts create firebase-readonly-mcp --project=clearwater-hub --display-name="Firebase read-only MCP"
-gcloud projects add-iam-policy-binding clearwater-hub --member="serviceAccount:firebase-readonly-mcp@clearwater-hub.iam.gserviceaccount.com" --role="roles/datastore.viewer"
-mkdir -p ~/.config/clearwater && gcloud iam service-accounts keys create ~/.config/clearwater/firebase-readonly-mcp.json --iam-account=firebase-readonly-mcp@clearwater-hub.iam.gserviceaccount.com && chmod 600 ~/.config/clearwater/firebase-readonly-mcp.json
-```
-
-Keep the key out of the repository, and rotate it by creating a new key and
-deleting the old one in Google Cloud.
-
-Environment variables:
+A read-only service account key is optional, for automation without a
+person (CI, a scheduled check): name it with `EDGE_CMS_MCP_CREDENTIALS` (or
+`CLEARWATER_FIRESTORE_MCP_CREDENTIALS`), `GOOGLE_APPLICATION_CREDENTIALS`, or
+`credentialsFile` in the MCP config, in that order. A named path that does not
+exist is a startup error; the server doesn't fall back to the sign-in. There
+is no default key path, so a server never picks up another Hub's key. The
+key's service account should hold only `roles/datastore.viewer`:
 
 ```bash
-export EDGE_CMS_MCP_CONFIG=tools/mcp/config/clearwater.production.json   # required
-export EDGE_CMS_MCP_PROJECT=clearwater-hub                               # optional override
-export EDGE_CMS_MCP_DEFAULT_ORG_ID=your-default-org-id                   # optional
-export EDGE_CMS_AGENT_KEY=cmsak....                                      # optional; or agentKeyFile
-export EDGE_CMS_WORKSPACE_ROOT=/absolute/path/to/local/cms-block-workspace
-export EDGE_CMS_RENDERER_REPO=/absolute/path/to/emd-cms-front
+gcloud iam service-accounts create firebase-readonly-mcp --project=<project> --display-name="Firebase read-only MCP"
+gcloud projects add-iam-policy-binding <project> --member="serviceAccount:firebase-readonly-mcp@<project>.iam.gserviceaccount.com" --role="roles/datastore.viewer"
+gcloud iam service-accounts keys create <file> --iam-account=firebase-readonly-mcp@<project>.iam.gserviceaccount.com && chmod 600 <file>
 ```
 
-The default renderer path is the sibling `emd-cms-front` checkout.
-
-Start the MCP server from the Hub root:
-
-```bash
-EDGE_CMS_MCP_CONFIG=tools/mcp/config/clearwater.production.json node edge/tools/mcp/cms/src/server.js
-```
+The emulator configs need neither.
 
 ### Node version
 
@@ -451,7 +438,7 @@ Hub's config:
 EDGE_CMS_MCP_CONFIG=tools/mcp/config/clearwater.production.json node /absolute/path/to/clearwater-hub/edge/tools/mcp/cms/src/server.js
 ```
 
-Credentials resolve as described under **Credentials**: set `EDGE_CMS_MCP_CREDENTIALS` to the Hub's read-only key.
+Credentials resolve as described under **Credentials**: your Google sign-in and the Hub connection.
 
 ## Aliases
 
