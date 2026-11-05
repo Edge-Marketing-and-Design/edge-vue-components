@@ -23,15 +23,14 @@ Hub's root so `@edgedev/template-engine` resolves from its `node_modules`.
 | Render preparation | `edge/lib/cmsDataSourceRecords.js` | `prepareBlockForRender(instance, { orgId, siteId })` fills schema defaults and resolves `{orgId}`/`{siteId}` tokens as the public renderer does |
 | Release propagation | `edge/functions/helpers/cmsBlockPropagation.js` (CommonJS) | `updateBlocksInArray([instance], blockId, released, definition)` applies a definition to an instance the way a release does |
 | Instance comparison | `edge/tools/mcp/cms/src/compare-instances.js` | `collectInstanceDocuments` and `compareInstances`, the code behind `cms_compare_instances` |
-| Firestore (read-only) | `firebase-admin` from `edge/tools/mcp/cms/node_modules` | with the Hub's read-only key (`EDGE_CMS_MCP_CREDENTIALS` in `.mcp.json`) |
+| Firestore (reads) | `firebase-admin` from `edge/tools/mcp/cms/node_modules` | as your own Google sign-in (`gcloud auth application-default login`), with the Hub's `projectId` from its MCP config; read only, never write from a script |
 
 ## Example: validate and hash every v1 block's conversion
 
 ```js
-// .tmp/convert-check.mjs, run from the Hub root with the key path from .mcp.json:
-// EDGE_CMS_MCP_CREDENTIALS=~/.config/<hub>/<key>.json node .tmp/convert-check.mjs <orgId>
-import { readFileSync } from 'node:fs'
-import os from 'node:os'
+// .tmp/convert-check.mjs, run from the Hub root as your Google sign-in, with
+// the Hub's projectId (its tools/mcp/config/<hub>.production.json):
+// node .tmp/convert-check.mjs <projectId> <orgId>
 import { createRequire } from 'node:module'
 import { renderTemplateAsync } from '@edgedev/template-engine'
 import { validateBlock } from '../edge/lib/cmsBlockValidation.js'
@@ -40,10 +39,9 @@ import { useCmsTemplateV2Conversion } from '../edge/composables/useCmsTemplateV2
 
 const require = createRequire(new URL('../edge/tools/mcp/cms/package.json', import.meta.url))
 const admin = require('firebase-admin')
-const key = JSON.parse(readFileSync(process.env.EDGE_CMS_MCP_CREDENTIALS.replace(/^~(?=\/)/, os.homedir()), 'utf8'))
-admin.initializeApp({ projectId: key.project_id, credential: admin.credential.cert(key) })
+const [projectId, orgId] = process.argv.slice(2)
+admin.initializeApp({ projectId })
 
-const orgId = process.argv[2]
 const { convertLegacyBlockToTemplateV2 } = useCmsTemplateV2Conversion()
 const blocks = await admin.firestore().collection(`organizations/${orgId}/blocks`).get()
 for (const doc of blocks.docs) {

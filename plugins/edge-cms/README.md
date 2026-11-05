@@ -88,6 +88,10 @@ A Hub checkout supplies both instead:
   `edge/tools/mcp/cms/launch.sh`, which keeps the checkout and its
   dependencies current (`edge/tools/mcp/cms/README.md`), and the pinned
   `chrome-devtools` server.
+- **Access:** each developer's own, with no shared key files: a Hub
+  connection created on the Hub's Agent keys page (drafts, media, previews,
+  page and post reads, with their Hub permissions) and their Google sign-in
+  (`gcloud auth application-default login`) for the database reads.
 
 If the plugin or a CMS connector is already installed, remove it: the
 plugin from Claude's plugin page and `[plugins."edge-cms@edge"]` (and the

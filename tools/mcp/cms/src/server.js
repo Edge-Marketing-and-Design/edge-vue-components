@@ -38,7 +38,7 @@ const redactedFieldNames = new Set((config.redactedFieldNames || []).map(name =>
 const credentials = resolveCredentials({ configFile: config.credentialsFile })
 const credentialSummary = describeCredentials(credentials)
 if (!credentials.readOnlyServiceAccount) {
-  console.error(`[${config.serverName}] No read-only key is configured (EDGE_CMS_MCP_CREDENTIALS or credentialsFile); using Application Default Credentials. See the README "Credentials" section.`)
+  console.error(`[${config.serverName}] Reading as your Google sign-in (gcloud auth application-default login). See the README "Credentials" section.`)
 }
 
 const app = admin.apps.length
