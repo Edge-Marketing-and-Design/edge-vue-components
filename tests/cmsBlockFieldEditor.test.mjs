@@ -80,7 +80,7 @@ test('shared editor opens an adapter draft without loading or modifying the page
   const opening = source.slice(source.indexOf('const openEditor ='), source.indexOf('const getAuthoredFieldMeta ='))
   const saving = source.slice(source.indexOf('const save = () =>'), source.indexOf('watch(siteAllowsSelfRegistration,'))
   const preview = source.slice(source.indexOf('const fieldEditorPreviewBlock ='), source.indexOf('const isSingleRichtextOnlyFieldEditor ='))
-  const editor = runInNewContext(`${normalizers}; ${defaults}; ${opening}; ${saving}; ${preview}; ({ openEditor, save, fieldEditorPreviewBlock })`, {
+  const editor = runInNewContext(`${normalizers}; ${defaults}; ${opening}; ${saving}; ${preview}; ({ openEditor, openPreviewFieldEditor, save, fieldEditorPreviewBlock })`, {
     computed,
     props,
     state,
@@ -105,7 +105,7 @@ test('shared editor opens an adapter draft without loading or modifying the page
     applyDataSourceControlDraftMeta: clone,
   })
   const original = clone(modelValue.value)
-  await editor.openEditor(null, { allowPreviewFieldEditor: true })
+  await editor.openPreviewFieldEditor()
   assert.equal(state.open, true)
   assert.equal(state.editorMode, 'fields')
   assert.equal(state.draft['person.headline'], 'Entry-owned heading')
@@ -123,4 +123,14 @@ test('shared editor opens an adapter draft without loading or modifying the page
   assert.equal(state.open, false)
   assert.equal(modelValue.value.values['person.headline'], 'Save this entry value')
   assert.equal(props.contentEditorAdapter.values['person.headline'], 'Entry-owned heading', 'Save emits detached values rather than mutating adapter input')
+})
+
+test('custom launch controls replace only the default toolbar and open the same editor', () => {
+  const walk = (node, predicate) => predicate(node) ? node : (node.children || []).map(child => walk(child, predicate)).find(Boolean)
+  const launcher = walk(descriptor.template.ast, node => node.tag === 'slot' && node.props?.some(prop => prop.name === 'name' && prop.value?.content === 'preview-edit-control'))
+  assert.ok(launcher)
+  assert.ok(launcher.props.some(prop => prop.name === 'bind' && prop.arg?.content === 'open-editor' && prop.exp?.content === 'openPreviewFieldEditor'))
+  assert.match(launcher.loc.source, /ref="previewToolbarRef"/)
+  assert.match(launcher.loc.source, /@pointerdown\.stop\.prevent="startPreviewToolbarDrag"/)
+  assert.match(launcher.loc.source, /@click\.stop\.prevent="openEditor\(null, \{ allowPreviewFieldEditor: true \}\)"/)
 })

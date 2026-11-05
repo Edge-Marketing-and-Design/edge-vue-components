@@ -428,7 +428,13 @@ const liveUrl = computed(() => {
                     :allow-richtext-image-tools="true"
                     :allow-richtext-article-tools="true"
                     @update:model-value="value => applyPostBlockFields(id, value, slot.workingDoc)"
-                  />
+                  >
+                    <template #preview-edit-control="{ openEditor }">
+                      <button v-if="blockFields(id).length" type="button" data-cms-block-control class="absolute inset-0 z-10 flex items-start justify-end p-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" :aria-label="`Edit ${pageBlock(id)?.name || 'block'} content`" @click.stop.prevent="openEditor">
+                        <span class="rounded-full bg-background/95 px-3 py-1 text-xs font-medium shadow">Edit content</span>
+                      </button>
+                    </template>
+                  </edge-cms-block>
                 </div>
               </div>
             </div>

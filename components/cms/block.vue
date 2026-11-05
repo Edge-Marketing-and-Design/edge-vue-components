@@ -2562,6 +2562,8 @@ const openEditor = async (event, options = {}) => {
   state.afterLoad = true
 }
 
+const openPreviewFieldEditor = () => openEditor(null, { allowPreviewFieldEditor: true })
+
 const getAuthoredFieldMeta = (field) => {
   const normalizedField = String(field || '').trim()
   if (!normalizedField)
@@ -2990,62 +2992,63 @@ const getTagsFromPosts = computed(() => {
           </div>
         </div>
       </div>
-      <div
-        v-if="canShowPreviewToolbar"
-        ref="previewToolbarRef"
-        data-cms-block-control
-        class="pointer-events-none absolute right-8 top-2 opacity-0 transition-opacity duration-200 group-hover:opacity-100 focus-within:opacity-100"
-        :class="hasNavigationContent ? 'z-[10001]' : 'z-[9999]'"
-        :style="previewToolbarStyle"
-      >
-        <div class="pointer-events-auto flex min-w-[180px] flex-col rounded-md border border-slate-300 bg-white/95 p-1 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-950/95">
-          <button
-            type="button"
-            class="flex w-full min-w-0 cursor-grab touch-none select-none items-center justify-center gap-1 px-2 pb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500 active:cursor-grabbing dark:text-slate-400"
-            aria-label="Move block edit controls"
-            title="Drag to move edit controls. Arrow keys also move them."
-            @pointerdown.stop.prevent="startPreviewToolbarDrag"
-            @click.stop.prevent
-            @keydown.left.stop.prevent="nudgePreviewToolbar(-16, 0)"
-            @keydown.right.stop.prevent="nudgePreviewToolbar(16, 0)"
-            @keydown.up.stop.prevent="nudgePreviewToolbar(0, -16)"
-            @keydown.down.stop.prevent="nudgePreviewToolbar(0, 16)"
-          >
-            <GripVertical class="h-3 w-3 shrink-0" aria-hidden="true" />
-            <span class="truncate">{{ previewBlockDisplayName }}</span>
-          </button>
-          <div class="flex w-full items-center justify-center gap-1 border-t border-slate-200 pt-1 dark:border-slate-800">
-            <edge-shad-button
-              v-if="canShowPreviewDevControls"
+      <slot v-if="canShowPreviewToolbar" name="preview-edit-control" :open-editor="openPreviewFieldEditor">
+        <div
+          ref="previewToolbarRef"
+          data-cms-block-control
+          class="pointer-events-none absolute right-8 top-2 opacity-0 transition-opacity duration-200 group-hover:opacity-100 focus-within:opacity-100"
+          :class="hasNavigationContent ? 'z-[10001]' : 'z-[9999]'"
+          :style="previewToolbarStyle"
+        >
+          <div class="pointer-events-auto flex min-w-[180px] flex-col rounded-md border border-slate-300 bg-white/95 p-1 shadow-lg backdrop-blur dark:border-slate-700 dark:bg-slate-950/95">
+            <button
               type="button"
-              size="sm"
-              variant="ghost"
-              class="h-7 px-2 text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
-              @click.stop.prevent="openPreviewContentEditor"
+              class="flex w-full min-w-0 cursor-grab touch-none select-none items-center justify-center gap-1 px-2 pb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500 active:cursor-grabbing dark:text-slate-400"
+              aria-label="Move block edit controls"
+              title="Drag to move edit controls. Arrow keys also move them."
+              @pointerdown.stop.prevent="startPreviewToolbarDrag"
+              @click.stop.prevent
+              @keydown.left.stop.prevent="nudgePreviewToolbar(-16, 0)"
+              @keydown.right.stop.prevent="nudgePreviewToolbar(16, 0)"
+              @keydown.up.stop.prevent="nudgePreviewToolbar(0, -16)"
+              @keydown.down.stop.prevent="nudgePreviewToolbar(0, 16)"
             >
-              <FilePen class="h-3.5 w-3.5" />
-              Edit Block Template
-            </edge-shad-button>
-            <div
-              v-if="canShowPreviewDevControls && canShowPreviewContentControl"
-              class="h-5 w-px bg-slate-300 dark:bg-slate-700"
-              aria-hidden="true"
-            />
-            <edge-shad-button
-              v-if="canShowPreviewContentControl"
-              type="button"
-              size="sm"
-              variant="ghost"
-              class="h-7 px-2 text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
-              :class="canShowPreviewDevControls ? '' : 'w-full justify-center'"
-              @click.stop.prevent="openEditor(null, { allowPreviewFieldEditor: true })"
-            >
-              <Pencil class="h-3.5 w-3.5" />
-              {{ canShowPreviewDevControls ? 'Edit Block Contents' : 'Edit Block' }}
-            </edge-shad-button>
+              <GripVertical class="h-3 w-3 shrink-0" aria-hidden="true" />
+              <span class="truncate">{{ previewBlockDisplayName }}</span>
+            </button>
+            <div class="flex w-full items-center justify-center gap-1 border-t border-slate-200 pt-1 dark:border-slate-800">
+              <edge-shad-button
+                v-if="canShowPreviewDevControls"
+                type="button"
+                size="sm"
+                variant="ghost"
+                class="h-7 px-2 text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                @click.stop.prevent="openPreviewContentEditor"
+              >
+                <FilePen class="h-3.5 w-3.5" />
+                Edit Block Template
+              </edge-shad-button>
+              <div
+                v-if="canShowPreviewDevControls && canShowPreviewContentControl"
+                class="h-5 w-px bg-slate-300 dark:bg-slate-700"
+                aria-hidden="true"
+              />
+              <edge-shad-button
+                v-if="canShowPreviewContentControl"
+                type="button"
+                size="sm"
+                variant="ghost"
+                class="h-7 px-2 text-xs text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                :class="canShowPreviewDevControls ? '' : 'w-full justify-center'"
+                @click.stop.prevent="openEditor(null, { allowPreviewFieldEditor: true })"
+              >
+                <Pencil class="h-3.5 w-3.5" />
+                {{ canShowPreviewDevControls ? 'Edit Block Contents' : 'Edit Block' }}
+              </edge-shad-button>
+            </div>
           </div>
         </div>
-      </div>
+      </slot>
       <!-- Shade blocks only when the preview is being used for layout editing. -->
       <div v-if="shouldDisableInteractivePreview" class="pointer-events-none absolute inset-0 bg-black/50 opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-10" />
 

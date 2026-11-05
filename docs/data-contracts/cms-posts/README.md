@@ -2,7 +2,7 @@
 
 Status: in use for every post and event a site publishes.
 
-Last verified: 2026-11-05, shared block-editor reuse, detached post values and live-preview regression tests
+Last verified: 2026-11-05, fixed custom-post preview launcher, shared block-editor reuse and detached values regression tests
 
 A post is a dated entry (a post or an event) that a post template page
 renders under its route. Drafts live with the site; publishing copies a
@@ -223,6 +223,9 @@ it uses placeholders. Sample values never become page defaults or saved post
 values. Cancel leaves the flag unchanged; Save block then Save page persists it.
 Library releases and synced content do not own or propagate this placement flag.
 
+Custom entries keep a fixed Edit content button over each editable block
+preview; they do not use the page preview's draggable hover toolbar. The
+shared block component's `preview-edit-control` slot changes only the launcher.
 Editing a block's content inside a custom entry reuses the page's actual
 block editor: live preview on the left, fields on the right, with the same
 resizing, viewport controls and field-focus highlighting. A content adapter

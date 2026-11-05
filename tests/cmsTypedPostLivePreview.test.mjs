@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { runInNewContext } from 'node:vm'
 import { computed, ref } from 'vue'
+import { parse } from '@vue/compiler-sfc'
 import { buildPostEntryPreviewBlock } from '../lib/cmsPostEntryPreview.js'
 import { buildPostTypeFields, getPostPath, preparePostTypePage, setPostPath } from '../lib/cmsPostTypes.js'
 
@@ -90,4 +91,21 @@ test('custom posts reuse the actual page block editor instead of their own form 
   assert.match(blockSource, /if \(!props\.contentEditorAdapter\)\s+modelValue\.value\.blockUpdatedAt/)
   assert.ok(blockSource.includes(':render-context="fieldEditorRenderContext"'))
   assert.ok(blockSource.includes('meta: { ...(preview?.meta || {}), ...state.meta }'))
+})
+
+test('custom posts retain the fixed preview Edit content launcher instead of draggable hover controls', () => {
+  const { descriptor } = parse(source)
+  const walk = (node, predicate) => predicate(node) ? node : (node.children || []).map(child => walk(child, predicate)).find(Boolean)
+  const block = walk(descriptor.template.ast, node => node.tag === 'edge-cms-block')
+  const launcher = walk(block, node => node.tag === 'template' && node.props?.some(prop => prop.name === 'slot' && prop.arg?.content === 'preview-edit-control'))
+  assert.ok(launcher, 'The custom-post control replaces the shared default toolbar')
+  assert.ok(launcher.props.some(prop => prop.name === 'slot' && prop.exp?.content === '{ openEditor }'))
+  const button = walk(launcher, node => node.tag === 'button')
+  assert.ok(button.props.some(prop => prop.name === 'on' && prop.arg?.content === 'click' && prop.exp?.content === 'openEditor'))
+  const classes = button.props.find(prop => prop.name === 'class').value.content
+  assert.match(classes, /absolute inset-0/)
+  assert.match(classes, /items-start justify-end/)
+  assert.doesNotMatch(classes, /opacity-0|group-hover|cursor-grab/)
+  assert.match(button.loc.source, />Edit content<\/span>/)
+  assert.doesNotMatch(launcher.loc.source, /previewToolbarStyle|startPreviewToolbarDrag|pointerenter|pointerdown/)
 })
