@@ -7,6 +7,7 @@
       "name": "Block schema inputs (image, video, publication, options...)",
       "code": [
         "edge/components/cms/blockEditor.vue",
+        { "path": "edge/components/cms/block.vue", "diffPattern": "isOwnDefinitionPreview|OWN_DEFINITION_PREVIEW_IDS|loadSourceBlockDoc|blockContentSourceDoc|orderedMeta|getAuthoredFieldMeta" },
         "edge/components/cms/blockInput.vue",
         "edge/components/cms/mediaManager.vue",
         "edge/lib/cmsVideo.js"
@@ -173,7 +174,7 @@
       "name": "Custom-post display labels and entry access controls",
       "code": [
         "edge/components/cms/typedPosts.vue",
-        "edge/components/cms/block.vue",
+        { "path": "edge/components/cms/block.vue", "diffPattern": "customPost|contentEditorAdapter|preview-edit-control|draftPostPreview" },
         "edge/lib/cmsPostEntryPreview.js",
         "edge/lib/cmsDraftPostPreview.js",
         "edge/lib/cmsPostTypes.js",
