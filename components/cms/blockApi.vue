@@ -7,6 +7,7 @@
  */
 
 import { getCmsTemplateRuntimeMeta } from '../../composables/useCmsTemplateRuntimeMeta'
+import { isDraftPostPreviewSource, resolveDraftPostPreviewSource } from '../../lib/cmsDraftPostPreview'
 
 const props = defineProps({
   content: {
@@ -36,6 +37,10 @@ const props = defineProps({
   dataSources: {
     type: Object,
     default: () => ({}),
+  },
+  draftPostPreview: {
+    type: Object,
+    default: null,
   },
   theme: {
     type: Object,
@@ -542,10 +547,43 @@ if (import.meta.client) {
 }
 
 const collectionValues = ref({})
+const draftPostContext = computed(() => {
+  if (props.draftPostPreview?.orgId !== edgeGlobal.edgeState.currentOrganization || props.draftPostPreview?.siteId !== props.siteId)
+    return null
+  return props.draftPostPreview
+})
+const draftPosts = computed(() => {
+  if (!draftPostContext.value)
+    return {}
+  return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.siteId}/posts`] || {}
+})
+const loadPreviewCollections = async (values, meta, siteId) => {
+  const publishedMeta = {}
+  const draftValues = {}
+  await Promise.all(Object.entries(meta || {}).map(async ([name, source]) => {
+    if (isDraftPostPreviewSource(source, draftPostContext.value)) {
+      try {
+        draftValues[name] = await resolveDraftPostPreviewSource(name, source, draftPostContext.value, draftPosts.value)
+      }
+      catch {
+        draftValues[name] = []
+      }
+    }
+    else {
+      publishedMeta[name] = source
+    }
+  }))
+  const result = Object.values(publishedMeta).some(source => source?.collection)
+    ? await edgeGlobal.cmsCollectionData(edgeFirebase, values, publishedMeta, siteId)
+    : values
+  return { ...result, ...draftValues }
+}
 const collectionRequestSignature = computed(() => serializePreviewRequestInput({
   siteId: props.siteId,
   meta: collectionMetaToFetch.value,
   values: mergedValues.value,
+  draftPostContext: draftPostContext.value,
+  draftPosts: draftPosts.value,
 }))
 
 watch(collectionRequestSignature, async () => {
@@ -561,13 +599,13 @@ watch(collectionRequestSignature, async () => {
   const siteId = props.siteId
   collectionPending.value = true
   try {
-    const result = await edgeGlobal.cmsCollectionData(edgeFirebase, values, meta, siteId)
+    const result = await loadPreviewCollections(values, meta, siteId)
     if (requestId === collectionRequestId)
       collectionValues.value = result || {}
   }
   catch {
     if (requestId === collectionRequestId)
-      collectionValues.value = {}
+      collectionValues.value = Object.fromEntries(Object.entries(meta || {}).filter(([, source]) => isDraftPostPreviewSource(source, draftPostContext.value)).map(([name]) => [name, []]))
   }
   finally {
     if (requestId === collectionRequestId)
@@ -613,6 +651,11 @@ const resolveScopedCollectionSource = async (sourceName, sourceConfig, overrides
   if (!cfg?.collection)
     return null
   delete cfg.value
+
+  if (isDraftPostPreviewSource(cfg, draftPostContext.value)) {
+    const prepared = edgeGlobal.prepareCmsMetaForRuntime({ [sourceName]: cfg }, props.siteId, { routeLastSegment: effectiveRouteLastSegment.value })?.[sourceName] || cfg
+    return resolveDraftPostPreviewSource(sourceName, prepared, draftPostContext.value, draftPosts.value)
+  }
 
   const cacheKey = JSON.stringify({ sourceName, cfg, siteId: props.siteId })
   if (!scopedCollectionSourceCache.has(cacheKey)) {

@@ -52,6 +52,7 @@
       "name": "Data Sources and per-page settings",
       "code": [
         "edge/components/cms/blockApi.vue",
+        "edge/lib/cmsDraftPostPreview.js",
         "edge/components/cms/blockRender.vue",
         "functions/cmsCollectionData.js",
         "functions/helpers/cmsDataSourceRecords.mjs"
@@ -174,13 +175,14 @@
         "edge/components/cms/typedPosts.vue",
         "edge/components/cms/block.vue",
         "edge/lib/cmsPostEntryPreview.js",
+        "edge/lib/cmsDraftPostPreview.js",
         "edge/lib/cmsPostTypes.js",
         "functions/helpers/cmsPostTypes.mjs",
         { "path": "functions/cms.js", "diffPattern": "useForCustomPost|previous: draftData" },
         "edge/components/cms/postTypeSettings.vue",
         { "path": "edge/components/cms/menu.vue", "diffPattern": "edge-cms-post-type-settings" },
-        { "path": "edge/components/cms/page.vue", "diffPattern": "templateTypeIncludesPost|edge-cms-post-type-settings" },
-        { "path": "edge/components/cms/site.vue", "diffPattern": "customPostTypes|menuTitle|titles\\.get|titles\\.set|titles\\.has" }
+        { "path": "edge/components/cms/page.vue", "diffPattern": "templateTypeIncludesPost|edge-cms-post-type-settings|draftPostPreview" },
+        { "path": "edge/components/cms/site.vue", "diffPattern": "customPostTypes|menuTitle|titles\\.get|titles\\.set|titles\\.has|draftPostPreview" }
       ],
       "documents": [
         { "path": "edge/docs/data-contracts/cms-posts/README.md", "section": "Page-defined custom post types", "says": "Custom-type settings, instance-owned block opt-in, marked-only entry fields/layout, sample previews, inactive value preservation and unchanged public layout" }

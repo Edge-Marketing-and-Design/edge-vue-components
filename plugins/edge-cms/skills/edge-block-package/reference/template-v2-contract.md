@@ -94,6 +94,11 @@ A configured Data Source does not run merely because it exists. Every declared
 source must be called with `source("name")`. Dynamic sources also require
 separate Hub-preview and public-renderer/KV verification.
 
+An enabled custom-post page's Index preview in the authenticated Hub (including
+its small site-page preview) reads that type's saved draft posts without
+changing the block. Public rendering still reads published posts. Do not
+change a source path or embed sample values to enable this preview behavior.
+
 ## Input mapping
 
 Use these classifications:

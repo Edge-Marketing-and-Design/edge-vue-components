@@ -17,6 +17,10 @@ const props = defineProps({
     type: Object,
     default: null,
   },
+  draftPostPreview: {
+    type: Object,
+    default: null,
+  },
   modelValue: {
     type: Object,
     required: true,
@@ -2968,7 +2972,7 @@ const getTagsFromPosts = computed(() => {
     >
       <!-- Content -->
       <div class="relative z-0" :class="props.editMode && props.overrideClicksInEditMode ? 'pointer-events-none' : ''">
-        <edge-cms-block-api :site-id="props.siteId" :route-last-segment="props.routeLastSegment" :theme="props.theme" :content="displayRenderBlock.content" :template-version="displayRenderBlock.templateVersion" :template="displayRenderBlock.template" :schema="displayRenderBlock.schema" :data-sources="displayRenderBlock.dataSources" :values="displayRenderBlock.values" :meta="displayRenderBlock.meta" :viewport-mode="props.viewportMode" :render-context="effectiveRenderContext" :standalone-preview="props.standalonePreview" :preview-auth-logged-in="props.previewAuthLoggedIn" />
+        <edge-cms-block-api :draft-post-preview="props.draftPostPreview" :site-id="props.siteId" :route-last-segment="props.routeLastSegment" :theme="props.theme" :content="displayRenderBlock.content" :template-version="displayRenderBlock.templateVersion" :template="displayRenderBlock.template" :schema="displayRenderBlock.schema" :data-sources="displayRenderBlock.dataSources" :values="displayRenderBlock.values" :meta="displayRenderBlock.meta" :viewport-mode="props.viewportMode" :render-context="effectiveRenderContext" :standalone-preview="props.standalonePreview" :preview-auth-logged-in="props.previewAuthLoggedIn" />
       </div>
       <edge-cms-override-block-badge :is-override-block="isOverrideBlockPreview" />
       <div v-if="showProtectedEditOverlay" class="pointer-events-none absolute inset-0 z-[9998] bg-black/20">
@@ -3204,6 +3208,7 @@ const getTagsFromPosts = computed(() => {
                   <div class="w-full mx-auto rounded-none overflow-visible" :style="previewViewportContainStyle">
                     <div class="relative overflow-visible rounded-none" :class="[previewContentSurfaceClass, previewContentCanvasClass, previewAuthClass]" style="transform: translateZ(0);">
                       <edge-cms-block-api
+                        :draft-post-preview="props.draftPostPreview"
                         :site-id="props.siteId"
                         :route-last-segment="props.routeLastSegment"
                         :theme="props.theme"
@@ -3323,6 +3328,7 @@ const getTagsFromPosts = computed(() => {
                   <div class="w-full mx-auto rounded-none overflow-visible" :style="previewViewportContainStyle">
                     <div ref="fieldEditorPreviewRef" class="relative overflow-visible rounded-none" :class="[fieldEditorPreviewSurfaceClass, fieldEditorPreviewCanvasClass, previewAuthClass]" style="transform: translateZ(0);">
                       <edge-cms-block-api
+                        :draft-post-preview="props.draftPostPreview"
                         :site-id="props.siteId"
                         :route-last-segment="props.routeLastSegment"
                         :theme="props.theme"

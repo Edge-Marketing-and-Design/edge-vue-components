@@ -4,6 +4,7 @@ import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { buildPostEntryPreviewBlock } from '../../lib/cmsPostEntryPreview'
 import { preparePostTypePage } from '../../lib/cmsPostTypes'
+import { draftPostPreviewContext } from '../../lib/cmsDraftPostPreview'
 import { buildCmsPublishedPageUrl, buildCmsSitePreviewUrl, findCmsPageRoute } from '../../lib/cmsPublishedSitePreview'
 
 const runtimeConfig = useRuntimeConfig()
@@ -4214,6 +4215,7 @@ const hasUnsavedChanges = (changes) => {
                                         :key="`${pagePreviewRenderKey}:${blockId}:${effectiveThemeId}:list`"
                                         v-model="slotProps.workingDoc.content[blockIndex(slotProps.workingDoc, blockId, false)]"
                                         :site-id="selectedPreviewContextSiteId"
+                                        :draft-post-preview="draftPostPreviewContext(slotProps.workingDoc, props.page, edgeGlobal.edgeState.currentOrganization, selectedPreviewContextSiteId)"
                                         :render-context="pagePreviewRenderContext"
                                         :edit-mode="state.editMode"
                                         :override-clicks-in-edit-mode="state.editMode"

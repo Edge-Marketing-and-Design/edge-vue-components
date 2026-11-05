@@ -2,7 +2,7 @@
 
 Status: in use for every site the CMS publishes.
 
-Last verified: 2026-11-05, custom-post menu labels and Page Settings regression tests
+Last verified: 2026-11-05, custom-post draft index previews, menu labels and Page Settings regression tests
 
 A site is an organization's website: its settings, menus and domains, and
 the draft pages assembled from block instances. Publishing copies a page or
@@ -174,6 +174,12 @@ pages and templates have no external route. Unsaved editor state is not sent.
 These are client URLs only: no new stored fields, public projections or reads
 authorized by the URL. The authenticated frontend reads permitted saved draft
 site/page/theme snapshots; collection/API delivery remains published.
+
+This external-renderer behavior is separate from the Hub's own editor canvas:
+an enabled custom-post page's Index canvas and small site-page preview read
+its type's saved draft posts. Their preview cache signatures include draft
+changes. The override changes no saved block, menu, source or published
+projection; other page previews retain their normal collection loading.
 
 `emd-cms-front` resolves the request's host through `idx:sites:domains` to
 the site, reads `sites:` for `menus`, `theme`, `pageVersions`, the logos,

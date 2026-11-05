@@ -7,6 +7,7 @@ import { getCmsDomainConnectionStatus } from '../../lib/cmsDomainConnectionStatu
 import { FileText } from 'lucide-vue-next'
 import { postTypeIcons } from '../../lib/cmsPostTypeIcons'
 import { getPostTypes, preparePostTypePage } from '../../lib/cmsPostTypes'
+import { draftPostPreviewContext } from '../../lib/cmsDraftPostPreview'
 import { prepareSitemapSettings, reconcilePostSitemaps } from '../../lib/cmsSitemapSettings'
 import { useStructuredDataTemplates } from '@/edge/composables/structuredDataTemplates'
 import { buildCmsSitePreviewUrl, buildPublishedSitePreviewUrl, getCmsPublishedSiteOrigin } from '../../lib/cmsPublishedSitePreview'
@@ -2223,6 +2224,7 @@ const getSitePagePreviewPageSnapshotSignature = (pageDoc) => {
     pageId: pageDoc?.docId || null,
     version: pageDoc?.version || null,
     rows: getSitePagePreviewPageRowsSignature(pageDoc),
+    draftPosts: draftPostPreviewContext(pageDoc, pageDoc?.docId, organizationId.value, props.site) ? (edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/posts`] || {}) : null,
   })
 }
 
@@ -2234,6 +2236,7 @@ const getSitePagePreviewFullSnapshotSignature = (pageDoc) => {
     theme: getSitePagePreviewThemeSignature(),
     version: pageDoc?.version || null,
     rows: getSitePagePreviewBlockSignature(pageDoc),
+    draftPosts: draftPostPreviewContext(pageDoc, pageDoc?.docId, organizationId.value, props.site) ? (edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/posts`] || {}) : null,
   })
 }
 
@@ -4367,6 +4370,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                                     <edge-cms-block-api
                                       v-if="resolveTemplateBlockForPreview(item, blockRef)"
                                       :key="getPagePreviewBlockRenderKey(getTemplatePagePreviewKey(item.docId), item, blockRef, blockIdx)"
+                                      :draft-post-preview="draftPostPreviewContext(item, item.docId, organizationId, props.site)"
                                       :site-id="selectedTemplatePreviewSiteId"
                                       :content="resolveTemplateBlockForPreview(item, blockRef).content"
                                       :template-version="resolveTemplateBlockForPreview(item, blockRef).templateVersion"
@@ -5147,6 +5151,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
                                             <edge-cms-block-api
                                               v-if="resolveTemplateBlockForPreview(item, blockRef)"
                                               :key="getPagePreviewBlockRenderKey(getSitePagePreviewKey(item.docId), item, blockRef, blockIdx)"
+                                                :draft-post-preview="draftPostPreviewContext(item, item.docId, organizationId, props.site)"
                                               :site-id="props.site"
                                               :content="resolveTemplateBlockForPreview(item, blockRef).content"
                                               :template-version="resolveTemplateBlockForPreview(item, blockRef).templateVersion"

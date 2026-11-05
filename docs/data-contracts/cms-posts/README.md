@@ -2,7 +2,7 @@
 
 Status: in use for every post and event a site publishes.
 
-Last verified: 2026-11-05, fixed custom-post preview launcher, shared block-editor reuse and detached values regression tests
+Last verified: 2026-11-05, draft-only custom index previews, fixed launcher and shared block-editor regression tests
 
 A post is a dated entry (a post or an event) that a post template page
 renders under its route. Drafts live with the site; publishing copies a
@@ -285,6 +285,17 @@ History, compare, draft restore, discard, scheduling and unpublish remain source
 versus snapshot operations. No migration/backfill of legacy posts is performed.
 
 ### Type-specific index metadata
+
+In the authenticated Hub, an enabled custom type's Index preview and its
+small site-page preview resolve post sources from that site's saved draft
+`posts`, restricted to the defining page's `postTypeId`. This includes the
+latest saved draft of already-published entries. The preview's read-only
+in-memory source uses the template engine's query, sort, canonical lookup
+and limit handling. Empty drafts stay empty, without published or sample
+fallback. Draft changes invalidate the small preview's cache. Detail previews
+retain their existing single-entry selection. Blocks, their source settings
+and values are not modified or saved by this preview override; public sites
+and standalone preview routes continue using published sources.
 
 `cmsPostTypes` compiles post-source dependencies from template expressions,
 conditionals, loops, nested arrays and source sort/query field declarations.
