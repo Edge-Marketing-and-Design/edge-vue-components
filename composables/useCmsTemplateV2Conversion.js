@@ -241,6 +241,17 @@ const addSchemaFormatter = (schemaEntry, type) => {
   return schemaEntry
 }
 
+// Legacy item settings the v2 editor and validator still read. Dropping
+// them loses an input's choices (a select becomes free text) and its rules.
+const LEGACY_SCHEMA_ENTRY_KEYS = ['option', 'validation', 'tags']
+const copyLegacySchemaEntryKeys = (target, config) => {
+  for (const key of LEGACY_SCHEMA_ENTRY_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(config, key) && config[key] !== undefined)
+      target[key] = cloneValue(config[key])
+  }
+  return target
+}
+
 const convertSchemaDefinition = (schema) => {
   if (Array.isArray(schema)) {
     return schema.reduce((acc, item) => {
@@ -252,6 +263,7 @@ const convertSchemaDefinition = (schema) => {
         type: getEditorSchemaType(schemaType),
         label: item.title || item.label || toTitle(field),
       }, schemaType)
+      copyLegacySchemaEntryKeys(acc[field], item)
       if (Object.prototype.hasOwnProperty.call(item, 'value') && item.type)
         acc[field].value = cloneValue(item.value)
       return acc
@@ -270,6 +282,7 @@ const convertSchemaDefinition = (schema) => {
           type: getEditorSchemaType(schemaType),
           label: config.title || config.label || toTitle(field),
         }, schemaType)
+        copyLegacySchemaEntryKeys(acc[field], config)
         if (Object.prototype.hasOwnProperty.call(config, 'value') && config.type)
           acc[field].value = cloneValue(config.value)
       }
