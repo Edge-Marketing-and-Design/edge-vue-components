@@ -1,6 +1,5 @@
 <script setup>
 import * as templateMonaco from 'monaco-editor'
-import { createWebWorker as createFormattingWorker } from 'monaco-editor/esm/vs/common/workers.js'
 import { formatSingleLineTemplate, templateSourceOffset } from '../../lib/cmsTemplateReadability'
 import { cn } from '@/lib/utils'
 
@@ -309,11 +308,12 @@ const formatSingleLineOnOpen = async () => {
     const formatted = await formatSingleLineTemplate(source, async (masked) => {
       temporaryModel = monacoApi.editor.createModel(masked, 'html')
       // The language-worker factory initializes the HTML service before syncing models.
-      formattingWorker = createFormattingWorker({
+      formattingWorker = monacoApi.editor.createWebWorker({
         moduleId: 'vs/language/html/htmlWorker', label: 'html',
         createData: { languageId: 'html', languageSettings: { format: {} } },
       })
-      const worker = await formattingWorker.withSyncedResources([temporaryModel.uri])
+      const worker = await formattingWorker.getProxy()
+      await formattingWorker.withSyncedResources([temporaryModel.uri])
       const edits = await worker.format(temporaryModel.uri.toString(), null, {
         tabSize: 2, insertSpaces: true, wrapLineLength: 0,
         unformatted: 'pre,code,textarea,script,style',

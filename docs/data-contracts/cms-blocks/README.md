@@ -368,9 +368,10 @@ byte-identical; the definition and metadata split lives in
 Opening a single-line template in the Block Editor formats only its editor
 display. CMS tokens are masked while HTML is indented, then restored exactly;
 non-whitespace changes are rejected. Existing multiline source is left alone.
-This uses the installed Monaco HTML language-worker factory, which initializes
-the HTML service before model synchronization. The raw editor worker API does
-not perform that language-service initialization.
+This uses the installed Monaco public `editor.createWebWorker` API with the
+HTML worker module and language createData. It initializes the HTML service
+with `getProxy()` before `withSyncedResources()`, matching the bundled HTML
+WorkerManager. It does not import a version-specific internal worker path.
 
 Opening a block does not change saved content, preview source, or dirty state.
 A real edit emits the formatted markup; undoing back to the formatted baseline
