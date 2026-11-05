@@ -10,7 +10,7 @@
 // New content waits (invisible) until its CSS exists, then fades in.
 // When disabled, the slot renders in place (Teleport disabled).
 import { computed, nextTick, onBeforeUnmount, provide, reactive, ref, watch } from 'vue'
-import { CANVAS_EDITOR_CSS, CANVAS_SRCDOC, buildCanvasSiteCss, buildChromeCss, canvasContentHeight, canvasHeadLinks, collectCanvasClassTokens, guardCanvasNavigation, revealCanvasBody, upsertCanvasStyle } from '../../lib/cmsCanvas'
+import { CANVAS_CONTENT_VIEWPORT_HEIGHTS, CANVAS_EDITOR_CSS, CANVAS_SRCDOC, buildCanvasSiteCss, buildChromeCss, canvasContentHeight, canvasHeadLinks, collectCanvasClassTokens, guardCanvasNavigation, pinCanvasViewportUnits, revealCanvasBody, upsertCanvasStyle } from '../../lib/cmsCanvas'
 
 const props = defineProps({
   enabled: { type: Boolean, default: false },
@@ -125,6 +125,9 @@ async function writeSiteCss() {
       scheduleSiteCss()
     return
   }
+  // Content fit: viewport units can't follow the frame (see pinCanvasViewportUnits).
+  if (props.fit === 'content')
+    css = pinCanvasViewportUnits(css, CANVAS_CONTENT_VIEWPORT_HEIGHTS[props.viewportMode] || CANVAS_CONTENT_VIEWPORT_HEIGHTS.large)
   upsertCanvasStyle(doc, 'cms-page-canvas-site-css', css)
   knownTokens = tokens
   releasePending(doc)
