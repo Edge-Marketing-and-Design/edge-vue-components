@@ -2,7 +2,7 @@
 
 Status: in use in every Hub, for every block the CMS places on a page or post.
 
-Last verified: 2026-11-05, template readability worker browser and regression checks
+Last verified: 2026-11-05, unreleased input preview, template readability and regression checks
 
 This contract covers library blocks, the block instances placed on pages and
 posts, draft revisions, releases, propagation and the shared validation rules.
@@ -111,6 +111,15 @@ ordered string array, the tags library blocks in that organization may carry.
   them.
 
 ### Schema inputs
+
+Clicking the Block Editor's standalone preview opens inputs from that exact
+working preview definition, including new unreleased schema fields and source
+controls. Refresh the preview when template changes are pending; releasing a
+revision is not required to test its inputs. Field ordering and rendered
+defaults use the same definition. History previews likewise use their selected
+snapshot, including an empty schema, rather than reviving released inputs.
+These test values stay in the preview; they do not release or update the
+library block or any page. Ordinary page instances still use released inputs.
 
 Each input is `{ type, label, value, ... }`.
 

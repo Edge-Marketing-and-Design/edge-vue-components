@@ -827,7 +827,12 @@ const ensureSourceBlockSnapshot = async () => {
   }
 }
 
+const OWN_DEFINITION_PREVIEW_IDS = new Set(['preview', 'history-preview'])
+const isOwnDefinitionPreview = computed(() => props.standalonePreview && OWN_DEFINITION_PREVIEW_IDS.has(String(modelValue.value?.id || '')))
+
 const loadSourceBlockDoc = async () => {
+  if (isOwnDefinitionPreview.value)
+    return modelValue.value || {}
   const blockDocId = sourceBlockDocId.value
   const blocksPath = sourceBlocksCollectionPath.value
   if (!blockDocId || !blocksPath)
@@ -1672,6 +1677,8 @@ const buildUpdatedBlockDocFromContent = (content, sourceDoc = {}) => {
 }
 
 const blockContentSourceDoc = computed(() => {
+  if (isOwnDefinitionPreview.value)
+    return modelValue.value || {}
   const blockDocId = String(state.blockContentDocId || sourceBlockDocId.value || '').trim()
   if (!blockDocId)
     return null
@@ -1679,8 +1686,6 @@ const blockContentSourceDoc = computed(() => {
     return state.blockContentSourceView
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[blockDocId] || null
 })
-
-const OWN_DEFINITION_PREVIEW_IDS = new Set(['preview', 'history-preview'])
 
 const resolvedRenderBlock = computed(() => {
   const instance = modelValue.value || {}
@@ -1691,8 +1696,7 @@ const resolvedRenderBlock = computed(() => {
   // Standalone previews of a specific version (the Block Editor's unsaved
   // work, a Block History snapshot) render their own definition, not the
   // library block's current one.
-  const isOwnDefinitionPreview = props.standalonePreview && OWN_DEFINITION_PREVIEW_IDS.has(String(instance.id || ''))
-  const useSourceDefinition = sourceIsV2 && hasObjectEntries(sourceDoc) && !isOwnDefinitionPreview
+  const useSourceDefinition = sourceIsV2 && hasObjectEntries(sourceDoc) && !isOwnDefinitionPreview.value
 
   return {
     ...sourceDoc,
@@ -2573,7 +2577,7 @@ const getAuthoredFieldMeta = (field) => {
   if (!normalizedField)
     return null
 
-  const blockData = edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[modelValue.value?.blockId]
+  const blockData = isOwnDefinitionPreview.value ? modelValue.value : edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[modelValue.value?.blockId]
   const authoredContent = String(blockData?.content || modelValue.value?.content || '').trim()
   if (!authoredContent)
     return null
@@ -2642,7 +2646,7 @@ const validateValueAgainstRules = (value, rules, label, typeHint) => {
 
 const orderedMeta = computed(() => {
   const metaObj = state.metaUpdate || {}
-  const blockData = edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[modelValue.value?.blockId]
+  const blockData = isOwnDefinitionPreview.value ? modelValue.value : edgeFirebase.data[`${edgeGlobal.edgeState.organizationDocPath}/blocks`]?.[modelValue.value?.blockId]
   const templateIsV2 = (isTemplateV2BlockDoc(blockData) && !isMalformedLegacyTemplateV2Doc(blockData))
     || (isTemplateV2BlockDoc(modelValue.value) && !isMalformedLegacyTemplateV2Doc(modelValue.value))
   const tpl = templateIsV2
