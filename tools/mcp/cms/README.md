@@ -250,6 +250,50 @@ the file named by `agentKeyFile` in the Hub's MCP config (Clearwater:
 `https://us-central1-<projectId>.cloudfunctions.net/cms-agentOperation`;
 `agentEndpoint` in the config or `EDGE_CMS_AGENT_ENDPOINT` overrides it.
 
+## Developer setup (Claude Code and Codex)
+
+Edge developers get the CMS tools and the Edge skills from the Hub checkout
+the session runs in, and nothing Edge-specific from their accounts or user
+configuration. Account-level tools load in every session, so another Hub's
+remote server (with the same tool names) or an older copy of a skill would
+sit next to the Hub's own. One-time setup, the same for everyone:
+
+1. **Checkouts.** Clone each Hub you work on, with `emd-cms-front` next to
+   it (`<parent>/<hub>` and `<parent>/emd-cms-front`); the launcher reads
+   that path unless `EDGE_CMS_RENDERER_REPO` is set. A symlink to an existing
+   `emd-cms-front` checkout works too.
+2. **Node.** Install nvm and the version in the Hub's `.nvmrc`. The launcher
+   uses it and installs the server's dependencies itself.
+3. **Accounts.** Don't add a Hub's remote CMS endpoint (`…/cms-agentMcp`,
+   for example "EMD CMS") as a claude.ai connector, don't install the
+   `edge-cms` plugin in Claude or Codex, and keep no Edge skill in a claude.ai
+   account or in `~/.claude/skills`, `~/.codex/skills` or `~/.agents/skills`.
+   Remove any you have; the `claude` CLI keeps copies of removed org plugins
+   and account skills under `~/.claude/plugins/synced/` and
+   `~/.claude/skills/synced/`, so delete those folders too. Keep no Hub
+   server in `~/.claude.json` or `~/.codex/config.toml`.
+4. **Keys.** Put the Hub's read-only key where its `.mcp.json` names it
+   (`EDGE_CMS_MCP_CREDENTIALS`, for example
+   `~/.config/clearwater/firebase-readonly-mcp.json`); see **Credentials**.
+   Writes use your own agent key or Hub connection (**Draft-only CMS
+   operations**).
+5. **Claude Code.** Open the Hub folder in the desktop app (Code tab) or run
+   `claude` there; in the CLI, approve the project's servers once.
+6. **Codex.** Open the Hub folder and trust it: Codex reads a project's
+   `.codex/config.toml` only in a trusted folder.
+7. **Check.** Run `node edge/tools/dev-check.mjs` in the Hub (it exits 1 on a
+   problem and names the fix), then start one new session per client: the
+   only CMS servers are the Hub's own (for example
+   `clearwater-firebase-readonly` and `clearwater-cms-emulator`) plus
+   `chrome-devtools`, and each Edge skill is listed once, without an
+   `edge-cms:` prefix.
+
+What keeps it current, with nothing to republish: the skills are committed
+links to `edge/skills` (`edge/skills/README.md`), so they follow the
+checkout's branch; the servers start from the checkout through `launch.sh`,
+which fast-forwards a clean `main` and reinstalls dependencies; shared
+changes reach each Hub through the `edge/` subtree.
+
 ## Setup
 
 Install dependencies once, in the Hub's main checkout:

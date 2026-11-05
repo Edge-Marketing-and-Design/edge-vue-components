@@ -97,7 +97,9 @@ and account skills under `~/.claude/plugins/synced/` and
 `~/.claude/skills/synced/`; if a removed one still loads there, delete its
 folder.
 
-Check a session: the only CMS servers are the Hub's own (for example
+The full one-time setup is in `edge/tools/mcp/cms/README.md` (Developer
+setup); `node edge/tools/dev-check.mjs` checks a machine. Check a session: the
+only CMS servers are the Hub's own (for example
 `clearwater-firebase-readonly` and `clearwater-cms-emulator`) plus
 `chrome-devtools`, and each Edge skill is listed once, without an
 `edge-cms:` prefix.
