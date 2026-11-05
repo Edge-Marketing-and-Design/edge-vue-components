@@ -2,7 +2,7 @@
 
 Status: in use for every post and event a site publishes.
 
-Last verified: 2026-10-13, 9fa2002f
+Last verified: 2026-11-04, custom-post label and access regression tests
 
 A post is a dated entry (a post or an event) that a post template page
 renders under its route. Drafts live with the site; publishing copies a
@@ -192,10 +192,18 @@ Each Hub lists the tests in its own checkout under "This Hub". Shared:
 
 An ordinary site's index/detail page (`post: true`) can opt into
 `postType: { enabled: true, icon: 'BookOpen' }`. Its stable page ID identifies
-the type; its current name is the menu label. The site-local Content sidebar
-shows its selected supported icon and a filtered list. Add New goes directly
+the type. The site-local Content sidebar uses the first nonempty matching
+`menuTitle` in the saved site menus (including folders and Not In Menu),
+falling back to the page name or ID. Display labels do not change the page's
+route slug or type identity. It shows its selected supported icon and a
+filtered list. Add New goes directly
 to a values-only editor built from that page's detail blocks/structure. The
 normal Posts editor continues handling existing copied-layout posts/events.
+
+When site restrictions are enabled, the custom editor's Access dropdown uses
+a nonempty UI-only value for Public, mapped to an empty `restrictionRuleId`
+in the working document. Existing rule IDs pass through unchanged; the UI
+value is never stored as a restriction.
 
 Custom post drafts use the same `posts` collection and published snapshots use
 `published_posts`. Additive fields:

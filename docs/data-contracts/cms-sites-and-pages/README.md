@@ -2,7 +2,7 @@
 
 Status: in use for every site the CMS publishes.
 
-Last verified: 2026-11-04, e9af426e
+Last verified: 2026-11-04, e9af426e; custom-post menu label regression tests
 
 A site is an organization's website: its settings, menus and domains, and
 the draft pages assembled from block instances. Publishing copies a page or
@@ -100,6 +100,8 @@ navigation, `Not In Menu` holds routable pages the navigation hides.
 | External link | `{ name, item: { type: 'external', url } }` |
 
 `name` is the page's route slug; `menuTitle` is what the navigation shows.
+The Hub's custom-post menu also uses the matching `menuTitle`, preserving its
+capitalization independently of the route slug; see the posts contract.
 A theme's `defaultMenus` has the same shape with template page ids, which
 seeding replaces with the new pages' ids.
 

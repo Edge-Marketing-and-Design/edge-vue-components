@@ -58,6 +58,10 @@ const initial = computed(() => {
 },
 )
 const siteDoc = computed(() => edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.site] || {})
+const publicAccessValue = '__public__'
+const accessItems = computed(() => [{ id: publicAccessValue, name: 'Public' }, ...(siteDoc.value.restrictedContent?.rules || [])])
+const accessSelectValue = value => value || publicAccessValue
+const accessStoredValue = value => value === publicAccessValue ? '' : value
 const typeTheme = computed(() => {
   if (props.theme)
     return props.theme
@@ -421,7 +425,7 @@ const liveUrl = computed(() => {
             <edge-shad-input v-model="slot.workingDoc.name" name="name" label="URL slug" />
             <edge-shad-textarea v-model="slot.workingDoc.blurb" name="blurb" label="Preview text" :rows="4" />
             <edge-shad-tags v-model="slot.workingDoc.tags" name="tags" label="Tags" />
-            <edge-shad-select v-if="canManageRestrictions && siteDoc.restrictedContent?.enabled" v-model="slot.workingDoc.restrictionRuleId" name="restrictionRuleId" label="Access" :items="[{ id: '', name: 'Public' }, ...(siteDoc.restrictedContent?.rules || [])]" item-title="name" item-value="id" />
+            <edge-shad-select v-if="canManageRestrictions && siteDoc.restrictedContent?.enabled" :model-value="accessSelectValue(slot.workingDoc.restrictionRuleId)" name="restrictionRuleId" label="Access" :items="accessItems" item-title="name" item-value="id" @update:model-value="value => slot.workingDoc.restrictionRuleId = accessStoredValue(value)" />
             <edge-cms-block-input v-model="slot.workingDoc.featuredImage" field="featuredImage" type="image" label="Featured image" :site="site" />
           </aside>
         </div>

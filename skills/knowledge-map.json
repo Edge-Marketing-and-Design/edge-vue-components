@@ -156,6 +156,17 @@
       ]
     },
     {
+      "id": "custom-post-editor",
+      "name": "Custom-post display labels and entry access controls",
+      "code": [
+        "edge/components/cms/typedPosts.vue",
+        { "path": "edge/components/cms/site.vue", "diffPattern": "customPostTypes|menuTitle|titles\\.get|titles\\.set|titles\\.has" }
+      ],
+      "documents": [
+        { "path": "edge/docs/data-contracts/cms-posts/README.md", "section": "Page-defined custom post types", "says": "Menu titles label custom types without changing slug or identity; Public access uses an empty stored restriction and a nonempty UI-only select value" }
+      ]
+    },
+    {
       "id": "plugin-and-launcher",
       "name": "The plugin and the local CMS server launcher",
       "code": [

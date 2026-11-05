@@ -1729,7 +1729,27 @@ const pages = computed(() => {
   return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`] || {}
 })
 
-const customPostTypes = computed(() => getPostTypes(pages.value))
+const customPostTypes = computed(() => {
+  const titles = new Map()
+  const visit = (items) => {
+    if (!Array.isArray(items))
+      return
+    for (const entry of items) {
+      if (typeof entry?.item === 'string') {
+        const title = String(entry.menuTitle || '').trim()
+        if (title && !titles.has(entry.item))
+          titles.set(entry.item, title)
+      }
+      else if (entry?.item && typeof entry.item === 'object' && entry.item.type !== 'external') {
+        Object.values(entry.item).forEach(visit)
+      }
+    }
+  }
+  Object.values(siteData.value?.menus || {}).forEach(visit)
+  return getPostTypes(pages.value)
+    .map(type => ({ ...type, name: titles.get(type.id) || type.name }))
+    .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
+})
 const selectedCustomPostType = computed(() => customPostTypes.value.find(type => type.id === String(route.query.postType || '')) || null)
 const selectCustomPostType = async (id = '') => {
   const query = { ...route.query }
