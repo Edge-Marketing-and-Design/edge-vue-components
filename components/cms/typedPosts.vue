@@ -229,15 +229,20 @@ const remove = () => run(async () => {
 )
 const pageBlock = id => (sessionPage.value?.postContent || []).find(block => block.id === id)
 const blockFields = id => fields.value.filter(field => field.blockId === id)
+const closeFields = () => {
+  editingFields.value = ''
+  fieldDraft.value = {}
+}
 const editFields = (id, doc) => {
   editingFields.value = id
   fieldDraft.value = edgeGlobal.dupObject(doc)
 }
 const applyFields = (doc) => {
   for (const field of blockFields(editingFields.value)) setPostPath(doc, field.field, getPostPath(fieldDraft.value, field.field) ?? field.default)
-  editingFields.value = ''
+  closeFields()
 }
 const previewBlock = (id, doc) => buildPostEntryPreviewBlock(sessionPage.value, id, doc)
+const fieldEditorPreviewBlock = computed(() => editingFields.value ? previewBlock(editingFields.value, fieldDraft.value) : null)
 const readHistoryItems = (value) => {
   if (!value || typeof value !== 'object')
     return []
@@ -447,18 +452,36 @@ const liveUrl = computed(() => {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-        <Sheet :open="!!editingFields" @update:open="value => { if (!value) editingFields = '' }">
-          <SheetContent class="w-full overflow-y-auto sm:max-w-xl">
-            <SheetHeader><SheetTitle>Edit content</SheetTitle><SheetDescription>Update the content for this entry.</SheetDescription></SheetHeader>
-            <div class="space-y-5 py-6">
-              <div v-for="field in blockFields(editingFields)" :key="field.field">
-                <edge-cms-post-value-field :model-value="getPostPath(fieldDraft, field.field) ?? field.default" :field="field" :site="site" @update:model-value="value => setPostPath(fieldDraft, field.field, value)" />
+        <Sheet :open="!!editingFields" @update:open="value => { if (!value) closeFields() }">
+          <edge-cms-block-sheet-content class="flex h-full w-full max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none">
+            <SheetHeader class="shrink-0 border-b px-5 py-4 pr-12">
+              <SheetTitle>Edit content: {{ pageBlock(editingFields)?.name || 'Block' }}</SheetTitle>
+              <SheetDescription>Preview your edits as you type. Apply content, then save the entry to keep them.</SheetDescription>
+            </SheetHeader>
+            <div class="grid min-h-0 flex-1 grid-rows-2 overflow-hidden lg:grid-cols-[minmax(280px,0.8fr)_minmax(0,1.6fr)] lg:grid-rows-1">
+              <div class="min-h-0 min-w-0 space-y-5 overflow-y-auto border-b p-5 lg:border-b-0 lg:border-r" aria-label="Content fields">
+                <div v-for="field in blockFields(editingFields)" :key="field.field">
+                  <edge-cms-post-value-field :model-value="getPostPath(fieldDraft, field.field) ?? field.default" :field="field" :site="site" @update:model-value="value => setPostPath(fieldDraft, field.field, value)" />
+                </div>
               </div>
+              <section class="flex min-h-0 min-w-0 flex-col overflow-hidden bg-muted/20" aria-label="Live block preview">
+                <div class="shrink-0 border-b px-4 py-2 text-xs font-medium text-muted-foreground">
+                  Live preview · Unsaved edits
+                </div>
+                <div class="min-h-0 flex-1 overflow-auto p-4">
+                  <edge-cms-block-api v-if="fieldEditorPreviewBlock" :key="editingFields" v-bind="fieldEditorPreviewBlock" :site-id="site" :theme="typeTheme" :render-context="fieldDraft" />
+                </div>
+              </section>
+            </div>
+            <SheetFooter class="shrink-0 gap-2 border-t px-5 py-3">
+              <edge-shad-button type="button" variant="outline" @click="closeFields">
+                Cancel
+              </edge-shad-button>
               <edge-shad-button type="button" class="w-full" @click="applyFields(slot.workingDoc)">
                 <Check class="mr-2 h-4 w-4" />Apply content
               </edge-shad-button>
-            </div>
-          </SheetContent>
+            </SheetFooter>
+          </edge-cms-block-sheet-content>
         </Sheet>
       </template>
       <template #footer />
