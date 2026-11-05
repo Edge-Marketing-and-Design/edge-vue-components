@@ -10,6 +10,16 @@ the checkout. Nothing Edge-specific comes from the person's accounts.
 Background is in `edge/tools/mcp/cms/README.md`, "Developer setup" and
 "Credentials".
 
+## Access the person needs first
+
+Confirm these with the person before step 1. Dustin grants them:
+
+- GitHub: access to the Edge-Marketing-and-Design repositories.
+- Google: their Google account can open the `clearwater-hub` and `emd-cms`
+  projects in the Firebase console.
+- Each Hub: a root admin account, which is what shows the Dev Mode switch.
+  Agent Keys appears in the Hub's menu only with Dev Mode on.
+
 ## Rules for the agent
 
 - Never ask the person to paste a credential into the chat, and never print
@@ -82,7 +92,7 @@ In each Hub's folder: `npm --prefix edge/tools/mcp/cms install`.
 
 ## Step 6: Hub connections (Person, one per Hub)
 
-For each Hub, the person opens Agent keys:
+For each Hub, the person signs in, turns on Dev Mode, and opens Agent Keys:
 
 - Clearwater: https://hub.clearwaterproperties.com/app/dashboard/agent-keys
 - emd-cms: https://emd-cms.web.app/app/dashboard/agent-keys
