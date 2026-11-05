@@ -2,7 +2,7 @@
 
 Status: in use for every post and event a site publishes.
 
-Last verified: 2026-11-05, custom-post settings, access and live-preview regression tests
+Last verified: 2026-11-05, shared block-editor reuse, detached post values and live-preview regression tests
 
 A post is a dated entry (a post or an event) that a post template page
 renders under its route. Drafts live with the site; publishing copies a
@@ -223,13 +223,14 @@ it uses placeholders. Sample values never become page defaults or saved post
 values. Cancel leaves the flag unchanged; Save block then Save page persists it.
 Library releases and synced content do not own or propagate this placement flag.
 
-Editing a block's content inside a custom entry opens a full-screen split
-sheet: fields on the left and the block's live preview on the right (stacked
-on smaller screens). The preview renders the detached field draft and updates
-as values change without remounting its iframe for every keystroke. Apply
-copies only that block's content fields into the entry's working document;
-the entry still needs Save. Cancel, Escape and closing the sheet discard its
-detached edits. Preview placeholders are never copied into saved content.
+Editing a block's content inside a custom entry reuses the page's actual
+block editor: live preview on the left, fields on the right, with the same
+resizing, viewport controls and field-focus highlighting. A content adapter
+maps semantic post paths to the shared editor's schema and detached values;
+there is no separate custom-entry form or sheet. Save changes copies only
+that block's declared fields into the entry's working document; the entry
+still needs Save. Cancel, Escape and closing the sheet discard detached edits.
+Preview placeholders and page layout definitions are never copied into posts.
 
 When site restrictions are enabled, the custom editor's Access dropdown uses
 a nonempty UI-only value for Public, mapped to an empty `restrictionRuleId`

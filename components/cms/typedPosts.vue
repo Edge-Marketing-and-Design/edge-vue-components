@@ -1,5 +1,5 @@
 <script setup>
-import { ArrowLeft, CalendarClock, CalendarDays, Check, Eye, FileText, History, Loader2, Plus, Save, Trash2 } from 'lucide-vue-next'
+import { ArrowLeft, CalendarClock, CalendarDays, Eye, FileText, History, Loader2, Plus, Save, Trash2 } from 'lucide-vue-next'
 import { toTypedSchema } from '@vee-validate/zod'
 import * as z from 'zod'
 import { buildPostTypeFields, buildTypedPost, getPostPath, postTypeSchema, preparePostTypePage, setPostPath, withPostProjection } from '../../lib/cmsPostTypes'
@@ -22,8 +22,6 @@ const selected = ref('')
 const search = ref('')
 const saving = ref(false)
 const error = ref('')
-const editingFields = ref('')
-const fieldDraft = ref({})
 const schedule = ref('')
 const publishOpen = ref(false)
 const eventOpen = ref(false)
@@ -229,20 +227,23 @@ const remove = () => run(async () => {
 )
 const pageBlock = id => (sessionPage.value?.postContent || []).find(block => block.id === id)
 const blockFields = id => fields.value.filter(field => field.blockId === id)
-const closeFields = () => {
-  editingFields.value = ''
-  fieldDraft.value = {}
-}
-const editFields = (id, doc) => {
-  editingFields.value = id
-  fieldDraft.value = edgeGlobal.dupObject(doc)
-}
-const applyFields = (doc) => {
-  for (const field of blockFields(editingFields.value)) setPostPath(doc, field.field, getPostPath(fieldDraft.value, field.field) ?? field.default)
-  closeFields()
-}
 const previewBlock = (id, doc) => buildPostEntryPreviewBlock(sessionPage.value, id, doc)
-const fieldEditorPreviewBlock = computed(() => editingFields.value ? previewBlock(editingFields.value, fieldDraft.value) : null)
+const applyPostBlockFields = (id, block, doc) => {
+  for (const field of blockFields(id))
+    setPostPath(doc, field.field, edgeGlobal.dupObject(block.values?.[field.field] ?? field.default))
+}
+const postBlockEditorAdapter = (id, doc) => {
+  const editableFields = blockFields(id)
+  return {
+    schema: Object.fromEntries(editableFields.map(field => [field.field, { ...field, value: field.default }])),
+    values: Object.fromEntries(editableFields.map(field => [field.field, edgeGlobal.dupObject(getPostPath(doc, field.field) ?? field.default)])),
+    preview(values) {
+      const draft = edgeGlobal.dupObject(doc)
+      applyPostBlockFields(id, { values }, draft)
+      return { ...previewBlock(id, draft), renderContext: draft }
+    },
+  }
+}
 const readHistoryItems = (value) => {
   if (!value || typeof value !== 'object')
     return []
@@ -412,10 +413,22 @@ const liveUrl = computed(() => {
             <div v-for="row in blockRows" :key="row.id" class="grid grid-cols-6" :class="[row.width, row.tailwindClasses]" :style="{ gap: `${Number(row.gap || 4) * 0.25}rem`, paddingTop: `${Number(row.paddingTop || 0) * 0.25}rem`, paddingBottom: `${Number(row.paddingBottom || 0) * 0.25}rem`, alignItems: row.verticalAlign || 'start' }">
               <div v-for="column in row.columns" :key="column.id" class="min-w-0 space-y-3" :style="{ gridColumn: `span ${Math.min(6, Math.max(1, Number(column.span) || 6))}` }">
                 <div v-for="id in column.blocks" :key="id" class="group relative overflow-hidden rounded-md border border-border" :class="blockFields(id).length ? 'ring-primary/0 transition hover:ring-2 hover:ring-primary/40' : ''">
-                  <edge-cms-block-api v-if="pageBlock(id)" v-bind="previewBlock(id, slot.workingDoc)" :site-id="site" :theme="typeTheme" :render-context="slot.workingDoc" />
-                  <button v-if="blockFields(id).length" type="button" class="absolute inset-0 z-10 flex items-start justify-end p-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" :aria-label="`Edit ${pageBlock(id)?.name || 'block'} content`" @click="editFields(id, slot.workingDoc)">
-                    <span class="rounded-full bg-background/95 px-3 py-1 text-xs font-medium shadow">Edit content</span>
-                  </button>
+                  <edge-cms-block
+                    v-if="pageBlock(id)"
+                    :model-value="pageBlock(id)"
+                    :block-id="id"
+                    :preview-block="previewBlock(id, slot.workingDoc)"
+                    :content-editor-adapter="postBlockEditorAdapter(id, slot.workingDoc)"
+                    :site-id="site"
+                    :theme="typeTheme"
+                    :render-context="slot.workingDoc"
+                    :edit-mode="false"
+                    :allow-delete="false"
+                    :allow-protection-editor="false"
+                    :allow-richtext-image-tools="true"
+                    :allow-richtext-article-tools="true"
+                    @update:model-value="value => applyPostBlockFields(id, value, slot.workingDoc)"
+                  />
                 </div>
               </div>
             </div>
@@ -452,37 +465,6 @@ const liveUrl = computed(() => {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-        <Sheet :open="!!editingFields" @update:open="value => { if (!value) closeFields() }">
-          <edge-cms-block-sheet-content class="flex h-full w-full max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none">
-            <SheetHeader class="shrink-0 border-b px-5 py-4 pr-12">
-              <SheetTitle>Edit content: {{ pageBlock(editingFields)?.name || 'Block' }}</SheetTitle>
-              <SheetDescription>Preview your edits as you type. Apply content, then save the entry to keep them.</SheetDescription>
-            </SheetHeader>
-            <div class="grid min-h-0 flex-1 grid-rows-2 overflow-hidden lg:grid-cols-[minmax(280px,0.8fr)_minmax(0,1.6fr)] lg:grid-rows-1">
-              <div class="min-h-0 min-w-0 space-y-5 overflow-y-auto border-b p-5 lg:border-b-0 lg:border-r" aria-label="Content fields">
-                <div v-for="field in blockFields(editingFields)" :key="field.field">
-                  <edge-cms-post-value-field :model-value="getPostPath(fieldDraft, field.field) ?? field.default" :field="field" :site="site" @update:model-value="value => setPostPath(fieldDraft, field.field, value)" />
-                </div>
-              </div>
-              <section class="flex min-h-0 min-w-0 flex-col overflow-hidden bg-muted/20" aria-label="Live block preview">
-                <div class="shrink-0 border-b px-4 py-2 text-xs font-medium text-muted-foreground">
-                  Live preview · Unsaved edits
-                </div>
-                <div class="min-h-0 flex-1 overflow-auto p-4">
-                  <edge-cms-block-api v-if="fieldEditorPreviewBlock" :key="editingFields" v-bind="fieldEditorPreviewBlock" :site-id="site" :theme="typeTheme" :render-context="fieldDraft" />
-                </div>
-              </section>
-            </div>
-            <SheetFooter class="shrink-0 gap-2 border-t px-5 py-3">
-              <edge-shad-button type="button" variant="outline" @click="closeFields">
-                Cancel
-              </edge-shad-button>
-              <edge-shad-button type="button" class="w-full" @click="applyFields(slot.workingDoc)">
-                <Check class="mr-2 h-4 w-4" />Apply content
-              </edge-shad-button>
-            </SheetFooter>
-          </edge-cms-block-sheet-content>
-        </Sheet>
       </template>
       <template #footer />
     </edge-editor>

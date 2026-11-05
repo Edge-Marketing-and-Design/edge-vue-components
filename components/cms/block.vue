@@ -13,6 +13,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  contentEditorAdapter: {
+    type: Object,
+    default: null,
+  },
   modelValue: {
     type: Object,
     required: true,
@@ -1862,6 +1866,10 @@ const previewContentCanvasClass = computed(() => {
 })
 
 const fieldEditorPreviewBlock = computed(() => {
+  if (props.contentEditorAdapter?.preview) {
+    const preview = props.contentEditorAdapter.preview(JSON.parse(JSON.stringify(state.draft || {})))
+    return { ...preview, meta: { ...(preview?.meta || {}), ...state.meta } }
+  }
   if (customPostFieldsOwnedByEntry.value && props.previewBlock)
     return JSON.parse(JSON.stringify(props.previewBlock))
   const dataSourceControlFields = Object.keys(state.meta || {}).filter(field => state.meta[field]?.dataSourceControl)
@@ -1913,16 +1921,17 @@ const effectiveRenderContext = computed(() => {
     return props.renderContext
   return selectedSiteRenderContext.value
 })
+const fieldEditorRenderContext = computed(() => fieldEditorPreviewBlock.value?.renderContext || effectiveRenderContext.value)
 
 const fieldEditorRenderValues = computed(() => {
   const baseValues = fieldEditorPreviewBlock.value?.values || {}
-  if (!effectiveRenderContext.value)
+  if (!fieldEditorRenderContext.value)
     return baseValues
 
   return {
-    ...effectiveRenderContext.value,
-    renderBlocks: effectiveRenderContext.value,
-    renderItem: effectiveRenderContext.value,
+    ...fieldEditorRenderContext.value,
+    renderBlocks: fieldEditorRenderContext.value,
+    renderItem: fieldEditorRenderContext.value,
     ...baseValues,
   }
 })
@@ -2457,11 +2466,16 @@ const openEditor = async (event, options = {}) => {
     }
   }
   let blockData = null
-  try {
-    blockData = await loadSourceBlockDoc()
+  if (props.contentEditorAdapter) {
+    blockData = { ...modelValue.value, templateVersion: 2, schema: props.contentEditorAdapter.schema, values: props.contentEditorAdapter.values, dataSources: {} }
   }
-  catch {
-    blockData = null
+  else {
+    try {
+      blockData = await loadSourceBlockDoc()
+    }
+    catch {
+      blockData = null
+    }
   }
   if (!blockData)
     blockData = modelValue.value || {}
@@ -2508,7 +2522,7 @@ const openEditor = async (event, options = {}) => {
     schemaDefaults,
     legacyValues: templateIsV2 ? {} : legacyAuthoredModel.values,
     blockValues: blockData?.values,
-    instanceValues: modelValue.value?.values,
+    instanceValues: props.contentEditorAdapter?.values || modelValue.value?.values,
   })))
   if (templateIsV2) {
     Object.entries(mergedMeta).forEach(([field, fieldMeta]) => {
@@ -2536,7 +2550,8 @@ const openEditor = async (event, options = {}) => {
       }
     }
   }
-  modelValue.value.blockUpdatedAt = new Date().toISOString()
+  if (!props.contentEditorAdapter)
+    modelValue.value.blockUpdatedAt = new Date().toISOString()
   state.validationErrors = []
   state.protectionDraft = normalizeBlockProtection(modelValue.value?.protection, {
     allowPaidPlan: siteAllowsSelfRegistration.value,
@@ -3317,7 +3332,7 @@ const getTagsFromPosts = computed(() => {
                         :meta="fieldEditorPreviewBlock.meta"
                         :viewport-mode="previewViewportMode"
                         preview-fixed-min-height="calc(100vh - 360px)"
-                        :render-context="effectiveRenderContext"
+                        :render-context="fieldEditorRenderContext"
                         :standalone-preview="props.standalonePreview"
                         :preview-auth-logged-in="state.previewAuthLoggedIn"
                         @loaded="handleFieldEditorPreviewLoaded"

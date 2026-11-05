@@ -4,6 +4,7 @@ import test from 'node:test'
 import { runInNewContext } from 'node:vm'
 import { computed, reactive } from 'vue'
 import { compileScript, compileTemplate, parse } from '@vue/compiler-sfc'
+import { buildCmsBlockEditorDraftValues } from '../composables/useCmsBlockEditorModel.js'
 
 const filename = new URL('../components/cms/block.vue', import.meta.url)
 const source = readFileSync(filename, 'utf8')
@@ -60,4 +61,66 @@ test('block component script and template compile', () => {
     compilerOptions: { bindingMetadata: script.bindings },
   })
   assert.deepEqual(result.errors, [])
+})
+
+test('shared editor opens an adapter draft without loading or modifying the page block', async () => {
+  const clone = value => JSON.parse(JSON.stringify(value))
+  const modelValue = { value: { templateVersion: 2, template: '<h1>{{ pageHeading }}</h1>', values: { pageHeading: 'Page-owned default' }, blockUpdatedAt: 'unchanged' } }
+  const state = reactive({})
+  const props = {
+    editMode: false,
+    contentEditorAdapter: {
+      schema: { 'person.headline': { type: 'text', label: 'Headline', value: '' } },
+      values: { 'person.headline': 'Entry-owned heading' },
+      preview: values => ({ values: { cmsPost: [{ headline: values['person.headline'] }] }, renderContext: { headline: values['person.headline'] } }),
+    },
+  }
+  const normalizers = source.slice(source.indexOf('const normalizeTemplateV2SchemaItem ='), source.indexOf('const buildMetaFromTemplateV2DataSourceControls ='))
+  const defaults = source.slice(source.indexOf('const collectTemplateV2SchemaDefaults ='), source.indexOf('const buildUpdatedBlockDocFromContent ='))
+  const opening = source.slice(source.indexOf('const openEditor ='), source.indexOf('const getAuthoredFieldMeta ='))
+  const saving = source.slice(source.indexOf('const save = () =>'), source.indexOf('watch(siteAllowsSelfRegistration,'))
+  const preview = source.slice(source.indexOf('const fieldEditorPreviewBlock ='), source.indexOf('const isSingleRichtextOnlyFieldEditor ='))
+  const editor = runInNewContext(`${normalizers}; ${defaults}; ${opening}; ${saving}; ${preview}; ({ openEditor, save, fieldEditorPreviewBlock })`, {
+    computed,
+    props,
+    state,
+    modelValue,
+    canShowPreviewContentControl: { value: true },
+    canOpenFieldEditor: { value: false },
+    EDITOR_CONTROL_CLICK_SELECTOR: '[data-cms-block-control]',
+    isTemplateV2BlockDoc: block => block.templateVersion === 2,
+    isMalformedLegacyTemplateV2Doc: () => false,
+    loadSourceBlockDoc: () => { throw new Error('Adapter must not load page/library values') },
+    buildMetaFromTemplateV2DataSourceControls: () => ({}),
+    buildCmsBlockEditorDraftValues,
+    edgeGlobal: { dupObject: clone },
+    isPublicationFieldMeta: () => false,
+    ensureQueryItemsDefaults() {},
+    removeIgnoredMetaEntries() {},
+    normalizeBlockProtection: () => ({ enabled: false }),
+    siteAllowsSelfRegistration: { value: false },
+    collectValidationErrors: () => [],
+    customPostFieldsOwnedByEntry: { value: false },
+    sanitizeQueryItems: clone,
+    applyDataSourceControlDraftMeta: clone,
+  })
+  const original = clone(modelValue.value)
+  await editor.openEditor(null, { allowPreviewFieldEditor: true })
+  assert.equal(state.open, true)
+  assert.equal(state.editorMode, 'fields')
+  assert.equal(state.draft['person.headline'], 'Entry-owned heading')
+  assert.equal(state.draft.pageHeading, undefined)
+  assert.equal(state.meta['person.headline'].title, 'Headline')
+  state.draft['person.headline'] = 'Live entry edit'
+  assert.equal(editor.fieldEditorPreviewBlock.value.renderContext.headline, 'Live entry edit')
+  assert.equal(editor.fieldEditorPreviewBlock.value.meta['person.headline'].type, 'text', 'Shared focus highlighting receives the editable field metadata')
+  state.open = false
+  assert.deepEqual(modelValue.value, original, 'Cancel never modifies the page block or post')
+  await editor.openEditor(null, { allowPreviewFieldEditor: true })
+  assert.equal(state.draft['person.headline'], 'Entry-owned heading')
+  state.draft['person.headline'] = 'Save this entry value'
+  editor.save()
+  assert.equal(state.open, false)
+  assert.equal(modelValue.value.values['person.headline'], 'Save this entry value')
+  assert.equal(props.contentEditorAdapter.values['person.headline'], 'Entry-owned heading', 'Save emits detached values rather than mutating adapter input')
 })
