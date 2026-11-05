@@ -130,7 +130,8 @@ const updateWorkingDoc = (doc) => {
 
 const save = async (doc) => {
   const current = edgeFirebase.data?.[`${base.value}/pages`]?.[props.definition.id]
-  if (!current || postTypeSchema(current) !== postTypeSchema(sessionPage.value))
+  if (!current || postTypeSchema(current) !== postTypeSchema(sessionPage.value)
+    || JSON.stringify((current.postContent || []).filter(block => block.useForCustomPost === true).map(block => block.id)) !== JSON.stringify((sessionPage.value?.postContent || []).filter(block => block.useForCustomPost === true).map(block => block.id)))
     throw new Error('The detail page changed. Reopen the post to load its latest fields.')
   const name = String(doc.name || '').trim().toLowerCase()
   if (!/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/.test(name))
@@ -140,7 +141,7 @@ const save = async (doc) => {
     throw new Error('That URL slug is already used by another post in this site.')
   if (doc.restrictionRuleId && !(siteDoc.value.restrictedContent?.rules || []).some(rule => rule.id === doc.restrictionRuleId))
     throw new Error('Choose an existing access rule for this site.')
-  const payload = buildTypedPost({ page: current, pageId: props.definition.id, post: { ...doc, name } })
+  const payload = buildTypedPost({ page: current, pageId: props.definition.id, post: { ...doc, name }, previous: sourcePost.value || {} })
   const result = await edgeFirebase.storeDoc(path.value, payload)
   if (result?.success === false)
     throw new Error(result.message || 'Unable to save post.')
@@ -173,7 +174,7 @@ const publish = (at = null) => run(async () => {
     throw new Error('Publish this type’s defining page and event setting before publishing its entries.')
   if (!post || unsaved.value)
     throw new Error('Save your changes before publishing.')
-  const payload = withPostProjection(buildTypedPost({ page, pageId: props.definition.id, post }), page)
+  const payload = withPostProjection(buildTypedPost({ page, pageId: props.definition.id, post, previous: post, forPublication: true }), page)
   const publishTime = at || new Date(schedule.value).toISOString()
   const blocked = postEventPublishProblem(payload, Date.parse(publishTime))
   if (blocked)
@@ -414,7 +415,7 @@ const liveUrl = computed(() => {
               </div>
             </div>
             <p v-if="!fields.length" class="py-10 text-center text-sm text-muted-foreground">
-              This detail page has no editable blocks yet. Add content blocks to the detail page to create its entry form.
+              No custom-post fields yet. Mark the Detail layout's content blocks “Use for custom posts” to include them here.
             </p>
           </div>
           <aside class="space-y-4 rounded-lg border border-border bg-muted/20 p-4 self-start">

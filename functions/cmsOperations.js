@@ -907,7 +907,7 @@ const planPost = async (core, reader, { orgId, uid, now, operation }) => {
             if (!allowed.has(key)) throw new Error(`Unknown custom post field: ${key}`)
             setPostPath(candidate, key, value)
           }
-          const saved = buildTypedPost({ page: definition.data(), pageId: post.postTypeId, post: { ...candidate, ...update } })
+          const saved = buildTypedPost({ page: definition.data(), pageId: post.postTypeId, post: { ...candidate, ...update }, previous: post })
           for (const [key, value] of Object.entries(saved)) {
             if (!['docId', 'postTypeId', 'publishAt', 'publishAtTimezone', 'publishedAt', 'doc_created_at', 'hidePublishedDate'].includes(key)) update[key] = value
           }

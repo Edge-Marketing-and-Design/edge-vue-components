@@ -2,7 +2,7 @@
 
 Status: in use in every Hub, for every block the CMS places on a page or post.
 
-Last verified: 2026-10-13, 78099a9 (Template v2 schema defaults on placed instances)
+Last verified: 2026-11-05, template readability worker browser and regression checks
 
 This contract covers library blocks, the block instances placed on pages and
 posts, draft revisions, releases, propagation and the shared validation rules.
@@ -225,6 +225,13 @@ queries.
 
 <!-- fields: block-instance generated from CMS_DOCUMENT_FIELDS -->
 
+`useForCustomPost` is an optional instance-owned boolean on a custom type's
+Detail blocks. Only explicit `true` includes that placement in the entry form;
+it is not a library definition or a synced value. The Detail page still renders
+every placement. Its checkbox is staged with the block's normal Save/Cancel,
+and marked blocks show sample-post preview instead of page-owned content inputs.
+The posts contract describes field discovery and preservation of inactive data.
+
 ### Revision
 
 Writing a revision doesn't trigger `blockUpdated`, and history tracking
@@ -346,6 +353,21 @@ byte-identical; the definition and metadata split lives in
 `edge/lib/cmsBlockRevisions.js` with copies at `edge/functions/helpers/` and
 `functions/helpers/` (`cmsBlockRevisions.mjs`), and
 `tests/cmsBlockRevisions.test.mjs` enforces it.
+
+### Template editor readability
+
+Opening a single-line template in the Block Editor formats only its editor
+display. CMS tokens are masked while HTML is indented, then restored exactly;
+non-whitespace changes are rejected. Existing multiline source is left alone.
+This uses the installed Monaco HTML language-worker factory, which initializes
+the HTML service before model synchronization. The raw editor worker API does
+not perform that language-service initialization.
+
+Opening a block does not change saved content, preview source, or dirty state.
+A real edit emits the formatted markup; undoing back to the formatted baseline
+restores the original source. Field/loop selection offsets map back to the
+original source until an edit is made. Formatting failures preserve the source
+and log a warning rather than modifying a template.
 
 ## Invariants and validation codes
 

@@ -2001,6 +2001,7 @@ const theme = computed(() => {
               Creates both an Index Page and a Detail Page for this section.
               The Index Page lists all items (e.g., /{{ slotProps.workingDoc.name }}), while the Detail Page displays a single item (e.g., /{{ slotProps.workingDoc.name }}/:slug).
             </edge-shad-checkbox>
+            <edge-cms-post-type-settings v-model="slotProps.workingDoc.postType" :page="slotProps.workingDoc" />
             <edge-shad-select-tags
               v-if="props.isTemplateSite"
               v-model="slotProps.workingDoc.tags"

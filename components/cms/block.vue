@@ -9,6 +9,10 @@ const props = defineProps({
     type: Object,
     default: null,
   },
+  customPostTypeDetail: {
+    type: Boolean,
+    default: false,
+  },
   modelValue: {
     type: Object,
     required: true,
@@ -587,6 +591,7 @@ const aiGenerateButtonSpotlightTimer = ref(null)
 
 const state = reactive({
   open: false,
+  useForCustomPost: false,
   editorMode: 'fields',
   previewViewport: 'full',
   previewScale: '100',
@@ -1707,7 +1712,10 @@ const resolvedRenderBlock = computed(() => {
 
 // Display-only data for a custom type's detail preview. Field/source editing
 // always continues to use the real instance and resolved definition.
-const displayRenderBlock = computed(() => props.previewBlock || resolvedRenderBlock.value)
+const displayRenderBlock = computed(() => (props.customPostTypeDetail && modelValue.value?.useForCustomPost !== true)
+  ? resolvedRenderBlock.value
+  : (props.previewBlock || resolvedRenderBlock.value))
+const customPostFieldsOwnedByEntry = computed(() => props.customPostTypeDetail && state.useForCustomPost)
 
 const isOverrideBlockPreview = computed(() => {
   const instance = modelValue.value || {}
@@ -1854,6 +1862,8 @@ const previewContentCanvasClass = computed(() => {
 })
 
 const fieldEditorPreviewBlock = computed(() => {
+  if (customPostFieldsOwnedByEntry.value && props.previewBlock)
+    return JSON.parse(JSON.stringify(props.previewBlock))
   const dataSourceControlFields = Object.keys(state.meta || {}).filter(field => state.meta[field]?.dataSourceControl)
   const previewValues = JSON.parse(JSON.stringify(state.draft || {}))
   dataSourceControlFields.forEach((field) => {
@@ -2531,6 +2541,7 @@ const openEditor = async (event, options = {}) => {
   state.protectionDraft = normalizeBlockProtection(modelValue.value?.protection, {
     allowPaidPlan: siteAllowsSelfRegistration.value,
   })
+  state.useForCustomPost = modelValue.value?.useForCustomPost === true
   state.editorMode = 'fields'
   state.open = true
   state.afterLoad = true
@@ -2646,6 +2657,8 @@ const hasEditableArrayControls = (entry) => {
 }
 
 const editableMetaEntries = computed(() => {
+  if (customPostFieldsOwnedByEntry.value)
+    return []
   return orderedMeta.value.filter((entry) => {
     if (entry?.meta?.type === 'array')
       return hasEditableArrayControls(entry)
@@ -2697,7 +2710,7 @@ const collectValidationErrors = () => {
 }
 
 const save = () => {
-  const validationErrors = collectValidationErrors()
+  const validationErrors = customPostFieldsOwnedByEntry.value ? [] : collectValidationErrors()
   if (validationErrors.length) {
     state.validationErrors = validationErrors
     return
@@ -2717,8 +2730,8 @@ const save = () => {
   updatedMeta = sanitizeQueryItems(updatedMeta)
   const updated = {
     ...modelValue.value,
-    values: updatedValues,
-    meta: updatedMeta,
+    ...(customPostFieldsOwnedByEntry.value ? {} : { values: updatedValues, meta: updatedMeta }),
+    ...(props.customPostTypeDetail ? { useForCustomPost: state.useForCustomPost === true } : {}),
   }
   const normalizedProtection = normalizeBlockProtection(state.protectionDraft, {
     allowPaidPlan: siteAllowsSelfRegistration.value,
@@ -3229,6 +3242,7 @@ const getTagsFromPosts = computed(() => {
                 </SheetDescription>
               </div>
               <edge-shad-button
+                v-if="!customPostFieldsOwnedByEntry"
                 type="button"
                 size="sm"
                 class="h-8 gap-2 md:self-start ai-generate-button"
@@ -3434,7 +3448,15 @@ const getTagsFromPosts = computed(() => {
                       <div class="prose prose-sm max-w-none" v-html="editorInstructionsHtml" />
                     </AlertDescription>
                   </Alert>
-                  <Alert v-if="editableMetaEntries.length === 0" variant="info" :class="showFieldEditorPreview ? 'mb-4' : 'mt-4 mb-4'">
+                  <edge-shad-checkbox v-if="props.customPostTypeDetail" v-model="state.useForCustomPost" name="use-for-custom-post" item-class="!mt-0">
+                    <span class="block text-sm font-medium">Use for custom posts</span>
+                    <span class="block text-xs font-normal text-muted-foreground">Include this block in the entry form. Its content is edited separately for each post.</span>
+                  </edge-shad-checkbox>
+                  <Alert v-if="customPostFieldsOwnedByEntry" variant="info">
+                    <AlertTitle>Content belongs to each post</AlertTitle>
+                    <AlertDescription>The preview uses a sample post, or placeholders when no post exists. Edit these values from the site's custom-post content menu. Save this block and the page to keep the selection.</AlertDescription>
+                  </Alert>
+                  <Alert v-else-if="editableMetaEntries.length === 0" variant="info" :class="showFieldEditorPreview ? 'mb-4' : 'mt-4 mb-4'">
                     <AlertTitle>No editable fields found</AlertTitle>
                     <AlertDescription class="text-sm">
                       This block does not have any editable fields defined.

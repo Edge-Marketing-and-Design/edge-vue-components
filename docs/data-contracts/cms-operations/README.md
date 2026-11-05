@@ -2,7 +2,7 @@
 
 Status: in use through the Hub callables and the agent endpoint; every write is a draft.
 
-Last verified: 2026-11-04, e9af426e
+Last verified: 2026-11-05, custom-post block ownership regression checks
 
 Server-side, draft-only writes for building sites, used by agents through the
 CMS MCP and available to any signed-in caller with write permission. Source:
@@ -638,8 +638,14 @@ copied body/layout. `templateId` and an Event kind cannot be combined with this
 mode. Unknown fields and schema/required/type problems reject the operation.
 
 For an existing custom post, `post.update` accepts `fields.values` with the
-same path/value map, validated against its defining detail page. Other standard
-post metadata edits retain their existing behavior. Post block-placement,
+same path/value map, validated against its defining detail page.
+Only fields from Detail instances marked `useForCustomPost: true` are editable
+through custom `values`. Mark placements in the Hub's block field editor; the
+operations do not set this flag. Unchecked/retired values are preserved from the
+existing post, never accepted as new unmarked input. Ownership-only changes do
+not invalidate the post's field-definition fingerprint.
+
+Other standard post metadata edits retain their existing behavior. Post block-placement,
 movement/removal and instance-value operations are refused for values-only
 posts; edit their shared layout on the defining page instead. Nothing in these
 operations publishes posts or changes sitemap settings.

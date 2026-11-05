@@ -36,6 +36,18 @@
       "probe": "edge/skills/edge-skill-impact/scripts/probe-conditions.mjs"
     },
     {
+      "id": "template-editor-readability",
+      "name": "Single-line template display formatting",
+      "code": [
+        "edge/components/cms/codeEditor.vue",
+        "edge/lib/cmsTemplateReadability.js",
+        { "path": "edge/components/cms/blockEditor.vue", "diffPattern": "format-single-line-on-open" }
+      ],
+      "documents": [
+        { "path": "edge/docs/data-contracts/cms-blocks/README.md", "section": "Template editor readability", "says": "Monaco HTML language-worker initialization, display-only formatting, source preservation, token masking and edit offsets" }
+      ]
+    },
+    {
       "id": "data-sources",
       "name": "Data Sources and per-page settings",
       "code": [
@@ -160,10 +172,18 @@
       "name": "Custom-post display labels and entry access controls",
       "code": [
         "edge/components/cms/typedPosts.vue",
+        "edge/components/cms/block.vue",
+        "edge/lib/cmsPostEntryPreview.js",
+        "edge/lib/cmsPostTypes.js",
+        "functions/helpers/cmsPostTypes.mjs",
+        { "path": "functions/cms.js", "diffPattern": "useForCustomPost|previous: draftData" },
+        "edge/components/cms/postTypeSettings.vue",
+        { "path": "edge/components/cms/menu.vue", "diffPattern": "edge-cms-post-type-settings" },
+        { "path": "edge/components/cms/page.vue", "diffPattern": "templateTypeIncludesPost|edge-cms-post-type-settings" },
         { "path": "edge/components/cms/site.vue", "diffPattern": "customPostTypes|menuTitle|titles\\.get|titles\\.set|titles\\.has" }
       ],
       "documents": [
-        { "path": "edge/docs/data-contracts/cms-posts/README.md", "section": "Page-defined custom post types", "says": "Menu titles label custom types without changing slug or identity; Public access uses an empty stored restriction and a nonempty UI-only select value" }
+        { "path": "edge/docs/data-contracts/cms-posts/README.md", "section": "Page-defined custom post types", "says": "Custom-type settings, instance-owned block opt-in, marked-only entry fields/layout, sample previews, inactive value preservation and unchanged public layout" }
       ]
     },
     {

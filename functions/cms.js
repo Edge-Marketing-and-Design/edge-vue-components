@@ -1847,6 +1847,11 @@ const replaceSyncedBlockIfOlder = (blocks, blockId, sourceBlock, sourceMillis) =
     const cloned = cloneValue(sourceBlock)
     // Preserve the per-page block instance id so layout references remain valid.
     cloned.id = currentBlock?.id || cloned.id
+    // Content may sync, but entry-form ownership belongs to this placement.
+    if (Object.prototype.hasOwnProperty.call(currentBlock, 'useForCustomPost'))
+      cloned.useForCustomPost = currentBlock.useForCustomPost === true
+    else
+      delete cloned.useForCustomPost
     blocks[i] = cloned
     updated = true
   }
@@ -2303,7 +2308,7 @@ exports.publishScheduledPosts = onSchedule(
             try {
               const { buildTypedPost, withPostProjection } = await import('./helpers/cmsPostTypes.mjs')
               const definition = await db.collection('organizations').doc(orgId).collection('sites').doc(siteId).collection('published').doc(draftData.postTypeId).get()
-              publishPayload = withPostProjection(buildTypedPost({ page: definition.data(), pageId: draftData.postTypeId, post: draftData }), definition.data())
+              publishPayload = withPostProjection(buildTypedPost({ page: definition.data(), pageId: draftData.postTypeId, post: draftData, previous: draftData, forPublication: true }), definition.data())
               buildPostKvMetadata(publishPayload, { orgId, siteId, postId })
             }
             catch (error) {

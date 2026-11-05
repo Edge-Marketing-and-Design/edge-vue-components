@@ -2,7 +2,7 @@
 
 Status: in use for every post and event a site publishes.
 
-Last verified: 2026-11-04, custom-post label and access regression tests
+Last verified: 2026-11-05, custom-post settings, label and access regression tests
 
 A post is a dated entry (a post or an event) that a post template page
 renders under its route. Drafts live with the site; publishing copies a
@@ -197,8 +197,31 @@ the type. The site-local Content sidebar uses the first nonempty matching
 falling back to the page name or ID. Display labels do not change the page's
 route slug or type identity. It shows its selected supported icon and a
 filtered list. Add New goes directly
-to a values-only editor built from that page's detail blocks/structure. The
+to a values-only editor built from that page's marked detail blocks/structure. The
 normal Posts editor continues handling existing copied-layout posts/events.
+
+Page Settings opened from either the site menu or the page preview exposes
+the Index/Detail checkbox. The shared Use as a custom post type control is
+shown only while that page's `post` checkbox is checked, with its icon and
+event options bound to the same working page's `postType`. Unchecking
+Index/Detail hides the control without deleting its saved options. Post-only
+template definitions retain their existing checkbox exclusion.
+
+Each placed Detail block opts in with instance-owned `useForCustomPost: true`,
+edited through Use for custom posts in its field editor. Only marked blocks
+contribute editable/inferred entry fields and appear in the entry editor.
+Unmarked blocks (including header/footer) remain in the full public detail
+layout and retain their ordinary page-owned inputs. Empty entry rows are
+removed, while selected blocks keep their columns, spans and row settings.
+Existing instances are not automatically opted in; mark the intended content
+blocks and save the page.
+
+For a marked block, the page's normal inputs and AI content action are hidden.
+Its left-hand preview uses the earliest post of that type (creation time, then
+document ID), or the explicitly selected preview slug; without a matching post
+it uses placeholders. Sample values never become page defaults or saved post
+values. Cancel leaves the flag unchanged; Save block then Save page persists it.
+Library releases and synced content do not own or propagate this placement flag.
 
 When site restrictions are enabled, the custom editor's Access dropdown uses
 a nonempty UI-only value for Public, mapped to an empty `restrictionRuleId`
@@ -212,7 +235,7 @@ Custom post drafts use the same `posts` collection and published snapshots use
 - `type`: `custom-` followed by the defining-page ID UTF-8 bytes encoded as
   unpadded lowercase base32. This keeps case-distinct IDs distinct through existing
   lowercase/slug-based `idx:posts:type` readers. Labels never define identity.
-- `postTypeSchema`: a compact versioned fingerprint of the editable schema,
+- `postTypeSchema`: a compact versioned fingerprint of the detail field definitions,
   used to reject saves/publication against incompatible detail definitions.
 - Content values live at their named paths on the post itself, alongside the
   standard title, slug, blurb, tags, image, restriction and publication fields.
@@ -231,8 +254,16 @@ references in detail templates supply additional inferred fields. Page-owned
 layout/theme/source configuration, bookkeeping and permission fields cannot
 be stored as content paths. Existing values remain stored if a schema changes;
 incompatible changes block saving/publication until explicitly resolved.
+Ownership flags are excluded from that fingerprint, so checking/unchecking
+alone does not invalidate existing entries. The fingerprint still covers all
+detail field definitions, including inactive fields, to protect reactivation.
+The open editor separately checks for changed block selections before saving.
+Inactive content is retained from the existing stored record on saves,
+operations and manual/scheduled publication, but new unmarked input is ignored.
+Fields explicitly marked private in the current detail schema remain in drafts
+but are stripped from manual/scheduled public snapshots.
 
-The Hub prepares the inline detail template using the engine's existing
+For marked blocks the Hub prepares the inline detail template using the engine's existing
 `source("posts")` loop, canonical lookup, route slug and type filter. Explicit
 record bindings avoid block defaults overriding the post's values. No frontend
 or template-engine package changes are required. Manual and scheduled

@@ -822,11 +822,15 @@ const editorDocUpdates = (workingDoc) => {
 const previewRouteLastSegment = computed(() => String(state.routeLastSegment || '').trim())
 
 const customTypeDetailPreview = (doc, blockId) => {
-  if (doc?.postType?.enabled !== true) return null
+  if (doc?.post !== true || doc?.postType?.enabled !== true) return null
   const base = `${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}`
-  const entries = Object.values(edgeFirebase.data?.[`${base}/posts`] || {}).filter(post => post.postTypeId === props.page)
-  const selected = previewRouteLastSegment.value ? entries.find(post => post.name === previewRouteLastSegment.value) : entries.find(post => post.publishedAt) || entries[0]
-  return buildPostEntryPreviewBlock(preparePostTypePage(doc, props.page), blockId, selected || {})
+  const entries = Object.entries(edgeFirebase.data?.[`${base}/posts`] || {})
+    .filter(([, post]) => post.postTypeId === props.page)
+    .sort(([aId, a], [bId, b]) => (Number(a.doc_created_at) || 0) - (Number(b.doc_created_at) || 0) || aId.localeCompare(bId))
+    .map(([, post]) => post)
+  const selected = previewRouteLastSegment.value ? entries.find(post => post.name === previewRouteLastSegment.value) : entries[0]
+  const previewPage = { ...doc, postContent: (doc.postContent || []).map(block => block.id === blockId ? { ...block, useForCustomPost: true } : block) }
+  return buildPostEntryPreviewBlock(preparePostTypePage(previewPage, props.page), blockId, selected || {})
 }
 
 const openRouteLastSegmentDialog = () => {
@@ -1910,6 +1914,7 @@ function resolveSyncedPageBlock(block) {
     id: resolvedBlock.id,
     blockId,
     synced: resolvedBlock.synced ?? currentBlockDoc.synced ?? false,
+    useForCustomPost: resolvedBlock.useForCustomPost === true,
     values: edgeGlobal.dupObject(resolvedBlock.values || {}),
     meta: mergeSyncedBlockMeta(currentBlockDoc.meta, resolvedBlock.meta),
     ...(instanceProtection ? { protection: instanceProtection } : {}),
@@ -1954,6 +1959,7 @@ function buildComparablePageBlock(block) {
       id: String(block.id || ''),
       blockId,
       synced: block.synced ?? currentBlockDoc.synced ?? false,
+      useForCustomPost: block.useForCustomPost === true,
       values: edgeGlobal.dupObject(block.values || {}),
       meta: comparableMeta,
       protection: isObjectRecord(block.protection) ? edgeGlobal.dupObject(block.protection) : {},
@@ -3894,7 +3900,7 @@ const hasUnsavedChanges = (changes) => {
               </SheetHeader>
               <div class="p-6 space-y-4 h-[calc(100vh-142px)] overflow-y-auto">
                 <edge-shad-checkbox
-                  v-if="props.isTemplateSite && !templateTypeIncludesPost(slotProps.workingDoc)"
+                  v-if="!templateTypeIncludesPost(slotProps.workingDoc)"
                   v-model="slotProps.workingDoc.post"
                   label="Is a Post Template"
                   name="page-settings-post"
@@ -4475,6 +4481,7 @@ const hasUnsavedChanges = (changes) => {
                                         :key="`${pagePreviewRenderKey}:${blockId}:${effectiveThemeId}:post:${previewRouteLastSegment || 'auto'}`"
                                         v-model="slotProps.workingDoc.postContent[blockIndex(slotProps.workingDoc, blockId, true)]"
                                         :preview-block="customTypeDetailPreview(slotProps.workingDoc, blockId)"
+                                        :custom-post-type-detail="slotProps.workingDoc.post === true && slotProps.workingDoc.postType?.enabled === true"
                                         :render-context="pagePreviewRenderContext"
                                         :edit-mode="state.editMode"
                                         :override-clicks-in-edit-mode="state.editMode"
