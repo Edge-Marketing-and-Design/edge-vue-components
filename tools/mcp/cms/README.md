@@ -256,7 +256,9 @@ Edge developers get the CMS tools and the Edge skills from the Hub checkout
 the session runs in, and nothing Edge-specific from their accounts or user
 configuration. Account-level tools load in every session, so another Hub's
 remote server (with the same tool names) or an older copy of a skill would
-sit next to the Hub's own. One-time setup, the same for everyone:
+sit next to the Hub's own. One-time setup, the same for everyone. To have
+an AI agent run it and confirm it works, give the agent `AGENT-SETUP.md`
+in this folder.
 
 1. **Checkouts.** Clone each Hub you work on, with `emd-cms-front` next to
    it (`<parent>/<hub>` and `<parent>/emd-cms-front`); the launcher reads
