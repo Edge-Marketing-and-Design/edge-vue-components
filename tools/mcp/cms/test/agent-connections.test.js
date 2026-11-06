@@ -61,6 +61,20 @@ test('sessions have independent opaque handles, never expose secrets, and refuse
   assert.equal((await client.credential('', body)).code, 'session-required')
   assert.equal(requests.length, 2)
 })
+test('site settings and menus run in a site session, never an organization session; site.create stays organization-scoped', async () => {
+  const env = setup()
+  const site = await env.client.open({ orgId: 'a', scope: 'site', siteId: 's' })
+  const org = await env.client.open({ orgId: 'a', scope: 'organization' })
+  for (const type of ['site.update', 'site.settings', 'site.menus']) {
+    const body = { orgId: 'a', action: 'check', operation: { type, siteId: 's' } }
+    assert.equal((await env.client.credential(site.sessionId, body)).token, token, type)
+    assert.equal((await env.client.credential(site.sessionId, { ...body, operation: { type, siteId: 'other' } })).code, 'session-target-mismatch', type)
+    assert.equal((await env.client.credential(org.sessionId, body)).code, 'session-target-mismatch', type)
+  }
+  const create = { orgId: 'a', action: 'check', operation: { type: 'site.create', name: 'New' } }
+  assert.equal((await env.client.credential(org.sessionId, create)).token, token)
+  assert.equal((await env.client.credential(site.sessionId, create)).code, 'session-target-mismatch')
+})
 test('credentials refresh only for the original target, and a revoked connection blocks refresh', async () => {
   const env = setup()
   const session = await env.client.open({ orgId: 'a', scope: 'site', siteId: 's' })
