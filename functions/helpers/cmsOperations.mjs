@@ -1,4 +1,5 @@
 import { POST_EVENT_STATUSES, POST_EVENT_FIELDS, normalizePostEvent, localDateTimeToUtcIso, isValidTimeZone, savedPostEvent, computePostEvent, postEventProblems } from './cmsPostEvents.mjs'
+import { POST_SITEMAP_KEY_PATTERN, normalizeSitemapSettings, validateSitemapSettings } from './cmsSitemapConfig.mjs'
 export { POST_EVENT_STATUSES, POST_EVENT_FIELDS, normalizePostEvent, localDateTimeToUtcIso, isValidTimeZone, savedPostEvent, computePostEvent, postEventProblems }
 
 // CMS operations: the document shapes the server-side write actions
@@ -84,6 +85,49 @@ export const NEW_BLOCK_DEFAULTS = Object.freeze({
 export const THEME_FIELDS = Object.freeze(['name', 'theme', 'headJSON', 'extraCSS', 'typeRoles', 'defaultPages', 'defaultMenus', 'defaultSiteSettings'])
 
 const isPlainObject = value => !!value && typeof value === 'object' && !Array.isArray(value)
+
+// Page fields that make a page an index/detail page and, optionally, a
+// page-defined custom post type (posts contract, Page-defined custom post
+// types). page.create and page.update only; templates keep their own `post`.
+export const PAGE_TYPE_FIELDS = Object.freeze(['post', 'postType'])
+const POST_TYPE_KEYS = ['enabled', 'icon', 'event']
+const POST_TYPE_ICON = /^[A-Z][A-Za-z0-9]{1,40}$/
+
+// Problems with `post` and `postType` page fields, as { code, message }.
+// - page: the stored draft page (null for page.create)
+export const pageTypeProblems = (fields = {}, page = null) => {
+  const problems = []
+  const add = message => problems.push({ code: 'page.post-type', message })
+  if (fields.post !== undefined && typeof fields.post !== 'boolean')
+    add('post must be true or false (true makes the page an index/detail page with a post area).')
+  if (fields.postType === undefined)
+    return problems
+  const postType = fields.postType
+  if (!isPlainObject(postType)) {
+    add('postType must be an object: { enabled, icon, event }.')
+    return problems
+  }
+  const unknown = Object.keys(postType).filter(key => !POST_TYPE_KEYS.includes(key))
+  if (unknown.length)
+    add(`postType only takes ${POST_TYPE_KEYS.join(', ')} (not ${unknown.join(', ')}).`)
+  for (const key of ['enabled', 'event']) {
+    if (postType[key] !== undefined && typeof postType[key] !== 'boolean')
+      add(`postType.${key} must be true or false.`)
+  }
+  if (postType.icon !== undefined && (typeof postType.icon !== 'string' || !POST_TYPE_ICON.test(postType.icon)))
+    add('postType.icon must be a Lucide icon name from the type settings picker, like "Users" or "BookOpen".')
+  const isPost = fields.post ?? page?.post
+  if (postType.enabled === true && isPost !== true)
+    add('A custom post type needs an index/detail page: set post: true with it.')
+  return problems
+}
+
+// The `postType` a page stores after an update: the given keys over the
+// stored ones, as the type settings control saves them.
+export const mergePostType = (stored, update) => ({
+  ...(isPlainObject(stored) ? stored : {}),
+  ...Object.fromEntries(Object.entries(update || {}).filter(([key]) => POST_TYPE_KEYS.includes(key))),
+})
 const clone = value => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)))
 
 // Six base-36 characters, like the page editor's generateShortId, drawn
@@ -820,7 +864,7 @@ export const buildSitePages = ({ site = {}, pages = {}, published = {} }) => {
     const page = pages[pageId]
     if (!page)
       return { pageId, exists: false, status: 'missing' }
-    return { pageId, exists: true, status: pagePublicationStatus(page, published[pageId]), version: Number.isFinite(Number(page.version)) ? Number(page.version) : null, post: page.post === true }
+    return { pageId, exists: true, status: pagePublicationStatus(page, published[pageId]), version: Number.isFinite(Number(page.version)) ? Number(page.version) : null, post: page.post === true, ...(page.post === true && page.postType?.enabled === true ? { customPostType: true } : {}) }
   }
   const visit = (entries, folders) => (Array.isArray(entries) ? entries : []).flatMap((entry) => {
     if (!entry || entry.item == null || entry.item === '')
@@ -904,6 +948,7 @@ const outlineBody = ({ content, structure, blocks = {}, includeValues = true, in
       releasedRevision: released,
       behind: released !== null && held !== null && held < released,
       ...(library ? {} : { libraryMissing: true }),
+      ...(instance?.useForCustomPost === true ? { useForCustomPost: true } : {}),
       ...(includeValues ? { values: clone(isPlainObject(instance?.values) ? instance.values : {}) } : {}),
       ...(includeSchema ? { schema: clone(isPlainObject(instance?.schema) ? instance.schema : {}) } : {}),
     }
@@ -944,6 +989,7 @@ export const buildPageOutline = ({ pageId, page = {}, source = 'draft', status =
     path,
     status,
     post: page.post === true,
+    ...(isPlainObject(page.postType) ? { postType: clone(page.postType) } : {}),
     structuredDataAiLocked: page.structuredDataAiLocked === true,
     ...Object.fromEntries(fields.map(key => [key, typeof page[key] === 'string' ? page[key] : ''])),
     version: Number.isFinite(Number(page.version)) ? Number(page.version) : null,
@@ -1370,12 +1416,57 @@ export const SITE_SETTINGS_FIELDS = Object.freeze([
   'trackingFacebookPixel',
   'trackingConsentEnabled',
   'trackingConsentMessage',
+  'sitemap',
 ])
 // Settings that hold an image: empty, or a Hub media URL.
 export const SITE_SETTINGS_IMAGE_FIELDS = Object.freeze(['logo', 'logoLight', 'brandLogoDark', 'brandLogoLight', 'favicon', 'appIcon'])
 export const SITE_LOGO_TYPES = Object.freeze(['image', 'text'])
 export const SITE_MENU_POSITIONS = Object.freeze(['left', 'center', 'right'])
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+// ---- Sitemaps (site.settings `sitemap`; sites-and-pages contract, Per-site sitemap configuration) ----
+
+const SITEMAP_PATCH_KEYS = ['posts', 'collections', 'apis']
+
+// Problems with a site.settings `sitemap` patch on its own (the merged
+// configuration is checked again by mergeSitemapSettings' caller).
+export const sitemapPatchProblems = (patch) => {
+  if (!isPlainObject(patch))
+    return ['sitemap must be an object: { posts, collections, apis }.']
+  const problems = []
+  const unknown = Object.keys(patch).filter(key => !SITEMAP_PATCH_KEYS.includes(key))
+  if (unknown.length)
+    problems.push(`sitemap only takes ${SITEMAP_PATCH_KEYS.join(', ')} (not ${unknown.join(', ')}).`)
+  if (patch.posts !== undefined) {
+    if (!isPlainObject(patch.posts))
+      problems.push('sitemap.posts must be an object of true/false choices: { "post": true, "event": false, "page:<pageId>": true }.')
+    else {
+      for (const [key, enabled] of Object.entries(patch.posts)) {
+        if (!POST_SITEMAP_KEY_PATTERN.test(key))
+          problems.push(`sitemap.posts key "${key}" must be "post", "event" or "page:<defining page id>".`)
+        if (typeof enabled !== 'boolean')
+          problems.push(`sitemap.posts["${key}"] must be true or false.`)
+      }
+    }
+  }
+  return problems
+}
+
+// The draft site's `sitemap` after a site.settings patch: `posts` choices
+// merge into the stored ones; `collections` and `apis`, when given, replace
+// the stored lists whole. Normalized as the Sitemaps tab saves it.
+export const mergeSitemapSettings = (stored, patch) => {
+  const base = normalizeSitemapSettings(isPlainObject(stored) ? stored : {})
+  const next = {
+    ...base,
+    ...(patch.collections !== undefined ? { collections: patch.collections } : {}),
+    ...(patch.apis !== undefined ? { apis: patch.apis } : {}),
+  }
+  if (patch.posts !== undefined || base.posts !== undefined)
+    next.posts = { ...(base.posts || {}), ...(patch.posts || {}) }
+  const errors = validateSitemapSettings(next)
+  return errors.length ? { errors } : { sitemap: normalizeSitemapSettings(next), errors: [] }
+}
 
 // Problems with site.settings values, as { code, message }. mediaHosts: the
 // Hub's media hosts; an image setting must be empty or an https URL on one.
@@ -1386,6 +1477,11 @@ export const siteSettingsProblems = (settings, { mediaHosts = [] } = {}) => {
   for (const [key, value] of Object.entries(settings || {})) {
     if (!SITE_SETTINGS_FIELDS.includes(key)) {
       add('fields.not-allowed', `"${key}" can't be set by site.settings (allowed: ${SITE_SETTINGS_FIELDS.join(', ')}). Domains and apex forwarding are set by a person in the Hub's site settings.`)
+      continue
+    }
+    if (key === 'sitemap') {
+      for (const message of sitemapPatchProblems(value))
+        add('site.sitemap', message)
       continue
     }
     const kind = typeof defaults[key] === 'boolean' ? 'boolean' : 'string'
@@ -1843,10 +1939,10 @@ export const describePost = ({ postId, post, live, blocks = {} }) => {
 // A site's posts, newest first (publication date, else creation), filtered
 // by type and tag and paged after `startAfter` (a postId).
 // - posts: { [postId]: draft }, published: { [postId]: snapshot }
-export const selectSitePosts = ({ posts = {}, published = {}, type = null, tag = null, limit = 50, startAfter = null }) => {
+export const selectSitePosts = ({ posts = {}, published = {}, type = null, tag = null, postTypeId = null, limit = 50, startAfter = null }) => {
   const sorted = [...new Set([...Object.keys(posts), ...Object.keys(published)])]
     .map(postId => ({ postId, doc: posts[postId] || published[postId] }))
-    .filter(({ doc }) => (!type || normalizePostType(doc?.type) === type) && (!tag || (Array.isArray(doc?.tags) && doc.tags.includes(tag))))
+    .filter(({ doc }) => (!type || normalizePostType(doc?.type) === type) && (!postTypeId || doc?.postTypeId === postTypeId) && (!tag || (Array.isArray(doc?.tags) && doc.tags.includes(tag))))
     .sort((a, b) => postDate(b.doc).localeCompare(postDate(a.doc)) || (a.postId < b.postId ? -1 : a.postId > b.postId ? 1 : 0))
   const start = startAfter ? sorted.findIndex(entry => entry.postId === startAfter) + 1 : 0
   const page = sorted.slice(start, start + limit)
@@ -1971,14 +2067,14 @@ export const CMS_OPERATION_SPECS = Object.freeze({
   'site.settings': {
     scope: 'site',
     writes: 'sites',
-    summary: 'Set the draft site\'s branding, contact, social, menu position and tracking settings. Published site settings change when the site is published from the Hub.',
+    summary: 'Set the draft site\'s branding, contact, social, menu position, tracking and sitemap settings. Published site settings change when the site is published from the Hub.',
     effect: 'Those settings on the draft site document (`sites/{siteId}`); published site settings are unchanged until the site is published from the Hub. Image settings must be Hub media URLs (`cms_upload_media`). Domains and `forwardApex` change live routing and stay with a person in the Hub',
     input: {
       siteId: siteIdField,
-      settings: { type: 'object', required: true, fields: SITE_SETTINGS_FIELDS, note: '`trackingConsentEnabled` is true or false, the rest strings. `logoType` is image or text, `menuPosition` left, center or right, `contactEmail` an email address. An empty string clears a setting.' },
+      settings: { type: 'object', required: true, fields: SITE_SETTINGS_FIELDS, note: '`trackingConsentEnabled` is true or false, `sitemap` an object, the rest strings. `logoType` is image or text, `menuPosition` left, center or right, `contactEmail` an email address. An empty string clears a setting. `sitemap` is `{ posts, collections, apis }` (sites-and-pages contract, Per-site sitemap configuration): `posts` is a map of true/false Enable Sitemap choices for `post`, `event` and `page:<pageId>` (this site\'s custom post types), merged into the stored choices; `collections` and `apis` (the Dev Mode lists) replace the stored lists when given. Generated post sitemap entries follow when a person publishes the site settings.' },
     },
     result: '{ siteId }',
-    problems: ['site.not-found', 'site.templates-site', 'fields.not-allowed', 'fields.type', 'site.settings-media', 'site.no-fields'],
+    problems: ['site.not-found', 'site.templates-site', 'fields.not-allowed', 'fields.type', 'site.settings-media', 'site.sitemap', 'site.no-fields'],
   },
   'site.menus': {
     scope: 'site',
@@ -2030,23 +2126,23 @@ export const CMS_OPERATION_SPECS = Object.freeze({
       siteId: siteIdField,
       name: { type: 'text', required: true, note: 'The page title; its slug is made unique among root pages.' },
       menu: { type: 'string', values: ROOT_MENUS, default: 'Site Root' },
-      fields: { type: 'object', fields: PAGE_UPDATE_FIELDS, note: 'SEO fields, as page.update.' },
+      fields: { type: 'object', fields: [...PAGE_UPDATE_FIELDS, ...PAGE_TYPE_FIELDS], note: 'SEO fields, and `post`/`postType`, as page.update.' },
     },
     result: '{ siteId, pageId, slug }',
-    problems: ['site.not-found', 'page.templates-site', 'page.menu', 'page.name-required', 'fields.type', 'fields.not-allowed', 'structured-data'],
+    problems: ['site.not-found', 'page.templates-site', 'page.menu', 'page.name-required', 'fields.type', 'fields.not-allowed', 'page.post-type', 'structured-data'],
   },
   'page.update': {
     scope: 'site',
     writes: 'sites',
-    summary: 'Change a draft page\'s SEO fields.',
-    effect: 'Those fields; `version` + 1. Structured data rules in Invariants. Refused when it sets `structuredData` on a page with `structuredDataAiLocked: true` (custom structured data copied from its template), which the Hub\'s AI SEO also leaves alone; it is edited in the Hub\'s page settings. The other fields, `postStructuredData` included, stay open, as they do for the Hub\'s AI',
+    summary: 'Change a draft page\'s SEO fields, and make it an index/detail page or a page-defined custom post type.',
+    effect: 'Those fields; `version` + 1. `post: true` gives the page a post area (index and detail views, Page Settings\' Index/Detail checkbox). `postType: { enabled, icon, event }` (merged into the stored one) makes an index/detail page a custom post type: its page id is the type, its menu title the label, and the detail blocks marked `useForCustomPost` (page.placeBlock or page.setValues with area post) become the entry form; entries are made with post.create `postTypeId` and `values`. The page is prepared as the page editor saves it (post sources bound to the type). Turning `post` off keeps `postType`, as the editor does. Structured data rules in Invariants. Refused when it sets `structuredData` on a page with `structuredDataAiLocked: true` (custom structured data copied from its template), which the Hub\'s AI SEO also leaves alone; it is edited in the Hub\'s page settings. The other fields, `postStructuredData` included, stay open, as they do for the Hub\'s AI',
     input: {
       siteId: siteIdField,
       pageId: pageIdField,
-      fields: { type: 'object', required: true, fields: PAGE_UPDATE_FIELDS, note: 'Strings. `structuredData` is refused on a page whose structured data is AI-locked.' },
+      fields: { type: 'object', required: true, fields: [...PAGE_UPDATE_FIELDS, ...PAGE_TYPE_FIELDS], note: 'SEO fields are strings; `post` is true or false; `postType` is `{ enabled, icon, event }` (booleans and a Lucide icon name such as "Users"), and `enabled: true` needs `post: true`. `structuredData` is refused on a page whose structured data is AI-locked.' },
     },
     result: '{ siteId, pageId }',
-    problems: ['site.not-found', 'page.not-found', 'fields.not-allowed', 'fields.type', 'page.no-fields', 'page.structured-data-locked', 'structured-data'],
+    problems: ['site.not-found', 'page.not-found', 'fields.not-allowed', 'fields.type', 'page.no-fields', 'page.post-type', 'page.structured-data-locked', 'structured-data'],
   },
   'page.placeBlock': {
     scope: 'site',
@@ -2060,24 +2156,26 @@ export const CMS_OPERATION_SPECS = Object.freeze({
       values: valuesField,
       index: indexField,
       area: { type: 'string', values: ['main', 'post'], default: 'main', note: '`post` places it in the page\'s post area.' },
+      useForCustomPost: { type: 'boolean', default: false, note: 'On a custom post type page (postType.enabled), with area post: the block\'s editable fields become part of every entry of the type (Use for custom posts).' },
     },
     result: '{ siteId, pageId, instanceId, rowId }',
-    problems: ['site.not-found', 'page.not-found', 'area.invalid', 'block.not-found', 'block.not-allowed-here', 'block.synced-values', 'values.template-v1', 'values.invalid', 'values.schema'],
+    problems: ['site.not-found', 'page.not-found', 'area.invalid', 'block.not-found', 'block.not-allowed-here', 'block.synced-values', 'values.template-v1', 'values.invalid', 'values.schema', 'instance.custom-post'],
   },
   'page.setValues': {
     scope: 'site',
     writes: 'sites',
-    summary: 'Set field values on a placed block instance (Template v2, not synced).',
-    effect: 'The instance\'s `values` (merged unless `replace`), `blockUpdatedAt`; `version` + 1. Template v2, non-synced instances only',
+    summary: 'Set field values on a placed block instance (Template v2, not synced), or mark a custom post type\'s detail block for its entries.',
+    effect: 'The instance\'s `values` (merged unless `replace`), `blockUpdatedAt`; `version` + 1. Template v2, non-synced instances only. `useForCustomPost` sets the instance flag of the same name on a post-area block of a custom post type page, as the block editor\'s Use for custom posts checkbox does, and prepares the page as the page editor saves it',
     input: {
       siteId: siteIdField,
       pageId: pageIdField,
       instanceId: instanceIdField,
-      values: { ...valuesField, required: true },
+      values: { ...valuesField, note: 'Field values for the block, validated against its schema. Under 200 KB. Required unless useForCustomPost is given.' },
       replace: { type: 'boolean', default: false, note: 'Replace all values instead of merging.' },
+      useForCustomPost: { type: 'boolean', note: 'Custom post type pages only, post-area blocks: true makes the block\'s editable fields part of every entry; false returns them to the page.' },
     },
     result: '{ siteId, pageId, instanceId }',
-    problems: ['site.not-found', 'page.not-found', 'instance.not-found', 'values.template-v1', 'block.synced-values', 'values.invalid', 'values.schema'],
+    problems: ['site.not-found', 'page.not-found', 'instance.not-found', 'values.template-v1', 'block.synced-values', 'values.invalid', 'values.schema', 'instance.custom-post'],
   },
   'page.removeBlock': {
     scope: 'site',
@@ -2225,6 +2323,7 @@ export const CMS_OPERATION_PROBLEMS = Object.freeze({
   'page.templates-site': 'Template pages are created with template.create; page.create is for site pages.',
   'site.templates-site': 'The templates site has no settings or menus of its own; change templates with template.update and the page block operations.',
   'site.settings-media': 'Image settings must be Hub media URLs: upload the file with cms_upload_media and use the URL it returns.',
+  'site.sitemap': 'sitemap is invalid: posts choices must be true/false for "post", "event" or "page:<id>" of an enabled custom post type on this site; collection and API entries follow the Sitemaps tab\'s rules. The message says which.',
   'menus.shape': 'menus has the wrong form; the message says where (sites-and-pages contract, Menus).',
   'menus.page-not-found': 'A menu entry names a page that is not a draft page on the site (cms_list_pages).',
   'menus.slug': 'A page entry\'s name must be the page\'s slug (rename pages in the Hub), and folder slugs are lowercase letters, numbers and dashes.',
@@ -2239,6 +2338,8 @@ export const CMS_OPERATION_PROBLEMS = Object.freeze({
   'page.menu': 'menu must be one of the root menus.',
   'page.name-required': 'New pages need a name.',
   'page.no-fields': 'fields has nothing to change.',
+  'page.post-type': '`post` must be true or false, and `postType` `{ enabled, icon, event }` with a Lucide icon name; a custom post type needs post: true.',
+  'instance.custom-post': 'useForCustomPost only applies to a post-area block on a custom post type page (postType.enabled), and must be true or false.',
   'page.structured-data-locked': 'The page\'s structured data came from its template and is AI-locked; change it in the Hub\'s page settings. The other fields can still change.',
   'block.not-found': 'No library block with that id (cms_find_block). New blocks use block.create.',
   'block.not-allowed-here': 'This block can\'t go here; for posts, the block\'s types must include Post.',

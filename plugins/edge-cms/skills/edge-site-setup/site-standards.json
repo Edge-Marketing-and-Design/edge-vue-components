@@ -47,6 +47,13 @@
       "note": "A Google Analytics property that doesn't exist yet is created or linked by a person at launch."
     },
     {
+      "id": "sitemaps",
+      "rule": "Every post kind and custom post type the site publishes has its sitemap turned on (Site Settings, Sitemaps); page sitemaps need no setting. Collection and API sitemaps are set by a developer when the answers name them.",
+      "set": "site.settings sitemap: { posts: { post, event, \"page:<pageId>\": true } }",
+      "check": { "answers": ["sitemapPosts"] },
+      "note": "Generated post sitemap entries follow when a person publishes the site settings."
+    },
+    {
       "id": "site-seo",
       "rule": "The site has a meta title, a meta description and WebSite structured data with its tokens.",
       "set": "site.create settings or site.update metaTitle, metaDescription, structuredData",

@@ -18,7 +18,7 @@ import { readFileSync } from 'node:fs'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 
-const filled = value => !(value === undefined || value === null || value === '' || (Array.isArray(value) && !value.length))
+const filled = value => !(value === undefined || value === null || value === '' || (Array.isArray(value) && !value.length) || (value && typeof value === 'object' && !Array.isArray(value) && !Object.keys(value).length))
 const same = (a, b) => JSON.stringify(Array.isArray(a) ? [...a].map(String).sort() : a) === JSON.stringify(Array.isArray(b) ? [...b].map(String).sort() : b)
 
 // Page names in the site's menus (slugs and menu titles), for answers.pages.
@@ -61,6 +61,12 @@ export const evaluateStandards = ({ standards, readiness = null, site = null, an
         const missing = answers.pages.filter(page => !names.has(String(page).toLowerCase()))
         if (missing.length)
           reasons.push(`pages missing from the menus: ${missing.join(', ')}`)
+      }
+      else if (field === 'sitemapPosts') {
+        const stored = site.sitemap?.posts || {}
+        const off = Object.entries(answers.sitemapPosts || {}).filter(([key, enabled]) => stored[key] !== enabled).map(([key]) => key)
+        if (off.length)
+          reasons.push(`sitemap choices differ from the answers: ${off.join(', ')} (site.settings sitemap.posts)`)
       }
       else if (!same(site[field], answers[field])) {
         reasons.push(`${field} is ${JSON.stringify(site[field] ?? null)}, the answers say ${JSON.stringify(answers[field])}`)

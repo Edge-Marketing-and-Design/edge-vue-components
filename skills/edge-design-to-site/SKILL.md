@@ -43,7 +43,7 @@ With a Hub checkout (developers), use the local CMS MCP the Hub's `.mcp.json` st
 | `cms_find_media`, `cms_upload_media` | Find the organization's images, and add new ones (a public URL, or a local file PUT to a one-time link) through the Hub's own upload |
 | `cms_site_readiness` | What stops the site from being finished, including image links outside the Hub's media |
 
-Operations (fields from `cms_contract`, kind `operations`): `theme.create`, `theme.update` (only themes no published site uses), `theme.propose` (for a live theme), `site.create`, `site.update` (the site's SEO), `site.settings` (branding, contact, social, tracking), `site.menus`, `template.create`, `template.update`, `page.create`, `page.update`, `page.placeBlock`, `page.setValues`, `page.moveBlock`, `page.removeBlock`, `block.create`, `block.draft`, and for posts (when the handoff covers them) `post.create`, `post.update`, `post.placeBlock`, `post.setValues`, `post.moveBlock`, `post.removeBlock`.
+Operations (fields from `cms_contract`, kind `operations`): `theme.create`, `theme.update` (only themes no published site uses), `theme.propose` (for a live theme), `site.create`, `site.update` (the site's SEO), `site.settings` (branding, contact, social, tracking, sitemaps), `site.menus`, `template.create`, `template.update`, `page.create`, `page.update` (SEO, and `post`/`postType` for custom post types), `page.placeBlock`, `page.setValues` (both take `useForCustomPost` for a custom type's detail blocks), `page.moveBlock`, `page.removeBlock`, `block.create`, `block.draft`, and for posts and custom post type entries (when the handoff covers them) `post.create` (`postTypeId` and `values` for an entry), `post.update`, `post.placeBlock`, `post.setValues`, `post.moveBlock`, `post.removeBlock`.
 
 You never publish a page, release a block, change a live theme, or edit `emd-cms-front`. The developer does those, in the Hub, after checkpoint 2.
 
@@ -78,7 +78,7 @@ Every image a block or value shows comes from the Hub's media: never a link to t
 
 Work through the pages in the handoff's order. For each page:
 
-1. **Plan the blocks.** Existing blocks it reuses, new blocks it needs (four or fewer per page is a good size), and which need a Vue override component (interactive or renderer-owned behaviour; see edge-block-package `reference/override-blocks.md`). Flag overrides now, not at the end.
+1. **Plan the blocks.** Existing blocks it reuses, new blocks it needs (four or fewer per page is a good size), and which need a Vue override component (interactive or renderer-owned behaviour; see edge-block-package `reference/override-blocks.md`). Flag overrides now, not at the end. A page that lists hand-entered items, each with its own page (staff, board members, vendors, programs, testimonials with detail), is a **custom post type**, not a manual array or a custom collection: one index/detail page defines the type and each item becomes an entry (see "Custom post types" below). Use a collection only for records that come from an API, an import or another system; use a manual array only for short lists with no detail pages.
 2. **Author new blocks** with the edge-block-package workflow: generate, validate three ways, local preview at desktop and phone widths, fix. Without a Hub checkout, the Hub check is `cms_validate` on each definition and the local scripts are optional (edge-block-package, "With or without a Hub checkout"); step 6's preview then is the first look. Prefer baseline theme names; extensions must exist in every selected theme. Use `--standard-theme` for baseline-only portability, not to reject intentional declared extensions. Get them right locally first: once a block is on a page, later fixes are drafts the developer must release.
 3. **Create them**: `block.create` per block. The check runs the Hub's import check; fix every problem it reports and check again. Tag each block with one or two content tags from the organization's block tag list (`cmsBlockTags`; edge-block-package "Block tags"), plus `Quick Picks` only for blocks that belong in the picker's first view. Never `[]`, never a site, theme or feature name. Treat `tags.not-in-list` and `tags.content-count` notices as problems to fix, even while the Hub still reports them as warnings.
 4. **Change existing blocks** only from the Hub's copy: `cms_block_base`, edit that definition, `block.draft` with its `baseHash`. Never from a local file: the Hub may hold hand fixes you don't have. A "changed since you loaded it" refusal means someone edited it; load it again and reapply your change.
@@ -87,6 +87,16 @@ Work through the pages in the handoff's order. For each page:
 7. Log the page as done and go straight to the next one.
 
 Override blocks render as their CMS HTML in the preview; that is expected. Check their CMS HTML is a sensible fallback.
+
+## Custom post types
+
+When the handoff has a list page with one page per hand-entered item (`cms_guide` section "Custom post types" is the reference):
+
+1. The list page is the defining page: `page.update` with `fields: { post: true, postType: { enabled: true, icon } }` (`event: true` for dated items). Its menu title is the type's label; its main area is the index, its post area the detail page.
+2. Author the index block (reads `source("posts")`; the Hub binds it to the type when the page is saved) and the detail blocks (fields that map to entry paths through `postField`, else their keys; `editable: false` or `private: true` for fields entries must not set). Place the detail blocks with `area: "post"` and `useForCustomPost: true`; chrome and fixed sections stay unmarked.
+3. Each item: `post.create` with `postTypeId`, `title`, `blurb` and `values` (the handoff's copy only; images as Hub URLs). `cms_list_posts` with `postTypeId` and `cms_get_post` read them back.
+4. Turn on the type's sitemap when its entries are public pages: `site.settings` `sitemap.posts["page:<pageId>"]: true`.
+5. Preview the index and one entry's detail route. List the entries (draft, never published) in the report; a person publishes the page, then the entries.
 
 ## SEO (every page and the site)
 

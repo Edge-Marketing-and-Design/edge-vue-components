@@ -247,6 +247,7 @@ const handleAgentRequest = async ({ header, body }) => {
       siteId: requireDocId(body.siteId, 'site id'),
       type: body.type ?? null,
       tag: body.tag ?? null,
+      postTypeId: body.postTypeId ?? null,
       limit: body.limit,
       startAfter: body.startAfter ? requireDocId(body.startAfter, 'startAfter post id') : null,
     })

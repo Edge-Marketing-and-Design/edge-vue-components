@@ -167,7 +167,7 @@ const createRemoteCms = ({ now = Date.now, issueSession = issueAgentSession, han
     cms_site_readiness: tool(({ siteId, ...input }) => call(connection, input, { action: 'readiness', siteId })),
     cms_list_pages: tool(({ siteId, ...input }) => call(connection, input, { action: 'pages', siteId })),
     cms_get_page: tool(({ siteId, pageId, source, includeValues, includeSchema, ...input }) => call(connection, input, { action: 'page', siteId, pageId, source, includeValues, includeSchema })),
-    cms_list_posts: tool(({ siteId, type, tag, limit, startAfter, ...input }) => call(connection, input, { action: 'posts', siteId, ...(type ? { type } : {}), ...(tag ? { tag } : {}), ...(limit ? { limit } : {}), ...(startAfter ? { startAfter } : {}) })),
+    cms_list_posts: tool(({ siteId, type, tag, postTypeId, limit, startAfter, ...input }) => call(connection, input, { action: 'posts', siteId, ...(type ? { type } : {}), ...(tag ? { tag } : {}), ...(postTypeId ? { postTypeId } : {}), ...(limit ? { limit } : {}), ...(startAfter ? { startAfter } : {}) })),
     cms_get_post: tool(({ siteId, postId, source, includeValues, includeSchema, ...input }) => call(connection, input, { action: 'post', siteId, postId, source, includeValues, includeSchema })),
   })
 
