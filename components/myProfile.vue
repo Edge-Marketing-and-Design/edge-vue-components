@@ -313,8 +313,16 @@ watch(currentMeta, async () => {
                 class="col-span-12 mb-3"
                 :class="numColsToTailwind(field.cols)"
               >
+                <slot
+                  v-if="$slots[`field-${field.field}`]"
+                  :name="`field-${field.field}`"
+                  :field="field"
+                  :value="getByPath(state.meta, field.field, '')"
+                  :meta="state.meta"
+                  :set-value="val => setByPath(state.meta, field.field, val)"
+                />
                 <edge-image-picker
-                  v-if="field?.type === 'imagePicker'"
+                  v-else-if="field?.type === 'imagePicker'"
                   :model-value="getByPath(state.meta, field.field, '')"
                   :label="field?.label || 'Photo'"
                   :dialog-title="field?.dialogTitle || 'Select Image'"
@@ -328,6 +336,7 @@ watch(currentMeta, async () => {
                 <p v-if="field?.type === 'imagePicker' && field?.disabled" class="mt-1 text-xs text-slate-500 dark:text-slate-400">
                   {{ getDisabledNote(field) }}
                 </p>
+                <template v-else-if="$slots[`field-${field.field}`]" />
                 <div v-else-if="field?.type === 'richText'" class="profile-richtext">
                   <edge-shad-html
                     :model-value="getByPath(state.meta, field.field, '')"

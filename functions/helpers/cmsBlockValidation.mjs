@@ -445,6 +445,14 @@ export const buildSourceFixtures = (template, dataSourceNames = []) => {
   return { fixtures, unverified }
 }
 
+const hasOptionList = (option) => {
+  if (!isObject(option))
+    return false
+  if (Array.isArray(option.options))
+    return option.options.length > 0
+  return typeof option.options === 'string' && option.options.trim() !== ''
+}
+
 const validateSchemaInput = (report, input, path, { allowMissingValue = false } = {}) => {
   if (!isObject(input)) {
     report.add('error', 'schema.input-object', path, `${path} must be an object.`)
@@ -460,12 +468,35 @@ const validateSchemaInput = (report, input, path, { allowMissingValue = false } 
     report.add('error', 'schema.input-label', `${path}.label`, `${path} needs a label.`)
   if (!allowMissingValue && !owns(input, 'value'))
     report.add('warning', 'schema.input-value', `${path}.value`, `${path} has no default value.`)
+  // An option input with no list shows the page editor an empty select. A
+  // string `options` names a collection the select loads, so it counts.
+  if (input.type === 'option' && !hasOptionList(input.option))
+    report.add('warning', 'schema.option-list', `${path}.option`, `${path} is a select input with no option list; give option.options its choices.`)
   if (input.type === 'array') {
     if (owns(input, 'value') && !Array.isArray(input.value))
       report.add('error', 'schema.array-value', `${path}.value`, `${path}.value must be an array.`)
     for (const [name, child] of Object.entries(isObject(input.schema) ? input.schema : {}))
       validateSchemaInput(report, child, `${path}.schema.${name}`, { allowMissingValue: true })
   }
+}
+
+// `{{ expr }}` placeholders (not `{{#for}}` or triple-brace tags) where
+// default() is nested in, or holds, another call. @edgedev/template-engine
+// renders `default(a, default(b, c))` and `upper(default(a, b))` as "" and
+// treats `default(upper(b), c)` as if b were empty (checked 2026-11-05,
+// 26.10.4); a single default(a, b) works.
+const nestedDefaultExpressions = (template) => {
+  const found = []
+  for (const match of String(template || '').matchAll(/(?<!\{)\{\{(?!\{)\s*([^{}#/][^{}]*?)\s*\}\}(?!\})/g)) {
+    const expression = match[1]
+    const code = expression.replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`/g, '""')
+    if (!/\bdefault\s*\(/.test(code))
+      continue
+    const calls = code.match(/\b[A-Za-z_$][\w$]*\s*\(/g) || []
+    if (calls.length > 1)
+      found.push(expression)
+  }
+  return [...new Set(found)]
 }
 
 const hasAltPair = (schema, name) => owns(schema, `${name}Alt`) || owns(schema, 'alt')
@@ -894,6 +925,8 @@ export const validateBlockDocument = (doc, options = {}) => {
     report.add(finding.severity, finding.code, finding.path, finding.message)
   if (/\s(?:v-[a-z][\w-]*|@[a-z][\w.-]*|:[a-z][\w-]*|on[a-z]+)\s*=/i.test(stripTemplateTokens(template)))
     report.add('error', 'grammar.vue-or-inline-handler', 'template', 'Vue directives, bindings, and inline event handlers are not supported.')
+  for (const expression of nestedDefaultExpressions(template))
+    report.add('warning', 'grammar.nested-default', 'template', `"{{ ${expression} }}" calls default() together with another function; the template engine renders nested calls as "". Use {{{#if}}}/{{{#else}}} for fallbacks.`)
   if (/(^|[^{])\{\{\s*#if\b/.test(template))
     report.add('error', 'grammar.legacy-if', 'template', 'Template v2 conditionals must use triple-brace JSON syntax.')
   if (/\{\{\{\s*#if\s+\{[^}]*(&&|\|\|)/.test(template))
@@ -1209,6 +1242,7 @@ export const BLOCK_VALIDATION_CODES = Object.freeze({
   'schema.array-value': { severity: 'error', meaning: 'An array input\'s value is not a list.' },
   'schema.input-title': { severity: 'warning', meaning: 'A schema input uses the legacy `title`; use `label`.' },
   'schema.input-value': { severity: 'warning', meaning: 'A schema input has no default value.' },
+  'schema.option-list': { severity: 'warning', meaning: 'A select (`option`) input has no option list, so the page editor shows an empty select. Template v1 conversions before 2026-11-05 dropped the lists of inputs inside arrays.' },
   'schema.image-alt': { severity: 'warning', meaning: 'An image input has no alt-text input beside it.' },
   'grammar.unbalanced-html': { severity: 'error', meaning: 'HTML is unbalanced when every conditional takes its `if` branch, or every one takes its `else` branch.' },
   'grammar.unbalanced-block': { severity: 'error', meaning: 'Unpaired `{{#for}}`/`{{/for}}` or `{{{#if}}}`/`{{{#else}}}`/`{{{/if}}}`.' },
@@ -1218,6 +1252,7 @@ export const BLOCK_VALIDATION_CODES = Object.freeze({
   'grammar.condition-scope': { severity: 'error', meaning: 'A condition on a name that is not `item` or an enclosing loop alias (outside loops, a bare field name such as `eyebrow` instead of `item.eyebrow`): it is always false and the `else` branch renders.' },
   'grammar.condition-loop-item': { severity: 'warning', meaning: 'Inside a loop, `item.<field>` names one of the block\'s own fields, but there `item` is the current entry, so it does not test the block\'s value.' },
   'grammar.vue-or-inline-handler': { severity: 'error', meaning: 'Vue directives, bindings or inline `on*` handlers.' },
+  'grammar.nested-default': { severity: 'warning', meaning: 'A `{{ }}` placeholder nests `default()` with another call (`default(a, default(b, c))`, `upper(default(a, b))`); the template engine renders it as an empty string. Use `{{{#if}}}`/`{{{#else}}}` for fallbacks.' },
   'grammar.json-ld': { severity: 'warning', meaning: 'JSON-LD belongs in page structured data, not in a block.' },
   'script.syntax': { severity: 'error', meaning: 'An inline script does not parse as JavaScript.' },
   'script.dom-content-loaded-only': { severity: 'warning', meaning: 'An inline script only runs on DOMContentLoaded, which the renderer has already fired; block scripts run once per route.' },
