@@ -317,18 +317,61 @@ const valuesTooLarge = values => Buffer.byteLength(JSON.stringify(values || {}))
 
 // page.update's fields, and page.create's optional ones: the page SEO
 // strings, with the structured data checked.
-const pageFieldUpdate = (core, plan, fields, type) => {
+// SEO fields, and for page.create/page.update (`page` given: the stored
+// draft, or null for a new page) the page type fields `post` and `postType`.
+const pageFieldUpdate = (core, plan, fields, type, { page, pageTypes = false } = {}) => {
   const update = {}
+  const allowed = pageTypes ? [...core.PAGE_UPDATE_FIELDS, ...core.PAGE_TYPE_FIELDS] : core.PAGE_UPDATE_FIELDS
   for (const [key, value] of Object.entries(fields)) {
-    if (!core.PAGE_UPDATE_FIELDS.includes(key))
-      problem(plan, 'fields.not-allowed', `"${key}" can't be set by ${type} (allowed: ${core.PAGE_UPDATE_FIELDS.join(', ')}).`)
+    if (!allowed.includes(key))
+      problem(plan, 'fields.not-allowed', `"${key}" can't be set by ${type} (allowed: ${allowed.join(', ')}).`)
+    else if (core.PAGE_TYPE_FIELDS.includes(key))
+      continue
     else if (typeof value !== 'string')
       problem(plan, 'fields.type', `${key} must be a string.`)
     else
       update[key] = value
   }
+  if (pageTypes) {
+    const found = core.pageTypeProblems(fields, page || null)
+    for (const { code, message } of found)
+      problem(plan, code, message)
+    if (!found.length) {
+      if (fields.post !== undefined)
+        update.post = fields.post
+      if (fields.postType !== undefined)
+        update.postType = core.mergePostType(page?.postType, fields.postType)
+      // As the menu editor does when a page gains a post view.
+      const postSd = update.postStructuredData ?? page?.postStructuredData ?? ''
+      if (update.post === true && !String(postSd).trim())
+        update.postStructuredData = (update.structuredData ?? page?.structuredData) || core.buildPageStructuredData()
+    }
+  }
   addStructuredDataFindings(core, plan, update)
   return update
+}
+
+// A custom post type page (post + postType.enabled) is prepared on every
+// save as the page editor saves it (cmsPostTypes preparePostTypePage): post
+// sources bound to the type, marked detail blocks bound to the entry. The
+// plan's last write to the page then carries both prepared areas.
+const isCustomTypePage = page => page?.post === true && page?.postType?.enabled === true
+const prepareCustomTypeWrite = async (plan, { pageRef, pageId, next }) => {
+  if (!isCustomTypePage(next))
+    return
+  const write = [...plan.writes].reverse().find(entry => entry.ref.path === pageRef.path)
+  if (!write)
+    return
+  const { preparePostTypePage } = await import('./helpers/cmsPostTypes.mjs')
+  let prepared
+  try {
+    prepared = preparePostTypePage(next, pageId)
+  }
+  catch (error) {
+    problem(plan, 'page.post-type', `The custom post type's detail fields can't be prepared: ${error?.message || error}`)
+    return
+  }
+  write.data = { ...write.data, content: prepared.content || [], postContent: prepared.postContent || [] }
 }
 
 const instanceLabel = instance => instance?.name || instance?.blockId
@@ -340,6 +383,7 @@ const instanceLabel = instance => instance?.name || instance?.blockId
 
 const pageBody = (core, { pageRef, page, siteId, pageId }) => ({
   ref: pageRef,
+  customPosts: siteId !== 'templates',
   label: siteId === 'templates' ? `template ${pageId}` : `draft page ${pageId}`,
   ids: { siteId, pageId },
   areas: { main: ['content', 'structure'], post: ['postContent', 'postStructure'] },
@@ -366,6 +410,16 @@ const areaOfKey = (body, key) => Object.entries(body.areas).find(([, keys]) => k
 
 // placeBlock { blockId, values?, index?, area? }: a new instance of a library
 // block in a new full-width row at `index` (default last).
+// useForCustomPost: true/false on a post-area block of a custom post type page.
+const customPostFlagProblems = (plan, { page, area, value }) => {
+  if (typeof value !== 'boolean')
+    problem(plan, 'instance.custom-post', 'useForCustomPost must be true or false.')
+  else if (!isCustomTypePage(page))
+    problem(plan, 'instance.custom-post', 'useForCustomPost needs a custom post type page: set post: true and postType: { enabled: true } with page.update first.')
+  else if (area !== 'post')
+    problem(plan, 'instance.custom-post', 'useForCustomPost applies to the detail (post area) blocks; place or pick a block with area "post".')
+}
+
 const planPlaceBlock = async (core, reader, plan, { orgId, uid, now, operation, siteRef, body, next }) => {
   const blockId = requireDocId(operation.blockId, 'block id')
   const blockSnap = await reader.doc(orgRefOf(orgId).collection('blocks').doc(blockId))
@@ -392,8 +446,12 @@ const planPlaceBlock = async (core, reader, plan, { orgId, uid, now, operation, 
     return plan
   }
   const [contentKey, structureKey] = body.areas[operation.area === 'post' ? 'post' : 'main']
+  if (operation.useForCustomPost !== undefined)
+    customPostFlagProblems(plan, { page: next, area: operation.area === 'post' ? 'post' : 'main', value: operation.useForCustomPost })
   const taken = core.pageIds(next)
   const instance = core.buildInstanceFromLibraryBlock(block, { id: core.generateShortId(taken), blockId })
+  if (operation.useForCustomPost === true)
+    instance.useForCustomPost = true
   if (syncedSource) {
     instance.synced = true
     instance.values = clone(syncedSource.values || {})
@@ -439,6 +497,24 @@ const planPlaceBlock = async (core, reader, plan, { orgId, uid, now, operation, 
 // instance's values, merged unless `replace`.
 const planSetValues = (core, plan, { uid, now, operation, next, body, found }) => {
   const { instance, key, index } = found
+  const flag = operation.useForCustomPost
+  if (flag !== undefined && !body.customPosts) {
+    problem(plan, 'instance.custom-post', 'useForCustomPost applies to a custom post type page\'s blocks, not to posts.')
+    return plan
+  }
+  if (flag !== undefined)
+    customPostFlagProblems(plan, { page: next, area: key === 'postContent' ? 'post' : 'main', value: flag })
+  if (operation.values === undefined && flag !== undefined) {
+    const marked = { ...instance }
+    if (flag === true)
+      marked.useForCustomPost = true
+    else
+      delete marked.useForCustomPost
+    next[key][index] = marked
+    addWrite(plan, body.ref, body.versioned({ [key]: next[key], ...stamp(uid, now) }), 'update', `${flag ? 'Use' : 'Stop using'} "${instanceLabel(instance)}" (${instance.id}) for custom posts on ${body.label}.`)
+    plan.result = { ...body.ids, instanceId: instance.id }
+    return plan
+  }
   if (Number(instance.templateVersion) !== 2)
     problem(plan, 'values.template-v1', 'Values can only be set on Template v2 blocks.')
   if (instance.synced)
@@ -451,11 +527,17 @@ const planSetValues = (core, plan, { uid, now, operation, next, body, found }) =
     ? clone(operation.values)
     : { ...(isPlainObject(instance.values) ? instance.values : {}), ...clone(operation.values) }
   problem(plan, 'values.schema', ...core.validateInstanceValues(instance.schema, values))
-  next[key][index] = { ...instance, values, blockUpdatedAt: new Date(now).toISOString() }
-  addWrite(plan, body.ref, body.versioned({ [key]: next[key], ...stamp(uid, now) }), 'update', `Set ${Object.keys(operation.values).join(', ')} on "${instanceLabel(instance)}" (${instance.id}) on ${body.label}.`)
+  const updated = { ...instance, values, blockUpdatedAt: new Date(now).toISOString() }
+  if (flag === true)
+    updated.useForCustomPost = true
+  else if (flag === false)
+    delete updated.useForCustomPost
+  next[key][index] = updated
+  addWrite(plan, body.ref, body.versioned({ [key]: next[key], ...stamp(uid, now) }), 'update', `Set ${Object.keys(operation.values).join(', ')} on "${instanceLabel(instance)}" (${instance.id}) on ${body.label}${flag === undefined ? '' : flag ? ', used for custom posts' : ', not used for custom posts'}.`)
   plan.result = { ...body.ids, instanceId: instance.id }
   return plan
 }
+
 
 // removeBlock { instanceId }: the instance, its column reference, and rows
 // left empty.
@@ -574,14 +656,16 @@ const planPage = async (core, reader, { orgId, uid, now, operation }) => {
     let fields = {}
     if (operation.fields !== undefined) {
       if (isPlainObject(operation.fields))
-        fields = pageFieldUpdate(core, plan, operation.fields, 'page.create')
+        fields = pageFieldUpdate(core, plan, operation.fields, 'page.create', { page: null, pageTypes: true })
       else
         problem(plan, 'fields.type', 'fields must be an object of page fields.')
     }
     const pageId = randomUUID()
     const pageRef = siteRef.collection('pages').doc(pageId)
     const withFields = Object.keys(fields).length ? ` with ${Object.keys(fields).join(', ')}` : ''
-    addWrite(plan, pageRef, { ...core.blankPagePayload(slug, now), ...fields, docId: pageId, uid }, 'set', `Create draft page "${title}" at /${slug} on ${siteId}${withFields}.`)
+    const created = { ...core.blankPagePayload(slug, now), ...fields, docId: pageId, uid }
+    addWrite(plan, pageRef, created, 'set', `Create draft page "${title}" at /${slug} on ${siteId}${withFields}.`)
+    await prepareCustomTypeWrite(plan, { pageRef, pageId, next: created })
     if (core.ROOT_MENUS.includes(menuName))
       menus[menuName].push({ name: slug, menuTitle: title, item: pageId })
     addWrite(plan, siteRef, { menus, ...stamp(uid, now) }, 'update', `Add it to the "${menuName}" menu.`)
@@ -598,7 +682,7 @@ const planPage = async (core, reader, { orgId, uid, now, operation }) => {
 
   if (operation.type === 'page.update') {
     const fields = isPlainObject(operation.fields) ? operation.fields : {}
-    const update = pageFieldUpdate(core, plan, fields, 'page.update')
+    const update = pageFieldUpdate(core, plan, fields, 'page.update', { page, pageTypes: true })
     // As the Hub's AI SEO leaves it alone: a page copied from a template with
     // custom structured data keeps it until someone edits it in the Hub.
     if (page.structuredDataAiLocked === true && update.structuredData !== undefined)
@@ -606,6 +690,7 @@ const planPage = async (core, reader, { orgId, uid, now, operation }) => {
     if (!Object.keys(fields).length)
       problem(plan, 'page.no-fields', 'No page fields to change.')
     addWrite(plan, pageRef, { ...update, version: core.getNextVersion(page.version), ...stamp(uid, now) }, 'update', `Update draft page ${pageId}: ${Object.keys(update).join(', ')}.`)
+    await prepareCustomTypeWrite(plan, { pageRef, pageId, next: { ...next, ...update } })
     return plan
   }
 
@@ -613,8 +698,12 @@ const planPage = async (core, reader, { orgId, uid, now, operation }) => {
   if (siteId === 'templates')
     plan.notices = [...(plan.notices || []), core.TEMPLATE_COPY_NOTICE]
   if (operation.type === 'page.placeBlock')
-    return planPlaceBlock(core, reader, plan, { orgId, uid, now, operation, siteRef, body, next })
-  return planInstanceOperation(core, plan, { now, uid, operation, next, body })
+    await planPlaceBlock(core, reader, plan, { orgId, uid, now, operation, siteRef, body, next })
+  else
+    planInstanceOperation(core, plan, { now, uid, operation, next, body })
+  if (siteId !== 'templates')
+    await prepareCustomTypeWrite(plan, { pageRef, pageId, next })
+  return plan
 }
 
 // ---- Templates ----
@@ -1132,7 +1221,8 @@ const planSiteSettings = async (core, reader, { orgId, uid, now, operation }) =>
     return plan
   }
   const siteRef = orgRefOf(orgId).collection('sites').doc(siteId)
-  if (!(await reader.doc(siteRef)).exists) {
+  const siteSnap = await reader.doc(siteRef)
+  if (!siteSnap.exists) {
     problem(plan, 'site.not-found', `Site "${siteId}" does not exist.`)
     return plan
   }
@@ -1143,6 +1233,21 @@ const planSiteSettings = async (core, reader, { orgId, uid, now, operation }) =>
   for (const { code, message } of found)
     problem(plan, code, message)
   const update = Object.fromEntries(Object.entries(settings).filter(([key]) => core.SITE_SETTINGS_FIELDS.includes(key)))
+  // sitemap: posts choices merge into the stored ones; a custom type's
+  // choice must name an enabled custom post type page on this site.
+  if (update.sitemap !== undefined && !found.some(entry => entry.code === 'site.sitemap')) {
+    const customIds = Object.keys(update.sitemap.posts || {}).filter(key => key.startsWith('page:')).map(key => key.slice(5))
+    for (const pageId of customIds) {
+      const pageSnap = DOC_ID_PATTERN.test(pageId) ? await reader.doc(siteRef.collection('pages').doc(pageId)) : null
+      if (!pageSnap?.exists || !isCustomTypePage(pageSnap.data()))
+        problem(plan, 'site.sitemap', `sitemap.posts["page:${pageId}"] names no custom post type on this site: the page must exist with post: true and postType.enabled (cms_list_pages marks them customPostType).`)
+    }
+    const merged = core.mergeSitemapSettings(siteSnap.data()?.sitemap, update.sitemap)
+    for (const message of merged.errors)
+      problem(plan, 'site.sitemap', message)
+    if (merged.sitemap)
+      update.sitemap = merged.sitemap
+  }
   addWrite(plan, siteRef, { ...update, ...stamp(uid, now) }, 'update', `Update site ${siteId} settings: ${Object.keys(update).join(', ')}. Published site settings are unchanged.`)
   plan.result = { siteId }
   return plan
@@ -1588,10 +1693,12 @@ const readLibraryBlocks = async (orgId, docs, what) => {
 // A site's posts, newest first, with their publication state (the Hub's
 // status: the draft resolved as publishing resolves it, compared with the
 // snapshot). Filtered by type and tag, paged by postId. Reads only.
-const gatherSitePosts = async ({ orgId, siteId, type = null, tag = null, limit = 50, startAfter = null }) => {
+const gatherSitePosts = async ({ orgId, siteId, type = null, tag = null, postTypeId = null, limit = 50, startAfter = null }) => {
   const core = await corePromise
-  if (type !== null && type !== undefined && !['post', 'event'].includes(type))
-    throw new HttpsError('invalid-argument', 'type must be "post" or "event".')
+  if (type !== null && type !== undefined && (typeof type !== 'string' || core.normalizePostType(type) !== type))
+    throw new HttpsError('invalid-argument', 'type must be "post", "event" or a custom type key ("custom-…", as cms_list_posts reports it).')
+  if (postTypeId !== null && postTypeId !== undefined && (typeof postTypeId !== 'string' || !DOC_ID_PATTERN.test(postTypeId)))
+    throw new HttpsError('invalid-argument', 'postTypeId must be a page id.')
   if (tag !== null && tag !== undefined && typeof tag !== 'string')
     throw new HttpsError('invalid-argument', 'tag must be a string.')
   const count = (limit === undefined || limit === null) ? 50 : Number(limit)
@@ -1605,7 +1712,7 @@ const gatherSitePosts = async ({ orgId, siteId, type = null, tag = null, limit =
   const cursor = startAfter ? String(startAfter) : null
   if (cursor && !posts[cursor] && !published[cursor])
     throw new HttpsError('invalid-argument', `startAfter "${cursor}" is not a post on this site.`)
-  const selected = core.selectSitePosts({ posts, published, type: type || null, tag: tag || null, limit: count, startAfter: cursor })
+  const selected = core.selectSitePosts({ posts, published, type: type || null, tag: tag || null, postTypeId: postTypeId || null, limit: count, startAfter: cursor })
   const blocks = await readLibraryBlocks(orgId, selected.postIds.map(postId => posts[postId]), 'These posts')
   return {
     siteId,

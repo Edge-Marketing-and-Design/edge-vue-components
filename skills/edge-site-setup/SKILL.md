@@ -27,7 +27,7 @@ the first check; build every operation from those fields.
 | --- | --- |
 | Theme | `cms_find_theme`, `cms_get_theme`; `theme.create` for a new one (edge-design-to-site section 1 for a theme from a design) |
 | Site | `site.create` (name, theme, `domains: ["<site-slug>.test"]`, SEO settings) |
-| Settings | `site.settings` (logo, favicon, app icon, contact, social, menu position, tracking) |
+| Settings | `site.settings` (logo, favicon, app icon, contact, social, menu position, tracking, sitemaps) |
 | Menus | `site.menus` (the whole menus object; read it with `cms_list_pages`) |
 | Pages | seeded by `site.create` from the theme's default menus; `page.create` for others; `page.placeBlock` / `page.setValues` |
 | SEO | `site.update`, `page.update` |
@@ -50,7 +50,7 @@ message**. First read what the Hub has and fill it in rather than asking:
 Then send one message listing every field of `answers.template.json` with
 the value you found (marked "from the Hub") or a question. Ask for: site
 name and slug, owner, theme, the launch domain if known (it is not set now),
-contact email and phone, social links, analytics ids, which default pages,
+contact email and phone, social links, analytics ids, which post kinds and custom post types get sitemaps (`sitemapPosts`), which default pages,
 logo, favicon and app icon files. Save the answers as
 `importfiles/<site>/site-setup.answers.json` (or the workspace folder without
 a checkout). Don't ask again later: anything missing becomes a report item.
@@ -71,7 +71,11 @@ In this order, checking and running each operation:
    `cms_upload_media` (SVG logos rendered to PNG first), wait for `ready`.
 4. **Settings**: `site.settings` with the logos, favicon, app icon, contact
    email and phone, social links (full URLs), tracking ids, menu position.
-   Consent stays on unless the answers say otherwise.
+   Consent stays on unless the answers say otherwise. Sitemaps: page
+   sitemaps need nothing; turn on `sitemap.posts` for each post kind and
+   custom post type the site publishes (`post`, `event`, `page:<pageId>`),
+   and leave a public type off only when the answers say so. Collection and
+   API sitemaps are a developer's (Dev Mode) and only from the answers.
 5. **Pages**: the answers' pages: seeded ones kept, missing ones from a
    template (`page.create` then the template's blocks, or a new template
    with `template.create` when several sites will need it), extra seeded

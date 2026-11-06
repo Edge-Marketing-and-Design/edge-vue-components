@@ -303,7 +303,7 @@ const handlers = {
   },
   cms_list_pages: async ({ orgId, siteId, sessionId }) => jsonResult(await agentOperations.pages(resolveOrgId(orgId), siteId, sessionId)),
   cms_get_page: async ({ orgId, siteId, pageId, source, includeValues, includeSchema, sessionId }) => jsonResult(await agentOperations.page(resolveOrgId(orgId), siteId, pageId, { source, includeValues, includeSchema, sessionId })),
-  cms_list_posts: async ({ orgId, siteId, type, tag, limit, startAfter, sessionId }) => jsonResult(await agentOperations.posts(resolveOrgId(orgId), siteId, { type, tag, limit, startAfter, sessionId })),
+  cms_list_posts: async ({ orgId, siteId, type, tag, postTypeId, limit, startAfter, sessionId }) => jsonResult(await agentOperations.posts(resolveOrgId(orgId), siteId, { type, tag, postTypeId, limit, startAfter, sessionId })),
   cms_get_post: async ({ orgId, siteId, postId, source, includeValues, includeSchema, sessionId }) => jsonResult(await agentOperations.post(resolveOrgId(orgId), siteId, postId, { source, includeValues, includeSchema, sessionId })),
   cms_block_base: async input => jsonResult(await cmsTools.blockBase(input)),
   // Local only: they read every placed instance and the emd-cms-front checkout.

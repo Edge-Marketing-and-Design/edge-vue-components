@@ -61,7 +61,7 @@ Shared Edge source: `edge/functions/agentGuide/cms-agent-guide.md`.
 
 - **Settings:** `site.settings` sets branding (logo, light logo, text logo,
   brand logos, favicon, app icon), contact email and phone, social links,
-  menu position and tracking ids on the draft site. Images must be Hub media
+  menu position, tracking ids and sitemaps (see "Sitemaps") on the draft site. Images must be Hub media
   URLs (`cms_upload_media`). The SEO fields stay with `site.update`.
 - **Menus:** `site.menus` replaces the whole `menus` object. Read the current
   menus with `cms_list_pages`, change them and send them back: every draft
@@ -72,6 +72,50 @@ Shared Edge source: `edge/functions/agentGuide/cms-agent-guide.md`.
 - **Domains:** `site.create` needs a domain; a new site takes a placeholder
   `<site-slug>.test`. A person sets the real domain at launch, and readiness
   warns while it is on `.test` (`site.placeholder-domain`).
+
+## Custom post types
+
+For hand-entered content with a list page and one page per item (staff
+profiles, board members, vendors, programs, FAQs by topic), use a
+page-defined custom post type instead of a custom collection. Use a
+collection (a Data Source) only when the records come from elsewhere: an
+API, an import, a feed, or another system.
+
+1. **Define the type on a page.** `page.create`, then `page.update` with
+   `fields: { post: true, postType: { enabled: true, icon: "Users" } }`
+   (`event: true` too for dated entries with Event Details). The page's id is
+   the type; its menu title is the label editors see in the Content sidebar.
+   The page's main area is the index (list); its post area is the detail page.
+2. **Build both views.** `page.placeBlock` for the index's list block (a
+   `posts` Data Source; the Hub binds it to the type) and, with
+   `area: "post"`, the detail blocks. Add `useForCustomPost: true` to each
+   detail block whose fields are the entry's content (or set it later with
+   `page.setValues`). Unmarked blocks keep page-owned values and appear on
+   every entry unchanged. A detail field maps to an entry path through its
+   schema `postField` (else its key); `editable: false` and `private: true`
+   fields are not entry fields.
+3. **Add entries.** `post.create` with `postTypeId` (the defining page),
+   `title`, `blurb` and `values` (the detail fields by path), and
+   `post.update` with `fields.values`. Entries have no blocks of their own;
+   `post.placeBlock` and the other block operations refuse them.
+4. **Read them back.** `cms_list_pages` marks the defining page
+   `customPostType`; `cms_get_page` shows `postType` and the marked
+   instances; `cms_list_posts` with `postTypeId` lists the entries;
+   `cms_get_post` shows their `values`.
+
+A person publishes the defining page, then each entry, in the Hub.
+
+## Sitemaps
+
+`site.settings` with `sitemap` sets the site's sitemap configuration
+(Site Settings, Sitemaps): `posts` is the Enable Sitemap choice for each
+post kind, `{ "post": true, "event": false, "page:<pageId>": true }` for
+this site's custom post types, merged into the stored choices. Turn on a
+custom type's sitemap when its entries are public pages. `collections` and
+`apis` are the Dev Mode lists (collection and API sitemaps); given, each
+replaces its stored list, checked as the Sitemaps tab checks it. Page
+sitemaps need no setting. The generated post entries follow when a person
+publishes the site settings, from the published pages and menus.
 
 ## Templates
 

@@ -186,7 +186,27 @@
         { "path": "edge/components/cms/site.vue", "diffPattern": "customPostTypes|menuTitle|titles\\.get|titles\\.set|titles\\.has|draftPostPreview" }
       ],
       "documents": [
-        { "path": "edge/docs/data-contracts/cms-posts/README.md", "section": "Page-defined custom post types", "says": "Custom-type settings, instance-owned block opt-in, marked-only entry fields/layout, sample previews, inactive value preservation and unchanged public layout" }
+        { "path": "edge/docs/data-contracts/cms-posts/README.md", "section": "Page-defined custom post types", "says": "Custom-type settings, instance-owned block opt-in, marked-only entry fields/layout, sample previews, inactive value preservation and unchanged public layout" },
+        { "path": "edge/functions/agentGuide/cms-agent-guide.md", "section": "Custom post types", "says": "How an agent defines a custom post type (page.update post/postType), marks its detail blocks (useForCustomPost) and adds entries (post.create postTypeId and values)" },
+        { "path": "edge/skills/edge-design-to-site/SKILL.md", "section": "Custom post types", "says": "When a handoff's list-and-detail content becomes a custom post type, and the build steps" },
+        { "path": "edge/skills/edge-block-package/SKILL.md", "section": "Site chrome, posts, overrides", "says": "How detail blocks map schema fields to entry paths (postField, editable, private) and what the index block may show" }
+      ]
+    },
+    {
+      "id": "sitemaps",
+      "name": "Per-site sitemap settings (Site Settings, Sitemaps)",
+      "code": [
+        "edge/lib/cmsSitemapConfig.mjs",
+        "edge/functions/helpers/cmsSitemapConfig.mjs",
+        "edge/lib/cmsSitemapSettings.js",
+        "edge/components/cms/sitemapSettings.vue",
+        { "path": "edge/components/cms/site.vue", "diffPattern": "sitemap|Sitemap" }
+      ],
+      "documents": [
+        { "path": "edge/docs/data-contracts/cms-sites-and-pages/README.md", "section": "Per-site sitemap configuration (Hub editor)", "says": "The sitemap object's fields, validation and publication" },
+        { "path": "edge/docs/data-contracts/cms-sites-and-pages/README.md", "section": "Post-type sitemap controls", "says": "The posts choices and the generated post sitemap entries" },
+        { "path": "edge/functions/agentGuide/cms-agent-guide.md", "section": "Sitemaps", "says": "How site.settings sets sitemap choices and lists" },
+        { "path": "edge/skills/edge-site-setup/site-standards.json", "says": "The sitemaps standard and its answers check" }
       ]
     },
     {

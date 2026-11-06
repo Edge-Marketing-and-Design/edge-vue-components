@@ -137,7 +137,7 @@ export function createAgentOperationClient({ endpoint, getKey, connections, fetc
     render: (orgId, input, sessionId) => post({ orgId, action: 'render', ...input }, sessionId),
     pages: (orgId, siteId, sessionId) => post({ orgId, action: 'pages', siteId }, sessionId),
     page: (orgId, siteId, pageId, { source = 'draft', includeValues = true, includeSchema = false, sessionId } = {}) => post({ orgId, action: 'page', siteId, pageId, source, includeValues, includeSchema }, sessionId),
-    posts: (orgId, siteId, { type, tag, limit, startAfter, sessionId } = {}) => post({ orgId, action: 'posts', siteId, ...(type ? { type } : {}), ...(tag ? { tag } : {}), ...(limit ? { limit } : {}), ...(startAfter ? { startAfter } : {}) }, sessionId),
+    posts: (orgId, siteId, { type, tag, postTypeId, limit, startAfter, sessionId } = {}) => post({ orgId, action: 'posts', siteId, ...(type ? { type } : {}), ...(tag ? { tag } : {}), ...(postTypeId ? { postTypeId } : {}), ...(limit ? { limit } : {}), ...(startAfter ? { startAfter } : {}) }, sessionId),
     post: (orgId, siteId, postId, { source = 'draft', includeValues = true, includeSchema = false, sessionId } = {}) => post({ orgId, action: 'post', siteId, postId, source, includeValues, includeSchema }, sessionId),
   }
 }

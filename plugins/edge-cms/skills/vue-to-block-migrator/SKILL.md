@@ -303,6 +303,7 @@ Core invariants:
 Classify post artifacts before generating them:
 
 - A route-level blog page uses `post: true`; its `content`/`structure` is the post index view and its `postContent`/`postStructure` is the detail shell.
+- Hand-entered repeated content with its own detail routes (a Vue page per staff member, vendor or program, usually from a local data file) converts to a page-defined custom post type, not a collection or a manual array: the route-level page gets `post: true` and `postType: { enabled: true, icon }`, its detail blocks are marked `useForCustomPost`, and each record becomes an entry (`post.create` with `postTypeId` and `values`). Classify those records as `editable` entry content in the inventory. Keep `collection/API dynamic` for records another system owns.
 - A selectable Post template uses `type: ["Post"]` with `post` false or omitted. The Posts manager copies the template's `postContent`/`postStructure` when non-empty, otherwise it falls back to `content`/`structure`.
 - Post templates scaffold post documents; they do not create routes. Keep navigation/footer/site chrome in the route-level blog page and keep article-specific heroes/body/related content in the Post template.
 - If a Post template supplies its own hero, remove or skip a fixed hero in the route-level detail shell to avoid duplicate titles and featured images.
