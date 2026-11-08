@@ -2,7 +2,7 @@
 
 Status: in use for every site the CMS publishes.
 
-Last verified: 2026-11-05, 9fc8697b
+Last verified: 2026-11-08, 222869ce
 
 A site is an organization's website: its settings, menus and domains, and
 the draft pages assembled from block instances. Publishing copies a page or
@@ -23,6 +23,7 @@ posts in `edge/docs/data-contracts/cms-posts/`; the workflow rules in
 | Published site settings | `organizations/{orgId}/published-site-settings/{siteId}` (the same id as the site) |
 | Template pages | `organizations/{orgId}/sites/templates/pages/{pageId}`: the `templates` site is not a public site; its pages are copied when a theme seeds a site or a page is created from a template |
 | Legacy published site | `organizations/{orgId}/sites-published/{siteId}`: only the registrar's attach and detach callables keep its `domains` in step; nothing else reads or writes it |
+| Site-resolution state | `cms-site-resolution-locks/writer`: backend-only project-wide writer lease; `cms-site-resolution/{sha256(siteKey)}`: cleanup intent and successful projection checkpoint |
 | Auth-domain reconciliation state | `cms-auth-domain-sync/{projectId}`: backend-only project-wide lease and successful managed-host ledger |
 
 The Hub writes sites and pages from the browser through
@@ -142,11 +143,103 @@ Defaults come from `blankPagePayload` (a blank page) and
 
 | Key | Value | Indexes and metadata |
 | --- | --- | --- |
-| `sites:{orgId}:{siteId}` | The `published-site-settings` document without `cacheVerification` (`onSiteWritten`) | `idx:sites:docId:{orgId}:{slug(siteId)}:{siteId}`, `idx:sites:domains:{slug(domain)}` per domain |
+| `sites:{orgId}:{siteId}` | The published settings without `cacheVerification`, with current published `pageVersions` and generated `revision`/`publishedAt` (`onSiteWritten`) | `idx:sites:docId:{orgId}:{slug(siteId)}:{siteId}`, `idx:sites:domains:{slug(domain)}` per domain |
+| `site-resolution:v1:{normalizedHostname}` | Active resolution record or disabled tombstone (see below) | exact key, no index or expiration |
 | `pages:{orgId}:{siteId}:{pageId}` | The published page document (`onPublishedPageWritten`) | none |
 
 Every mirror writes `{ canonical }` metadata on its index keys and keeps an
 `idx:manifest:` entry per canonical key (`functions/kv/kvMirror.js`).
+
+### Exact hostname resolution and published revisions
+
+`site-resolution:v1:<normalized-hostname>` is additive in the same KV namespace
+as `sites:{orgId}:{siteId}`. Normalize the hostname to lowercase ASCII/IDNA,
+remove the port and trailing dot, and exclude scheme/path/query. Do not slug it.
+
+An active value is:
+
+```json
+{
+  "schemaVersion": 1,
+  "status": "active",
+  "orgId": "org-id",
+  "siteId": "site-id",
+  "siteKey": "sites:org-id:site-id",
+  "revision": "sha256:<opaque-digest>",
+  "publishedAt": "2026-11-08T12:00:00.000Z"
+}
+```
+
+The full KV site document has matching top-level `revision` and `publishedAt`.
+These are mirror-generated public projection fields, not editable Site fields.
+Revision equality is the cache contract; the hash format is opaque and does not
+replace the existing numeric `version`. A deterministic revision covers the
+public settings and current published-page contents. It changes for settings,
+routing, theme-triggered site-version bumps, published-page changes, block
+propagation and page unpublishing, including page edits whose numeric version
+was not advanced. Draft documents are never read. The KV `pageVersions` map is
+reconciled from currently published pages, removing obsolete deletion entries.
+`publishedAt` comes from the latest included Firestore source commit, not worker
+execution time; completed identical projections retain their timestamp.
+
+`cms-onSiteWritten`, `cms-syncSiteResolutionFromPublishedPage` and
+`cms-syncSiteResolutionFromDomainRegistry` reconcile current saved state rather
+than event payloads. The existing KV retry worker also redirects legacy queued
+site writes through this writer. One backend project-wide transactional lease
+serializes canonical-site and shared hostname writes across organizations. KV
+requests are bounded to 15 seconds without automatic HTTP retries; an uncertain
+failure retains its four-minute lease (longer than the 180-second handlers).
+Pending hostname/index cleanup intent is durable before KV writes; a successful
+checkpoint clears pending intent. No client permissions or indexes are added.
+
+Write the site document successfully before advertising its revision on hosts.
+Registry ownership and the published domain list must both match. Expand the
+existing apex/www pair for each alias; `canonicalDomain` and `forwardApex`
+continue controlling redirects separately. Conflicting or malformed owners
+fail closed. Old-owner events resolve the current owner, including cross-org
+moves, rather than disabling another site's record. Removed domains and
+unpublished/deleted sites get stable disabled tombstones:
+
+```json
+{
+  "schemaVersion": 1,
+  "status": "disabled",
+  "orgId": null,
+  "siteId": null,
+  "siteKey": null,
+  "revision": null,
+  "publishedAt": null
+}
+```
+
+A disabled record is authoritative. Only an absent new record uses the legacy
+lookup fallback during rollout. Existing site/domain indexes, manifests and
+collection-version markers remain supported. Keys are overwritten, not
+version-suffixed, and tombstones do not expire.
+
+KV has no multi-key atomic write or conditional compare-and-swap. Serialization
+prevents older Hub workers/retries from overtaking newer Hub writes; it cannot
+promise immediate global propagation or cancel an already accepted upstream
+request after a timeout. The frontend must compare the fetched site document's
+revision with the active record and never mark a mismatch current. This does
+not make separately mirrored page/theme documents an atomic snapshot.
+
+Rollout: deploy the writer, page/domain triggers and KV retry worker together;
+allow old deployed invocations to finish before depending on the new path.
+Then use the dry-run-first shared backfill from the Hub root:
+
+```sh
+node edge/scripts/backfill-site-resolution.cjs --project <project-id>
+# Only with explicit production authorization:
+node edge/scripts/backfill-site-resolution.cjs --project <project-id> --apply --production
+```
+
+The backfill paginates published settings and prior managed-site state by
+standard document-name order, deduplicates sites and queues current-state work
+through `topic-queue`/`kv-mirror-retry`. It does not publish drafts. Production
+writes require both flags; emulator writes require `--apply` without
+`--production`. Existing retry/dead-letter handling applies. No backfill is
+performed merely by deploying this code.
 
 ### What the renderer reads
 

@@ -60,6 +60,19 @@ async function runKvOperation(payload) {
   if (!op || !key)
     throw new Error('Invalid KV retry payload: missing op/key')
 
+  // Do not replay pre-upgrade site payloads into KV. Their event can be old,
+  // and the new writer must own both canonical and hostname records together.
+  const sourceSite = String(payload?.sourceState?.path || '').match(/^organizations\/([^/]+)\/published-site-settings\/([^/]+)$/)
+  const keySite = key.match(/^(?:idx:manifest:)?sites:([^:]+):([^:]+)$/)
+  if (op === 'reconcileSiteResolution' || sourceSite || keySite) {
+    const { runSiteResolution } = require('./siteResolution')
+    return runSiteResolution({
+      orgId: sourceSite?.[1] || keySite?.[1] || payload.orgId,
+      siteId: sourceSite?.[2] || keySite?.[2] || payload.siteId,
+      touchedHosts: payload.touchedHosts || [],
+    })
+  }
+
   if (op === 'finalizeMirror') {
     if (!await isSourceStateCurrent(db, payload?.sourceState)) {
       logger.log('Discarded superseded KV mirror finalization', {

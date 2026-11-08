@@ -3,6 +3,18 @@
   "version": 1,
   "areas": [
     {
+      "id": "site-resolution",
+      "name": "Published site revision and exact hostname resolution",
+      "code": [
+        { "path": "functions/cms.js", "diffPattern": "SiteResolution|onSiteWritten|servedHosts|touchedHosts|siteResolution" },
+        "functions/kv/siteResolution.js",
+        "edge/scripts/backfill-site-resolution.cjs"
+      ],
+      "documents": [
+        { "path": "edge/docs/data-contracts/cms-sites-and-pages/README.md", "section": "Exact hostname resolution and published revisions", "says": "Exact resolution keys, site revisions, current-state publication coverage, serialization, domain ownership, tombstones and backfill" }
+      ]
+    },
+    {
       "id": "block-inputs",
       "name": "Block schema inputs (image, video, publication, options...)",
       "code": [
@@ -90,7 +102,8 @@
       ],
       "documents": [
         { "repo": "emd-cms-front", "path": "docs/cms-template-v2-blocks.md", "section": "KV mirroring: Firestore is not the frontend query API", "says": "What the KV mirror stores, index and metadata keys, and what a block can query" },
-        { "path": "edge/skills/edge-block-package/SKILL.md", "section": "Rules the validator should enforce", "says": "Data Source rules block packages follow" }
+        { "path": "edge/skills/edge-block-package/SKILL.md", "section": "Rules the validator should enforce", "says": "Data Source rules block packages follow" },
+        { "path": "edge/docs/data-contracts/cms-sites-and-pages/README.md", "section": "Exact hostname resolution and published revisions", "says": "Site mirror and retry compatibility with existing KV datasets" }
       ]
     },
     {

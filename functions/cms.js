@@ -2374,28 +2374,45 @@ exports.reindexPublishedPostsToKv = onCall({ timeoutSeconds: 540 }, async (reque
 })
 // end delete later
 
-exports.onSiteWritten = createKvMirrorHandler({
+// All published-site writes converge here, independent of their UI/worker origin.
+exports.onSiteWritten = onDocumentWritten({
   document: 'organizations/{orgId}/published-site-settings/{siteId}',
-  makeCanonicalKey: ({ orgId, siteId }) =>
-    `sites:${orgId}:${siteId}`,
-  makeIndexKeys: ({ orgId, siteId }, data) => {
-    const keys = []
-    const siteDocId = slug(siteId)
-    if (siteDocId)
-      keys.push(`idx:sites:docId:${orgId}:${siteDocId}:${siteId}`)
-    const domains = Array.isArray(data?.domains) ? data.domains : []
-    for (const domain of domains) {
-      const st = slug(domain)
-      keys.push(`idx:sites:domains:${st}`)
-    }
-    return keys
-  },
-  serialize: (data) => {
-    const copy = { ...(data || {}) }
-    delete copy.cacheVerification
-    return JSON.stringify(copy)
-  },
   timeoutSeconds: 180,
+  retry: true,
+}, async (event) => {
+  const { runSiteResolution } = require('./kv/siteResolution')
+  await runSiteResolution({ ...event.params, touchedHosts: [
+    ...(event.data?.before?.data()?.domains || []),
+    ...(event.data?.after?.data()?.domains || []),
+  ] })
+})
+
+// Unpublishing a page and synced-block writes do not always update the site doc.
+exports.syncSiteResolutionFromPublishedPage = onDocumentWritten({
+  document: 'organizations/{orgId}/sites/{siteId}/published/{pageId}',
+  timeoutSeconds: 180,
+  retry: true,
+}, async (event) => {
+  const { runSiteResolution } = require('./kv/siteResolution')
+  await runSiteResolution(event.params)
+})
+
+exports.syncSiteResolutionFromDomainRegistry = onDocumentWritten({
+  document: 'domain-registry/{domain}',
+  timeoutSeconds: 180,
+  retry: true,
+}, async (event) => {
+  const { runSiteResolution, servedHosts } = require('./kv/siteResolution')
+  const targets = new Map()
+  const touched = new Set(servedHosts(event.params.domain))
+  const registry = await db.collection('domain-registry').get()
+  for (const snapshot of [event.data?.before, event.data?.after, ...registry.docs]) {
+    const data = snapshot?.data() || {}
+    if (!servedHosts(data.domain || snapshot?.id || event.params.domain).some(host => touched.has(host))) continue
+    const match = String(data.sitePath || '').match(/^organizations\/([^/]+)\/published-site-settings\/([^/]+)$/)
+    if (match) targets.set(data.sitePath, { orgId: match[1], siteId: match[2] })
+  }
+  for (const target of targets.values()) await runSiteResolution({ ...target, touchedHosts: [event.params.domain] })
 })
 
 exports.onUserWritten = createKvMirrorHandler({

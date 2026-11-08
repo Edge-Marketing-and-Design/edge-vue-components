@@ -41,14 +41,14 @@ function shouldRetryError(err) {
   return false
 }
 
-async function requestWithRetry(run, label = 'kv-request') {
+async function requestWithRetry(run, label = 'kv-request', options = {}) {
   let attempt = 0
   for (;;) {
     try {
       return await run()
     }
     catch (err) {
-      if (!shouldRetryError(err) || attempt >= MAX_RETRIES)
+      if (!shouldRetryError(err) || attempt >= (options.maxRetries ?? MAX_RETRIES))
         throw err
       const retryAfterMs = parseRetryAfterMs(err?.response?.headers?.['retry-after'])
       const expo = Math.min(MAX_DELAY_MS, BASE_DELAY_MS * (2 ** attempt))
@@ -111,7 +111,7 @@ async function put(key, value, opts = undefined) {
     form.append('metadata', JSON.stringify(opts.metadata))
     const formHeaders = form.getHeaders()
     Object.assign(headers, formHeaders)
-    const res = await requestWithRetry(() => axios.put(url, form, { headers }), `put:${key}`)
+    const res = await requestWithRetry(() => axios.put(url, form, { headers, timeout: opts?.timeoutMs }), `put:${key}`, opts)
     if (res.status !== 200) {
       throw new Error(`KV put failed: ${res.status} ${res.statusText}`)
     }
@@ -127,7 +127,7 @@ async function put(key, value, opts = undefined) {
     headers['Content-Type'] = 'text/plain'
   }
 
-  const res = await requestWithRetry(() => axios.put(url, data, { headers }), `put:${key}`)
+  const res = await requestWithRetry(() => axios.put(url, data, { headers, timeout: opts?.timeoutMs }), `put:${key}`, opts)
   if (res.status !== 200) {
     throw new Error(`KV put failed: ${res.status} ${res.statusText}`)
   }
@@ -146,14 +146,15 @@ async function putIndexMeta(key, metadata, opts = undefined) {
   return put(key, '1', { ...(opts || {}), metadata: meta })
 }
 
-async function get(key, type = 'text') {
+async function get(key, type = 'text', options = {}) {
   const url = `${base}/values/${encodeURIComponent(key)}`
   try {
     const res = await requestWithRetry(() => axios.get(url, {
       headers: { Authorization: `Bearer ${apiKey}` },
       responseType: 'text',
+      timeout: options.timeoutMs,
       transformResponse: [x => x],
-    }), `get:${key}`)
+    }), `get:${key}`, options)
     if (type === 'json') {
       return parseJsonIfNeeded(res.data)
     }
@@ -167,12 +168,12 @@ async function get(key, type = 'text') {
   }
 }
 
-async function del(key) {
+async function del(key, options = {}) {
   const url = `${base}/values/${encodeURIComponent(key)}`
   try {
     await requestWithRetry(
-      () => axios.delete(url, { headers: { Authorization: `Bearer ${apiKey}` } }),
-      `del:${key}`,
+      () => axios.delete(url, { headers: { Authorization: `Bearer ${apiKey}` }, timeout: options.timeoutMs }),
+      `del:${key}`, options,
     )
   }
   catch (err) {
