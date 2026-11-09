@@ -90,9 +90,13 @@ and called:
 {{/for}}
 ```
 
-A configured Data Source does not run merely because it exists. Every declared
-source must be called with `source("name")`. Dynamic sources also require
-separate Hub-preview and public-renderer/KV verification.
+A configured Data Source does not run merely because it exists. Activate it
+with `source("name")` or a collectionFilter, collectionOptions or paired
+collectionResults helper. For interactive filtering/pagination, use the complete
+configuration and single-template example in
+[interactive collections](interactive-collections.md). Keep the normal condition
+scope rule in results: an empty-result condition is `item.total == 0`.
+Hub preview and public frontend interactions remain separate verification paths.
 
 An enabled custom-post page's Index preview in the authenticated Hub (including
 its small site-page preview) reads that type's saved draft posts without

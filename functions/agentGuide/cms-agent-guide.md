@@ -105,6 +105,38 @@ API, an import, a feed, or another system.
 
 A person publishes the defining page, then each entry, in the Hub.
 
+## Interactive collection blocks
+
+Prefer generic collectionFilter/collectionOptions/paired collectionResults
+helpers to custom scripts or Vue overrides when indexed, bounded filtering fits.
+Requires published template-engine 26.11.1 and the public frontend's interactive
+controller/API. Declare defaults and multiple array filters in dataSources;
+project only public display/filter/sort fields with interactive.fields.
+queryItems unions/deduplicates indexed candidates; query applies the final AND
+conditions, then order, then pagination. A broad initial lookup belongs in
+fallbackQueryItems, not alongside active narrow selections. Empty selections
+omit their lookup/condition; no lookup or fallback returns no candidates.
+
+Use one template containing controls, loading skeletons and an inline paired
+collectionResults region. Keep controls outside it. Results expose items, total,
+page and pages; if conditions use item.total outside the item loop. Do not fetch
+additional sources or render nested CMS blocks inside the result region.
+Options remain dynamic through collectionOptions, source overrides and distinct;
+distinct provides choices, not counts. maxCandidates is an explicit bound, not
+silent truncation (global ceiling 2,000; prefer smaller sets).
+
+Choose browser or server pagination deliberately. Server mode uses real page
+links and unique pageParam/filterPrefix values for blocks sharing a page.
+Verify direct URLs, filter reset, empty/error states, Back/Forward and mobile
+layout. These helpers activate sources just as source() does. Do not assume
+public filter interaction works in the Hub: its editor canvas renders a bounded
+initial snapshot of options/results from already loaded records, including
+scalar distinct choices, but installs no public controller/API. Other
+placeholder-only rendering still fetches no helper KV data.
+A person reviews the saved draft and confirms frontend readiness before release
+or publication. With a checkout, the complete example and limitations are in
+edge/skills/edge-block-package/reference/interactive-collections.md.
+
 ## Sitemaps
 
 `site.settings` with `sitemap` sets the site's sitemap configuration

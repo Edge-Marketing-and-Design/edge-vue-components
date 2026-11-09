@@ -2,7 +2,7 @@
 
 Status: in use in every Hub, for every block the CMS places on a page or post.
 
-Last verified: 2026-11-05, unreleased input preview, template readability and regression checks
+Last verified: 2026-11-09, ad98f805
 
 This contract covers library blocks, the block instances placed on pages and
 posts, draft revisions, releases, propagation and the shared validation rules.
@@ -224,6 +224,53 @@ shared video media picker.
   `@edgedev/template-engine` 26.10.4 in the public renderer's engine, the Hub
   preview and the page editor canvas (`blockRender.vue`).
 - A missing `{{{/if}}}` silently drops the rest of the enclosing content.
+
+### Interactive collection helpers
+
+Template-engine 26.11.1 adds generic collectionFilter, collectionOptions and a
+paired collectionResults region inside the block's single template field.
+Prefer these to custom filtering scripts or Vue overrides when selective,
+bounded indexed filtering fits. Existing blocks stay unchanged until migrated.
+A helper's `source` declaration activates its data source just as source() does;
+validation and MCP source-use summaries recognize both. A results region owns
+its loaded wrapper, so it does not require a separate `{{ loaded }}` class.
+
+`dataSources.<name>.interactive` declares public `fields`, filter defaults
+(`multiple: true` for arrays), optional `fallbackQueryItems`, `maxCandidates`
+and `pageSize`. Optional `pagination: { mode: "server", pageParam, filterPrefix }`
+uses API-managed pages and real page links. queryItems unions/deduplicates indexed
+candidates; query applies AND conditions, then ordering, then the page slice.
+Empty filter bindings omit their lookup/condition. No active lookup and no
+fallback yields no candidates. Exceeding the explicit bound fails instead of
+silently truncating; the engine ceiling is 2,000 candidates.
+
+collectionOptions emits escaped dynamic option values/labels. `distinct` emits
+unique sorted scalar choices, flattening one array level and dropping blank,
+null and object values after any source limit; it provides no counts.
+text-contains/text-starts-with are case-insensitive candidate filters, not an
+unbounded search. Only declared public interactive.fields are sent to results.
+Controls and authored `{{ loading }}` skeletons stay outside the results region.
+The region exposes items, total, page and pages. Normal condition scoping still
+applies: use `item.total == 0` outside its item loop. No nested CMS block render
+or additional source lookup is allowed inside that isolated results region.
+
+The public frontend owns its interactive controller, filter/page URL handling,
+Back/Forward, bounded browser cache and no-store API; the Hub engine upgrade
+alone does not install these into the editor. The editor canvas renders options
+and initial results from already loaded, authorized source records, using native
+engine selection/filter/order/page and conditional rules. Its bounded static
+snapshot does not install the controller/API. Distinct source loading returns
+sorted unique scalar choices in KV and the Firestore emulator. The editor also
+projects raw records from older deployed preview loaders without projecting
+already-scalar choices twice. Other
+placeholder-only rendering still fetches no helper KV and may show busy results.
+Public interaction and draft-editor parity are separate acceptance checks.
+Confirm frontend deployment readiness before a person publishes migrated blocks.
+
+A complete configuration plus its one-template example, all helper signatures,
+limits, cache/event behavior and verification steps are in
+[interactive collections](../../../skills/edge-block-package/reference/interactive-collections.md).
+The existing grammar's condition rule remains verified with engine 26.11.1.
 
 ### Block instance
 

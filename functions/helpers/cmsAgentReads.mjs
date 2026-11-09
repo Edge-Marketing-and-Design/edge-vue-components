@@ -1435,16 +1435,21 @@ export function resolveOverrideFromComponents(components, { orgId = '', blockNam
   }
 }
 
+// Collection helpers activate sources too. Match the engine's literal JSON
+// declarations; malformed declarations are left for its render diagnostics.
 export function extractSourceCalls(template) {
-  const calls = []
-  const matcher = /source\(\s*["']([^"']+)["']/g
-  for (;;) {
-    const match = matcher.exec(String(template || ''))
-    if (!match)
-      break
-    calls.push(match[1])
+  const text = String(template || '')
+  const references = [...text.matchAll(/source\(\s*["']([^"']+)["']/g)]
+    .map(match => ({ index: match.index, name: match[1] }))
+  for (const match of text.matchAll(/\{\{\{#collection(?:Filter|Options|Results)\s+(\{[^\n]*?\})\s*\}\}\}/g)) {
+    try {
+      const name = JSON.parse(match[1])?.source
+      if (typeof name === 'string' && name.trim())
+        references.push({ index: match.index, name })
+    }
+    catch { /* The template engine reports malformed helper JSON. */ }
   }
-  return calls
+  return references.sort((a, b) => a.index - b.index).map(reference => reference.name)
 }
 
 // A Firestore value's kind, for the live shape.

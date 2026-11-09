@@ -2,6 +2,8 @@
 import { renderTemplate, renderTemplateAsync } from '@edgedev/template-engine'
 import { getCmsTemplateRuntimeMeta } from '../../composables/useCmsTemplateRuntimeMeta'
 import { safeParseTagConfig } from '../../lib/cmsTagConfig'
+import { prepareCmsCollectionPreview } from '../../lib/cmsCollectionPreview'
+import { distinctSourceRecords } from '../../lib/cmsDataSourceRecords'
 
 const props = defineProps({
   content: {
@@ -674,6 +676,14 @@ const applyTemplateV2SourceOrder = (records, orderList) => {
 // own overrides filter in memory, and only when no loader applied them.
 const applyTemplateV2SourceOverrides = (items, sourceConfig, overrides, scope, { filtered = false } = {}) => {
   let records = Array.isArray(items) ? [...items] : []
+  const distinct = overrides?.distinct ?? sourceConfig?.distinct
+  // Local UI may still use an older deployed collectionData function, which
+  // returns raw records. New loaders return scalar choices already projected.
+  // A source limit caps input records, so never reapply it to scalar choices.
+  if (distinct !== undefined && records.every(record => record === null || typeof record !== 'object')) {
+    distinctSourceRecords([], distinct) // validate the field path in either mode
+    return records
+  }
   const canonicalLookup = filtered ? null : overrides?.canonicalLookup
   const canonicalDocIds = getTemplateV2CanonicalDocIds(canonicalLookup, scope)
   if (canonicalLookup && !canonicalDocIds.length)
@@ -698,7 +708,7 @@ const applyTemplateV2SourceOverrides = (items, sourceConfig, overrides, scope, {
   const limit = Number(overrides?.limit ?? sourceConfig?.limit)
   if (Number.isFinite(limit) && limit > 0)
     records = records.slice(0, Math.floor(limit))
-  return records
+  return distinct !== undefined ? distinctSourceRecords(records, distinct) : records
 }
 
 const fetchTemplateV2ApiSource = async (sourceConfig, overrides, scope, renderOptions = {}) => {
@@ -798,7 +808,8 @@ const createTemplateV2ChildScope = (scope, alias, entry) => {
 }
 
 const renderTemplateV2CmsSection = async (template, scope, dataSources, schema, renderOptions) => {
-  const resolvedSources = { ...(dataSources || {}) }
+  const preview = await prepareCmsCollectionPreview(template, dataSources)
+  const resolvedSources = { ...preview.dataSources }
   let sourceIndex = 0
   const entries = []
   // Resolve Hub collection queries first, but leave rendering and alias scope
@@ -830,9 +841,9 @@ const renderTemplateV2CmsSection = async (template, scope, dataSources, schema, 
     output += remaining
     return output
   }
-  const prepared = await prepare(replaceTemplateLoadingStateTokens(template, 'loaded'), scope || {})
+  const prepared = await prepare(replaceTemplateLoadingStateTokens(preview.template, 'loaded'), scope || {})
   const output = prepared.replace(/\uE000CMS_ENTRIES_(\d+)\uE001/g, (_, index) => entries[Number(index)])
-  return renderTemplateAsync(
+  const rendered = await renderTemplateAsync(
     output,
     scope || {},
     {},
@@ -844,6 +855,7 @@ const renderTemplateV2CmsSection = async (template, scope, dataSources, schema, 
       templateVersion: 2,
     },
   )
+  return preview.restore(rendered)
 }
 
 const templateV2Block = computed(() => ({

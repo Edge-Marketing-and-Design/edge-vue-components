@@ -36,8 +36,12 @@
       "name": "Template grammar, conditions and validation",
       "code": [
         "edge/lib/cmsBlockValidation.js",
+        { "path": "edge/lib/cmsAgentReads.js", "diffPattern": "extractSourceCalls|collection|references" },
+        { "path": "functions/helpers/cmsAgentReads.mjs", "diffPattern": "extractSourceCalls|collection|references" },
         { "path": "package.json", "diffPattern": "@edgedev/template-engine" },
-        { "path": "functions/package.json", "diffPattern": "@edgedev/template-engine" }
+        { "path": "functions/package.json", "diffPattern": "@edgedev/template-engine" },
+        { "path": "edge/root/edge.packages.json", "diffPattern": "@edgedev/template-engine" },
+        { "path": "edge/functions/edge.packages.json", "diffPattern": "@edgedev/template-engine" }
       ],
       "documents": [
         { "path": "edge/docs/data-contracts/cms-blocks/README.md", "section": "Template v2 grammar the engine supports", "says": "The tags the engine renders, the condition scope rule (outside loops `item` is the block's values; bare names are false; inside a loop `item` is the record)" },
@@ -68,12 +72,17 @@
         "edge/lib/cmsDraftPostPreview.js",
         "edge/components/cms/blockRender.vue",
         "functions/cmsCollectionData.js",
-        "functions/helpers/cmsDataSourceRecords.mjs"
+        "functions/helpers/cmsDataSourceRecords.mjs",
+        "edge/lib/cmsCollectionPreview.js",
+        "edge/lib/cmsDataSourceRecords.js",
+        "edge/functions/helpers/cmsDataSourceRecords.mjs"
       ],
       "documents": [
         { "repo": "emd-cms-front", "path": "docs/cms-template-v2-blocks.md", "section": "Data Sources", "says": "Collection and API sources, runtime tokens, canonical lookups, and when a source runs" },
-        { "path": "edge/skills/edge-block-package/reference/template-v2-contract.md", "section": "Supported starter grammar", "says": "A declared source runs only when the template calls source(\"name\")" },
-        { "path": "edge/skills/edge-block-package/reference/chrome-and-helpers.md", "says": "Site record lookups (path sites with canonicalLookup) for logo, social links and contact" }
+        { "path": "edge/skills/edge-block-package/reference/template-v2-contract.md", "section": "Supported starter grammar", "says": "A declared source runs when source() or a collection helper references it" },
+        { "path": "edge/skills/edge-block-package/reference/chrome-and-helpers.md", "says": "Site record lookups (path sites with canonicalLookup) for logo, social links and contact" },
+        { "path": "edge/skills/edge-block-package/reference/interactive-collections.md", "says": "Complete interactive dataSources/template example, public projection, candidate semantics, paging and preview limits" },
+        { "path": "edge/docs/data-contracts/cms-blocks/README.md", "section": "Interactive collection helpers", "says": "Source activation by helpers, persisted interactive options, condition scope and runtime boundary" }
       ]
     },
     {

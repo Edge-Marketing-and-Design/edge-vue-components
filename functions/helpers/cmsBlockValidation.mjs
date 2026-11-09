@@ -246,7 +246,22 @@ export const findUnbalancedTemplateBlocks = (template) => {
   return [loops && `${loops} unclosed loop(s)`, conditionals && `${conditionals} unclosed conditional(s)`].filter(Boolean).join(', ')
 }
 
-export const extractSourceCalls = template => [...String(template || '').matchAll(/source\(\s*["']([^"']+)["']/g)].map(match => match[1])
+// Collection helpers activate sources too. Match the engine's literal JSON
+// declarations; malformed declarations are left for its render diagnostics.
+export const extractSourceCalls = (template) => {
+  const text = String(template || '')
+  const references = [...text.matchAll(/source\(\s*["']([^"']+)["']/g)]
+    .map(match => ({ index: match.index, name: match[1] }))
+  for (const match of text.matchAll(/\{\{\{#collection(?:Filter|Options|Results)\s+(\{[^\n]*?\})\s*\}\}\}/g)) {
+    try {
+      const name = JSON.parse(match[1])?.source
+      if (typeof name === 'string' && name.trim())
+        references.push({ index: match.index, name })
+    }
+    catch { /* The template engine reports malformed helper JSON. */ }
+  }
+  return references.sort((a, b) => a.index - b.index).map(reference => reference.name)
+}
 
 // Finds each loop header and returns { alias, expression, start, bodyStart,
 // bodyEnd, depth }. Headers may span lines and contain option objects.
@@ -962,7 +977,7 @@ export const validateBlockDocument = (doc, options = {}) => {
   const called = [...new Set(extractSourceCalls(template))]
   for (const name of called) {
     if (!declared.includes(name))
-      report.add('error', 'sources.undeclared', 'template', `Template calls source("${name}") but dataSources does not declare it.`)
+      report.add('error', 'sources.undeclared', 'template', `Template references Data Source "${name}" but dataSources does not declare it.`)
   }
   for (const name of declared) {
     if (!called.includes(name))
@@ -970,7 +985,7 @@ export const validateBlockDocument = (doc, options = {}) => {
   }
   if (called.length && !/\{\{\s*loading\s*\}\}/.test(template))
     report.add('warning', 'sources.loading-token', 'template', 'Dynamic Data Sources have no {{ loading }} placeholder class token.')
-  if (called.length && !/\{\{\s*loaded\s*\}\}/.test(template))
+  if (called.length && !/\{\{\s*loaded\s*\}\}/.test(template) && !/\{\{\{#collectionResults\b/.test(template))
     report.add('warning', 'sources.loaded-token', 'template', 'Dynamic Data Sources have no {{ loaded }} content class token.')
 
   const ownershipStatus = ownership?.status
@@ -1264,7 +1279,7 @@ export const BLOCK_VALIDATION_CODES = Object.freeze({
   'theme.not-object': { severity: 'error', meaning: 'Theme JSON is not an object (theme checks).' },
   'theme.apply-rules': { severity: 'warning', meaning: 'Theme apply rules have no effect on published sites; leave `apply` empty (theme checks).' },
   'type.section-role': { severity: 'warning', meaning: 'Section headings and intros should use the theme\'s type-role classes for size, line height and width; `data-type-role="none"` marks an exception.' },
-  'sources.undeclared': { severity: 'error', meaning: '`source("x")` without a declaration in `dataSources`.' },
+  'sources.undeclared': { severity: 'error', meaning: '`source("x")` or a collection helper without a declaration in `dataSources`.' },
   'sources.site-id': { severity: 'warning', meaning: 'A Data Source looks up the site record by a literal id instead of `{orgId}:{siteId}`, so it only works on one site.' },
   'sources.unused': { severity: 'warning', meaning: 'A declared Data Source is never called.' },
   'sources.loading-token': { severity: 'warning', meaning: 'Dynamic Data Sources have no `{{ loading }}` class token.' },

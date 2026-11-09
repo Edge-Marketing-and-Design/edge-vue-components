@@ -6,6 +6,9 @@
  * - Preserves original behavior: API fields override same-named props.values fields
  */
 
+import { collectionContract, collectionLookup, collectionSelection } from '@edgedev/template-engine'
+import { prepareInteractivePreviewSource } from '../../lib/cmsDataSourceRecords'
+import { hydrateCmsPreviewCandidates } from '../../lib/cmsCollectionPreview'
 import { getCmsTemplateRuntimeMeta } from '../../composables/useCmsTemplateRuntimeMeta'
 import { isDraftPostPreviewSource, resolveDraftPostPreviewSource } from '../../lib/cmsDraftPostPreview'
 
@@ -116,6 +119,7 @@ const dataSourceToPreviewMetaConfig = (source) => {
   if (!source || typeof source !== 'object' || Array.isArray(source))
     return null
 
+  source = prepareInteractivePreviewSource(source, { collectionContract, collectionLookup, collectionSelection })
   const cfg = {
     ...source,
     type: 'array',
@@ -151,10 +155,9 @@ const dataSourcesToRuntimeMeta = (dataSources, meta) => {
 
     acc[field] = {
       ...cfg,
-      queryItems: {
-        ...(cfg.queryItems || {}),
-        ...(hasQueryItems ? queryItems : {}),
-      },
+      queryItems: hasQueryItems
+        ? { ...(cfg.queryItems || {}), ...queryItems }
+        : (cfg.queryItems || {}),
     }
     if (hasLimit)
       acc[field].limit = sourceMeta.limit
@@ -576,7 +579,9 @@ const loadPreviewCollections = async (values, meta, siteId) => {
   const result = Object.values(publishedMeta).some(source => source?.collection)
     ? await edgeGlobal.cmsCollectionData(edgeFirebase, values, publishedMeta, siteId)
     : values
-  return { ...result, ...draftValues }
+  const hydrated = await hydrateCmsPreviewCandidates(result, publishedMeta, (sources) =>
+    edgeGlobal.cmsCollectionData(edgeFirebase, {}, sources, siteId), props.dataSources)
+  return { ...hydrated, ...draftValues }
 }
 const collectionRequestSignature = computed(() => serializePreviewRequestInput({
   siteId: props.siteId,

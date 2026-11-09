@@ -28,6 +28,17 @@ Inside `{{#for site in source("siteDoc")}}`: `site.name`, `site.logo`, `site.log
 
 Navigation hooks: root `cms-nav-root` (+ `cms-nav-sticky`, `data-cms-nav-root`, `data-cms-nav-position`, `data-cms-nav-close-on-link`), `cms-nav-main`, `cms-nav-layout`, `cms-nav-logo`, `cms-nav-desktop`, `cms-nav-toggle`, `cms-nav-overlay`, `cms-nav-panel`, `cms-nav-close`, `cms-nav-link`, `cms-nav-item`. Wrap in a `{{ loading }}` skeleton header and a `{{ loaded }}` root. The runtime owns open/close; blocks ship no JavaScript.
 
+## Interactive collection filters and pagination
+
+Use collectionFilter for control bindings, collectionOptions for escaped dynamic
+options, and paired collectionResults for an inline refreshable result region.
+These helpers activate sources without a source() loop. Prefer them to custom
+scripts or Vue overrides when bounded indexed filtering fits the behavior.
+The complete source configuration, single-template example, field projection,
+limits, browser/server pagination and preview boundary are in
+[interactive collections](interactive-collections.md). No state-tab counts are
+provided by distinct options; do not invent them.
+
 ## Forms
 
 `form.cms-form` or `data-cms-form`; required controls `data-cms-required="true"` and `aria-required="true"` (never native `required`, it blocks page saves); `data-cms-form-submit`; `data-cms-form-message`; optional `data-cms-success-message`, `data-cms-error-message`, class hooks. Endpoint is the shared `/api/contact`; delivery is verified separately.

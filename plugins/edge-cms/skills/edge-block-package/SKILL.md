@@ -108,6 +108,16 @@ importfiles/<project>/<NN-package-name>/
 
 Numbering packages (`00-site-setup`, `01-global-chrome`, `02-home` ...) keeps upload order obvious.
 
+## Interactive collection blocks
+
+For indexed collection filtering, dynamic options and bounded pagination, prefer
+the generic collection helpers over filtering scripts or Vue overrides when they
+fit. Read `reference/interactive-collections.md` for the complete dataSources
+and single-template example. It covers union candidate lookups, final AND query,
+public projected fields, fallbackQueryItems, array filters, dynamic distinct
+options, explicit bounds, server pagination and the Hub/public preview boundary.
+Keep tested migration source settings as supplied. Do not invent tab counts.
+
 ## Site chrome, posts, overrides
 
 - Navigation and footer are synced blocks that read the Site record through `siteDoc` (see `reference/chrome-and-helpers.md`). Never replace Site menu links or the Site logo with static content. New pages reuse the existing chrome blocks. Through the agent operations, `page.placeBlock` copies the site's existing synced instance onto a new page; the site's first instance starts from the schema defaults, so put the chrome's content in the defaults.
