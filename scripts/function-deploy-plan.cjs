@@ -8,11 +8,11 @@ const { createRuntimeInputs, describeInputChanges } = require('./function-deploy
 
 const { readRetiredEnvironmentKeys } = require('./function-deploy-config.cjs')
 
-const VERSION = 7
-const SUPPORTED_VERSIONS = [1, 2, 3, 4, 5, 6, VERSION]
+const VERSION = 8
+const SUPPORTED_VERSIONS = [1, 2, 3, 4, 5, 6, 7, VERSION]
 const fingerprintAtVersion = (item, version) => version === 1 ? item.legacyFingerprint
   : version === 2 ? item.moduleFingerprint : version === 3 ? item.handlerV3Fingerprint
-    : version === 4 ? item.handlerV4Fingerprint : version === 5 ? item.handlerV5Fingerprint : version === 6 ? item.handlerV6Fingerprint : item.fingerprint
+    : version === 4 ? item.handlerV4Fingerprint : version === 5 ? item.handlerV5Fingerprint : version === 6 ? item.handlerV6Fingerprint : version === 7 ? item.handlerV7Fingerprint : item.fingerprint
 const transientInput = file => /^(?:\.DS_Store|\.env\.(?:dev|local)|[a-z0-9-]+-debug(?:\.[^.]+)*\.log)$/.test(path.basename(file))
 const digest = value => createHash('sha256').update(value).digest('hex')
 const stable = value => JSON.stringify(value, (_, item) => item && typeof item === 'object' && !Array.isArray(item)
@@ -172,7 +172,8 @@ function buildInventory(root, endpoints, env = process.env, { formats = SUPPORTE
     environment,
   }
   const fullFiles = allFiles.filter(file => !/(?:^|\/)(?:tests?|__tests__)(?:\/|$)/.test(path.relative(sourceDir, file)))
-  const trace = createHandlerTracer({ root, asts, resolve, closure, hashFiles, digest, env, environmentNames, runtimeAssets, scopedRuntime: true })
+  const trace = createHandlerTracer({ root, asts, resolve, closure, hashFiles, digest, env, environmentNames, runtimeAssets, scopedRuntime: true, scopedTriggers: true })
+  const traceV7 = createHandlerTracer({ root, asts, resolve, closure, hashFiles, digest, env, environmentNames, runtimeAssets, scopedRuntime: true })
   const traceV5 = createHandlerTracer({ root, asts, resolve, closure, hashFiles, digest, env, environmentNames, runtimeAssets })
   const traceV4 = createHandlerTracer({ root, asts, resolve, closure, hashFiles, digest, env, environmentNames, legacyV4: true })
   const traceV3 = createHandlerTracer({ root, asts, resolve, closure, hashFiles, digest, env, environmentNames, legacyV3: true })
@@ -193,6 +194,7 @@ function buildInventory(root, endpoints, env = process.env, { formats = SUPPORTE
     return !referenced
   })
   const runtimeInputs = formats.includes(VERSION) ? createRuntimeInputs({ sourceDir, allFiles, ignoredEnvironmentKeys }) : null
+  const runtimeInputsV7 = formats.includes(7) ? createRuntimeInputs({ sourceDir, allFiles, ignoredEnvironmentKeys }) : null
   const runtimeInputsV6 = formats.includes(6) ? createRuntimeInputs({ sourceDir, allFiles }) : null
   const inventory = {}
   for (const [name, endpoint] of Object.entries(endpoints)) {
@@ -203,16 +205,18 @@ function buildInventory(root, endpoints, env = process.env, { formats = SUPPORTE
     const inputs = uncertain.size ? fullFiles : [...closure(groups.get(endpoint.entryPoint?.split('.')[0]))]
     const files = hashFiles(inputs)
     const legacyFiles = hashFiles(inputs, true)
-    const graph = formats.includes(VERSION) || formats.includes(6) ? trace(entry, endpoint.entryPoint) : null
+    const graph = formats.includes(VERSION) ? trace(entry, endpoint.entryPoint) : null
+    const graphV7 = formats.includes(7) || formats.includes(6) ? traceV7(entry, endpoint.entryPoint) : null
     const graphV5 = formats.includes(5) ? traceV5(entry, endpoint.entryPoint) : null
     const graphV4 = formats.includes(4) ? traceV4(entry, endpoint.entryPoint) : null
     const graphV3 = formats.includes(3) ? traceV3(entry, endpoint.entryPoint) : null
     const inputSummary = runtimeInputs ? runtimeInputs(graph, uncertain.size > 0) : undefined
-    const inputSummaryV6 = runtimeInputsV6 ? runtimeInputsV6(graph, uncertain.size > 0) : undefined
-    for (const summary of [inputSummary, inputSummaryV6].filter(Boolean)) {
+    const inputSummaryV7 = runtimeInputsV7 ? runtimeInputsV7(graphV7, uncertain.size > 0) : undefined
+    const inputSummaryV6 = runtimeInputsV6 ? runtimeInputsV6(graphV7, uncertain.size > 0) : undefined
+    for (const [summary, sourceGraph] of [[inputSummary, graph], [inputSummaryV7, graphV7], [inputSummaryV6, graphV7]].filter(([summary]) => summary)) {
       for (const [file, mode, hash] of configuration) summary.configuration[file] = digest(stable([mode, hash]))
       const sources = new Map()
-      for (const piece of uncertain.size ? hashFiles(fullFiles) : graph.pieces) {
+      for (const piece of uncertain.size ? hashFiles(fullFiles) : sourceGraph.pieces) {
         if (!sources.has(piece[0])) sources.set(piece[0], [])
         sources.get(piece[0]).push(piece)
       }
@@ -226,7 +230,8 @@ function buildInventory(root, endpoints, env = process.env, { formats = SUPPORTE
         callable: !!endpoint.callableTrigger,
         eventTrigger: endpoint.eventTrigger || null,
         fingerprint: formats.includes(VERSION) ? digest(stable({ common, files: handlerFiles, endpoint })) : undefined,
-        handlerV6Fingerprint: formats.includes(6) ? digest(stable({ common: { version: 6, configuration, inputs: inputSummaryV6 }, files: handlerFiles, endpoint })) : undefined,
+        handlerV7Fingerprint: formats.includes(7) ? digest(stable({ common: { version: 7, configuration, inputs: inputSummaryV7 }, files: uncertain.size ? hashFiles(fullFiles) : graphV7?.pieces, endpoint })) : undefined,
+        handlerV6Fingerprint: formats.includes(6) ? digest(stable({ common: { version: 6, configuration, inputs: inputSummaryV6 }, files: uncertain.size ? hashFiles(fullFiles) : graphV7?.pieces, endpoint })) : undefined,
         handlerV5Fingerprint: formats.includes(5) ? digest(stable({ common: { version: 5, configuration: v5Configuration, environment: uncertain.size ? environment : graphV5.environment }, files: uncertain.size ? hashFiles(fullFiles) : graphV5.pieces, endpoint })) : undefined,
         ...(inputSummary ? { inputSummary } : {}),
         handlerV4Fingerprint: graphV4 ? digest(stable({ common: { version: 4, configuration: legacyConfiguration, environment: uncertain.size ? environment : graphV4.environment }, files: uncertain.size ? hashFiles(fullFiles) : graphV4.pieces, endpoint })) : undefined,

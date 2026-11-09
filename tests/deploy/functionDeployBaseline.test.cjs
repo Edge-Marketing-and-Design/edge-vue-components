@@ -4,7 +4,7 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const { execFileSync } = require('node:child_process')
-const { VERSION, buildInventory, makePlan } = require('../../scripts/function-deploy-plan.cjs')
+const { VERSION, buildInventory, makePlan, fingerprintAtVersion } = require('../../scripts/function-deploy-plan.cjs')
 const { recoverBaselines } = require('../../scripts/function-deploy-baseline.cjs')
 
 function fixture(t, version = 2, withRetiredEnv = false) {
@@ -27,7 +27,7 @@ function fixture(t, version = 2, withRetiredEnv = false) {
   const old = buildInventory(root, endpoints, {}).inventory
   const archive = { sha256: 'b'.repeat(64), files: ['index.js', 'alpha.js', 'beta.js', 'package.json', ...(withRetiredEnv ? ['.env.prod'] : [])].map(file => ({ path: file, mode: 0o644, content: fs.readFileSync(path.join(root, 'functions', file)) })) }
   const cloud = { describeSource: async () => ({ bucket: 'test-source', object: 'function-source.zip', generation: '1', md5Hash: 'same-archive', size: '100' }), readSource: async () => archive }
-  const keyFor = item => version === 1 ? item.legacyFingerprint : version === 2 ? item.moduleFingerprint : version === 3 ? item.handlerV3Fingerprint : version === 4 ? item.handlerV4Fingerprint : version === 5 ? item.handlerV5Fingerprint : item.handlerV6Fingerprint
+  const keyFor = item => fingerprintAtVersion(item, version)
   const state = { version, projectId: 'test-project', functions: Object.fromEntries(Object.entries(old).map(([key, item]) => [key, { fingerprint: keyFor(item), remoteUpdateTime: 'deployed-1', deployedAt: 'original-date' }])) }
   const remote = Object.fromEntries(Object.keys(old).map(key => [key, { state: 'ACTIVE', updateTime: 'deployed-1' }]))
   write('functions/new-helper.js', 'exports.value = () => 4')
@@ -39,7 +39,7 @@ function fixture(t, version = 2, withRetiredEnv = false) {
   return { root, write, commit, oldRevision, state, remote, inventory, recover, plan, endpoints, git }
 }
 
-for (const version of [1, 2, 3, 4, 5, 6]) test(`v${version} recovery proves old source before skipping unchanged siblings`, async t => {
+for (const version of [1, 2, 3, 4, 5, 6, 7]) test(`v${version} recovery proves old source before skipping unchanged siblings`, async t => {
   const f = fixture(t, version)
   assert.ok(f.plan().selectedNames.includes('alpha-other'))
   const before = JSON.stringify(f.state)
@@ -95,7 +95,7 @@ test('source recovery remains portable without Git history', async t => {
   assert.deepEqual(f.plan(await f.recover()).selectedNames, ['alpha-one'])
 })
 
-for (const version of [5, 6]) test(`retiring CLEARWATER_URL preserves source proof for v${version} checkpoints`, async t => {
+for (const version of [5, 6, 7]) test(`retiring CLEARWATER_URL preserves source proof for v${version} checkpoints`, async t => {
   const f = fixture(t, version, true)
   const original = JSON.stringify(f.state)
   f.write('functions/.env.prod', '')

@@ -80,7 +80,15 @@ existing local `kvMirror` handler factories, `kvAllowList` serializer factory,
 and `cmsAgentMcp.createRemoteCms` factory construct local values and are traced through their consumers. This exception
 matches the resolved local export, not a function name in an unrelated module.
 Changing those factories to perform unrelated global work would require updating
-this initialization contract. Expression-only local factories with statically pure bodies, static metadata
+this initialization contract. Known Firebase v2 trigger registrations stored in
+local constants also construct deferred handlers; their callback bodies belong
+to the registered endpoint, not to every endpoint importing the entry module.
+The tracer verifies the resolved official SDK import, or the configured SDK
+wrapper in functions/config.js, rather than trusting a same-named function.
+Options must be statically pure for this exception. Eager option calls,
+non-SDK config replacements and unknown factory calls remain conservative.
+The callbacks and their complete dependencies are still traced for the actual
+endpoint consuming that registered handler. Expression-only local factories with statically pure bodies, static metadata
 spreads, literal-array `join`, `path.join`/`resolve`, and `Promise.all` of literal
 imports are local value construction. Imported modules still contribute any
 actual startup side effects. Unknown startup calls remain conservative.
@@ -113,7 +121,7 @@ key is excluded only when none of the statically discovered production source
 identifiers/string literals reference it. A reference disables the exemption.
 This changes comparison only, never actual configuration/runtime values.
 The same Hub policy is used when comparing immutable historical archives.
-Exact v1–v6 comparison remains unchanged, preserving checkpoint source proof.
+Exact v1–v7 comparison remains unchanged, preserving checkpoint source proof.
 Runtime overrides referenced by application source remain included. Diagnostics show key names, never environment values.
 For example, a template-engine upgrade now reports only its consumers:
 
@@ -177,8 +185,8 @@ deployed source objects identified by `buildConfig.sourceProvenance`.
 `functions/state-v1.json` contains `version`, `projectId`, and `functions`, a map
 keyed by `<region>/<function-name>`. Each entry stores `fingerprint`,
 `fingerprintVersion`, `remoteUpdateTime` and `deployedAt`. The object name stays
-unchanged; its current schema/fingerprint version is 7. Exact version-1 through
-version-6 fingerprint comparators remain available for migration. Version-6 and newer
+unchanged; its current schema/fingerprint version is 8. Exact version-1 through
+version-7 fingerprint comparators remain available for migration. Version-6 and newer
 entries additionally store `inputSummary`: file/definition hashes, consumed
 package versions and lock-closure hashes, and environment-key hashes. This lets
 the next plan name specific source, package, configuration and environment-key
@@ -217,7 +225,7 @@ before promoting checkpoints or starting batches if required proof is missing;
 resolve read access/configuration or deliberately use `--all-functions`.
 Explicit full deployments do not need source recovery. After migration, normal
 handler comparisons require no historical source downloads. All deployers must
-pull the updated scripts before using version-7 state; older runners fail closed.
+pull the updated scripts before using version-8 state; older runners fail closed.
 An operator-requested `redeployRequested: true` selects just that checkpoint's
 Function even when its fingerprint matches. Successful deployment replaces the
 checkpoint and clears this one-time request; failed deployments retain it.

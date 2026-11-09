@@ -11,7 +11,7 @@ async function recoverBaselines({ root, endpoints, environment, inventory, state
   const retiredEnvironmentKeys = readRetiredEnvironmentKeys(root)
   const pending = Object.keys(inventory).filter(key => {
     const previous = state.functions?.[key], version = previous?.fingerprintVersion || state.version
-    return previous && [1, 2, 3, 4, 5, 6].includes(version) && version < VERSION
+    return previous && [1, 2, 3, 4, 5, 6, 7].includes(version) && version < VERSION
       && remote[key]?.state === 'ACTIVE' && remote[key].updateTime === previous.remoteUpdateTime
   })
   const descriptors = new Map(), groups = new Map(), recovered = {}

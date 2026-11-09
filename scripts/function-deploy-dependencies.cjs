@@ -14,7 +14,7 @@ const exportName = (node) => {
 }
 const moduleExport = node => node?.object?.name === 'module' && property(node) === 'exports'
 
-function createHandlerTracer({ root, asts, resolve, closure, hashFiles, digest, env, environmentNames, legacyV3 = false, legacyV4 = false, scopedRuntime = false, runtimeAssets = new Map() }) {
+function createHandlerTracer({ root, asts, resolve, closure, hashFiles, digest, env, environmentNames, legacyV3 = false, legacyV4 = false, scopedRuntime = false, scopedTriggers = false, runtimeAssets = new Map() }) {
   const modules = new Map()
   function inspect(file) {
     if (modules.has(file)) return modules.get(file)
@@ -166,9 +166,73 @@ function createHandlerTracer({ root, asts, resolve, closure, hashFiles, digest, 
     return (relative === 'functions/kv/kvMirror.js' && ['createKvMirrorHandler', 'createKvMirrorHandlerFromFields'].includes(name))
       || (relative === 'functions/kvAllowList.js' && name === 'kvAllowList')
   }
+  // SDK trigger registration constructs a handler; it does not invoke its
+  // callback during module initialization. Match resolved imports rather than
+  // trusting an onCall/onMessagePublished spelling in arbitrary user code.
+  const triggerNames = new Set(['onCall', 'onRequest', 'onSchedule', 'onMessagePublished',
+    'onDocumentWritten', 'onDocumentCreated', 'onDocumentUpdated', 'onDocumentDeleted',
+    'onDocumentUpdatedWithAuthContext', 'onObjectFinalized', 'onObjectDeleted'])
+  function configuredSdkTrigger(info, value, name, seen = new Set()) {
+    if (!value || seen.has(value)) return false
+    seen.add(value)
+    if (value.type === 'Identifier') {
+      const variable = info.references.get(value.start)?.resolved
+        || [...info.bindings.keys()].find(variable => variable.name === value.name)
+      const def = info.bindings.get(variable)
+      const imported = info.importOf(def?.node?.init)
+      if (imported) {
+        const members = [...imported.members]
+        if (def.node.id?.type === 'ObjectPattern') {
+          const binding = def.node.id.properties.find(p => p.type === 'Property' && !p.computed && p.value?.name === variable.name)
+          if (!binding) return false
+          members.push(binding.key.name || binding.key.value)
+        }
+        return /^firebase-functions\/v2\/(?:https|scheduler|pubsub|firestore|storage)$/.test(imported.specifier)
+          && members.length === 1 && members[0] === name
+      }
+      return configuredSdkTrigger(info, def?.node?.init, name, seen)
+    }
+    const imported = info.importOf(value)
+    if (imported) return /^firebase-functions\/v2\/(?:https|scheduler|pubsub|firestore|storage)$/.test(imported.specifier)
+      && imported.members.length === 1 && imported.members[0] === name
+    if (value.type === 'CallExpression' && value.callee.type === 'Identifier') {
+      const def = info.bindings.get(info.references.get(value.callee.start)?.resolved)
+      const wrapped = info.importOf(def?.node?.init)
+      const wrapper = wrapped && resolve(info.file, wrapped.specifier)
+      const binding = def?.node?.id?.properties?.find(p => p.type === 'Property' && p.value?.name === value.callee.name)
+      const member = binding?.key?.name || wrapped?.members?.[0]
+      return wrapper && path.relative(root, wrapper) === 'functions/errorReporting.js'
+        && member === 'wrapTriggerFactory' && configuredSdkTrigger(info, value.arguments[0], name, seen)
+    }
+    return false
+  }
+  function triggerRegistration(node, info) {
+    if (!scopedTriggers || node?.type !== 'CallExpression') return false
+    const callee = node.callee
+    const identifier = callee.type === 'MemberExpression' ? callee.object : callee
+    if (identifier?.type !== 'Identifier') return false
+    const variable = info.references.get(identifier.start)?.resolved
+    const def = info.bindings.get(variable)
+    const imported = info.importOf(def?.node?.init)
+    if (!imported) return false
+    let members = [...imported.members]
+    if (def.node.id?.type === 'ObjectPattern') {
+      const binding = def.node.id.properties.find(p => p.type === 'Property' && !p.computed && p.value?.name === variable.name)
+      if (!binding) return false
+      members.push(binding.key.name || binding.key.value)
+    }
+    if (callee.type === 'MemberExpression') members.push(property(callee))
+    if (members.length !== 1 || !triggerNames.has(members[0])) return false
+    const dependency = resolve(info.file, imported.specifier)
+    const official = /^firebase-functions\/v2\/(?:https|scheduler|pubsub|firestore|storage)$/.test(imported.specifier)
+    const configured = dependency && path.relative(root, dependency) === 'functions/config.js'
+      && configuredSdkTrigger(inspect(dependency), inspect(dependency).exports.get(members[0]), members[0])
+    return (official || configured) && node.arguments.every(argument => pureInitializer(argument, info))
+  }
   const checkingPureCalls = new Set()
   function pureInitializer(node, info) {
     if (!node) return true
+    if (triggerRegistration(node, info)) return true
     if (['FunctionExpression', 'ArrowFunctionExpression', 'Literal', 'Identifier'].includes(node.type)) return true
     // Import starts module initialization, which initialize()/hasStartupWork()
     // follow separately. Its exported values belong to the promise's consumer.

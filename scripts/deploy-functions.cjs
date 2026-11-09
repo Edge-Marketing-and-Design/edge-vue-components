@@ -187,7 +187,7 @@ async function main(argv) {
     const current = buildInventory(root, endpoints, environment)
     // Legacy hashes include volatile artifacts solely for checkpoint migration.
     // Only normalized production inputs guard a running deployment.
-    const productionInventory = inventory => Object.fromEntries(Object.entries(inventory).map(([key, { legacyFingerprint, moduleFingerprint, handlerV3Fingerprint, handlerV4Fingerprint, handlerV5Fingerprint, handlerV6Fingerprint, ...item }]) => [key, item]))
+    const productionInventory = inventory => Object.fromEntries(Object.entries(inventory).map(([key, { legacyFingerprint, moduleFingerprint, handlerV3Fingerprint, handlerV4Fingerprint, handlerV5Fingerprint, handlerV6Fingerprint, handlerV7Fingerprint, ...item }]) => [key, item]))
     if (JSON.stringify(productionInventory(current.inventory)) !== JSON.stringify(productionInventory(result.inventory)))
       throw new Error('Function inputs changed while deploying; no checkpoint for the current batch. Commit/push changes and rerun.')
   }
