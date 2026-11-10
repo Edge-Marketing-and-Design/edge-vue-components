@@ -1851,6 +1851,7 @@ onBeforeUnmount(() => {
           <edge-cms-site-settings-form
             v-if="state.workingDoc"
             :settings="state.workingDoc.defaultSiteSettings"
+            :splash-theme="state.workingDoc.theme"
             :show-users="false"
             :show-theme-fields="false"
             :is-admin="true"

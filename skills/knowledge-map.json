@@ -3,6 +3,32 @@
   "version": 1,
   "areas": [
     {
+      "id": "splash-screen-settings",
+      "name": "Splash screen site settings and preview",
+      "code": [
+        "edge/components/cms/splashScreenSettings.vue",
+        "edge/lib/cmsSplashScreen.js",
+        "edge/components/cms/siteSettingsForm.vue",
+        "edge/composables/siteSettingsTemplate.js",
+        { "path": "edge/components/cms/site.vue", "diffPattern": "splashImage|splashBackgroundColor|splash-theme" }
+      ],
+      "documents": [
+        { "path": "edge/docs/data-contracts/cms-sites-and-pages/README.md", "section": "Splash screen settings", "says": "Splash fields, theme tokens, preview semantics, settings lifecycle and frontend boundary" }
+      ]
+    },
+    {
+      "id": "post-blurb-metadata",
+      "name": "Post blurb validation and KV metadata limits",
+      "code": [
+        "edge/components/cms/posts.vue",
+        "functions/helpers/cmsPostKvMetadata.js",
+        "edge/functions/helpers/cmsPostKvMetadata.js"
+      ],
+      "documents": [
+        { "path": "edge/docs/data-contracts/cms-posts/README.md", "section": "KV dataset", "says": "Editor and agent blurb caps, legacy metadata truncation, byte budget and unchanged canonical posts" }
+      ]
+    },
+    {
       "id": "site-resolution",
       "name": "Published site revision and exact hostname resolution",
       "code": [

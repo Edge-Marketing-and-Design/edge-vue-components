@@ -6,7 +6,7 @@ import { buildPostTypeFields, buildTypedPost, getPostPath, postTypeSchema, prepa
 import { buildCmsPostLiveUrl } from '../../lib/cmsPostRoutes'
 import { buildPostEntryPreviewBlock, postEntryPreviewRows } from '../../lib/cmsPostEntryPreview'
 import { normalizePostEvent, postEventPublishProblem } from '../../lib/cmsPostEvents.mjs'
-import { slugify, uniquePostSlug } from '../../lib/cmsOperations'
+import { POST_BLURB_MAX, slugify, uniquePostSlug } from '../../lib/cmsOperations'
 import { findCmsPageRoute } from '../../lib/cmsPublishedSitePreview'
 
 const props = defineProps({ site: { type: String, required: true }, definition: { type: Object, required: true }, theme: { type: Object, default: null }, canManageRestrictions: { type: Boolean, default: false } })
@@ -46,7 +46,7 @@ const fields = computed(() => buildPostTypeFields(sessionPage.value || props.def
 const visible = computed(() => records.value.filter(post => `${post.title} ${post.name} ${post.blurb}`.toLowerCase().includes(search.value.toLowerCase())).sort((a, b) => (b.doc_created_at || 0) - (a.doc_created_at || 0)))
 const sourcePost = computed(() => records.value.find(post => post.docId === selected.value))
 const blockRows = computed(() => postEntryPreviewRows(sessionPage.value))
-const schema = toTypedSchema(z.object({ title: z.string().min(1, 'Title is required'), name: z.string().min(1, 'URL slug is required'), blurb: z.string().min(1, 'Preview text is required').max(500) }).passthrough())
+const schema = toTypedSchema(z.object({ title: z.string().min(1, 'Title is required'), name: z.string().min(1, 'URL slug is required'), blurb: z.string().min(1, 'Preview text is required').max(POST_BLURB_MAX, `Preview text must be at most ${POST_BLURB_MAX} characters`) }).passthrough())
 const initial = computed(() => {
   const doc = { title: '', name: '', blurb: '', tags: [], featuredImage: '', postTypeId: props.definition.id, postTypeSchema: postTypeSchema(sessionPage.value || props.definition.page), type: props.definition.type }
   if (eventType.value)

@@ -2,7 +2,7 @@
 
 Status: in use for every site the CMS publishes.
 
-Last verified: 2026-11-08, 222869ce
+Last verified: 2026-11-10, splash screen settings and draft/publication lifecycle
 
 A site is an organization's website: its settings, menus and domains, and
 the draft pages assembled from block instances. Publishing copies a page or
@@ -52,6 +52,34 @@ values compare equally for legacy sites. The Branding tab provides selection,
 removal and a URL-input alternative. Changing it participates in site settings
 publication, change summaries and Discard changes. The normal whole-document
 publisher and `sites:` KV serialization retain the field without a new index.
+
+### Splash screen settings
+
+`splashImage` is an optional image URL. `splashBackgroundColor` is an optional
+color **key** in the site's selected theme `extend.colors`, not a literal CSS
+color. Both default to an empty string. Nested color keys use dots, for example
+`brand.500`; a nested `DEFAULT` leaf uses its parent key. Nonstandard theme
+names are supported. The UI offers only the selected theme's defined colors.
+
+The Splash Screen tab follows Branding. It includes media selection/removal,
+background swatches and a local phone preview using the current working copy.
+The local-only iOS/Android toggle does not persist a setting. iOS previews
+`splashImage`; Android previews `appIcon` and points editors to Branding to
+change it. Both use the selected theme background. Missing artwork shows a
+platform-specific prompt without substituting a logo. The preview centers
+artwork without cropping. A missing theme color is flagged and
+white is used for the illustrative preview without changing the stored token.
+
+Both fields participate in draft save, unpublished-change comparisons, settings
+change summaries, publication and Discard changes. Missing and empty compare
+equally for existing sites. Theme default settings can seed both fields. The
+existing whole-document site publisher and `sites:` KV document retain them;
+no new endpoint, index, rules or migration is required. The image remains
+separate from `appIcon`, `favicon` and logo settings. The public renderer must
+consume these new fields before they affect home-screen launches; native
+appearance is device dependent.
+
+### Branding icon preview
 
 Preview icons opens a full-screen, local-only dialog using the current settings,
 including unsaved selections. It never saves or publishes. It shows original

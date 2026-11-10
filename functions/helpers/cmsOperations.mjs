@@ -1072,6 +1072,8 @@ export const siteSettingsDefaults = () => ({
   brandLogoLight: '',
   favicon: '',
   appIcon: '',
+  splashImage: '',
+  splashBackgroundColor: '',
   menuPosition: 'right',
   domains: [],
   forwardApex: true,
@@ -1374,6 +1376,8 @@ export const SITE_CREATE_FIELDS = Object.freeze([
   'brandLogoLight',
   'favicon',
   'appIcon',
+  'splashImage',
+  'splashBackgroundColor',
   'contactEmail',
   'contactPhone',
   'metaTitle',
@@ -1401,6 +1405,8 @@ export const SITE_SETTINGS_FIELDS = Object.freeze([
   'brandLogoLight',
   'favicon',
   'appIcon',
+  'splashImage',
+  'splashBackgroundColor',
   'contactEmail',
   'contactPhone',
   'socialFacebook',
@@ -1419,7 +1425,7 @@ export const SITE_SETTINGS_FIELDS = Object.freeze([
   'sitemap',
 ])
 // Settings that hold an image: empty, or a Hub media URL.
-export const SITE_SETTINGS_IMAGE_FIELDS = Object.freeze(['logo', 'logoLight', 'brandLogoDark', 'brandLogoLight', 'favicon', 'appIcon'])
+export const SITE_SETTINGS_IMAGE_FIELDS = Object.freeze(['logo', 'logoLight', 'brandLogoDark', 'brandLogoLight', 'favicon', 'appIcon', 'splashImage'])
 export const SITE_LOGO_TYPES = Object.freeze(['image', 'text'])
 export const SITE_MENU_POSITIONS = Object.freeze(['left', 'center', 'right'])
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -1672,7 +1678,7 @@ export const templateAllowsBlock = (template, block) => {
 export const POST_UPDATE_FIELDS = Object.freeze(['title', 'blurb', 'name', 'tags', 'featuredImage', 'event', 'restrictionRuleId', 'values'])
 // Every key post.create accepts, `type` included.
 export const POST_CREATE_KEYS = Object.freeze(['type', 'siteId', 'title', 'blurb', 'name', 'tags', 'featuredImage', 'postType', 'event', 'templateId', 'postTypeId', 'values'])
-export const POST_BLURB_MAX = 500
+export const POST_BLURB_MAX = 250
 
 
 // posts.vue normalizePostType: missing or anything else means `post`.
@@ -2252,7 +2258,7 @@ export const CMS_OPERATION_SPECS = Object.freeze({
     scope: 'site',
     writes: 'sites',
     summary: 'Change a draft post\'s fields with the post editor\'s rules.',
-    effect: 'Those fields and `last_updated`/`uid`, with the editor\'s rules: title and blurb required, blurb at most 500 characters, `name` slugified and made unique (a title change keeps the slug, as for a saved post in the editor), `event` merged into the post\'s event and recomputed for events, `restrictionRuleId` empty or one of the site\'s `restrictedContent.rules` ids. Other fields are refused',
+    effect: 'Those fields and `last_updated`/`uid`, with the editor\'s rules: title and blurb required, blurb at most 250 characters, `name` slugified and made unique (a title change keeps the slug, as for a saved post in the editor), `event` merged into the post\'s event and recomputed for events, `restrictionRuleId` empty or one of the site\'s `restrictedContent.rules` ids. Other fields are refused',
     input: {
       siteId: siteIdField,
       postId: postIdField,
@@ -2571,6 +2577,7 @@ export const CMS_DOCUMENT_FIELDS = Object.freeze({
       { names: ['canonicalDomain'], type: 'string', meaning: '"Forward All Sites To": the domain every other domain redirects to.', writtenBy: 'the Hub\'s site settings' },
       { names: ['logo', 'logoLight', 'logoText', 'logoType'], type: 'strings', meaning: 'Logo image, light-surface logo, text logo, and `image` or `text`.' },
       { names: ['brandLogoDark', 'brandLogoLight', 'favicon', 'appIcon'], type: 'strings', meaning: 'Brand marks, favicon and optional installed-app icon URLs.' },
+      { names: ['splashImage', 'splashBackgroundColor'], type: 'strings', meaning: 'Splash artwork URL and background theme.extend.colors key (dot-separated for nested colors); empty means unset.' },
       { names: ['menuPosition'], type: 'string', meaning: 'Navigation alignment (`right` by default).' },
       { names: ['contactEmail', 'contactPhone'], type: 'strings', meaning: 'Contact details blocks read from the site record and contact forms send to.' },
       { names: ['metaTitle', 'metaDescription', 'structuredData'], type: 'strings', meaning: 'Site SEO. `structuredData` is a JSON-LD string; the default is a `WebSite` with a publisher `Organization` and the `{{cms-site}}` and `{{cms-logo}}` tokens (`buildSiteStructuredData`).' },
@@ -2598,7 +2605,7 @@ export const CMS_DOCUMENT_FIELDS = Object.freeze({
     fields: [
       { names: ['name'], type: 'string, required', meaning: 'The post\'s slug, generated from the title and editable; unique within the site\'s posts (`ensureUniqueSlug`). It is the last route segment under the post template page.' },
       { names: ['title'], type: 'string, required', meaning: 'Title.' },
-      { names: ['blurb'], type: 'string, required', meaning: 'Preview text, at most 500 characters (`POST_BLURB_MAX`).' },
+      { names: ['blurb'], type: 'string, required', meaning: 'Preview text, at most 250 characters (`POST_BLURB_MAX`).' },
       { names: ['tags'], type: 'string array', meaning: 'Free tags; a post with the `Field Notes` tag is an editorial post.' },
       { names: ['featuredImage'], type: 'string', meaning: 'One image URL or storage path. Older posts may carry `featuredImages` (an array); the first entry is used when `featuredImage` is empty.' },
       { names: ['content', 'structure'], type: 'arrays', meaning: 'The body: block instances and rows, as a page\'s (blocks contract, Block instance; sites and pages contract, Page). Copied from a Post template page when one is given.' },

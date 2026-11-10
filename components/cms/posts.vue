@@ -9,6 +9,7 @@ import {
   normalizeCmsPostStructure,
   removeCmsPostBlockReferences,
 } from '../../lib/cmsPostStructure'
+import { POST_BLURB_MAX } from '../../lib/cmsOperations'
 import { buildCmsPostLiveUrl, findFirstCmsPostRouteSegments } from '../../lib/cmsPostRoutes'
 
 const props = defineProps({
@@ -356,7 +357,7 @@ const schemas = {
     tags: z.array(z.string()).optional(),
     blurb: z.string({
       required_error: 'Content blurb is required',
-    }).min(1, { message: 'Content blurb is required' }).max(500, { message: 'Content blurb must be at most 500 characters' }),
+    }).min(1, { message: 'Content blurb is required' }).max(POST_BLURB_MAX, { message: `Content blurb must be at most ${POST_BLURB_MAX} characters` }),
     content: z.union([z.array(z.any()), z.string()]).optional(),
     structure: z.array(z.any()).optional(),
     featuredImages: z.array(z.string()).optional(),

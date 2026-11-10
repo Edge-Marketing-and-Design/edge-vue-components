@@ -2,7 +2,7 @@
 
 Status: in use for every post and event a site publishes.
 
-Last verified: 2026-11-05, draft-only custom index previews, fixed launcher and shared block-editor regression tests
+Last verified: 2026-11-10, 250-character blurb validation and byte-aware KV metadata truncation
 
 A post is a dated entry (a post or an event) that a post template page
 renders under its route. Drafts live with the site; publishing copies a
@@ -86,7 +86,11 @@ Index metadata, the fields a list renders without a canonical read:
 `event.{startAt,endAt,isPast,locationName}`, `hidePublishedDate` (only when
 `true`) and `tags`, with tags dropped
 from the end until the metadata fits KV's 1,024-byte limit
-(`functions/helpers/cmsPostKvMetadata.js`). `cms-reindexPublishedPostsToKv` (any
+(`functions/helpers/cmsPostKvMetadata.js`). Editor and agent operations limit blurbs
+to 250 characters. KV metadata also caps legacy blurbs at 250 characters,
+then shortens them further when needed to fit the byte budget before adding tags.
+This never changes the stored post or full canonical document. Other oversized
+metadata fields can still require reducing index fields or canonical lookups. `cms-reindexPublishedPostsToKv` (any
 signed-in Hub user) rewrites every snapshot's keys.
 
 ### What the renderer reads
@@ -145,7 +149,7 @@ The field names and the listing and detail sources are spelled out in the
 
 ## Invariants and validation codes
 
-- **Required:** `name`, `title` and `blurb` (at most 500 characters) on
+- **Required:** `name`, `title` and `blurb` (at most 250 characters) on
   every save.
 - **Slugs** are unique within the site's posts and are generated from the
   title until edited.

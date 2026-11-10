@@ -272,6 +272,8 @@ const schemas = {
     brandLogoLight: z.string().optional(),
     favicon: z.string().optional(),
     appIcon: z.string().optional(),
+    splashImage: z.string().optional(),
+    splashBackgroundColor: z.string().optional(),
     menuPosition: z.enum(['left', 'center', 'right']).optional(),
     metaTitle: z.string().optional(),
     metaDescription: z.string().optional(),
@@ -1325,6 +1327,8 @@ const isSiteDiff = computed(() => {
       brandLogoLight: publishedSite.brandLogoLight,
       favicon: publishedSite.favicon,
       appIcon: publishedSite.appIcon || '',
+      splashImage: publishedSite.splashImage || '',
+      splashBackgroundColor: publishedSite.splashBackgroundColor || '',
       sitemap: publishedSite.sitemap || null,
       menuPosition: publishedSite.menuPosition,
       forwardApex: publishedSite.forwardApex,
@@ -1363,6 +1367,8 @@ const isSiteDiff = computed(() => {
       brandLogoLight: siteData.value.brandLogoLight,
       favicon: siteData.value.favicon,
       appIcon: siteData.value.appIcon || '',
+      splashImage: siteData.value.splashImage || '',
+      splashBackgroundColor: siteData.value.splashBackgroundColor || '',
       sitemap: siteData.value.sitemap || null,
       menuPosition: siteData.value.menuPosition,
       forwardApex: siteData.value.forwardApex,
@@ -1406,6 +1412,8 @@ const SITE_SETTINGS_DIFF_FIELDS = [
   { key: 'brandLogoLight', label: 'Brand Logo Light' },
   { key: 'favicon', label: 'Favicon' },
   { key: 'appIcon', label: 'App Icon' },
+  { key: 'splashImage', label: 'Splash Image' },
+  { key: 'splashBackgroundColor', label: 'Splash Background Color' },
   { key: 'menuPosition', label: 'Menu Position' },
   { key: 'forwardApex', label: 'Forward Apex', format: 'boolean' },
   { key: 'canonicalDomain', label: 'Forward All Sites To' },
@@ -1510,7 +1518,7 @@ const siteSettingsDiffDetails = computed(() => {
       baseValue = baseValue || defaultSiteSettings.trackingConsentMessage
       compareValue = compareValue || defaultSiteSettings.trackingConsentMessage
     }
-    if (field.key === 'appIcon') {
+    if (['appIcon', 'splashImage', 'splashBackgroundColor'].includes(field.key)) {
       baseValue = baseValue || ''
       compareValue = compareValue || ''
     }
@@ -1593,6 +1601,8 @@ const discardSiteSettings = async () => {
       brandLogoLight: publishedSite.brandLogoLight || '',
       favicon: publishedSite.favicon || '',
       appIcon: publishedSite.appIcon || '',
+      splashImage: publishedSite.splashImage || '',
+      splashBackgroundColor: publishedSite.splashBackgroundColor || '',
       sitemap: publishedSite.sitemap || null,
       menuPosition: publishedSite.menuPosition || '',
       forwardApex: publishedSite.forwardApex !== false,
@@ -5478,6 +5488,7 @@ const siteSettingsWorkingDocUpdates = (workingDoc) => {
               <edge-cms-site-settings-form
                 :settings="slotProps.workingDoc"
                 :theme-options="themeOptions"
+                :splash-theme="parseThemeDoc(themeCollection[slotProps.workingDoc?.theme])"
                 :user-options="userOptions"
                 :has-users="userOptions.length > 0"
                 :show-users="!cmsMultiOrg"

@@ -2,7 +2,7 @@
 
 Status: in use; the baseline names are adopted for new themes, and older themes keep working with warnings.
 
-Last verified: 2026-10-06, 1bbb7b99
+Last verified: 2026-11-10, splash screen defaults in theme settings
 
 A theme is the Tailwind configuration, head markup and extra CSS a site
 renders with, plus the pages and settings a new site starts from. This
@@ -138,6 +138,12 @@ Portable blocks use the baseline names, plus `white`, `black`, `transparent`,
 them); `extraCSS` a string. The operations accept no other theme fields
 than `name`, `theme`, `headJSON`, `extraCSS`, `typeRoles`, `defaultPages`,
 `defaultMenus` and `defaultSiteSettings` (`THEME_FIELDS`).
+
+Default Site Settings includes the same Splash Screen tab as site settings.
+Its `splashImage` and `splashBackgroundColor` values seed newly created sites;
+the color choices resolve against the theme being edited. These defaults do
+not update existing sites. See the sites-and-pages Splash screen settings
+contract for the fields and preview behavior.
 
 ### Older themes
 

@@ -3,6 +3,7 @@ import { CheckCircle2, CircleAlert, Eye, Loader2, RefreshCw } from 'lucide-vue-n
 import { normalizeAnalyticsEvents, normalizeSiteDomainSettings } from '../../lib/cmsOperations'
 
 const props = defineProps({
+  splashTheme: { type: [Object, String], default: null },
   sitemapPages: { type: Object, default: () => ({}) },
   showSitemaps: {
     type: Boolean,
@@ -869,6 +870,9 @@ watch(() => [
       <TabsTrigger value="branding" class="min-h-9 w-full min-w-0 whitespace-normal rounded-sm px-3 py-2 text-sm leading-snug text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground data-[state=active]:bg-slate-800 data-[state=active]:text-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-slate-100 dark:data-[state=active]:text-slate-900">
         Branding
       </TabsTrigger>
+      <TabsTrigger value="splash-screen" class="min-h-9 w-full min-w-0 whitespace-normal rounded-sm px-3 py-2 text-sm leading-snug text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground data-[state=active]:bg-slate-800 data-[state=active]:text-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-slate-100 dark:data-[state=active]:text-slate-900">
+        Splash Screen
+      </TabsTrigger>
       <TabsTrigger value="seo" class="min-h-9 w-full min-w-0 whitespace-normal rounded-sm px-3 py-2 text-sm leading-snug text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground data-[state=active]:bg-slate-800 data-[state=active]:text-white data-[state=active]:shadow-sm dark:data-[state=active]:bg-slate-100 dark:data-[state=active]:text-slate-900">
         SEO
       </TabsTrigger>
@@ -1564,6 +1568,9 @@ watch(() => [
         />
         <p class="text-xs text-muted-foreground">App icon: separate artwork for installed apps. If left empty, the dark logo is used. The favicon stays separate.</p>
       </template>
+    </TabsContent>
+    <TabsContent value="splash-screen" class="pt-4">
+      <edge-cms-splash-screen-settings :settings="props.settings" :theme="props.splashTheme" :site-id="props.siteId" :enable-media-picker="props.enableMediaPicker" />
     </TabsContent>
     <TabsContent value="seo" class="pt-4">
       <div class="space-y-4">

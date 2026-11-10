@@ -2,7 +2,7 @@
 
 Status: in use through the Hub callables and the agent endpoint; every write is a draft.
 
-Last verified: 2026-11-05, custom-post block ownership regression checks
+Last verified: 2026-11-10, post blurb validation capped at 250 characters
 
 Server-side, draft-only writes for building sites, used by agents through the
 CMS MCP and available to any signed-in caller with write permission. Source:
@@ -17,6 +17,13 @@ problem codes) is generated from `CMS_OPERATION_SPECS` in
 `edge/lib/cmsOperations.js`, the definitions the checks enforce; it replaces
 the marker below whenever `cms_contract` serves this contract. Change an
 operation there, not here. The rest of this file is hand-written.
+
+`site.settings` also accepts `splashImage` (Hub media URL or empty) and
+`splashBackgroundColor` (theme color key or empty). These are draft settings;
+publication stays with the normal site settings flow.
+
+Post creation and updates accept blurbs of at most 250 characters, matching both
+standard and custom post editors. Existing stored blurbs are not migrated.
 
 ## Storage
 

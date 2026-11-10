@@ -2,6 +2,7 @@
 // without a canonical read. KV caps metadata at 1,024 bytes; tags are
 // dropped from the end until it fits.
 const MAX_KV_METADATA_BYTES = 1024
+const POST_BLURB_MAX = 250
 
 const postCanonicalKey = ({ orgId, siteId, postId }) => `posts:${orgId}:${siteId}:${postId}`
 const metadataSizeBytes = value => Buffer.byteLength(JSON.stringify(value), 'utf8')
@@ -75,6 +76,15 @@ const buildPostKvMetadata = (data, params) => {
     }
   }
   const canonicalKey = postCanonicalKey(params || {})
+  // Apply after custom projections too, so they cannot restore a legacy blurb.
+  // Keep full post/canonical data untouched and avoid splitting surrogate pairs.
+  const blurbCharacters = Array.from(String(metadataBase.blurb || '').slice(0, POST_BLURB_MAX))
+  if (blurbCharacters.at(-1)?.match(/[\uD800-\uDBFF]/)) blurbCharacters.pop()
+  metadataBase.blurb = blurbCharacters.join('')
+  while (blurbCharacters.length && metadataSizeBytes({ ...metadataBase, canonical: canonicalKey }) > MAX_KV_METADATA_BYTES) {
+    blurbCharacters.pop()
+    metadataBase.blurb = blurbCharacters.join('')
+  }
   if (data?.postTypeId && metadataSizeBytes({ ...metadataBase, canonical: canonicalKey }) > MAX_KV_METADATA_BYTES)
     throw new Error('Post index metadata exceeds 1,024 bytes. Reduce the fields used by the index or use canonical post lookups.')
   const fittedTags = fitPostTagsToMetadataBudget({
@@ -89,6 +99,7 @@ const buildPostKvMetadata = (data, params) => {
 
 module.exports = {
   MAX_KV_METADATA_BYTES,
+  POST_BLURB_MAX,
   buildPostKvMetadata,
   fitPostTagsToMetadataBudget,
   postCanonicalKey,
