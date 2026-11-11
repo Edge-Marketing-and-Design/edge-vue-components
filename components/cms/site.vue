@@ -290,6 +290,7 @@ const schemas = {
       forms: z.boolean().optional(),
       contactClicks: z.boolean().optional(),
       accountSignUps: z.boolean().optional(),
+      shares: z.boolean().optional(),
     }).optional(),
     sureFeedURL: z.string().optional(),
     socialFacebook: z.string().optional(),
@@ -1445,6 +1446,7 @@ const ANALYTICS_EVENT_LABELS = {
   forms: 'Form submissions',
   contactClicks: 'Phone and email clicks',
   accountSignUps: 'Account sign-ups',
+  shares: 'Share clicks',
 }
 
 const summarizeSiteSettingsValue = (value, format = '') => {

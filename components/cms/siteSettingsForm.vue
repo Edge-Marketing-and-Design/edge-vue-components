@@ -394,6 +394,7 @@ const analyticsEventsEnabled = analyticsEventSwitch('enabled')
 const analyticsEventForms = analyticsEventSwitch('forms')
 const analyticsEventContactClicks = analyticsEventSwitch('contactClicks')
 const analyticsEventAccountSignUps = analyticsEventSwitch('accountSignUps')
+const analyticsEventShares = analyticsEventSwitch('shares')
 const analyticsEventCategoriesDisabled = computed(() => !analyticsEventsEnabled.value || !hasGoogleAnalyticsId.value)
 
 const normalizeDomain = (value) => {
@@ -1681,6 +1682,15 @@ watch(() => [
               v-model="analyticsEventAccountSignUps"
               name="analyticsEvents.accountSignUps"
               label="Account sign-ups"
+              :disabled="analyticsEventCategoriesDisabled"
+              class="w-full"
+              checked-label="On"
+              unchecked-label="Off"
+            />
+            <edge-cms-boolean-card
+              v-model="analyticsEventShares"
+              name="analyticsEvents.shares"
+              label="Share clicks"
               :disabled="analyticsEventCategoriesDisabled"
               class="w-full"
               checked-label="On"
