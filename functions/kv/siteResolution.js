@@ -98,17 +98,29 @@ async function reconcileSiteResolution({ db, kv, orgId, siteId, touchedHosts = [
   const lock = db.doc(LOCK_PATH)
   await db.runTransaction(async transaction => {
     const current = (await transaction.get(lock)).data() || {}
-    if (current.owner && current.expiresAt > now()) throw new Error('Site resolution writer is busy; retry.')
+    if (current.owner && current.expiresAt > now()) throw Object.assign(new Error('Site resolution writer is busy; retry.'), { code: 'site-resolution-busy' })
     transaction.set(lock, { owner, expiresAt: now() + LEASE_MS })
   })
-  let success = false
+  let uncertainMutation = false
   const checkLease = async () => {
     const state = (await lock.get()).data() || {}
     if (state.owner !== owner || state.expiresAt <= now() + REQUEST_TIMEOUT_MS)
       throw new Error('Site resolution lease expired or changed; retry.')
   }
-  const put = async (key, value, opts = {}) => { await checkLease(); await kv.put(key, value, { ...opts, ...httpOptions }) }
-  const del = async key => { await checkLease(); await kv.del(key, httpOptions) }
+  const mutate = async (write) => {
+    await checkLease()
+    try {
+      await write()
+    }
+    catch (error) {
+      // A rejected mutation may still complete upstream. Keep serialization
+      // protection until the lease expires, even if no response arrived.
+      uncertainMutation = true
+      throw error
+    }
+  }
+  const put = (key, value, opts = {}) => mutate(() => kv.put(key, value, { ...opts, ...httpOptions }))
+  const del = key => mutate(() => kv.del(key, httpOptions))
   const get = async key => { await checkLease(); return kv.get(key, 'json', httpOptions) }
   const processed = new Map()
   try {
@@ -185,7 +197,7 @@ async function reconcileSiteResolution({ db, kv, orgId, siteId, touchedHosts = [
         const publication = target.publication
         if (publication?.hosts.includes(host)) {
           const latest = await loadPublication(db, current.orgId, current.siteId)
-          if (latest?.revision !== publication.revision) throw new Error('Published site changed during resolution; retry current state.')
+          if (latest?.revision !== publication.revision) throw Object.assign(new Error('Published site changed during resolution; retry current state.'), { code: 'site-resolution-superseded' })
           value = { schemaVersion: 1, status: 'active', orgId: current.orgId, siteId: current.siteId, siteKey: publication.siteKey, revision: publication.revision, publishedAt: publication.publishedAt }
         }
       }
@@ -204,24 +216,25 @@ async function reconcileSiteResolution({ db, kv, orgId, siteId, touchedHosts = [
       await checkLease()
       await ref.set({ hosts: publication?.hosts || [], indexKeys, revision: publication?.revision || null, publishedAt: publication?.publishedAt || null, completed: true, pendingHosts: [], pendingIndexKeys: [] }, { merge: true })
     }
-    success = true
     return { siteKey: siteKeyFor(orgId, siteId), hosts: candidates.size }
   }
   finally {
-    // An HTTP timeout is ambiguous. Do not immediately let another writer race
-    // an upstream request which may still be finishing; retain its lease.
-    if (success) await db.runTransaction(async transaction => {
+    // Source changes and failed reads leave no uncertain KV mutation behind.
+    // Preserve pending cleanup intent, but let the next attempt run promptly.
+    if (!uncertainMutation) await db.runTransaction(async transaction => {
       const state = (await transaction.get(lock)).data() || {}
       if (state.owner === owner) transaction.set(lock, { owner: '', expiresAt: 0 })
     })
   }
 }
 
+const siteResolutionDisabled = () => ['1', 'true', 'yes'].includes(String(process.env.KV_MIRROR_DISABLED || '').trim().toLowerCase())
+
 async function runSiteResolution(options) {
-  if (['1', 'true', 'yes'].includes(String(process.env.KV_MIRROR_DISABLED || '').trim().toLowerCase())) return { disabled: true }
+  if (siteResolutionDisabled()) return { disabled: true }
   const { db } = require('../config.js')
   const kv = require('./kvClient')
   return reconcileSiteResolution({ db, kv, ...options })
 }
 
-module.exports = { reconcileSiteResolution, runSiteResolution, normalizeHostname, servedHosts, loadPublication, resolutionKey, statePath, LOCK_PATH, LEASE_MS, REQUEST_TIMEOUT_MS }
+module.exports = { reconcileSiteResolution, runSiteResolution, siteResolutionDisabled, normalizeHostname, servedHosts, loadPublication, resolutionKey, statePath, LOCK_PATH, LEASE_MS, REQUEST_TIMEOUT_MS }

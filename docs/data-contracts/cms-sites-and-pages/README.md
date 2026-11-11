@@ -2,7 +2,7 @@
 
 Status: in use for every site the CMS publishes.
 
-Last verified: 2026-11-10, splash screen settings and draft/publication lifecycle
+Last verified: 2026-11-11, site resolution queue and writer lease recovery
 
 A site is an organization's website: its settings, menus and domains, and
 the draft pages assembled from block instances. Publishing copies a page or
@@ -23,7 +23,7 @@ posts in `edge/docs/data-contracts/cms-posts/`; the workflow rules in
 | Published site settings | `organizations/{orgId}/published-site-settings/{siteId}` (the same id as the site) |
 | Template pages | `organizations/{orgId}/sites/templates/pages/{pageId}`: the `templates` site is not a public site; its pages are copied when a theme seeds a site or a page is created from a template |
 | Legacy published site | `organizations/{orgId}/sites-published/{siteId}`: only the registrar's attach and detach callables keep its `domains` in step; nothing else reads or writes it |
-| Site-resolution state | `cms-site-resolution-locks/writer`: backend-only project-wide writer lease; `cms-site-resolution/{sha256(siteKey)}`: cleanup intent and successful projection checkpoint |
+| Site-resolution state | `cms-site-resolution-locks/writer`: backend-only project-wide writer lease; `cms-site-resolution/{sha256(siteKey)}`: cleanup intent and successful projection checkpoint; `cms-site-resolution-pending/{siteHash}`: durable work per site |
 | Auth-domain reconciliation state | `cms-auth-domain-sync/{projectId}`: backend-only project-wide lease and successful managed-host ledger |
 
 The Hub writes sites and pages from the browser through
@@ -211,14 +211,28 @@ reconciled from currently published pages, removing obsolete deletion entries.
 execution time; completed identical projections retain their timestamp.
 
 `cms-onSiteWritten`, `cms-syncSiteResolutionFromPublishedPage` and
-`cms-syncSiteResolutionFromDomainRegistry` reconcile current saved state rather
-than event payloads. The existing KV retry worker also redirects legacy queued
-site writes through this writer. One backend project-wide transactional lease
-serializes canonical-site and shared hostname writes across organizations. KV
-requests are bounded to 15 seconds without automatic HTTP retries; an uncertain
-failure retains its four-minute lease (longer than the 180-second handlers).
+`cms-syncSiteResolutionFromDomainRegistry` merge work into one backend pending
+record per organization/site, keyed by SHA-256 of the site KV key. It holds
+`orgId`, `siteId`, a fresh `generation`, `readyAt` (Unix milliseconds), and
+optional `touchedHosts` merged as a set so domain cleanup hints survive bursts.
+`cms-drainSiteResolution` checks every minute for work that has been quiet for
+three seconds and reconciles the latest saved state rather than an event
+payload. It removes the pending record only if its generation is unchanged.
+New work during a reconciliation survives for another pass. Busy or superseded
+work stays pending without surfacing an event error. Unexpected failures are
+logged and deferred. Site resolution can lag a publish by a scheduler interval
+plus the quiet window and processing time; separate page KV mirroring is unchanged.
+
+The existing KV retry worker and backfill still reconcile directly through
+the same writer. One backend project-wide transactional lease serializes
+canonical-site and shared hostname writes across organizations. KV requests
+are bounded to 15 seconds without automatic HTTP retries. A rejected KV
+mutation retains the four-minute lease (longer than the 180-second handlers)
+because the write may still complete upstream. A source change or other
+failure without an uncertain KV mutation releases the lease immediately.
 Pending hostname/index cleanup intent is durable before KV writes; a successful
-checkpoint clears pending intent. No client permissions or indexes are added.
+checkpoint clears pending intent. No client permissions or composite indexes
+are added; the pending queue uses Firestore's single-field `readyAt` index.
 
 Write the site document successfully before advertising its revision on hosts.
 Registry ownership and the published domain list must both match. Expand the
@@ -252,9 +266,10 @@ request after a timeout. The frontend must compare the fetched site document's
 revision with the active record and never mark a mismatch current. This does
 not make separately mirrored page/theme documents an atomic snapshot.
 
-Rollout: deploy the writer, page/domain triggers and KV retry worker together;
-allow old deployed invocations to finish before depending on the new path.
-Then use the dry-run-first shared backfill from the Hub root:
+Rollout: deploy the scheduled drain with all three event producers and the
+updated writer. Allow old deployed invocations to finish. Existing resolution
+records need no migration or backfill for this queue change. For a first-time
+resolution-key rollout, use the dry-run-first shared backfill from the Hub root:
 
 ```sh
 node edge/scripts/backfill-site-resolution.cjs --project <project-id>

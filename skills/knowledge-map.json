@@ -34,6 +34,7 @@
       "code": [
         { "path": "functions/cms.js", "diffPattern": "SiteResolution|onSiteWritten|servedHosts|touchedHosts|siteResolution" },
         "functions/kv/siteResolution.js",
+        "functions/kv/siteResolutionQueue.js",
         "edge/scripts/backfill-site-resolution.cjs"
       ],
       "documents": [
