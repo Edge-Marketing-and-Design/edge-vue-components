@@ -1,11 +1,6 @@
-// cms-collectionData: the records the Hub editor canvas shows for a block's
-// collection-backed Data Sources, loaded as the public site loads them
-// (helpers/cmsDataSourceRecords.mjs: the KV mirror through the template
-// engine, or Firestore in the emulator). The canvas used to query Firestore
-// from the browser, which failed on queries that need a composite index and
-// showed editors different records than the site. Each source needs read
-// rights on its collection; personal-data collections are not loaded.
-// Keep identical in functions/.
+// The Hub canvas is a visual preview of saved Firestore drafts, not the
+// published KV delivery layer. Keep source configuration unchanged so the
+// public renderer still reads published records. Keep identical in functions/.
 const { db, HttpsError, onCall, permissionCheck } = require('./config.js')
 
 const MAX_SOURCES = 20
@@ -37,7 +32,7 @@ const docId = (value, label, required = false) => {
 // belong to sites. Null for a personal-data collection.
 const readTarget = (cfg, reads) => {
   const path = text(cfg?.collection?.path || cfg?.path)
-  if (['posts', 'post', 'sites'].includes(path))
+  if (['posts', 'post', 'sites', 'published-site-settings'].includes(path))
     return 'sites'
   const name = path.split('/')[0]
   return (name && !reads.PERSONAL_DATA_COLLECTION.test(name)) ? name : null
@@ -85,15 +80,14 @@ exports.collectionData = onCall({ timeoutSeconds: 60, memory: '512MiB' }, async 
   }
 
   const deadline = Date.now() + BUDGET_MS
-  const kvOptions = engine ? records.scopedKvClientOptions({ orgId, env: process.env, deadline }) : null
   const loaded = await records.loadBlockSources({
     block: { templateVersion: 1, meta: allowed },
     orgId,
     siteId,
     routeLastSegment,
     engine,
-    kvOptions,
-    db: kvOptions ? null : db,
+    db,
+    draftPreview: true,
     deadline,
     maxRecords: MAX_RECORDS,
   })

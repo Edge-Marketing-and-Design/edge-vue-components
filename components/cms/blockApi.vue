@@ -587,6 +587,7 @@ const collectionRequestSignature = computed(() => serializePreviewRequestInput({
   siteId: props.siteId,
   meta: collectionMetaToFetch.value,
   values: mergedValues.value,
+  savedSite: edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[props.siteId] || null,
   draftPostContext: draftPostContext.value,
   draftPosts: draftPosts.value,
 }))
@@ -626,6 +627,7 @@ const finalValues = computed(() => {
 })
 
 const scopedCollectionSourceCache = new Map()
+watch(collectionRequestSignature, () => scopedCollectionSourceCache.clear(), { flush: 'sync' })
 
 const getScopedCollectionArrayFields = (sourceConfig) => {
   const records = Array.isArray(sourceConfig?.value) ? sourceConfig.value : []

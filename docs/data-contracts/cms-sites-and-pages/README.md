@@ -312,11 +312,16 @@ These are client URLs only: no new stored fields, public projections or reads
 authorized by the URL. The authenticated frontend reads permitted saved draft
 site/page/theme snapshots; collection/API delivery remains published.
 
-This external-renderer behavior is separate from the Hub's own editor canvas:
-an enabled custom-post page's Index canvas and small site-page preview read
-its type's saved draft posts. Their preview cache signatures include draft
-changes. The override changes no saved block, menu, source or published
-projection; other page previews retain their normal collection loading.
+This external-renderer behavior is separate from the Hub's own editor canvas.
+The authenticated `cms-collectionData` callable loads authorized Firestore
+records, never KV. Site sources read saved draft site settings (including
+menus and footer values); posts read saved draft posts. A source explicitly
+naming `published-site-settings` is mapped to `sites` only for this canvas.
+Saved site changes invalidate canvas collection requests and scoped caches.
+Unsaved form changes are not included. Source definitions and public delivery
+remain unchanged. These are visual previews; full interactions are tested
+through the frontend preview links. Agent render/compare tools and external
+preview endpoints retain their separate loading paths.
 
 `emd-cms-front` resolves the request's host through `idx:sites:domains` to
 the site, reads `sites:` for `menus`, `theme`, `pageVersions`, the logos,

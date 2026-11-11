@@ -222,7 +222,7 @@ MCP source-use summaries count helper references, and the results region owns
 its loaded wrapper (it needs no separate `{{ loaded }}` class). This does not
 install the public frontend's controller or API into the Hub editor. Its
 editor canvas renders options and the initial results from its already
-loaded, authorized records, using the engine's default selection, filtering,
+loaded, authorized Firestore records (saved drafts for sites and posts), using the engine's default selection, filtering,
 ordering, pagination and conditional scope. Distinct sources yield sorted,
 unique scalar choices in KV and emulator loading. The editor also projects raw
 records from older deployed preview loaders, so local UI testing does not require

@@ -98,9 +98,8 @@ configuration and single-template example in
 scope rule in results: an empty-result condition is `item.total == 0`.
 Hub preview and public frontend interactions remain separate verification paths.
 
-An enabled custom-post page's Index preview in the authenticated Hub (including
-its small site-page preview) reads that type's saved draft posts without
-changing the block. Public rendering still reads published posts. Do not
+The authenticated Hub canvas loads collection records from Firestore, including
+saved draft site settings, menus and posts, without changing the block. Public rendering still reads published posts. Do not
 change a source path or embed sample values to enable this preview behavior.
 
 ## Input mapping
