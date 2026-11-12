@@ -4,6 +4,7 @@ const fs = require('node:fs')
 const vm = require('node:vm')
 const { createFakeDb } = require('./support/fakeFirestore.cjs')
 const { reconcileSiteResolution, loadPublication, normalizeHostname, servedHosts, statePath, LOCK_PATH, LEASE_MS, REQUEST_TIMEOUT_MS } = require('../kv/siteResolution')
+const { enqueueSiteResolution, drainPendingSiteResolutions, PENDING_COLLECTION, QUIET_MS } = require('../kv/siteResolutionQueue')
 const site = (org = 'org', id = 'site') => `organizations/${org}/published-site-settings/${id}`
 const pages = (org = 'org', id = 'site') => `organizations/${org}/sites/${id}/published`
 const registry = (host, org = 'org', id = 'site') => ({ domain: host, orgId: org, siteId: id, sitePath: site(org, id) })
@@ -30,7 +31,7 @@ function fixture(seed = base()) {
     async del(key, options) { assert.equal(options.maxRetries, 0); calls.push(['del', key]); stored.delete(key) },
   }
   const run = (options = {}) => reconcileSiteResolution({ db: fake.db, kv, orgId: 'org', siteId: 'site', now: () => clock, ...options })
-  return { ...fake, stored, calls, hooks, run, advance: () => { clock += LEASE_MS + 1 } }
+  return { ...fake, stored, calls, hooks, run, now: () => clock, advance: (ms = LEASE_MS + 1) => { clock += ms } }
 }
 
 test('normalization is exact, internationalized, and never a slug', () => {
@@ -178,11 +179,13 @@ test('concurrent invocations cannot overtake the active writer', async () => {
   assert.equal(f.stored.get('sites:org:site').version, 2)
 })
 
-test('source changes during publication are not advertised as the new current revision', async () => {
+test('source changes preserve pending intent but release the lease for an immediate retry', async () => {
   const f = fixture(); f.hooks.put = async key => { if (key === 'sites:org:site') f.docs.get(site()).version = 2 }
   await assert.rejects(f.run(), /changed during/)
   assert.equal(f.stored.has(record('example.com')), false)
-  f.advance(); delete f.hooks.put; await f.run(); assert.equal(f.stored.get('sites:org:site').version, 2)
+  assert.ok(f.docs.get(statePath('sites:org:site')).pendingHosts.length)
+  assert.equal(f.docs.get(LOCK_PATH).owner, '')
+  delete f.hooks.put; await f.run(); assert.equal(f.stored.get('sites:org:site').version, 2)
 })
 
 test('publication timestamps use committed sources rather than worker invocation time', async () => {
@@ -246,11 +249,11 @@ test('an unexpired abandoned lease blocks writes; an expired one can be reclaime
   f.advance(); await f.run(); assert.equal(f.stored.get(record('example.com')).status, 'active')
 })
 
-test('all three trigger entrypoints reconcile current state, including deleted pages and old domain owners', async () => {
+test('all three trigger entrypoints queue site work, including deleted pages and old domain owners', async () => {
   const text = fs.readFileSync(require.resolve('../cms'), 'utf8')
   const source = text.slice(text.indexOf('exports.onSiteWritten ='), text.indexOf('exports.onUserWritten ='))
   const entries = {}; const calls = []; const exports = {}
-  vm.runInNewContext(source, { exports, db: { collection: () => ({ get: async () => ({ docs: [] }) }) }, onDocumentWritten: (options, handler) => { entries[options.document] = { options, handler }; return handler }, require: () => ({ servedHosts, runSiteResolution: async args => calls.push(args) }) })
+  vm.runInNewContext(source, { exports, db: { collection: () => ({ get: async () => ({ docs: [] }) }) }, onDocumentWritten: (options, handler) => { entries[options.document] = { options, handler }; return handler }, onSchedule: (_options, handler) => handler, require: () => ({ servedHosts, siteResolutionDisabled: () => false, requestSiteResolution: async args => calls.push(args), runPendingSiteResolutions: async () => calls.push('drain') }) })
   assert.equal(Object.keys(entries).length, 3)
   for (const { options } of Object.values(entries)) { assert.equal(options.retry, true); assert.equal(options.timeoutSeconds, 180) }
   await exports.onSiteWritten({ params: { orgId: 'org', siteId: 'site' }, data: { before: { data: () => ({ domains: ['old.example'] }) }, after: { data: () => ({ domains: ['new.example'] }) } } })
@@ -258,6 +261,8 @@ test('all three trigger entrypoints reconcile current state, including deleted p
   await exports.syncSiteResolutionFromPublishedPage({ params: { orgId: 'org', siteId: 'site', pageId: 'deleted' }, data: { after: { exists: false } } })
   await exports.syncSiteResolutionFromDomainRegistry({ params: { domain: 'example.com' }, data: { before: { data: () => registry('example.com') }, after: { data: () => registry('example.com', 'next', 'next') } } })
   assert.equal(calls.length, 4); assert.equal(calls[3].orgId, 'next')
+  await exports.drainSiteResolution()
+  assert.equal(calls.at(-1), 'drain')
 })
 
 test('KV client applies bounded requests and disables internal retries only when requested', async () => {
@@ -284,4 +289,117 @@ test('KV client applies bounded requests and disables internal retries only when
   assert.equal(requests.length, count + 1)
   fail = false; await module.exports.put('legacy', 'value')
   assert.equal(requests.at(-1)[1].timeout, undefined)
+})
+
+function queueFixture() {
+  const f = fixture()
+  const collection = f.db.collection.bind(f.db)
+  const doc = f.db.doc.bind(f.db)
+  const transact = f.db.runTransaction.bind(f.db)
+  const pending = () => [...f.docs.keys()].filter(path => path.startsWith(`${PENDING_COLLECTION}/`))
+  f.db.doc = (path) => {
+    const ref = doc(path)
+    if (!path.startsWith(`${PENDING_COLLECTION}/`)) return ref
+    const set = ref.set
+    ref.set = (value, options) => {
+      if (value.touchedHosts) {
+        value = { ...value, touchedHosts: [...new Set([...(f.docs.get(path)?.touchedHosts || []), ...value.touchedHosts.union])] }
+      }
+      return set(value, options)
+    }
+    return ref
+  }
+  f.db.collection = (name) => {
+    if (name !== PENDING_COLLECTION) return collection(name)
+    return { where: (_field, _op, until) => ({ orderBy: () => ({ limit: count => ({
+      get: async () => ({
+        docs: pending().filter(path => f.docs.get(path).readyAt <= until)
+          .sort((a, b) => f.docs.get(a).readyAt - f.docs.get(b).readyAt)
+          .slice(0, count).map(path => ({ ref: f.db.doc(path) })),
+      }),
+    }) }) }) }
+  }
+  f.db.runTransaction = callback => transact(async (tx) => {
+    const deletions = []
+    const result = await callback({ ...tx, delete: ref => deletions.push(ref.path) })
+    for (const path of deletions) f.docs.delete(path)
+    return result
+  })
+  const errors = []
+  const enqueue = options => enqueueSiteResolution({ db: f.db, now: f.now, arrayUnion: (...union) => ({ union }), orgId: 'org', siteId: 'site', ...options })
+  const drain = (reconcile = f.run) => drainPendingSiteResolutions({ db: f.db, now: f.now, reconcile, logger: { error: (...args) => errors.push(args) } })
+  return { ...f, pending, enqueue, drain, errors }
+}
+
+test('22 page events and settings events coalesce into one latest-state reconciliation', async () => {
+  const f = queueFixture()
+  await f.enqueue({ touchedHosts: ['old.example'] })
+  for (let index = 0; index < 22; index++) {
+    f.advance(700)
+    f.docs.set(`${pages()}/${index}`, { version: index + 1 })
+    await f.enqueue()
+  }
+  await f.enqueue({ touchedHosts: ['example.com'] })
+  assert.equal(f.pending().length, 1)
+  assert.equal((await f.drain()).completed, 0, 'wait for the publication burst to settle')
+  f.advance(QUIET_MS)
+  assert.deepEqual(await f.drain(), { completed: 1, deferred: 0, failed: 0 })
+  assert.equal(f.pending().length, 0)
+  assert.equal(Object.keys(f.stored.get('sites:org:site').pageVersions).length, 22)
+  assert.equal(f.stored.get(record('www.old.example')).status, 'disabled')
+  assert.equal(f.calls.filter(([op, key]) => op === 'put' && key === 'sites:org:site').length, 1)
+})
+
+test('events arriving during a successful sync survive acknowledgement with all cleanup hints', async () => {
+  const f = queueFixture()
+  await f.enqueue({ touchedHosts: ['old.example'] })
+  f.advance(QUIET_MS)
+  await f.drain(async (request) => {
+    await f.run(request)
+    f.docs.set(`${pages()}/home`, { version: 2 })
+    await f.enqueue({ touchedHosts: ['another.example'] })
+  })
+  assert.equal(f.pending().length, 1)
+  const request = f.docs.get(f.pending()[0])
+  assert.ok(request.touchedHosts.includes('www.old.example'))
+  assert.ok(request.touchedHosts.includes('another.example'))
+  f.advance(QUIET_MS)
+  await f.drain()
+  assert.equal(f.pending().length, 0)
+  assert.equal(f.stored.get('sites:org:site').pageVersions.home, 2)
+  assert.equal(f.stored.get(record('another.example')).status, 'disabled')
+})
+
+test('busy and superseded runs keep durable work without logging errors', async () => {
+  const f = queueFixture()
+  await f.enqueue()
+  f.advance(QUIET_MS)
+  f.docs.set(LOCK_PATH, { owner: 'other', expiresAt: f.now() + LEASE_MS })
+  assert.equal((await f.drain()).deferred, 1)
+  assert.equal(f.pending().length, 1)
+  f.advance()
+  f.hooks.put = async (key) => { if (key === 'sites:org:site') f.docs.get(site()).version = 2 }
+  assert.equal((await f.drain()).deferred, 1)
+  assert.equal(f.pending().length, 1)
+  assert.equal(f.docs.get(LOCK_PATH).owner, '')
+  delete f.hooks.put
+  assert.equal((await f.drain()).completed, 1)
+  assert.equal(f.pending().length, 0)
+  assert.equal(f.errors.length, 0)
+})
+
+test('a lost KV write response preserves the lease and queued work until a safe retry', async () => {
+  const f = queueFixture()
+  await f.enqueue()
+  f.advance(QUIET_MS)
+  f.hooks.put = async () => { throw new Error('lost response') }
+  assert.equal((await f.drain()).failed, 1)
+  assert.equal(f.errors.length, 1)
+  assert.notEqual(f.docs.get(LOCK_PATH).owner, '')
+  assert.equal(f.pending().length, 1)
+  assert.equal((await f.drain()).failed, 0, 'failed work is deferred')
+  f.advance()
+  delete f.hooks.put
+  assert.equal((await f.drain()).completed, 1)
+  assert.equal(f.pending().length, 0)
 })

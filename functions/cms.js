@@ -2380,8 +2380,8 @@ exports.onSiteWritten = onDocumentWritten({
   timeoutSeconds: 180,
   retry: true,
 }, async (event) => {
-  const { runSiteResolution } = require('./kv/siteResolution')
-  await runSiteResolution({ ...event.params, touchedHosts: [
+  const { requestSiteResolution } = require('./kv/siteResolutionQueue')
+  await requestSiteResolution({ ...event.params, touchedHosts: [
     ...(event.data?.before?.data()?.domains || []),
     ...(event.data?.after?.data()?.domains || []),
   ] })
@@ -2393,8 +2393,8 @@ exports.syncSiteResolutionFromPublishedPage = onDocumentWritten({
   timeoutSeconds: 180,
   retry: true,
 }, async (event) => {
-  const { runSiteResolution } = require('./kv/siteResolution')
-  await runSiteResolution(event.params)
+  const { requestSiteResolution } = require('./kv/siteResolutionQueue')
+  await requestSiteResolution(event.params)
 })
 
 exports.syncSiteResolutionFromDomainRegistry = onDocumentWritten({
@@ -2402,7 +2402,9 @@ exports.syncSiteResolutionFromDomainRegistry = onDocumentWritten({
   timeoutSeconds: 180,
   retry: true,
 }, async (event) => {
-  const { runSiteResolution, servedHosts } = require('./kv/siteResolution')
+  const { requestSiteResolution } = require('./kv/siteResolutionQueue')
+  const { servedHosts, siteResolutionDisabled } = require('./kv/siteResolution')
+  if (siteResolutionDisabled()) return
   const targets = new Map()
   const touched = new Set(servedHosts(event.params.domain))
   const registry = await db.collection('domain-registry').get()
@@ -2412,8 +2414,18 @@ exports.syncSiteResolutionFromDomainRegistry = onDocumentWritten({
     const match = String(data.sitePath || '').match(/^organizations\/([^/]+)\/published-site-settings\/([^/]+)$/)
     if (match) targets.set(data.sitePath, { orgId: match[1], siteId: match[2] })
   }
-  for (const target of targets.values()) await runSiteResolution({ ...target, touchedHosts: [event.params.domain] })
+  for (const target of targets.values()) await requestSiteResolution({ ...target, touchedHosts: [event.params.domain] })
 })
+
+// A bulk publish writes many pages before its final settings write. Process
+// durable per-site requests once the burst settles instead of competing per event.
+exports.drainSiteResolution = onSchedule(
+  { schedule: 'every 1 minutes', timeoutSeconds: 180, maxInstances: 1, concurrency: 1 },
+  async () => {
+    const { runPendingSiteResolutions } = require('./kv/siteResolutionQueue')
+    await runPendingSiteResolutions()
+  },
+)
 
 exports.onUserWritten = createKvMirrorHandler({
   document: 'organizations/{orgId}/users/{userId}',

@@ -652,3 +652,12 @@ Each Hub lists the tests in its own checkout under "This Hub". Shared:
   documents that hold instances, and their KV datasets.
 - `edge/docs/data-contracts/cms-posts/README.md`: post documents and their KV
   dataset.
+
+### Saved draft data in the Hub canvas
+
+CMS canvas collection sources load authorized Firestore records, not published
+KV. Site lookups show saved draft settings and menus; post lookups show saved
+draft posts. Keep the authored source configuration pointed at the published
+delivery contract: the Hub handles draft loading without changing the block.
+This is a visual preview, not a functional public-site runtime. Use the frontend
+preview links for interaction testing. Unsaved settings are not included.
