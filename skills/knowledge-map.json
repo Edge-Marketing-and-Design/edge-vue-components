@@ -10,10 +10,13 @@
         "edge/lib/cmsSplashScreen.js",
         "edge/components/cms/siteSettingsForm.vue",
         "edge/composables/siteSettingsTemplate.js",
-        { "path": "edge/components/cms/site.vue", "diffPattern": "splashImage|splashBackgroundColor|splash-theme" }
+        { "path": "edge/components/cms/site.vue", "diffPattern": "splashImage|splashBackgroundColor|splash-theme" },
+        { "path": "edge/lib/cmsOperations.js", "diffPattern": "splash" }
       ],
       "documents": [
-        { "path": "edge/docs/data-contracts/cms-sites-and-pages/README.md", "section": "Splash screen settings", "says": "Splash fields, theme tokens, preview semantics, settings lifecycle and frontend boundary" }
+        { "path": "edge/docs/data-contracts/cms-sites-and-pages/README.md", "section": "Splash screen settings", "says": "Splash fields, theme tokens, preview semantics, settings lifecycle and frontend boundary" },
+        { "path": "edge/docs/data-contracts/cms-operations/README.md", "says": "Which operations accept the splash fields and what each checks" },
+        { "path": "edge/functions/agentGuide/cms-agent-guide.md", "section": "Set up a site", "says": "That site.settings sets the splash image and a theme color key, and that the key is not checked" }
       ]
     },
     {
@@ -22,10 +25,14 @@
       "code": [
         "edge/components/cms/posts.vue",
         "functions/helpers/cmsPostKvMetadata.js",
-        "edge/functions/helpers/cmsPostKvMetadata.js"
+        "edge/functions/helpers/cmsPostKvMetadata.js",
+        "edge/components/cms/typedPosts.vue",
+        { "path": "edge/lib/cmsOperations.js", "diffPattern": "POST_BLURB_MAX" }
       ],
       "documents": [
-        { "path": "edge/docs/data-contracts/cms-posts/README.md", "section": "KV dataset", "says": "Editor and agent blurb caps, legacy metadata truncation, byte budget and unchanged canonical posts" }
+        { "path": "edge/docs/data-contracts/cms-posts/README.md", "section": "KV dataset", "says": "Editor and agent blurb caps, legacy metadata truncation, byte budget and unchanged canonical posts" },
+        { "path": "edge/skills/edge-block-package/reference/posts-contract.md", "says": "The blurb limit among the Hub editor fields a post block can rely on" },
+        { "path": "edge/functions/agentGuide/cms-agent-guide.md", "section": "Change page content", "says": "The blurb limit and its refusal code for post operations" }
       ]
     },
     {
@@ -37,7 +44,9 @@
         "edge/scripts/backfill-site-resolution.cjs"
       ],
       "documents": [
-        { "path": "edge/docs/data-contracts/cms-sites-and-pages/README.md", "section": "Exact hostname resolution and published revisions", "says": "Exact resolution keys, site revisions, current-state publication coverage, serialization, domain ownership, tombstones and backfill" }
+        { "path": "edge/docs/data-contracts/cms-sites-and-pages/README.md", "section": "Exact hostname resolution and published revisions", "says": "Exact resolution keys, site revisions, current-state publication coverage, serialization, domain ownership, tombstones and backfill" },
+        { "path": "edge/docs/data-contracts/cms-sites-and-pages/README.md", "section": "What the renderer reads", "says": "How the renderer resolves a host to a site (resolution record first, legacy index only when absent)" },
+        { "path": "edge/docs/data-contracts/cms-sites-and-pages/README.md", "section": "KV datasets", "says": "Which domain index keys a published site writes" }
       ]
     },
     {
@@ -101,14 +110,16 @@
         "functions/helpers/cmsDataSourceRecords.mjs",
         "edge/lib/cmsCollectionPreview.js",
         "edge/lib/cmsDataSourceRecords.js",
-        "edge/functions/helpers/cmsDataSourceRecords.mjs"
+        "edge/functions/helpers/cmsDataSourceRecords.mjs",
+        "functions/cmsAgentRender.js"
       ],
       "documents": [
         { "repo": "emd-cms-front", "path": "docs/cms-template-v2-blocks.md", "section": "Data Sources", "says": "Collection and API sources, runtime tokens, canonical lookups, and when a source runs" },
         { "path": "edge/skills/edge-block-package/reference/template-v2-contract.md", "section": "Supported starter grammar", "says": "A declared source runs when source() or a collection helper references it" },
         { "path": "edge/skills/edge-block-package/reference/chrome-and-helpers.md", "says": "Site record lookups (path sites with canonicalLookup) for logo, social links and contact" },
         { "path": "edge/skills/edge-block-package/reference/interactive-collections.md", "says": "Complete interactive dataSources/template example, public projection, candidate semantics, paging and preview limits" },
-        { "path": "edge/docs/data-contracts/cms-blocks/README.md", "section": "Interactive collection helpers", "says": "Source activation by helpers, persisted interactive options, condition scope and runtime boundary" }
+        { "path": "edge/docs/data-contracts/cms-blocks/README.md", "section": "Interactive collection helpers", "says": "Source activation by helpers, persisted interactive options, condition scope and runtime boundary" },
+        { "path": "edge/functions/agentGuide/cms-agent-guide.md", "section": "Interactive collection blocks", "says": "When to use an interactive collection and where its authoring reference is" }
       ]
     },
     {
@@ -156,7 +167,8 @@
         { "path": "edge/functions/agentGuide/cms-agent-guide.md", "says": "What agents can do through the tools, which session each operation uses, what stays in the Hub" },
         { "path": "edge/skills/edge-design-to-site/SKILL.md", "section": "What you can and can't do", "says": "The tools and operations the site build uses" },
         { "path": "edge/skills/edge-site-setup/SKILL.md", "says": "The operations and readiness codes the site setup run uses" },
-        { "path": "edge/skills/edge-site-setup/site-standards.json", "says": "How each setup standard is set and checked (operation, readiness code)" }
+        { "path": "edge/skills/edge-site-setup/site-standards.json", "says": "How each setup standard is set and checked (operation, readiness code)" },
+        { "path": "edge/tools/mcp/cms/README.md", "section": "Draft-only CMS operations (agent key)", "says": "What each operation, readiness and read tool covers and returns" }
       ]
     },
     {
@@ -219,7 +231,7 @@
     },
     {
       "id": "custom-post-editor",
-      "name": "Custom-post display labels and entry access controls",
+      "name": "Custom post types: settings, entry fields, events, publishing and access controls",
       "code": [
         "edge/components/cms/typedPosts.vue",
         { "path": "edge/components/cms/block.vue", "diffPattern": "customPost|contentEditorAdapter|preview-edit-control|draftPostPreview" },
@@ -231,13 +243,23 @@
         "edge/components/cms/postTypeSettings.vue",
         { "path": "edge/components/cms/menu.vue", "diffPattern": "edge-cms-post-type-settings" },
         { "path": "edge/components/cms/page.vue", "diffPattern": "templateTypeIncludesPost|edge-cms-post-type-settings|draftPostPreview" },
-        { "path": "edge/components/cms/site.vue", "diffPattern": "customPostTypes|menuTitle|titles\\.get|titles\\.set|titles\\.has|draftPostPreview" }
+        { "path": "edge/components/cms/site.vue", "diffPattern": "customPostTypes|menuTitle|titles\\.get|titles\\.set|titles\\.has|draftPostPreview" },
+        "edge/components/cms/postEventFields.vue",
+        "edge/components/cms/postPublishing.vue",
+        "edge/components/cms/postValueField.vue",
+        "edge/lib/cmsPostTypeIcons.js",
+        "edge/lib/cmsPostEvents.mjs",
+        "functions/helpers/cmsPostEvents.mjs",
+        "functions/helpers/cmsPostTypeRefresh.js"
       ],
       "documents": [
         { "path": "edge/docs/data-contracts/cms-posts/README.md", "section": "Page-defined custom post types", "says": "Custom-type settings, instance-owned block opt-in, marked-only entry fields/layout, sample previews, inactive value preservation and unchanged public layout" },
         { "path": "edge/functions/agentGuide/cms-agent-guide.md", "section": "Custom post types", "says": "How an agent defines a custom post type (page.update post/postType), marks its detail blocks (useForCustomPost) and adds entries (post.create postTypeId and values)" },
         { "path": "edge/skills/edge-design-to-site/SKILL.md", "section": "Custom post types", "says": "When a handoff's list-and-detail content becomes a custom post type, and the build steps" },
-        { "path": "edge/skills/edge-block-package/SKILL.md", "section": "Site chrome, posts, overrides", "says": "How detail blocks map schema fields to entry paths (postField, editable, private) and what the index block may show" }
+        { "path": "edge/skills/edge-block-package/SKILL.md", "section": "Site chrome, posts, overrides", "says": "How detail blocks map schema fields to entry paths (postField, editable, private) and what the index block may show" },
+        { "path": "edge/docs/data-contracts/cms-operations/README.md", "section": "Values-only custom posts", "says": "What post.create and post.update accept for a custom entry, how blocks are marked, and the limits of those operations" },
+        { "path": "edge/skills/edge-block-package/reference/posts-contract.md", "says": "The post type values a block can query, including custom type keys" },
+        { "path": "edge/tools/mcp/cms/README.md", "section": "Draft-only CMS operations (agent key)", "says": "What the page and post reads return for custom post types and entries" }
       ]
     },
     {
@@ -248,7 +270,8 @@
         "edge/functions/helpers/cmsSitemapConfig.mjs",
         "edge/lib/cmsSitemapSettings.js",
         "edge/components/cms/sitemapSettings.vue",
-        { "path": "edge/components/cms/site.vue", "diffPattern": "sitemap|Sitemap" }
+        { "path": "edge/components/cms/site.vue", "diffPattern": "sitemap|Sitemap" },
+        "functions/helpers/cmsSitemapConfig.mjs"
       ],
       "documents": [
         { "path": "edge/docs/data-contracts/cms-sites-and-pages/README.md", "section": "Per-site sitemap configuration (Hub editor)", "says": "The sitemap object's fields, validation and publication" },
@@ -281,6 +304,73 @@
       ],
       "documents": [
         { "path": "edge/docs/data-contracts/cms-sites-and-pages/README.md", "section": "Firebase Auth membership domains", "says": "Current project-wide registry ownership, redundant-www/stale-event safety, restoration on unchanged membership, preservation of unrelated Auth entries, serialized updates and retry/lease state" }
+      ]
+    },
+    {
+      "id": "local-cms-server",
+      "name": "Local CMS MCP server: tool handlers, credentials, sessions and contracts",
+      "code": [
+        "edge/tools/mcp/cms/src/server.js",
+        "edge/tools/mcp/cms/src/cms-tools.js",
+        "edge/tools/mcp/cms/src/agent-operations.js",
+        "edge/tools/mcp/cms/src/agent-connections.js",
+        "edge/tools/mcp/cms/src/credentials.js",
+        "edge/tools/mcp/cms/src/contracts.js",
+        "edge/tools/mcp/cms/src/checkout-status.js",
+        "edge/tools/mcp/cms/src/node-version.js"
+      ],
+      "documents": [
+        { "path": "edge/tools/mcp/cms/README.md", "section": "CMS Block Workspace Tools", "says": "Each local block tool, its inputs and what it returns, including the checkout workspace" },
+        { "path": "edge/tools/mcp/cms/README.md", "section": "Draft-only CMS operations (agent key)", "says": "The operation, media, preview, readiness, page and post tools, operationFile limits, and what each read returns" },
+        { "path": "edge/tools/mcp/cms/README.md", "section": "Data contracts", "says": "The contract kinds cms_contract serves and where each is read from" },
+        { "path": "edge/tools/mcp/cms/README.md", "section": "Credentials", "says": "Google sign-in by default, optional read-only key, agent key and connection files" },
+        { "path": "edge/tools/mcp/cms/README.md", "section": "Hub-managed connections (preferred for multi-org operators)", "says": "Sessions per target, which operations a site or organization session allows, renewal" },
+        { "path": "edge/tools/mcp/cms/README.md", "section": "Node version", "says": "The server refuses to start below Node 22" },
+        { "path": "edge/tools/mcp/cms/AGENT-SETUP.md", "says": "The setup steps and checks an agent runs for a developer's local server" },
+        { "path": "edge/docs/data-contracts/cms-operations/README.md", "section": "Hub-managed agent connections", "says": "Session handles, target matching and credential renewal in connection mode" },
+        { "path": "edge/functions/agentGuide/cms-agent-guide.md", "section": "Start", "says": "Which session each kind of work uses and that sessions are opened for the agent" },
+        { "path": "edge/plugins/edge-cms/README.md", "section": "Developers", "says": "How a developer's checkout provides the local server alongside the plugin" }
+      ]
+    },
+    {
+      "id": "instance-comparison",
+      "name": "Comparing a block change on every placed instance",
+      "code": [
+        "edge/tools/mcp/cms/src/compare-instances.js"
+      ],
+      "documents": [
+        { "path": "edge/skills/edge-block-package/reference/scripting-against-a-hub.md", "section": "When to use `cms_compare_instances`", "says": "What the comparison renders, what it cannot check, and when to use the preview instead" },
+        { "path": "edge/tools/mcp/cms/README.md", "section": "CMS Block Workspace Tools", "says": "cms_compare_instances inputs, counts and limits" }
+      ]
+    },
+    {
+      "id": "agent-endpoint-and-keys",
+      "name": "Agent endpoint, agent keys and preview links",
+      "code": [
+        "functions/cmsAgentKeys.js",
+        "functions/cmsPreviewTokens.js"
+      ],
+      "documents": [
+        { "path": "edge/docs/data-contracts/cms-operations/README.md", "section": "Agent endpoint", "says": "Every action's request fields (posts takes postTypeId), the checks, and the HTTP status for each refusal" },
+        { "path": "edge/docs/data-contracts/cms-operations/README.md", "section": "Agent key", "says": "The key document, expiry, revocation and who may list or revoke" },
+        { "path": "edge/docs/data-contracts/cms-operations/README.md", "section": "Preview links", "says": "Preview token lifetime, blockDrafts, viewport and width" },
+        { "path": "edge/functions/agentGuide/cms-agent-guide.md", "section": "When something is refused", "says": "The refusal codes and HTTP statuses an agent sees" }
+      ]
+    },
+    {
+      "id": "agent-library-reads",
+      "name": "Library reads for agents (blocks, themes, sites, usage, audit, schema, diff, render)",
+      "code": [
+        "functions/cmsAgentLibraryReads.js",
+        "edge/lib/cmsAgentReads.js",
+        "functions/helpers/cmsAgentReads.mjs",
+        "functions/cmsAgentRender.js"
+      ],
+      "documents": [
+        { "path": "edge/docs/data-contracts/cms-operations/README.md", "section": "Library reads", "says": "Each read action, its limits, the read audit and the operator's read rights" },
+        { "path": "edge/functions/agentGuide/cms-agent-guide.md", "section": "Change a library block", "says": "What cms_block_base, cms_validate, cms_diff, cms_render_block, cms_audit_blocks and cms_schema return" },
+        { "path": "edge/functions/agentGuide/cms-agent-guide.md", "section": "Check your work", "says": "renderingOwner and deployedRenderer, and what cms_resolve_override answers" },
+        { "path": "edge/tools/mcp/cms/README.md", "section": "CMS Theme Context Tools", "says": "What cms_find_theme and cms_get_theme return" }
       ]
     }
   ]

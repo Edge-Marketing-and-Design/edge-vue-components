@@ -162,8 +162,9 @@ name cannot silently select the wrong theme. Its response includes:
 
 ## Draft-only CMS operations (agent key)
 
-- `cms_check_operation`: plan an operation (theme, new site, draft page and
-  its SEO, block placement, order and content, new block, block draft) and
+- `cms_check_operation`: plan an operation (theme, new site, site settings
+  and menus, templates, draft page and its SEO, block placement, order and
+  content, new block, block draft, posts and custom post type entries) and
   get what would change, any problems, and a checksum. Writes nothing.
 - `cms_run_operation`: run a checked operation with its checksum. The Hub
   refuses it if anything the check read changed since, or if it has
@@ -204,11 +205,14 @@ name cannot silently select the wrong theme. Its response includes:
 - `cms_list_pages`: a site's menus as a tree (Site Root, other menus, Not In
   Menu, with folders and external links) and each page's `pageId`, slug,
   menu title, URL path and status (`draft`, `published`,
-  `unpublished-changes`); pages in no menu are under `unlisted`.
+  `unpublished-changes`), with `post` for a page with a post view and
+  `customPostType` for the defining page of a custom post type; pages in no
+  menu are under `unlisted`.
 - `cms_get_page`: one page as an outline: its SEO fields (with
   `structuredDataAiLocked`: `page.update` refuses `structuredData` on a locked
-  page, as the Hub's AI SEO leaves it alone), version and status,
-  then per area (`main`, and `post` when the page has a post view) its rows
+  page, as the Hub's AI SEO leaves it alone), version and status, `postType`
+  when the page defines a custom post type (its instances then carry
+  `useForCustomPost`), then per area (`main`, and `post` when the page has a post view) its rows
   in order with column spans and each column's instances (`instanceId`,
   `blockId`, name, synced and override flags, `behind` the released block,
   values). Use the ids and row indexes with `page.setValues`,
@@ -218,19 +222,24 @@ name cannot silently select the wrong theme. Its response includes:
   `postId`, `name` (slug), title, type, tags, `publishedAt`, `publishAt`,
   status (`draft`, `published`, `unpublished-changes` as the Hub's post
   editor compares it, or `missing` for a snapshot without a draft) and
-  `blockIds`. Filter by `type` or `tag`; page with `limit` and
+  `blockIds`, and `postTypeId` for a custom post type entry. Filter by
+  `type` (`post`, `event` or a custom type's `custom-...` key), `postTypeId`
+  (a custom type's defining page) or `tag`; page with `limit` and
   `startAfter` (`nextStartAfter`).
 - `cms_get_post`: one post's fields (title, blurb, tags, featured image,
   restriction rule, the event for events, publication dates, `imported`)
   with `paths` (the URLs the site's post template pages serve it at) and its
   body as rows, columns and instances like `cms_get_page`. Use the ids and
   row indexes with `post.setValues`, `post.moveBlock` and
-  `post.removeBlock`.
+  `post.removeBlock`. A custom post type entry has no body; it returns
+  `postTypeId` and `values` (every content key of the entry; only the detail
+  field paths go back through `post.update` `fields.values`).
 
 Post operations (`post.create`, `post.update`, `post.placeBlock`,
 `post.setValues`, `post.moveBlock`, `post.removeBlock`) write draft posts
-only. A post's kind is `postType` (`post` or `event`), since `type` names
-the operation. Publishing, scheduling, dates and an imported post's
+only. A standard post's kind is `postType` (`post` or `event`), since `type`
+names the operation; a custom post type entry is made with `postTypeId` (its
+defining page) and `values` instead. Publishing, scheduling, dates and an imported post's
 `legacyBlog` stay with the Hub.
 
 The end-to-end workflow that uses these tools is the `edge-design-to-site`

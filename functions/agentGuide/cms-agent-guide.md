@@ -19,8 +19,10 @@ Shared Edge source: `edge/functions/agentGuide/cms-agent-guide.md`.
   organization you name, and is recorded: runs in the operation audit, library
   reads in the read audit. Lose access in the Hub and the tools stop too.
 - **Some things stay in the Hub:** domains and apex forwarding; renaming and
-  deleting pages; members-only content, users and the site AI; videos and
-  files; publishing; releasing blocks; applying theme proposals.
+  deleting pages; deleting posts and custom post entries; members-only
+  content, users and the site AI; videos and files; publishing, scheduling
+  and unpublishing (pages, posts and entries) and a post's dates; releasing
+  blocks; applying theme proposals.
 - **Images come from the Hub's media.** Upload them with `cms_upload_media`
   and place the Hub URL it returns. Never leave a link to another site (an
   old site, a CDN, a stock photo URL) in a block or a value.
@@ -56,13 +58,19 @@ Shared Edge source: `edge/functions/agentGuide/cms-agent-guide.md`.
   `structuredData`.
 - **Posts** work the same way with `post.create`, `post.update` and
   `post.placeBlock` / `setValues` / `moveBlock` / `removeBlock` with `postId`.
+  A blurb is at most 250 characters (`post.blurb-too-long`).
 
 ## Set up a site
 
 - **Settings:** `site.settings` sets branding (logo, light logo, text logo,
-  brand logos, favicon, app icon), contact email and phone, social links,
-  menu position, tracking ids and sitemaps (see "Sitemaps") on the draft site. Images must be Hub media
-  URLs (`cms_upload_media`). The SEO fields stay with `site.update`.
+  brand logos, favicon, app icon, splash image and splash background),
+  contact email and phone, social links, menu position, tracking ids and
+  sitemaps (see "Sitemaps") on the draft site. Images must be Hub media
+  URLs (`cms_upload_media`). `splashBackgroundColor` is a color key from the
+  site's theme `extend.colors` (`cms_get_theme`; nested keys take dots,
+  `brand.500`, and `brand` stands for `brand.DEFAULT`), never a CSS color.
+  A key the theme doesn't have is refused (`site.splash-color`, which lists
+  the theme's keys). The SEO fields stay with `site.update`.
 - **Menus:** `site.menus` replaces the whole `menus` object. Read the current
   menus with `cms_list_pages`, change them and send them back: every draft
   page listed once (`Not In Menu` for routable pages the navigation hides),
@@ -86,6 +94,10 @@ API, an import, a feed, or another system.
    (`event: true` too for dated entries with Event Details). The page's id is
    the type; its menu title is the label editors see in the Content sidebar.
    The page's main area is the index (list); its post area is the detail page.
+   `icon` is one of the type settings picker's names
+   (`edge/lib/cmsPostTypeIcons.js`: `Users`, `BookOpen`, `CalendarDays`,
+   `Store`, `Newspaper`, `GraduationCap` and about a hundred more); another
+   name is refused (`page.post-type`).
 2. **Build both views.** `page.placeBlock` for the index's list block (a
    `posts` Data Source; the Hub binds it to the type) and, with
    `area: "post"`, the detail blocks. Add `useForCustomPost: true` to each
@@ -93,15 +105,35 @@ API, an import, a feed, or another system.
    `page.setValues`). Unmarked blocks keep page-owned values and appear on
    every entry unchanged. A detail field maps to an entry path through its
    schema `postField` (else its key); `editable: false` and `private: true`
-   fields are not entry fields.
+   fields are not entry fields. An entry's standard field names (`name`,
+   the slug, `title`, `blurb`, `tags`, `featuredImage`, `hidePublishedDate`,
+   and `event` on a non-event type) can't be detail field paths: marking a
+   block that has one is refused (`instance.custom-post`), so use keys like
+   `fullName` in the library block. Finish and mark every
+   detail block before adding entries: a later change to any post-area
+   field refuses `fields.values` on the entries that already exist.
 3. **Add entries.** `post.create` with `postTypeId` (the defining page),
-   `title`, `blurb` and `values` (the detail fields by path), and
-   `post.update` with `fields.values`. Entries have no blocks of their own;
-   `post.placeBlock` and the other block operations refuse them.
+   `title`, `blurb` (250 characters at most) and `values`: one key per
+   detail field path, dotted for a nested one (`"about.bio"`, not
+   `{ about: { bio } }`), from marked blocks only. A field you leave out
+   takes the detail block's current value on the page, so keep placeholder
+   copy out of marked blocks. For a type with `event: true`, also send
+   `event` (`startAt`, `endAt`, `timezone`, and `locationName` and
+   `locationAddress` unless `isVirtual`); without it, or without
+   `timezone`, the create is refused (`post.event`). On a type without
+   `event: true`, an `event` is ignored with a notice.
+   Change an entry with `post.update` `fields.values`. `cms_get_post`'s
+   `values` holds exactly the detail field paths, so you can change some and
+   send them back. Its `status` sees changes to detail values too. All of an
+   entry's values together are at most
+   200 KB. Entries have no blocks of their own; `post.placeBlock` and the
+   other block operations refuse them (`post.area`).
 4. **Read them back.** `cms_list_pages` marks the defining page
    `customPostType`; `cms_get_page` shows `postType` and the marked
    instances; `cms_list_posts` with `postTypeId` lists the entries;
-   `cms_get_post` shows their `values`.
+   `cms_get_post` shows their `values`. An entry's `status` does not see
+   changes to its detail values: a draft that differs from the published
+   entry only in `values` still reads `published`.
 
 A person publishes the defining page, then each entry, in the Hub.
 
@@ -134,8 +166,9 @@ initial snapshot of options/results from already loaded records, including
 scalar distinct choices, but installs no public controller/API. Other
 placeholder-only rendering still fetches no helper KV data.
 A person reviews the saved draft and confirms frontend readiness before release
-or publication. With a checkout, the complete example and limitations are in
-edge/skills/edge-block-package/reference/interactive-collections.md.
+or publication. The complete example, defaults and limits are in the
+edge-block-package skill's `reference/interactive-collections.md` (the
+edge-cms plugin, or `edge/skills/` in a checkout).
 
 ## Sitemaps
 
@@ -145,7 +178,13 @@ post kind, `{ "post": true, "event": false, "page:<pageId>": true }` for
 this site's custom post types, merged into the stored choices. Turn on a
 custom type's sitemap when its entries are public pages. `collections` and
 `apis` are the Dev Mode lists (collection and API sitemaps); given, each
-replaces its stored list, checked as the Sitemaps tab checks it. Page
+replaces its stored list, checked as the Sitemaps tab checks it (a
+collection needs a `routePrefix` or a `pathField`). Send `collections` only
+with the full list you mean to keep: read the stored `sitemap` from
+`cms_list_pages` first. The post rows the Hub generates for the `posts`
+choices (`managedPostType`) are kept unless your list has a row with the
+same `fileName`; turn one off with its `posts` choice. A `page:<pageId>`
+choice must name an enabled custom post type on the draft site. Page
 sitemaps need no setting. The generated post entries follow when a person
 publishes the site settings, from the published pages and menus.
 

@@ -1,9 +1,9 @@
 # Posts contract (verified against emd-cms `functions/cms.js` onPostWritten and `edge/components/cms/init_blocks/`, 2026-09-18)
 
 - Published posts live at `organizations/{orgId}/sites/{siteId}/published_posts/{postId}` and are mirrored to KV as collection `posts` with `uniqueKey: "{orgId}:{siteId}"`.
-- Indexed (usable in `queryItems`): `name` (slug), `tags` (one key per tag), `type` (`post` | `event`), month buckets, event start/end/isPast.
+- Indexed (usable in `queryItems`): `name` (slug), `tags` (one key per tag), `type` (`post` | `event` | a custom post type's `custom-...` key), month buckets, event start/end/isPast.
 - Metadata (available to lists without `canonical: true`): `title`, `blurb`, `name`, `type`, `featuredImage` (single URL), `doc_created_at` (publish time in milliseconds), `tags`, `event.{startAt,endAt,isPast,locationName}`.
-- Hub editor fields: Title (required), Name = slug (generated, editable), Content Blurb (required, max 500 chars), Featured Image (media manager), Publish At (sets `publishedAt`; `doc_created_at` follows it), Tags (free multi-select), Post Type, and a block-based body stored as `content` + `structure`.
+- Hub editor fields: Title (required), Name = slug (generated, editable), Content Blurb (required, max 250 chars; longer is refused, and list metadata cuts an older, longer blurb to 250), Featured Image (media manager), Publish At (sets `publishedAt`; `doc_created_at` follows it), Tags (free multi-select), Post Type, and a block-based body stored as `content` + `structure`.
 
 ## Listing source
 

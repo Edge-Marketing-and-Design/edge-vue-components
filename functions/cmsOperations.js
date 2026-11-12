@@ -144,6 +144,33 @@ const parseThemeJson = (value) => {
   }
 }
 
+// splashBackgroundColor is a theme.extend.colors key: dots for nested colors,
+// the parent key for a DEFAULT (the Hub's swatch list, cmsSplashScreen.js).
+const themeColorKeys = (theme) => {
+  const keys = new Set()
+  const visit = (values, prefix = '') => {
+    for (const [key, value] of Object.entries(values || {})) {
+      const name = key === 'DEFAULT' ? prefix : [prefix, key].filter(Boolean).join('.')
+      if (typeof value === 'string' && value.trim() && name)
+        keys.add(name)
+      else if (isPlainObject(value))
+        visit(value, name)
+    }
+  }
+  visit(isPlainObject(theme?.extend?.colors) ? theme.extend.colors : {})
+  return keys
+}
+const splashColorProblem = async (reader, orgId, themeId, key) => {
+  if (typeof key !== 'string' || !key)
+    return null
+  const themeDoc = themeId ? await reader.doc(orgRefOf(orgId).collection('themes').doc(themeId)) : null
+  const keys = themeColorKeys(parseThemeJson(themeDoc?.exists ? themeDoc.data()?.theme : null))
+  if (keys.has(key))
+    return null
+  const listed = [...keys].slice(0, 30).join(', ')
+  return `splashBackgroundColor "${key}" is not a color of the site's theme${listed ? ` (theme.extend.colors keys: ${listed})` : ' (its theme has no extend.colors)'}. Use a key, never a CSS color.`
+}
+
 const isStandardTheme = (validation, themeDoc) => {
   const theme = parseThemeJson(themeDoc?.theme)
   return !!theme && !validation.themeTokenProblems(theme).length
@@ -411,7 +438,18 @@ const areaOfKey = (body, key) => Object.entries(body.areas).find(([, keys]) => k
 // placeBlock { blockId, values?, index?, area? }: a new instance of a library
 // block in a new full-width row at `index` (default last).
 // useForCustomPost: true/false on a post-area block of a custom post type page.
-const customPostFlagProblems = (plan, { page, area, value }) => {
+// A detail block's schema fields become the entry's fields (postField or the
+// key). The standard post fields are written over them when the entry is
+// saved, so a field named like one would silently lose its value.
+const RESERVED_CUSTOM_POST_FIELDS = ['name', 'title', 'blurb', 'tags', 'featuredImage', 'hidePublishedDate', 'event']
+const reservedCustomPostFields = (instance, page) => Object.entries(isPlainObject(instance?.schema) ? instance.schema : {})
+  .filter(([, config]) => isPlainObject(config) && !config.private && config.editable !== false)
+  .map(([key, config]) => (typeof config.postField === 'string' && config.postField) || key)
+  .filter(path => RESERVED_CUSTOM_POST_FIELDS.includes(path.split('.')[0]) && !(path.split('.')[0] === 'event' && page?.postType?.event === true))
+const customPostFlagProblems = (plan, { page, area, value, instance = null }) => {
+  const reserved = value === true ? reservedCustomPostFields(instance, page) : []
+  if (reserved.length)
+    problem(plan, 'instance.custom-post', `This block's field${reserved.length > 1 ? 's' : ''} ${reserved.map(path => `"${path}"`).join(', ')} would be overwritten by the entry's standard ${reserved.length > 1 ? 'fields' : 'field'} of the same name. Rename the field key (or its postField) in the library block before using it for custom posts; reserved: ${RESERVED_CUSTOM_POST_FIELDS.join(', ')}.`)
   if (typeof value !== 'boolean')
     problem(plan, 'instance.custom-post', 'useForCustomPost must be true or false.')
   else if (!isCustomTypePage(page))
@@ -447,7 +485,7 @@ const planPlaceBlock = async (core, reader, plan, { orgId, uid, now, operation, 
   }
   const [contentKey, structureKey] = body.areas[operation.area === 'post' ? 'post' : 'main']
   if (operation.useForCustomPost !== undefined)
-    customPostFlagProblems(plan, { page: next, area: operation.area === 'post' ? 'post' : 'main', value: operation.useForCustomPost })
+    customPostFlagProblems(plan, { page: next, area: operation.area === 'post' ? 'post' : 'main', value: operation.useForCustomPost, instance: block })
   const taken = core.pageIds(next)
   const instance = core.buildInstanceFromLibraryBlock(block, { id: core.generateShortId(taken), blockId })
   if (operation.useForCustomPost === true)
@@ -503,7 +541,7 @@ const planSetValues = (core, plan, { uid, now, operation, next, body, found }) =
     return plan
   }
   if (flag !== undefined)
-    customPostFlagProblems(plan, { page: next, area: key === 'postContent' ? 'post' : 'main', value: flag })
+    customPostFlagProblems(plan, { page: next, area: key === 'postContent' ? 'post' : 'main', value: flag, instance })
   if (operation.values === undefined && flag !== undefined) {
     const marked = { ...instance }
     if (flag === true)
@@ -907,6 +945,14 @@ const planPost = async (core, reader, { orgId, uid, now, operation }) => {
       const pageId = requireDocId(operation.postTypeId, 'post type page id')
       const definition = await reader.doc(siteRef.collection('pages').doc(pageId))
       if (operation.templateId || (operation.postType && operation.postType !== 'post')) problem(plan, 'post.type', 'Custom types use their defining page and its event setting, not a copied template or separate kind.')
+      // An event type's entry needs what a standard event needs, time zone
+      // included; reported as post.event like a standard event's.
+      if (definition.data()?.postType?.event === true) {
+        const reported = new Set(core.postEventProblems(operation.event, { type: postType, merged: event }))
+        problem(plan, 'post.event', ...core.postEventProblems(operation.event, { type: 'event', merged: event }).filter(message => !reported.has(message)))
+      }
+      else if (operation.event !== undefined)
+        plan.notices = [...(plan.notices || []), 'This post type is not an event type, so event was ignored.']
       try {
         const { buildTypedPost, buildPostTypeFields, setPostPath } = await import('./helpers/cmsPostTypes.mjs')
         if (operation.values !== undefined && !isPlainObject(operation.values)) throw new Error('values must be an object of custom post fields.')
@@ -1016,12 +1062,13 @@ const planPost = async (core, reader, { orgId, uid, now, operation }) => {
       }
     }
     if (fields.event !== undefined) {
-      const postType = core.normalizePostType(post.type)
+      const definition = post.postTypeId ? await reader.doc(siteRef.collection('pages').doc(post.postTypeId)) : null
+      // An event type's custom entry is checked as a standard event is.
+      const postType = definition?.data()?.postType?.event === true ? 'event' : core.normalizePostType(post.type)
       const merged = core.savedPostEvent({ ...(isPlainObject(post.event) ? post.event : {}), ...(isPlainObject(fields.event) ? fields.event : {}) })
       problem(plan, 'post.event', ...core.postEventProblems(fields.event, { type: postType, merged, timezoneKnown: typeof post.event?.timezone === 'string' && !!post.event.timezone }))
       if (post.postTypeId) {
         try {
-          const definition = await reader.doc(siteRef.collection('pages').doc(post.postTypeId))
           if (definition.data()?.postType?.event !== true) throw new Error('This custom type does not enable event entries.')
           const { buildPostEvent } = await import('./helpers/cmsPostEvents.mjs')
           update.event = buildPostEvent(merged)
@@ -1233,6 +1280,7 @@ const planSiteSettings = async (core, reader, { orgId, uid, now, operation }) =>
   for (const { code, message } of found)
     problem(plan, code, message)
   const update = Object.fromEntries(Object.entries(settings).filter(([key]) => core.SITE_SETTINGS_FIELDS.includes(key)))
+  problem(plan, 'site.splash-color', ...[await splashColorProblem(reader, orgId, siteSnap.data()?.theme, update.splashBackgroundColor)].filter(Boolean))
   // sitemap: posts choices merge into the stored ones; a custom type's
   // choice must name an enabled custom post type page on this site.
   if (update.sitemap !== undefined && !found.some(entry => entry.code === 'site.sitemap')) {
@@ -1329,6 +1377,7 @@ const planSite = async (core, reader, context) => {
   if (chosen.allowedThemes?.length && themeId && !chosen.allowedThemes.includes(themeId))
     problem(plan, 'site.allowed-themes', 'allowedThemes must include the site\'s theme.')
   addStructuredDataFindings(core, plan, chosen)
+  problem(plan, 'site.splash-color', ...[await splashColorProblem(reader, orgId, themeId, chosen.splashBackgroundColor)].filter(Boolean))
 
   const isAdmin = await permissionCheck(uid, 'assign', `organizations/${orgId}`)
   const siteRef = org.collection('sites').doc()
@@ -1624,6 +1673,9 @@ const gatherSitePages = async ({ orgId, siteId }) => {
     siteId,
     siteName: String(site.name || ''),
     ...core.buildSitePages({ site, pages, published }),
+    // The draft site's sitemap settings, so a site.settings sitemap patch can
+    // start from what is stored.
+    sitemap: isPlainObject(site.sitemap) ? site.sitemap : null,
     pageCount: Object.keys(pages).length,
     truncated: pagesSnap.size > READINESS_MAX_PAGES || publishedSnap.size > READINESS_MAX_PAGES,
   }
@@ -1750,9 +1802,20 @@ const gatherPostOutline = async ({ orgId, siteId, postId, source = 'draft', incl
     routePages = await siteRef.collection('published').where('post', '==', true).limit(READINESS_MAX_PAGES).get()
   }
   const pages = Object.fromEntries(routePages.docs.map(doc => [doc.id, doc.data() || {}]))
+  // A custom entry's values keyed by the defining page's field paths, the
+  // shape post.update fields.values takes back.
+  let postValues = null
+  if (data.postTypeId && includeValues !== false) {
+    const definition = pages[data.postTypeId] || (await siteRef.collection(from === 'published' ? 'published' : 'pages').doc(data.postTypeId).get()).data()
+    if (definition?.post === true) {
+      const { buildPostTypeFields, getPostPath } = await import('./helpers/cmsPostTypes.mjs')
+      postValues = Object.fromEntries(buildPostTypeFields(definition).map(field => [field.field, getPostPath(data, field.field) ?? null]))
+    }
+  }
   return {
     siteId,
     ...core.buildPostOutline({
+      postValues,
       postId,
       post: data,
       source: from,

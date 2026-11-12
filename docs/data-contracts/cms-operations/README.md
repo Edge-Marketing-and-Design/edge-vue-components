@@ -2,7 +2,7 @@
 
 Status: in use through the Hub callables and the agent endpoint; every write is a draft.
 
-Last verified: 2026-11-10, post blurb validation capped at 250 characters
+Last verified: 2026-11-11, custom post type operations and reads, splash settings and sitemap list replacement checked against the code
 
 Server-side, draft-only writes for building sites, used by agents through the
 CMS MCP and available to any signed-in caller with write permission. Source:
@@ -18,9 +18,14 @@ problem codes) is generated from `CMS_OPERATION_SPECS` in
 the marker below whenever `cms_contract` serves this contract. Change an
 operation there, not here. The rest of this file is hand-written.
 
-`site.settings` also accepts `splashImage` (Hub media URL or empty) and
-`splashBackgroundColor` (theme color key or empty). These are draft settings;
-publication stays with the normal site settings flow.
+`site.settings` and `site.create` accept `splashImage` and
+`splashBackgroundColor` (a color key of the site theme's `extend.colors`, or
+empty). `site.settings` requires a Hub media URL or an empty string for the
+image; `site.create` checks only that the image is a string, and a new site
+takes the theme's defaults for either one left empty. Both refuse a color key
+the site's theme doesn't have, a CSS color included (`site.splash-color`; the
+message lists the theme's keys). These are
+draft settings; publication stays with the normal site settings flow.
 
 Post creation and updates accept blurbs of at most 250 characters, matching both
 standard and custom post editors. Existing stored blurbs are not migrated.
@@ -343,7 +348,7 @@ viewport?, width? }` for a preview link, `{ orgId, action: 'readiness',
 siteId }` for the readiness report (as `cms-siteReadiness`), `{ orgId,
 action: 'pages', siteId }` for the page list, `{ orgId, action: 'page',
 siteId, pageId, source?, includeValues?, includeSchema? }` for a page outline
-(Page reads), `{ orgId, action: 'posts', siteId, type?, tag?, limit?,
+(Page reads), `{ orgId, action: 'posts', siteId, type?, postTypeId?, tag?, limit?,
 startAfter? }` for the post list or `{ orgId, action: 'post', siteId,
 postId, source?, includeValues?, includeSchema? }` for a post outline (Post
 reads). The reads need the key creator's read permission on the
@@ -378,16 +383,20 @@ the library blocks; the MCP's `cms_list_pages` and `cms_get_page`.
   menus other than `Site Root` and `Not In Menu` prefix their own slug. `null`
   when no menu lists the page.
 - **`pages`** returns `{ siteId, siteName, menus: [{ menu, entries }],
-  unlisted, pageCount, truncated }`. Menus are in the Sites page's order
+  unlisted, sitemap, pageCount, truncated }`; `sitemap` is the draft site's
+  stored sitemap settings (`null` when never set). Menus are in the Sites page's order
   (`Site Root`, other menus, `Not In Menu`). Entries are `{ kind: 'page',
-  pageId, exists, status, version?, post?, slug, menuTitle, path }`,
+  pageId, exists, status, version?, post?, customPostType?, slug, menuTitle,
+  path }` (`customPostType` on the defining page of an enabled custom post
+  type),
   `{ kind: 'folder', slug, menuTitle, entries }` or `{ kind: 'external',
   name, url }`. `unlisted` holds pages in no menu (`{ pageId, exists, status,
   version, post, slug }`). Up to 500 draft and 500 published pages are read;
   `truncated` says when there are more.
 - **`page`** returns `{ siteId, pageId, source, name, path, status, post,
   structuredDataAiLocked, metaTitle, metaDescription, structuredData, version, last_updated, areas,
-  blockIds }`, with `postMetaTitle`, `postMetaDescription` and
+  blockIds }`, with `postType` when the page stores one, and with
+  `postMetaTitle`, `postMetaDescription` and
   `postStructuredData` when the page has a post view (`post: true` or post
   rows or instances). `source: 'published'` outlines the published copy and
   takes its path from the published site settings' menus; `status` is the
@@ -395,7 +404,8 @@ the library blocks; the MCP's `cms_list_pages` and `cms_get_page`.
   rows in order, `{ rowId, index, width, layout: [span], columns: [{
   columnId, span, instances }] }`; instances `{ instanceId, blockId, name,
   templateVersion, synced, override, blockRevision, releasedRevision, behind,
-  libraryMissing?, values?, schema? }` (`values` unless `includeValues` is
+  libraryMissing?, useForCustomPost?, values?, schema? }` (`values` unless
+  `includeValues` is
   false, `schema` only when `includeSchema` is true). A column reference with
   no instance is `{ instanceId, missing: true }`; instances no column places
   are in `unplaced`. A page using more than 200 library blocks is refused
@@ -413,19 +423,31 @@ published snapshots and the library blocks; the MCP's `cms_list_posts` and
   draft, with each instance resolved to its library block's current
   definition as publishing resolves it, differs from the snapshot in
   `postDocComparable`'s fields; dates and timestamps don't count) or
-  `missing` (a snapshot without a draft).
+  `missing` (a snapshot without a draft). A custom post type entry is
+  compared whole, less `publishedAt`, `doc_created_at`, `last_updated`,
+  `uid`, `publishAt`, `publishAtTimezone` and `postTypeProjection`, as the
+  Hub's entry editor compares it, so a change to a detail value reads
+  `unpublished-changes`.
 - **`posts`** returns `{ siteId, siteName, posts, matched, nextStartAfter,
   postCount, truncated }`, newest first (`publishedAt`, else
-  `doc_created_at`), filtered by `type` (`post` or `event`) and exact `tag`;
+  `doc_created_at`), filtered by `type` (`post`, `event` or a custom type's
+  `custom-...` key), `postTypeId` (a custom type's defining page) and exact
+  `tag`;
   `limit` 1–100 (default 50), `startAfter` a postId from `nextStartAfter`.
-  Each post is `{ postId, exists, name, title, type, tags, publishedAt,
+  Each post is `{ postId, exists, name, postTypeId?, title, type, tags, publishedAt,
   publishAt, status, blockIds }`. Up to 500 drafts and 500 snapshots are
   read; `truncated` says when there are more.
 - **`post`** returns `{ siteId, postId, source, name, paths, status, type,
   title, blurb, featuredImage, featuredImages?, restrictionRuleId,
   publishAt, publishAtTimezone, publishAtError, tags, event? (events),
   publishedAt, hidePublishedDate, imported, doc_created_at, last_updated,
-  body, blockIds }`. `body` is `{ rows, unplaced? }` as a page area.
+  body, blockIds }`. `body` is `{ rows, unplaced? }` as a page area. A
+  custom post type entry also returns `postTypeId` and `values`, has an
+  empty `body`, and takes its `paths` from its defining page only. Its
+  `values` is keyed by the defining page's detail field paths (dotted for
+  nested ones, `null` for a path the entry lacks), the shape `post.update`
+  `fields.values` takes back. Without a readable defining page it is the
+  entry's non-standard keys.
   `imported` is true for a post with `legacyBlog` (the audit fields are not
   returned). `paths` are the URLs the site's post route pages (`post: true`
   with a post-rendering block, `cmsPostRoutes.js`) serve it at, in menu
@@ -647,12 +669,36 @@ mode. Unknown fields and schema/required/type problems reject the operation.
 For an existing custom post, `post.update` accepts `fields.values` with the
 same path/value map, validated against its defining detail page.
 Only fields from Detail instances marked `useForCustomPost: true` are editable
-through custom `values`. Mark placements in the Hub's block field editor; the
-operations do not set this flag. Unchecked/retired values are preserved from the
+through custom `values`. Mark a placement with `useForCustomPost: true` on
+`page.placeBlock` or `page.setValues` (post area of a custom post type page),
+or in the Hub's block field editor. Unchecked/retired values are preserved from the
 existing post, never accepted as new unmarked input. Ownership-only changes do
 not invalidate the post's field-definition fingerprint.
 
 Other standard post metadata edits retain their existing behavior. Post block-placement,
 movement/removal and instance-value operations are refused for values-only
-posts; edit their shared layout on the defining page instead. Nothing in these
-operations publishes posts or changes sitemap settings.
+posts (`post.area`); edit their shared layout on the defining page instead.
+Nothing in these operations publishes posts; sitemap settings change only
+through `site.settings` `sitemap`.
+
+Rules of the custom post operations:
+
+- `values` keys are the exact field paths, dotted for nested ones
+  (`"about.bio"`); a nested object is refused as an unknown field. A field
+  left out takes the detail block's current value on the page.
+- An entry's standard field names (`name`, `title`, `blurb`, `tags`,
+  `featuredImage`, `hidePublishedDate`, and `event` on a type without
+  `event: true`) can't be detail field paths: `useForCustomPost: true` on a
+  block with such a schema field (its key or `postField`) is refused
+  (`instance.custom-post`).
+- After any post-area field of the defining page changes, `fields.values` on
+  an existing entry is refused (`post.type`, "The detail page fields
+  changed"); other `post.update` fields still work. Turning
+  `postType.enabled` off refuses value updates too.
+- An event type (`postType.event`) entry needs the fields a standard event
+  needs, `timezone` included, on `post.create` and `post.update`; its event
+  problems are reported as `post.event`. On a type without `event: true`,
+  `event` is ignored on create with a notice.
+- An entry's values together are at most 200 KB.
+- `postType.icon` must be one of the picker's names (`POST_TYPE_ICON_NAMES`,
+  kept equal to `edge/lib/cmsPostTypeIcons.js` by a test).

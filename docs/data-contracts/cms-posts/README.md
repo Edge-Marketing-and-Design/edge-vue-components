@@ -2,7 +2,7 @@
 
 Status: in use for every post and event a site publishes.
 
-Last verified: 2026-11-10, 250-character blurb validation and byte-aware KV metadata truncation
+Last verified: 2026-11-11, custom type index key and blurb shortening in index metadata checked against the code
 
 A post is a dated entry (a post or an event) that a post template page
 renders under its route. Drafts live with the site; publishing copies a
@@ -77,7 +77,7 @@ publication date/time.
 | `posts:{orgId}:{siteId}:{postId}` | The published post document, serialized as stored |
 | `idx:posts:name:{orgId}:{siteId}:{name}` | Direct lookup by slug |
 | `idx:posts:tags:{orgId}:{siteId}:{slug(tag)}:{postId}` | One per tag |
-| `idx:posts:type:{orgId}:{siteId}:{type}:{postId}` | `post` or `event` |
+| `idx:posts:type:{orgId}:{siteId}:{type}:{postId}` | `post`, `event` or a custom post type's `custom-...` key |
 | `idx:posts:dates:{orgId}:{siteId}:{yyyyMM}:{postId}` | Archive bucket of `publishedAt` (else `doc_created_at`) |
 | `idx:posts:startAt:…`, `idx:posts:endAt:…`, `idx:posts:isPast:…` and the `event.`-prefixed twins | Event start, end (ISO strings) and `true`/`false` |
 
@@ -305,8 +305,8 @@ and standalone preview routes continue using published sources.
 conditionals, loops, nested arrays and source sort/query field declarations.
 Computed field names fail explicitly rather than omitting data. Private detail
 fields cannot be index dependencies. The usual routing/order metadata envelope
-is retained; only referenced dynamic post values are added. Required values
-are never truncated: the exact UTF-8 envelope, including `canonical`, must fit
+is retained; only referenced dynamic post values are added. Projected values
+are never truncated (only the blurb is shortened to fit): the exact UTF-8 envelope, including `canonical`, must fit
 KV's 1,024-byte limit. Use existing canonical post lookups for larger cards.
 
 `cms-refreshPostTypeMetadata` handles published-page writes with Firestore

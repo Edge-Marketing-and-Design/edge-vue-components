@@ -626,7 +626,11 @@ key, a non-object document, an invalid `type`, a non-array `themes`.
 **Render checks:** the template renders with its schema defaults. Blocks with
 Data Sources render twice: once with empty sources, and once with generated
 sample records built from the fields each loop body references. Loops the
-generator cannot model are reported as unverified, never as passed.
+generator cannot model are reported as unverified, never as passed. A mistake
+in an `interactive` declaration has no code of its own: it is reported as
+`render.error` with the engine's message (for example "Candidate fields must
+include query field published"). Neither render pass renders the markup inside
+a `collectionResults` region; only the static grammar checks cover it.
 
 <!-- validation codes: generated from BLOCK_VALIDATION_CODES -->
 

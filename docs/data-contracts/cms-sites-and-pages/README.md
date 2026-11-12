@@ -2,7 +2,7 @@
 
 Status: in use for every site the CMS publishes.
 
-Last verified: 2026-11-10, splash screen settings and draft/publication lifecycle
+Last verified: 2026-11-11, renderer consumption of splash, sitemap and hostname resolution checked against emd-cms-front main
 
 A site is an organization's website: its settings, menus and domains, and
 the draft pages assembled from block instances. Publishing copies a page or
@@ -75,9 +75,17 @@ change summaries, publication and Discard changes. Missing and empty compare
 equally for existing sites. Theme default settings can seed both fields. The
 existing whole-document site publisher and `sites:` KV document retain them;
 no new endpoint, index, rules or migration is required. The image remains
-separate from `appIcon`, `favicon` and logo settings. The public renderer must
-consume these new fields before they affect home-screen launches; native
-appearance is device dependent.
+separate from `appIcon`, `favicon` and logo settings.
+
+The public renderer (`emd-cms-front` main, `shared/siteSplashScreen.js`) reads
+both fields from the published `sites:` document. The color key is resolved
+against the published theme's `extend.colors` and used as the manifest
+`background_color`, with or without artwork; a key that is missing, or whose
+value is not an opaque concrete color (a CSS variable, a transparent value),
+falls back to the existing theme color, then white. Apple startup images are
+generated only when `splashImage` is a Cloudflare Images URL; other media URLs
+fall back to the app icon or logo, or produce none. The operations and the
+editor do not check either rule. Native appearance is device dependent.
 
 ### Branding icon preview
 
@@ -171,7 +179,7 @@ Defaults come from `blankPagePayload` (a blank page) and
 
 | Key | Value | Indexes and metadata |
 | --- | --- | --- |
-| `sites:{orgId}:{siteId}` | The published settings without `cacheVerification`, with current published `pageVersions` and generated `revision`/`publishedAt` (`onSiteWritten`) | `idx:sites:docId:{orgId}:{slug(siteId)}:{siteId}`, `idx:sites:domains:{slug(domain)}` per domain |
+| `sites:{orgId}:{siteId}` | The published settings without `cacheVerification`, with current published `pageVersions` and generated `revision`/`publishedAt` (`onSiteWritten`) | `idx:sites:docId:{orgId}:{slug(siteId)}:{siteId}`, `idx:sites:domains:{slug(domain)}` for each published domain the registry assigns to this site |
 | `site-resolution:v1:{normalizedHostname}` | Active resolution record or disabled tombstone (see below) | exact key, no index or expiration |
 | `pages:{orgId}:{siteId}:{pageId}` | The published page document (`onPublishedPageWritten`) | none |
 
@@ -303,8 +311,12 @@ its type's saved draft posts. Their preview cache signatures include draft
 changes. The override changes no saved block, menu, source or published
 projection; other page previews retain their normal collection loading.
 
-`emd-cms-front` resolves the request's host through `idx:sites:domains` to
-the site, reads `sites:` for `menus`, `theme`, `pageVersions`, the logos,
+`emd-cms-front` resolves the request's host through
+`site-resolution:v1:<hostname>` (see Exact hostname resolution and published
+revisions), reads the `sites:` document the record names and requires its
+`revision` and `publishedAt` to match the record; a disabled record means no
+site, an invalid or mismatched one is answered 503, and only an absent record
+falls back to `idx:sites:domains`. It then reads `sites:` for `menus`, `theme`, `pageVersions`, the logos,
 contact and social fields, SEO and tracking settings, then `pages:` for the
 page the route's slug names in `menus`, `themes:` for the theme and
 `posts:` for post routes. A post template page (`post: true`, with a block
@@ -413,7 +425,8 @@ section names them).
   `site.menus` refuse it. Pages and sites copy a template when they are
   created, so a template change reaches new copies only.
 - **Site settings and menus by operation:** `site.settings` writes the
-  allow-listed branding, contact, social and tracking settings, never
+  allow-listed branding (splash included), contact, social, tracking and
+  sitemap settings, never
   `domains` or `forwardApex`; `site.menus` replaces the menus with every
   draft page listed once. Both write the draft site only.
 - **Versions:** every save and every page operation increments the page's
@@ -546,11 +559,20 @@ response contract, pagination discovery, generated filenames and URL mapping.
 Saving an arbitrary API URL here does not make an unsupported response format
 renderable. The Hub neither fetches the URLs nor checks API responses.
 
-The renderer **does not yet consume this field**. A separate frontend task must
-resolve the published site's configuration, retain the existing query/path and
-cache-version semantics, and decide the transition away from bundled
-`site_maps/` files. This Hub change does not fetch any source URL or render XML,
-and has no remote/static XML map editor. No production backfill is performed.
+`emd-cms-front` main generates the collection and API sitemaps from the
+published site's `sitemap` (`shared/siteSitemap.ts`,
+`server/util/collectionSitemaps.ts`, `server/util/apiSitemaps.ts`). The Hub
+does not fetch any source URL or render XML, and has no remote/static XML map
+editor. No production backfill is performed.
+
+A collection entry needs a `routePrefix` or a `pathField` (`site.sitemap`
+otherwise). The stored `collections` list also holds the post rows the Hub
+generates (`managedPostType`) and recognised legacy post rows, which the
+Collections editor hides and preserves. `site.settings` replaces the list
+when `collections` is given but keeps those post rows, unless the new list
+has a row with the same `fileName` (`mergeSitemapSettings`); the `posts`
+choices turn them on and off. `cms_list_pages` returns the stored
+`sitemap`.
 
 ### Post-type sitemap controls
 

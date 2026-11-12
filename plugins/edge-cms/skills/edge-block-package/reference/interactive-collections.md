@@ -144,8 +144,17 @@ Do not call source() or render nested CMS blocks inside collectionResults.
 | `{{{#collectionOptions {"source":"categories","label":"name","value":"docId"} }}}` | Resolves its declared source and emits escaped option labels/values. |
 | `{{{#collectionResults {"source":"products"} }}} ... {{{/collectionResults}}}` | One refreshable inline region per source; controls remain outside it and stay mounted during updates. |
 
-The equivalent `data-cms-filter="name"` hooks are supported inside the owning
-`data-cms-collection="products"` root, including custom radios/checkboxes.
+Wrap the controls and the results region in one element with
+`data-cms-collection="<source name>"`: the public controller mounts on that
+element and ignores controls outside it. The equivalent
+`data-cms-filter="name"` hooks are supported inside that root, including
+custom radios/checkboxes; a `data-cms-filter` name that is not declared in
+`interactive.filters` is ignored, and the validator does not flag it. Write
+each helper tag and its JSON on one line: a helper split across lines is
+dropped silently. An element with `data-cms-collection-status` inside the root
+receives the result count ("N results. Page X of Y."), "No matching
+results.", loading and error text. Place the block directly on the page or
+post template; a block rendered inside another block cannot refresh.
 A source invoked inside a group loop can receive indexed overrides, for example
 `source("credentials", { queryItems: { type: group.name } })`.
 
@@ -158,11 +167,25 @@ not provide counts; never calculate tab totals from one page of results.
 selected candidate set, not across all KV records. `array-contains-all` requires
 all selected values. Filter bounds are explicit: maxCandidates is a safety
 ceiling with an error on overflow, not a silent truncation setting. The global
-ceiling is 2,000; prefer much smaller candidates (the Agents example uses 200).
+ceiling is 2,000; prefer much smaller candidates (the example above uses 200).
+
+Defaults and limits: `maxCandidates` defaults to 500 (1 to 2,000); `pageSize`
+defaults to 24 (100 at most). `fields` is required, up to 100 paths, and must
+include every `query` and `order` field. Up to 20 filters, 20 values per
+filter of up to 200 characters each, and 20 indexed lookups. Filter values
+and defaults are strings, and `{filters.name}` must be the entire value.
+`pagination.mode` is `"server"` or the key is left out; `pageParam` and
+`filterPrefix` start with a letter and use letters, digits, `_` or `-` (41
+characters at most). An interactive source is an indexed collection source,
+never an `api` or `canonicalLookup` source. The markup inside a results region
+is at most 50,000 characters and may not call `source(` or `renderBlocks`.
 
 ## Pagination and runtime boundary
 
-Without server pagination, bounded candidates are filtered in the browser.
+Without server pagination, bounded candidates are filtered in the browser,
+and paging needs your own buttons inside the root: `<button type="button"
+data-cms-page="previous">` and `data-cms-page="next"`. Without them only the
+first `pageSize` results can be reached.
 With `pagination: { mode: "server", pageParam, filterPrefix }`, the public API
 performs the final query, ordering and slicing and sends only the requested
 page. The results helper appends real Previous/Next page links. Do not append
@@ -176,8 +199,11 @@ not arbitrary client-supplied templates, queries, scope or sort definitions.
 
 Successful results use a bounded browser-memory cache scoped to site, render
 revision and source contract. Server-mode entries also include filters/page.
-The public API stays no-store; there is no new cross-request server cache and
-an open browser tab does not poll for publication changes.
+Responses to the browser stay no-store. On the server, `emd-cms-front` main
+caches each indexed candidate set (not filtered pages) in its rendered-page
+cache tiers and serves hits stale while it revalidates, so a newly published
+record can take a moment to appear in results. An open browser tab does not
+poll for publication changes.
 
 Placeholder rendering fetches no KV for these helpers: options remain empty
 and the results wrapper stays busy until hydration. Put authored skeletons
