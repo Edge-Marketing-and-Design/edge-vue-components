@@ -248,7 +248,7 @@ MCP source-use summaries count helper references, and the results region owns
 its loaded wrapper (it needs no separate `{{ loaded }}` class). This does not
 install the public frontend's controller or API into the Hub editor. Its
 editor canvas renders options and the initial results from its already
-loaded, authorized records, using the engine's default selection, filtering,
+loaded, authorized Firestore records (saved drafts for sites and posts), using the engine's default selection, filtering,
 ordering, pagination and conditional scope. Distinct sources yield sorted,
 unique scalar choices in KV and emulator loading. The editor also projects raw
 records from older deployed preview loaders, so local UI testing does not require
@@ -259,7 +259,11 @@ missing active query fields, the editor uses the same authorized loader for an
 explicit canonical batch before applying the result filters; it never invents
 agent eligibility fields. The canvas snapshot is bounded
 by the preview loader's limits; it installs no public controller/API and does
-not verify filter interaction or subsequent pages. Other placeholder-only
+not verify filter interaction or subsequent pages. The agent render
+(`cms_render_block`) draws the same initial snapshot from its records when it
+has no indexed KV records to hand the engine: `sample` (rows carry the
+declared `interactive.fields` and the fixed values the query requires),
+`empty`, and live records read from Firestore. Other placeholder-only
 rendering can still show busy/empty helpers. Do not claim public interaction
 parity because a block saves or its initial canvas snapshot looks correct.
 

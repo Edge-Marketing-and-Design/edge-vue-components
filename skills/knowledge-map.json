@@ -110,6 +110,9 @@
         "functions/cmsCollectionData.js",
         "functions/helpers/cmsDataSourceRecords.mjs",
         "edge/lib/cmsCollectionPreview.js",
+        "edge/functions/helpers/cmsCollectionPreview.mjs",
+        "functions/helpers/cmsCollectionPreview.mjs",
+        "edge/functions/cmsAgentRender.js",
         "edge/lib/cmsDataSourceRecords.js",
         "edge/functions/helpers/cmsDataSourceRecords.mjs",
         "functions/cmsAgentRender.js"

@@ -246,7 +246,10 @@ on another host, with the page, instance and field.
    `definition`). Fix every error. `cms_render_block` renders it with a site's
    theme and its real Data Source records (`data: "sample"` or `"empty"` for
    the other states) and returns the HTML and a standalone page to open and
-   screenshot. `cms_diff` with the `docId` and your `definition` lists exactly
+   screenshot. An interactive list (`collectionResults`) draws its first page
+   from those records in every mode; in `sample` mode its rows carry the
+   list's declared `interactive.fields`. Filtering and paging only run on the
+   public site. `cms_diff` with the `docId` and your `definition` lists exactly
    what the draft will change (field paths and a line diff of changed
    markup); `sameDefinition: true` means there is nothing to draft. Without a
    definition it shows what the block's open draft changes in the release.

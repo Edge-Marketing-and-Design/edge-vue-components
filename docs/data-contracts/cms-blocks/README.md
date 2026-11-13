@@ -262,7 +262,9 @@ engine selection/filter/order/page and conditional rules. Its bounded static
 snapshot does not install the controller/API. Distinct source loading returns
 sorted unique scalar choices in KV and the Firestore emulator. The editor also
 projects raw records from older deployed preview loaders without projecting
-already-scalar choices twice. Other
+already-scalar choices twice. The agent render (`cms_render_block`) draws the
+same initial snapshot from its sample, empty or Firestore-read records, since
+the engine draws results only from indexed KV records. Other
 placeholder-only rendering still fetches no helper KV and may show busy results.
 Public interaction and draft-editor parity are separate acceptance checks.
 Confirm frontend deployment readiness before a person publishes migrated blocks.

@@ -22,6 +22,7 @@ const loadModules = () => {
     import('@edgedev/template-engine'),
     import('./helpers/cmsBlockValidation.mjs'),
     import('./helpers/cmsAgentReads.mjs'),
+    import('./helpers/cmsCollectionPreview.mjs'),
   ])
   return modulesPromise
 }
@@ -98,6 +99,49 @@ const setStaticSource = (block, name, records, orgId) => {
   block.meta[name] = { value: records, collection: empty }
 }
 
+// Sample records for interactive lists. The template's loops can't show which
+// fields a list or options source uses, so the samples carry the list's
+// declared fields (and the fixed values its query requires) and each options
+// list's label and value fields.
+const SAMPLE_TEXT = 'Sample'
+const setSamplePath = (record, path, value) => {
+  const parts = String(path).split('.')
+  let target = record
+  for (const part of parts.slice(0, -1))
+    target = isPlainObject(target[part]) ? target[part] : (target[part] = {})
+  target[parts[parts.length - 1]] = value
+}
+const interactiveSamples = (template, dataSources) => {
+  const samples = {}
+  for (const [name, source] of Object.entries(isPlainObject(dataSources) ? dataSources : {})) {
+    const fields = Array.isArray(source?.interactive?.fields) ? source.interactive.fields : []
+    if (!fields.length)
+      continue
+    const record = {}
+    for (const field of fields)
+      setSamplePath(record, field, SAMPLE_TEXT)
+    for (const entry of [...(source.collection?.query ?? source.query ?? [])]) {
+      const operator = String(entry?.operator || '==').toLowerCase()
+      if (operator === '==' && !JSON.stringify(entry.value ?? '').includes('{') && typeof entry.field === 'string')
+        setSamplePath(record, entry.field, entry.value)
+    }
+    samples[name] = [record, { ...record }]
+  }
+  for (const match of String(template || '').matchAll(/\{\{\{#collectionOptions\s+(\{[^\n]*?\})\s*\}\}\}/g)) {
+    try {
+      const { source, label, value } = JSON.parse(match[1])
+      if (typeof source !== 'string' || samples[source] || !isPlainObject(dataSources?.[source]))
+        continue
+      const record = {}
+      for (const path of [label, value].filter(item => typeof item === 'string' && item))
+        setSamplePath(record, path, SAMPLE_TEXT)
+      samples[source] = [record, { ...record }]
+    }
+    catch {}
+  }
+  return samples
+}
+
 // The collection read rights a live source needs; null when it may not be
 // read live (personal data).
 const sourceReadTarget = (shared, entry) => {
@@ -113,7 +157,7 @@ const sourceReadTarget = (shared, entry) => {
 // { result, docIds, resultCount, truncated } for the library read audit.
 // overrideFor(block, themeId) is the deployed renderer's resolution.
 const renderBlock = async ({ reads, orgId, body, requireRead, overrideFor }) => {
-  const [records, engine, validation, shared] = await loadModules()
+  const [records, engine, validation, shared, collectionPreview] = await loadModules()
   const data = DATA_MODES.includes(body.data) ? body.data : 'live'
   const siteId = docIdOf(body.siteId, 'siteId')
   const routeLastSegment = text(body.routeLastSegment).slice(0, 200)
@@ -170,6 +214,14 @@ const renderBlock = async ({ reads, orgId, body, requireRead, overrideFor }) => 
       capLimit(prepared.meta[entry.name], records.MAX_SOURCE_RECORDS)
   }
   const entries = records.blockDataSources(prepared, { orgId, siteId, routeLastSegment })
+  // Sources as declared, before any is replaced with fixed records: an
+  // interactive list drawn from fixed records still needs its query and order.
+  const declaredSources = isPlainObject(prepared.dataSources) ? JSON.parse(JSON.stringify(prepared.dataSources)) : {}
+  const staticRecords = {}
+  const useStaticSource = (name, list) => {
+    staticRecords[name] = list
+    setStaticSource(prepared, name, list, orgId)
+  }
 
   const deadline = Date.now() + RENDER_BUDGET_MS
   const requestCache = engine.createHydrationRequestCache()
@@ -196,7 +248,7 @@ const renderBlock = async ({ reads, orgId, body, requireRead, overrideFor }) => 
     }
     const toLoad = JSON.parse(JSON.stringify(prepared))
     for (const name of Object.keys(refused)) {
-      setStaticSource(prepared, name, [], orgId)
+      useStaticSource(name, [])
       delete toLoad.meta[name]
       if (isPlainObject(toLoad.dataSources))
         delete toLoad.dataSources[name]
@@ -212,27 +264,49 @@ const renderBlock = async ({ reads, orgId, body, requireRead, overrideFor }) => 
       hydrate = { uniqueKey: siteId ? `${orgId}:${siteId}` : orgId, clientOptions: kvOptions, requestCache }
       for (const item of sources) {
         if (item.loadedFrom !== 'kv')
-          setStaticSource(prepared, item.name, loaded.values[item.name] || [], orgId)
+          useStaticSource(item.name, loaded.values[item.name] || [])
       }
     }
     else {
       for (const item of sources)
-        setStaticSource(prepared, item.name, loaded.values[item.name] || [], orgId)
+        useStaticSource(item.name, loaded.values[item.name] || [])
     }
   }
   else {
     const fixtures = data === 'sample'
-      ? validation.buildSourceFixtures(prepared.template || prepared.content || '', entries.map(entry => entry.name)).fixtures
+      ? { ...validation.buildSourceFixtures(prepared.template || prepared.content || '', entries.map(entry => entry.name)).fixtures, ...interactiveSamples(prepared.template, prepared.dataSources) }
       : {}
     for (const entry of entries) {
       const list = Array.isArray(fixtures[entry.name]) ? fixtures[entry.name] : []
-      setStaticSource(prepared, entry.name, list, orgId)
+      useStaticSource(entry.name, list)
       sources.push({ name: entry.name, path: text(entry.source?.collection?.path || entry.source?.path), loadedFrom: data, records: list.length, truncated: false })
     }
   }
   for (const item of sources) {
     if (item.problem)
       problems.push(`Data Source "${item.name}": ${item.problem}`)
+  }
+
+  // The engine draws an interactive list only from indexed KV records, so a
+  // render without them (sample, empty, or live records read from Firestore)
+  // draws its first page from the fixed records, as the Hub canvas does.
+  let restoreCollections = html => html
+  if (!hydrate && Number(prepared.templateVersion) === 2 && /\{\{\{#collection(?:Results|Options)\s/.test(String(prepared.template || ''))) {
+    const withRecords = {}
+    for (const [name, source] of Object.entries(declaredSources))
+      withRecords[name] = { ...source, value: staticRecords[name] || [] }
+    try {
+      const preview = await collectionPreview.prepareCmsCollectionPreview(String(prepared.template), withRecords)
+      prepared.template = preview.template
+      for (const [name, source] of Object.entries(preview.dataSources || {})) {
+        if (source?.interactive && isPlainObject(prepared.dataSources?.[name]))
+          prepared.dataSources[name].interactive = source.interactive
+      }
+      restoreCollections = preview.restore
+    }
+    catch (error) {
+      throw new HttpsError('failed-precondition', `The block's interactive collection did not render: ${error?.message || error}`)
+    }
   }
 
   let rendered
@@ -248,7 +322,7 @@ const renderBlock = async ({ reads, orgId, body, requireRead, overrideFor }) => 
   catch (error) {
     throw new HttpsError('failed-precondition', `The block did not render: ${error?.message || error}`)
   }
-  const html = String(rendered?.blocks?.[0]?.html || '')
+  const html = restoreCollections(String(rendered?.blocks?.[0]?.html || ''))
   const unresolved = [...new Set(html.match(/\{\{\{?[^{}]{1,80}\}?\}\}/g) || [])].slice(0, 10)
   if (unresolved.length)
     problems.push(`Unrendered template tags in the output: ${unresolved.join(', ')}`)
