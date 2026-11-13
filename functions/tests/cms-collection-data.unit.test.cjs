@@ -10,10 +10,11 @@ const functionRoot = existsSync(path.join(__dirname, '../config.js')) ? path.joi
 const ORG = 'org1'
 const SITE = 'site1'
 
-// cms-collectionData against a fake config, with the KV REST API served from
-// `kvKeys` and the denied "action:path" rights refused.
-const load = (t, { kvKeys = [], denied = [] } = {}) => {
-  const { db } = createFakeDb({})
+// cms-collectionData against a fake config: saved drafts in a fake Firestore
+// (`docs`), a KV REST API served from `kvKeys` (the canvas must not read it),
+// and the denied "action:path" rights refused.
+const load = (t, { docs = {}, kvKeys = [], denied = [] } = {}) => {
+  const { db } = createFakeDb(docs)
   const configPath = require.resolve(path.join(functionRoot, 'config.js'))
   const modulePath = require.resolve(path.join(functionRoot, 'cmsCollectionData.js'))
   const original = require.cache[configPath]
@@ -49,25 +50,26 @@ const load = (t, { kvKeys = [], denied = [] } = {}) => {
   return { collectionData, calls }
 }
 
-const post = (orgId, docId, title, tags) => ({ name: `posts:${orgId}:${SITE}:${docId}`, metadata: { canonical: `posts:${orgId}:${SITE}:${docId}`, title, tags } })
+const draft = (orgId, docId, title, tags, created) => [`organizations/${orgId}/sites/${SITE}/posts/${docId}`, { title, tags, doc_created_at: created }]
 const call = (collectionData, data, uid = 'editor') => collectionData({ auth: uid ? { uid } : null, data: { uid, ...data } })
 const trainings = {
-  collection: { path: 'posts', uniqueKey: `${ORG}:${SITE}`, query: [{ field: 'doc_created_at', operator: '>', value: 0 }, { field: 'tags', operator: 'array-contains', value: 'Trainings' }], order: [{ field: 'title', direction: 'asc' }] },
+  collection: { path: 'posts', uniqueKey: `${ORG}:${SITE}`, query: [{ field: 'tags', operator: 'array-contains', value: 'Trainings' }], order: [{ field: 'title', direction: 'asc' }] },
   limit: 20,
 }
 
-test('loads the canvas\'s collection fields from KV with the public site\'s query model', async (t) => {
-  const kvKeys = [
-    { ...post(ORG, 'b', 'Bravo', ['Trainings']), metadata: { ...post(ORG, 'b', 'Bravo', ['Trainings']).metadata, doc_created_at: 2 } },
-    { ...post(ORG, 'a', 'Alpha', ['Trainings']), metadata: { ...post(ORG, 'a', 'Alpha', ['Trainings']).metadata, doc_created_at: 1 } },
-    { ...post(ORG, 'n', 'News', ['News']), metadata: { ...post(ORG, 'n', 'News', ['News']).metadata, doc_created_at: 3 } },
-    { ...post('org2', 'x', 'Other org', ['Trainings']), metadata: { ...post('org2', 'x', 'Other org', ['Trainings']).metadata, doc_created_at: 4 } },
-  ]
-  const { collectionData, calls } = load(t, { kvKeys })
+test('loads the canvas\'s collection records from saved Firestore drafts with the source\'s query', async (t) => {
+  const docs = Object.fromEntries([
+    draft(ORG, 'b', 'Bravo', ['Trainings'], 2),
+    draft(ORG, 'a', 'Alpha', ['Trainings'], 1),
+    draft(ORG, 'n', 'News', ['News'], 3),
+    draft('org2', 'x', 'Other org', ['Trainings'], 4),
+  ])
+  const kvKeys = [{ name: `posts:${ORG}:${SITE}:kv`, metadata: { canonical: `posts:${ORG}:${SITE}:kv`, title: 'Published only', tags: ['Trainings'], doc_created_at: 5 } }]
+  const { collectionData, calls } = load(t, { docs, kvKeys })
   const result = await call(collectionData, { orgId: ORG, siteId: SITE, sources: { trainings } })
   assert.deepEqual(result.values.trainings.map(item => item.title), ['Alpha', 'Bravo'])
-  assert.deepEqual(result.sources.map(source => [source.name, source.loadedFrom, source.records]), [['trainings', 'kv', 2]])
-  assert.ok(calls.every(url => !url.includes('org2')))
+  assert.deepEqual(result.sources.map(source => [source.name, source.loadedFrom, source.records]), [['trainings', 'firestore', 2]])
+  assert.deepEqual(calls, [], 'the canvas reads no KV')
 })
 
 test('needs a signed-in caller whose uid matches, and read rights per collection', async (t) => {
@@ -93,8 +95,9 @@ test('needs a signed-in caller whose uid matches, and read rights per collection
   assert.match(result.sources.find(source => source.name === 'people').problem, /personal data/)
 })
 
-test('keys outside the organization and API sources are not read', async (t) => {
-  const { collectionData, calls } = load(t, { kvKeys: [post('org2', 'x', 'Other org', ['Trainings'])] })
+test('another organization\'s records and API sources are not read', async (t) => {
+  const docs = Object.fromEntries([draft(ORG, 'a', 'Own draft', ['Trainings'], 1), draft('org2', 'x', 'Other org', ['Trainings'], 2)])
+  const { collectionData, calls } = load(t, { docs })
   const result = await call(collectionData, {
     orgId: ORG,
     siteId: SITE,
@@ -103,7 +106,7 @@ test('keys outside the organization and API sources are not read', async (t) => 
       remote: { collection: { path: 'posts', uniqueKey: `${ORG}:${SITE}` }, api: 'http://169.254.169.254/latest', value: [] },
     },
   })
-  assert.deepEqual(result.values.foreign, [])
-  assert.match(result.sources.find(source => source.name === 'foreign').problem, /outside organization/)
-  assert.ok(calls.every(url => !url.includes('169.254') && !url.includes('org2')))
+  // Reads are always under the caller's organization, whatever key a source names.
+  assert.ok(!JSON.stringify(result.values).includes('Other org'), 'another organization\'s records stay out')
+  assert.deepEqual(calls, [], 'no API or KV request is made')
 })
