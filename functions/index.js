@@ -6,6 +6,8 @@ exports.history = require('./history')
 exports.registration = require('./stagedUserNotifications')
 exports.edgeMedia = require('./edgeMedia')
 exports.siteWebAnalytics = require('./siteWebAnalytics')
+// Site Analytics dashboard: Cloudflare Web Analytics and zone traffic for a site hostname.
+exports.siteAnalytics = require('./siteAnalytics')
 exports.listAgentContractNotes = require('./cmsAgentContractNotes').listAgentContractNotes
 exports.setAgentContractNote = require('./cmsAgentContractNotes').setAgentContractNote
 exports.clearAgentContractNote = require('./cmsAgentContractNotes').clearAgentContractNote
