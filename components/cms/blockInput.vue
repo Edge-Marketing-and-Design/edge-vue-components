@@ -1,6 +1,6 @@
 <script setup>
 import { useVModel } from '@vueuse/core'
-import { ImagePlus, Video, X } from 'lucide-vue-next'
+import { ImagePlus, Link2, TriangleAlert, Video, X } from 'lucide-vue-next'
 import {
   applyCloudflareVideoOptions,
   buildCloudflareVideoIframe,
@@ -8,6 +8,7 @@ import {
   getCloudflareVideoOptions,
   normalizeCloudflareVideoOptions,
 } from '../../lib/cmsVideo'
+import { LINK_PICKER, isSiteLinkHref, linkTargetForHref, linkTargets, normalizeLinkHref } from '../../lib/cmsOperations'
 
 const props = defineProps({
   field: {
@@ -81,6 +82,7 @@ const state = reactive({
   imageOpen: false,
   videoOpen: false,
   videoError: '',
+  linkOther: false,
   richtextImageOpen: false,
   richtextFileOpen: false,
 })
@@ -123,6 +125,71 @@ const videoToggles = [
   { key: 'loop', label: 'Loop', description: 'Starts again when it ends.' },
   { key: 'controls', label: 'Player controls', description: 'Play, pause, volume and full screen.' },
 ]
+
+// Link inputs (`text` + `picker: "link"`) offer the site's pages from its
+// saved draft menus and store the page's address with a trailing slash.
+// Typed addresses are normalized when the field loses focus.
+const LINK_OTHER = '__link-other__'
+const isLinkPicker = computed(() => props.type === 'text' && props.schema?.picker === LINK_PICKER)
+const linkSiteDoc = computed(() => {
+  const siteId = String(props.site || '').trim()
+  if (!isLinkPicker.value || !siteId || siteId === 'templates')
+    return null
+  return edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites`]?.[siteId] || null
+})
+const linkPages = computed(() => {
+  if (!linkSiteDoc.value)
+    return []
+  const pages = edgeFirebase.data?.[`${edgeGlobal.edgeState.organizationDocPath}/sites/${props.site}/pages`] || null
+  return linkTargets(linkSiteDoc.value.menus, pages)
+})
+const linkPageItems = computed(() => [
+  ...linkPages.value.map(target => ({
+    title: `${target.group ? `${target.group} › ` : ''}${target.title} (${target.href})`,
+    value: target.href,
+  })),
+  { title: 'Another address…', value: LINK_OTHER },
+])
+const linkValue = computed(() => (typeof modelValue.value === 'string' ? modelValue.value.trim() : ''))
+const linkedPage = computed(() => linkTargetForHref(linkPages.value, linkValue.value))
+const linkSelection = computed({
+  get: () => {
+    if (linkedPage.value && linkValue.value === linkedPage.value.href)
+      return linkedPage.value.href
+    return (linkValue.value || state.linkOther) ? LINK_OTHER : ''
+  },
+  set: (value) => {
+    if (value === LINK_OTHER) {
+      state.linkOther = true
+      if (linkedPage.value)
+        modelValue.value = ''
+      return
+    }
+    state.linkOther = false
+    modelValue.value = value
+  },
+})
+const linkStatus = computed(() => {
+  const value = linkValue.value
+  if (!value)
+    return { tone: 'muted', text: linkSiteDoc.value ? 'No link yet. Pick a page or type an address.' : 'Type an address. Site pages can be picked when this block is edited on a site page.' }
+  if (!normalizeLinkHref(value))
+    return { tone: 'warning', text: 'This kind of link isn\'t allowed. Use a site page, https://, mailto: or tel:.' }
+  if (!isSiteLinkHref(value))
+    return { tone: 'muted', text: value.startsWith('#') ? 'Links to a section of the same page.' : 'Outside address.' }
+  if (linkedPage.value)
+    return { tone: 'muted', text: `Links to the ${linkedPage.value.title} page.` }
+  if (linkSiteDoc.value)
+    return { tone: 'warning', text: `No page on this site is at ${value.replace(/[?#].*$/, '')}. Pick a page, or keep it if the address is served another way (a post or a file).` }
+  return { tone: 'muted', text: 'Site address.' }
+})
+const normalizeLinkValue = () => {
+  if (!isLinkPicker.value || typeof modelValue.value !== 'string')
+    return
+  const normalized = normalizeLinkHref(modelValue.value)
+  if (normalized && normalized !== modelValue.value)
+    modelValue.value = normalized
+}
 
 const optionConfig = computed(() => {
   let option = {}
@@ -383,6 +450,37 @@ onBeforeMount(async () => {
           On the live site a video stops when it is hidden, such as when a pop-up closes.
         </p>
       </div>
+    </div>
+    <div v-else-if="isLinkPicker" class="space-y-2">
+      <edge-shad-select
+        v-if="linkPages.length"
+        v-model="linkSelection"
+        :label="label"
+        :items="linkPageItems"
+        item-title="title"
+        item-value="value"
+        placeholder="Pick a page"
+        trigger-class="normal-case"
+        dropdown-item-class="normal-case"
+        item-label-class="normal-case"
+      />
+      <edge-shad-input
+        v-if="!linkPages.length || linkSelection === LINK_OTHER"
+        v-model="modelValue"
+        :name="field"
+        :label="linkPages.length ? 'Address' : label"
+        :placeholder="props.placeholder || '/about/ or https://…'"
+        @blur="normalizeLinkValue"
+      />
+      <p
+        class="flex items-start gap-1.5 text-xs"
+        :class="linkStatus.tone === 'warning' ? 'text-amber-700 dark:text-amber-400' : 'text-muted-foreground'"
+        :role="linkStatus.tone === 'warning' ? 'status' : undefined"
+      >
+        <TriangleAlert v-if="linkStatus.tone === 'warning'" class="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <Link2 v-else class="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <span>{{ linkStatus.text }}</span>
+      </p>
     </div>
     <div v-else-if="props.type === 'richtext'">
       <edge-shad-html

@@ -26,6 +26,7 @@ Each change in the design is one of these. A section can carry several; list eac
 | Markup only | Same fields, different HTML, classes, spacing or order | `block.draft` on `content` (Template v2 `template` follows) | None; the release checks render every instance |
 | New field | The design shows content the schema has no input for | `block.draft` adding the input with a default and the markup that reads it; instances pick up the default on release | None |
 | Removed or renamed field | An input the design no longer uses, or one whose meaning moved | Two steps: add the new field first and keep the old one; removal is a later draft. Say "breaking" in the handoff | Breaking on the removal step: the developer confirms |
+| Link inputs | A `text` input written as a whole `href` (`schema.link-picker`), or link values not in the trailing-slash form | `block.draft` adding `"picker": "link"` to the input (same type, so not breaking), then `page.setValues` for any instance value the check refuses | None |
 | Content values | Same fields, different copy | `page.setValues` per instance (`cms_find_usage` lists them); synced values go to the developer | None (page drafts) |
 | Media | A changed or new image | Exported from the design, uploaded with `cms_upload_media`, and set with `page.setValues` (or as the field default in the draft) once `ready` | None (page drafts) |
 | Override behavior | The change is in what the Vue component does, not in what the block shows | The CMS block first (the fidelity rule in `override-blocks.md`), then a renderer task for `emd-cms-front` | Renderer deploy |
@@ -50,6 +51,12 @@ The default is two steps, because the release checks flag a removed or retyped f
 2. **Remove, later.** After the first release, a second draft removes the old input. Its release is breaking; the handoff says so, and the developer confirms it in the release dialog.
 
 A one-step removal (one draft that removes the field) is only done when the developer asks for it in so many words. The handoff then says "breaking" and lists the instances the release checks will name.
+
+### Link inputs
+
+Whenever a block is updated, convert the plain `text` inputs it writes as a whole `href` (the validator's `schema.link-picker` warnings) to Link inputs in the same draft: add `"picker": "link"`, keep the field name, type and default. Nothing renders differently, and the release is not breaking. After the release, `cms_site_readiness` lists the instance values that aren't in the Link form (`instance.values`, "should be \"/about/\""); fix each with `page.setValues` using the value the message names. Outside addresses need no change.
+
+Verify: `cms_validate` reports no `schema.link-picker` for the block; `cms_site_readiness` shows no `instance.values` error for it.
 
 ### Content values
 

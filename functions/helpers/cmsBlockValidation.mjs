@@ -516,6 +516,36 @@ const nestedDefaultExpressions = (template) => {
 
 const hasAltPair = (schema, name) => owns(schema, `${name}Alt`) || owns(schema, 'alt')
 
+// A text input the template writes as a whole link (href="{{ ctaUrl }}", or
+// href="{{ card.link }}" inside {{#for card in cards}}) should be a Link
+// input ("picker": "link"), so editors pick a site page and the address
+// gets its trailing slash. Inputs after a prefix (href="mailto:{{ email }}")
+// are other kinds of value and are left alone.
+const arrayItemInput = (input, child) => {
+  if (Array.isArray(input?.schema))
+    return input.schema.find(item => item?.field === child) || null
+  return isObject(input?.schema) ? input.schema[child] || null : null
+}
+const isPlainTextInput = input => isObject(input) && input.type === 'text' && input.picker !== 'link' && !isObject(input.option)
+export const linkInputFindings = (template, schema) => {
+  const source = String(template || '')
+  const fields = isObject(schema) ? schema : {}
+  const loops = new Map([...source.matchAll(/\{\{#for\s+([A-Za-z_$][\w$]*)\s+in\s+([A-Za-z_$][\w$]*)\s*\}\}/g)].map(match => [match[1], match[2]]))
+  const findings = []
+  const seen = new Set()
+  for (const match of source.matchAll(/\bhref\s*=\s*["']\s*\{\{\s*([A-Za-z_$][\w$]*)(?:\.([A-Za-z_$][\w$]*))?\s*\}\}/g)) {
+    const [, head, child] = match
+    const name = child ? loops.get(head) : head
+    const input = child ? arrayItemInput(fields[name], child) : fields[name]
+    const path = child ? `schema.${name}.schema.${child}` : `schema.${name}`
+    if (!name || seen.has(path) || !isPlainTextInput(input))
+      continue
+    seen.add(path)
+    findings.push({ path, message: `${child ? `Array input "${child}" in "${name}"` : `Input "${name}"`} is written as a link (href="{{ ${match[1]}${child ? `.${child}` : ''} }}") but is a plain text input. Make it a Link input ("picker": "link") so editors pick a site page and the address ends with "/".` })
+  }
+  return findings
+}
+
 // ---- Standard theme names ----
 // Every theme defines the same color, font and radius names, and blocks use
 // only those, so a block works with any theme in the organization: swapping
@@ -926,6 +956,9 @@ export const validateBlockDocument = (doc, options = {}) => {
     }
   }
 
+  for (const finding of linkInputFindings(template, schema))
+    report.add('warning', 'schema.link-picker', finding.path, finding.message)
+
   for (const branch of ['if', 'else']) {
     const htmlProblem = findUnbalancedHtml(stripTemplateTokens(selectConditionalPath(template, branch)))
     if (htmlProblem) {
@@ -1259,6 +1292,7 @@ export const BLOCK_VALIDATION_CODES = Object.freeze({
   'schema.input-value': { severity: 'warning', meaning: 'A schema input has no default value.' },
   'schema.option-list': { severity: 'warning', meaning: 'A select (`option`) input has no option list, so the page editor shows an empty select. Template v1 conversions before 2026-11-05 dropped the lists of inputs inside arrays.' },
   'schema.image-alt': { severity: 'warning', meaning: 'An image input has no alt-text input beside it.' },
+  'schema.link-picker': { severity: 'warning', meaning: 'A plain text input is written as a whole link (`href="{{ field }}"`); make it a Link input (`"picker": "link"`) so editors pick a site page and the address ends with "/".' },
   'grammar.unbalanced-html': { severity: 'error', meaning: 'HTML is unbalanced when every conditional takes its `if` branch, or every one takes its `else` branch.' },
   'grammar.unbalanced-block': { severity: 'error', meaning: 'Unpaired `{{#for}}`/`{{/for}}` or `{{{#if}}}`/`{{{#else}}}`/`{{{/if}}}`.' },
   'grammar.legacy-if': { severity: 'error', meaning: 'Unsupported conditional syntax (legacy if).' },

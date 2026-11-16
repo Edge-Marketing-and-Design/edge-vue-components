@@ -38,7 +38,11 @@ handoff note), never part of this change.
 
    It lists each touched area, its changed code, and each document with
    `changed` or `unchanged` and what it says. `NEEDS REVIEW` marks an area
-   whose code changed while none of its documents in this checkout did.
+   whose code changed while none of its documents in this checkout did, or
+   while only contracts changed and none of its skill documents did (agents
+   build from the skills, so a contract edit alone doesn't cover them; the
+   video picker change on 2026-11-04 updated the contract and left every
+   skill silent about video).
    Add `--json` for the report as data.
 
 2. **Decide per document section.** For every section of every touched

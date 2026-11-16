@@ -303,6 +303,16 @@ from editor output:
   (`validateInstanceValues`): `required`, `min` and `max` (characters, items
   or number), at least one item for manual arrays, and no values for fields
   the schema doesn't define.
+- **Link values:** a value for a Link input (`"type": "text"`,
+  `"picker": "link"`, root or array item; `docs/data-contracts/cms-blocks/README.md`,
+  Input types) must already be in the form the Hub's picker stores
+  (`normalizeLinkHref` in `edge/lib/cmsOperations.js`): a site path with one
+  leading slash and a trailing slash (`/`, `/about/`, `/folder/page/`; a
+  last segment with a file extension keeps none), or an outside address
+  (`https://`, `mailto:`, `tel:`, `#section`). Anything else is a
+  `values.schema` problem naming the corrected value (`Button Link should be
+  "/about/": ...`); `javascript:`, `data:` and `vbscript:` are refused. The
+  readiness report applies the same rule to stored values (`instance.values`).
 - **Theme fields:** `theme` and `headJSON` must be JSON object strings (the
   KV mirror parses them); `extraCSS` a string; no other fields.
 - **Structured data** (`structuredData`, `postStructuredData`, and the site's
@@ -381,13 +391,15 @@ the library blocks; the MCP's `cms_list_pages` and `cms_get_page`.
 - **Path:** the route the Hub's page links use (`findCmsPageRoute`): `/` for
   a top-level `home` page, otherwise `/` plus the folder and page slugs;
   menus other than `Site Root` and `Not In Menu` prefix their own slug. `null`
-  when no menu lists the page.
+  when no menu lists the page. **`href`** is the same address with its
+  trailing slash (`/about/`): the value a Link input stores, and the one to
+  write with `page.setValues`.
 - **`pages`** returns `{ siteId, siteName, menus: [{ menu, entries }],
   unlisted, sitemap, pageCount, truncated }`; `sitemap` is the draft site's
   stored sitemap settings (`null` when never set). Menus are in the Sites page's order
   (`Site Root`, other menus, `Not In Menu`). Entries are `{ kind: 'page',
   pageId, exists, status, version?, post?, customPostType?, slug, menuTitle,
-  path }` (`customPostType` on the defining page of an enabled custom post
+  path, href }` (`customPostType` on the defining page of an enabled custom post
   type),
   `{ kind: 'folder', slug, menuTitle, entries }` or `{ kind: 'external',
   name, url }`. `unlisted` holds pages in no menu (`{ pageId, exists, status,

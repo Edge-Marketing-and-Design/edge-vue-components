@@ -64,6 +64,20 @@ test('a mapped code change without a document change needs review; with one, or 
   assert.deepEqual(waived.waivers, ['internal rename, no behavior change'])
 })
 
+test('when an area lists a skill document, a contract change alone still needs review', () => {
+  const skillMap = { areas: [{ id: 'inputs', name: 'Inputs', code: ['edge/lib/cmsVideo.js'], documents: [
+    { path: 'edge/docs/data-contracts/cms-blocks/README.md', section: 'Input types', says: 'contract' },
+    { path: 'edge/skills/edge-block-package/reference/template-v2-contract.md', section: 'Input mapping', says: 'skill' },
+  ] }] }
+  const contractOnly = impactReport({ map: skillMap, changes: [{ path: 'edge/lib/cmsVideo.js' }, { path: 'edge/docs/data-contracts/cms-blocks/README.md' }] })
+  assert.equal(contractOnly.ok, false)
+  assert.equal(contractOnly.areas[0].reviewReason, 'no skill document changed')
+  const withSkill = impactReport({ map: skillMap, changes: [{ path: 'edge/lib/cmsVideo.js' }, { path: 'edge/docs/data-contracts/cms-blocks/README.md' }, { path: 'edge/skills/edge-block-package/reference/template-v2-contract.md' }] })
+  assert.equal(withSkill.ok, true)
+  const waived = impactReport({ map: skillMap, changes: [{ path: 'edge/lib/cmsVideo.js' }, { path: 'edge/docs/data-contracts/cms-blocks/README.md' }], messages: ['Fix\n\nSkill-Impact: none (internal refactor)'] })
+  assert.equal(waived.ok, true)
+})
+
 test('a diffPattern counts only matching changes, and unmapped system code is listed', () => {
   const unrelated = impactReport({ map: fixtureMap, changes: [{ path: 'package.json', diffLines: ['"vue": "3.5.1"'] }] })
   assert.deepEqual(unrelated.areas, [])

@@ -10,6 +10,7 @@ import { editorTagOptions, offListBlockTags } from '../../lib/cmsBlockTags'
 import { useCmsBlockTagList } from '../../composables/useCmsBlockTagList'
 import { safeParseTagConfig } from '../../lib/cmsTagConfig'
 import { BLOCK_REVISION_DEFINITION_FIELDS, diffBlockMetadata } from '../../lib/cmsBlockRevisions'
+import { isLinkInput, normalizeLinkHref } from '../../lib/cmsOperations'
 import { BLOCK_EXPORT_BASE_KEY, blockExportBase, discardLibraryBlockDraft, isBlockBaseChangedError, loadLibraryBlockForEditing, releasedRevisionOf, saveLibraryBlockEdit, saveWithBaseCheck } from '../../lib/cmsBlockRevisionClient'
 const props = defineProps({
   blockId: {
@@ -145,6 +146,7 @@ const blockTypeOptions = [
 ]
 const v2SchemaTypeOptions = [
   { name: 'text', title: 'Text' },
+  { name: 'link', title: 'Link' },
   { name: 'textarea', title: 'Textarea' },
   { name: 'richtext', title: 'Rich Text' },
   { name: 'image', title: 'Image' },
@@ -156,6 +158,7 @@ const v2SchemaTypeOptions = [
 ]
 const v2ArrayItemSchemaTypeOptions = [
   { name: 'text', title: 'Text' },
+  { name: 'link', title: 'Link' },
   { name: 'textarea', title: 'Textarea' },
   { name: 'richtext', title: 'Rich Text' },
   { name: 'image', title: 'Image' },
@@ -1027,6 +1030,10 @@ const normalizeTemplateV2SchemaEntry = (schema, field) => {
     schema[field].type = 'richtext'
     schema[field].picker = 'video'
   }
+  if (schema[field].type === 'link') {
+    schema[field].type = 'text'
+    schema[field].picker = 'link'
+  }
   if (schema[field].type === 'option')
     ensureTemplateV2SchemaOption(schema[field])
   if (schema[field].type === 'publication') {
@@ -1047,6 +1054,8 @@ const getTemplateV2SchemaEntries = (workingDoc) => {
 function getTemplateV2SchemaEditorType(entry) {
   if (entry?.type === 'richtext' && entry?.picker === 'video')
     return 'video'
+  if (entry?.type === 'text' && entry?.picker === 'link')
+    return 'link'
   return String(entry?.type || 'text').trim() || 'text'
 }
 
@@ -1054,9 +1063,10 @@ const normalizeTemplateV2SchemaConfig = (field, config) => {
   if (!config || typeof config !== 'object' || Array.isArray(config)) {
     const type = (typeof config === 'string' && config) ? config : 'text'
     return {
-      type: type === 'video' ? 'richtext' : type,
+      type: type === 'video' ? 'richtext' : type === 'link' ? 'text' : type,
       label: titleFromKey(field),
       ...(type === 'video' ? { picker: 'video' } : {}),
+      ...(type === 'link' ? { picker: 'link' } : {}),
     }
   }
   const normalized = config
@@ -1067,6 +1077,10 @@ const normalizeTemplateV2SchemaConfig = (field, config) => {
   if (normalized.type === 'video') {
     normalized.type = 'richtext'
     normalized.picker = 'video'
+  }
+  if (normalized.type === 'link') {
+    normalized.type = 'text'
+    normalized.picker = 'link'
   }
   if (!normalized.label && !normalized.title)
     normalized.label = titleFromKey(field)
@@ -1377,9 +1391,15 @@ const updateTemplateV2SchemaType = (entry, value) => {
     if (previousType !== 'video')
       entry.value = ''
   }
+  else if (normalizedType === 'link') {
+    entry.type = 'text'
+    entry.picker = 'link'
+    if (previousType !== 'link' && previousType !== 'text')
+      entry.value = ''
+  }
   else {
     entry.type = normalizedType
-    if (entry.picker === 'video')
+    if (entry.picker === 'video' || entry.picker === 'link')
       delete entry.picker
   }
   if (entry.type === 'option')
@@ -1417,9 +1437,15 @@ const updateTemplateV2ArraySchemaType = (entry, value) => {
     if (previousType !== 'video')
       entry.value = ''
   }
+  else if (normalizedType === 'link') {
+    entry.type = 'text'
+    entry.picker = 'link'
+    if (previousType !== 'link' && previousType !== 'text')
+      entry.value = ''
+  }
   else {
     entry.type = normalizedType
-    if (entry.picker === 'video')
+    if (entry.picker === 'video' || entry.picker === 'link')
       delete entry.picker
   }
   if (entry.type === 'option')
@@ -1831,6 +1857,11 @@ const BLOCK_CONTENT_SNIPPETS = [
     label: 'Image',
     snippet: '{{{#image {"field": "imageField", "value": "",   "tags": ["Backgrounds"] }}}}',
     description: 'Image field placeholder',
+  },
+  {
+    label: 'Link',
+    snippet: '{{{#text {"field": "linkUrl", "value": "", "picker": "link" }}}}',
+    description: 'Site page picker that stores the page address with a trailing slash',
   },
   {
     label: 'Video',
@@ -2289,7 +2320,7 @@ const blockModel = (html) => {
       val = (val && typeof val === 'object') ? JSON.parse(JSON.stringify(val)) : String(val || '')
     }
     else if (type === 'text') {
-      val = !val ? PLACEHOLDERS.text : String(val)
+      val = cfg.picker === 'link' ? String(val || '') : (!val ? PLACEHOLDERS.text : String(val))
     }
     else if (type === 'array') {
       // Keep array fields empty by default instead of injecting placeholder items.
@@ -4351,7 +4382,8 @@ const exportCurrentBlock = async () => {
                         v-model="state.schemaWizardDraft.entry.value"
                         name="schemaWizardDefault"
                         label="Default Value"
-                        placeholder="Optional default"
+                        :placeholder="isLinkInput(state.schemaWizardDraft.entry) ? 'Optional site path, such as /contact/' : 'Optional default'"
+                        @blur="isLinkInput(state.schemaWizardDraft.entry) && (state.schemaWizardDraft.entry.value = normalizeLinkHref(state.schemaWizardDraft.entry.value))"
                       />
                     </div>
                     <div
@@ -6030,6 +6062,7 @@ const exportCurrentBlock = async () => {
 {{{#textarea {"field":"intro","value":""}}}}
 {{{#richtext {"field":"body","value":""}}}}
 {{{#richtext {"field":"video","value":"","picker":"video"}}}}
+{{{#text {"field":"ctaUrl","value":"","picker":"link"}}}}
 {{{#image {"field":"heroImage","value":"https://example.com/hero.jpg"}}}}</code></pre>
                   </section>
 
@@ -6051,6 +6084,7 @@ const exportCurrentBlock = async () => {
                     </h3>
                     <div class="text-sm text-foreground space-y-1">
                       <div><code>text</code> → single‑line input (HTML is escaped on render).</div>
+                      <div><code>link</code> → site page picker (or a typed address) that stores the page address with a trailing slash.</div>
                       <div><code>textarea</code> → multi‑line input (HTML is escaped on render).</div>
                       <div><code>richtext</code> → WYSIWYG editor (HTML is rendered as‑is).</div>
                       <div><code>number</code> → number input.</div>
@@ -6061,6 +6095,33 @@ const exportCurrentBlock = async () => {
                     </div>
                     <p class="text-sm text-foreground">
                       Rich text image controls include size buttons, float left/none/right, and a width slider (10–100%).
+                    </p>
+                  </section>
+
+                  <section id="link-fields" class="space-y-3">
+                    <h3 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                      Link Fields (Page Picker)
+                    </h3>
+                    <p class="text-sm text-foreground">
+                      Use a Link input for every link an editor sets: buttons, calls to action, card links. Editors pick a site page and the field stores its address as the site serves it, with a trailing slash (<code>/</code>, <code>/about/</code>, <code>/team/leadership/</code>). They can also type an address; site paths are corrected to the same form, and outside addresses (<code>https://</code>, <code>mailto:</code>, <code>tel:</code>, <code>#section</code>) are kept as typed.
+                    </p>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{{{#if {"cond":"item.ctaUrl"} }}}
+  &lt;a href="{{ ctaUrl }}"&gt;{{ ctaLabel }}&lt;/a&gt;
+{{{/if}}}
+
+{{#for card in cards}}
+  &lt;a href="{{ card.link }}"&gt;{{ card.title }}&lt;/a&gt;
+{{/for}}</code></pre>
+                    <pre v-pre class="rounded-md bg-muted p-3 text-xs overflow-auto"><code>{
+  "ctaUrl": {
+    "type": "text",
+    "label": "Button Link",
+    "picker": "link",
+    "value": ""
+  }
+}</code></pre>
+                    <p class="text-sm text-foreground">
+                      The friendly Inputs editor labels this configuration as Link. The stored <code>text</code> type is intentional: the value is a plain string, so templates render it with <code v-pre>{{ ctaUrl }}</code> as before. The stored address does not follow a page that is renamed or moved later; the picker flags an address no page uses.
                     </p>
                   </section>
 

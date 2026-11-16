@@ -27,7 +27,7 @@ the first check; build every operation from those fields.
 | --- | --- |
 | Theme | `cms_find_theme`, `cms_get_theme`; `theme.create` for a new one (edge-design-to-site section 1 for a theme from a design) |
 | Site | `site.create` (name, theme, `domains: ["<site-slug>.test"]`, SEO settings) |
-| Settings | `site.settings` (logo, favicon, app icon, contact, social, menu position, tracking, sitemaps) |
+| Settings | `site.settings` (logo, favicon, app icon, splash screen, contact, social, menu position, tracking, sitemaps) |
 | Menus | `site.menus` (the whole menus object; read it with `cms_list_pages`) |
 | Pages | seeded by `site.create` from the theme's default menus; `page.create` for others; `page.placeBlock` / `page.setValues` |
 | SEO | `site.update`, `page.update` |
@@ -71,6 +71,10 @@ In this order, checking and running each operation:
    `cms_upload_media` (SVG logos rendered to PNG first), wait for `ready`.
 4. **Settings**: `site.settings` with the logos, favicon, app icon, contact
    email and phone, social links (full URLs), tracking ids, menu position.
+   The splash screen is optional: `splashImage` is a Hub media URL and
+   `splashBackgroundColor` is a color key from the site's theme
+   `extend.colors` (for example `brand.500`), never a CSS color; set them
+   only when the answers give splash artwork.
    Consent stays on unless the answers say otherwise. Sitemaps: page
    sitemaps need nothing; turn on `sitemap.posts` for each post kind and
    custom post type the site publishes (`post`, `event`, `page:<pageId>`),

@@ -73,6 +73,21 @@ Required package rules:
 - `previewType` is `light` or `dark`.
 - `synced` is boolean; `version` is numeric.
 
+### Link inputs
+
+Every link an editor sets is a Link input: a `text` input with
+`"picker": "link"`, rendered as `href="{{ field }}"` (in loops,
+`href="{{ item.link }}"` with the picker on the item input). The Hub offers
+the site's pages and stores the page's address with a trailing slash (`/`,
+`/about/`, `/team/leadership/`); typed site paths are corrected to that form
+and outside addresses (`https://`, `mailto:`, `tel:`, `#section`) are kept.
+Defaults are a site path in that form or empty. A plain `text` input written
+as a whole `href` gets the `schema.link-picker` warning; fix it before import.
+
+```json
+"ctaUrl": { "type": "text", "label": "Button Link", "picker": "link", "value": "/contact/" }
+```
+
 The current block importer can accept a direct object or a wrapper:
 
 ```json

@@ -100,6 +100,9 @@ export const SKILL_IMPACT_TRAILER = /^Skill-Impact:\s*none\s*\((.+)\)\s*$/im
 // - changes: [{ path, diffLines? }] (repo-relative)
 // - messages: commit messages in the range (for the trailer)
 // - readDocument(doc): the document's current text, or null
+// Skill files (and their plugin copies) agents read while building blocks.
+export const isSkillDocument = doc => !doc.repo && /^edge\/(skills|plugins\/edge-cms\/skills)\//.test(doc.path || '')
+
 export const impactReport = ({ map, changes, messages = [], readDocument = () => null }) => {
   const changed = new Set(changes.map(change => change.path))
   const areas = []
@@ -120,13 +123,21 @@ export const impactReport = ({ map, changes, messages = [], readDocument = () =>
       }
     })
     const localDocs = documents.filter(doc => !doc.repo)
+    // A contract edit alone doesn't cover an area whose skills describe the
+    // same behavior: agents build from the skills, so one of them must
+    // change too (or the commit carries a waiver).
+    const skillDocs = localDocs.filter(isSkillDocument)
+    const reviewReason = !localDocs.some(doc => doc.changed)
+      ? 'no document in this checkout changed'
+      : (skillDocs.length && !skillDocs.some(doc => doc.changed) ? 'no skill document changed' : '')
     areas.push({
       id: area.id,
       name: area.name,
       code: code.map(change => change.path),
       documents,
       ...(area.probe ? { probe: area.probe } : {}),
-      needsReview: !localDocs.some(doc => doc.changed),
+      needsReview: !!reviewReason,
+      ...(reviewReason ? { reviewReason } : {}),
     })
   }
   const unmapped = changes
@@ -252,7 +263,7 @@ const formatReport = (report, { range, base }) => {
   if (!report.areas.length)
     lines.push('', 'No mapped area changed.')
   for (const area of report.areas) {
-    lines.push('', `## ${area.name} (${area.id})${area.needsReview ? ' - NEEDS REVIEW: no document in this checkout changed' : ''}`)
+    lines.push('', `## ${area.name} (${area.id})${area.needsReview ? ` - NEEDS REVIEW: ${area.reviewReason}` : ''}`)
     lines.push(`Code: ${area.code.join(', ')}`)
     if (area.probe)
       lines.push(`Probe (shows the real behavior): node ${area.probe}`)

@@ -107,8 +107,9 @@ change a source path or embed sample values to enable this preview behavior.
 Use these classifications:
 
 - fixed structural copy: keep literal in the template;
-- editable scalar: `text`, `textarea`, `richtext`, `image`, `number`, or
-  `option` Input;
+- editable scalar: `text`, `textarea`, `richtext`, `image`, video (below),
+  `number`, or `option` Input;
+- editable link (a button, call to action or card link): a Link Input, below;
 - repeated editorial content: `array` Input with a nested `schema`;
 - collection/API content: Data Source, outside this starter kit;
 - site/theme-controlled content: theme token, Site Data Source, or runtime
@@ -116,9 +117,86 @@ Use these classifications:
 - interaction requiring client state: supported CMS helper or a separately
   reviewed Vue override, outside this starter kit.
 
+### Video inputs
+
+A video in the design (a player, or a background behind other content)
+becomes a video input: a `richtext` input with `picker: "video"`, empty by
+default. The blocks contract ("Input types") is the full reference.
+
+```json
+{
+  "heroVideo": {
+    "type": "richtext",
+    "label": "Hero Video",
+    "picker": "video",
+    "value": "",
+    "tags": ["Videos"],
+    "videoOptions": { "layout": "background" }
+  }
+}
+```
+
+- Render it with `{{ richtext(heroVideo) }}`, also inside array items. A bare
+  `{{ heroVideo }}` is escaped on the public site.
+- `videoOptions` only sets the picker's starting choices for a new
+  selection; leave it out for an ordinary player. Don't add schema fields
+  for autoplay, sound, loop, controls, start time or poster: the editor picks
+  those in the video picker and they live in the stored value.
+- A background video covers its nearest positioned ancestor. Render it
+  inside an element with `relative` (or another positioning class), and give
+  content that sits on top its own `relative` and a `z-` class.
+- Agents can't upload or choose videos: `cms_upload_media` takes images only,
+  and a value must be a processed Cloudflare Stream iframe from the Hub's
+  picker. Leave the value empty, and list each video for a person to pick in
+  the Hub (field, block, page, the source video). Never put a YouTube, Vimeo,
+  R2 or old-site video URL in markup, a default or a value.
+- The Hub preview doesn't run the video's inline guard script. Check
+  autoplay and background behavior on the published site.
+
 Do not invent records, testimonials, statistics, prices, dates, credentials,
 contact information, links, or media. Keep unresolved items out of final import
 JSON until a source of truth is supplied.
+
+## Links
+
+Every link an editor sets is a Link Input: a `text` Input with
+`"picker": "link"`. The Hub shows a page picker for it; the stored value is
+the page's address with a trailing slash, the form the public site serves
+(`/`, `/about/`, `/team/leadership/`). Typed site paths are corrected to that
+form; outside addresses (`https://`, `mailto:`, `tel:`, `#section`) are kept.
+
+```json
+{
+  "ctaUrl": { "type": "text", "label": "Button Link", "picker": "link", "value": "" },
+  "cards": {
+    "type": "array",
+    "label": "Cards",
+    "value": [],
+    "schema": {
+      "title": { "type": "text", "label": "Title", "value": "" },
+      "link": { "type": "text", "label": "Link", "picker": "link", "value": "" }
+    }
+  }
+}
+```
+
+```handlebars
+{{{#if {"cond":"item.ctaUrl"} }}}<a href="{{ ctaUrl }}">{{ ctaLabel }}</a>{{{/if}}}
+```
+
+- The value is a plain string; render it with `{{ field }}`, never
+  `richtext()`. To hide a link left empty, condition on it: a root Input is
+  `item.<field>` in a condition (`{"cond":"item.ctaUrl"}`), a loop field
+  `card.link`.
+- A default is a site path in that form (`"/contact/"`) or empty. Never an
+  invented address.
+- Values written by `page.setValues` must already be in that form; the check
+  refuses `/about` and names `/about/`.
+- A plain `text` Input written as a whole `href` gets the
+  `schema.link-picker` warning. `mailto:{{ email }}` and `tel:{{ phone }}`
+  stay `text`.
+- The address doesn't follow a page renamed or moved later; the picker shows
+  a warning for an address no page uses.
 
 ## Markup and accessibility
 

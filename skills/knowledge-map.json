@@ -64,7 +64,10 @@
         { "path": "edge/docs/data-contracts/cms-blocks/README.md", "section": "Schema inputs", "says": "The schema field types and options the block editor offers and the shape of each value" },
         { "path": "edge/docs/data-contracts/cms-blocks/README.md", "section": "Input types", "says": "What each input type stores (image URLs and variants, video objects, publications) and how templates read it" },
         { "path": "edge/skills/edge-block-package/reference/template-v2-contract.md", "section": "Input mapping", "says": "Which schema input a design element becomes, and the value shape the generator writes" },
-        { "repo": "emd-cms-front", "path": "docs/cms-template-v2-blocks.md", "section": "Inputs and schema", "says": "How the public renderer reads each input type" }
+        { "repo": "emd-cms-front", "path": "docs/cms-template-v2-blocks.md", "section": "Inputs and schema", "says": "How the public renderer reads each input type" },
+        { "path": "edge/skills/edge-block-package/reference/template-v2-contract.md", "section": "Video inputs", "says": "The video input shape, rendering with richtext(), videoOptions, background positioning, and that agents leave videos for a person" },
+        { "path": "edge/skills/vue-to-block-migrator/SKILL.md", "says": "How source images and videos become image and video inputs" },
+        { "path": "edge/skills/edge-design-to-site/SKILL.md", "section": "Images", "says": "Images go through Hub media; videos stay empty and are listed for a person" }
       ]
     },
     {
@@ -230,6 +233,7 @@
         { "path": "edge/docs/data-contracts/cms-sites-and-pages/README.md", "section": "Menus", "says": "The menu shapes site.menus writes" },
         { "path": "edge/docs/data-contracts/cms-sites-and-pages/README.md", "section": "Invariants and validation codes", "says": "The templates site rules, domains, site settings by operation" },
         { "path": "edge/skills/edge-site-setup/site-standards.json", "says": "The settings and menus every site is set up with" },
+        { "path": "edge/skills/edge-site-setup/SKILL.md", "section": "2. Build without stopping", "says": "Which site.settings fields setup fills (logos, icons, splash screen, contact, social, tracking, sitemaps) and from which answers" },
         { "path": "edge/skills/edge-site-launch/launch-standards.json", "says": "The launch steps and checks" }
       ]
     },
