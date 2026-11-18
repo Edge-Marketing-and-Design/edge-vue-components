@@ -380,6 +380,20 @@
         { "path": "edge/functions/agentGuide/cms-agent-guide.md", "section": "Check your work", "says": "renderingOwner and deployedRenderer, and what cms_resolve_override answers" },
         { "path": "edge/tools/mcp/cms/README.md", "section": "CMS Theme Context Tools", "says": "What cms_find_theme and cms_get_theme return" }
       ]
+    },
+    {
+      "id": "site-export",
+      "name": "Published site shape the standalone export reads (post routes, post type keys, KV keys)",
+      "code": [
+        "edge/lib/cmsPostRoutes.js",
+        { "path": "edge/lib/cmsPostTypes.js", "diffPattern": "postTypeKey" },
+        { "path": "functions/cms.js", "diffPattern": "idx:posts|`posts:|`pages:|`sites:|pageVersions" },
+        "edge/skills/edge-site-export/scripts/**"
+      ],
+      "documents": [
+        { "path": "edge/skills/edge-site-export/SKILL.md", "section": "2. Export", "says": "How the export finds pages (menus), posts (type indexes at their post page paths) and everything else (sitemap, links)" },
+        { "path": "edge/skills/edge-site-export/SKILL.md", "section": "3. Work through the report", "says": "Every warning code export-site.mjs writes and what to do about it" }
+      ]
     }
   ]
 }
