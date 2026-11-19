@@ -71,14 +71,22 @@ const exists = (urlPath) => {
   return existsSync(target) || (!extname(clean) && existsSync(join(target, 'index.html')))
 }
 
+// Links that already 404 on the source are reported, not failed: the export
+// cannot fix content, and the handover names them.
+const brokenOnSource = new Set(report.brokenOnSource || [])
+const knownBroken = []
 let linkCount = 0
 for (const file of htmlFiles) {
   const html = readFileSync(file, 'utf8')
-  for (const [, attr, value] of html.matchAll(/\s(href|src|poster)="(\/[^"/][^"]*|\/)"/g)) {
+  for (const [, attr, , value] of html.matchAll(/\s(href|src|poster)=(["'])(\/[^"'/][^"']*|\/)\2/g)) {
     if (value.startsWith('//'))
       continue
     linkCount++
-    if (!exists(value))
+    if (exists(value))
+      continue
+    if (attr === 'href' && brokenOnSource.has(value.split(/[?#]/)[0]))
+      knownBroken.push({ file: relative(SITE, file), link: value })
+    else
       fail(attr === 'href' ? 'internal-link-resolves' : 'asset-exists', file, value)
   }
   for (const [, set] of html.matchAll(/\ssrcset="([^"]+)"/g)) {
@@ -109,12 +117,15 @@ const results = {
   localReferences: linkCount,
   ok: failures.length === 0,
   formsConnected,
+  knownBroken,
   failures,
 }
 writeFileSync(join(OUT, 'check-results.json'), JSON.stringify(results, null, 2))
 const byCheck = failures.reduce((counts, item) => ({ ...counts, [item.check]: (counts[item.check] || 0) + 1 }), {})
 console.log(`${htmlFiles.length} pages, ${files.length} files, ${linkCount} local references checked.`)
 console.log(failures.length ? `FAILED: ${JSON.stringify(byCheck)} (details in check-results.json)` : 'OK: no Hub references, every local link and asset resolves.')
+if (knownBroken.length)
+  console.log(`NOTE: ${knownBroken.length} link(s) were already broken on the source (knownBroken in check-results.json).`)
 if (!formsConnected)
   console.log('NOTE: forms have no endpoint yet (formEndpoint in site/assets/edge-standalone-config.js).')
 process.exit(failures.length ? 1 : 0)

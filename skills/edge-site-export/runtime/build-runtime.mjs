@@ -7,7 +7,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -30,6 +30,17 @@ if (!existsSync(pnpm)) {
 }
 const esbuildDir = readdirSync(pnpm).filter(name => /^esbuild@\d/.test(name)).sort().pop()
 const esbuild = createRequire(join(pnpm, esbuildDir, 'node_modules/esbuild/package.json'))('esbuild')
+
+// Older renderers (iafsc-cms-front) lack some helpers; build without them.
+const OPTIONAL = ['plugins/cmsCountdown.client.ts']
+const missing = OPTIONAL.filter(path => !existsSync(join(renderer, 'app', path)))
+const optionalHelpers = {
+  name: 'optional-helpers',
+  setup(build) {
+    build.onResolve({ filter: /^~\/plugins\// }, args => missing.includes(args.path.slice(2)) ? { path: args.path, namespace: 'missing-helper' } : undefined)
+    build.onLoad({ filter: /.*/, namespace: 'missing-helper' }, () => ({ contents: 'export default () => {}', loader: 'js' }))
+  },
+}
 
 const commit = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: renderer }).toString().trim()
 const dirty = execFileSync('git', ['status', '--porcelain', 'app', 'shared'], { cwd: renderer }).toString().trim()
@@ -59,9 +70,10 @@ const result = await esbuild.build({
     'import.meta.server': 'false',
     'process.env.NODE_ENV': '"production"',
   },
+  plugins: [optionalHelpers],
   logLevel: 'warning',
 })
-const source = `emd-cms-front ${commit}${dirty ? ' (with uncommitted changes)' : ''}`
+const source = `${basename(renderer)} ${commit}${dirty ? ' (with uncommitted changes)' : ''}`
 const banner = `/* Edge CMS standalone runtime, built from ${source}. */\n`
 rmSync(dist, { recursive: true, force: true })
 mkdirSync(dist, { recursive: true })
@@ -71,4 +83,4 @@ for (const file of result.outputFiles) {
   writeFileSync(file.path, text)
   total += file.contents.length
 }
-console.log(`Wrote ${result.outputFiles.length} files (${Math.round(total / 1024)} KB) to ${dist} from ${source}`)
+console.log(`Wrote ${result.outputFiles.length} files (${Math.round(total / 1024)} KB) to ${dist} from ${source}${missing.length ? `; renderer has no ${missing.join(', ')}` : ''}`)

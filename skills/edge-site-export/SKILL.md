@@ -65,7 +65,10 @@ The result, in one folder:
    the site is live, since it exports exactly what visitors get; otherwise
    the preview host (default, `https://emd-cms-front.pages.dev`, which serves
    any published site by id). A site served by another renderer project uses
-   that project's host and `--renderer` checkout.
+   that project's host and `--renderer` checkout (iafsc-hub sites:
+   `--renderer <iafsc-cms-front checkout>`). Helpers that renderer lacks
+   (older ones have no countdown) are left out of the runtime and named in
+   `report.runtime`.
 4. Decide the **target domain** (`--domain`): where the owner will host it.
    Defaults to the site's canonical domain.
 
@@ -103,6 +106,9 @@ Every warning in `export-report.json` has a code:
 | `form-fallback` | Forms built by renderer components | They post to `formEndpoint`; test each (step 5) |
 | `form-endpoint-missing` | Forms and no endpoint | Step 5 |
 | `asset-download-failed` | Files that could not be downloaded | Check each URL in `assets.failed`; re-run, or replace the reference |
+| `broken-on-source` | Links that 404 on the source too | The checker lists them as `knownBroken`; fix them in the Hub first or name them in the handover |
+| `licensed-fonts` | An Adobe Fonts (Typekit) kit | Its files are copied, but Adobe Fonts may not be self-hosted: the owner needs their own kit or replacement fonts. Say so in the handover |
+| `cloudflare-zaraz` | The domain ran Cloudflare Zaraz | Dropped with the domain's Cloudflare zone; ask what it loaded (often analytics) and tell the owner to add it directly |
 | `max-pages`, `sitemap-unavailable`, `lucide-download` | Crawl limits, missing sitemap, icon script | Re-run with a higher limit or check the source |
 
 Also read `thirdPartyScripts` (analytics and embeds kept on the site) and
