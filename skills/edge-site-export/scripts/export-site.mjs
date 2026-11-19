@@ -174,7 +174,31 @@ const listPosts = async (type) => {
 // --- Assets ----------------------------------------------------------------
 const assetMap = new Map() // absolute URL -> local path (or null when it failed)
 const assetJobs = new Map()
-const EXT_BY_TYPE = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/avif': '.avif', 'image/gif': '.gif', 'image/svg+xml': '.svg', 'image/x-icon': '.ico', 'image/vnd.microsoft.icon': '.ico', 'text/css': '.css', 'font/woff2': '.woff2', 'font/woff': '.woff', 'font/ttf': '.ttf', 'font/otf': '.otf', 'application/pdf': '.pdf', 'video/mp4': '.mp4', 'video/webm': '.webm', 'audio/mpeg': '.mp3', 'application/zip': '.zip', 'application/json': '.json', 'application/javascript': '.js', 'text/javascript': '.js' }
+const EXT_BY_TYPE = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/avif': '.avif', 'image/gif': '.gif', 'image/svg+xml': '.svg', 'image/x-icon': '.ico', 'image/vnd.microsoft.icon': '.ico', 'text/css': '.css', 'font/woff2': '.woff2', 'font/woff': '.woff', 'font/ttf': '.ttf', 'font/otf': '.otf', 'application/pdf': '.pdf', 'video/mp4': '.mp4', 'video/webm': '.webm', 'audio/mpeg': '.mp3', 'application/zip': '.zip', 'application/json': '.json', 'application/javascript': '.js', 'text/javascript': '.js', 'application/font-woff2': '.woff2', 'application/font-woff': '.woff', 'application/x-font-woff': '.woff', 'font/opentype': '.otf', 'application/x-font-opentype': '.otf', 'application/x-font-ttf': '.ttf', 'font/sfnt': '.ttf', 'application/vnd.ms-fontobject': '.eot' }
+// Files served with no usable content type or extension, by their first bytes.
+const sniffExt = (bytes) => {
+  const head = bytes.subarray(0, 12)
+  const ascii = head.toString('latin1')
+  if (ascii.startsWith('wOF2'))
+    return '.woff2'
+  if (ascii.startsWith('wOFF'))
+    return '.woff'
+  if (ascii.startsWith('OTTO'))
+    return '.otf'
+  if (head.length >= 4 && head.readUInt32BE(0) === 0x00010000)
+    return '.ttf'
+  if (ascii.startsWith('\x89PNG'))
+    return '.png'
+  if (head[0] === 0xFF && head[1] === 0xD8)
+    return '.jpg'
+  if (ascii.startsWith('GIF8'))
+    return '.gif'
+  if (ascii.startsWith('RIFF') && ascii.slice(8, 12) === 'WEBP')
+    return '.webp'
+  if (ascii.startsWith('%PDF'))
+    return '.pdf'
+  return '.bin'
+}
 const FILE_EXT = /\.(pdf|docx?|xlsx?|pptx?|zip|csv|txt|mp3|mp4|webm|mov|jpe?g|png|gif|webp|avif|svg|ico)$/i
 
 const folderFor = (type, ext) => {
@@ -246,18 +270,16 @@ const downloadAsset = (href, expectType = '') => {
         throw new Error(`HTTP ${response.status}`)
       const type = String(response.headers.get('content-type') || expectType).split(';')[0].trim().toLowerCase()
       const pathExt = extname(url.pathname).toLowerCase()
-      const ext = EXT_BY_TYPE[type] || (pathExt && pathExt.length <= 6 ? pathExt : '.bin')
+      const bytes = Buffer.from(await response.arrayBuffer())
+      const ext = EXT_BY_TYPE[type] || (/^\.[a-z0-9]{1,5}$/.test(pathExt) ? pathExt : sniffExt(bytes))
       const hash = createHash('sha1').update(href).digest('hex').slice(0, 8)
       const folder = folderFor(type, ext)
       const local = `${ASSET_PREFIX}/${folder}/${fileBase(url)}-${hash}${ext}`
       mkdirSync(join(SITE_DIR, ASSET_PREFIX, folder), { recursive: true })
-      if (folder === 'css') {
-        const css = await localizeCss(await response.text(), href)
-        writeFileSync(join(SITE_DIR, local), css)
-      }
-      else {
-        writeFileSync(join(SITE_DIR, local), Buffer.from(await response.arrayBuffer()))
-      }
+      if (folder === 'css')
+        writeFileSync(join(SITE_DIR, local), await localizeCss(bytes.toString('utf8'), href))
+      else
+        writeFileSync(join(SITE_DIR, local), bytes)
       report.assets.downloaded++
       assetMap.set(href, local)
       return local
@@ -505,12 +527,14 @@ const postBodyHtml = (post) => {
   return parts.join('\n')
 }
 
+// Only media sources are downloaded; iframe embeds (video, flipbooks) keep
+// their links.
 const localizeFragment = async (html, base) => {
-  let out = await replaceAsync(html, /\s(src)="([^"]+)"/gi, async (whole, attr, value) => {
+  let out = await replaceAsync(html, /<(?:img|source|video|audio|track)\b[^>]*>/gi, tag => replaceAsync(tag, /\s(src|poster)="([^"]+)"/gi, async (whole, attr, value) => {
     const url = absolute(value, base)
     const local = url && await downloadAsset(url.href)
     return local ? ` ${attr}="${local}"` : whole
-  })
+  }))
   out = await replaceAsync(out, /\shref="([^"]+)"/gi, async (whole, value) => {
     const url = absolute(value, base)
     return url && isPageLink(url) ? ` href="${normalPath(url.pathname)}"` : whole
