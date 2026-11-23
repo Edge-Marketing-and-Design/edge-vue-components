@@ -11,7 +11,7 @@ It did not need a big design budget:
 3. **Light designer pass.** The designer did one short round: button rounding, some spacing, a few color changes.
 4. **Approved.** That frame became the anchor. In MOE's case it also went live as a temporary landing page and was converted to CMS blocks, which gave the full site real sections to reuse. That is a bonus, not a requirement.
 
-Repeat that recipe. The designer's pass matters more than its size: it is the human taste the rest of the site inherits.
+Repeat that recipe, with one addition before step 1: write the client's world (`design-rubric.md` part A: what only this client has, the audience's world, one signature motif, imagery direction) and give it to the AI tool with the colors, fonts and copy. That first pass otherwise starts from the category's default look, and the designer has to undo it. Before the designer's pass, check the AI pass against the rubric's parts B to D so the designer spends the round on taste. The designer's pass matters more than its size: it is the human taste the rest of the site inherits.
 
 ## What the anchor must contain
 
