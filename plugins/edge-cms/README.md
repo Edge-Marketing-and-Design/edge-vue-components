@@ -7,7 +7,9 @@ checkout supplies the same skills and its own CMS tools (Developers, below).
 - **Skills:** `edge-block-package`, `edge-design-to-site`, `edge-figma-design`,
   `vue-to-block-migrator`, `edge-site-setup` (a new site to the standard in
   its `site-standards.json`), `edge-site-launch` (pre-launch, the person's
-  launch steps, post-launch checks) and `edge-skill-impact` (keeps the
+  launch steps, post-launch checks), `edge-search-health` (pages rendered
+  as Googlebot plus Search Console indexing and traffic, as an audit or a
+  scheduled watch) and `edge-skill-impact` (keeps the
   skills, contracts and agent guide in step with code changes; needs a Hub
   checkout). Copies of `edge/skills/`; don't edit them here.
   Each says what changes without a Hub checkout. The migrator reads the public
@@ -64,8 +66,8 @@ claude plugin marketplace update edge
 claude plugin update edge-cms@edge
 ```
 
-Check it took: `/skills` lists the seven skills (`edge-site-setup`,
-`edge-site-launch` and `edge-skill-impact` among them) and `/mcp` lists
+Check it took: `/skills` lists the eight skills (`edge-site-setup`,
+`edge-site-launch`, `edge-search-health` and `edge-skill-impact` among them) and `/mcp` lists
 `chrome-devtools`. The first `chrome-devtools` call downloads the pinned
 package through `npx`. In Claude Desktop, update the plugin from its page
 in the plugin catalog.

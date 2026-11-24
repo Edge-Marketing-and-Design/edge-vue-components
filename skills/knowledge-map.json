@@ -376,6 +376,21 @@
         { "path": "edge/functions/agentGuide/cms-agent-guide.md", "section": "Check your work", "says": "renderingOwner and deployedRenderer, and what cms_resolve_override answers" },
         { "path": "edge/tools/mcp/cms/README.md", "section": "CMS Theme Context Tools", "says": "What cms_find_theme and cms_get_theme return" }
       ]
+    },
+    {
+      "id": "search-health-scripts",
+      "name": "Search health audit scripts (crawler render, Search Console, audit history)",
+      "code": [
+        "edge/skills/edge-search-health/scripts/crawler-render.mjs",
+        "edge/skills/edge-search-health/scripts/search-console.mjs",
+        "edge/skills/edge-search-health/scripts/google-auth.mjs",
+        "edge/skills/edge-search-health/scripts/audit.mjs"
+      ],
+      "documents": [
+        { "path": "edge/skills/edge-search-health/SKILL.md", "says": "Render modes and failure rules, Search Console checks, traffic thresholds, report location and scheduling" },
+        { "path": "edge/skills/edge-search-health/reference/search-console-setup.md", "says": "Credential kinds, file location and the scope the scripts request" },
+        { "path": "edge/skills/edge-site-launch/SKILL.md", "section": "3. Post-launch (the live domain)", "says": "Which launch items run the crawler render and the audit, and their commands" }
+      ]
     }
   ]
 }

@@ -50,3 +50,12 @@ Reveal: `sr`, `sr-up`, `sr-group`, `sr-item`, `sr-delay-*`. Carousel: `[data-car
 ## Apple App Store badge (any app site)
 
 Use Apple's official badge SVG unmodified (geometry untouched). Inline it; remove only the root `id` and `<title>`, add `role="img" aria-label="Download on the App Store"`. Never recolor or redraw. Do not show two store entry points in one viewport.
+
+### Saved draft data in the Hub canvas
+
+CMS canvas collection sources load authorized Firestore records, not published
+KV. Site lookups show saved draft settings and menus; post lookups show saved
+draft posts. Keep the authored source configuration pointed at the published
+delivery contract: the Hub handles draft loading without changing the block.
+This is a visual preview, not a functional public-site runtime. Use the frontend
+preview links for interaction testing. Unsaved settings are not included.
