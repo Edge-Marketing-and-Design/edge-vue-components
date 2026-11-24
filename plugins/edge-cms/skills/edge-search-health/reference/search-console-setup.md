@@ -72,6 +72,29 @@ If the client's OAuth consent screen is in **Testing** with an External
 user type, Google expires the login after 7 days, which breaks scheduled
 audits: set it to Internal (Workspace) or publish it, or use A.
 
+## Core Web Vitals key (Chrome UX Report)
+
+Real-user Core Web Vitals come from the Chrome UX Report API, which only
+accepts an API key. Create one restricted to the two read-only APIs, in the
+same project:
+
+```bash
+gcloud services enable pagespeedonline.googleapis.com chromeuxreport.googleapis.com --project=clearwater-hub
+```
+
+```bash
+gcloud services api-keys create --display-name="Edge search health (PageSpeed, CrUX)" --api-target=service=pagespeedonline.googleapis.com --api-target=service=chromeuxreport.googleapis.com --project=clearwater-hub
+```
+
+Write the key to the file without pasting it anywhere: take the key's
+`name` from the previous command's output.
+
+```bash
+gcloud services api-keys get-key-string <name> --format='value(keyString)' | tr -d '\n' > ~/.config/edge-search-console/pagespeed-api-key && chmod 600 ~/.config/edge-search-console/pagespeed-api-key
+```
+
+`EDGE_PAGESPEED_API_KEY` overrides the file.
+
 ## Check it
 
 ```bash

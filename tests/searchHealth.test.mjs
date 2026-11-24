@@ -1,14 +1,20 @@
 // The edge-search-health scripts: robots rules, page choice, render
 // comparison, Search Console summaries, traffic alarms, Google auth and the
-// audit report. The browser test runs only where Playwright and Chrome load.
+// audit report, URL consistency, Pages report exports and Core Web Vitals.
+// The browser test runs only where Playwright and Chrome load.
 import assert from 'node:assert/strict'
 import { createPublicKey, createVerify, generateKeyPairSync } from 'node:crypto'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 import { diffProblems, formatAudit } from '../skills/edge-search-health/scripts/audit.mjs'
 import { checkOpenRender, compareRenders, crawlerRender, isAllowed, launchBrowser, loadPlaywright, parseRobots, rulesForAgent, selectTemplatePages } from '../skills/edge-search-health/scripts/crawler-render.mjs'
 import { SEARCH_CONSOLE_SCOPE, getAccessToken, serviceAccountAssertion } from '../skills/edge-search-health/scripts/google-auth.mjs'
 import { checkSitemaps, compareTraffic, findProperty, summarizeInspection } from '../skills/edge-search-health/scripts/search-console.mjs'
+import { checkCoverage, checkInternalLinks, checkVariants, judgeProbe, linkPattern, mergeCoverageExports, probeUrl, readCoverageExport, reasonKind } from '../skills/edge-search-health/scripts/url-checks.mjs'
+import { checkWebVitals, rate } from '../skills/edge-search-health/scripts/web-vitals.mjs'
 
 const CLEARWATER_ROBOTS = `User-agent: *
 Disallow: /admin
@@ -193,9 +199,11 @@ test('the audit report escapes table cells and says what changed since the last 
 // A local site whose page replaces itself with an error screen when its API
 // request fails - the October 2026 renderer bug - next to a page that keeps
 // its server-rendered content, and a missing URL that returns 200.
-const page = (title, script = '') => `<!doctype html><html><head><title>${title}</title><link rel="canonical" href="/"><script type="application/ld+json">{"@type":"WebPage"}</script></head><body><h1>${title}</h1><p>${'Real listing content. '.repeat(40)}</p><script>${script}</script></body></html>`
+const page = (title, script = '') => `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title><link rel="canonical" href="/"><script type="application/ld+json">{"@type":"WebPage"}</script></head><body><h1>${title}</h1><p>${'Real listing content. '.repeat(40)}</p><script>${script}</script></body></html>`
 const breaksOnFailure = 'fetch(\'/api/kv\',{method:\'POST\'}).catch(()=>{document.title=\'Unable to load this page\';document.head.querySelector(\'script[type="application/ld+json"]\').remove();document.head.insertAdjacentHTML(\'beforeend\',\'<meta name="robots" content="noindex">\');document.body.innerHTML=\'<h1>Unable to load this page</h1>\'})'
 const survivesFailure = 'fetch(\'/api/kv\',{method:\'POST\'}).catch(()=>{})'
+// A header inserted above the content after the first paint, as on Clearwater.
+const lateHeader = 'setTimeout(()=>document.body.insertAdjacentHTML(\'afterbegin\',\'<div style="height:300px">Header</div>\'),1200)'
 
 test('crawler render catches a page that breaks when its own API request is blocked', async (t) => {
   let browser
@@ -218,15 +226,21 @@ test('crawler render catches a page that breaks when its own API request is bloc
     if (request.url === '/broken/')
       return send(200, page('Broken Listing', breaksOnFailure))
     if (request.url === '/' || request.url === '/fixed/')
-      return send(200, page('Fixed Listing', survivesFailure))
+      return send(200, page('Fixed Listing', survivesFailure).replace('<p>', '<a href="/broken/">listing</a><p>'))
+    if (request.url === '/jumpy/')
+      return send(200, page('Jumpy Listing', lateHeader))
     return send(200, page('Soft Missing'))
   })
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
   const base = `http://127.0.0.1:${server.address().port}/`
   try {
-    const report = await crawlerRender({ base, pages: ['/fixed/', '/broken/'], browser })
-    const [fixed, broken] = report.pages
+    const report = await crawlerRender({ base, pages: ['/fixed/', '/broken/', '/jumpy/'], browser })
+    const [fixed, broken, jumpy] = report.pages
     assert.equal(fixed.ok, true, JSON.stringify(fixed.problems))
+    assert.ok(fixed.links.includes(`${base}broken/`), 'links are collected from the open render')
+    const shift = jumpy.problems.find(problem => problem.code === 'layout-shift')
+    assert.ok(shift, JSON.stringify(jumpy.problems))
+    assert.match(shift.detail, /moved -?\d+px/)
     assert.equal(broken.ok, false)
     for (const mode of ['robots', 'no-api'])
       assert.ok(broken.problems.some(problem => problem.mode === mode && problem.code === 'error-screen'), `${mode}: ${JSON.stringify(broken.problems)}`)
@@ -238,4 +252,134 @@ test('crawler render catches a page that breaks when its own API request is bloc
     server.close()
     await browser.close()
   }
+})
+
+// A fake site for fetch(): path -> { status, location?, html? }.
+const fakeSite = routes => async (url) => {
+  const { pathname, search } = new URL(url)
+  const route = routes[`${pathname}${search}`] || routes[pathname] || { status: 404, html: '<title>Not found</title>' }
+  const headers = new Map(Object.entries({ 'content-type': 'text/html', ...(route.location ? { location: route.location } : {}), ...(route.headers || {}) }))
+  return { status: route.status, headers: { get: name => headers.get(name.toLowerCase()) ?? null }, text: async () => route.html || '' }
+}
+const listingHtml = (canonical, extra = '') => `<html><head><link rel="canonical" href="${canonical}">${extra}</head><body>Listing</body></html>`
+const BASE = 'https://www.example.com'
+
+test('probes follow redirects hop by hop and flag chains, alias landings and noindex', async () => {
+  const fetcher = fakeSite({
+    '/properties/mt_1/city/address': { status: 301, location: '/properties/mt_1/city/address/' },
+    '/properties/mt_1/city/address/': { status: 301, location: `${BASE}/properties/abc/MT-City-Address` },
+    '/properties/abc/MT-City-Address': { status: 301, location: '/properties/abc/MT-City-Address/' },
+    '/properties/abc/MT-City-Address/': { status: 200, html: listingHtml(`${BASE}/properties/abc/`) },
+    '/hidden/': { status: 200, html: listingHtml(`${BASE}/hidden/`, '<meta name="robots" content="noindex">') },
+  })
+  const probe = await probeUrl(`${BASE}/properties/mt_1/city/address`, { fetcher })
+  assert.equal(probe.hops.length, 3)
+  assert.equal(probe.final, `${BASE}/properties/abc/MT-City-Address/`)
+  assert.deepEqual(judgeProbe(probe).map(problem => problem.code), ['redirect-chain', 'redirect-to-alias'])
+  assert.deepEqual(judgeProbe(await probeUrl(`${BASE}/hidden/`, { fetcher })).map(problem => problem.code), ['noindex'])
+})
+
+test('URL variants must redirect to the canonical page or name it; a self-canonical copy is an error', async () => {
+  const canonical = `${BASE}/offices/bigfork/`
+  const fetcher = fakeSite({
+    '/offices/Bigfork/': { status: 200, html: listingHtml(`${BASE}/offices/Bigfork/`) },
+    '/offices/bigfork': { status: 308, location: '/offices/bigfork/' },
+    '/offices/bigfork/': { status: 200, html: listingHtml(canonical) },
+  })
+  const { results, problems } = await checkVariants([canonical], { fetcher })
+  assert.deepEqual(results.map(result => `${result.kind}:${result.ok}`), ['uppercase:false', 'no-trailing-slash:true', 'tracking-query:true'])
+  assert.deepEqual(problems.map(problem => `${problem.severity}:${problem.code}`), ['error:duplicate-variant'])
+})
+
+test('internal links are grouped by pattern and flagged when they redirect or point at aliases', async () => {
+  assert.equal(linkPattern(`${BASE}/properties/0a94008b-0b4d-3ff1-96db-f160e775ae54/MT-Great-Falls-2626-8th/`), '/properties/<id>/<slug>/')
+  const fetcher = fakeSite({
+    '/sell-with-us': { status: 308, location: '/sell-with-us/' },
+    '/sell-with-us/': { status: 200, html: listingHtml(`${BASE}/sell-with-us/`) },
+    '/properties/0a94008b-0b4d-3ff1-96db-f160e775ae54/MT-A-1/': { status: 200, html: listingHtml(`${BASE}/properties/0a94008b-0b4d-3ff1-96db-f160e775ae54/`) },
+    '/about/': { status: 200, html: listingHtml(`${BASE}/about/`) },
+  })
+  const links = [
+    ...Array.from({ length: 5 }, () => ({ href: `${BASE}/sell-with-us`, from: `${BASE}/` })),
+    { href: `${BASE}/properties/0a94008b-0b4d-3ff1-96db-f160e775ae54/MT-A-1/`, from: `${BASE}/` },
+    { href: `${BASE}/about/`, from: `${BASE}/` },
+  ]
+  const report = await checkInternalLinks(links, { fetcher })
+  assert.equal(report.patterns, 3)
+  assert.deepEqual(report.problems.map(problem => problem.code), ['link-to-alias', 'link-to-alias'])
+  assert.match(report.problems[0].detail, /^5 link\(s\) like .*sell-with-us redirect 1x/)
+})
+
+test('Pages report exports are read, merged by reason and sampled live', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'coverage-test-'))
+  const make = (name, reason, urls, chart) => {
+    const dir = join(folder, name)
+    rmSync(dir, { recursive: true, force: true })
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'Metadata.csv'), `\uFEFFProperty,Value\nSitemap,All known pages\nIssue,${reason}`)
+    writeFileSync(join(dir, 'Table.csv'), `URL,Last crawled\n${urls.map(url => `"${url}",2026-11-17`).join('\n')}\n`)
+    if (chart)
+      writeFileSync(join(dir, 'Chart.csv'), `Date,Affected pages\n2026-11-14,100\n2026-11-15,${chart}\n`)
+    return dir
+  }
+  try {
+    const noindex = readCoverageExport(make('a', 'Excluded by ‘noindex’ tag', [`${BASE}/properties/x/`, `${BASE}/properties/y/a,b`], 113))
+    assert.equal(noindex.reason, 'Excluded by \'noindex\' tag')
+    assert.equal(noindex.affected, 113)
+    assert.deepEqual(noindex.urls.map(entry => entry.url), [`${BASE}/properties/x/`, `${BASE}/properties/y/a,b`])
+    assert.equal(reasonKind(noindex.reason), 'noindex')
+    const redirectSmall = readCoverageExport(make('b', 'Page with redirect', [`${BASE}/old/`]))
+    const redirectLarge = readCoverageExport(make('c', 'Page with redirect', [`${BASE}/old/`, `${BASE}/older/`]))
+    assert.equal(mergeCoverageExports([redirectSmall, noindex, redirectLarge]).length, 2)
+
+    const fetcher = fakeSite({
+      '/properties/x/': { status: 200, html: listingHtml(`${BASE}/properties/x/`) },
+      '/properties/y/a,b': { status: 200, html: listingHtml(`${BASE}/properties/y/`) },
+      '/old/': { status: 301, location: '/older/' },
+      '/older/': { status: 301, location: '/new/' },
+      '/new/': { status: 200, html: listingHtml(`${BASE}/new/`) },
+    })
+    const report = await checkCoverage([noindex, redirectSmall, redirectLarge], { fetcher, sample: 4 })
+    const byKind = Object.fromEntries(report.reasons.map(reason => [reason.kind, reason]))
+    assert.equal(byKind.noindex.problems[0].code, 'coverage-fixed')
+    assert.equal(byKind.redirect.exported, 2)
+    assert.equal(byKind.redirect.problems[0].code, 'redirect-chain')
+  }
+  finally {
+    rmSync(folder, { recursive: true, force: true })
+  }
+})
+
+test('Core Web Vitals: Google thresholds, poor is an error, no data for a page is not a problem', async () => {
+  assert.equal(rate('largest_contentful_paint', 2500), 'good')
+  assert.equal(rate('largest_contentful_paint', 3523), 'needs-improvement')
+  assert.equal(rate('cumulative_layout_shift', 0.26), 'poor')
+  assert.equal(rate('interaction_to_next_paint', 96), 'good')
+  const requests = []
+  const fetcher = async (url, options) => {
+    const body = JSON.parse(options.body)
+    requests.push(body)
+    if (body.url)
+      return { ok: false, status: 404, json: async () => ({}) }
+    const phone = body.formFactor === 'PHONE'
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        record: {
+          collectionPeriod: {},
+          metrics: {
+            largest_contentful_paint: { percentiles: { p75: phone ? 4200 : 2100 } },
+            interaction_to_next_paint: { percentiles: { p75: 96 } },
+            cumulative_layout_shift: { percentiles: { p75: phone ? '0.17' : '0.08' } },
+          },
+        },
+      }),
+    }
+  }
+  const report = await checkWebVitals({ origin: BASE, urls: [`${BASE}/`], key: 'k', fetcher })
+  assert.deepEqual(report.problems.map(problem => `${problem.severity}:${problem.code}`), ['error:cwv-lcp', 'warning:cwv-cls'])
+  assert.equal(report.pages[0].phone, null)
+  assert.deepEqual(requests.map(body => body.formFactor), ['PHONE', 'DESKTOP', 'PHONE'])
+  assert.equal((await checkWebVitals({ origin: BASE, key: '' })).problems[0].code, 'cwv-unavailable')
 })

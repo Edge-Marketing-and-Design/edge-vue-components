@@ -151,8 +151,11 @@ done; then verify what you can:
    accessibility, best practices and SEO, and the performance score with
    the trace tools or `npx lighthouse`. Record each score and the failing
    audits.
-6. **Field data** (`post.field-data`): PageSpeed Insights for the home
-   page; a new site usually has none yet: record that.
+6. **Field data** (`post.field-data`): real-user Core Web Vitals,
+   `node edge/skills/edge-search-health/scripts/web-vitals.mjs --host
+   <host>` (needs the Chrome UX Report key; else PageSpeed Insights for the
+   home page). A new site usually has none yet: record that; the scheduled
+   audits pick it up once there is traffic.
 7. **Links and forms again** (`post.links-forms`):
    `crawl-links.mjs --start https://<host>/`, and the form tests (or the
    person's test submissions).

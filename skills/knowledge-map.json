@@ -384,7 +384,9 @@
         "edge/skills/edge-search-health/scripts/crawler-render.mjs",
         "edge/skills/edge-search-health/scripts/search-console.mjs",
         "edge/skills/edge-search-health/scripts/google-auth.mjs",
-        "edge/skills/edge-search-health/scripts/audit.mjs"
+        "edge/skills/edge-search-health/scripts/audit.mjs",
+        "edge/skills/edge-search-health/scripts/url-checks.mjs",
+        "edge/skills/edge-search-health/scripts/web-vitals.mjs"
       ],
       "documents": [
         { "path": "edge/skills/edge-search-health/SKILL.md", "says": "Render modes and failure rules, Search Console checks, traffic thresholds, report location and scheduling" },

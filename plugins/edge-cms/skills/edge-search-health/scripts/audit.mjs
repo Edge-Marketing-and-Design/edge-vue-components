@@ -6,18 +6,24 @@
 //   node edge/skills/edge-search-health/scripts/audit.mjs --host www.example.com \
 //     [--launch-date 2026-10-24] [--pages /,/about/] [--max-pages 12] [--inspect 12] \
 //     [--out importfiles/search-health/www.example.com] [--credentials file] [--skip-search-console]
+//     [--coverage <Pages report export.zip|folder>]... [--skip-vitals]
 //
 // Writes <out>/<YYYY-MM-DD>.json and <out>/<YYYY-MM-DD>.md (same-day runs
-// overwrite), and prints the summary. --launch-date compares traffic with the
+// overwrite), and prints the summary. Besides the render and Search Console it
+// checks URL variants and the site's own links against canonical URLs,
+// real-user Core Web Vitals (Chrome UX Report key), and, given Pages report
+// exports from Search Console, samples every "not indexed" reason live. --launch-date compares traffic with the
 // 28 days before launch; without it, with the previous 28 days.
 // Exit codes: 0 no errors, 1 errors found, 2 the audit could not run.
 import { existsSync } from 'node:fs'
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { crawlerRender } from './crawler-render.mjs'
 import { checkSitemaps, compareTraffic, connect, fetchDailyTraffic, findProperty, inspectUrls } from './search-console.mjs'
+import { checkCoverage, checkInternalLinks, checkVariants, coverageInputs, probeUrl, readCoverageExport, sameUrl } from './url-checks.mjs'
+import { THRESHOLDS, checkWebVitals } from './web-vitals.mjs'
 
 // What to do about each problem, in plain words.
 export const ADVICE = {
@@ -49,6 +55,21 @@ export const ADVICE = {
   'no-structured-data': 'Add structured data for the page type.',
   'invalid-structured-data': 'Fix the JSON-LD so it parses.',
   'script-errors': 'Scripts threw errors while the page loaded with a request blocked; check they are handled.',
+  'sitemap-url': 'The sitemap lists an address that redirects or names another canonical. List only final, canonical URLs in sitemaps.',
+  'redirect-chain': 'Old URLs take several redirects to reach a page. Redirect each one in a single step (301) straight to the canonical URL; chains slow crawling and weaken the signal.',
+  'redirect-to-alias': 'Redirects end on an address whose canonical is a different URL. Point the redirect at the canonical URL itself.',
+  'alias-url': 'The same page answers at more than one address. Keep one canonical address and make links, redirects and the sitemap use it; redirect (301) the others where possible.',
+  'link-to-alias': 'The site links to addresses that redirect or are aliases of another canonical URL. Change the links (cards, menus, blocks) to the canonical URL so Google gets one consistent signal.',
+  'broken-internal-link': 'The site links to pages that return an error.',
+  'duplicate-variant': 'A capitalized, slashless or tracking-query copy of a page is served as its own canonical page. Redirect (301) such variants to the canonical URL, or point their canonical link at it.',
+  'layout-shift': 'The page moves while it loads (Core Web Vitals CLS). Reserve space for what appears late (header, banners, images, overlays) in the server HTML and CSS.',
+  'cwv-lcp': 'Real users wait too long for the main content (LCP). Usual causes: render-blocking fonts or CSS, large hero images, slow server response. Run Lighthouse on the slow templates for specifics.',
+  'cwv-inp': 'Pages respond slowly to taps and clicks (INP). Look for long JavaScript tasks.',
+  'cwv-cls': 'Real users see the page jump while loading (CLS). See layout-shift on the templates for the element that moves.',
+  'cwv-unavailable': 'Core Web Vitals field data was not checked: set up the Chrome UX Report key (reference/search-console-setup.md).',
+  'coverage-fixed': 'The cause behind this Pages report reason is gone on the live site. Validate fix on that reason in Search Console.',
+  'coverage-expected': 'Expected for this kind of URL; nothing to fix unless the samples show otherwise.',
+  'coverage-other': 'Review this reason in Search Console.',
 }
 
 const cell = value => String(value ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ')
@@ -99,6 +120,27 @@ export const formatAudit = (audit) => {
       lines.push(`| ${new URL(inspection.url).pathname} | ${cell(inspection.coverageState || inspection.problems?.[0]?.detail)} | ${inspection.lastCrawlTime?.slice(0, 10) || ''} | ${inspection.googleCanonical === inspection.userCanonical ? 'same' : (inspection.googleCanonical || '')} | ${(inspection.richResults || []).join(', ')} |`)
     lines.push('')
   }
+  if (audit.urls) {
+    lines.push('## Site URLs', '')
+    const badVariants = audit.urls.variants.results.filter(result => !result.ok)
+    lines.push(`**Variants** (uppercase, no trailing slash, tracking query) of ${audit.render.pages.length} pages: ${badVariants.length ? `${badVariants.length} served as separate pages` : 'all redirect or point at the canonical URL'}.`)
+    lines.push(`**Links:** ${audit.urls.links.checked.length} sampled from ${audit.urls.links.patterns} link patterns; ${audit.urls.links.problems.length ? `${audit.urls.links.problems.length} pattern(s) point at redirects or aliases (below)` : 'all point at canonical URLs'}.`)
+    lines.push(`**Sitemap entries:** ${audit.urls.sitemap?.length ? `${audit.urls.sitemap.length} of the sampled pages redirect or are aliases (below)` : 'the sampled entries are final, canonical URLs'}.`, '')
+  }
+  if (audit.coverage) {
+    lines.push('## Pages report (not indexed)', '', '| Reason | Pages | Sampled | More than 1 redirect | Ends on alias | noindex now | Clean |', '| --- | --- | --- | --- | --- | --- | --- |')
+    for (const reason of audit.coverage.reasons)
+      lines.push(`| ${cell(reason.reason)} | ${reason.affected ?? `${reason.exported}+`} | ${reason.sampled} | ${reason.tally.redirectChains} | ${reason.tally.landsOnAlias} | ${reason.tally.noindexNow} | ${reason.tally.ok} |`)
+    lines.push('')
+  }
+  if (audit.vitals?.available) {
+    const fmt = summary => (summary ? Object.entries(THRESHOLDS).filter(([metric]) => summary[metric]).map(([metric, threshold]) => `${threshold.label} ${threshold.unit === 'ms' ? `${(summary[metric].p75 / 1000).toFixed(2)} s` : summary[metric].p75} (${summary[metric].rating.replace('-', ' ')})`).join(', ') : 'not enough traffic')
+    lines.push('## Core Web Vitals (real users, 75th percentile)', '', `- Site, phone: ${fmt(audit.vitals.site.PHONE)}`, `- Site, desktop: ${fmt(audit.vitals.site.DESKTOP)}`)
+    const withData = audit.vitals.pages.filter(page => page.phone)
+    lines.push(`- Pages with their own data: ${withData.length ? withData.map(page => `${new URL(page.url).pathname} ${fmt(page.phone)}`).join('; ') : 'none yet (Google reports this site by URL group)'}`)
+    const shifting = audit.render.pages.filter(page => page.loads.open.layoutShift > 0.1)
+    lines.push(`- Lab layout shift at phone width: ${shifting.length ? shifting.map(page => `${new URL(page.url).pathname} ${page.loads.open.layoutShift}`).join(', ') : 'all templates ≤ 0.1'}`, '')
+  }
   if (audit.changes) {
     lines.push(`## Since ${audit.changes.since}`, '')
     lines.push(audit.changes.new.length ? `New: ${audit.changes.new.map(problem => `${problem.code}${problem.url ? ` ${new URL(problem.url).pathname}` : ''}`).join(', ')}` : 'No new problems.')
@@ -131,7 +173,7 @@ const previousAudit = async (out, date) => {
   return JSON.parse(await readFile(join(out, files.at(-1)), 'utf8'))
 }
 
-export const runAudit = async ({ host, launchDate = '', pages = [], maxPages = 12, inspect = 12, out = '', credentials = '', skipSearchConsole = false, log = () => {} }) => {
+export const runAudit = async ({ host, launchDate = '', pages = [], maxPages = 12, inspect = 12, out = '', credentials = '', skipSearchConsole = false, coverage = [], skipVitals = false, log = () => {} }) => {
   const date = new Date().toISOString().slice(0, 10)
   const base = `https://${host}/`
   log('crawler render')
@@ -156,8 +198,37 @@ export const runAudit = async ({ host, launchDate = '', pages = [], maxPages = 1
       scProblems.push({ severity: 'error', code: 'search-console-unavailable', detail: error.message })
     }
   }
-  const problems = [...render.problems, ...scProblems]
-  const audit = { host, date, launchDate: launchDate || null, render, searchConsole, problems, ok: !problems.some(problem => problem.severity === 'error') }
+  log('url variants and links')
+  const canonicalPages = render.pages.map(page => page.loads.open.canonical || page.url).filter(Boolean)
+  const variants = await checkVariants(canonicalPages)
+  // Sitemap entries must be final, canonical URLs (no redirect, no alias).
+  const sitemapProblems = []
+  if (!pages.length) {
+    for (const page of render.pages) {
+      const probe = await probeUrl(page.url)
+      if (probe.hops.length || (probe.status === 200 && probe.canonical && !sameUrl(probe.canonical, probe.final)))
+        sitemapProblems.push({ severity: 'warning', code: 'sitemap-url', url: page.url, detail: `listed in the sitemap but ${probe.hops.length ? `redirects to ${probe.final}` : `its canonical is ${probe.canonical}`}` })
+    }
+  }
+  const links = await checkInternalLinks(render.pages.flatMap(page => (page.links || []).map(href => ({ href, from: page.url }))))
+  const urls = { variants, links, sitemap: sitemapProblems }
+  let coverageReport = null
+  if (coverage.length) {
+    log('pages report exports')
+    coverageReport = await checkCoverage(coverageInputs(coverage).map(readCoverageExport))
+  }
+  let vitals = null
+  if (!skipVitals) {
+    log('core web vitals')
+    try {
+      vitals = await checkWebVitals({ origin: `https://${host}`, urls: render.pages.map(page => page.url) })
+    }
+    catch (error) {
+      vitals = { available: false, problems: [{ severity: 'warning', code: 'cwv-unavailable', detail: error.message }] }
+    }
+  }
+  const problems = [...render.problems, ...scProblems, ...sitemapProblems, ...variants.problems, ...links.problems, ...(coverageReport?.problems || []), ...(vitals?.problems || [])]
+  const audit = { host, date, launchDate: launchDate || null, render: { ...render, pages: render.pages.map(({ links: _links, ...page }) => page) }, searchConsole, urls, coverage: coverageReport, vitals, problems, ok: !problems.some(problem => problem.severity === 'error') }
   const folder = out || join('importfiles', 'search-health', host)
   const previous = await previousAudit(folder, date)
   if (previous)
@@ -178,7 +249,7 @@ if (isMain) {
   }
   const host = value('--host')
   if (!host) {
-    console.error('Usage: audit.mjs --host www.example.com [--launch-date YYYY-MM-DD] [--pages /,/a/] [--max-pages 12] [--inspect 12] [--out dir] [--credentials file] [--skip-search-console]')
+    console.error('Usage: audit.mjs --host www.example.com [--launch-date YYYY-MM-DD] [--pages /,/a/] [--max-pages 12] [--inspect 12] [--out dir] [--credentials file] [--skip-search-console] [--coverage export.zip|folder]... [--skip-vitals]')
     process.exit(2)
   }
   try {
@@ -191,6 +262,8 @@ if (isMain) {
       out: value('--out') || '',
       credentials: value('--credentials') || '',
       skipSearchConsole: args.includes('--skip-search-console'),
+      coverage: args.flatMap((arg, index) => ((arg === '--coverage' && args[index + 1]) ? [args[index + 1]] : [])),
+      skipVitals: args.includes('--skip-vitals'),
       log: message => console.error(message),
     })
     console.log(summary)

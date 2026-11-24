@@ -207,6 +207,10 @@ export const checkOpenRender = (open, { preview = false } = {}) => {
     add('warning', 'no-structured-data', 'no JSON-LD')
   if (open.invalidStructuredData)
     add('error', 'invalid-structured-data', `${open.invalidStructuredData} JSON-LD block(s) do not parse`)
+  if (open.layoutShift > 0.1) {
+    const first = open.shifts?.[0]
+    add(open.layoutShift > 0.25 ? 'error' : 'warning', 'layout-shift', `layout shift ${open.layoutShift} while loading at phone width (good ≤ 0.1, poor > 0.25)${first ? `; at ${first.at} ms: ${first.sources.join(', ')}` : ''}`)
+  }
   return problems
 }
 
@@ -266,6 +270,42 @@ const snapshotScript = () => {
   }
 }
 
+// Layout shifts while the page loads (no input), with the elements that moved.
+const recordLayoutShifts = () => {
+  window.__edgeShifts = []
+  try {
+    new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        if (entry.hadRecentInput)
+          continue
+        window.__edgeShifts.push({
+          at: Math.round(entry.startTime),
+          value: entry.value,
+          sources: entry.sources.map((source) => {
+            const node = source.node
+            const name = (node && node.nodeType === 1) ? `${node.nodeName.toLowerCase()}${node.id ? `#${node.id}` : ''}${(typeof node.className === 'string' && node.className) ? `.${node.className.trim().split(/\s+/).slice(0, 3).join('.')}` : ''}` : '(text)'
+            return `${name} moved ${Math.round(source.currentRect.y - source.previousRect.y)}px`
+          }),
+        })
+      }
+    }).observe({ type: 'layout-shift', buffered: true })
+  }
+  catch {}
+}
+
+const openExtrasScript = () => {
+  const shifts = window.__edgeShifts || []
+  const links = [...new Set([...document.querySelectorAll('a[href]')]
+    .map(anchor => anchor.href)
+    .filter(href => href.startsWith(location.origin) && !/\.(?:pdf|jpe?g|png|webp|gif|svg|zip|xml|txt)(?:$|\?)/i.test(href))
+    .map(href => href.split('#')[0]))].slice(0, 300)
+  return {
+    layoutShift: +shifts.reduce((sum, shift) => sum + shift.value, 0).toFixed(3),
+    shifts: shifts.filter(shift => shift.value >= 0.01).slice(0, 3).map(shift => ({ ...shift, value: +shift.value.toFixed(3) })),
+    links,
+  }
+}
+
 export const renderPage = async (browser, url, { mode = 'open', rules = [], previewSite = '', timeout = 45000 } = {}) => {
   const context = await browser.newContext({ userAgent: GOOGLEBOT_UA, viewport: { width: 412, height: 915 }, isMobile: true })
   const page = await context.newPage()
@@ -273,6 +313,8 @@ export const renderPage = async (browser, url, { mode = 'open', rules = [], prev
   const blocked = []
   const pageErrors = []
   page.on('pageerror', error => pageErrors.push(String(error.message || error).slice(0, 200)))
+  if (mode === 'open')
+    await page.addInitScript(recordLayoutShifts)
   await page.route('**/*', (route) => {
     const request = route.request()
     let target
@@ -300,7 +342,9 @@ export const renderPage = async (browser, url, { mode = 'open', rules = [], prev
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {})
     await page.waitForTimeout(1500)
     const snapshot = await page.evaluate(snapshotScript)
+    const extra = mode === 'open' ? await page.evaluate(openExtrasScript) : {}
     return {
+      ...extra,
       url,
       mode,
       status: response?.status() ?? null,
@@ -358,7 +402,8 @@ export const crawlerRender = async ({ base, pages = [], useSitemap = false, maxP
         url,
         ok: !problems.some(problem => problem.severity === 'error'),
         problems,
-        loads: Object.fromEntries(Object.entries(loads).map(([mode, load]) => [mode, { status: load.status, title: load.title, h1: load.h1, canonical: load.canonical, robots: [load.robotsMeta, load.robotsHeader].filter(Boolean).join(' / '), textLength: load.textLength, structuredData: load.structuredData, blocked: load.blocked, failed: load.failed }])),
+        loads: Object.fromEntries(Object.entries(loads).map(([mode, load]) => [mode, { status: load.status, title: load.title, h1: load.h1, canonical: load.canonical, robots: [load.robotsMeta, load.robotsHeader].filter(Boolean).join(' / '), textLength: load.textLength, structuredData: load.structuredData, layoutShift: load.layoutShift, shifts: load.shifts, blocked: load.blocked, failed: load.failed }])),
+        links: loads.open.links || [],
       })
     }
   }
