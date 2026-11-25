@@ -164,6 +164,8 @@ Do not silently hard-code fake listings, agents, offices, testimonials, prices, 
 
 Images the source shows (an `<img src>`, a CSS `url()`, an imported asset) become `image` fields, never URLs baked into markup. Each real image goes into the Hub's media with `cms_upload_media` (the source site's public URL, or a local asset file through the one-time upload link it returns); check `cms_find_media` first and reuse what exists. The field's default or page value is the returned Hub `url` once its status is `ready`. Never keep a link to the old site, a CDN or a stock photo, even as a placeholder; SVG artwork is rendered to PNG before upload. If a source-of-truth decision is unresolved, pause final import JSON unless the user explicitly approves an assumption.
 
+Videos the source shows (a `<video>`, a YouTube or Vimeo embed, a background video) become video inputs (`richtext` with `picker: "video"`, rendered with `richtext()`), empty by default. Agents can't upload or choose videos: list each one for a person to pick in the Hub, and never keep the source's video URL in markup or a value. The edge-block-package `reference/template-v2-contract.md` "Video inputs" has the field shape and the background-video positioning rule.
+
 ### 3. Load the theme contract
 
 Use one of:
@@ -187,6 +189,7 @@ For Vue/JSX/HTML:
 - replace supported state and behavior with Template v2 fields, Data Sources, and CMS helpers;
 - remove Vue directives, component imports, inline handlers, external runtime dependencies, and unsupported scripts;
 - replace repeated mock markup with manual arrays or runtime sources;
+- turn every editable link (`href`, `:href`, `<NuxtLink :to>`, `router-link`) into a Link input (`"type": "text"`, `"picker": "link"`) rendered as `href="{{ field }}"`; its default is a site path with a trailing slash (`/contact/`) or empty, and `mailto:{{ email }}` / `tel:{{ phone }}` stay `text` (`references/import-contracts.md`, Link inputs);
 - add skeleton markup for asynchronous data;
 - add accessible alt text or an equivalent for meaningful images;
 - turn every image into an `image` field whose value is a Hub media URL (`cms_upload_media`), with `tags` when its picker should be scoped;

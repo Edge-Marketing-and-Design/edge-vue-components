@@ -103,6 +103,35 @@ export const assertBlockBasics = (block, file, { themeId, allowedTags = null, de
       for (const [child, childInput] of Object.entries(input.schema || {}))
         if (childInput.type === 'image') assert.ok(Object.hasOwn(input.schema, 'alt') || Object.hasOwn(input.schema, `${child}Alt`), `${file}: array image ${child} needs an alt field`)
   }
+  assertLinkInputs(block, file)
+}
+
+/**
+ * Editable links are Link inputs (`"picker": "link"`): a text input the
+ * template writes as a whole href (`href="{{ ctaUrl }}"`, or `{{ card.link }}`
+ * in a loop) must carry the picker, and its default is a site path with a
+ * trailing slash or an outside address. The Hub validator's
+ * `schema.link-picker` rule (cms-blocks contract).
+ */
+export const assertLinkInputs = (block, file) => {
+  const loops = new Map([...block.template.matchAll(/\{\{#for\s+(\w+)\s+in\s+(\w+)\s*\}\}/g)].map(match => [match[1], match[2]]))
+  for (const match of block.template.matchAll(/\bhref\s*=\s*["']\s*\{\{\s*(\w+)(?:\.(\w+))?\s*\}\}/g)) {
+    const [, head, child] = match
+    const name = child ? loops.get(head) : head
+    const input = child ? block.schema[name]?.schema?.[child] : block.schema[name]
+    if (input?.type === 'text' && !input.option)
+      assert.equal(input.picker, 'link', `${file}: ${child ? `${name}.${child}` : name} is written as href="{{ ${match[1]}${child ? `.${child}` : ''} }}"; make it a Link input ("picker": "link")`)
+  }
+  const checkDefault = (input, location) => {
+    const value = input?.picker === 'link' ? input.value : ''
+    if (typeof value === 'string' && value.startsWith('/') && !value.startsWith('//'))
+      assert.match(value, /^\/(?:[^?#]*\/|[^?#]*\.[a-z0-9]{1,8})?(?:[?#].*)?$/i, `${location}: a site link default ends with "/" (for example "/contact/")`)
+  }
+  for (const [name, input] of Object.entries(block.schema)) {
+    checkDefault(input, `${file}.schema.${name}`)
+    if (input.type === 'array')
+      for (const [child, childInput] of Object.entries(input.schema || {})) checkDefault(childInput, `${file}.schema.${name}.schema.${child}`)
+  }
 }
 
 /** Image URLs in `html` on hosts other than the Hub's media (Cloudflare Images, plus `mediaHosts` such as the Hub's R2 host). */

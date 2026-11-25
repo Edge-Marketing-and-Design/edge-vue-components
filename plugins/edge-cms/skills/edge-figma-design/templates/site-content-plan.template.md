@@ -161,6 +161,8 @@ This plan turns the final website copy into a page-by-page build plan, so an age
 
 ## 8. Links and forms
 
+Targets are site pages by their address with a trailing slash (`/contact/`) or full outside addresses. Each CTA becomes a Link input on its block, so editors can repoint it to any page later.
+
 | Copy CTA | Pages | Target |
 |---|---|---|
 

@@ -493,12 +493,18 @@ export const validateInstanceValues = (schema, values) => {
       if (Array.isArray(value)) {
         const itemSchema = arrayItemSchema(entry)
         value.forEach((item, index) => {
-          for (const itemEntry of itemSchema)
-            errors.push(...checkRules(item?.[itemEntry.field], itemEntry.validation, `${label} ${index + 1} · ${itemEntry.label || itemEntry.title || itemEntry.field}`, itemEntry.type))
+          for (const itemEntry of itemSchema) {
+            const itemLabel = `${label} ${index + 1} · ${itemEntry.label || itemEntry.title || itemEntry.field}`
+            errors.push(...checkRules(item?.[itemEntry.field], itemEntry.validation, itemLabel, itemEntry.type))
+            if (isLinkInput(itemEntry))
+              errors.push(...linkValueProblems(item?.[itemEntry.field], itemLabel))
+          }
         })
       }
     }
     errors.push(...checkRules(value, entry?.validation, label, entry?.type))
+    if (isLinkInput(entry))
+      errors.push(...linkValueProblems(value, label))
   }
   return errors
 }
@@ -877,7 +883,8 @@ const menuFolders = name => (ROOT_MENUS.includes(name) ? [] : [routeSlug(name)])
 const menuOrder = name => (name === 'Site Root' ? 0 : name === 'Not In Menu' ? 2 : 1)
 
 // The site's menus as a tree, in the Sites page's order (Site Root, other
-// menus, Not In Menu), with each page's id, slug, menu title, path and
+// menus, Not In Menu), with each page's id, slug, menu title, path, link
+// `href` (the path with its trailing slash, what Link inputs store) and
 // publication state. Pages in no menu are listed in `unlisted`.
 // - pages: { [pageId]: draft page }, published: { [pageId]: published page }
 export const buildSitePages = ({ site = {}, pages = {}, published = {} }) => {
@@ -896,7 +903,8 @@ export const buildSitePages = ({ site = {}, pages = {}, published = {} }) => {
     if (typeof entry.item === 'string') {
       listed.add(entry.item)
       const slug = routeSlug(entry.name)
-      return [{ kind: 'page', ...describePage(entry.item), slug: String(entry.name || ''), menuTitle: String(entry.menuTitle || ''), path: slug ? routePath(folders, slug) : null }]
+      const path = slug ? routePath(folders, slug) : null
+      return [{ kind: 'page', ...describePage(entry.item), slug: String(entry.name || ''), menuTitle: String(entry.menuTitle || ''), path, href: path === null ? null : normalizeLinkHref(path) }]
     }
     if (isPlainObject(entry.item)) {
       const folderSlug = Object.keys(entry.item)[0]
@@ -945,6 +953,118 @@ export const pageRoutePath = (menus, pageId) => {
       return found
   }
   return null
+}
+
+// ---- Page links ----
+// A Link input is a `text` input with `picker: "link"`. Its value is the
+// href the template writes: a site page's address with a trailing slash
+// ("/", "/about/", "/team/leadership/"), or an outside address as typed
+// ("https://...", "mailto:", "tel:", "#section"). The Hub's Link picker
+// (blockInput.vue) offers the site's pages and normalizes typed paths;
+// page.setValues and the readiness report refuse a site path that isn't in
+// this form.
+
+export const LINK_PICKER = 'link'
+export const isLinkInput = entry => entry?.type === 'text' && entry?.picker === LINK_PICKER
+
+const LINK_SCHEME = /^([a-z][a-z0-9+.-]*):/i
+const UNSAFE_LINK_SCHEMES = new Set(['javascript', 'data', 'vbscript'])
+const HOST_LIKE = /^(?:www\.|[a-z0-9-]+(?:\.[a-z0-9-]+)*\.([a-z]{2,})(?:[/?#:]|$))/i
+const FILE_SEGMENT = /\.[a-z0-9]{1,8}$/i
+// Typed without a leading slash, "brochure.pdf" is a file, not a host.
+const FILE_EXTENSIONS = new Set(['htm', 'html', 'php', 'asp', 'aspx', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'txt', 'xml', 'json', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'mp4', 'mp3', 'zip'])
+const isHostLike = (href) => {
+  const match = href.match(HOST_LIKE)
+  return !!match && !(match[1] && FILE_EXTENSIONS.has(match[1].toLowerCase()))
+}
+
+// The href a Link value should be. Site paths get one leading slash, no
+// empty segments and a trailing slash (unless the last segment is a file
+// such as "/brochure.pdf"); a query or #fragment follows the slash. A bare
+// host ("www.example.com") gets https://. Outside addresses, "#section" and
+// "//host" links are returned trimmed. Unsafe schemes return ''.
+export const normalizeLinkHref = (value) => {
+  const href = String(value ?? '').trim()
+  if (!href || href.startsWith('#') || href.startsWith('//'))
+    return href
+  const scheme = href.match(LINK_SCHEME)?.[1]
+  if (scheme)
+    return UNSAFE_LINK_SCHEMES.has(scheme.toLowerCase()) ? '' : href
+  if (!href.startsWith('/') && isHostLike(href))
+    return `https://${href}`
+  const [, path, rest] = href.match(/^([^?#]*)(.*)$/)
+  const segments = path.split('/').filter(Boolean)
+  if (!segments.length)
+    return `/${rest}`
+  const last = segments[segments.length - 1]
+  return `/${segments.join('/')}${FILE_SEGMENT.test(last) ? '' : '/'}${rest}`
+}
+
+// Whether a Link value points into the site (a path) rather than outside.
+export const isSiteLinkHref = value => /^\/(?!\/)/.test(String(value ?? '').trim())
+
+// The site path a page is linked at, from saved menus: "/" for the home
+// page, "/about/" or "/folder/page/" otherwise; null when no menu lists it.
+export const pageLinkHref = (menus, pageId) => {
+  const route = pageRoutePath(menus, pageId)
+  return route === null ? null : normalizeLinkHref(route)
+}
+
+// The pages a Link picker offers, in the Sites page's menu order:
+// [{ pageId, title, href, group }]. `group` is the menu or folder title the
+// page sits under ('' for the top of Site Root). `pages` ({ [pageId]: page })
+// is optional; when given, menu entries for missing pages are left out.
+export const linkTargets = (menus, pages = null) => {
+  const targets = []
+  const seen = new Set()
+  const visit = (entries, folders, group) => {
+    for (const entry of Array.isArray(entries) ? entries : []) {
+      if (!entry || isExternalLinkEntry(entry))
+        continue
+      if (typeof entry.item === 'string' && entry.item) {
+        const slug = routeSlug(entry.name)
+        if (!slug || seen.has(entry.item) || (pages && !pages[entry.item]))
+          continue
+        seen.add(entry.item)
+        targets.push({
+          pageId: entry.item,
+          title: String(entry.menuTitle || pages?.[entry.item]?.name || entry.name),
+          href: normalizeLinkHref(routePath(folders, slug)),
+          group,
+        })
+      }
+      else if (isPlainObject(entry.item)) {
+        for (const [folder, children] of Object.entries(entry.item))
+          visit(children, [...folders, routeSlug(folder)], String(entry.menuTitle || entry.folderTitle || folder))
+      }
+    }
+  }
+  Object.entries(withRootMenus(menus))
+    .map(([name, entries], index) => ({ name, entries, index }))
+    .sort((a, b) => menuOrder(a.name) - menuOrder(b.name) || a.index - b.index)
+    .forEach(({ name, entries }) => visit(entries, menuFolders(name), name === 'Site Root' ? '' : name))
+  return targets
+}
+
+// The page a site path links to, or null.
+export const linkTargetForHref = (targets, href) => {
+  const wanted = String(href ?? '').trim().replace(/[?#].*$/, '')
+  return wanted ? (targets || []).find(target => target.href === wanted) || null : null
+}
+
+// Messages for a Link value that isn't in its final form. Empty is fine
+// (required is a separate rule).
+export const linkValueProblems = (value, label) => {
+  if (value === null || value === undefined || value === '')
+    return []
+  if (typeof value !== 'string')
+    return [`${label} must be a link (a string such as "/about/").`]
+  const normalized = normalizeLinkHref(value)
+  if (!normalized)
+    return [`${label} uses a link type that isn't allowed ("${value.trim().split(':')[0]}:").`]
+  if (normalized !== value)
+    return [`${label} should be "${normalized}"${isSiteLinkHref(normalized) ? ': site links start and end with "/"' : ''}.`]
+  return []
 }
 
 const PAGE_OUTLINE_FIELDS = ['metaTitle', 'metaDescription', 'structuredData']

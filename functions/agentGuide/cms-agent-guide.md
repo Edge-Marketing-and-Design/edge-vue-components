@@ -46,7 +46,12 @@ Shared Edge source: `edge/functions/agentGuide/cms-agent-guide.md`.
 - **Values on a placed block:** `page.setValues` with the `instanceId` from
   `cms_get_page` (merged unless `replace`). Validation follows the block's
   schema; an empty required field or a value of the wrong type is a problem
-  in the check. Synced blocks (site chrome) and Template v1 blocks are edited
+  in the check.
+- **Links:** a Link input (`"type": "text"`, `"picker": "link"`) holds a
+  site page's address with a trailing slash (`/`, `/about/`,
+  `/folder/page/`: the `href` of each page in `cms_list_pages`) or a full
+  outside address (`https://`, `mailto:`, `tel:`, `#section`). The check
+  refuses `/about` and names the form it needs. Synced blocks (site chrome) and Template v1 blocks are edited
   in the Hub.
 - **Add a block:** `page.placeBlock` with a library `blockId` (find it with
   `cms_find_block`), its `values`, and `index` (the row position; default
@@ -243,7 +248,11 @@ on another host, with the page, instance and field.
 2. `cms_block_base` returns its current definition (its open draft, else the
    released one) and `baseHash`.
 3. Edit the definition and check it with `cms_validate` (send it inline as
-   `definition`). Fix every error. `cms_render_block` renders it with a site's
+   `definition`). Fix every error, and every `schema.link-picker` warning:
+   a plain `text` input written as a whole `href` becomes a Link input by
+   adding `"picker": "link"` (not a breaking change). Every link an editor
+   sets is a Link input, in new blocks and in blocks you update.
+   `cms_render_block` renders it with a site's
    theme and its real Data Source records (`data: "sample"` or `"empty"` for
    the other states) and returns the HTML and a standalone page to open and
    screenshot. An interactive list (`collectionResults`) draws its first page

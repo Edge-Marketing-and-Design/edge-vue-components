@@ -12,6 +12,7 @@ Codex.
 | `edge-site-setup` | Set up a new site to the standard in its `site-standards.json`: one round of questions, then theme, site, settings, menus, pages, chrome, SEO, images and forms, checked |
 | `edge-site-launch` | Launch a site: pre-launch checks, the person's launch steps (domain, DNS, publish, analytics, MyStats), post-launch checks and a launch report (`launch-standards.json`) |
 | `edge-search-health` | Check that Google can index a live site and is indexing it: pages rendered as Googlebot, Search Console inspection, sitemaps and traffic, saved with history; standalone audit, launch checks, watch window and weekly audit |
+| `edge-site-export` | Export a published site (pages and posts) as a standalone static site plus a content archive, disconnected from the Hub, for a client who leaves |
 | `edge-skill-impact` | Find and fix the documents a code change made wrong, through `knowledge-map.json`; the backstop is `edge/tests/skillImpact.test.mjs` |
 
 Each skill opens with the block vocabulary and a step 0 that receives the data

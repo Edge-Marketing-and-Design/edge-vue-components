@@ -11,7 +11,7 @@ The design half of an Edge site, before and after the build. The first site made
 
 | Stage | Who | Output |
 | --- | --- | --- |
-| 0. Anchor design | Developer + AI tool + designer | One approved Figma frame: a landing page or a hero and three or four sections. See `reference/anchor-design.md` |
+| 0. Anchor design | Developer + AI tool + designer | The client's world (`reference/design-rubric.md` part A), then one approved Figma frame: a landing page or a hero and three or four sections. See `reference/anchor-design.md` |
 | 1. Inputs | Developer | Brand colors and fonts, the final copy document for every page, the Figma file, the Hub organization |
 | 2. Content plan | **This skill** | `docs/<site>/site-content-plan.md` from `templates/site-content-plan.template.md` |
 | 3. Decision checkpoint | Developer | Answers to the plan's conflicts table; the new-block list approved |
@@ -31,6 +31,7 @@ Stages 2–4 and 6 are agent work; the people decide at stage 0, 3 and 5.
 5. **One builder per block, used everywhere.** The frame on the blocks page and every copy on the pages are drawn by the same builder from data, so a block looks identical on every page and the copy for each page lives in data, not in hand edits.
 6. **Tier 1 first, then look.** The blocks used on three or more pages are drawn and screenshot-checked against the anchor before anything else, because they set the look of every interior page.
 7. **A design map from day one.** Every frame's node id is recorded in the plan; the build step copies it into each block's `meta.design`, and both sync directions use it.
+8. **A rubric of principles, not a house style.** `reference/design-rubric.md` checks every page before the designer sees it, so the designer's time goes to taste, not to fixing templated layouts. It grows from each designer revision, and it never carries one client's brand into the next site.
 
 ## Tools
 
@@ -66,7 +67,8 @@ Follow `reference/figma-build.md` in this order, each step in its own `use_figma
 6. Tier 2 blocks and the reuse states of anchor sections (duplicates with the full site's copy).
 7. Pages, one 1171-wide frame each (`Page / About`), nav duplicate at the top, footer duplicate at the bottom, sections in §5 order with the §5 copy. Save each page's copy data in plugin data as you go so later fixes don't need it re-sent.
 8. Screenshot every page; fix overlaps, clipped text, broken auto-layout and rhythm (neighbouring sections never share a background).
-9. Fill in §10 with every frame's node id, phone frame id, the pages each block appears on, and status.
+9. Score every page against `reference/design-rubric.md` parts B to D; fix the fails that don't contradict the anchor and keep the table for the handoff.
+10. Fill in §10 with every frame's node id, phone frame id, the pages each block appears on, and status.
 
 Never edit the anchor frame or its children; reuse means duplicate.
 
@@ -76,9 +78,10 @@ Report, and put the same in the plan's §10 notes:
 - links to both Figma pages, and which blocks, variants and pages were drawn;
 - plan items not drawn and why;
 - copy that did not fit its layout, and every place the draft chose between options the plan left open;
-- `[TBD]` counts by kind (copy, images, links).
+- `[TBD]` counts by kind (copy, images, links);
+- the rubric table per page, with every remaining fail and why it was left.
 
-The designer works on the frames directly. Ask the designer to keep layer names and the item components (detaching an instance breaks the array mapping), and to note in the plan which frames she changed, so the build reads the right node.
+The designer works on the frames directly. After the review, compare the designer's frames with the draft and update the rubric as its "How a rule gets in" section says. Ask the designer to keep layer names and the item components (detaching an instance breaks the array mapping), and to note in the plan which frames she changed, so the build reads the right node.
 
 ## 5. Build
 

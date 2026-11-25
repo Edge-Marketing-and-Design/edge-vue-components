@@ -127,7 +127,7 @@ Each input is `{ type, label, value, ... }`.
   `publication` and `array`.
 - **Arrays** carry an item `schema` and an array `value`.
 - **Optional keys:** `validation` (`required`, `min`, `max`), `option`,
-  `picker` (Input types, below) and `tags`.
+  `picker` (`video` or `link`; Input types, below) and `tags`.
 - **Legacy `title`:** accepted and still read as the field label, but new
   blocks use `label`.
 - **Alt text:** image inputs should have a paired `<field>Alt` input.
@@ -201,6 +201,53 @@ shared video media picker.
   to the stored schema, `blockInput.vue` owns selection and the stored iframe,
   `mediaManager.vue` provides the video-only mode and `edge/lib/cmsVideo.js`
   validates Stream hosts and builds the iframe markup.
+
+**Link** is the other friendly type: its durable schema is a `text` input
+with `picker: "link"`. It is the input for every link an editor sets
+(buttons, calls to action, card links), at the block root or as an array
+item field.
+
+```json
+{
+  "ctaUrl": {
+    "type": "text",
+    "label": "Button Link",
+    "picker": "link",
+    "value": ""
+  }
+}
+```
+
+- **Stored value:** a plain string, the href the template writes. Picking a
+  page stores the page's address from the site's saved draft menus with a
+  trailing slash, the form the public site serves: `/` for the home page,
+  `/about/`, `/folder/page/`, and for pages in a menu other than the two
+  root menus `/menu-slug/page/` (the route `findCmsPageRoute` gives, plus the
+  slash). Typed addresses are normalized when the field loses focus: one
+  leading slash, no empty segments, a trailing slash before any `?query` or
+  `#fragment`, none after a file name (`/brochure.pdf`); a bare host
+  (`www.example.com`) gets `https://`. Outside addresses (`https://`,
+  `mailto:`, `tel:`, `#section`, `//host`) are kept as typed; `javascript:`,
+  `data:` and `vbscript:` are rejected.
+- **No page reference:** the value is the address, not the page id, so it
+  renders anywhere without a renderer change. It does not follow a page that
+  is renamed or moved later; the picker warns when a site path matches no
+  page in the site's menus.
+- **Rendering:** `href="{{ ctaUrl }}"`, `href="{{ card.link }}"` in loops.
+  The value is escaped like any `text` value (`&` becomes `&amp;`).
+- **Where pages come from:** the picker lists the pages of the site being
+  edited (`blockInput.vue`, `linkTargets`), skipping menu entries whose page
+  no longer exists and external menu links. Without a site (the library
+  Block Editor) it shows only the address field.
+- **Rules:** `page.setValues` and the readiness report refuse values not in
+  the normalized form (`docs/data-contracts/cms-operations/README.md`, Link
+  values). The Hub's AI field rewrite skips Link inputs.
+- **Ownership:** the helpers (`normalizeLinkHref`, `linkTargets`,
+  `linkTargetForHref`, `linkValueProblems`, `isLinkInput`) are in
+  `edge/lib/cmsOperations.js` with its Functions copies; `blockEditor.vue`
+  maps the friendly type; `blockInput.vue` owns the picker; `block.vue` maps
+  `type: "link"` in array item schemas and Template v1 inline tags
+  (`{{{#text {"field":"ctaUrl","value":"","picker":"link"}}}}`).
 
 ### Template v2 grammar the engine supports
 

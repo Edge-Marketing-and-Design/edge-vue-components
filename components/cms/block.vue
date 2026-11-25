@@ -1392,7 +1392,7 @@ const parseBlockContentModel = (html) => {
     else if (type === 'publication')
       val = (val && typeof val === 'object') ? JSON.parse(JSON.stringify(val)) : String(val || '')
     else if (type === 'text')
-      val = !val ? PLACEHOLDERS.text : String(val)
+      val = cfg.picker === 'link' ? String(val || '') : (!val ? PLACEHOLDERS.text : String(val))
     else if (type === 'array') {
       // Keep array fields empty by default instead of injecting placeholder content.
       val = Array.isArray(val) ? JSON.parse(JSON.stringify(val)) : []
@@ -1495,6 +1495,10 @@ const normalizeTemplateV2SchemaItem = (field, config = {}) => {
   if (normalized.type === 'video') {
     normalized.type = 'richtext'
     normalized.picker = 'video'
+  }
+  if (normalized.type === 'link') {
+    normalized.type = 'text'
+    normalized.picker = 'link'
   }
 
   if (schema !== undefined)
@@ -2784,7 +2788,7 @@ const aiFieldOptions = computed(() => {
       type: entry.meta?.type || 'text',
       picker: entry.meta?.picker || '',
     }))
-    .filter(option => option.type !== 'image' && option.type !== 'color' && option.picker !== 'video' && !/url/i.test(option.id) && !/color/i.test(option.id))
+    .filter(option => option.type !== 'image' && option.type !== 'color' && option.picker !== 'video' && option.picker !== 'link' && !/url/i.test(option.id) && !/color/i.test(option.id))
 })
 
 const selectedAiFieldIds = computed(() => {
