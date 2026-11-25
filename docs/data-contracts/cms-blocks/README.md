@@ -438,7 +438,7 @@ alone. A block links to pages with the slash: `href="/{{ menuItem.name }}/"`,
 `href="/{{ folderEntry.key }}/{{ folderChild.name }}/"`, and the same in
 `default()` fallbacks (`default(searchUrl, "/properties/")`). The validator
 reports a slashless root-relative `href` in the template as
-`links.trailing-slash` (error) and a slashless internal path in a schema
+`links.trailing-slash` (warning) and a slashless internal path in a schema
 default, block value or page instance value as `links.value-trailing-slash`
 (warning). Links built entirely from a value (`href="{{ buttonUrl }}"`) are
 checked through the value. A folder serves its first child's content at

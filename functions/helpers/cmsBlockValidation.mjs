@@ -1061,7 +1061,7 @@ export const validateBlockDocument = (doc, options = {}) => {
     report.add('warning', 'grammar.condition-loop-item', 'template', message)
   const slashless = slashlessTemplateLinks(template)
   if (slashless.length)
-    report.add('error', 'links.trailing-slash', 'template', `Internal page links must end in "/"; the site redirects ${listLinks(slashless)} to the trailing-slash URL. Write href="/{{ page }}/" (a folder: href="/{{ folder }}/").`)
+    report.add('warning', 'links.trailing-slash', 'template', `Internal page links must end in "/"; the site redirects ${listLinks(slashless)} to the trailing-slash URL. Write href="/{{ page }}/" (a folder: href="/{{ folder }}/").`)
   addSlashlessValueFindings(report, schemaDefaultValues(doc.schema))
   if (!library)
     addSlashlessValueFindings(report, slashlessValuePaths(doc.values))
@@ -1379,7 +1379,7 @@ export const BLOCK_VALIDATION_CODES = Object.freeze({
   'grammar.condition-loop-item': { severity: 'warning', meaning: 'Inside a loop, `item.<field>` names one of the block\'s own fields, but there `item` is the current entry, so it does not test the block\'s value.' },
   'grammar.vue-or-inline-handler': { severity: 'error', meaning: 'Vue directives, bindings or inline `on*` handlers.' },
   'grammar.nested-default': { severity: 'warning', meaning: 'A `{{ }}` placeholder nests `default()` with another call (`default(a, default(b, c))`, `upper(default(a, b))`); the template engine renders it as an empty string. Use `{{{#if}}}`/`{{{#else}}}` for fallbacks.' },
-  'links.trailing-slash': { severity: 'error', meaning: 'A root-relative page link in the template has no trailing slash (`href="/{{ menuItem.name }}"`), so every click and crawl takes a 301. Files, `/api` and Nuxt-internal paths are exempt.' },
+  'links.trailing-slash': { severity: 'warning', meaning: 'A root-relative page link in the template has no trailing slash (`href="/{{ menuItem.name }}"`), so every click and crawl takes a 301. Files, `/api` and Nuxt-internal paths are exempt.' },
   'links.value-trailing-slash': { severity: 'warning', meaning: 'A schema default, block value or page instance value is an internal page path without the trailing slash (`buttonUrl: "/sell-with-us"`).' },
   'grammar.json-ld': { severity: 'warning', meaning: 'JSON-LD belongs in page structured data, not in a block.' },
   'script.syntax': { severity: 'error', meaning: 'An inline script does not parse as JavaScript.' },
