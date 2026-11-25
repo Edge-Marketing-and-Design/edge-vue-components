@@ -15,16 +15,18 @@ Inside `{{#for site in source("siteDoc")}}`: `site.name`, `site.logo`, `site.log
       {{{#if {"cond":"menuItem.item.type == 'external'"} }}}
         <a href="{{ menuItem.item.url }}" class="cms-nav-link ..." data-cms-nav-current-class="...">{{ default(menuItem.menuTitle, menuItem.name) }}</a>
       {{{#else}}}
-        <a href="/{{ menuItem.name }}" class="cms-nav-link ..." data-cms-nav-current-class="...">{{ default(menuItem.menuTitle, menuItem.name) }}</a>
+        <a href="/{{ menuItem.name }}/" class="cms-nav-link ..." data-cms-nav-current-class="...">{{ default(menuItem.menuTitle, menuItem.name) }}</a>
       {{{/if}}}
     {{{#else}}}
       {{{#entries:folderEntry {"field":"menuItem.item"} }}}
-        <a href="/{{ folderEntry.key }}" class="cms-nav-link ...">{{ default(menuItem.menuTitle, folderEntry.key) }}</a>
+        <a href="/{{ folderEntry.key }}/" class="cms-nav-link ...">{{ default(menuItem.menuTitle, folderEntry.key) }}</a>
       {{{/entries}}}
     {{{/if}}}
   </li>
 {{/for}}
 ```
+
+Internal page links end in `/`: the public site serves every page at its trailing-slash URL and 301-redirects the slashless form, so `href="/{{ menuItem.name }}"` costs every visitor and crawler a redirect per link. The validator refuses slashless root-relative page links in a template (`links.trailing-slash`) and warns on author-entered values such as `buttonUrl: "/sell-with-us"` (`links.value-trailing-slash`). Files (a dot in the last segment), `/api` and Nuxt-internal paths are exempt. When a folder lists its children, link the first child to the folder itself (`href="/{{ folderEntry.key }}/"`): the site serves the folder at the first child's content and redirects `/<folder>/<first-child>/` there.
 
 Navigation hooks: root `cms-nav-root` (+ `cms-nav-sticky`, `data-cms-nav-root`, `data-cms-nav-position`, `data-cms-nav-close-on-link`), `cms-nav-main`, `cms-nav-layout`, `cms-nav-logo`, `cms-nav-desktop`, `cms-nav-toggle`, `cms-nav-overlay`, `cms-nav-panel`, `cms-nav-close`, `cms-nav-link`, `cms-nav-item`. Wrap in a `{{ loading }}` skeleton header and a `{{ loaded }}` root. The runtime owns open/close; blocks ship no JavaScript.
 
@@ -50,3 +52,12 @@ Reveal: `sr`, `sr-up`, `sr-group`, `sr-item`, `sr-delay-*`. Carousel: `[data-car
 ## Apple App Store badge (any app site)
 
 Use Apple's official badge SVG unmodified (geometry untouched). Inline it; remove only the root `id` and `<title>`, add `role="img" aria-label="Download on the App Store"`. Never recolor or redraw. Do not show two store entry points in one viewport.
+
+### Saved draft data in the Hub canvas
+
+CMS canvas collection sources load authorized Firestore records, not published
+KV. Site lookups show saved draft settings and menus; post lookups show saved
+draft posts. Keep the authored source configuration pointed at the published
+delivery contract: the Hub handles draft loading without changing the block.
+This is a visual preview, not a functional public-site runtime. Use the frontend
+preview links for interaction testing. Unsaved settings are not included.

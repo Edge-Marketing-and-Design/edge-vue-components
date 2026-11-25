@@ -211,7 +211,7 @@ shared video media picker.
 - They do **not** support `&&`, `||` or a leading `!`. The engine takes the
   `else` branch for those regardless of data. Nest positive conditions and
   put the content in `{{{#else}}}` instead.
-- A condition tests `item` or the alias of a `{{#for}}` that encloses it.
+- A condition tests `item` or the alias of a `{{#for}}` or `{{{#entries:alias}}}` that encloses it.
   Outside every loop `item` is the block's values: test a field as
   `item.eyebrow`. Any other name (a bare `eyebrow`, or a name that is not an
   enclosing alias) is always false, so the `else` branch renders; the
@@ -427,6 +427,24 @@ A real edit emits the formatted markup; undoing back to the formatted baseline
 restores the original source. Field/loop selection offsets map back to the
 original source until an edit is made. Formatting failures preserve the source
 and log a warning rather than modifying a template.
+
+### Internal links end in "/"
+
+The public renderer serves every HTML page at its trailing-slash URL and
+301-redirects the slashless form (emd-cms-front
+`server/middleware/strip-trailing-slash.ts`). Paths starting `/api`, `/_nuxt`,
+`/__nuxt` or `/_ipx`, and paths whose last segment has a dot (files), are left
+alone. A block links to pages with the slash: `href="/{{ menuItem.name }}/"`,
+`href="/{{ folderEntry.key }}/{{ folderChild.name }}/"`, and the same in
+`default()` fallbacks (`default(searchUrl, "/properties/")`). The validator
+reports a slashless root-relative `href` in the template as
+`links.trailing-slash` (error) and a slashless internal path in a schema
+default, block value or page instance value as `links.value-trailing-slash`
+(warning). Links built entirely from a value (`href="{{ buttonUrl }}"`) are
+checked through the value. A folder serves its first child's content at
+`/<folder>/` and redirects `/<folder>/<first-child>/` there; the template
+engine has no loop index, so a menu template cannot single out the first
+child, and that one link still redirects.
 
 ## Invariants and validation codes
 
