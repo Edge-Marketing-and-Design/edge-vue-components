@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { runInNewContext } from 'node:vm'
+import { hydrateCmsPreviewCandidates } from '../lib/cmsCollectionPreview.js'
 import { computed, reactive } from 'vue'
 import { compileScript, compileTemplate, parse } from '@vue/compiler-sfc'
 import { draftPostPreviewContext, isDraftPostPreviewSource, resolveDraftPostPreviewSource } from '../lib/cmsDraftPostPreview.js'
@@ -66,7 +67,7 @@ test('preview loader keeps post drafts local while other sources retain their ca
       return { ...values, siteDoc: [{ title: 'Site settings' }] }
     },
   }
-  const loader = runInNewContext(`${declarations}; ({ loadPreviewCollections })`, { props, computed, edgeGlobal, edgeFirebase: { data: { 'organizations/org/sites/site/posts': posts } }, isDraftPostPreviewSource, resolveDraftPostPreviewSource })
+  const loader = runInNewContext(`${declarations}; ({ loadPreviewCollections })`, { props, computed, edgeGlobal, edgeFirebase: { data: { 'organizations/org/sites/site/posts': posts } }, isDraftPostPreviewSource, resolveDraftPostPreviewSource, hydrateCmsPreviewCandidates })
   const loaded = await loader.loadPreviewCollections({ people: [{ title: 'Old published fallback' }] }, { people: source, siteDoc: { collection: { path: 'sites' } } }, 'site')
   assert.equal(loaded.people[0].title, 'Alpha updated draft')
   assert.deepEqual(Array.from(calls[0]), ['siteDoc'])

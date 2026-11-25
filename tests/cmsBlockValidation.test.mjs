@@ -16,6 +16,8 @@ import {
   sectionTypeRoleFindings,
   findUnbalancedHtml,
   findUnbalancedTemplateBlocks,
+  isSlashlessPagePath,
+  slashlessTemplateLinks,
   validateBlock,
   validateBlockDocument,
   validateBlockRender,
@@ -572,4 +574,69 @@ test('type roles: normalized from theme documents', () => {
   assert.deepEqual(commonTypeRoles([a, { name: 'No roles' }]), ROLES, 'themes without roles do not cancel the check')
   assert.equal(commonTypeRoles([{ name: 'No roles' }]), null)
   assert.equal(commonTypeRoles([]), null)
+})
+
+// The renderer 301s every slashless HTML path to its trailing-slash URL, so a
+// menu built from href="/{{ menuItem.name }}" carried ~35 redirects per page.
+test('internal links: slashless page paths are flagged, everything the renderer leaves alone is not', () => {
+  const flagged = ['/sell-with-us', '/about/our-story', '/{{ menuItem.name }}', '/{{ folderEntry.key }}/{{ folderChild.name }}', '/{{ folderEntry.key }}', '/agents/{{ slug(member.name) }}', '/search?q=1', '/about#team']
+  const fine = [
+    '/', '/sell-with-us/', '/{{ menuItem.name }}/', '/{{ folderEntry.key }}/{{ folderChild.name }}/', '/about/?q=1',
+    'https://example.com/a', '//cdn.example.com/a', '#top', '?page=2', 'tel:5551234', 'mailto:a@b.co',
+    '/files/guide.pdf', '/favicon.ico', '/images/{{ photo.name }}.jpg', '/api/contact', '/api', '/_nuxt/x', '/__nuxt_island/a', '/_ipx/w_400/a',
+    '{{ menuItem.item.url }}', '{{ buttonUrl }}', '', 'sell-with-us',
+  ]
+  for (const value of flagged)
+    assert.equal(isSlashlessPagePath(value), true, value)
+  for (const value of fine)
+    assert.equal(isSlashlessPagePath(value), false, value)
+})
+
+test('internal links: hrefs are read whole, including placeholders that hold quotes', () => {
+  const template = `<a href="/{{ menuItem.name }}">A</a><a href='/b'>B</a><a href="{{ default(indexUrl, "/real-estate") }}/">C</a><a href="/c/">D</a><a class="x" data-href="/nope">E</a>`
+  assert.deepEqual(slashlessTemplateLinks(template), ['/{{ menuItem.name }}', '/b'])
+})
+
+test('internal links: a navigation template with slashless menu links is a warning', () => {
+  const menu = (page, folder, child) => `<nav>{{#for menuItem in site.menus.Site Root}}<a href="${page}">P</a>{{{#entries:folderEntry {"field":"menuItem.item"} }}}<a href="${folder}">F</a>{{#for folderChild in folderEntry.value}}<a href="${child}">C</a>{{/for}}{{{/entries}}}{{/for}}</nav>`
+  const broken = validateBlockDocument(withTemplate(menu('/{{ menuItem.name }}', '/{{ folderEntry.key }}', '/{{ folderEntry.key }}/{{ folderChild.name }}')))
+  const issue = broken.warnings.find(warning => warning.code === 'links.trailing-slash')
+  assert.ok(issue, JSON.stringify(broken.warnings))
+  assert.ok(!codes(broken.errors).includes('links.trailing-slash'))
+  assert.match(issue.message, /"\/\{\{ menuItem\.name \}\}"/)
+  assert.match(issue.message, /"\/\{\{ folderEntry\.key \}\}\/\{\{ folderChild\.name \}\}"/)
+
+  const fixed = validateBlockDocument(withTemplate(menu('/{{ menuItem.name }}/', '/{{ folderEntry.key }}/', '/{{ folderEntry.key }}/{{ folderChild.name }}/')))
+  assert.ok(!codes(fixed.warnings).includes('links.trailing-slash'), JSON.stringify(fixed.warnings))
+})
+
+test('internal links: author-entered page paths without the slash are warnings', () => {
+  const schema = {
+    buttonUrl: { type: 'text', label: 'Button URL', value: '/sell-with-us' },
+    pdfUrl: { type: 'text', label: 'PDF', value: '/files/guide.pdf' },
+    external: { type: 'text', label: 'External', value: 'https://example.com/a' },
+    body: { type: 'richtext', label: 'Body', value: '<p>/not a link</p>' },
+    links: { type: 'array', label: 'Links', value: [{ url: '/contact' }, { url: '/contact/' }], schema: { url: { type: 'text', label: 'URL', value: '' } } },
+  }
+  const result = validateBlockDocument(block({ schema }))
+  const warned = result.warnings.filter(issue => issue.code === 'links.value-trailing-slash')
+  assert.deepEqual(warned.map(issue => issue.path), ['schema.buttonUrl.value', 'schema.links.value[0].url'])
+  assert.match(warned[0].message, /"\/sell-with-us\/"/)
+  assert.ok(!codes(result.errors).includes('links.value-trailing-slash'))
+
+  const instance = page({ content: [{ ...page().content[0], values: { buttonUrl: '/sell-with-us', other: '/ok/' } }] })
+  const pageResult = validatePageDocument(instance)
+  assert.deepEqual(pageResult.warnings.map(issue => [issue.code, issue.path]), [['links.value-trailing-slash', 'content[0].values.buttonUrl']])
+  assert.equal(pageResult.valid, true)
+})
+
+test('conditions: an enclosing {{{#entries:alias}}} is in scope, as the engine renders it', async () => {
+  const template = '<ul>{{#for menuItem in menu}}{{{#entries:folderEntry {"field":"menuItem.item","value":{}}}}}<li>{{{#if {"cond":"folderEntry.key == \'home\'"}}}}H{{{#else}}}{{ folderEntry.key }}{{{/if}}}</li>{{{/entries}}}{{/for}}</ul>'
+  const schema = { menu: { type: 'array', label: 'Menu', value: [] } }
+  assert.ok(!codes(validateBlockDocument(withTemplate(template, { schema })).errors).includes('grammar.condition-scope'))
+  const rendered = await renderTemplateAsync(template, { menu: [{ item: { home: [] } }, { item: { about: [] } }] }, {}, { templateVersion: 2 })
+  assert.equal(rendered, '<ul><li>H</li><li>about</li></ul>')
+
+  const outside = '<ul>{{#for menuItem in menu}}{{{#entries:folderEntry {"field":"menuItem.item","value":{}}}}}<li></li>{{{/entries}}}{{{#if {"cond":"folderEntry.key == \'home\'"}}}}H{{{/if}}}{{/for}}</ul>'
+  assert.ok(codes(validateBlockDocument(withTemplate(outside, { schema })).errors).includes('grammar.condition-scope'))
 })
